@@ -729,7 +729,7 @@ export function renderAgentWorkspace(workspace: AgentWorkspace, width: number, h
     width,
     height,
     title: 'Agent workspace',
-    stateLabel: workspace.localEditor ? `editing ${workspace.localEditor.kind}` : workspace.actionSearchActive ? 'Search' : workspace.focusPane === 'categories' ? 'Categories' : 'Actions',
+    stateLabel: workspace.localEditor ? `Editing: ${workspace.localEditor.title}` : workspace.actionSearchActive ? 'Search' : workspace.focusPane === 'categories' ? 'Categories' : 'Actions',
     leftHeader: 'Operator Areas',
     mainHeader: workspace.actionSearchActive
       ? `Search actions · ${workspace.actions.length} result${workspace.actions.length === 1 ? '' : 's'}`

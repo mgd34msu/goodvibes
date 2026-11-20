@@ -7,10 +7,10 @@ import type { CheckoutTerms } from '../checkout-page.js';
 export function checkoutTermsView(expected: CheckoutTerms, current: object) {
   const money = (amount: number): string => {
     if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('The approved checkout terms are invalid.');
-    return formatMinorUnits(amount, expected.currency);
+    return formatMinorUnits(amount, expected.total.currency);
   };
   const state = { expected: {
-    merchantDomain: expected.merchantDomain, currency: expected.currency,
+    merchantDomain: expected.merchantDomain, currency: expected.total.currency,
     lines: expected.lines.map(line => {
       if (!Number.isSafeInteger(line.quantity) || line.quantity <= 0) throw new Error('The approved checkout quantity is invalid.');
       return { label: line.label, quantity: line.quantity, unitPrice: money(line.unitMinorUnits) };
@@ -18,7 +18,7 @@ export function checkoutTermsView(expected: CheckoutTerms, current: object) {
     discounts: (expected.discounts ?? []).map(discount => ({ label: discount.label, amount: money(discount.amountMinorUnits) })),
     tax: money(expected.taxMinorUnits), fees: money(expected.feesMinorUnits), feeLabels: expected.feeLabels,
     selectedShipping: { label: expected.shippingLabel, cost: money(expected.shippingMinorUnits) },
-    total: money(expected.totalMinorUnits),
+    total: money(expected.total.minor),
   }, current };
   assertJudgmentInput(state);
   return state;

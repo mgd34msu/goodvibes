@@ -1,7 +1,10 @@
 import type { BlockMeta } from './work-tree-types.js';
 export function describeBlockForReceipt(block: BlockMeta, detailed = true): string {
   const lineText = `${block.lineCount} line${block.lineCount === 1 ? '' : 's'}`;
-  if (!detailed && block.type !== 'tool' && block.type !== 'code' && block.type !== 'thinking') return `${block.type} (${lineText})`;
+  if (block.title !== undefined) return `${block.title} (${lineText})`;
+  // The short form names the block in plain words, without the tool or file it carries.
+  if (!detailed && block.type === 'assistant_turn') return `answer (${lineText})`;
+  if (!detailed && block.type === 'diff') return `change (${lineText})`;
   switch (block.type) {
     case 'tool':
       return block.toolName ? `tool result: ${block.toolName} (${lineText})` : `tool result (${lineText})`;

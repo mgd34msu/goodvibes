@@ -5,7 +5,7 @@ import { assertProvisionCurrent, ownProvisionLifetime, type BrowserProvisionLife
 import { readBrowserLaunchCause } from './launch-reading.js';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { OwnedWork } from '../utils/owned-work.js';
+import { OwnedScope } from '../utils/owned-work.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { findOriginalBrowserPage, observeBrowserPageConnection, type BrowserPageConnection } from './browser-page-connection.js';
@@ -263,8 +263,8 @@ export interface BrowserSessionManagerDeps {
  * launched. Ownership is recorded at connect time, not decided later.
  */
 export class BrowserSessionManager {
-  readonly #creations = new OwnedWork();
-  readonly #operations = new OwnedWork();
+  readonly #creations = new OwnedScope('browser session creations');
+  readonly #operations = new OwnedScope('browser session operations');
   readonly #retiring = new AbortController();
   #closing: Promise<void> | null = null;
   readonly #unpublishedContexts = new Set<BrowserContext>();
@@ -349,7 +349,7 @@ export class BrowserSessionManager {
 
   async provision(options: BrowserProvisionLifetime & { readonly repair?: boolean | undefined; readonly allowDownload?: boolean | undefined } = {}): Promise<BrowserProvisionReport> {
     this.#assertOpen();
-    return this.#creations.run(() => this.provisionOwned(options));
+    return this.#creations.run('provision owned', () => this.provisionOwned(options));
   }
 
   private async provisionOwned(options: BrowserProvisionLifetime & { readonly repair?: boolean | undefined; readonly allowDownload?: boolean | undefined }): Promise<BrowserProvisionReport> {
@@ -432,7 +432,7 @@ export class BrowserSessionManager {
    */
   async launch(options: BrowserLaunchOptions = {}): Promise<BrowserLaunchResult> {
     this.#assertOpen();
-    return this.#creations.run(() => this.launchOwned(options));
+    return this.#creations.run('launch owned', () => this.launchOwned(options));
   }
 
   private async launchOwned(options: BrowserLaunchOptions): Promise<BrowserLaunchResult> {
@@ -531,7 +531,7 @@ export class BrowserSessionManager {
   async attach(options: BrowserAttachOptions): Promise<BrowserSessionInfo> {
     this.#assertOpen();
     const requestedEndpoint = options.cdpEndpoint;
-    return this.#creations.run(() => this.attachOwned(requestedEndpoint));
+    return this.#creations.run('attach owned', () => this.attachOwned(requestedEndpoint));
   }
 
   private async attachOwned(requestedEndpoint: string, original?: BrowserPageConnection, owner: BrowserProvisionLifetime = {}): Promise<BrowserSessionInfo> {
@@ -870,7 +870,7 @@ export class BrowserSessionManager {
   async withPage<T>(sessionId: string, pageId: string, read: (page: Page, assertCurrent: () => void, signal: AbortSignal) => Promise<T>): Promise<T> {
     const session = this.require(sessionId), tracked = session.pages.get(pageId);
     if (!tracked) throw new BrowserSessionError('The selected browser page is no longer available.', 'Read a live page before retrying.');
-    return this.#operations.run(async () => {
+    return this.#operations.run('browser session operation', async () => {
       const current = (): void => {
         this.assertSessionCurrent(session);
         if (session.pages.get(pageId) !== tracked) throw new BrowserSessionError('The selected browser page was closed.', 'Read a live page before retrying.');
@@ -909,7 +909,7 @@ export class BrowserSessionManager {
    * retains this page/owner; effects still validate current terms and controls. */
   restorePage(value: BrowserPageConnection, input: BrowserProvisionLifetime): Promise<RestoredBrowserPage> {
     const original = captureBrowserPageConnection(value), owner = this.ownLifetime(input);
-    return this.#creations.run(async () => {
+    return this.#creations.run('browser session operation', async () => {
       let sessionId: string | undefined;
       try {
         assertProvisionCurrent(owner);
@@ -949,7 +949,7 @@ export class BrowserSessionManager {
 
   async page(sessionId: string, pageId?: string): Promise<{ readonly pageId: string; readonly page: Page }> {
     const session = this.require(sessionId);
-    return this.#operations.run(() => this.pageOwned(session, pageId));
+    return this.#operations.run('page owned', () => this.pageOwned(session, pageId));
   }
 
   private async pageOwned(session: TrackedSession, pageId?: string): Promise<Pick<TrackedPage, 'pageId' | 'page'>> {
@@ -974,7 +974,7 @@ export class BrowserSessionManager {
 
   async newPage(sessionId: string): Promise<{ readonly pageId: string; readonly page: Page }> {
     const session = this.require(sessionId);
-    return this.#operations.run(() => this.createPage(session, true));
+    return this.#operations.run('create page', () => this.createPage(session, true));
   }
 
   private async createPage(session: TrackedSession, activate: boolean): Promise<Pick<TrackedPage, 'pageId' | 'page'>> {
@@ -1006,7 +1006,7 @@ export class BrowserSessionManager {
   /** Close only the selected original tab; keep its actual native work owned. */
   async closePage(sessionId: string, pageId: string): Promise<void> {
     const session = this.require(sessionId);
-    return this.#operations.run(async () => {
+    return this.#operations.run('browser session operation', async () => {
       this.assertSessionCurrent(session);
       const tracked = session.pages.get(pageId);
       if (!tracked) throw new BrowserSessionError(
@@ -1048,7 +1048,7 @@ export class BrowserSessionManager {
 
   async pageList(sessionId: string): Promise<readonly BrowserPageInfo[]> {
     const session = this.require(sessionId);
-    return this.#operations.run(() => this.pageListOwned(session));
+    return this.#operations.run('page list owned', () => this.pageListOwned(session));
   }
 
   private async pageListOwned(session: TrackedSession): Promise<readonly BrowserPageInfo[]> {
@@ -1097,7 +1097,7 @@ export class BrowserSessionManager {
     }
     const info = this.describe(session);
     this.forgetSession(session);
-    return this.#operations.run(async () => {
+    return this.#operations.run('browser session operation', async () => {
       try { await this.closeContext(session.context); } catch (error) {
         // The browser is still there: list it again, with a fresh lifetime, so
         // the close can be retried instead of the session vanishing.

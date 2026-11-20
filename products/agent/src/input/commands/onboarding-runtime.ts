@@ -9,7 +9,7 @@ export function registerOnboardingRuntimeCommands(registry: CommandRegistry): vo
     effect: 'ui-navigation',
     aliases: ['onboarding'],
     description: 'Open the Agent workspace',
-    hidden: true,
+    firstScreen: false,
     usage: '',
     async handler(args, ctx) {
       if (args[0] === 'unpair') {

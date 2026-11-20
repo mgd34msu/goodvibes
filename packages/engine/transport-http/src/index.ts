@@ -33,8 +33,8 @@ export type { HttpJsonTransport, HttpJsonTransportOptions, TransportContext, Tra
 export { generateIdempotencyKey } from './http-core.js';
 export type { ServerSentEventHandlers, ServerSentEventOptions } from './sse.js';
 export { openServerSentEventStream } from './sse.js';
-export type { ServerSentEventHandlers as RawServerSentEventHandlers, ServerSentEventOptions as RawServerSentEventOptions, ServerSentEventStreamHandle } from './sse-stream.js';
-export { SSE_HEARTBEAT_INTERVAL_MS, openRawServerSentEventStream, sseIdleDeadlineMs } from './sse-stream.js';
+export type { ServerSentEvent, ServerSentEventHandlers as RawServerSentEventHandlers, ServerSentEventOptions as RawServerSentEventOptions, ServerSentEventStreamHandle, StreamEnd, StreamGap, StreamSubscriber } from './sse-stream.js';
+export { SSE_HEARTBEAT_INTERVAL_MS, STREAM_CONTROL_FRAMES, openRawServerSentEventStream, sseIdleDeadlineMs } from './sse-stream.js';
 export type { AuthTokenInput, AuthTokenResolver, HeaderResolver, MaybePromise } from './auth.js';
 export { mergeHeaderRecord, mergeHeaders, normalizeAuthToken, resolveAuthToken, resolveHeaders } from './auth.js';
 export type { BackoffPolicy, ResolvedBackoffPolicy } from './backoff.js';

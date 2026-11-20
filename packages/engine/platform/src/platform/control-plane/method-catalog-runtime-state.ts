@@ -37,9 +37,8 @@ export const builtinGatewayRuntimeStateMethodDescriptors: readonly GatewayMethod
       + 'nesting and total size are bounded, a cut value reads "[Truncated]" and truncated is true. unknown lists asked-for '
       + 'domains the store does not hold. Read-only.',
     category: 'health',
-    scopes: ['read:health'],
+    effects: ['health.inspect'],
     // The conversation domain can hold streamed text, so only an operator reads it.
-    access: 'admin',
     http: { method: 'GET', path: '/api/runtime/state' },
     inputSchema: objectSchema({ domains: STRING_SCHEMA }, []),
     outputSchema: RUNTIME_STATE_SCHEMA,

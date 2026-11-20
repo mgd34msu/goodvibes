@@ -40,7 +40,7 @@ export interface GatePresetDefinition extends GatePreset {
 export const GATE_PRESETS: Readonly<Record<GatePresetName, GatePresetDefinition>> = {
   'ask-me': {
     name: 'ask-me', label: 'Ask me', mode: 'ask-me',
-    summary: 'With a working decision model, an action runs unless it reads as critical, irreversible or weakening security, or is an owner-only decision; those ask you. Without one, every action that is not a plain read asks you unless a per-tool setting allows it.',
+    summary: 'With a working decision model, an action runs unless it reads as critical, irreversible or weakening security, or is an owner-only decision; those ask you. Without one, every action asks you except a read inside the workspace and a change to files inside it that can be undone, unless a per-tool setting allows it.',
     stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'ask' },
     readOnly: false,
   },
@@ -112,7 +112,7 @@ export function parsePermissionMode(mode: unknown): GatePresetName | undefined {
  */
 export function retiredPermissionModeNotice(mode: unknown): string | undefined {
   if (mode !== 'prompt' && mode !== 'normal' && mode !== 'accept-edits' && mode !== 'custom') return undefined;
-  return `permissions.mode "${mode}" is retired and now runs as ask-me: with a working decision model ordinary actions run without asking and only critical actions ask; without one, every action that is not a plain read asks. `
+  return `permissions.mode "${mode}" is retired and now runs as ask-me: with a working decision model ordinary actions run without asking and only critical actions ask; without one, every action asks except a read inside the workspace and a change to files inside it that can be undone. `
     + 'To be asked less, choose jev-decides, just-vibes or yolo; for read-only planning choose plan; to block one tool, set permissions.tools.<tool> to deny.';
 }
 

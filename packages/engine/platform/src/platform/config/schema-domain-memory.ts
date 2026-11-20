@@ -58,7 +58,6 @@ export const memoryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'memory.budgetMb',
     type: 'number',
-    default: 0,
     description:
       'MemoryGovernor budget in MB. The governor sheds caches and pauses background jobs as RSS approaches this budget. 0 means auto: min(25% of system RAM, 4096 MB), resolved at daemon start. Applies after the daemon restarts.',
     ...intRange(0, 1_048_576),
@@ -66,7 +65,6 @@ export const memoryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'memory.tier.elevatedPct',
     type: 'number',
-    default: 60,
     description:
       'Elevated tier threshold, as a percent of the budget: at/above this the governor trims registered caches to their floor and runs a gc. Applies after the daemon restarts.',
     ...intRange(1, 100),
@@ -74,7 +72,6 @@ export const memoryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'memory.tier.highPct',
     type: 'number',
-    default: 80,
     description:
       'High tier threshold, as a percent of the budget: at/above this the governor flushes all registered caches and pauses deferrable background jobs. Applies after the daemon restarts.',
     ...intRange(1, 100),
@@ -82,7 +79,6 @@ export const memoryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'memory.tier.criticalPct',
     type: 'number',
-    default: 95,
     description:
       'Critical tier threshold, as a percent of the budget: at/above this the governor refuses new expensive work with an honest structured outcome and emits an ops attention event. Applies after the daemon restarts.',
     ...intRange(1, 100),
@@ -90,7 +86,6 @@ export const memoryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'memory.tripwire.rateMbPerSec',
     type: 'number',
-    default: 25,
     description:
       'Leak tripwire rate in MB/s: if RSS keeps growing faster than this AFTER a full cache flush, the flush did not help and a leak is suspected. Applies after the daemon restarts.',
     ...numRange(1, 100_000),
@@ -98,7 +93,6 @@ export const memoryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'memory.tripwire.sustainSec',
     type: 'number',
-    default: 60,
     description:
       'Leak tripwire sustain window in seconds: the post-flush growth rate must exceed memory.tripwire.rateMbPerSec continuously for this long before the governor writes a receipt and exits for a clean supervisor restart. Applies after the daemon restarts.',
     ...intRange(1, 86_400),
@@ -106,7 +100,6 @@ export const memoryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'memory.hardLimitPct',
     type: 'number',
-    default: 90,
     description:
       'Absolute-memory backstop as a percent of the EFFECTIVE KILL CEILING, the daemon\'s own cgroup memory limit where one applies, else physical RAM. If RSS holds at/above this percent of that ceiling for memory.tripwire.sustainSec, the governor writes a hard-limit receipt and exits so a supervisor restarts clean, catching a leak too slow for memory.tripwire.rateMbPerSec just before the kernel/cgroup OOM killer would strike. Default 90: fire at 90% of the real kill line, leaving a safety margin for the exit itself. Deliberately anchored to the kill ceiling and NOT to memory.budgetMb: the budget caps small by design (25% of RAM, max 4096 MB), and a large-but-stable working set above the budget on a big-RAM host is handled by the critical tier (refuse new expensive work, stay alive), anchoring the exit to the budget would put such a healthy daemon in a permanent restart loop. Applies after the daemon restarts.',
     ...intRange(1, 100),

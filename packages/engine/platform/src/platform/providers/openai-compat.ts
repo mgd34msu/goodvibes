@@ -627,6 +627,14 @@ export class OpenAICompatProvider implements LLMProvider {
 
   async describeRuntime(deps: ProviderRuntimeMetadataDeps): Promise<ProviderRuntimeMetadata> {
     const { buildStandardProviderAuthRoutes, summarizeProviderAuth } = await import('./runtime-metadata.js');
+    // A keyless local gateway (LiteLLM, SGLang, a proxy) is set up only once a server
+    // there has answered with its models: the catalog says it may run without a key,
+    // not that one is running. Until then its status says so instead of "signed in".
+    const anonymousAnswered = this.anonymousConfigured && this._models.length > 0;
+    const origin = safeEndpointOrigin(this.baseURL);
+    const anonymousDetail = anonymousAnswered || !this.anonymousConfigured
+      ? this.anonymousDetail
+      : `No server has answered${origin ? ` at ${origin}` : ''} with any models yet. Start it, or set its address.`;
     const authRoutes = await buildStandardProviderAuthRoutes({
       providerId: this.name,
       apiKeyEnvVars: this.authEnvVars,
@@ -634,15 +642,15 @@ export class OpenAICompatProvider implements LLMProvider {
       serviceNames: this.serviceNames,
       ...(this.subscriptionProviderId ? { subscriptionProviderId: this.subscriptionProviderId } : {}),
       allowAnonymous: this.allowAnonymous,
-      anonymousConfigured: this.anonymousConfigured,
-      anonymousDetail: this.anonymousDetail,
+      anonymousConfigured: anonymousAnswered,
+      anonymousDetail,
     }, deps);
     const auth = summarizeProviderAuth({
-      configured: this.configured || this.anonymousConfigured,
+      configured: this.configured || anonymousAnswered,
       detail: this.configured
         ? `${this.name} API key available`
         : this.allowAnonymous
-          ? (this.anonymousDetail ?? `${this.name} can be used without a stored API key`)
+          ? (anonymousDetail ?? `${this.name} can be used without a stored API key`)
           : `API key for ${this.name} is not configured`,
     }, authRoutes);
     return {

@@ -168,32 +168,22 @@ export function useDaemonHealth(): DaemonHealth {
     wasLive.current = streamLive;
   }, [streamLive, stream.status, refetchHealth]);
 
-  const [browserOffline, setBrowserOffline] = useState(() => !navigator.onLine);
+  // The browser going offline or online is a reason to probe now, never an answer: it
+  // says whether there is a network beyond this machine, and a daemon on loopback (or
+  // the same LAN) answers without one. Only the probe decides reachability.
   useEffect(() => {
-    let cancelled = false;
-    const offline = () => setBrowserOffline(true);
-    const online = () => {
-      void refetchHealth().then(() => {
-        if (!cancelled && navigator.onLine) setBrowserOffline(false);
-      });
-    };
-    window.addEventListener('offline', offline);
-    window.addEventListener('online', online);
+    const probeNow = () => { void refetchHealth(); };
+    window.addEventListener('offline', probeNow);
+    window.addEventListener('online', probeNow);
     return () => {
-      cancelled = true;
-      window.removeEventListener('offline', offline);
-      window.removeEventListener('online', online);
+      window.removeEventListener('offline', probeNow);
+      window.removeEventListener('online', probeNow);
     };
   }, [refetchHealth]);
 
   // Derive connection state from the probe. A route that answered: connected over it.
   // No route: a connection that was up shows 'reconnecting' for one probe, then 'down'.
   useEffect(() => {
-    if (browserOffline) {
-      setLatencyMs(null);
-      setConnectionState('down');
-      return;
-    }
     if (healthQuery.isSuccess) {
       const { route, latencyMs: probed } = healthQuery.data;
       setLatencyMs(probed);
@@ -210,12 +200,12 @@ export function useDaemonHealth(): DaemonHealth {
       return; // still pending, nothing to evaluate yet
     }
     setConnectionState((previous) => (previous === 'connected' ? 'reconnecting' : 'down'));
-  }, [browserOffline, healthQuery.isSuccess, healthQuery.isError, healthQuery.data, healthQuery.dataUpdatedAt]);
+  }, [healthQuery.isSuccess, healthQuery.isError, healthQuery.data, healthQuery.dataUpdatedAt]);
 
   // A live stream is itself proof the daemon answers over the current route.
   useEffect(() => {
-    if (streamLive && !browserOffline) setConnectionState('connected');
-  }, [streamLive, browserOffline]);
+    if (streamLive) setConnectionState('connected');
+  }, [streamLive]);
 
   // -- Tasks ----------------------------------------------------------------
   // `tasks` frames revalidate this key; it polls only while the stream is down.

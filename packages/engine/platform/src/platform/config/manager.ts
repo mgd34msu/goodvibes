@@ -39,7 +39,7 @@ import { watchConfigFiles, reloadAndNotifyChanges, type ConfigFileWatchHandle } 
 import { isDaemonOwnedConfigKey, listDaemonOwnedConfigPaths, type DaemonOwnedConfigPath } from './config-ownership.js';
 import { resolveOrCreateDaemonPath } from './daemon-tier-paths.js';
 import { daemonConfigPath, overlayDaemonTierFrom, readDaemonTierFile } from './daemon-config-tier.js';
-import { describeKeySource, type ConfigKeySource } from './manager-key-source.js';
+import { describeKeySource, type ConfigKeyTier, type ConfigKeySource } from './manager-key-source.js';
 import { DEFAULT_CONFIG_SNAPSHOT, cloneDefaultConfig, ensureSharedConfig, requireAbsoluteOwnedPath, sanitizeConfigShape } from './manager-bootstrap.js';
 import { resolveWithProfileFallback, type ConfigProfileFallbackReader } from './profile-fallback.js';
 import { ingestManagerSettings, toConfigLoadFailure, type IngestionNoticeSink, type SettingsIngestionNotice } from './manager-ingestion.js';
@@ -223,6 +223,21 @@ export interface DaemonWriteRoute {
   reset?(key: string): Promise<void>;
   /** The daemon refused a forwarded write; this process's view of the key was put back. */
   refused?(key: string, error: unknown): void;
+}
+
+/**
+ * Whether a forwarded write failed because nothing accepted the connection
+ * (Bun names it `ConnectionRefused`, Node `ECONNREFUSED`), so nothing was sent.
+ * The code may sit on a transport error's cause chain.
+ */
+function nothingListening(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== null && typeof current === 'object'; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (code === 'ECONNREFUSED' || code === 'ConnectionRefused') return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 /** A daemon-owned write the daemon refused; this process's view of the key is back at what it was. */
@@ -630,6 +645,32 @@ export class ConfigManager {
   /** Whether a settings file or a runtime override holds this key, rather than the shipped default. One map lookup. */
   isExplicitlySet(key: ConfigKey): boolean {
     return this.runtimeState.sources.has(key) || this.runtimeState.overrides.has(key);
+  }
+
+  /**
+   * Where the loaded value of a key comes from: the shipped default, the
+   * global file, the project file, the shared tier, the daemon, or this
+   * program's own host setting. Read from what the load recorded (a map read,
+   * no file read), so no caller reads a settings file itself to learn whether
+   * a key was stated.
+   */
+  sourceOf(key: ConfigKey): ConfigKeyTier | 'host' {
+    const tier = this.runtimeState.sources.get(key);
+    if (tier !== undefined) return tier;
+    if (this.hostSettings.has(key)) return 'host';
+    return 'default';
+  }
+
+  /**
+   * Set `key` to `next` only while it still holds `expected` (compared by
+   * value): a deferred change that failed restores only keys nothing has
+   * changed since. 'superseded' when another write got there first; nothing
+   * is written then.
+   */
+  setIfUnchanged<K extends ConfigKey>(key: K, expected: unknown, next: ConfigValue<K>, options: ConfigSetOptions = {}): 'set' | 'superseded' {
+    if (JSON.stringify(this.get(key)) !== JSON.stringify(expected)) return 'superseded';
+    (this.set as (k: ConfigKey, v: unknown, o: ConfigSetOptions) => void)(key, next, options);
+    return 'set';
   }
 
   /** Validate registration and return an immutable, manager-bound boolean handle. */
@@ -1350,10 +1391,25 @@ export class ConfigManager {
       try { route.refused?.(change.key, error); } catch { /* reporting cannot change the outcome */ }
       return { key: change.key, error };
     };
-    const outcome: Promise<readonly DaemonWriteRefusal[]> = changes.length > 1 && !reset && route.writeMany
-      ? route.writeMany(changes).then(() => [], (error: unknown) => changes.map((_, index) => refuse(index, error)))
+    // A refused connection means no daemon listens where this process sends
+    // its writes, and nothing was sent: the daemon's file is what a daemon
+    // reads when it starts, so the value goes there (as with no route at all)
+    // instead of being reported as refused by a daemon that is not running.
+    const settle = (index: number, error: unknown): DaemonWriteRefusal | null => {
+      if (!nothingListening(error)) return refuse(index, error);
+      const change = changes[index]!;
+      try {
+        if (reset) this.reset(change.key, { daemonNotRunning: true });
+        else this.set(change.key, change.value as never, { daemonNotRunning: true });
+        return null;
+      } catch (fileError) {
+        return refuse(index, fileError);
+      }
+    };
+    const outcome: Promise<readonly DaemonWriteRefusal[]> = (changes.length > 1 && !reset && route.writeMany
+      ? route.writeMany(changes).then(() => [], (error: unknown) => changes.map((_, index) => settle(index, error)))
       : Promise.all(changes.map((change, index) => (reset && route.reset ? route.reset(change.key) : route.write(change.key, change.value))
-        .then(() => null, (error: unknown) => refuse(index, error))))
+        .then(() => null, (error: unknown) => settle(index, error)))))
         .then(results => results.filter((result): result is DaemonWriteRefusal => result !== null));
     this.#forwarding.add(outcome);
     for (const watch of this.#forwardWatches) watch.push(outcome);
@@ -1735,6 +1791,15 @@ export class ConfigManager {
       return;
     }
     value = this.validateSetValue(key, value, options, false) as ConfigValue<K>;
+    // One admission for write and reload: a value the project layer would skip when the file
+    // is read again is refused here, before anything is written.
+    if (this.projectConfigPath !== this.configPath) {
+      const layer: Record<string, unknown> = {};
+      writeRawDotPath(layer, key, structuredClone(value));
+      const admitted = restrictProjectLayer(layer, this.#config, this.projectConfigPath, this.hostSettings);
+      const refused = admitted.notices[0];
+      if (refused) throw new Error(`${key} was not saved to the project settings file: ${refused.reason}. ${refused.remedy}.`);
+    }
     if (key === 'permissions.mode' && this.get('behavior.autoApprove')) {
       this.setProjectValue('behavior.autoApprove', false, options);
     }

@@ -52,6 +52,12 @@
   border-bottom: 0;
 }
 
+.pairing-handoff-offer__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .pairing-handoff-offer__label {
   color: var(--text);
   font-weight: var(--weight-medium);

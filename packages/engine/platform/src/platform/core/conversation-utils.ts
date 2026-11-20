@@ -110,8 +110,28 @@ export function restoreBranchMap(branches?: Record<string, Message[]>): Map<stri
   return restored;
 }
 
+/** The first line of the block a `!` command's output travels in, in front of the next message (terminal-shell shell-passthrough.ts). */
+export const SHELL_CONTEXT_OPEN = 'The user ran a shell command via the `!` prefix:';
+/** The line that ends that block. */
+export const SHELL_CONTEXT_CLOSE = '--- end of shell output ---';
+
+/**
+ * What the person typed, without the `!` command output blocks put in front of
+ * it for the model. The output is shown in the transcript as its own block, so
+ * the message and the conversation's title are the typed text alone.
+ */
+export function stripShellContext(text: string): string {
+  let rest = text;
+  while (rest.startsWith(SHELL_CONTEXT_OPEN)) {
+    const end = rest.indexOf(`\n${SHELL_CONTEXT_CLOSE}`);
+    if (end < 0) return rest;
+    rest = rest.slice(end + SHELL_CONTEXT_CLOSE.length + 1).replace(/^\n+/, '');
+  }
+  return rest;
+}
+
 export function deriveConversationTitle(content: string): string {
-  const text = content.trim();
+  const text = stripShellContext(content.trim()).trim();
   if (text.length <= 50) return text;
   let cut = text.lastIndexOf(' ', 50);
   if (cut <= 0) cut = 50;
@@ -119,8 +139,8 @@ export function deriveConversationTitle(content: string): string {
 }
 
 export function extractUserDisplayText(content: string | ContentPart[]): string {
-  if (typeof content === 'string') return content;
+  if (typeof content === 'string') return stripShellContext(content);
   const textParts = content.filter((part): part is { type: 'text'; text: string } => part.type === 'text');
   const imageCount = content.filter((part) => part.type === 'image').length;
-  return textParts.map((part) => part.text).join('') + (imageCount > 0 ? ` [+${imageCount} image(s)]` : '');
+  return stripShellContext(textParts.map((part) => part.text).join('')) + (imageCount > 0 ? ` [+${imageCount} image(s)]` : '');
 }

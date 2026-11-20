@@ -87,6 +87,60 @@
   margin-inline: auto;
 }
 
+/* Approvals this chat's turn waits on (ChatApprovals). */
+.chat-approvals {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-approval {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--warn) 7%, var(--surface));
+}
+
+.chat-approval__icon {
+  flex: none;
+  color: var(--warn);
+}
+
+.chat-approval__text {
+  display: flex;
+  flex: 1 1 200px;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chat-approval__title {
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.chat-approval__summary {
+  overflow-wrap: anywhere;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.chat-approval__actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.chat-approval__link {
+  color: var(--accent);
+  font-size: var(--text-sm);
+}
+
 /* The settled-turn notice ("Live updates are off…", Retry). One quiet line. */
 .chat-status {
   display: flex;

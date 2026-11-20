@@ -813,7 +813,7 @@ async function handleMultimodalWriteback(context: DaemonMediaRouteContext, req: 
       {
         ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
         ...(typeof body.title === 'string' ? { title: body.title } : {}),
-        ...(tags ? { tags } : {}),
+        ...(tags?.length ? { tags } : {}),
         ...(typeof body.folderPath === 'string' ? { folderPath: body.folderPath } : {}),
         ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
       },

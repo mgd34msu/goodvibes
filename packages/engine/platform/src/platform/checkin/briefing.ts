@@ -8,13 +8,25 @@
  */
 import type { CheckinStateSnapshot } from './types.js';
 
-/** A one-line summary of the snapshot, reused in receipts. */
+function counted(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+/**
+ * A one-line summary of the snapshot, reused in receipts: what waits for the
+ * owner (the same count the check-in's decision reads), then only the other
+ * counts that are not zero.
+ */
 export function summarizeCheckinState(snapshot: CheckinStateSnapshot): string {
-  return (
-    `${snapshot.runningSessions} running, ${snapshot.blockedSessions} with messages not yet picked up, ` +
-    `${snapshot.unreadChannelItems} channel messages not yet picked up, ${snapshot.recentCompletions} recent completions, ` +
-    `${snapshot.needsAttention.length} attention lines`
-  );
+  const waiting = snapshot.waitingForOwner;
+  const parts = [
+    waiting === undefined ? '' : waiting === 0 ? 'Nothing waiting for you' : `${counted(waiting, 'item', 'items')} waiting for you`,
+    snapshot.runningSessions > 0 ? `${counted(snapshot.runningSessions, 'session', 'sessions')} running` : '',
+    snapshot.blockedSessions > 0 ? `${counted(snapshot.blockedSessions, 'session has', 'sessions have')} messages not yet picked up` : '',
+    snapshot.unreadChannelItems > 0 ? `${counted(snapshot.unreadChannelItems, 'channel message', 'channel messages')} not yet picked up` : '',
+    snapshot.recentCompletions > 0 ? `${counted(snapshot.recentCompletions, 'run', 'runs')} finished recently` : '',
+  ].filter(Boolean);
+  return parts.length > 0 ? `${parts.join('; ')}.` : 'Nothing running and nothing waiting.';
 }
 
 /** The compact briefing text handed to the judge. */

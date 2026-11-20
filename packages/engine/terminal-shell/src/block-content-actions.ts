@@ -61,7 +61,7 @@ export function createBlockContentActions(policy: {
       requestRender();
       return;
     }
-    const label = `${nearest.type}: ${nearest.rawContent.slice(0, 40).replace(/\n/g, ' ')}`;
+    const label = nearest.title ?? `${nearest.type}: ${nearest.rawContent.slice(0, 40).replace(/\n/g, ' ')}`;
     const added = bookmarkManager.toggle(nearest.collapseKey, label);
     // See handleBlockCopy's note, bookmarking is an explicit block action too.
     policy.noteTouch(conversationManager, nearest.collapseKey);

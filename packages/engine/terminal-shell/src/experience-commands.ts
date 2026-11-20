@@ -25,7 +25,7 @@ export function createApprovalMatrixCommand<Context extends ExperienceContext>(p
     effect: 'connected-host-state',
     aliases: ['approvals'],
     description: 'Review action-specific approval classes and the specialized security UX matrix',
-    hidden: policy.hidden,
+    firstScreen: !policy.hidden,
     usage: policy.usage,
     async handler(args, ctx) {
       const sub = (args[0] ?? 'matrix').toLowerCase();

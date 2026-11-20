@@ -8,11 +8,22 @@
  * alone reads high or silent. Only these three sources can put a row in the
  * Needs you group, so only they are read here.
  */
-import { buildWorkItems, groupWorkItems, type WorkSources } from '../views/work/work-items';
+import { buildWorkItems, groupWorkItems, runningNowCount, type WorkSources } from '../views/work/work-items';
 
 export type NeedsYouSources = Pick<WorkSources, 'approvals' | 'nodes' | 'attemptGroups'>;
 
 export function needsYouCount({ approvals, nodes, attemptGroups }: NeedsYouSources): number {
   const items = buildWorkItems({ approvals, nodes, attemptGroups, sessions: [], hosted: [], tasks: [], ciWatches: [] });
   return groupWorkItems(items, 'all').needs.length;
+}
+
+export type RunningNowSources = Pick<WorkSources, 'nodes' | 'attemptGroups' | 'tasks'>;
+
+/**
+ * What the account menu says is running: the Work page's own count over the
+ * sources the shell already reads (the fleet, best-of-N groups, runtime tasks),
+ * so the two never disagree about an idle watcher or a schedule between runs.
+ */
+export function runningNow({ nodes, attemptGroups, tasks }: RunningNowSources): number {
+  return runningNowCount(buildWorkItems({ approvals: [], nodes, attemptGroups, sessions: [], hosted: [], tasks, ciWatches: [] }));
 }

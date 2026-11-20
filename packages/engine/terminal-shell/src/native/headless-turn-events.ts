@@ -2,6 +2,10 @@ import type { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/ru
 import type { AgentEvent, ContractEvent, GateEvent, ToolEvent, TurnEvent } from '@goodvibes-jev/engine/platform/events';
 import type { PermissionExecutionOptions, PermissionPromptDecision, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { redactDiagnosticText } from '@goodvibes-jev/engine/platform/platform/utils';
+import {
+  exitCodeOfSettlement, readTurnSettlement, stopReasonOfSettlement, TURN_SETTLING_EVENTS,
+  type TurnSettlement, type TurnSettlingEvent,
+} from '@goodvibes-jev/engine/transport-core/turn-settlement';
 import type { NativeHeadlessTurnResult } from './native-headless.js';
 
 /**
@@ -161,25 +165,41 @@ export function observeHeadlessTurn(bus: Pick<RuntimeEventBus, 'on'>, format: st
     bus.on<Payload<ContractEvent, 'CONTRACT_PASSED'>>('CONTRACT_PASSED', ({ payload }) => forward(payload, ['contractId', 'criteriaMet', 'criteriaJudged'])),
     bus.on<Payload<ContractEvent, 'CONTRACT_FAILED'>>('CONTRACT_FAILED', ({ payload }) => forward(payload, ['contractId', 'reason', 'failureKind'])),
     bus.on<Payload<ContractEvent, 'CONTRACT_CANCELLED'>>('CONTRACT_CANCELLED', ({ payload }) => forward(payload, ['contractId', 'reason'])),
-    bus.on<Payload<TurnEvent, 'TURN_COMPLETED'>>('TURN_COMPLETED', ({ payload }) => {
+    // Every event that ends a turn, read by the one settlement reader: a turn refused before it
+    // started (PREFLIGHT_FAIL) settles the run with exit 1 and its stop reason, like any failure.
+    ...TURN_SETTLING_EVENTS.map((type) => bus.on<Payload<TurnEvent, TurnSettlingEvent>>(type, ({ payload }) => {
+      const settlement = readTurnSettlement({ type, payload });
+      if (!settlement) return;
       state.events++;
-      state.response = payload.response;
-      state.stopReason = payload.stopReason;
-      state.exitCode = 0;
-    }),
-    bus.on<Payload<TurnEvent, 'TURN_ERROR'>>('TURN_ERROR', ({ payload }) => {
-      state.events++;
-      state.error = payload.error;
-      state.stopReason = payload.stopReason;
-      state.exitCode = 1;
-    }),
-    bus.on<Payload<TurnEvent, 'TURN_CANCEL'>>('TURN_CANCEL', ({ payload }) => {
-      state.events++;
-      state.error = payload.reason ?? 'cancelled';
-      state.stopReason = payload.stopReason;
-      state.exitCode = 130;
-    }),
+      settle(settlement);
+    })),
   ];
+  function settle(settlement: TurnSettlement): void {
+    state.stopReason = stopReasonOfSettlement(settlement);
+    switch (settlement.kind) {
+      case 'answered':
+        state.response = settlement.response;
+        state.exitCode = exitCodeOfSettlement(settlement);
+        return;
+      case 'empty':
+        // Delegated work may still supply the answer; result() settles an empty one as exit 1.
+        state.response = '';
+        state.exitCode = 0;
+        return;
+      case 'refused':
+        state.error = settlement.reason;
+        state.exitCode = exitCodeOfSettlement(settlement);
+        return;
+      case 'failed':
+        state.error = settlement.error;
+        state.exitCode = exitCodeOfSettlement(settlement);
+        return;
+      case 'cancelled':
+        state.error = settlement.reason;
+        state.exitCode = exitCodeOfSettlement(settlement);
+        return;
+    }
+  }
   return {
     state,
     /** Write one versioned frame on the same stream as the observed events (nothing in other output formats). */

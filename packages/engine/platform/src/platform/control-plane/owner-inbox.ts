@@ -31,7 +31,6 @@
  * one presence check (a stat, a small file read) per answered question still
  * waiting. `revision()` is one statement over SQLite's change counters.
  */
-import { isOwnerActApproval } from './owner-act.js';
 import { refusal, type Refusal } from '@goodvibes-jev/engine/errors';
 import type { ApprovalBroker, SharedApprovalRecord } from './approval-broker.js';
 import type { ApprovalActionOutcome } from './approval-broker-owner.js';
@@ -77,11 +76,6 @@ export interface OwnerAnswer {
 export interface OwnerAnswerSource {
   readonly actor: string;
   readonly surface: string;
-  /**
-   * The answer came with a token minted for automation, which does not answer
-   * a change put to the owner (owner-act.ts).
-   */
-  readonly automation?: boolean | undefined;
 }
 
 export interface OwnerItem {
@@ -809,15 +803,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     }
     const approval = this.#approvals?.getApproval(id);
     if (!approval || !this.#approvals) return { applied: false, refusal: unknownRefusal(id) };
-    if (by.automation === true && isOwnerActApproval(approval)) {
-      return { applied: false, refusal: refusal({
-        code: 'OWNER_ONLY',
-        state: 'not answered',
-        reason: `Approval ${id} asks the owner to make a change only he makes; a token minted for automation cannot answer it.`,
-        next: ['The owner answers it from his own app: the approval prompt, /approval in a terminal, or the web UI signed in as him.'],
-        status: 403,
-      }) };
-    }
+    // Who may answer is decided before this runs: `inbox.answer` declares `approval.answer`
+    // (the owner's own act) and a channel reply is admitted for its sender (approval-reply.ts).
     return this.#answerApproval(this.#approvals, approval, answer, by);
   }
 

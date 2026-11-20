@@ -39,7 +39,7 @@ import type {
 } from './approval-broker.js';
 import { logger } from '../utils/logger.js';
 import { assertPermissionActive } from '../permissions/cancellation.js';
-import { currentTurnSurfaceId } from '../security/turn-boundary.js';
+import { currentTurn } from '../security/turn-boundary.js';
 import { guestChannelOf } from '../gate/surface-authority.js';
 
 /** A pending ask's resolvers and its expiry timer, as the broker holds them. */
@@ -144,7 +144,7 @@ export function approvalGuestChannel(approval: { readonly metadata: Readonly<Rec
  * request: its prompt goes to the owner's own conversation, not the guest's.
  */
 function withGuestChannel(metadata: Record<string, unknown>): Record<string, unknown> {
-  const channel = guestChannelOf(currentTurnSurfaceId());
+  const channel = guestChannelOf(currentTurn()?.surface);
   return channel === undefined ? metadata : { ...metadata, [APPROVAL_GUEST_CHANNEL_METADATA]: channel };
 }
 

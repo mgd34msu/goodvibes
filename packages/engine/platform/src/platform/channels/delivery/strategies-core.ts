@@ -9,7 +9,7 @@ import { resolveSecretInput } from '../../config/secret-refs.js';
 import { ControlPlaneGateway } from '../../control-plane/gateway.js';
 import { DiscordIntegration, HomeAssistantIntegration, NtfyIntegration, SlackIntegration, resolveNtfyDefaultPriority } from '../../integrations/index.js';
 import { ownerDeliveryTargetProblem, postToPublicWebhook, validatePublicWebhookUrl } from '../../utils/url-safety.js';
-import type { HostResolver } from '../../tools/fetch/pinned-request.js';
+import type { HostResolver } from '../../runtime/network/destination.js';
 import { resolveReachableBaseUrl } from '../../utils/reachable-base-url.js';
 import { resolveHomeAssistantAccessToken, resolveHomeAssistantEventType } from '../builtin/homeassistant.js';
 import type { ChannelDeliveryRequest, ChannelDeliveryStrategy } from './types.js';

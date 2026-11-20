@@ -115,8 +115,8 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   // is paste and stays paste). Two presses rather than a hold: see the action's
   // description, a terminal has no key-release event to hold against.
   'voice-input':           [{ key: 'v', alt: true }],
-// Shift+Tab: cycle this session's permission mode. The legacy backtab literal
-  // is read as this chord (handler-shortcuts.ts).
+// Shift+Tab: cycle this session's permission mode. The tokenizer reads the
+  // xterm back-tab (CSI Z) as this chord.
   'cycle-permission-mode': [{ key: 'tab', shift: true }],
 });
 

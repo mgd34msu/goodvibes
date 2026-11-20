@@ -496,7 +496,8 @@
 }
 
 /* Thin connection banner and the page-level banners */
-.shell-main > .banner {
+.shell-main > .banner,
+.shell-main > .daemon-receipts > .banner {
   flex: none;
   max-width: none;
   margin: 0;
@@ -510,17 +511,26 @@
   line-height: var(--leading-meta);
 }
 
-.shell-main > .banner svg {
+.shell-main > .banner svg,
+.shell-main > .daemon-receipts > .banner svg {
   flex: none;
   color: var(--warn);
 }
 
-.shell-main > .banner.info {
+.shell-main > .banner.info,
+.shell-main > .daemon-receipts > .banner.info {
   background: color-mix(in srgb, var(--info) 9%, var(--canvas));
 }
 
-.shell-main > .banner.info svg {
+.shell-main > .banner.info svg,
+.shell-main > .daemon-receipts > .banner.info svg {
   color: var(--info);
+}
+
+/* The receipts stack sits in the shell's column like a banner. */
+.shell-main > .daemon-receipts {
+  flex: none;
+  gap: 0;
 }
 
 /* Content frame */
@@ -617,7 +627,8 @@
     padding: 0;
   }
 
-  .shell-main > .banner {
+  .shell-main > .banner,
+  .shell-main > .daemon-receipts > .banner {
     padding: 6px 12px;
   }
 }

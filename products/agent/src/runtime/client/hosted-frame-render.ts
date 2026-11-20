@@ -42,6 +42,7 @@
 
 import type { ToolCall, ToolResult } from '@goodvibes-jev/engine/platform/platform/types';
 import type { TokenUsage } from '@goodvibes-jev/engine/platform/platform/core';
+import { readTurnSettlement, stopReasonOfSettlement, type TurnSettlement } from '@goodvibes-jev/engine/transport-core/turn-settlement';
 
 /**
  * The part of the conversation model this mapping writes to.
@@ -221,6 +222,46 @@ export function createHostedFrameRenderer(
     });
   };
 
+  const settleTurn = (settlement: TurnSettlement): void => {
+    if (settlement.kind === 'answered') {
+      // Prefer what was streamed: it is what the person watched arrive. The
+      // turn's `response` is the fallback for a turn that produced its text
+      // without deltas (a non-streaming provider).
+      flush(accumulated || settlement.response, { final: true });
+      closeStream();
+      requestRender();
+      finish({ status: 'completed', response: turnText, stopReason: settlement.stopReason });
+      return;
+    }
+    flush(accumulated, { final: true });
+    closeStream();
+    const stopReason = stopReasonOfSettlement(settlement);
+    switch (settlement.kind) {
+      case 'empty': {
+        const error = 'The model returned no response.';
+        conversation.addNotice(`${error} Run the turn again or choose another model.`, { level: 'warning' });
+        requestRender();
+        finish({ status: 'error', response: turnText, error, stopReason });
+        return;
+      }
+      case 'refused':
+        conversation.addNotice(`The hosting daemon refused this turn before it started: ${settlement.reason}`, { level: 'error' });
+        requestRender();
+        finish({ status: 'error', response: turnText, error: settlement.reason, stopReason });
+        return;
+      case 'failed':
+        conversation.addNotice(`The hosting daemon reported this turn failed: ${settlement.error}`, { level: 'error' });
+        requestRender();
+        finish({ status: 'error', response: turnText, error: settlement.error, stopReason });
+        return;
+      case 'cancelled':
+        conversation.addNotice('This turn was cancelled on the hosting daemon.', { level: 'info' });
+        requestRender();
+        finish({ status: 'cancelled', response: turnText, error: settlement.reason, stopReason });
+        return;
+    }
+  };
+
   const apply = (frame: HostedSessionFrame): void => {
     if (finished) return;
     const payload = frame.payload;
@@ -307,46 +348,14 @@ export function createHostedFrameRenderer(
         provider = readString(payload, 'provider') ?? provider;
         return;
       }
-      case 'TURN_COMPLETED': {
-        // Prefer what was streamed: it is what the person watched arrive. The
-        // turn's `response` is the fallback for a turn that produced its text
-        // without deltas (a non-streaming provider).
-        flush(accumulated || readString(payload, 'response') || '', { final: true });
-        closeStream();
-        requestRender();
-        finish({
-          status: 'completed',
-          response: turnText,
-          stopReason: readString(payload, 'stopReason') ?? 'completed',
-        });
-        return;
-      }
-      case 'PREFLIGHT_FAIL':
-      case 'TURN_ERROR': {
-        flush(accumulated, { final: true });
-        closeStream();
-        const reason = readString(payload, 'error') ?? readString(payload, 'reason') ?? 'no reason was given';
-        conversation.addNotice(`The hosting daemon reported this turn failed: ${reason}`, { level: 'error' });
-        requestRender();
-        finish({
-          status: 'error',
-          response: turnText,
-          error: reason,
-          stopReason: readString(payload, 'stopReason') ?? 'unexpected_error',
-        });
-        return;
-      }
-      case 'TURN_CANCEL': {
-        flush(accumulated, { final: true });
-        closeStream();
-        conversation.addNotice('This turn was cancelled on the hosting daemon.', { level: 'info' });
-        requestRender();
-        finish({
-          status: 'cancelled',
-          response: turnText,
-          error: readString(payload, 'reason') ?? 'cancelled',
-          stopReason: readString(payload, 'stopReason') ?? 'cancelled',
-        });
+      case 'TURN_COMPLETED':
+      case 'TURN_ERROR':
+      case 'TURN_CANCEL':
+      case 'PREFLIGHT_FAIL': {
+        // How the turn ended, from the one settlement reader every surface uses.
+        const settlement = readTurnSettlement({ type: frame.type, payload });
+        if (!settlement) return;
+        settleTurn(settlement);
         return;
       }
       default:

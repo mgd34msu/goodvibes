@@ -49,11 +49,13 @@ export class ToastCenter {
         readonly durationMs: number;
     }> = [];
     private nextId = 1;
+    /** While a modal or a full-screen flow is open, toasts wait instead of covering it. */
+    private held = false;
     /** Called whenever the visible set changes (wired to the render request). */
     onChange: (() => void) | null = null;
     constructor(private readonly clock: () => number = Date.now, private readonly schedule: ToastScheduler = defaultScheduler) { }
     show(spec: ToastSpec, durationMs: number = TOAST_DURATION_MS): void {
-        if (this.toasts.length >= MAX_TOASTS) {
+        if (this.held || this.toasts.length >= MAX_TOASTS) {
             this.waiting.push({ spec, durationMs });
             if (this.waiting.length > MAX_WAITING) {
                 const info = this.waiting.findIndex((entry) => entry.spec.tone === 'info' || entry.spec.tone === 'success');
@@ -69,6 +71,29 @@ export class ToastCenter {
         const toast: LiveToast = { id: this.nextId++, spec, expiresAt: this.clock() + durationMs };
         this.toasts = [toast, ...this.toasts];
         this.schedule(() => this.expire(toast.id), durationMs);
+    }
+    /**
+     * Hold toasts while something they would cover is open (a modal, the
+     * permission card, the onboarding wizard): the ones up go back to the
+     * front of the queue with their full time, new ones queue, and on release
+     * they are shown as places free. Called by the frame that knows what is
+     * open, which draws the result itself, so no change is announced.
+     */
+    hold(held: boolean): void {
+        if (held === this.held)
+            return;
+        this.held = held;
+        if (held) {
+            // Oldest first, so the queue keeps the order they were shown in.
+            const live = [...this.toasts].reverse().map((toast) => ({ spec: toast.spec, durationMs: TOAST_DURATION_MS }));
+            this.toasts = [];
+            this.waiting = [...live, ...this.waiting];
+            return;
+        }
+        while (this.toasts.length < MAX_TOASTS && this.waiting.length > 0) {
+            const next = this.waiting.shift()!;
+            this.start(next.spec, next.durationMs);
+        }
     }
     /** The toasts to draw now, newest first. */
     visible(): ToastSpec[] {
@@ -87,7 +112,7 @@ export class ToastCenter {
         this.toasts = this.toasts.filter((t) => t.id !== id);
         if (this.toasts.length === before)
             return;
-        while (this.toasts.length < MAX_TOASTS && this.waiting.length > 0) {
+        while (!this.held && this.toasts.length < MAX_TOASTS && this.waiting.length > 0) {
             const next = this.waiting.shift()!;
             this.start(next.spec, next.durationMs);
         }

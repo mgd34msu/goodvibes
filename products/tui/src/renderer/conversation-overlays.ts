@@ -105,8 +105,8 @@ export interface ConversationLayerContext {
  * when one opens another (settings opening the model picker or a theme
  * picker), both are drawn in the order they were opened (the input layer's
  * modal stack, kit modals such as the command palette included), the newer
- * on top, each dimming what is under it. The permission dialog and toasts
- * sit above all of them.
+ * on top, each dimming what is under it. The permission dialog sits above
+ * all of them; toasts wait until they close.
  */
 export function buildConversationLayers(context: ConversationLayerContext): SurfaceLayer[] {
   const { input, screenWidth: w, screenHeight: h } = context;
@@ -154,6 +154,7 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
     permission: context.permission,
     headerRows: context.headerRows,
     footerRows: context.footerRows,
-    toasts: () => getSharedToastCenter().visible(),
+    toasts: getSharedToastCenter(),
+    screenOwned: onboarding,
   });
 }

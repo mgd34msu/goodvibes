@@ -92,7 +92,7 @@ import type { PermissionManager } from '../permissions/manager.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { HookEvent, HookResult } from '../hooks/types.js';
 import { appendGoodVibesRuntimeAwarenessPrompt } from '../tools/goodvibes-runtime/index.js';
-import { summarizeError } from '../utils/error-display.js';
+import { normalizeError, summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import type { ConfigManager } from '../config/manager.js';
 
@@ -1206,6 +1206,9 @@ export class CompanionChatManager {
     // rounds commit as they finish), what a cancel or failure hands to the
     // model-facing history so later turns can reason about the interruption.
     let uncommittedContent = '';
+    // A round that ended in tool calls: the next round's text starts a new paragraph,
+    // so the reply does not run two rounds' sentences together ("first.Sorting").
+    let roundEnded = false;
     const assistantMessageId = randomUUID();
     let writer: TurnHistoryWriter | null = null;
 
@@ -1241,10 +1244,10 @@ export class CompanionChatManager {
       this.markTurn(session, userMessageId, 'started');
       publish({ type: 'turn.started', sessionId, messageId: userMessageId, turnId, envelope: startEnvelope });
       const conversation = await prepareConversation();
-      const history = new TurnHistoryWriter(conversation);
+      const toolRegistry = this.toolRegistry;
+      const history = new TurnHistoryWriter(conversation, (name, args) => toolCallActivity(toolRegistry?.definitionOf(name)?.activity, args));
       writer = history;
 
-      const toolRegistry = this.toolRegistry;
       // A provider failure moves the turn along provider.fallbackModels (providers/failover.ts); the
       // reply's metadata says which model answered, and a stop says why on the error.
       const registry = this.failoverRegistry;
@@ -1354,6 +1357,7 @@ export class CompanionChatManager {
           addAssistantMessage: (content, options) => {
             history.addAssistantMessage(content, options);
             if (!options?.toolCalls?.length) uncommittedContent = '';
+            else roundEnded = true;
           },
           addToolResults: (results) => {
             history.addToolResults(results);
@@ -1374,7 +1378,9 @@ export class CompanionChatManager {
         completion: { maxRejectedDrafts: 0, deadlineMs: 0 },
         delegates: 'return',
         sink: {
-          delta: (delta) => {
+          delta: (raw) => {
+            const delta = roundEnded && assistantContent.length > 0 && !/\s$/.test(assistantContent) ? `\n\n${raw}` : raw;
+            roundEnded = false;
             uncommittedContent += delta;
             assistantContent += delta;
             publish({ type: 'turn.delta', sessionId, turnId, delta });
@@ -1428,9 +1434,8 @@ export class CompanionChatManager {
     } catch (err: unknown) {
       if (!abortSignal.aborted) {
         // A provider failure with nothing left in the fallback order says why nothing else was tried.
-        const reported = failoverStop ? new Error(`${err instanceof Error ? err.message : String(err)}\n${failoverStop}`) : err;
         this.recordFailedTurn(session, {
-          error: reported, turnId, userMessageId, assistantMessageId, writer,
+          error: err, ...(failoverStop ? { failoverStop } : {}), turnId, userMessageId, assistantMessageId, writer,
           assistantContent, uncommittedContent, publish,
         });
       } else {
@@ -1461,6 +1466,8 @@ export class CompanionChatManager {
    */
   private recordFailedTurn(session: InternalSession, turn: {
     readonly error: unknown;
+    /** Why the failover tried no other model, when it stopped. */
+    readonly failoverStop?: string | undefined;
     readonly turnId: string;
     readonly userMessageId: string;
     readonly assistantMessageId: string;
@@ -1470,10 +1477,14 @@ export class CompanionChatManager {
     readonly publish: (event: CompanionChatTurnEvent) => void;
   }): void {
     const sessionId = session.meta.id;
-    const reason = turn.error instanceof Error ? turn.error.message : String(turn.error);
+    // The model keeps the provider's own words; the person is told what happened in plain ones.
+    const raw = turn.error instanceof Error ? turn.error.message : String(turn.error);
+    const modelReason = turn.failoverStop ? `${raw}\n${turn.failoverStop}` : raw;
+    const stopped = turn.failoverStop?.replace(/^\[Failover\]\s*/, '');
+    const reason = personFacingTurnFailure(turn.error, raw) + (stopped ? ` ${stopped}` : '');
     if (turn.writer) {
       turn.writer.dropHeld();
-      turn.writer.addAssistantMessage(turn.uncommittedContent + turnFailureNote(reason));
+      turn.writer.addAssistantMessage(turn.uncommittedContent + turnFailureNote(modelReason));
     } else {
       // The turn failed before its history was ready; the next turn rebuilds it from the transcript.
       session.conversation = null;
@@ -1859,4 +1870,34 @@ export class CompanionChatManager {
     clearTimeout(pending.timeout);
     pending.resolve(result);
   }
+}
+
+/** What a provider's failure means, by its category, for a reply that failed on it. */
+const PROVIDER_FAILURE_WORDS: Readonly<Record<string, string>> = {
+  service: 'had a server error and did not answer',
+  rate_limit: 'is limiting requests right now',
+  authentication: 'did not accept the key or sign-in it was sent',
+  authorization: 'does not let this account use the model',
+  billing: 'reported a billing or quota problem',
+  timeout: 'took too long to answer',
+  network: 'could not be reached',
+  bad_request: 'refused the request',
+  not_found: 'does not have the model asked for',
+  protocol: 'sent back an answer that could not be read',
+};
+
+/**
+ * A failed reply's reason as a person reads it: a provider failure in words
+ * ("The model provider sample had a server error and did not answer (500)"),
+ * anything else as its own message. The provider's raw text stays in the logs
+ * and in the note the model reads.
+ */
+function personFacingTurnFailure(error: unknown, fallback: string): string {
+  const normalized = normalizeError(error);
+  const words = normalized.provider !== undefined || normalized.source === 'provider'
+    ? PROVIDER_FAILURE_WORDS[normalized.category]
+    : undefined;
+  if (!words) return fallback;
+  const who = normalized.provider ? `The model provider ${normalized.provider}` : 'The model provider';
+  return `${who} ${words}${normalized.statusCode !== undefined ? ` (${normalized.statusCode})` : ''}.`;
 }

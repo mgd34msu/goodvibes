@@ -16,12 +16,13 @@
 // `stream-data` frames as the daemon produces them, so the EXISTING
 // Server-Sent-Events connector idiom works over the relay unchanged, and a
 // streamed chat completion or streamed speech starts as soon as its first bytes
-// exist. Overflow on the daemon's bounded send buffer surfaces as a visible
-// `relay-overflow` SSE event (never a silent gap). A frame larger than the
+// exist. Overflow on the daemon's bounded send buffer ends the body with a
+// typed `StreamGapError` carrying the dropped count (never a silent gap, and
+// never text written into the body). A frame larger than the
 // relay forwards in one message is sent and received in fragments.
 
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
-import { createUuidV4, type FetchLike } from '@goodvibes-jev/engine/transport-core';
+import { createUuidV4, StreamGapError, type FetchLike } from '@goodvibes-jev/engine/transport-core';
 import {
   RelaySecureChannel,
   TunnelFragmentJoiner,
@@ -91,6 +92,8 @@ interface PendingStream {
   readonly body: ReadableStream<Uint8Array>;
   readonly controller: ReadableStreamDefaultController<Uint8Array>;
   readonly detachAbort: () => void;
+  /** Ends the stream here with `failure` and tells the daemon to stop sending it. */
+  cancel?: ((failure?: { readonly error: unknown }) => Promise<void>) | undefined;
   closed: boolean;
   /** Settles the caller's fetch once the daemon answers with the stream's status and headers. */
   answer?: { resolve(response: Response): void; reject(error: unknown): void } | undefined;
@@ -340,9 +343,13 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     if (header.kind === 'stream-overflow') {
       const stream = streams.get(header.id);
       if (stream && !stream.closed) {
-        // Surface the gap as a visible SSE event, never a silent drop.
-        const notice = encodeUtf8(`event: relay-overflow\ndata: {"dropped":${header.dropped}}\n\n`);
-        try { stream.controller.enqueue(notice); } catch { /* consumer cancelled */ }
+        // Chunks were dropped: the body ends here with a typed gap, never with
+        // text written into it (which would corrupt an audio or completion
+        // stream) and never carrying on with a hole. An event stream reconnects
+        // from its last event id and is replayed what was lost.
+        const failure = { error: new StreamGapError(header.dropped) };
+        if (stream.cancel) void stream.cancel(failure);
+        else closeStream(header.id, failure);
       }
       return;
     }
@@ -472,7 +479,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       cancel: () => cancel(),
     });
     const answered = new Promise<Response>((resolve, reject) => {
-      owner = { path, body, controller, closed: false, answer: { resolve, reject }, detachAbort: () => signal.removeEventListener('abort', abort) };
+      owner = { path, body, controller, closed: false, answer: { resolve, reject }, cancel, detachAbort: () => signal.removeEventListener('abort', abort) };
       streams.set(id, owner);
     });
     answered.catch(() => { /* observed through the await below */ });

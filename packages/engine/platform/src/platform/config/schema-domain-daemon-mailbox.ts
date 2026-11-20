@@ -123,100 +123,84 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.host',
     type: 'string',
-    default: '',
     description: 'Mail server hostname used for both IMAP and SMTP unless overridden below',
   },
   {
     key: 'surfaces.email.user',
     type: 'string',
-    default: '',
     description: 'Mailbox account name the daemon authenticates as',
   },
   {
     key: 'surfaces.email.from',
     type: 'string',
-    default: '',
     description: 'From address on mail the daemon sends; defaults to the account name',
   },
   {
     key: 'surfaces.email.password',
     type: 'string',
-    default: '',
     description: 'Mailbox password or app password. Stored in the daemon secret tier, never in config',
   },
   {
     key: 'surfaces.email.inboxTagging',
     type: 'boolean',
-    default: false,
     description: 'Write triage labels (GoodVibes/Spam, Priority, Normal) back to the mailbox as IMAP keywords on the messages they label. '
       + 'Off: labels stay in GoodVibes and channels.inbox.applyLabels refuses for this account.',
   },
   {
     key: 'surfaces.email.imap.host',
     type: 'string',
-    default: '',
     description: 'IMAP hostname (e.g. imap.gmail.com), overriding surfaces.email.host',
   },
   {
     key: 'surfaces.email.imap.port',
     type: 'number',
-    default: 993,
     description: 'IMAP port',
     ...remotePort(),
   },
   {
     key: 'surfaces.email.imap.user',
     type: 'string',
-    default: '',
     description: 'IMAP account name, overriding surfaces.email.user',
   },
   {
     key: 'surfaces.email.imap.password',
     type: 'string',
-    default: '',
     description: 'IMAP password, overriding surfaces.email.password. Daemon secret tier',
   },
   {
     key: 'surfaces.email.imap.secure',
     type: 'boolean',
-    default: true,
     description: 'Connect to IMAP over TLS',
   },
   {
     key: 'surfaces.email.imap.mailbox',
     type: 'string',
-    default: 'INBOX',
     description: 'Mailbox the daemon reads',
   },
   {
     key: 'surfaces.email.imap.draftsMailbox',
     type: 'string',
-    default: '',
     description: 'Mailbox drafts are appended to. Empty (the default) means ask the server which folder carries the \\Drafts flag, which is right for providers such as Gmail whose Drafts folder is not literally named "Drafts"',
   },
   {
     key: 'surfaces.email.smtp.host',
     type: 'string',
-    default: '',
     description: 'SMTP hostname, overriding surfaces.email.host',
   },
   {
     key: 'surfaces.email.smtp.port',
     type: 'number',
-    default: 465,
     description: 'SMTP port',
     ...remotePort(),
   },
   {
     key: 'surfaces.email.smtp.password',
     type: 'string',
-    default: '',
     description: 'SMTP password when it differs from the IMAP one. Daemon secret tier',
   },
   {
     key: 'surfaces.email.smtp.secure',
     type: 'boolean',
-    default: true,
     description: 'Connect to SMTP over TLS',
   },
 
@@ -226,7 +210,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.enabled',
     type: 'boolean',
-    default: false,
     description: 'Turns on inbound notices: arriving mail is matched against open verification expectations, '
       + 'recorded and announced, and further accounts below are watched. Off by default. The daemon\'s own mailbox '
       + 'is read by one reader for the inbox as well whenever it is configured; this switch decides whether that '
@@ -235,7 +218,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.accounts',
     type: 'string',
-    default: '[]',
     description: 'JSON array of configured mailbox account identifiers to watch for inbound mail, e.g. '
       + '["primary"]. The first names the daemon\'s own mailbox; empty labels it with the mail user. A list rather than a single '
       + 'switch because one address for signups and another for the owner\'s real mail is the expected shape. '
@@ -247,7 +229,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.mailboxes',
     type: 'string',
-    default: '{}',
     description: 'JSON object giving each account after the first in surfaces.email.inbound.accounts its own IMAP '
       + 'mailbox, e.g. {"signups":{"host":"imap.example.com","user":"signups@example.com"}}. Fields: host and user '
       + '(required), port (default 993, or 143 when secure is false), secure (default true; false only for a loopback '
@@ -266,7 +247,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.source',
     type: 'enum',
-    default: 'auto',
     description: 'Which mechanism reads the mailbox. "auto" uses Gmail when Google credentials have been adopted '
       + 'and the configured mail account is a Gmail account, and IMAP otherwise, so connecting Google is the '
       + 'whole of the setup and no IMAP host, username or app password has to be found. "gmail" and "imap" force '
@@ -280,7 +260,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.gmailPollSecondsExpecting',
     type: 'number',
-    default: 5,
     description: 'How often the Gmail source asks Google what changed while something is actually being waited '
       + 'for, a signup mid-flight whose verification mail has not arrived yet. This is polling, not push: mail '
       + 'can sit unnoticed for up to this many seconds, and no setting makes Gmail faster than the interval. '
@@ -292,7 +271,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.gmailPollSecondsIdle',
     type: 'number',
-    default: 60,
     description: 'How often the Gmail source asks Google what changed when nothing is being waited for. Again '
       + 'polling, not push: with nothing pending, mail is noticed up to this many seconds after it arrives. A '
       + 'minute keeps the daemon from asking Google every five seconds all week for mail nobody is waiting on; '
@@ -303,7 +281,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.mode',
     type: 'enum',
-    default: 'auto',
     description: 'How the IMAP source receives new mail: "idle" holds a persistent IMAP IDLE connection, "poll" '
       + 'checks on a timer, "auto" uses IDLE when the server advertises it and falls back to polling when it '
       + 'does not. Leave at auto unless a specific provider needs to be forced one way. Applies only to the IMAP '
@@ -313,7 +290,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.pollIntervalSeconds',
     type: 'number',
-    default: 120,
     description: 'How often the fallback poller checks the mailbox when IDLE is unavailable. Lower is more '
       + 'responsive but closer to a provider\'s rate limit; higher delays notice of new mail by up to this many '
       + 'seconds. Only applies when the connection is not using IDLE.',
@@ -322,7 +298,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.idleReissueMinutes',
     type: 'number',
-    default: 27,
     description: 'How often an open IDLE connection is torn down and re-issued. RFC 2177 advises re-issuing at '
       + 'least every 29 minutes, or the server may silently log the connection off; raising this toward 29 trims '
       + 'reconnect churn but leaves less margin against a slow round trip.',
@@ -331,7 +306,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.reconnect.maxBackoffSeconds',
     type: 'number',
-    default: 300,
     description: 'Ceiling on the exponential reconnect backoff after a dropped connection or provider error. '
       + 'Raising it tolerates a longer provider outage without hammering it; lowering it shortens the '
       + 'worst-case silence after a disconnect at the cost of retrying a still-down server more often.',
@@ -340,7 +314,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.notice.route',
     type: 'string',
-    default: 'default',
     description: 'Where the owner is told about inbound mail: the literal "default" inherits the owner\'s '
       + 'existing notice route binding; a specific route binding id sends inbound-mail notices somewhere else. '
       + 'A second place to configure "where to reach me" is a second place to get it wrong, so most '
@@ -349,7 +322,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.notice.mode',
     type: 'enum',
-    default: 'all',
     description: 'How much inbound mail generates an owner notice: "all" announces every message, '
       + '"expected-only" announces only mail matching a registered expectation (quieter for a high-volume '
       + 'mailbox), "none" announces nothing. Choosing "none" means mail can arrive with no notice at all, a '
@@ -359,7 +331,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.expectationWindowMinutes',
     type: 'number',
-    default: 15,
     description: 'Default lifetime, in minutes, of a verification expectation opened for inbound-mail matching '
       + '(for example an account signup awaiting its confirmation email). Raising it gives a slower-to-arrive '
       + 'confirmation more time to match; lowering it shrinks how long a stale expectation can be satisfied by a '
@@ -369,7 +340,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.dedupTtlMinutes',
     type: 'number',
-    default: 60,
     description: 'How long an inbound message\'s identity is remembered, inside the running daemon, so an '
       + 'overlapping poll or a retried pass does not process it twice. This cache lives in memory only: a '
       + 'restart destroys it rather than expiring it, so no value here prevents a duplicate across a restart, '
@@ -380,7 +350,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.retentionDays',
     type: 'number',
-    default: 30,
     description: 'How many days an inbound mail record (sender, subject, delivery evidence, link verdicts, '
       + 'never the full body) is kept before it is reaped. Longer keeps a longer history to explain "why did I '
       + 'get that message"; shorter bounds how much of the owner\'s mail metadata the daemon retains. Applies after the daemon restarts.',
@@ -389,7 +358,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.maxRecords',
     type: 'number',
-    default: 5000,
     description: 'Hard cap on the number of inbound mail records kept regardless of age. Whichever of this and '
       + 'retentionDays is reached first wins, so this bounds worst-case storage even under a burst of mail. Applies after the daemon restarts.',
     ...intRange(100, 100_000),
@@ -397,7 +365,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.capabilityRecheckMinutes',
     type: 'number',
-    default: 60,
     description: 'How often a mailbox that reported it cannot do what inbound mail requires (for example a '
       + 'Gmail grant that authorizes listing but not reading message bodies, or a mailbox that does not exist) is '
       + 're-probed. Long enough that a refused account is not hammered in a tight loop; short enough that fixing '
@@ -407,7 +374,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.onInsufficientCapability',
     type: 'enum',
-    default: 'refuse-and-notify',
     description: '"refuse-and-notify" stops the watcher for that account and tells the owner once, naming what '
       + 'is missing and the exact step to fix it, the account is not watched again until the recheck above '
       + 'finds it fixed. "notice-only" is a deliberate downgrade: it keeps announcing that mail arrived using '
@@ -425,31 +391,26 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.calendar.caldavUrl',
     type: 'string',
-    default: '',
     description: 'CalDAV server URL the daemon reads and writes events through',
   },
   {
     key: 'surfaces.calendar.caldavUser',
     type: 'string',
-    default: '',
     description: 'CalDAV account name',
   },
   {
     key: 'surfaces.calendar.caldavPassword',
     type: 'string',
-    default: '',
     description: 'CalDAV password. Stored in the daemon secret tier, never in config',
   },
   {
     key: 'surfaces.calendar.defaultCalendarId',
     type: 'string',
-    default: '',
     description: 'Calendar used when a request names none',
   },
   {
     key: 'surfaces.calendar.calendars',
     type: 'string',
-    default: '',
     description: 'JSON object mapping a calendar id to its collection path, e.g. {"work":"/dav/calendars/work/"}. Empty means the CalDAV URL is the one calendar',
     ...jsonText(
       (parsed) => parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)

@@ -25,7 +25,8 @@
  */
 import type { CardFieldKind } from './card-redaction.js';
 import type { CartLine } from './cart.js';
-import type { CurrencyCode, MinorUnits } from './types.js';
+import type { MinorUnits } from './types.js';
+import type { Money } from './money.js';
 import type { RawCheckoutReading } from './checkout-extraction.js';
 import type { MarketplaceListing } from './marketplace-listing.js';
 
@@ -33,7 +34,6 @@ import type { MarketplaceListing } from './marketplace-listing.js';
 export interface CheckoutTerms {
   readonly submitTarget: string;
   readonly merchantDomain: string;
-  readonly currency: CurrencyCode;
   readonly lines: readonly CartLine[];
   readonly taxMinorUnits: MinorUnits;
   readonly feesMinorUnits: MinorUnits;
@@ -42,7 +42,8 @@ export interface CheckoutTerms {
   readonly discounts?: readonly { readonly label: string; readonly amountMinorUnits: MinorUnits }[] | undefined;
   readonly shippingLabel: string;
   readonly shippingMinorUnits: MinorUnits;
-  readonly totalMinorUnits: MinorUnits;
+  /** What the purchase comes to, in the currency every other amount here is in (money.ts). */
+  readonly total: Money;
 }
 
 /** Which page a driver is bound to, so the redactor can be keyed to it. */

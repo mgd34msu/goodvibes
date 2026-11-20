@@ -128,7 +128,7 @@ const servicesCommand = withOwnerConfirmation<CommandContext, SlashCommand & Pic
   effect: 'mixed',
   readVerbs: ['list'],
   description: 'List API services and confirm the ones a project\'s services file defines',
-  hidden: true,
+  firstScreen: false,
   usage: '[list|trust <name> --yes]',
   argsHint: '[list|trust] [name]',
   subcommands: { list: '', trust: '<name> --yes' },
@@ -175,7 +175,7 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
     name: 'expand',
     effect: 'ui-navigation',
     description: 'Expand blocks by type',
-    hidden: true,
+    firstScreen: false,
     usage: '[all|thinking|tool|code]',
     argsHint: '[all|thinking|tool|code]',
     handler(args, ctx) {
@@ -186,7 +186,7 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
     name: 'collapse',
     effect: 'ui-navigation',
     description: 'Collapse blocks by type',
-    hidden: true,
+    firstScreen: false,
     usage: '[all|thinking|tool|code]',
     argsHint: '[all|thinking|tool|code]',
     handler(args, ctx) {
@@ -225,7 +225,7 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
     effect: 'ui-navigation',
     aliases: ['bm'],
     description: 'List bookmarked blocks',
-    hidden: true,
+    firstScreen: false,
     handler(_args, ctx) {
       handleBookmarks(ctx, () => requireBookmarkManager(ctx));
     },
@@ -239,7 +239,7 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
     name: 'media',
     effect: 'external-network',
     description: 'Inspect media providers or generate media through configured providers',
-    hidden: true,
+    firstScreen: false,
     usage: 'providers | generate [--provider <id>] [--model <id>] [--mime <mime>] <prompt> --yes | generate collect <provider> <task-id> [key=value ...]',
     argsHint: '<providers|generate>',
     async handler(args, ctx) {

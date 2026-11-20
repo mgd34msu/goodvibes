@@ -28,7 +28,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
 import { postToPublicWebhook, validatePublicWebhookUrl } from '../utils/url-safety.js';
-import type { HostResolver } from '../tools/fetch/pinned-request.js';
+import type { HostResolver } from '../runtime/network/destination.js';
 import { webAppLink } from './web-app-link.js';
 import type { PendingSurfaceReply } from './types.js';
 

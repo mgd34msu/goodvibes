@@ -377,7 +377,8 @@ export function createOperatorRemoteClient(
     // payloads are emitted to handlers without schema verification. The
     // validateResponses option is intentionally not forwarded because streams
     // do not have a single response body to validate.
-    const streamOptions = options ?? { handlers: {} };
+    // A caller that only wants the closer still gives the stream a subscriber that handles gaps and ends.
+    const streamOptions = options ?? { handlers: { onEvent: () => {}, onGap: () => {}, onEnd: () => {} } };
     try {
       return openContractRouteStream(
         transport,

@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { declaredPackageManager, PACKAGE_MANAGER_LOCKFILES } from '../utils/project-test-runner.js';
+import { declaredPackageManager, isDeclaredPackageManager, PACKAGE_MANAGER_LOCKFILES, type DeclaredPackageManager } from '../utils/project-test-runner.js';
 import { CONTRACT_CONFIG_DEFAULTS, getContractGates, getContractGateTimeoutMs, getEnabledContractGates, type ContractConfigReader } from './config.js';
 import { emitContractEvent } from './events.js';
 import { captureGateInput, type GateSourceInputIdentity } from './gate-input.js';
@@ -206,10 +206,26 @@ export async function resolveProjectTestCommand(
   const script = scripts !== null && typeof scripts === 'object' && !Array.isArray(scripts) ? (scripts as Record<string, unknown>).test : undefined;
   if (typeof script !== 'string' || script.trim() === '') return null;
   const lockfiles = PACKAGE_MANAGER_LOCKFILES.map(([file]) => file).filter((file) => existsSync(join(cwd, file)));
-  const manager = declaredPackageManager(manifest, lockfiles) ?? 'npm';
+  const manager = declaredPackageManager(manifest, lockfiles) ?? undeclaredPackageManager(script);
   // npm alone needs `--` to hand arguments to the script rather than keep them.
   const command = manager === 'npm' ? `npm test${tail ? ` --${tail}` : ''}` : `${manager} run test${tail}`;
   return { command, source: `the package.json test script, run with ${manager}` };
+}
+
+/**
+ * The manager to run a test script with when the project declares none (no
+ * packageManager field, no single lockfile): the one the script itself calls
+ * (`bun test` is a Bun project), else the first one installed, npm first.
+ */
+function undeclaredPackageManager(script: string): DeclaredPackageManager {
+  const first = script.trim().split(/\s+/)[0] ?? '';
+  if (isDeclaredPackageManager(first)) return first;
+  if (first === 'bunx') return 'bun';
+  if (first === 'npx') return 'npm';
+  for (const manager of ['npm', 'bun', 'pnpm', 'yarn'] as const) {
+    if (Bun.which(manager) !== null) return manager;
+  }
+  return 'npm';
 }
 
 /** Why there is no test command for `cwd`, and the two ways to give it one. */

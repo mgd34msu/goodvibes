@@ -267,15 +267,15 @@ function fileIdentity(stat: BigIntStats): string {
 
 const SCOPE_REFUSALS: Record<NativeWorkspaceScopeReason, (root: string, detail?: string) => { state: string; next: readonly string[] }> = {
   'not-registered': (root) => ({ state: `${root} is not a registered workspace`,
-    next: [`Register ${root} (workspaces.registrations.add, or \`goodvibes-agent workspaces register --yes\` in that directory), then retry.`] }),
+    next: [`Register ${root}: run \`goodvibes-agent workspaces register --yes\` in that directory, or open it in goodvibes and choose Register. Then retry.`] }),
   declined: (root, detail) => ({ state: `registration was declined at ${detail ?? root}`,
-    next: [`Register ${root} explicitly (workspaces.registrations.add), which clears that decline, then retry.`] }),
+    next: [`Register ${root} explicitly, which clears that decline: run \`goodvibes-agent workspaces register --yes\` in that directory. Then retry.`] }),
   'registry-unreadable': (_root, detail) => ({ state: `the workspace register cannot be read${detail ? `: ${detail}` : ''}`,
     next: ['Repair or remove the bad entry in the workspace register (~/.goodvibes/shared), then retry.'] }),
   'root-missing': (root) => ({ state: `${root} is not an existing directory`,
     next: ['Run the work from an existing project directory, or recreate the directory, then retry.'] }),
   unmigrated: (root) => ({ state: `${root} was registered before native work existed and has no native scope`,
-    next: [`Register ${root} again (workspaces.registrations.add); that grants its native scope. Then retry.`] }),
+    next: [`Register ${root} again with \`goodvibes-agent workspaces register --yes\` in that directory; that grants its native scope. Then retry.`] }),
   changed: (root, detail) => ({ state: `the registration of ${root} changed${detail ? ` (${detail})` : ''}`,
     next: ['Start the step again so it reads the current registration.'] }),
   retry: (_root, detail) => ({ state: `the workspace register changed or could not be confirmed on disk while it was read${detail ? `: ${detail}` : ''}`,
@@ -458,7 +458,7 @@ export class WorkspaceRegistrationStore {
     if (resolution.status !== 'covered') throw scopeRefusal('unavailable', 'not-registered', canonical);
     const matching = registrations.filter((row) => row.root === resolution.coveredBy);
     if (matching.length !== 1) {
-      throw scopeRefusal('unavailable', 'registry-unreadable', canonical, `${matching.length} registrations resolve to ${resolution.coveredBy}; remove all but one with workspaces.registrations.remove`);
+      throw scopeRefusal('unavailable', 'registry-unreadable', canonical, `${matching.length} registrations resolve to ${resolution.coveredBy}; remove all but one with goodvibes-agent workspaces unregister <path> --yes`);
     }
     const registered = matching[0]!;
     const scope = registered.nativeScope;

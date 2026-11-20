@@ -52,7 +52,7 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
       },
       aliases: ['task'],
       description: policy.description,
-      hidden: policy.hidden,
+      firstScreen: !policy.hidden,
       usage: policy.usage,
       async handler(args, ctx) {
         if (policy.beforeRead(args, ctx)) return;

@@ -25,7 +25,8 @@ import { createStreamTextAssembler, type StreamTextAssembler } from '@goodvibes-
 import { client as platformClient, DEFAULT_SSE_RECONNECT } from './goodvibes';
 import { getClientLifetime, subscribeClientLifetime, type ClientLifetime } from './client-lifetime';
 import { getActiveRoute, subscribeActiveRoute, type ConnectionRoute } from './relay-connection';
-import { RELAY_OVERFLOW_EVENT, noteRelayOverflow, readDroppedCount } from './relay-stream-overflow';
+import { readStreamGapDropped } from '@goodvibes-jev/engine/transport-core/errors';
+import { noteRelayOverflow } from './relay-stream-overflow';
 
 export type EventLane = 'app' | 'detail';
 
@@ -47,7 +48,7 @@ export interface EventSubscription {
   readonly onEvent: (name: string, payload: unknown) => void;
   /** The lane is live. `resumed` is true when this subscriber saw an earlier ready, so frames may have been missed in between. */
   readonly onReady?: (resumed: boolean) => void;
-  /** The relay dropped frames on this lane. */
+  /** Frames were dropped on this lane (by the daemon for a slow reader, or by the relay): resync from a snapshot. */
   readonly onGap?: () => void;
 }
 
@@ -182,13 +183,8 @@ function openLane(lane: LaneRecord, domains: string): void {
             subscriber.spec.onReady?.(resumed);
           }
         },
-        onEvent: (name: string, payload: unknown) => {
+        onEvent: ({ name, payload }) => {
           if (!current()) return;
-          if (name === RELAY_OVERFLOW_EVENT) {
-            noteRelayOverflow(readDroppedCount(payload));
-            for (const subscriber of [...lane.subscribers]) subscriber.spec.onGap?.();
-            return;
-          }
           if (name === 'closed') {
             // The daemon revoked this credential and says what to do; reconnecting with it cannot help.
             const next = (payload as { next?: unknown } | null)?.next;
@@ -202,14 +198,28 @@ function openLane(lane: LaneRecord, domains: string): void {
           if (!handlers) return;
           for (const subscriber of handlers) subscriber.spec.onEvent(name, frame);
         },
-        // The transport's error text can be a raw response body; only fixed copy is shown.
-        onError: () => {
-          if (current()) setState(lane, { status: 'paused', message: text.paused, final: false });
-        },
-        onTerminate: ({ final }) => {
+        // Frames were dropped for this reader: every view reconciles from the same snapshot
+        // reads it uses after a reconnect (a full refetch), and each subscriber marks its live state stale.
+        onGap: (gap) => {
           if (!current()) return;
+          noteRelayOverflow(gap.dropped);
+          for (const subscriber of [...lane.subscribers]) subscriber.spec.onGap?.();
+        },
+        // The transport's error text can be a raw response body; only fixed copy is shown.
+        onReconnect: ({ error }) => {
+          if (!current()) return;
+          setState(lane, { status: 'paused', message: text.paused, final: false });
+          // The relay ended the tunnelled stream because it dropped chunks: the reconnect resumes
+          // from the last event id, and the views reconcile as for any gap.
+          const dropped = readStreamGapDropped(error);
+          if (dropped === undefined) return;
+          noteRelayOverflow(dropped);
+          for (const subscriber of [...lane.subscribers]) subscriber.spec.onGap?.();
+        },
+        onEnd: (end) => {
+          if (!current() || end.kind === 'closed') return;
           shutLane(lane);
-          setState(lane, ended(lane, final === true));
+          setState(lane, ended(lane, end.kind === 'failed' && !end.refusal.retryable));
         },
       },
       { signal: controller.signal, reconnect: DEFAULT_SSE_RECONNECT },

@@ -560,38 +560,29 @@ export const AUTOMATION_INTEGRATION_SNAPSHOT_SCHEMA = objectSchema({
 
 // With ?limit or ?cursor the routes answer the bounded cursor envelope
 // instead of the legacy `{ jobs }` / `{ runs }` body; both shapes are published.
-export const AUTOMATION_JOBS_OUTPUT_SCHEMA = {
-  anyOf: [
-    objectSchema({
-      jobs: arraySchema(AUTOMATION_JOB_SCHEMA),
-      // Present only while automation is enabled with zero routines: the
-      // how-to-create-your-first-routine copy a surface renders instead of a
-      // bare empty list. Disappears by itself once the first routine exists.
-      emptyState: objectSchema({
-        title: STRING_SCHEMA,
-        body: STRING_SCHEMA,
-      }, ['title', 'body']),
-    }, ['jobs']),
-    objectSchema({
-      items: arraySchema(AUTOMATION_JOB_SCHEMA),
-      hasMore: BOOLEAN_SCHEMA,
-      nextCursor: STRING_SCHEMA,
-    }, ['items', 'hasMore']),
-  ],
-};
+// The listing the daemon sends (daemon-api pagination.ts listingEnvelope): one
+// object carrying the page (`items`, `hasMore`, `nextCursor`) and the same
+// items under the resource's own key, with or without `limit`/`cursor`.
+export const AUTOMATION_JOBS_OUTPUT_SCHEMA = objectSchema({
+  items: arraySchema(AUTOMATION_JOB_SCHEMA),
+  hasMore: BOOLEAN_SCHEMA,
+  nextCursor: STRING_SCHEMA,
+  jobs: arraySchema(AUTOMATION_JOB_SCHEMA),
+  // Present only while automation is enabled with zero routines: the
+  // how-to-create-your-first-routine copy a surface renders instead of a
+  // bare empty list. Disappears by itself once the first routine exists.
+  emptyState: objectSchema({
+    title: STRING_SCHEMA,
+    body: STRING_SCHEMA,
+  }, ['title', 'body']),
+}, ['items', 'hasMore', 'jobs']);
 
-export const AUTOMATION_RUNS_OUTPUT_SCHEMA = {
-  anyOf: [
-    objectSchema({
-      runs: arraySchema(AUTOMATION_RUN_SCHEMA),
-    }, ['runs']),
-    objectSchema({
-      items: arraySchema(AUTOMATION_RUN_SCHEMA),
-      hasMore: BOOLEAN_SCHEMA,
-      nextCursor: STRING_SCHEMA,
-    }, ['items', 'hasMore']),
-  ],
-};
+export const AUTOMATION_RUNS_OUTPUT_SCHEMA = objectSchema({
+  items: arraySchema(AUTOMATION_RUN_SCHEMA),
+  hasMore: BOOLEAN_SCHEMA,
+  nextCursor: STRING_SCHEMA,
+  runs: arraySchema(AUTOMATION_RUN_SCHEMA),
+}, ['items', 'hasMore', 'runs']);
 
 export const AUTOMATION_RUN_DETAIL_OUTPUT_SCHEMA = objectSchema({
   run: AUTOMATION_RUN_SCHEMA,

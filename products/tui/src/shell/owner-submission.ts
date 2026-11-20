@@ -17,7 +17,7 @@ import type { NoticeLevel, OrchestratorUserInputOptions } from '@goodvibes-jev/e
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { captureNativeConversationInput, type ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
 import { readComposerMarker } from '@goodvibes-jev/engine/terminal-shell/submission-router';
-import { SHELL_USAGE_HINT, type ShellPassthrough } from '@goodvibes-jev/engine/terminal-shell/shell-passthrough';
+import { SHELL_USAGE_HINT, type ShellPassthrough, type ShellRunResult } from '@goodvibes-jev/engine/terminal-shell/shell-passthrough';
 import { applyComposerCapture, shouldSendAfterCapture, splitAtModelDirectives, type ComposerCaptureDeps } from '../input/composer-capture.ts';
 import { createSpokenTurnInputOptions } from '../audio/spoken-turn-model-routing.ts';
 
@@ -35,6 +35,8 @@ export interface OwnerSubmissionPorts {
   /** Starts the turn. */
   readonly sendTurn: (text: string, content: ContentPart[] | undefined, inputOptions: OrchestratorUserInputOptions | undefined) => void;
   readonly notify: (message: string, level?: NoticeLevel) => void;
+  /** A `!` command's output, drawn in the transcript where it ran. */
+  readonly showShellOutput: (result: ShellRunResult) => void;
   readonly render: () => void;
 }
 
@@ -64,7 +66,7 @@ export function createOwnerSubmission(ports: OwnerSubmissionPorts): OwnerSubmiss
     ports.render();
     const run = ports.shellPassthrough
       .run(command, ports.workingDir)
-      .then((result) => ports.notify(result.display))
+      .then((result) => ports.showShellOutput(result))
       .catch((error: unknown) => ports.notify(`[Shell] Failed to run: ${summarizeError(error)}`, 'error'))
       .finally(() => {
         running.delete(run);

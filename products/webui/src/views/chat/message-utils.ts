@@ -336,6 +336,46 @@ export interface CompletedToolCall {
   readonly finishedAt?: number;
 }
 
+/**
+ * A saved reply's tool calls with their results, read from the turn history the
+ * daemon keeps with the reply (`modelHistory`), so a chat opened later shows the
+ * same fold the live turn did. Empty for a reply that used no tools.
+ */
+export function toolActivityFromHistory(message: unknown): CompletedToolCall[] {
+  const history = asRecord(message).modelHistory;
+  if (!Array.isArray(history)) return [];
+  const results = new Map<string, Record<string, unknown>>();
+  for (const entry of history) {
+    const record = asRecord(entry);
+    if (record.role !== 'tool-results' || !Array.isArray(record.results)) continue;
+    for (const result of record.results) {
+      const callId = firstString(asRecord(result), ['callId']);
+      if (callId) results.set(callId, asRecord(result));
+    }
+  }
+  const calls: CompletedToolCall[] = [];
+  for (const entry of history) {
+    const record = asRecord(entry);
+    if (record.role !== 'assistant' || !Array.isArray(record.toolCalls)) continue;
+    for (const raw of record.toolCalls) {
+      const call = asRecord(raw);
+      const toolCallId = firstString(call, ['id']);
+      if (!toolCallId) continue;
+      const result = results.get(toolCallId);
+      const activity = readToolActivityWords(call.activity);
+      calls.push({
+        toolCallId,
+        toolName: firstString(call, ['name']),
+        ...(activity ? { activity } : {}),
+        toolInput: call.arguments,
+        result: result ? (result.success === true ? result.output : result.error ?? result.output) : undefined,
+        isError: result !== undefined && result.success !== true,
+      });
+    }
+  }
+  return calls;
+}
+
 /** A tool call as the working line and the fold name it: its tool, and the words `turn.tool_call` carried. */
 export interface ToolActivitySource {
   readonly toolName: string;

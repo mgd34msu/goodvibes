@@ -1,3 +1,7 @@
+import type { Selection } from '@goodvibes-jev/engine/errors';
+// error-response.ts imports this file too; the binding is read only when a selection is refused.
+import { jsonErrorResponse } from './error-response.js';
+
 /** A plain JSON object (record of string keys to unknown values). */
 export type JsonRecord = Record<string, unknown>;
 /** Alias for `JsonRecord` used for request/response body shapes. */
@@ -167,14 +171,17 @@ export function readOptionalStringField(body: JsonRecord, key: string): string |
 }
 
 /**
- * Read an array of non-empty trimmed strings from a JSON body field.
- * Entries that are not strings or are blank are skipped. Returns `undefined` when
- * the field is absent, not an array, or all entries were invalid.
+ * Read a list of free-text strings (ids, tags) from a JSON body field: its
+ * non-empty trimmed string entries, at most `max`. Entries that are not
+ * strings or are blank are skipped. An explicit empty list (or one whose
+ * entries were all skipped) is `[]`, never "not sent": `undefined` only when
+ * the field is absent or not an array. Each caller decides what `[]` means;
+ * it is never "all".
  *
  * @param body - The parsed request body.
  * @param key - The field key to read.
  * @param max - Maximum number of entries to include; defaults to `128`.
- * @returns A non-empty string array, or `undefined`.
+ * @returns The string array (possibly empty), or `undefined` when the field was not sent as a list.
  */
 export function readStringArrayField(body: JsonRecord, key: string, max = 128): string[] | undefined {
   const value = body[key];
@@ -186,7 +193,48 @@ export function readStringArrayField(body: JsonRecord, key: string, max = 128): 
     const trimmed = entry.trim();
     if (trimmed) output.push(trimmed);
   }
-  return output.length > 0 ? output : undefined;
+  return output;
+}
+
+function invalidSelection(message: string): Response {
+  return jsonErrorResponse({ error: message, code: 'INVALID_REQUEST' }, { status: 400 });
+}
+
+/**
+ * A list field read as a selection: not sent (`default`: the documented
+ * default applies), sent as `[]` (`none`, or a 400 with `emptyMeans: 'refuse'`),
+ * or exactly these values. An entry outside `allowed` is a 400 naming it;
+ * never dropped. More than `max` entries (default 128) is a 400. Duplicates
+ * are kept once.
+ */
+export function readSelectionField<T extends string>(
+  body: JsonRecord,
+  key: string,
+  allowed: readonly T[],
+  options?: { readonly max?: number; readonly emptyMeans?: 'none' | 'refuse' },
+): Selection<T> | Response {
+  const value = body[key];
+  if (value === undefined) return { kind: 'default' };
+  const choices = allowed.join(', ');
+  if (!Array.isArray(value)) return invalidSelection(`${key} must be a list of: ${choices}.`);
+  const max = options?.max ?? 128;
+  if (value.length > max) return invalidSelection(`${key} has ${value.length} entries; at most ${max} are accepted.`);
+  const values: T[] = [];
+  for (const entry of value as readonly unknown[]) {
+    const text = typeof entry === 'string' ? entry.trim() : undefined;
+    const match = text === undefined ? undefined : allowed.find((candidate) => candidate === text);
+    if (match === undefined) {
+      return invalidSelection(`${key} has ${JSON.stringify(entry)}, which is not one of: ${choices}.`);
+    }
+    if (!values.includes(match)) values.push(match);
+  }
+  const [first, ...rest] = values;
+  if (first === undefined) {
+    return options?.emptyMeans === 'refuse'
+      ? invalidSelection(`${key} is an empty list, which selects nothing; omit ${key} for the default.`)
+      : { kind: 'none' };
+  }
+  return { kind: 'only', values: [first, ...rest] };
 }
 
 /**

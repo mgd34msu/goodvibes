@@ -27,6 +27,8 @@ export interface CommandRouteState<Context extends CommandRouteContext> {
     moveUp(): void;
     moveDown(): void;
     update(query: string): void;
+    /** The line with the highlighted completion past a described command's name in place, or undefined. */
+    completeArgument?(prompt: string): string | undefined;
     getSelected():
       | {
           readonly name: string;
@@ -93,6 +95,13 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
       return true;
     }
     if (token.logicalName === 'tab') {
+      const completed = state.autocomplete?.completeArgument?.(state.prompt);
+      if (completed !== undefined) {
+        state.prompt = completed;
+        state.cursorPos = completed.length;
+        state.autocomplete?.update(completed.slice(1));
+        return true;
+      }
       const selected = state.autocomplete?.getSelected();
       if (selected) {
         state.prompt = `/${selected.name} `;
@@ -110,9 +119,7 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
         closeCommandMode();
         state.autocomplete?.reset();
       } else {
-        const query = state.prompt.startsWith('/') ? state.prompt.slice(1) : '';
-        const spaceIdx = query.indexOf(' ');
-        if (spaceIdx === -1) state.autocomplete?.update(query);
+        state.autocomplete?.update(state.prompt.startsWith('/') ? state.prompt.slice(1) : '');
       }
       return true;
     }

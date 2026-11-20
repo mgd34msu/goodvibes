@@ -288,3 +288,13 @@
   margin: 0;
   color: var(--text-2);
 }
+
+/* Action sheets (components/command/ActionSheet.tsx): a slash command's action, drawn from its description. */
+.gv-action-sheet { display: flex; flex-direction: column; gap: 14px; }
+.gv-action-sheet__choices { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.gv-action-sheet__choices legend { font-weight: 600; margin-bottom: 4px; }
+.gv-action-sheet__choice { display: flex; flex-direction: column; gap: 2px; }
+.gv-action-sheet__hint { margin: 0 0 0 24px; color: var(--text-3); font-size: 0.875em; }
+.gv-action-sheet__sentence { margin: 4px 0 0; font-weight: 500; }
+.gv-action-sheet__line { margin: 0; color: var(--text-3); font-size: 0.875em; }
+.gv-action-buttons { display: inline-flex; gap: 6px; flex-wrap: wrap; }

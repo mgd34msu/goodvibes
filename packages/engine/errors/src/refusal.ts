@@ -3,6 +3,18 @@ import { categoryForStatus } from './failure-reading.js';
 import { classifyFailure, TRANSIENT_STATUS_CODES } from './failure-transience.js';
 
 /**
+ * One field of a reviewed target that is not what it was when it was shown
+ * (`TargetRef` in platform/utils/target-ref.ts). `was` and `now` are the
+ * display text the person saw and would see now, already redacted; `now` is
+ * null when the target is gone.
+ */
+export interface TargetChange {
+  readonly field: string;
+  readonly was: string;
+  readonly now: string | null;
+}
+
+/**
  * One shape for "this did not happen": what state things are in, why, and what
  * to do next. The daemon wire body carries the same fields (`state`, `next`;
  * `hint` is `next[0]`), a tool result carries them as its decision, and a
@@ -24,6 +36,11 @@ export interface Refusal {
   readonly retryAfterMs?: number | undefined;
   /** The HTTP status the refusal is answered with on the wire. */
   readonly status?: number | undefined;
+  /**
+   * For `TARGET_CHANGED`: each field of the reviewed target that changed since
+   * it was shown, so an agent reads what changed without parsing `reason`.
+   */
+  readonly changes?: readonly TargetChange[] | undefined;
 }
 
 /** What a slash command or CLI command returns: lines to show, or a refusal. */
@@ -39,6 +56,7 @@ export interface RefusalInit {
   readonly retryable?: boolean | undefined;
   readonly retryAfterMs?: number | undefined;
   readonly status?: number | undefined;
+  readonly changes?: readonly TargetChange[] | undefined;
 }
 
 const MAX_NEXT_STEPS = 8;
@@ -67,12 +85,30 @@ function validDelay(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
+const MAX_CHANGES = 32;
+
+/** The well-formed entries of a `changes` list, at most 32; undefined when the value is not a non-empty list. */
+export function readTargetChanges(value: unknown): readonly TargetChange[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const changes: TargetChange[] = [];
+  for (const entry of value as readonly unknown[]) {
+    if (!entry || typeof entry !== 'object') continue;
+    const record = entry as Record<string, unknown>;
+    if (typeof record.field !== 'string' || typeof record.was !== 'string') continue;
+    if (record.now !== null && typeof record.now !== 'string') continue;
+    changes.push(Object.freeze({ field: record.field, was: record.was, now: record.now }));
+    if (changes.length === MAX_CHANGES) break;
+  }
+  return changes.length > 0 ? Object.freeze(changes) : undefined;
+}
+
 /** Builds a frozen {@link Refusal}; `retryable` defaults to a Retry-After or a transient status (`TRANSIENT_STATUS_CODES`), otherwise false. */
 export function refusal(init: RefusalInit): Refusal {
   const status = validStatus(init.status);
   const retryAfterMs = validDelay(init.retryAfterMs);
   const retryable = init.retryable
     ?? (retryAfterMs !== undefined || (status !== undefined && TRANSIENT_STATUS_CODES.includes(status)));
+  const changes = readTargetChanges(init.changes);
   return Object.freeze({
     code: text(init.code) ?? 'REFUSED',
     state: text(init.state) ?? 'not done',
@@ -81,6 +117,7 @@ export function refusal(init: RefusalInit): Refusal {
     retryable,
     ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
     ...(status !== undefined ? { status } : {}),
+    ...(changes !== undefined ? { changes } : {}),
   });
 }
 
@@ -123,6 +160,7 @@ export function refusalErrorBody(value: Refusal): StructuredDaemonErrorBody {
     recoverable: value.retryable,
     ...(value.status !== undefined ? { status: value.status } : {}),
     ...(value.retryAfterMs !== undefined ? { retryAfterMs: value.retryAfterMs } : {}),
+    ...(value.changes !== undefined && value.changes.length > 0 ? { changes: value.changes } : {}),
   };
 }
 
@@ -152,6 +190,7 @@ export function readRefusal(error: unknown): Refusal | undefined {
       retryable: classified?.retryable ?? false,
       retryAfterMs: classified?.retryAfterMs,
       status: validStatus((error as { readonly status?: unknown }).status) ?? validStatus(record.status),
+      changes: readTargetChanges(record.changes),
     });
   }
   return undefined;

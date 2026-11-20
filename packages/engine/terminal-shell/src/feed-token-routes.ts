@@ -258,13 +258,8 @@ export function createFeedTokenRoutes<
       commandMode = true;
       state.autocomplete?.update('');
     } else if (commandMode && state.commandRegistry) {
-      const query = prompt.startsWith('/') ? prompt.slice(1) : '';
-      const spaceIdx = query.indexOf(' ');
-      if (spaceIdx === -1) {
-        state.autocomplete?.update(query);
-      } else {
-        state.autocomplete?.reset();
-      }
+      // Past the name, a described command completes its actions, blanks and options.
+      state.autocomplete?.update(prompt.startsWith('/') ? prompt.slice(1) : '');
     }
     return { handled: true, prompt, cursorPos, commandMode };
   }

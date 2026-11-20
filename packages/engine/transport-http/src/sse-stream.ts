@@ -5,22 +5,45 @@ import {
   normalizeStreamReconnectPolicy,
   type StreamReconnectPolicy,
 } from './reconnect.js';
-import { createHttpStatusError, HttpStatusError, RETRYABLE_STATUS_CODES } from '@goodvibes-jev/engine/errors';
-import { isAbortError, type FetchLike } from '@goodvibes-jev/engine/transport-core';
+import { createHttpStatusError, HttpStatusError, RETRYABLE_STATUS_CODES, refusal, toRefusal, type Refusal } from '@goodvibes-jev/engine/errors';
+import { isAbortError, readStreamGapDropped, type FetchLike } from '@goodvibes-jev/engine/transport-core';
 import type { TransportJsonError } from './http-core.js';
 
-export interface ServerSentEventHandlers {
-  readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined;
+/** How a stream ended. Exactly one is reported, once, for every stream that opened. */
+export type StreamEnd =
+  /** The client closed it (its closer, or its abort signal). */
+  | { readonly kind: 'closed' }
+  /** The source ended it, with everything it sent delivered. */
+  | { readonly kind: 'source-ended'; readonly complete: true }
+  /** The source ended it after `dropped` chunks were lost in transit and could not be had back. */
+  | { readonly kind: 'source-ended'; readonly complete: false; readonly dropped: number }
+  /** It could not be (re)opened, or failed after it opened, and will not reconnect. */
+  | { readonly kind: 'failed'; readonly refusal: Refusal };
+
+/** Frames the source dropped for this reader; `afterId` is the last one delivered before them. */
+export interface StreamGap { readonly dropped: number; readonly afterId?: string }
+
+/** Required members: a subscriber that cannot handle a gap or an end does not compile. */
+export interface StreamSubscriber<E> {
+  onEvent(event: E): void;
+  /** Frames were lost: resync from a snapshot (or reopen from the last position); never ignore it. */
+  onGap(gap: StreamGap): void;
+  onEnd(end: StreamEnd): void;
+}
+
+/** Control frames never count as progress for the retry budget. */
+export const STREAM_CONTROL_FRAMES: ReadonlySet<string> = new Set(['ready', 'heartbeat']);
+
+/** One delivered Server-Sent Events frame: its `event:` name (`message` when it had none) and its parsed `data:`. */
+export interface ServerSentEvent {
+  readonly name: string;
+  readonly payload: unknown;
+}
+
+export interface ServerSentEventHandlers extends StreamSubscriber<ServerSentEvent> {
   readonly onReady?: ((payload: unknown) => void) | undefined;
-  readonly onError?: ((error: unknown) => void) | undefined;
-  readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number }) => void;
-  readonly onClose?: (() => void) | undefined;
-  /**
-   * The stream ended on a failure and will not reconnect. `final` is true when
-   * no reconnect could clear it (a refused credential or another answer the
-   * server gives on purpose), false when reconnect was off or its attempts ran out.
-   */
-  readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; readonly final?: boolean | undefined }) => void;
+  /** A lost connection is being retried: attempt number, wait before it, and the failure that lost it. */
+  readonly onReconnect?: ((input: { readonly attempt: number; readonly delayMs: number; readonly error: unknown }) => void) | undefined;
   /**
    * The `id:` of each complete frame, when the frame is delivered.
    *
@@ -84,6 +107,7 @@ export function sseIdleDeadlineMs(heartbeatIntervalMs: number = SSE_HEARTBEAT_IN
  * refused credential (401, 403) or any other answer from the server is final.
  */
 function isRetryableStreamFailure(error: unknown): boolean {
+  if ((error as { streamFinal?: unknown } | null)?.streamFinal === true) return false;
   const status = (error as { transport?: { status?: unknown } } | null)?.transport?.status;
   if (typeof status !== 'number') return true;
   return status === 0 || (status >= 200 && status < 300) || RETRYABLE_STATUS_CODES.includes(status);
@@ -165,8 +189,38 @@ function createStreamError(
 
 export { openRawServerSentEventStream as openServerSentEventStream };
 
-function reportStreamError(error: unknown, handlers: ServerSentEventHandlers): void {
-  handlers.onError?.(error);
+/** Whether a `content-type` names an event stream (`text/event-stream`, any parameters, any case). */
+function isEventStreamContentType(value: string | null): boolean {
+  return (value ?? '').split(';')[0]!.trim().toLowerCase() === 'text/event-stream';
+}
+
+/**
+ * A 2xx that is not an event stream (a proxy's or captive portal's page, the
+ * wrong URL): never opened, and final, because reconnecting gets the same page.
+ */
+function wrongContentTypeError(status: number, url: string, contentType: string | null) {
+  const shown = contentType && contentType.trim() ? contentType.trim() : 'none';
+  const error = createStreamError(status, url, `the server answered ${status} with content-type ${shown}, not text/event-stream`);
+  return Object.assign(error, { streamFinal: true as const });
+}
+
+/** The refusal a stream that will not reconnect ends with. */
+function streamEndRefusal(error: unknown, retryable: boolean): Refusal {
+  const carried = toRefusal(error, {
+    state: 'the event stream ended and is not reconnecting',
+    next: retryable
+      ? ['Open the stream again; it resumes from its last event id.']
+      : ['Fix the cause named in the reason (credential, URL), then open the stream again.'],
+    code: 'STREAM_ENDED',
+  });
+  return carried.retryable === retryable ? carried : refusal({ ...carried, retryable });
+}
+
+/** The gap a `gap` control frame names. */
+function readGapFrame(payload: unknown): StreamGap {
+  const record = payload && typeof payload === 'object' ? payload as { dropped?: unknown; afterId?: unknown } : {};
+  const dropped = typeof record.dropped === 'number' && Number.isFinite(record.dropped) && record.dropped >= 0 ? Math.floor(record.dropped) : 0;
+  return typeof record.afterId === 'string' && record.afterId ? { dropped, afterId: record.afterId } : { dropped };
 }
 
 export async function openRawServerSentEventStream(
@@ -184,6 +238,14 @@ export async function openRawServerSentEventStream(
   let stopped = false;
   let reconnectAttempts = 0;
   let readySettled = false;
+  // Set once the first connection opened: from then on every end is reported through onEnd, once.
+  let opened = false;
+  let endReported = false;
+  const end = (value: StreamEnd): void => {
+    if (!opened || endReported) return;
+    endReported = true;
+    handlers.onEnd(value);
+  };
 
   const abort = () => outerController.abort(options.signal?.reason);
   options.signal?.addEventListener('abort', abort, { once: true });
@@ -243,8 +305,19 @@ export async function openRawServerSentEventStream(
         }
         throw wrapped;
       }
+      const contentType = response.headers.get('content-type');
+      if (!isEventStreamContentType(contentType)) {
+        void response.body.cancel().catch(() => undefined);
+        const wrapped = wrongContentTypeError(response.status, url, contentType);
+        if (!readySettled) {
+          settleReady(wrapped);
+          return false;
+        }
+        throw wrapped;
+      }
 
       settleReady();
+      opened = true;
       const connectedAt = Date.now();
 
       const reader = response.body.getReader();
@@ -285,19 +358,24 @@ export async function openRawServerSentEventStream(
           return;
         }
         // A connection that delivered a frame was healthy, so its drop starts a
-        // fresh retry budget. Merely answering 200 does not count, and neither does
-        // the `ready` greeting the daemon sends on every connect: a stream the
-        // server accepts, greets and closes at once must still run out of attempts.
-        if (eventName !== 'ready') reconnectAttempts = 0;
+        // fresh retry budget. Merely answering 200 does not count, and neither do
+        // the control frames (the `ready` greeting and the `heartbeat` the daemon
+        // sends on every connect): a stream the server accepts, greets and closes
+        // at once must still run out of attempts.
+        const name = eventName || 'message';
+        if (!STREAM_CONTROL_FRAMES.has(name)) reconnectAttempts = 0;
         if (eventName === 'heartbeat' && !heartbeating) {
           heartbeating = true;
           armIdleTimer();
         }
         const payload = readEventPayload(data);
-        if (eventName === 'ready') {
+        if (name === 'ready') {
           handlers.onReady?.(payload);
+        } else if (name === 'gap') {
+          // The source dropped frames for this reader: a typed signal, never an ordinary event.
+          handlers.onGap(readGapFrame(payload));
         } else {
-          handlers.onEvent?.(eventName || 'message', payload);
+          handlers.onEvent({ name, payload });
         }
         eventName = '';
         data = '';
@@ -370,11 +448,13 @@ export async function openRawServerSentEventStream(
       while (!outerController.signal.aborted && !stopped) {
         try {
           if (!(await runConnection())) return;
-          handlers.onClose?.();
+          // The source ended the stream cleanly and reconnect is off.
+          end({ kind: 'source-ended', complete: true });
           return;
         } catch (error) {
           if (outerController.signal.aborted || stopped) {
             settleReady(outerController.signal.reason ?? new DOMException('Stream closed', 'AbortError'));
+            end({ kind: 'closed' });
             return;
           }
           const nextAttempt = reconnectAttempts + 1;
@@ -382,8 +462,11 @@ export async function openRawServerSentEventStream(
           const shouldReconnect = reconnectPolicy.enabled && nextAttempt <= reconnectPolicy.maxAttempts && retryable;
           if (!shouldReconnect) {
             settleReady(error);
-            handlers.onTerminate?.({ error, reconnectAttempts: nextAttempt, final: !retryable });
-            reportStreamError(error, handlers);
+            // Chunks lost in transit that no reconnect will fetch again: the source ended incomplete.
+            const dropped = readStreamGapDropped(error);
+            end(dropped !== undefined
+              ? { kind: 'source-ended', complete: false, dropped }
+              : { kind: 'failed', refusal: streamEndRefusal(error, retryable) });
             return;
           }
           reconnectAttempts = nextAttempt;
@@ -394,25 +477,25 @@ export async function openRawServerSentEventStream(
             getStreamReconnectDelay(nextAttempt, reconnectPolicy),
             typeof serverWaitMs === 'number' && Number.isFinite(serverWaitMs) ? Math.min(serverWaitMs, MAX_RETRY_AFTER_MS) : 0,
           );
-          handlers.onReconnect?.({ attempt: nextAttempt, delayMs });
-          handlers.onError?.(error);
+          handlers.onReconnect?.({ attempt: nextAttempt, delayMs, error });
           try {
             await sleepWithSignal(delayMs, outerController.signal);
           } catch (sleepError) {
-            if (!outerController.signal.aborted && !stopped) {
-              reportStreamError(sleepError, handlers);
-            }
+            end(outerController.signal.aborted || stopped
+              ? { kind: 'closed' }
+              : { kind: 'failed', refusal: streamEndRefusal(sleepError, true) });
             return;
           }
         }
       }
+      end({ kind: 'closed' });
     };
 
     void loop().catch((error) => {
       settleReady(error);
-      if (!outerController.signal.aborted && !stopped) {
-        reportStreamError(error, handlers);
-      }
+      end(outerController.signal.aborted || stopped
+        ? { kind: 'closed' }
+        : { kind: 'failed', refusal: streamEndRefusal(error, isRetryableStreamFailure(error)) });
     }).finally(() => {
       activeController?.abort();
       options.signal?.removeEventListener('abort', abort);

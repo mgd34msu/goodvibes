@@ -73,7 +73,7 @@ export const builtinGatewayUpdateMethodDescriptors: readonly GatewayMethodDescri
     title: 'Self-Update Status',
     description: 'Whether this daemon is keeping itself current, and, when it is not, the reason in one line. `armed` is false whenever no loop is running and `offReason` says which gate stopped it: update.auto not set, no artifact identity (a host that manages its own updates), or no release URL to resolve tags from. `failedCheckCount` with `lastCheckFailure` is the case that used to be invisible: checks running on schedule and failing every time, which looks exactly like having nothing to update to. `pendingVersion` is a release already downloaded and verified, waiting for a moment when no work is in flight; `pendingSince` says since when a release has waited and `pendingBlockedBy` names the fleet ids of the work it waits behind (the owner is told once after 24 hours). `rejectedVersion` is a release that was installed here, failed to start, and was rolled back, it is deliberately not reinstalled. `recoveryRequired` (true) and `transactionRecovery` appear only while an interrupted update or rollback fences the loop: `transactionRecovery.recoveryPaths` lists the retained files to inspect, `recoveryErrors` what went wrong, and the loop stays off until they are dealt with.',
     category: 'control-plane',
-    scopes: ['read:control-plane'],
+    effects: ['control-plane.read'],
     transport: ['ws'],
     // Declared and empty rather than omitted: the invoke gate skips a verb with
     // no typed inputSchema, so "takes nothing" has to be stated to be enforced.
@@ -86,8 +86,7 @@ export const builtinGatewayUpdateMethodDescriptors: readonly GatewayMethodDescri
     title: 'Check For An Update Now',
     description: 'Run one update check immediately instead of waiting for the next interval, and return the status afterwards. This is the same tick the schedule runs, so an on-demand check and the hourly one cannot reach different conclusions. It never forces an install: a downloaded-and-verified release still waits for a moment when no work is in flight, which the returned `pendingVersion` reports. A check that fails is reported in `failedCheckCount` and `lastCheckFailure` rather than refused, the caller asked what the state is, and "the check failed" is the answer. `check` says what the call did: `ran` (a check ran now), `already-in-flight` (another check was still running, none was started, and the rest of the answer is as of now) or `loop-off` (no loop is armed, `offReason` says why, and nothing ran).',
     category: 'control-plane',
-    scopes: ['write:control-plane'],
-    access: 'admin',
+    effects: ['control-plane.administer'],
     transport: ['ws'],
     inputSchema: objectSchema({}, []),
     outputSchema: UPDATE_CHECK_SCHEMA,

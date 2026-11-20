@@ -8,6 +8,11 @@
  */
 
 .composer {
+  /* Above its neighbours in the dock: on a phone the suggestion chips are drawn
+     above the composer but come after it, and its slash-command menu opens over
+     them, so the composer (and the menu inside it) must stack on top. */
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 8px;

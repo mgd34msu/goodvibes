@@ -22,9 +22,10 @@
  * the list footer.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, History, Inbox, ListChecks, RefreshCw, Search } from 'lucide-react';
 import { client as platformClient } from '../../lib/goodvibes';
+import { firstArray, firstString } from '../../lib/object';
 import { queryKeys } from '../../lib/queries';
 import type { WorkTab } from '../../lib/router';
 import { WORK } from '../../components/shell/nav';
@@ -204,17 +205,33 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
     },
   });
 
+  // The chat list the sidebar already reads (same key and request), for each chat's current title.
+  const chatList = useQuery({
+    queryKey: ['companion-chat', 'sessions'],
+    queryFn: () => platformClient.chat.sessions.list({ limit: 100 }),
+  });
+  const chatTitles = useMemo(() => {
+    const titles = new Map<string, string>();
+    for (const session of firstArray(chatList.data, ['sessions'])) {
+      const id = firstString(session, ['id', 'sessionId']);
+      const title = firstString(session, ['title']);
+      if (id && title) titles.set(id, title);
+    }
+    return titles;
+  }, [chatList.data]);
+
   const items = useMemo(() => buildWorkItems({
     contracts: data.contractRecords,
     approvals: scope === 'archived' ? [] : data.approvalRecords,
     nodes: data.nodes,
     attemptGroups: scope === 'archived' ? [] : data.attemptGroups,
     sessions: scope === 'archived' ? [] : data.sessionRecords,
+    chatTitles,
     hosted: scope === 'archived' ? [] : data.hostedRecords,
     tasks: scope === 'archived' ? [] : data.taskRecords,
     ciWatches: scope === 'archived' ? [] : data.watchRecords,
     archived: scope === 'archived',
-  }), [scope, data.contractRecords, data.approvalRecords, data.nodes, data.attemptGroups, data.sessionRecords, data.hostedRecords, data.taskRecords, data.watchRecords]);
+  }), [scope, data.contractRecords, data.approvalRecords, data.nodes, data.attemptGroups, data.sessionRecords, chatTitles, data.hostedRecords, data.taskRecords, data.watchRecords]);
   const groups = useMemo(() => groupWorkItems(items, kind, query), [items, kind, query]);
   const selectedItem = useMemo(() => items.find((item) => item.key === selectedKey) ?? null, [items, selectedKey]);
 
@@ -340,7 +357,7 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
         return record ? (
           <SessionDetail
             key={record.id}
-            record={record}
+            record={chatTitles.has(record.id) ? { ...record, title: chatTitles.get(record.id) ?? record.title } : record}
             agents={data.liveNodes.filter((n) => n.sessionRef?.sessionId === record.id)}
             tab={sessionTab}
             onTabChange={setSessionTab}
@@ -404,7 +421,7 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
       )}
 
       {!data.firstLoad && groups.running.length > 0 && (
-        <RowGroup label="Running" count={groups.running.length}>
+        <RowGroup label={groups.running.every((item) => item.active) ? 'Running' : 'Running and idle'} count={groups.running.length}>
           {groups.running.map((item) => (
             <ItemRow key={item.key} item={item} selected={item.key === selectedKey} onSelect={() => openItem(item.key)} />
           ))}

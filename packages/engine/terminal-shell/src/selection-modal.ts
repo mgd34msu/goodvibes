@@ -7,6 +7,8 @@ export interface SelectionItem {
   id: string;
   label: string;
   detail?: string;        // selected-item help above the list
+  desc?: string;          // compact value shown with the label (a form field's current answer)
+  right?: string;         // muted words right-aligned on the row (a risk, a state)
   category?: string;      // optional grouping header
   actions?: string;       // hint text for available actions (e.g., "[d] delete")
   fg?: string;             // optional foreground color override for this item

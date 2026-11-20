@@ -294,7 +294,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     description:
       'Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. `before` pages backwards: pass the smallest UID of the page you have to get the next older page; `total` counts every match. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted. A message the daemon\'s inbox mirror has labelled carries `triageLabel` (spam, priority or normal); one not labelled yet has none. A message the mirror holds carries `screening`: `screened`, or `not-screened` when only code checked it for credential and card text, with `screeningReason`.',
     category: 'email',
-    scopes: ['read:email'],
+    effects: ['email.read'],
     http: { method: 'GET', path: '/api/email/inbox' },
     inputSchema: objectSchema({
       limit: NUMBER_SCHEMA,
@@ -318,8 +318,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     description:
       'Return the full body and attachment metadata for a single inbox message by IMAP UID. Read-only (BODY.PEEK; does not mark as read).',
     category: 'email',
-    scopes: ['read:email'],
-    access: 'admin',
+    effects: ['email.inspect'],
     http: { method: 'GET', path: '/api/email/inbox/{uid}' },
     inputSchema: objectSchema({ uid: NUMBER_SCHEMA }, ['uid']),
     outputSchema: EMAIL_MESSAGE_DETAIL_SCHEMA,
@@ -331,8 +330,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     description:
       'Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field.',
     category: 'email',
-    scopes: ['write:email'],
-    access: 'admin',
+    effects: ['email.administer'],
     http: { method: 'POST', path: '/api/email/drafts' },
     inputSchema: bodyEnvelopeSchema({
       to: STRING_SCHEMA,
@@ -357,13 +355,11 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     id: 'email.send',
     replay: { in: 'body', name: 'clientSendId', behavior: 'A repeat with the same `clientSendId` and the same message within ten minutes returns the first answer instead of sending again; the same id with a different message is 409 CLIENT_SEND_ID_REUSED.' },
     recipients: ['to'],
-    effect: 'outward',
+    effects: ['email.administer', 'outward.send'],
     title: 'Send Email',
     description:
       'Send a composed email via the configured SMTP account. Irreversible external send; requires confirm: true and explicit user review of recipients and body. Pass a clientSendId (8-128 letters, digits, - or _) chosen when the message was composed: a repeat with the same id and the same message within ten minutes returns the first answer instead of sending again (the id also becomes the Message-ID), and the same id with a different message is refused (409 CLIENT_SEND_ID_REUSED). A send whose final server reply was lost fails with EMAIL_DELIVERY_UNCONFIRMED: it may have gone, and repeating it with the same id will not send it twice.',
     category: 'email',
-    scopes: ['write:email'],
-    access: 'admin',
     http: { method: 'POST', path: '/api/email/send' },
     inputSchema: bodyEnvelopeSchema({
       to: STRING_SCHEMA,
@@ -386,8 +382,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     description:
       'Change one inbox message by IMAP UID: action seen or unseen sets or clears its read flag; archive moves it to the folder the server marks Archive (or All Mail); delete moves it to the folder the server marks Trash, so it can be recovered there. A server with no such folder is refused and nothing changes; nothing here expunges permanently. Pass uidValidity when you have it so a reset mailbox refuses instead of changing another message. Answers { uid, action, movedTo? }.',
     category: 'email',
-    scopes: ['write:email'],
-    access: 'admin',
+    effects: ['email.administer'],
     // Served through the control-plane invoke endpoint, like checkpoints.* and rewind.*.
     transport: ['ws'],
     inputSchema: objectSchema({
@@ -407,8 +402,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     description:
       'Return one attachment of an inbox message as base64 bytes, by UID and its position (from 0) in the attachments list email.inbox.read returns. Read-only (BODY.PEEK). Meant to be saved as a file, never rendered: the bytes are whatever the sender attached. Attachments over 25 MB are refused with the reason.',
     category: 'email',
-    scopes: ['read:email'],
-    access: 'admin',
+    effects: ['email.inspect'],
     // Served through the control-plane invoke endpoint, like checkpoints.* and rewind.*.
     transport: ['ws'],
     inputSchema: objectSchema({ uid: NUMBER_SCHEMA, index: NUMBER_SCHEMA }, ['uid', 'index']),
@@ -425,8 +419,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     description:
       'Return the newest drafts (default 25, at most 100) in the account\'s Drafts folder, newest first, each with its recipient, subject, date, the Message-ID it replies to and up to 64 KB of body text, so a draft can be reopened in a composer. Read-only.',
     category: 'email',
-    scopes: ['read:email'],
-    access: 'admin',
+    effects: ['email.inspect'],
     // Served through the control-plane invoke endpoint, like checkpoints.* and rewind.*.
     transport: ['ws'],
     inputSchema: objectSchema({ limit: NUMBER_SCHEMA }),
@@ -465,8 +458,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     description:
       'Register, in advance, that a verification message is expected at one address from one service domain, within a bounded window. Called by the workstream that already holds authority BEFORE it submits the signup or checkout form. Grants evidence-only authority: a matching message proves control of the address and can never start work, widen the expectation or extend its window. The answer carries `watching`: whether a mailbox is being read right now and, when not, why. Opening is not refused while nothing watches (a cluster standby legitimately does not), but a message cannot arrive then.',
     category: 'email',
-    scopes: ['write:email'],
-    access: 'admin',
+    effects: ['email.administer'],
     inputSchema: objectSchema({
       serviceDomain: STRING_SCHEMA,
       recipientAddress: STRING_SCHEMA,
@@ -483,7 +475,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     description:
       'Return every open verification expectation with its recipient, service domain, purpose and remaining window. Disclosure: an expectation is a live correlation key, and the owner is entitled to see which ones exist.',
     category: 'email',
-    scopes: ['read:email'],
+    effects: ['email.read'],
     inputSchema: objectSchema({}),
     outputSchema: objectSchema({
       expectations: arraySchema(EMAIL_EXPECTATION_SCHEMA),
@@ -498,8 +490,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     description:
       'Close an expectation the workstream abandoned. A signup dropped before submission otherwise leaves a live correlation key for an address nobody is waiting on, occupying one of the bounded open slots until its window elapses. Cancelling an id that is not open is an answer, not a failure.',
     category: 'email',
-    scopes: ['write:email'],
-    access: 'admin',
+    effects: ['email.administer'],
     inputSchema: objectSchema({ id: STRING_SCHEMA }, ['id']),
     outputSchema: objectSchema({
       cancelled: BOOLEAN_SCHEMA,
@@ -513,8 +504,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     description:
       'Where one expectation stands, waiting up to timeoutMs (default 0, at most 60000) for it to change. state "arrived" carries the verification link or code the daemon took from the matching message (token); "waiting" lists matching messages that held none (arrivals); "expired", "capability-lost" and "cancelled" say how it ended, with detail; "unknown" means no expectation with that id is open or remembered. watching says whether a mailbox is being read right now, so "nothing yet" is never confused with "nobody is looking". Call it again while the state is "waiting".',
     category: 'email',
-    scopes: ['read:email'],
-    access: 'admin',
+    effects: ['email.inspect'],
     inputSchema: objectSchema({ id: STRING_SCHEMA, timeoutMs: NUMBER_SCHEMA }, ['id']),
     outputSchema: EMAIL_EXPECTATION_WAIT_SCHEMA,
   }),
@@ -539,7 +529,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     description:
       'Disclose the inbound-mail watcher: whether it is running and why, which source is reading the mailbox and the delay that source actually costs, the current capability verdict, every persisted cursor with its position and age, every open verification expectation with its remaining window, whether each store could be read, whether arriving mail is actually being announced to the owner, and what each store retains before it is reaped. Read-only.',
     category: 'email',
-    scopes: ['read:email'],
+    effects: ['email.read'],
     inputSchema: objectSchema({}),
     outputSchema: objectSchema({
       enabled: BOOLEAN_SCHEMA,

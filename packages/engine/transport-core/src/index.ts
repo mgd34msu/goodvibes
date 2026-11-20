@@ -13,5 +13,5 @@ export type { TransportContext, TransportMiddleware } from './middleware.js';
 export { composeMiddleware } from './middleware.js';
 export { injectTraceparent, injectTraceparentAsync } from './otel.js';
 export { createUuidV4 } from './uuid.js';
-export { describeUnknownTransportError, isAbortError, transportErrorFromUnknown } from './errors.js';
+export { describeUnknownTransportError, isAbortError, readStreamGapDropped, StreamGapError, transportErrorFromUnknown } from './errors.js';
 export { WebSocketMessageAssembler, encodeWebSocketMessage, sendWebSocketMessage, WEBSOCKET_CHUNK_CHARS } from './websocket-messages.js';

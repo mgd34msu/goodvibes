@@ -1,4 +1,6 @@
 import { putToOwner } from '../../control-plane/owner-act.js';
+import { admitEffects } from '../../security/effect-authority.js';
+import type { Actor } from '../http-policy.js';
 import type { ConfigManager } from '../../config/manager.js';
 import type {
   ChannelDirectoryScope,
@@ -204,7 +206,7 @@ export function buildSystemRouteContext(input: {
   ) => Response;
   readonly requireAdmin: (request: Request) => Response | null;
   readonly requireAuthenticatedSession: (request: Request) => { username: string; roles: readonly string[] } | null;
-  readonly resolveAuthenticatedPrincipal: NonNullable<DaemonSystemRouteContext['resolveAuthenticatedPrincipal']>;
+  readonly resolveAuthenticatedPrincipal: (request: Request) => (NonNullable<ReturnType<NonNullable<DaemonSystemRouteContext['resolveAuthenticatedPrincipal']>>> & { readonly actor: Actor }) | null;
   readonly routeBindings: RouteBindingManager;
   readonly swapManager: DaemonSystemRouteContext['swapManager'];
   readonly watcherRegistry: WatcherRegistry;
@@ -220,6 +222,10 @@ export function buildSystemRouteContext(input: {
     configManager: input.configManager,
     configLoosening: (key, value, options) => input.configManager.describeLoosening(key, value, options),
     putToOwner: (request) => putToOwner(input.approvalBroker, request),
+    settingsLoosenAdmission: (request) => {
+      const actor = input.resolveAuthenticatedPrincipal(request)?.actor;
+      return actor === undefined ? 'refused' : admitEffects(actor, ['settings.loosen']).kind;
+    },
     settingsPrecondition: input.settingsPrecondition,
     settingsImportPrecondition: input.settingsImportPrecondition,
     credentialStatus: input.credentialStatus,

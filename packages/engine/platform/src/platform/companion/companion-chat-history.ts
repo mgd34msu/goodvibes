@@ -15,6 +15,7 @@
 
 import { ConversationManager } from '../core/conversation.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
+import type { ToolActivityWords } from '@goodvibes-jev/engine/contracts';
 import { buildProviderUserContent, type CompanionChatArtifactStore } from './companion-chat-attachments.js';
 import { activeMessages } from './companion-chat-branching.js';
 import { TURN_INTERRUPTION_NOTE } from './companion-chat-turn-control.js';
@@ -54,7 +55,11 @@ export class TurnHistoryWriter {
   private readonly recorded: CompanionChatHistoryEntry[] = [];
   private usedTools = false;
 
-  constructor(private readonly conversation: ConversationManager) {}
+  constructor(
+    private readonly conversation: ConversationManager,
+    /** The display words of a call, saved with it for a client that shows the reply later. */
+    private readonly activityOf?: ((name: string, args: Record<string, unknown>) => ToolActivityWords | undefined) | undefined,
+  ) {}
 
   /** Text waiting in a held tool-calling message, for a turn that ends before its results. */
   heldText(): string { return this.pending?.content ?? ''; }
@@ -73,7 +78,10 @@ export class TurnHistoryWriter {
     this.pending = null;
     if (held) {
       this.conversation.addAssistantMessage(held.content, { toolCalls: held.toolCalls });
-      this.recorded.push({ role: 'assistant', content: held.content, toolCalls: held.toolCalls.map(({ id, name, arguments: args }) => ({ id, name, arguments: args })) });
+      this.recorded.push({ role: 'assistant', content: held.content, toolCalls: held.toolCalls.map(({ id, name, arguments: args }) => {
+        const activity = this.activityOf?.(name, args);
+        return { id, name, arguments: args, ...(activity ? { activity } : {}) };
+      }) });
       this.usedTools = true;
     }
     this.conversation.addToolResults(results);

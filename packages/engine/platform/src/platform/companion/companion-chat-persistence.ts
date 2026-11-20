@@ -20,6 +20,7 @@ import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { CompanionChatMessage, CompanionChatSession } from './companion-chat-types.js';
 import { openRecordLog, type RecordLog } from '../state/record-log.js';
+import { durableAfter, type Durable } from '../state/operation.js';
 import { readDocument, writeDocument } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -52,10 +53,13 @@ export interface PersistedTranscript {
   readonly messages: CompanionChatMessage[];
   /** Absent for a chat converted from the single-file format, which wrote no turn marks. */
   readonly lastTurn?: PersistedTurnMark | undefined;
+  /** The sender's key of each message posted with one (clientMessageId -> message id), so a resend after a restart finds the first. */
+  readonly clientMessageIds: ReadonlyMap<string, string>;
 }
 
+/** `c` is the sender's key (clientMessageId), on the line that first saved a message posted with one. */
 type ChatRecord =
-  | { readonly m: CompanionChatMessage }
+  | { readonly m: CompanionChatMessage; readonly c?: string | undefined }
   | { readonly turn: PersistedTurnMark };
 
 function recordKey(record: ChatRecord): string {
@@ -196,11 +200,28 @@ export class CompanionChatPersistence {
     writeDocument(this.path(meta.id, META_SUFFIX), meta, { mode: 0o600 });
   }
 
-  /** Append the current state of these messages (one line each). */
-  appendMessages(sessionId: string, messages: readonly CompanionChatMessage[]): void {
+  /**
+   * Append the current state of these messages (one line each). `clientMessageIds`
+   * (message id -> the sender's key) puts the key on the line of a message the
+   * sender posted with one; it is read back by {@link loadTranscript}.
+   */
+  appendMessages(sessionId: string, messages: readonly CompanionChatMessage[], clientMessageIds?: ReadonlyMap<string, string>): void {
     if (messages.length === 0) return;
     const log = this.open(sessionId);
-    for (const message of messages) log.append({ m: storedMessage(message) });
+    for (const message of messages) {
+      const key = clientMessageIds?.get(message.id);
+      log.append(key === undefined ? { m: storedMessage(message) } : { m: storedMessage(message), c: key });
+    }
+  }
+
+  /**
+   * `record` as durable once every line appended to this chat's transcript so
+   * far is synced: the batch sync the appends already scheduled, no new one.
+   * A failed sync rejects.
+   */
+  async durable<R>(sessionId: string, record: R): Promise<Durable<R>> {
+    const log = this.logs.get(sessionId);
+    return await durableAfter(record, log ? log.flush() : Promise.resolve());
   }
 
   /** Record that a turn started or ended, so a restart can tell a reply the daemon died in. */
@@ -218,7 +239,7 @@ export class CompanionChatPersistence {
     }
   }
 
-  /** Resolves once every appended line is on disk. */
+  /** Resolves once every appended line of every open chat is on disk. */
   async flush(): Promise<void> {
     await Promise.all([...this.logs.values()].map((log) => log.flush()));
   }
@@ -290,13 +311,16 @@ function* parseLines(text: string): Iterable<ChatRecord> {
 /** The latest line per message, in the order messages first appeared. */
 function readRecords(records: Iterable<ChatRecord>): PersistedTranscript {
   const messages = new Map<string, CompanionChatMessage>();
+  const clientMessageIds = new Map<string, string>();
   let lastTurn: PersistedTurnMark | undefined;
   for (const record of records) {
     if (!record || typeof record !== 'object') continue;
-    if ('m' in record && isMessage(record.m)) messages.set(record.m.id, record.m);
-    else if ('turn' in record && record.turn && typeof record.turn.userMessageId === 'string') lastTurn = record.turn;
+    if ('m' in record && isMessage(record.m)) {
+      messages.set(record.m.id, record.m);
+      if (typeof record.c === 'string' && record.c.length > 0) clientMessageIds.set(record.c, record.m.id);
+    } else if ('turn' in record && record.turn && typeof record.turn.userMessageId === 'string') lastTurn = record.turn;
   }
-  return { messages: [...messages.values()], ...(lastTurn ? { lastTurn } : {}) };
+  return { messages: [...messages.values()], ...(lastTurn ? { lastTurn } : {}), clientMessageIds };
 }
 
 // ---------------------------------------------------------------------------

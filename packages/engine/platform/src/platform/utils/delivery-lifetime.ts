@@ -1,11 +1,14 @@
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import type { MutationPublication } from './file-mutation.js';
+import type { Fence } from './owner-fence.js';
 
 /** Optional restrictions on a delivery. Revocation cannot undo an accepted send. */
 export interface DeliveryLifetime {
   readonly signal?: AbortSignal | undefined;
   /** Synchronous final authority check. Throw when this delivery is no longer current. */
   readonly assertCurrent?: (() => void) | undefined;
+  /** The owner's fence for this delivery; checked with the other restrictions before each dispatch. */
+  readonly fence?: Fence | undefined;
   /** Native producers retain ownership only during the actual final dispatch. */
   readonly withPublication?: MutationPublication | undefined;
 }
@@ -43,6 +46,7 @@ export async function runDeliveryPublication<T>(lifetime: DeliveryLifetime, oper
 
 /** Call after all asynchronous preparation, immediately before each outbound side effect. */
 export function assertDeliveryCurrent(lifetime: DeliveryLifetime): void {
+  lifetime.fence?.check();
   lifetime.signal?.throwIfAborted();
   assertSynchronousJudgmentGuard(() => lifetime.assertCurrent?.(), () => new Error('Delivery ownership must be checked synchronously.'));
   // A currentness check may itself revoke the signal.

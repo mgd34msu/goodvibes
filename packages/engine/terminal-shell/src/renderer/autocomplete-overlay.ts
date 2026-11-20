@@ -25,6 +25,21 @@ export function renderAutocompleteOverlay(
   leadingGap = false,
 ): Line[] {
   const state = autocomplete.getState();
+  const argument = state.argument;
+  if (argument && state.active) {
+    // Past a described command's name: its actions, the blank's values, or its options.
+    const rows: KitRow[] = [
+      { header: argument.pending ? `${argument.header}: reading…` : argument.header },
+      ...argument.items.map((item, index) => ({
+        label: item.label,
+        detail: item.detail,
+        right: index === state.selectedIndex ? 'tab complete' : undefined,
+        selected: index === state.selectedIndex,
+      })),
+    ];
+    const lines = renderPopup({ width, rows, maxRows: popupRows(viewportHeight), scrollOwner: autocomplete }).lines;
+    return leadingGap ? [createEmptyLine(width), ...lines] : lines;
+  }
   if (!state.active || state.results.length === 0) return [];
   const rows: KitRow[] = state.results.map((result, index) => ({
     label: `/${result.command.name}`,
@@ -42,5 +57,8 @@ export function renderAutocompletePackageText(): string {
     '/<command>',
     'tab complete',
     '<n> more ↓',
+    'Actions',
+    'Options',
+    '<blank>: reading…',
   ].join('\n');
 }

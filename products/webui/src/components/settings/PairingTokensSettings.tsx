@@ -243,7 +243,7 @@ export function PairingTokensSettings() {
       {confirm.element}
       <SettingsBlock
         testId="pairing-tokens"
-        title="Devices & pairing"
+        title="Paired devices"
         description="Every paired phone or browser has its own token. Renaming or revoking one never affects another. A token is shown once, when it is created, so this list never shows one."
         actions={(
           <IconButton

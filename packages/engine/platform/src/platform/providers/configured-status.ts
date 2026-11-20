@@ -64,7 +64,9 @@ export function resolveProviderConfiguredStatus(input: ProviderConfiguredInput):
   const via = viaFromRoutes(routes)
     ?? (hasEnv ? 'env' : undefined)
     ?? (!routesAuthoritative && envVars.some((name) => input.storedKeys.has(name)) ? 'secrets' : undefined)
-    ?? (catalog?.allowAnonymous && catalog.anonymousConfigured ? 'anonymous' : undefined)
+    // Keyless access stands on the catalog's word only for a provider that described no
+    // routes: one that did says itself whether its local server has answered.
+    ?? (!routesAuthoritative && catalog?.allowAnonymous && catalog.anonymousConfigured ? 'anonymous' : undefined)
     ?? (runtime === null && input.selfConfigured === true ? 'subscription' : undefined);
   const usableRoute = routes.some((route) => route.route !== 'none' && isProviderAuthRouteUsable(route));
   return {

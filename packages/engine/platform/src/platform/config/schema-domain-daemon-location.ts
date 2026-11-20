@@ -18,7 +18,6 @@ export const daemonLocationConfigSettings: ConfigSetting[] = [
   {
     key: 'daemon.timezone',
     type: 'string',
-    default: '',
     description:
       "IANA timezone name the daemon reckons CALENDAR DAYS in, e.g. 'America/New_York', 'Europe/London'. Empty means UTC. This is the daemon's own location, not a display preference and not a per-schedule zone (schedules keep their own). Anything that resets daily reads it: the payment capability's daily budgets roll over at midnight in this zone. Changing it does not refill a spent budget: each spend keeps the day it was made on and counts until that day is over, and an agent cannot change it in a way that moves today; only the owner can.",
     validate: (value: unknown): boolean => typeof value === 'string' && (value.trim().length === 0 || isValidTimezone(value)),

@@ -1,5 +1,5 @@
 import { samePaymentEvidence } from '../evidence-equality.js';
-import { OwnedWork } from '../../utils/owned-work.js';
+import { OwnedScope } from '../../utils/owned-work.js';
 import { CheckoutOwnershipError } from '../checkout-ownership.js';
 import { canReconcilePaymentOperation, purchaseOutcomeText, readPurchaseOutcome, type PaymentOperationView } from '../operation-view.js';
 import { spendFromHold, type BudgetLedger, type CheckoutBudgetSettlement, type CheckoutBudgetSettlementOwner } from '../budget.js';
@@ -94,7 +94,7 @@ function confirmedAs(operation: PaymentOperationView, finding: PaymentReconcilia
  * be free before an owner can settle anything; bookkeeping never calls submit,
  * reserves replacement money, or converts a missing receipt into a no-charge. */
 export class PurchaseReconciliations {
-  private readonly work = new OwnedWork();
+  private readonly work = new OwnedScope('purchase reconciliation');
   private closed = false;
   private readonly deps: ReconciliationDeps;
   constructor(deps: ReconciliationDeps) { this.deps = Object.freeze({ ...deps }); }
@@ -104,7 +104,7 @@ export class PurchaseReconciliations {
   close(): Promise<void> { this.closed = true; return this.work.join(); }
 
   reconcile(purchaseId: string, operationId: string, outcome: PaymentReconciliationOutcome, principalId: string, authorized: () => void): Promise<PaymentOperationView> {
-    return this.work.run(async () => {
+    return this.work.run('reconciliation', async () => {
       this.current(); authorized();
       const writer = this.deps.operations.recover(purchaseId);
       if (!writer) throw new PaymentOperationStoreError('busy');
@@ -159,7 +159,7 @@ export class PurchaseReconciliations {
     this.current();
     for (const operation of this.deps.operations.list()) {
       if (readPurchaseOutcome(operation.outcome)?.kind !== 'owner-reconciliation-pending') continue;
-      await this.work.run(async () => {
+      await this.work.run('reconciliation', async () => {
         this.current(); const writer = this.deps.operations.recover(operation.purchaseId); if (!writer) return;
         try {
           const checkpoint = writer.reconciliation();

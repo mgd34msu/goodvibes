@@ -92,10 +92,10 @@ export function buildDefaultDerivedState(): OnboardingStepDerivationState {
   };
 }
 
+/** A secret shown as dots only: no character of it, and its length capped as the editor shows it. */
 export function maskValue(value: string): string {
   if (value.length === 0) return 'unset';
-  if (value.length <= 3) return '•'.repeat(value.length);
-  return `${'•'.repeat(Math.max(0, value.length - 2))}${value.slice(-2)}`;
+  return '•'.repeat(Math.min(12, Math.max(4, value.length)));
 }
 
 export function areSelectionsEqual(

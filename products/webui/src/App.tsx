@@ -37,7 +37,7 @@ import { SignedOutGate } from './components/auth/SignedOutGate';
 import { DaemonUnreachableGate } from './components/auth/DaemonUnreachableGate';
 import { SettingsDialog } from './components/settings/dialog/SettingsDialog';
 import type { SettingsSectionId } from './components/settings/dialog/sections';
-import { needsYouCount } from './lib/needs-you';
+import { needsYouCount, runningNow } from './lib/needs-you';
 import { unpairRelay } from './lib/relay-connection';
 import { useEventStreamState } from './lib/event-stream';
 import { asRecord, bestId, bestTitle, firstString } from './lib/object';
@@ -170,6 +170,21 @@ export default function App() {
       attemptGroups: attemptGroupList.isError ? [] : attemptGroupList.data?.groups ?? [],
     }),
     [approvalList.data, fleetSnapshot.data, attemptGroupList.data, attemptGroupList.isError],
+  );
+  // Runtime tasks: the same key and read the health hook and Work use, so no request is added.
+  const taskList = useQuery({
+    queryKey: queryKeys.tasks,
+    queryFn: () => platformClient.operator.tasks.list(),
+    enabled: auth.isSuccess,
+    retry: 0,
+  });
+  const runningWork = useMemo(
+    () => runningNow({
+      nodes: fleetSnapshot.data?.nodes ?? [],
+      attemptGroups: attemptGroupList.isError ? [] : attemptGroupList.data?.groups ?? [],
+      tasks: taskList.data?.tasks ?? [],
+    }),
+    [fleetSnapshot.data, attemptGroupList.data, attemptGroupList.isError, taskList.data],
   );
   const chatSessions = useQuery({
     queryKey: ['companion-chat', 'sessions'],
@@ -410,7 +425,21 @@ export default function App() {
     const identity = asRecord(record.identity);
     return firstString(record, ['username', 'name', 'principal']) || firstString(identity, ['name', 'subject']);
   }, [auth.data]);
-  const accountName = signedInName || 'Operator';
+  // The identity carries no person's name for a device token; an owner device is the
+  // owner's, so his name comes from his profile (one read per sign-in, kept).
+  const ownerDevice = asRecord(auth.data).admin === true;
+  const ownerName = useQuery({
+    queryKey: ['profile', 'field', 'identity.name'],
+    queryFn: () => platformClient.operator.profile.get('identity.name'),
+    enabled: auth.isSuccess && !signedInName && ownerDevice,
+    staleTime: Infinity,
+    retry: false,
+  });
+  const profileName = useMemo(() => {
+    const field = asRecord(asRecord(ownerName.data).field);
+    return typeof field.value === 'string' ? field.value.trim() : '';
+  }, [ownerName.data]);
+  const accountName = signedInName || profileName || 'Operator';
 
   const handleNewChat = useCallback(() => handleNavigate('chat', { newChat: true }), [handleNavigate]);
   const handleOpenChat = useCallback((sessionId: string) => {
@@ -551,7 +580,6 @@ export default function App() {
   return (
     <AppShell view={view} onNavigate={handleNavigate} onOpenSettings={openSettings}>
     <div className="app-shell-root">
-    <DecisionPolicyNotice />
     <StepUpHost />
     {confirmDialog.element}
     {/* A hand-off bundle (#pair=<token>&offers=…) surfaces its offer set once the
@@ -574,12 +602,6 @@ export default function App() {
       <PairingPostureNotice notice={pairing.postureNotice} onDismiss={pairing.dismissPostureNotice} />
     )}
     {relayOffer}
-    <RelayOverflowBanner />
-    {/* voice.wake.indicator: 'banner' is the prominent persistent listening marker.
-        Renders nothing for 'statusline' (the header's WakeChip owns that) or 'off'. */}
-    <WakeBanner />
-    {/* Undelivered daemon receipts, read on connect and acknowledged once shown (see DaemonReceipts). */}
-    <DaemonReceipts connected={health.connection === 'connected'} signedIn={auth.isSuccess} />
     {daemonUnreachable && (
       <div className="daemon-gate-overlay">
         <DaemonUnreachableGate
@@ -602,6 +624,7 @@ export default function App() {
       recentChats={recentChats}
       deletingChatId={deleteChat.isPending ? (deleteChat.variables ?? null) : null}
       workAttention={fleetAttentionCount}
+      runningNow={runningWork}
       accountName={accountName}
       health={health}
       onNavigate={setView}
@@ -618,6 +641,7 @@ export default function App() {
         <>
           {/* These chips replace the status strip's must-stay-visible segments:
               each renders nothing unless its condition holds. */}
+          <DecisionPolicyNotice onOpenSettings={openSettings} />
           <PowerChip />
           <WakeChip />
           {health.compatibility?.status === 'restart-required' && (
@@ -635,6 +659,12 @@ export default function App() {
       )}
       banners={(
         <>
+          <RelayOverflowBanner />
+          {/* voice.wake.indicator: 'banner' is the prominent persistent listening marker.
+              Renders nothing for 'statusline' (the header's WakeChip owns that) or 'off'. */}
+          <WakeBanner />
+          {/* Undelivered daemon receipts, read on connect and acknowledged once shown (see DaemonReceipts). */}
+          <DaemonReceipts connected={health.connection === 'connected'} signedIn={auth.isSuccess} />
           {health.daemonCompatibility?.notice && (
             <div className="banner warning" role="status">
               <TriangleAlert size={16} aria-hidden="true" />
@@ -681,7 +711,7 @@ export default function App() {
             session,
           })}
           onSessionMissing={handleMissingChatSession}
-          userName={signedInName}
+          userName={signedInName || profileName}
         />
       )}
       {activeView === 'work' && (

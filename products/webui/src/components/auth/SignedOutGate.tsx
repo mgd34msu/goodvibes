@@ -34,7 +34,7 @@ import { Camera, KeyRound, QrCode, Radio, ShieldCheck } from 'lucide-react';
 import { useEffect, useState, useSyncExternalStore, type SyntheticEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { GOODVIBES_BASE_URL, login, setExplicitAuthToken } from '../../lib/goodvibes';
-import { formatError } from '../../lib/errors';
+import { formatError, isAuthExpiredError } from '../../lib/errors';
 import { decodeRelayPairingCode, storeRelayPairing, type RelayPairingPayload } from '../../lib/relay-pairing';
 import { RelayPairingOffer } from './RelayPairingOffer';
 import {
@@ -68,6 +68,11 @@ async function validateSignIn<T>(read: () => Promise<T>): Promise<T> {
   }
   finally { signInsInFlight -= 1; }
 }
+// The token typed into the field. Checking it replaces the identity boundary, which
+// remounts this gate; a refused token must still be in the field to correct, so the
+// text lives here, in memory only, until a sign-in succeeds.
+let typedToken = '';
+
 /** A failure belongs to the gate that showed it: a later sign-out must open on a clean gate. */
 function retireSignInError(): void {
   // A gate replaced while a check is still running is the case the module state exists
@@ -88,7 +93,8 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
   const queryClient = useQueryClient();
   const validationError = useSyncExternalStore(subscribeSignIn, readSignInError, readSignInError);
   useEffect(() => retireSignInError, []);
-  const [token, setToken] = useState('');
+  const [token, setTokenState] = useState(() => typedToken);
+  const setToken = (value: string) => { typedToken = value; setTokenState(value); };
   const [showPassword, setShowPassword] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -120,6 +126,7 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
       validateSignIn(() => login(credentials.username, credentials.password)),
     onSuccess: async () => {
       setPassword('');
+      typedToken = '';
       await queryClient.cancelQueries();
       await queryClient.invalidateQueries();
     },
@@ -293,7 +300,9 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
 
         {tokenError != null && (
           <div className="banner warning" role="alert">
-            {formatError(tokenError)}: sign-in failed. Try fresh credentials.
+            {isAuthExpiredError(tokenError)
+              ? 'The daemon did not accept that token. Check that it was copied whole; a revoked or expired token needs a new one from your terminal.'
+              : `${formatError(tokenError)}: sign-in failed. Try fresh credentials.`}
           </div>
         )}
 

@@ -10,7 +10,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import type { NoticeMeta, TranscriptEventKind, TranscriptReadingOptions } from '@goodvibes-jev/engine/platform/platform/core';
 // SystemMessageKind imported from runtime directly to avoid cycle: conversation.ts → system-message-router.ts → conversation.ts
 import type { SystemMessageKind } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { ConversationManager as PlatformConversationManager, type BlockMeta as PlatformBlockMeta, } from '@goodvibes-jev/engine/platform/platform/core';
+import { ConversationManager as PlatformConversationManager, isTranscriptNotice, type BlockMeta as PlatformBlockMeta, } from '@goodvibes-jev/engine/platform/platform/core';
 import type { BlockMeta } from './work-tree-types.js';
 import type { ConversationRenderContext } from './conversation-render-context.js';
 import type { createConversationRenderer } from './conversation-rendering.js';
@@ -280,7 +280,34 @@ export class TerminalConversationManager extends PlatformConversationManager {
         this.markDirty();
         this.publishSystemNotice(nextIndex, false);
     }
-    /** Where system notices go (core/notices.ts); the transcript draws none. Absent in bare test conversations. */
+    public override addTurnFailure(content: string): void {
+        const nextIndex = this.getMessageCount();
+        this.messageKindRegistry.delete(nextIndex);
+        super.addTurnFailure(content);
+        this.markDirty();
+        this.publishSystemNotice(nextIndex, false);
+    }
+    public override addTurnRetry(content: string): void {
+        const nextIndex = this.getMessageCount();
+        this.messageKindRegistry.delete(nextIndex);
+        super.addTurnRetry(content);
+        this.markDirty();
+        this.publishSystemNotice(nextIndex, false);
+    }
+    public override addInputNotice(content: string, level?: Parameters<PlatformConversationManager['addInputNotice']>[1]): void {
+        const nextIndex = this.getMessageCount();
+        this.messageKindRegistry.delete(nextIndex);
+        super.addInputNotice(content, level);
+        this.markDirty();
+        this.publishSystemNotice(nextIndex, false);
+    }
+    /** A `!` command's output is drawn in the transcript only; it is not a toast or a notification. */
+    public override addShellOutput(content: string, failed: boolean): void {
+        this.messageKindRegistry.delete(this.getMessageCount());
+        super.addShellOutput(content, failed);
+        this.markDirty();
+    }
+    /** Where system notices go (core/notices.ts); the transcript draws none but a turn's failure or retry and a `!` command's output (isTranscriptNotice). Absent in bare test conversations. */
     public setNoticeSink(sink: NoticeSink | null): void {
         this.retireNoticePublications();
         this.noticeSink = sink;
@@ -415,6 +442,13 @@ export class TerminalConversationManager extends PlatformConversationManager {
         if (!content)
             return;
         this.heldReplySeq = this.displayOnly.keep(this.getMessageCount(), (width) => { this.history.addLines(this.streamingLines(content, width)); });
+        this.markDirty();
+    }
+    /** The interrupted reply stays drawn where it was, display-only, with a line saying it was cut off. */
+    public override keepInterruptedReply(content: string): void {
+        this.displayOnly.keep(this.getMessageCount(), (width) => {
+            this.history.addLines(this.streamingLines(`${content.trimEnd()}\n\n*(interrupted: this reply was not finished and the model will not see it)*`, width));
+        });
         this.markDirty();
     }
     public override releaseHeldReply(): void {
@@ -603,8 +637,9 @@ export class TerminalConversationManager extends PlatformConversationManager {
         const displayStart = this._displayFromMessageIndex;
         const visibleSnapshot = displayStart > 0 ? renderSnapshot.slice(displayStart) : renderSnapshot;
         // Tool and system messages are not transcript content: a system message is
-        // a notice (a toast and the notification history, see core/notices.ts).
-        const hasDisplayMessage = visibleSnapshot.some((m) => m.role !== 'tool' && m.role !== 'system');
+        // a notice (a toast and the notification history, see core/notices.ts),
+        // except the lines the transcript draws itself (isTranscriptNotice).
+        const hasDisplayMessage = visibleSnapshot.some((m) => (m.role !== 'tool' && m.role !== 'system') || isTranscriptNotice(m));
         if (!hasDisplayMessage && displayStart === 0 && !this.suppressSplash && !this.splashGate.dismissed && (this.presentation.stickySplash || this.displayOnly.count === 0)) {
             this.addSplashScreen(width);
             this.splashGate.enter();

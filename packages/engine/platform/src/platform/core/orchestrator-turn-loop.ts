@@ -17,7 +17,7 @@ import type { CacheHitTracker } from '../providers/cache-strategy.js';
 import type { ConfigManager } from '../config/manager.js';
 import { estimateConversationTokens, estimateTokens } from './context-compaction.js';
 import { ProviderError, isContextSizeExceededError, streamRetryFacts } from '../types/errors.js';
-import { formatProviderError } from '../utils/error-display.js';
+import { formatError, formatProviderError } from '../utils/error-display.js';
 import { createTurnFailover, describeFailoverCost, readFallbackOrder } from '../providers/failover.js';
 import { findModelDefinition } from '../providers/registry-models.js';
 import { buildFallbackModelDefinition } from '../providers/fallback-model.js';
@@ -573,7 +573,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         // turn does not end with STREAM_START unmatched.
         endStream(true);
         const reason = preResult.reason ?? 'LLM call blocked by hook';
-        context.conversation.addNotice(reason, { level: 'warning' });
+        context.conversation.addTurnFailure(reason);
         return failTurn(reason, () => emitTurnError(context.runtimeBus!, context.emitterContext(context.turnId), {
           turnId: context.turnId,
           error: reason,
@@ -817,13 +817,12 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       if (chatErr instanceof ProviderError && chatErr.statusCode === 429 && model.provider === 'synthetic' && model.tier !== 'free') {
         // Every backend of the synthetic model is spent: the fallback order comes next.
         if (turnFailover(chatErr)) return 'again';
-        context.conversation.addNotice(
+        context.conversation.addTurnFailure(
           `All providers for ${model.displayName} are currently exhausted.\n`
           + `Options:\n`
           + `  • Wait a few minutes for the rate limit to reset and retry\n`
           + `  • Switch to a different model with /model\n`
           + `  • Switch to a free model via /model and selecting the free tier`,
-          { level: 'error' }
         );
         return failTurn('All providers for the selected synthetic model are exhausted', () => emitTurnError(context.runtimeBus!, context.emitterContext(context.turnId), {
           turnId: context.turnId,
@@ -1104,12 +1103,13 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     awaitDelegates: async (delegateSignal, round) => {
       if (!round || !round.calls.some(call => call.name === 'agent' && ['spawn', 'batch-spawn'].includes(String(call.arguments.mode))
         && round.results.some(result => result.callId === call.id && result.success))) return false;
-      context.setCompletionActivity?.('waiting');
+      // The turn waits on its agents, not on a completion check: no completion
+      // activity is set, so the throbber names the agents it waits for.
+      context.requestRender();
       try {
         return await waitForResponseDelegates(context.conversation, context.agentManager, { signal: delegateSignal, assertCurrent: assertActiveTurn }, [], context.canWaitForDelegate,
           notify => context.runtimeBus?.on<Extract<ContractEvent, { type: 'CONTRACT_STATUS_CHANGED' }>>('CONTRACT_STATUS_CHANGED', ({ payload }) => { if (payload.to === 'awaiting-owner') notify(); }));
       } finally {
-        context.setCompletionActivity?.(null);
         context.requestRender();
       }
     },
@@ -1123,6 +1123,13 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       return moved;
     },
     onRetry: (attempt, delayMs, error) => {
+      // The first failed request says why, in the transcript, at once; the throbber counts the attempts after it.
+      if (attempt === 1 && !streamBlockOpen) {
+        const reason = (error instanceof ProviderError ? formatProviderError(error, model.provider) : formatError(error)).split('\n')[0];
+        const minutes = Math.max(1, Math.round(TURN_RETRY_DELAYS_MS.reduce((sum, ms) => sum + ms, 0) / 60_000));
+        context.conversation.addTurnRetry(`${reason}\n  Retrying up to ${TURN_RETRY_DELAYS_MS.length} times over about ${minutes} minute${minutes === 1 ? '' : 's'}. Next: wait, press Esc to stop, or choose another model with /model.`);
+        context.requestRender();
+      }
       if (!context.runtimeBus) return;
       emitStreamRetry(context.runtimeBus, context.emitterContext(context.turnId), {
         turnId: context.turnId,

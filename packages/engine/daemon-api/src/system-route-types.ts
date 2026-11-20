@@ -338,6 +338,14 @@ export interface DaemonSystemRouteContext {
    */
   readonly putToOwner?: ((request: OwnerActRequestLike) => Promise<{ readonly approvalId: string }>) | undefined;
   /**
+   * Whether the request's caller may loosen a security, permission, judgment
+   * or payment setting: the `settings.loosen` row of the effect table
+   * (security/effect-authority.ts) admitted for the request's actor.
+   * `ask-owner`: the change is put to the owner. Absent hosts treat every
+   * caller as allowed.
+   */
+  readonly settingsLoosenAdmission?: ((req: Request) => 'allowed' | 'ask-owner' | 'refused') | undefined;
+  /**
    * Secret-free credential-status source for `credentials.get`. Null when the
    * daemon host wires no shared secret store, the handler then reports an
    * honest 503 rather than a false "no credentials".
@@ -374,7 +382,7 @@ export interface DaemonSystemRouteContext {
    * The principal the gate authenticated; approval decisions are attributed to
    * it, and an answer presented with the Agent's credential is refused.
    */
-  readonly resolveAuthenticatedPrincipal?: ((req: Request) => { readonly principalId: string; readonly credentialKind?: CredentialKind | null | undefined; readonly ownerDevice?: true | undefined } | null) | undefined;
+  readonly resolveAuthenticatedPrincipal?: ((req: Request) => { readonly principalId: string; readonly credentialKind?: CredentialKind | null | undefined } | null) | undefined;
   readonly routeBindings: RouteBindingManagerLike;
   /** Manages runtime.workingDir swaps. Null when workspace swapping is not available. */
   readonly swapManager: WorkspaceSwapManagerLike | null;

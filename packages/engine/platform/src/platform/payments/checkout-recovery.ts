@@ -4,7 +4,7 @@
 import { describeInterruption, type CheckoutRegistry, type InFlightCheckout, type InterruptedVerdict } from './checkout-registry.js';
 import { recoverInterruptedWindow, type WindowRecovery } from './windows.js';
 import { CheckoutOwnershipError, type CheckoutOperationOwnership } from './checkout-ownership.js';
-import { OwnedWork } from '../utils/owned-work.js';
+import { OwnedScope } from '../utils/owned-work.js';
 import { logger } from '../utils/logger.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { PaymentsServiceDeps } from './payments-gateway-service.js';
@@ -108,7 +108,7 @@ export interface InterruptedCheckoutRecovery {
 const NOTICE_RETRY_DELAYS_MS: readonly number[] = [60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000];
 
 export class CheckoutRecovery {
-  private readonly work = new OwnedWork();
+  private readonly work = new OwnedScope('checkout recovery');
   private readonly abort = new AbortController();
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   /** Settlement failures whose record's notice already landed this sweep; the owner is not told twice. */
@@ -141,8 +141,8 @@ export class CheckoutRecovery {
     this.abort.signal.throwIfAborted();
   }
 
-  private io<T>(operation: () => Promise<T>, label: string, current: () => void, owned: OwnedWork): Promise<T> {
-    const pending = this.work.run(() => owned.run(async () => {
+  private io<T>(operation: () => Promise<T>, label: string, current: () => void, owned: OwnedScope): Promise<T> {
+    const pending = this.work.run(label, () => owned.run(label, async () => {
       current();
       const result = await operation();
       current();
@@ -160,7 +160,7 @@ export class CheckoutRecovery {
     let resolve!: (result: CheckoutRecoverySweep) => void, reject!: (error: unknown) => void;
     const pending = new Promise<CheckoutRecoverySweep>((done, failed) => { resolve = done; reject = failed; });
     this.sweep = pending;
-    void this.work.run(() => this.recover()).then(resolve, reject);
+    void this.work.run('recover', () => this.recover()).then(resolve, reject);
     const settled = () => { if (this.sweep === pending) this.sweep = undefined; };
     void pending.then((sweep) => { settled(); this.scheduleNoticeRetry(sweep); }, settled);
     return pending;
@@ -241,7 +241,7 @@ export class CheckoutRecovery {
       this.current();
       let lease: { assertCurrent(): void; release(): void } | null | undefined;
       let active = true;
-      const io = new OwnedWork();
+      const io = new OwnedScope('checkout recovery io');
       const current = () => { this.current(); if (!active) throw new CheckoutOwnershipError(); lease?.assertCurrent(); };
       try {
         if (this.deps.retainInterrupted) {
@@ -263,7 +263,7 @@ export class CheckoutRecovery {
         active = false;
         if (lease) {
           const retained = lease;
-          const retirement = this.work.run(async () => { await io.join(); retained.release(); });
+          const retirement = this.work.run('checkout recovery', async () => { await io.join(); retained.release(); });
           void retirement.catch(error => { this.retirementErrors.push(error); });
         }
       }
@@ -282,7 +282,7 @@ export class CheckoutRecovery {
     record: InFlightCheckout,
     verdict: InterruptedVerdict,
     error: unknown,
-    io: OwnedWork,
+    io: OwnedScope,
   ): Promise<InterruptedCheckoutRecovery> {
     const reason = error instanceof Error && error.name !== 'Error' ? error.name : 'settlement-error';
     logger.error('Checkout recovery could not settle an interrupted purchase', {
@@ -348,7 +348,7 @@ export class CheckoutRecovery {
     record: InFlightCheckout,
     verdict: InterruptedVerdict,
     current: () => void,
-    io: OwnedWork,
+    io: OwnedScope,
   ): Promise<InterruptedCheckoutRecovery> {
     const now = this.deps.now ?? Date.now;
     let action: InterruptedCheckoutRecovery['action'];
@@ -465,7 +465,7 @@ export class CheckoutRecovery {
   private async verifyPurchaseRecord(
     purchaseId: string,
     current: () => void,
-    io: OwnedWork,
+    io: OwnedScope,
   ): Promise<boolean | undefined> {
     const has = this.deps.purchases.has;
     if (has === undefined) return undefined;
@@ -533,7 +533,7 @@ export class CheckoutRecovery {
   private async runArmingPageCleanup(
     record: InFlightCheckout,
     current: () => void,
-    io: OwnedWork,
+    io: OwnedScope,
   ): Promise<'done' | 'failed' | 'unavailable'> {
     const cleanup = this.deps.armingPageCleanup;
     if (cleanup === undefined) return 'unavailable';

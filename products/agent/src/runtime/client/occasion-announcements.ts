@@ -50,11 +50,12 @@ export async function watchOccasionAnnouncements(options: WatchOccasionAnnouncem
   const ended = (): void => { if (!closed) { closed = true; options.onEnded(); } };
   try {
     const close = await openRawServerSentEventStream(options.fetchImpl ?? globalThis.fetch, url.toString(), {
-      onEvent: (domain: string, payload: unknown) => {
+      onEvent: ({ name: domain, payload }) => {
         if (domain === 'deliveries' && isOccasionWaitingFrame(payload)) options.onWaiting();
       },
-      onTerminate: () => ended(),
-      onClose: () => ended(),
+      // An announcement may have been dropped: say a reminder may be waiting, so it is read now.
+      onGap: () => { if (!closed) options.onWaiting(); },
+      onEnd: (end) => { if (end.kind !== 'closed') ended(); },
     }, { getAuthToken: () => options.token, reconnect: { enabled: true } });
     return { close: (): void => { if (closed) return; closed = true; close(); } };
   } catch (error) {

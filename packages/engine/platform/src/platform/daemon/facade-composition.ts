@@ -60,6 +60,7 @@ import { DaemonBatchManager } from '../batch/index.js';
 import { CloudflareTunnelConnector } from '../cloudflare/tunnel-connector.js';
 import { CompanionChatManager } from '../companion/companion-chat-manager.js';
 import type { CompanionLLMProvider, CompanionProviderChunk } from '../companion/companion-chat-manager.js';
+import { companionToolCallSession } from '../companion/companion-chat-turn-execution.js';
 import { findModelDefinition, findModelDefinitionForProvider } from '../providers/registry-models.js';
 import { CATALOG_PROVIDER_NAME_ALIASES } from '../providers/builtin-registry.js';
 import type { ProviderRegistry } from '../providers/registry.js';
@@ -428,6 +429,7 @@ export function resolveDaemonFacadeRuntime(
     permissionManager: createBrokeredPermissionManager({
       workspaceTrust: null,
       requestApproval: (input) => runtimeServices.approvalBroker.requestApproval(input),
+      sessionOfAsk: companionToolCallSession,
       configManager: resolvedConfigManager,
       policyRuntimeState: runtimeServices.policyRuntimeState,
       hookDispatcher: runtimeServices.hookDispatcher,

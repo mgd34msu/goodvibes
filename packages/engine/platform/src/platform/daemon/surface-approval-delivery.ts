@@ -20,7 +20,7 @@ import type { SharedApprovalRecord } from '../control-plane/index.js';
 import { SlackIntegration, DiscordIntegration, NtfyIntegration, resolveNtfyDefaultPriority } from '../integrations/index.js';
 import { logger } from '../utils/logger.js';
 import { postToPublicWebhook, validatePublicWebhookUrl } from '../utils/url-safety.js';
-import type { HostResolver } from '../tools/fetch/pinned-request.js';
+import type { HostResolver } from '../runtime/network/destination.js';
 import { summarizeError } from '../utils/error-display.js';
 import { resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
 import type { SurfaceNoticeDelivery } from './types.js';

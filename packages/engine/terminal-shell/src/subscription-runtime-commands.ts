@@ -147,7 +147,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
       secretArgs: {
         select: (args) => (args[0]?.toLowerCase() === 'login' && args[2]?.toLowerCase() === 'finish' ? [3] : []),
       },
-      ...(policy.hidden ? { hidden: true } : {}),
+      ...(policy.hidden ? { firstScreen: false } : {}),
       async handler(args, ctx) {
         // Export writes live sign-in tokens, so it needs an explicit --yes even where other mutations do not.
         const explicit = stripYesFlag(args);

@@ -14,12 +14,15 @@
 import { createSessionInputChangeSubscriber } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { DaemonVerbCaller, SessionInputsWireClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { SharedSessionInputRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { Page } from '@goodvibes-jev/engine/errors';
 
 /** What `sessions.inputs.list` answers with, tolerating a bare array. */
-function readInputs(payload: unknown): readonly SharedSessionInputRecord[] {
-  if (Array.isArray(payload)) return payload as readonly SharedSessionInputRecord[];
-  const inputs = (payload as { inputs?: unknown } | null)?.inputs;
-  return Array.isArray(inputs) ? inputs as readonly SharedSessionInputRecord[] : [];
+/** One page of `sessions.inputs.list`: its inputs, and the cursor to ask again from when the daemon says more remain. */
+function readInputsPage(payload: unknown): Page<SharedSessionInputRecord> {
+  if (Array.isArray(payload)) return { items: payload as readonly SharedSessionInputRecord[], more: false };
+  const record = payload as { inputs?: unknown; more?: unknown; next?: unknown } | null;
+  const items = Array.isArray(record?.inputs) ? record.inputs as readonly SharedSessionInputRecord[] : [];
+  return record?.more === true && typeof record.next === 'string' ? { items, more: true, next: record.next } : { items, more: false };
 }
 
 /** The connected host's address and token, the same the verb caller dials, or why there is none. */
@@ -56,7 +59,7 @@ export function createAgentSessionInputsClient(verbs: DaemonVerbCaller, connecti
         ...(options.since === undefined ? {} : { since: options.since }),
         ...(options.limit === undefined ? {} : { limit: options.limit }),
       });
-      return { inputs: readInputs(payload) };
+      return readInputsPage(payload);
     },
 
     // One caller is granted an input; the rest are refused (409), which the

@@ -68,9 +68,11 @@ function friendlyError(error: unknown): string {
 export interface ApprovalActionsOptions {
   /** Open an approval's detail so the person reviews it (a push "Allow" lands here). */
   readonly onOpenApproval?: (id: string) => void;
+  /** Act on a push notification's hand-off fragment (default true); only Work does, so the chat leaves it to Work. */
+  readonly pushHandoff?: boolean;
 }
 
-export function useApprovalActions({ onOpenApproval }: ApprovalActionsOptions = {}) {
+export function useApprovalActions({ onOpenApproval, pushHandoff = true }: ApprovalActionsOptions = {}) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -171,14 +173,14 @@ export function useApprovalActions({ onOpenApproval }: ApprovalActionsOptions = 
     openRef.current = onOpenApproval;
   });
   useEffect(() => {
-    if (handoffDoneRef.current) return;
+    if (handoffDoneRef.current || !pushHandoff) return;
     const intent = parseApprovalActionFromHash(window.location.hash);
     if (!intent) return;
     handoffDoneRef.current = true;
     stripApprovalActionFragment();
     if (intent.action === 'approve') openRef.current?.(intent.approvalId);
     else denyRef.current({ id: intent.approvalId });
-  }, []);
+  }, [pushHandoff]);
 
   return { approve, deny, claim, cancel };
 }

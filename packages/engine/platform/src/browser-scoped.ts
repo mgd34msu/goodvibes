@@ -1,6 +1,6 @@
 import { createStreamTextAssembler, type FetchLike, type StreamTextAssembler } from '@goodvibes-jev/engine/transport-core';
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
-import { ConfigurationError, ContractError } from '@goodvibes-jev/engine/errors';
+import { ConfigurationError, ContractError, RefusalError } from '@goodvibes-jev/engine/errors';
 import type {
   OperatorMethodInput,
   OperatorMethodOutput,
@@ -339,7 +339,8 @@ function createScopedRealtime<TDomain extends string>(
       const ensureDomain = (domain: TDomain) => {
         const existing = activeByDomain.get(domain);
         if (existing) return existing;
-        const controller = new AbortController();
+        // Owns the initial request, every reconnect wait, and the stream that replaces one after a gap.
+        let controller = new AbortController();
         const active: {
           listenersByType: Map<string, Set<Listener<ScopedRuntimeEventEnvelope>>>;
           closed: boolean;
@@ -355,68 +356,100 @@ function createScopedRealtime<TDomain extends string>(
             active.listenersByType.clear();
             if (activeByDomain.get(domain) === active) activeByDomain.delete(domain);
             // The native closer is available only after response readiness.
-            // This controller also owns the initial request and reconnect wait.
             controller.abort();
             active.disconnect?.();
           },
         };
         activeByDomain.set(domain, active);
-        const isCurrent = () => !active.closed
-          && !controller.signal.aborted
-          && activeByDomain.get(domain) === active;
         if (callerSignal?.aborted) {
           active.close();
           return active;
         }
         callerSignal?.addEventListener('abort', active.close, { once: true });
-        void openRawServerSentEventStream(
-          fetchImpl,
-          buildEventUrl(baseUrl, domain),
-          {
-            onEventId: (id) => {
-              if (isCurrent()) resumePositions.set(domain, id);
-            },
-            onEvent: (eventName, payload) => {
-              if (!isCurrent() || eventName !== domain) return;
-              const envelope = readScopedEnvelope(payload, streamText);
-              if (!envelope) return;
-              const frame = readTurnLifecycleFrame(envelope.sessionId, envelope.payload);
-              if (frame && !turnGate.accepts(frame)) return;
-              for (const listener of [...(active.listenersByType.get(envelope.payload.type) ?? [])]) {
-                if (!isCurrent()) break;
-                // A throwing listener must not reach the stream reader: it would be
-                // taken for a connection error, tear the stream down and leave the
-                // other listeners without this event.
-                try {
-                  listener(envelope);
-                } catch (error) {
+        // Take this entry out of the domain map: a later subscription to the domain
+        // opens a new stream instead of joining one that has ended.
+        const retire = (): void => {
+          if (activeByDomain.get(domain) === active) activeByDomain.delete(domain);
+          controller.abort();
+          active.disconnect?.();
+          active.disconnect = undefined;
+        };
+        const connect = (): void => {
+          const own = controller;
+          const isCurrent = () => !active.closed
+            && !own.signal.aborted
+            && activeByDomain.get(domain) === active;
+          void openRawServerSentEventStream(
+            fetchImpl,
+            buildEventUrl(baseUrl, domain),
+            {
+              onEventId: (id) => {
+                if (isCurrent()) resumePositions.set(domain, id);
+              },
+              onEvent: ({ name: eventName, payload }) => {
+                if (!isCurrent() || eventName !== domain) return;
+                const envelope = readScopedEnvelope(payload, streamText);
+                if (!envelope) return;
+                const frame = readTurnLifecycleFrame(envelope.sessionId, envelope.payload);
+                if (frame && !turnGate.accepts(frame)) return;
+                for (const listener of [...(active.listenersByType.get(envelope.payload.type) ?? [])]) {
+                  if (!isCurrent()) break;
+                  // A throwing listener must not reach the stream reader: it would be
+                  // taken for a connection error, tear the stream down and leave the
+                  // other listeners without this event.
                   try {
-                    options.realtime?.onError?.(error);
-                  } catch {
-                    // An error reporter that throws is not allowed to end the stream either.
+                    listener(envelope);
+                  } catch (error) {
+                    try {
+                      options.realtime?.onError?.(error);
+                    } catch {
+                      // An error reporter that throws is not allowed to end the stream either.
+                    }
                   }
                 }
-              }
+              },
+              // The daemon dropped frames for this client: replace the stream with one that
+              // resumes from the last delivered id, so the gateway replays them. Listeners stay.
+              onGap: () => {
+                if (!isCurrent()) return;
+                own.abort();
+                active.disconnect?.();
+                active.disconnect = undefined;
+                controller = new AbortController();
+                connect();
+              },
+              onReconnect: ({ error }) => {
+                if (isCurrent()) options.realtime?.onError?.(error);
+              },
+              // An ended stream (a failure no reconnect clears, or the source ending it) is retired.
+              onEnd: (end) => {
+                if (end.kind === 'closed' || !isCurrent()) return;
+                retire();
+                options.realtime?.onError?.(end.kind === 'failed'
+                  ? new RefusalError(end.refusal)
+                  : new Error(end.complete ? 'The event stream ended.' : `The event stream ended after ${end.dropped} chunk(s) were lost.`));
+              },
             },
-            onError: (error) => {
-              if (isCurrent()) options.realtime?.onError?.(error);
+            {
+              signal: own.signal,
+              reconnect: options.realtime?.sseReconnect,
+              getAuthToken,
+              lastEventId: resumePositions.get(domain) ?? null,
             },
-          },
-          {
-            signal: controller.signal,
-            reconnect: options.realtime?.sseReconnect,
-            getAuthToken,
-            lastEventId: resumePositions.get(domain) ?? null,
-          },
-        ).then((disconnect) => {
-          if (!isCurrent()) {
-            disconnect();
-            return;
-          }
-          active.disconnect = disconnect;
-        }).catch((error) => {
-          if (isCurrent()) options.realtime?.onError?.(error);
-        });
+          ).then((disconnect) => {
+            if (!isCurrent()) {
+              disconnect();
+              return;
+            }
+            active.disconnect = disconnect;
+          }).catch((error) => {
+            if (!isCurrent()) return;
+            // A failed open leaves no entry behind: the next subscription opens the stream again.
+            retire();
+            options.realtime?.onError?.(error);
+          });
+        };
+        connect();
         return active;
       };
 

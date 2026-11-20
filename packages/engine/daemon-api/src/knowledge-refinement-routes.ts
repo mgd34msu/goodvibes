@@ -52,11 +52,21 @@ function readRefinementTaskFilter(url: URL): KnowledgeRefinementTaskFilter {
   };
 }
 
+function refuseEmptySelection(field: string, defaultMeaning: string): Response {
+  return jsonErrorResponse({
+    error: `${field} is an empty list, which selects nothing; omit ${field} to ${defaultMeaning}.`,
+    code: 'INVALID_REQUEST',
+  }, { status: 400 });
+}
+
 const knowledgeRefinementBodySchemas = createRouteBodySchemaRegistry({
   run: createRouteBodySchema<KnowledgeRefinementRunBody>('POST /api/knowledge/refinement/run', (body) => {
     const knowledgeSpaceId = readOptionalStringField(body, 'knowledgeSpaceId') ?? readOptionalStringField(body, 'spaceId');
     const gapIds = readStringArrayField(body, 'gapIds');
     const sourceIds = readStringArrayField(body, 'sourceIds');
+    // An explicit empty selection selects nothing; it is never "every gap" or "every source".
+    if (gapIds?.length === 0) return refuseEmptySelection('gapIds', 'refine every open gap');
+    if (sourceIds?.length === 0) return refuseEmptySelection('sourceIds', 'refine across every source');
     return {
       ...(knowledgeSpaceId ? { knowledgeSpaceId } : {}),
       ...(gapIds ? { gapIds } : {}),

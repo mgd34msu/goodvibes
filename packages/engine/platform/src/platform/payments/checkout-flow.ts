@@ -76,6 +76,7 @@ import { readShippingTierChoice } from './shipping.js';
 import { evaluatePaymentTaint, type OwnerOriginIntent } from './taint-gate.js';
 import { extractCheckout, type ExtractedCheckout, type RawCheckoutReading } from './checkout-extraction.js';
 import { parseRequestedMaximum } from './money-parsing.js';
+import { money } from './money.js';
 import {
   classifyMerchant,
   windowForPurchase,
@@ -617,10 +618,10 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   const stepDown: ShippingStepDown | null = shipping.stepDown;
   const expectedTerms = captureOwnedJson({
     submitTarget: controls.placeOrderTarget,
-    merchantDomain, currency: checkout.currency, lines: checkout.lines,
+    merchantDomain, lines: checkout.lines,
     taxMinorUnits: checkout.taxMinorUnits, feesMinorUnits: checkout.feesMinorUnits, feeLabels: checkout.feeLabels,
     ...(checkout.discounts.length > 0 ? { discounts: checkout.discounts } : {}),
-    shippingLabel: shipping.option.rawLabel, shippingMinorUnits: shipping.costMinorUnits, totalMinorUnits: draw.totalMinorUnits,
+    shippingLabel: shipping.option.rawLabel, shippingMinorUnits: shipping.costMinorUnits, total: money(draw.totalMinorUnits, checkout.currency),
   }) as unknown as CheckoutTerms;
   if (resumption && (!resumption.checkpoint.terms || !isDeepStrictEqual(resumption.checkpoint.terms, expectedTerms)
     || !isDeepStrictEqual(resumption.checkpoint.record.draw, draw) || resumption.checkpoint.record.shippingTierUsed !== shipping.tier)) {
@@ -791,7 +792,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     if (samePrices) return refused('total-changed', isClassicOperation()
       ? `The checkout amounts are unchanged, but code could not find the approved total together with the delivery option '${sanitizeNoticeField(expectedTerms.shippingLabel, 60)}' on the page (no decision model is in use). Nothing was submitted. Make sure that option is selected, read the checkout page again and start the purchase with what it shows.`
       : 'The earlier quote could not be verified, and no changed price was established. Nothing was submitted.');
-    if (isClassicOperation()) lifecycle.repricedInCode = { totalMinorUnits: expectedTerms.totalMinorUnits, currency: expectedTerms.currency };
+    if (isClassicOperation()) lifecycle.repricedInCode = { totalMinorUnits: expectedTerms.total.minor, currency: expectedTerms.total.currency };
     // Iterative re-entry avoids retaining earlier request/window stacks. The
     // next attempt reads the live budget and creates a completely new window.
     return { kind: 'reprice', reading: retained };

@@ -114,20 +114,44 @@ function ResultBlock({ title, value }: { title: string; value: unknown }) {
   );
 }
 
+/**
+ * A knowledge record's name: its title, or for an issue its message ("Source
+ * crawl failed: ..."), before the id it would otherwise be shown by.
+ */
+function itemTitle(item: unknown, fallback: string): string {
+  return firstString(item, ['title', 'name', 'label', 'message']) || bestTitle(item, fallback);
+}
+
+/** Identifiers and hashes: in the raw data, not among the facts a person reads. */
+function isIdentifierFact(label: string): boolean {
+  return label === 'Id' || / id$/.test(label) || label === 'Content hash';
+}
+
 function ItemPane({ itemId, label, onClose, includeAllSpaces = false }: { itemId: string; label: string; onClose: () => void; includeAllSpaces?: boolean }) {
   const detail = useQuery({
     queryKey: ['knowledge', 'item', itemId, includeAllSpaces],
     queryFn: () => invokeMethod('knowledge.item.get', { id: itemId, ...(includeAllSpaces ? { includeAllSpaces: true } : {}) }),
   });
-  const body = readPath(detail.data, ['item']) ?? detail.data;
+  // knowledge.item.get answers with the record under its kind ({ source }, { node },
+  // { issue }); the pane reads that record, not the envelope around it.
+  const body = readPath(detail.data, ['item']) ?? readPath(detail.data, ['source'])
+    ?? readPath(detail.data, ['node']) ?? readPath(detail.data, ['issue']) ?? detail.data;
+  const summary = firstString(body, ['summary', 'description']);
+  const facts = scalarFacts(body, 20)
+    .filter((fact) => !['Title', 'Summary', 'Description', 'Message'].includes(fact.label) && !isIdentifierFact(fact.label));
   return (
-    <DetailPane title={detail.data ? bestTitle(body, itemId) : itemId} meta={label} onClose={onClose}>
+    <DetailPane title={detail.data ? itemTitle(body, label) : label} meta={label} onClose={onClose}>
       {detail.isPending && <SkeletonRows count={3} label="Loading detail" />}
       {detail.error && <ErrorState error={detail.error} onRetry={() => void detail.refetch()} title="Could not load this item" />}
       {detail.data !== undefined && (
         <>
-          <Facts items={scalarFacts(body)} />
-          <Disclosure summary="Raw data" defaultOpen={scalarFacts(body).length === 0}>
+          {summary && (
+            <DetailSection title="Summary">
+              <div className="lib-markdown"><MarkdownMessage content={summary} /></div>
+            </DetailSection>
+          )}
+          <Facts items={facts} />
+          <Disclosure summary="Raw data" defaultOpen={facts.length === 0 && !summary}>
             <CodeFrame>{compactJson(detail.data)}</CodeFrame>
           </Disclosure>
         </>
@@ -156,7 +180,7 @@ function ItemGroup({
 }: ItemGroupProps) {
   const [visible, setVisible] = useState(pageSize);
   const shown = useMemo(
-    () => items.filter((item) => includesText([bestTitle(item, ''), bestId(item)], query)),
+    () => items.filter((item) => includesText([itemTitle(item, ''), bestId(item)], query)),
     [items, query],
   );
   if (shown.length === 0) return null;
@@ -169,7 +193,7 @@ function ItemGroup({
           return (
             <Row
               key={`${key}-${index}`}
-              title={bestTitle(item, id)}
+              title={itemTitle(item, id)}
               meta={`${kindLabel} · ${sentence(bestStatus(item))}`}
               selected={selectedKey === key}
               onSelect={() => onSelect(key)}

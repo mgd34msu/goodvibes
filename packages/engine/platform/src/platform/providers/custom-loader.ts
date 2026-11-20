@@ -219,6 +219,9 @@ export async function loadCustomProviders(
 
     const apiKey = resolveApiKey(cfg);
     const modelIds = cfg.models.map((m) => m.id);
+    // The variable the file names is the provider's key route, so its status names
+    // that variable (not a name derived from the provider id that nothing sets).
+    const authEnvVars = cfg.apiKeyEnv ? [cfg.apiKeyEnv] : [];
 
     let provider: RegistrableProvider;
     try {
@@ -229,6 +232,7 @@ export async function loadCustomProviders(
           apiKey,
           defaultModel: modelIds[0]!,
           models: modelIds,
+          authEnvVars,
           ...(cfg.defaultHeaders ? { defaultHeaders: cfg.defaultHeaders } : {}),
         });
       } else {
@@ -238,6 +242,7 @@ export async function loadCustomProviders(
           apiKey,
           defaultModel: modelIds[0]!,
           models: modelIds,
+          authEnvVars,
           ...(cfg.defaultHeaders ? { defaultHeaders: cfg.defaultHeaders } : {}),
           reasoningFormat: cfg.reasoningFormat ?? 'none',
         });

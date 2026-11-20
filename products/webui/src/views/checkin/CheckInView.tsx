@@ -31,6 +31,7 @@ import { IconButton } from '../../components/ui/IconButton';
 import { StatusDot, type StatusTone } from '../../components/ui/StatusDot';
 import { Toggle } from '../../components/ui/Toggle';
 import { whenLabel } from '../../lib/when-label';
+import { cronInWords } from '../../lib/cron-words';
 import { formatError, isMethodUnavailableError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
 import '../../styles/components/checkin.css';
@@ -120,7 +121,7 @@ function ConfigEditForm({
     const ok = await confirm.ask({
       title: enabled ? 'Turn on check-ins?' : 'Save check-in settings?',
       description: enabled
-        ? `GoodVibes contacts you through ${deliveryChannel || 'the chosen channel'} on the schedule “${cadence}”, outside quiet hours “${quietHours}”.`
+        ? `GoodVibes contacts you through ${deliveryChannel || 'the chosen channel'} on the schedule “${cronInWords(cadence) ?? cadence}”, outside quiet hours “${quietHours}”.`
         : 'Check-ins stay off, so GoodVibes never contacts you on its own.',
       confirmLabel: 'Save',
       tone: enabled ? 'danger' : 'default',
@@ -268,7 +269,12 @@ export function CheckInSettings() {
                     </span>
                   ),
                 },
-                { label: 'Schedule', value: <code className="checkin-code">{config.data.config.cadence}</code> },
+                {
+                  label: 'Schedule',
+                  value: cronInWords(config.data.config.cadence)
+                    ? <span title={config.data.config.cadence}>{cronInWords(config.data.config.cadence)}</span>
+                    : <code className="checkin-code">{config.data.config.cadence}</code>,
+                },
                 { label: 'Delivery channel', value: config.data.config.deliveryChannel },
                 { label: 'Quiet hours', value: config.data.config.quietHours },
               ]}

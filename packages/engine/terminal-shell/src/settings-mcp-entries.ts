@@ -32,7 +32,7 @@ export function parseMcpToolRuleEdit(text: string): McpToolRuleEdit | null {
  * Keep one tool's rule from Settings -> MCP, the owner's own screen: the rule
  * is written with the server's entry in its MCP config file and applied at
  * once (an allow only in the owner's global file). `clear` removes whatever
- * rule is set for the tool, as /mcp clear does: the kept rule and this
+ * rule is set for the tool, as /mcp unblock and /mcp unexempt do together: the kept rule and this
  * session's denial. `done` gets the line to show and the refreshed rows once
  * the write and reload finish.
  */

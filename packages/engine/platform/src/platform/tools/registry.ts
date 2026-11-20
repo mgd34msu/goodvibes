@@ -32,7 +32,7 @@ import type { PreparedSubscriptionImportTransition } from '../config/subscriptio
 import { assertPreparedConfigWriteRoute } from '../config/settings-precondition-client.js';
 import { assertRemoteSettingsImportPrecondition, applyRemoteSettingsImportPrecondition,
   assertCompletedRemoteSettingsImportPrecondition } from '../config/settings-import-precondition-client.js';
-import { firstJsonSchemaFailureAsync } from '@goodvibes-jev/engine/transport-http';
+import { firstJsonSchemaFailure, firstJsonSchemaFailureAsync } from '@goodvibes-jev/engine/transport-http';
 import { PERMISSION_CATEGORIES, type Tool, type ToolDefinition, type ToolExecuteOptions, type ToolResult } from '../types/tools.js';
 import type { ToolActivity } from '@goodvibes-jev/engine/contracts';
 import { UnknownPreparedToolError } from './preparation-error.js';
@@ -495,11 +495,15 @@ export class ToolRegistry {
 
   /**
    * The answer to a call of a tool the request listed in one line and that is
-   * not loaded yet: not run, refused with the tool's full definition so the
-   * model can send the call again with real parameters, and loaded from now
-   * on. Undefined for any call that runs as usual. A lookup; no model request.
+   * not loaded yet. Its arguments are checked against the full definition: a
+   * call that already fits it runs as usual (the tool is loaded from now on),
+   * so a model that knew the parameters is not made to send the same call
+   * twice. One that does not fit is not run, and is refused with the tool's
+   * full definition so the model can send it again with real parameters.
+   * Undefined for any call that runs as usual. A lookup and a schema check;
+   * no model request.
    */
-  deferredCallRefusal(callId: string, name: string): ToolResult | undefined {
+  deferredCallRefusal(callId: string, name: string, args?: Record<string, unknown>): ToolResult | undefined {
     const away = this.tools.has(name) ? undefined : this.elsewhere.get(name);
     if (away) {
       return {
@@ -513,6 +517,7 @@ export class ToolRegistry {
     if (!definition || name === TOOL_SCHEMA_TOOL_NAME || this.sentInFull(definition)) return undefined;
     this.loadedTools.add(name);
     const full = this.fullDefinitionOf?.(name) ?? definition;
+    if (args !== undefined && firstJsonSchemaFailure(full.parameters, args) === undefined) return undefined;
     return deferredToolRefusal(callId, full);
   }
 

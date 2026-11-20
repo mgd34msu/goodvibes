@@ -9,6 +9,7 @@ import { asRecord, bestId, bestTitle, firstString } from '../lib/object';
 import { queryKeys } from '../lib/queries';
 import { useProviderModelOptions } from '../lib/use-provider-model-options';
 import { providerOptionsFromResponse, reasoningOptionsForModel, sortProvidersConfiguredFirst } from '../lib/provider-models';
+import { deriveProviderStatus } from '../lib/provider-status';
 import { shouldSteerComposerKey, shouldSubmitComposerKey } from '../lib/composer-keys';
 import { isSessionNotFoundError, formatError } from '../lib/errors';
 import {
@@ -27,6 +28,7 @@ import { MessageList } from './chat/MessageList';
 import { Composer } from './chat/Composer';
 import { ChatSearch } from './chat/ChatSearch';
 import { QueuedMessagesPanel } from './chat/QueuedMessagesPanel';
+import { ChatApprovals } from './chat/ChatApprovals';
 import { useChatSend } from './chat/useChatSend';
 import { parseSlashCommand, SLASH_COMMANDS } from './chat/slash-commands';
 import { useToast } from '../lib/toast';
@@ -45,6 +47,8 @@ import {
   settledFromList,
   settledTurnLabel,
   streamHealthLabel,
+  deliveryState,
+  toolActivityFromHistory,
   workingStatusLabel,
   type TurnPhase,
   type TurnState,
@@ -147,7 +151,7 @@ export function ChatView({
   const currentModel = useQuery({ queryKey: ['models', 'current'], queryFn: () => platformClient.operator.models.current.get() });
   const catalogProviderOptions = useMemo(() => providerOptionsFromResponse(modelCatalog.data), [modelCatalog.data]);
 
-  const providerOptions = useMemo(() => {
+  const allProviderOptions = useMemo(() => {
     const byId = new Map<string, ReturnType<typeof providerOptionsFromResponse>[number]>();
     for (const provider of providerOptionsFromResponse(providers.data)) byId.set(provider.id, provider);
     for (const provider of catalogProviderOptions) {
@@ -170,6 +174,13 @@ export function ChatView({
   const currentProviderId = sessionProvider || firstString(currentModelData, ['provider', 'providerId', 'runtimeProviderId'])
     || firstString(asRecord(asRecord(modelCatalog.data).currentModel), ['provider', 'providerId', 'runtimeProviderId'])
     || '';
+  // The model menu offers the providers that are set up, and the one this chat (or the
+  // default model) uses even when it no longer is; a provider with no key and no
+  // answering server has no model to pick.
+  const providerOptions = useMemo(
+    () => allProviderOptions.filter((provider) => deriveProviderStatus(provider.value).configured || provider.id === currentProviderId),
+    [allProviderOptions, currentProviderId],
+  );
   const selectedProvider = providerOptions.find((provider) => provider.id === selectedProviderId)?.value ?? providerOptions[0]?.value;
   const catalogProviders = useMemo(() => catalogProviderOptions.map(provider => provider.value), [catalogProviderOptions]);
   const providerModels = useProviderModelOptions(selectedProvider, catalogProviders,
@@ -413,10 +424,12 @@ export function ChatView({
     // history, both end up with the same id once the turn completes. A message
     // whose id has no entry (older history, or a full page reload) simply renders
     // without a fold, honestly, rather than fabricating one.
-    if (toolActivityByMessageId.size === 0) return merged;
+    // A reply this tab did not watch (an older one, or any after a reload) is folded
+    // from the turn history the daemon saved with it.
     return merged.map((message) => {
-      const toolActivity = toolActivityByMessageId.get(bestId(message));
-      return toolActivity ? { ...message, toolActivity } : message;
+      const toolActivity = toolActivityByMessageId.get(bestId(message))
+        ?? (messageTone(message) === 'assistant' ? toolActivityFromHistory(message) : []);
+      return toolActivity.length > 0 ? { ...message, toolActivity } : message;
     });
   }, [activeSessionId, localMessages, messageItems, toolActivityByMessageId]);
 
@@ -424,6 +437,13 @@ export function ChatView({
   // (retained) history attached to the node that heads its fork. Derived purely from
   // the server-authoritative list, so it survives reloads and never drops history.
   const lineageNodes = useMemo(() => buildLineage(renderedMessageItems), [renderedMessageItems]);
+  // A message still waiting behind the running reply is shown once, in the queue
+  // above the composer where it can be edited or dropped; it joins the transcript,
+  // after the reply it waited for, when it is sent.
+  const transcriptNodes = useMemo(
+    () => lineageNodes.filter((node) => !(messageTone(node.message) === 'user' && deliveryState(node.message) === 'queued')),
+    [lineageNodes],
+  );
 
   useEffect(() => {
     const container = scrollRef.current;
@@ -517,6 +537,10 @@ export function ChatView({
   // title the operator set by hand.
   useEffect(() => {
     if (!activeSessionId || isRenamingTitle) return;
+    // Decide only once the chat's own record (and so its real title) is here: before
+    // the list answers, the title reads as the bare id, which looks auto-generated and
+    // would replace a title the chat was created with by its first message.
+    if (!activeSession) return;
     if (autoTitledSessionsRef.current.has(activeSessionId)) return;
     if (manuallyTitledSessionsRef.current.has(activeSessionId)) return;
     const firstUser = renderedMessageItems.find((message) => messageTone(message) === 'user');
@@ -536,7 +560,7 @@ export function ChatView({
     autoTitledSessionsRef.current.add(activeSessionId);
     if (!looksAutoGenerated || current === derived) return;
     renameSession.mutate({ sessionId: activeSessionId, title: derived });
-  }, [activeSessionId, activeSessionTitle, isRenamingTitle, renderedMessageItems, renameSession]);
+  }, [activeSession, activeSessionId, activeSessionTitle, isRenamingTitle, renderedMessageItems, renameSession]);
 
   // A confirmed wake's transcript lands in the SAME two places a dictated one does:
   // appended to the draft for review, or sent straight away when
@@ -796,7 +820,7 @@ export function ChatView({
         </div>
       )}
       <MessageList
-        nodes={lineageNodes}
+        nodes={transcriptNodes}
         lead={greetingBlock}
         liveReply={liveReply}
         hasLiveText={hasLiveText}
@@ -819,6 +843,7 @@ export function ChatView({
         workingLabel={workingLabel}
       />
       <div className="chat-dock">
+        {activeSessionId && <ChatApprovals sessionId={activeSessionId} />}
         {activeSessionId && (
           <QueuedMessagesPanel
             sessionId={activeSessionId}
@@ -861,7 +886,9 @@ export function ChatView({
           effortPending={selectEffort.isPending}
           onEffortChange={(effort) => selectEffort.mutate(effort)}
         />
-        {isNewChat && (
+        {/* Starters are for an empty composer: once something is typed (a slash command
+            among them, whose menu opens where they sit) they step aside. */}
+        {isNewChat && !draft.trim() && (
           <div className="chat-suggestions" role="group" aria-label="Start with">
             {CHAT_SUGGESTIONS.map((suggestion) => {
               const Icon = SUGGESTION_ICONS[suggestion.icon];

@@ -17,7 +17,7 @@ import type { AgentRecord } from '../tools/agent/index.js';
 import type { ContractPreSpawn, ContractUnitOutcome } from '../orchestration/phase-runner.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { OwnedWork } from '../utils/owned-work.js';
+import { OwnedScope } from '../utils/owned-work.js';
 import type { ContractHoldOutcome } from './agent-hooks.js';
 import type { ContractConfig } from './config.js';
 import type { FoldedReads } from './evidence.js';
@@ -182,7 +182,7 @@ export class ContractRun {
     /** Units an agent-tool batch or AgentInput.proposedUnits proposed, for the planner. */
     readonly proposedUnits?: readonly { readonly task: string; readonly template?: string | undefined }[] | undefined,
     /** Real planning, checking, routing and completion work, including cleanup. */
-    readonly work: OwnedWork = new OwnedWork(),
+    readonly work: OwnedScope = new OwnedScope('contract run'),
   ) {
     if (contract.inputSnapshot) pinContractInputAdmission(contract, this.abort.signal);
   }

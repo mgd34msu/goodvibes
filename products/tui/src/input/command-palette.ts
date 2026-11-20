@@ -13,8 +13,10 @@
  * Suggested learns from what you use (per process); until it has something
  * to learn from it offers a sensible starting set.
  *
- * Enter runs the selected command; a command that needs arguments (and tab,
- * for any command) fills the composer instead so the arguments can be typed.
+ * Enter runs the selected command; a described command opens its guided
+ * path (what do you want to do, then its blanks). Another command that needs
+ * arguments (and tab, for any command) fills the composer instead so the
+ * arguments can be typed.
  */
 
 import { readCommandDiscovery, type CommandDiscoveryReading } from '@goodvibes-jev/engine/platform/platform/routing';
@@ -85,6 +87,8 @@ export function resetPaletteUsageForTests(): void {
 }
 
 function hasRequiredArgs(command: SlashCommand): boolean {
+  // A described command asks for what it needs: Enter opens its guided path.
+  if (command.described) return false;
   const hint = command.argsHint ?? command.usage ?? '';
   return /<[^>]+>/.test(hint.replace(/\[[^\]]*\]/g, ''));
 }

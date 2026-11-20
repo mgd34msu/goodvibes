@@ -330,7 +330,8 @@ const runtimeSessionBodySchemas = createRouteBodySchemaRegistry({
       task,
       ...(model ? { model } : {}),
       ...(provider ? { provider } : {}),
-      ...(tools ? { tools } : {}),
+      // An empty `tools` list is read as not sent, as before readStringArrayField returned [] for it.
+      ...(tools?.length ? { tools } : {}),
       ...(routing ? { routing } : {}),
     };
   }),
@@ -499,19 +500,27 @@ async function handleGetSharedSessionInputs(
   const limit = readBoundedLimit(url);
   // Collection cursor for live surfaces: filter by state (e.g. 'queued') and/or a
   // `since` createdAt cursor (exclusive) so a surface drains only inputs it has
-  // not collected yet. Absent params preserve the legacy "last N inputs" behavior.
+  // not collected yet: the OLDEST `limit` after the cursor, with `more` and the
+  // `next` cursor when inputs remain. Without either param the newest `limit`
+  // inputs are listed for display.
   const stateParam = readSessionInputState(url.searchParams.get('state'));
   const sinceParam = readPositiveInt(url.searchParams.get('since'));
-  const inputs = (stateParam !== undefined || sinceParam !== undefined)
-    ? context.sessionBroker.getInputsSince(sessionId, {
-        ...(stateParam !== undefined ? { state: stateParam } : {}),
-        ...(sinceParam !== undefined ? { since: sinceParam } : {}),
-        limit,
-      })
-    : context.sessionBroker.getInputs(sessionId, limit);
+  if (stateParam !== undefined || sinceParam !== undefined) {
+    const page = context.sessionBroker.getInputsPage(sessionId, {
+      ...(stateParam !== undefined ? { state: stateParam } : {}),
+      ...(sinceParam !== undefined ? { since: sinceParam } : {}),
+      limit,
+    });
+    return Response.json({
+      session: toSharedSessionRecordResponse(sessionId, session),
+      inputs: page.items,
+      more: page.more,
+      ...(page.next !== undefined ? { next: page.next } : {}),
+    });
+  }
   return Response.json({
     session: toSharedSessionRecordResponse(sessionId, session),
-    inputs,
+    inputs: context.sessionBroker.getInputs(sessionId, limit),
   });
 }
 

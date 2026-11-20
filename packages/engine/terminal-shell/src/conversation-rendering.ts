@@ -11,7 +11,7 @@ import { LAYOUT } from './renderer/layout.js';
 import type { ConversationRenderContext } from './conversation-render-context.js';
 import { renderCompactionContinuationMessage } from './conversation-compaction-render.js';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
-import { extractUserDisplayText, COMPACTION_HANDOFF_HEADER } from '@goodvibes-jev/engine/platform/platform/core';
+import { extractUserDisplayText, COMPACTION_HANDOFF_HEADER, isTranscriptNotice } from '@goodvibes-jev/engine/platform/platform/core';
 import { laneGlyphs } from './renderer/lane-graph-glyphs.js';
 import { beadArgument, beadName, cellText, formatBeadTime } from './renderer/bead.js';
 import { paintBeadRow } from './renderer/lane-graph-paint.js';
@@ -125,12 +125,14 @@ export function createConversationRenderer(presentation: ConversationPresentatio
      */
     function drawConversationTurn(context: ConversationRenderContext, model: TurnModel, width: number): TurnRender {
         const render = drawTurnRows(context, model, width);
-        if (model.notices.length === 0 || context.systemNotices === 'elsewhere')
+        // Where notices are shown elsewhere, a turn's failure or retry and a `!` command's output are still drawn here.
+        const notices = context.systemNotices === 'elsewhere' ? model.notices.filter((notice) => notice.inTranscript === true) : model.notices;
+        if (notices.length === 0)
             return render;
         const lines = [...render.lines];
         const errorLines = [...render.errorLines];
         const messageLines = new Map(render.messageLines);
-        for (const notice of model.notices) {
+        for (const notice of notices) {
             lines.push(createEmptyLine(width));
             messageLines.set(notice.messageIndex, lines.length);
             if (navigable(context, notice.messageIndex, notice.severity))
@@ -208,8 +210,8 @@ export function createConversationRenderer(presentation: ConversationPresentatio
         if (message.role === 'user')
             renderConversationUserMessage(context, message, width, msgIdx);
         else if (message.role === 'system') {
-            // The main transcript's notices are toasts and history entries, not rows.
-            if (context.systemNotices !== 'elsewhere')
+            // The main transcript's notices are toasts and history entries, not rows; a turn's failure or retry and a `!` command's output are drawn.
+            if (context.systemNotices !== 'elsewhere' || isTranscriptNotice(message))
                 renderConversationSystemMessage(context, message, width, msgIdx);
         }
         else if (message.role === 'tool') {

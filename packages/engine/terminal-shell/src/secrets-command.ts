@@ -53,7 +53,7 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
     name: 'secrets',
     effect: 'mixed',
     description: policy.description,
-    hidden: policy.hidden,
+    firstScreen: !policy.hidden,
     usage,
     argsHint: '<set|link|get|test|providers|list|trust|delete> [KEY]',
     secretArgs: { subcommands: { set: { from: 2 } } },

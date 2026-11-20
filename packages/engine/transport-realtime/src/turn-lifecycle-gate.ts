@@ -56,13 +56,10 @@
  * for a stream that only ever carries one session.
  */
 
-/** Turn frames that END a turn, the ones a replay must never be allowed to deliver. */
-export const TERMINAL_TURN_EVENT_TYPES: readonly string[] = [
-  'TURN_COMPLETED',
-  'TURN_ERROR',
-  'TURN_CANCEL',
-  'PREFLIGHT_FAIL',
-];
+import { TURN_SETTLING_EVENTS } from '@goodvibes-jev/engine/transport-core/turn-settlement';
+
+/** Turn frames that END a turn, the ones a replay must never be allowed to deliver (the one settling set). */
+export const TERMINAL_TURN_EVENT_TYPES: readonly string[] = TURN_SETTLING_EVENTS;
 
 /** The frame that starts a turn and (re)binds the session to it. */
 export const TURN_START_EVENT_TYPE = 'TURN_SUBMITTED';

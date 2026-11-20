@@ -120,6 +120,8 @@ Agent's outgoing host connections resolve credentials in this order:
 2. `GOODVIBES_DAEMON_TOKEN`
 3. Agent-owned pairing for the exact selected origin
 4. Existing daemon-global shared-token file, only when no host pairing exists
+   and the selected host address is this machine (loopback or one of its own
+   interface addresses)
 
 Corrupt/unavailable or unresolved host-bound storage fails closed instead of
 falling back. Symlinked or insecure home/store ancestry is refused, even when a

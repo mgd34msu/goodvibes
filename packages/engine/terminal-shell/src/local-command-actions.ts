@@ -87,7 +87,7 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
     image: {
       name: 'image',
       effect: 'external-network',
-      hidden: policy.hidden,
+      firstScreen: !policy.hidden,
       aliases: ['img'],
       description: 'Attach an image file to the next message',
       usage: '<path> [prompt text]',
@@ -139,7 +139,7 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
     'refresh-models': {
       name: 'refresh-models',
       effect: 'external-network',
-      hidden: policy.hidden,
+      firstScreen: !policy.hidden,
       description: 'Refresh model catalog, benchmarks, and token limits',
       async handler(_args: string[], ctx: Context) {
         const providerApi = requireProviderApi(ctx);
@@ -202,7 +202,7 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
     pin: {
       name: 'pin',
       effect: 'local-state',
-      hidden: policy.hidden,
+      firstScreen: !policy.hidden,
       description: 'Pin a model to the favorites list',
       usage: '<model-id>',
       argsHint: '<model-id>',
@@ -236,7 +236,7 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
     unpin: {
       name: 'unpin',
       effect: 'local-state',
-      hidden: policy.hidden,
+      firstScreen: !policy.hidden,
       description: 'Unpin a model from the favorites list',
       usage: '<model-id>',
       argsHint: '<model-id>',

@@ -924,8 +924,8 @@ The terminal app on a laptop can use a daemon on a home server instead of one of
 
 | Request from the laptop's terminal app to | Credential sent |
 | --- | --- |
-| A daemon on the laptop itself (a loopback address the app did not reach through `daemon.connectedHost.url`) | The laptop daemon's own operator token, from the laptop's `~/.goodvibes/daemon/operator-tokens.json` (or `GOODVIBES_DAEMON_TOKEN`). |
-| The daemon named by `daemon.connectedHost.url` | The token stored for that exact origin in the laptop's `~/.goodvibes/tui/connected-daemons.json`; while a `/auth login daemon` sign-in for that origin is held, its session token instead; `GOODVIBES_DAEMON_TOKEN` overrides both when set. The laptop's own operator token is never sent to another machine, even through a forwarded loopback port. |
+| A daemon on the laptop itself (a loopback address the app did not reach through `daemon.connectedHost.url`) | The laptop daemon's own operator token, from the laptop's `~/.goodvibes/daemon/operator-tokens.json` (or `GOODVIBES_DAEMON_TOKEN`). When the laptop's settings declare `controlPlane.publicBaseUrl` and the app dials that address, the token is sent there only after the address answers the daemon's identity challenge once per app run, without the token: the first call waits for that check (at most 2 seconds) and then goes ahead, or fails with `CREDENTIAL_NOT_FOR_TARGET` when the address did not prove it is this machine's daemon. |
+| The daemon named by `daemon.connectedHost.url` | The token stored for that exact origin in the laptop's `~/.goodvibes/tui/connected-daemons.json`; while a `/auth login daemon` sign-in for that origin is held, its session token instead. Neither the laptop's own operator token nor `GOODVIBES_DAEMON_TOKEN` is ever sent there, even when the address is a loopback port (a forwarded port, another user's daemon); with nothing stored the call is refused with `CREDENTIAL_NOT_FOR_TARGET`. `daemon.connectedHost.enabled` set to `false` stops the app dialling any daemon. |
 | Native work (contracts, the work ledger) on the connected daemon | A device credential from `/host pair` for that origin when one exists. |
 
 End to end:

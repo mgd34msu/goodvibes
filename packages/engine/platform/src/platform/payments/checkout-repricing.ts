@@ -11,6 +11,7 @@ import { assertJudgmentInput, captureOwnedJson } from '../gate/judgment-input.js
 import { sanitizeNoticeField } from '../security/notice-text.js';
 import { extractCheckout, readingDecimalMark, type RawCheckoutReading } from './checkout-extraction.js';
 import { minorUnitExponent, parseMinorUnits, type DecimalMark } from './money-parsing.js';
+import { money } from './money.js';
 import { checkoutTerms, checkoutTermsView } from './batteries/checkout-terms.js';
 import type { CheckoutTerms } from './checkout-page.js';
 
@@ -254,7 +255,7 @@ export function readRepricedCheckoutInCode(input: {
   const current = captureOwnedJson(input.current);
   if (!current || typeof current !== 'object' || Array.isArray(current)) return null;
   const texts = checkoutTexts(current); if (!texts) return null;
-  const currency = previous.currency;
+  const currency = previous.total.currency;
   const priorLayout = readingDecimalMark(reading, currency);
   const mark = priorLayout.ok ? priorLayout.mark : undefined;
   const candidates = checkoutAmountCandidates(texts, currency, mark); if (!candidates) return null;
@@ -399,14 +400,14 @@ export async function readRepricedCheckout(input: {
   const texts = checkoutTexts(current); if (!texts) return null;
   // The same page: its amounts are read by the decimal mark the notified
   // reading showed, so a three-decimal split is not read a thousand times off.
-  const priorLayout = readingDecimalMark(reading, previous.currency);
-  const candidates = checkoutAmountCandidates(texts, previous.currency, priorLayout.ok ? priorLayout.mark : undefined); if (!candidates) return null;
+  const priorLayout = readingDecimalMark(reading, previous.total.currency);
+  const candidates = checkoutAmountCandidates(texts, previous.total.currency, priorLayout.ok ? priorLayout.mark : undefined); if (!candidates) return null;
   const options = { site: 'payments.reprice', ...(signal === undefined ? {} : { signal }) };
   const original = checkoutTermsView(previous, current);
   const deliveryOptions = reading.shippingOptions.map(option => option.label);
   const roles = repriceRoles(previous, deliveryOptions);
   await assertCurrent();
-  const read = await checkoutRepriceReading.read(port, { previous: { ...original.expected, deliveryOptions }, current, currency: previous.currency, candidates }, roles, options);
+  const read = await checkoutRepriceReading.read(port, { previous: { ...original.expected, deliveryOptions }, current, currency: previous.total.currency, candidates }, roles, options);
   await assertCurrent();
   if (read.outcome !== 'act' || read.samePurchase.verdict !== 'yes') {
     read.recordAction('refused changed or unestablished purchase or price'); return null;
@@ -448,17 +449,17 @@ export async function readRepricedCheckout(input: {
   // or changed one no longer adds up to its own total and is refused below.
   const next: RawCheckoutReading = { lines, tax, shippingOptions, fees,
     ...(reading.discounts?.length ? { discounts: reading.discounts } : {}),
-    statedTotal: total, currency: previous.currency, orderSummaryText: reading.orderSummaryText };
-  const extracted = extractCheckout(next, previous.currency); if (!extracted.ok) return null;
+    statedTotal: total, currency: previous.total.currency, orderSummaryText: reading.orderSummaryText };
+  const extracted = extractCheckout(next, previous.total.currency); if (!extracted.ok) return null;
   const selected = extracted.checkout.shippingOptions.find(option => option.rawLabel === previous.shippingLabel);
   if (!selected) return null;
   const payable = extracted.checkout.subtotalMinorUnits + selected.costMinorUnits;
   // Read by the mark extraction read the new quote with.
-  const nextLayout = readingDecimalMark(next, previous.currency);
-  if (!nextLayout.ok || !Number.isSafeInteger(payable) || payable !== parseMinorUnits(total, previous.currency, nextLayout.mark)) return null;
+  const nextLayout = readingDecimalMark(next, previous.total.currency);
+  if (!nextLayout.ok || !Number.isSafeInteger(payable) || payable !== parseMinorUnits(total, previous.total.currency, nextLayout.mark)) return null;
   const expected: CheckoutTerms = { ...previous, lines: extracted.checkout.lines,
     taxMinorUnits: extracted.checkout.taxMinorUnits, feesMinorUnits: extracted.checkout.feesMinorUnits,
-    feeLabels: extracted.checkout.feeLabels, ...(extracted.checkout.discounts.length > 0 ? { discounts: extracted.checkout.discounts } : { discounts: undefined }), shippingMinorUnits: selected.costMinorUnits, totalMinorUnits: payable };
+    feeLabels: extracted.checkout.feeLabels, ...(extracted.checkout.discounts.length > 0 ? { discounts: extracted.checkout.discounts } : { discounts: undefined }), shippingMinorUnits: selected.costMinorUnits, total: money(payable, previous.total.currency) };
   await assertCurrent();
   const verified = await checkoutTerms.run(port, toJson(checkoutTermsView(expected, current)) as EntryType, options);
   await assertCurrent();

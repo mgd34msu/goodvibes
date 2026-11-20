@@ -5,6 +5,8 @@ import { captureNativeConversationInput, type NativeConversationInput } from './
 import type { DaemonWriteRefusal } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
+import type { CommandDescription } from './command-actions/types.js';
+import { Secret } from '@goodvibes-jev/engine/platform/platform/security';
 
 /**
  * The `afterCommand` both terminal apps give their registry: a setting a
@@ -52,7 +54,14 @@ export interface TerminalSlashCommand<Context> {
   description: string;
   usage?: string | undefined;
   argsHint?: string | undefined;
-  hidden?: boolean | undefined;
+  /**
+   * False: left off the first screen (the bare `/` list, /help's list, the
+   * palette's opening view); it is still found as soon as its name is typed and
+   * still runs. Every command is reachable; this only orders the first screen.
+   */
+  firstScreen?: boolean | undefined;
+  /** The one description a command built with `defineCommand` is generated from (command-actions/). */
+  readonly described?: CommandDescription<Context> | undefined;
   /** Typed arguments that carry a secret; the input history stores `<redacted>` in their place. */
   secretArgs?: CommandSecretArgs | undefined;
   /**
@@ -99,9 +108,63 @@ export interface CommandSecretArgs {
   readonly select?: ((args: readonly string[]) => Iterable<number>) | undefined;
 }
 const REDACTED_ARGUMENT = '<redacted>';
+/** The word that ends options: every argument after it is a value, never a flag. */
+const END_OF_OPTIONS = '--';
 function quoteHistoryArgument(value: string): string {
   return /\s/.test(value) || value === '' ? JSON.stringify(value) : value;
 }
+
+/** Where a command's secret arguments sit in one typed line: whole arguments, and `--flag=value` arguments whose value part is secret. */
+export interface SecretArgPositions {
+  /** Arguments that are entirely a secret. */
+  readonly whole: ReadonlySet<number>;
+  /** `--flag=value` arguments whose part after `=` is a secret. */
+  readonly inline: ReadonlySet<number>;
+}
+
+/**
+ * The positions of the secrets in `args` under a command's declaration: the
+ * one reading both the history line and the handler's `secretArg` use, so the
+ * mask and the read cannot drift. After a bare `--` every argument is a value:
+ * a value that starts with `--` is still a secret, and is never taken for a
+ * flag.
+ */
+export function secretArgPositions(args: readonly string[], secretArgs: CommandSecretArgs | undefined): SecretArgPositions {
+  const whole = new Set<number>();
+  const inline = new Set<number>();
+  if (!secretArgs) return { whole, inline };
+  const optionsEnd = args.indexOf(END_OF_OPTIONS);
+  const isFlag = (index: number): boolean => (optionsEnd === -1 || index < optionsEnd) && args[index]!.startsWith('--');
+  for (const position of secretArgs.positions ?? []) whole.add(position);
+  const first = args[0]?.toLowerCase();
+  const second = args[1]?.toLowerCase();
+  for (const key of [first, first !== undefined && second !== undefined ? `${first} ${second}` : undefined]) {
+    if (key === undefined || !secretArgs.subcommands || !Object.hasOwn(secretArgs.subcommands, key)) continue;
+    const declared = secretArgs.subcommands[key]!;
+    if ('from' in declared) {
+      // The values from that position on, counted as written or among the values alone
+      // (options and the bare `--` are not values), whichever masks more.
+      let seen = 0;
+      for (let index = 1; index < args.length; index++) {
+        if (index === optionsEnd || isFlag(index)) continue;
+        seen += 1;
+        if (seen >= declared.from || index >= declared.from) whole.add(index);
+      }
+    } else for (const position of declared) whole.add(position);
+  }
+  for (const position of secretArgs.select?.(args) ?? []) whole.add(position);
+  const flags = new Set(secretArgs.flags ?? []);
+  for (let index = 0; index < args.length; index++) {
+    if (!isFlag(index)) continue;
+    const value = args[index]!;
+    const equals = value.indexOf('=');
+    if (equals > 0 && flags.has(value.slice(0, equals))) inline.add(index);
+    else if (flags.has(value) && index + 1 < args.length) whole.add(index + 1);
+  }
+  whole.delete(optionsEnd);
+  return { whole, inline };
+}
+
 /**
  * The line the input history keeps for an executed command: the typed line as
  * it was, or, when the command declares secret arguments and the line has
@@ -114,37 +177,53 @@ export function commandHistoryLine(
   secretArgs: CommandSecretArgs | undefined,
 ): string {
   if (!secretArgs) return rawLine.trim();
-  const secret = new Set<number>(secretArgs.positions ?? []);
-  const first = args[0]?.toLowerCase();
-  const second = args[1]?.toLowerCase();
-  for (const key of [first, first !== undefined && second !== undefined ? `${first} ${second}` : undefined]) {
-    if (key === undefined || !secretArgs.subcommands || !Object.hasOwn(secretArgs.subcommands, key)) continue;
-    const declared = secretArgs.subcommands[key]!;
-    if ('from' in declared) {
-      for (let index = declared.from; index < args.length; index++) if (!args[index]!.startsWith('--')) secret.add(index);
-    } else for (const position of declared) secret.add(position);
-  }
-  for (const position of secretArgs.select?.(args) ?? []) secret.add(position);
-  const flags = new Set(secretArgs.flags ?? []);
-  let redacted = false;
+  const { whole, inline } = secretArgPositions(args, secretArgs);
+  if (whole.size === 0 && inline.size === 0) return rawLine.trim();
   const kept = args.map((value, index) => {
-    if (secret.has(index)) {
-      redacted = true;
-      return REDACTED_ARGUMENT;
-    }
-    const equals = value.indexOf('=');
-    if (equals > 0 && flags.has(value.slice(0, equals))) {
-      redacted = true;
-      return `${value.slice(0, equals)}=${REDACTED_ARGUMENT}`;
-    }
-    if (index > 0 && flags.has(args[index - 1]!)) {
-      redacted = true;
-      return REDACTED_ARGUMENT;
-    }
+    if (whole.has(index)) return REDACTED_ARGUMENT;
+    if (inline.has(index)) return `${value.slice(0, value.indexOf('='))}=${REDACTED_ARGUMENT}`;
     return quoteHistoryArgument(value);
   });
-  return redacted ? [`/${name}`, ...kept].join(' ') : rawLine.trim();
+  return [`/${name}`, ...kept].join(' ');
 }
+
+/** A handler asked for an argument its command did not declare secret: the declaration and the read must agree. */
+export class UndeclaredSecretArgumentError extends Error {
+  readonly code = 'UNDECLARED_SECRET_ARGUMENT';
+  constructor(readonly command: string, readonly index: number) {
+    super(`/${command} read argument ${index} as a secret, but its registration does not declare that position in secretArgs; nothing was done. Declare it so the input history masks it too.`);
+    this.name = 'UndeclaredSecretArgumentError';
+  }
+}
+
+/** The command being run in this dispatch, for `secretArg`. */
+interface CommandDispatch {
+  readonly name: string;
+  readonly args: readonly string[];
+  readonly secrets: SecretArgPositions;
+}
+
+// Nested dispatch cannot mint a keyboard gesture, including across product registries.
+const commandDispatchScope = new AsyncLocalStorage<CommandDispatch>();
+
+/**
+ * A secret argument of the command running now, as a `Secret` (its text
+ * leaves only through `reveal`). The position must be one the command's
+ * `secretArgs` declares for these arguments, so whatever a handler reads as a
+ * secret is also what the input history masked; anything else throws
+ * `UndeclaredSecretArgumentError`. For a `--flag=value` argument the value
+ * part is returned.
+ */
+export function secretArg(index: number): Secret {
+  const dispatch = commandDispatchScope.getStore();
+  if (!dispatch) throw new Error('secretArg is read only while a command handler runs.');
+  const value = dispatch.args[index];
+  if (value === undefined || !(dispatch.secrets.whole.has(index) || dispatch.secrets.inline.has(index))) {
+    throw new UndeclaredSecretArgumentError(dispatch.name, index);
+  }
+  return Secret.of(dispatch.secrets.inline.has(index) ? value.slice(value.indexOf('=') + 1) : value, `/${dispatch.name} argument ${index}`);
+}
+
 export interface TerminalCommandRegistry<Context> {
   register(command: TerminalSlashCommand<Context>): void;
   unregister(name: string): void;
@@ -163,8 +242,6 @@ export interface TerminalCommandRegistryFactory<Context> {
   readonly directOwnerRemoteInput: (context: Context) => string | undefined;
   readonly directOwnerPlanningInput: (context: Context) => NativeConversationInput | undefined;
 }
-// Nested dispatch cannot mint a keyboard gesture, including across product registries.
-const commandDispatchScope = new AsyncLocalStorage<boolean>();
 export function createTerminalCommandRegistry<
   Context extends {
     readonly invokedByModel?: boolean | undefined;
@@ -275,8 +352,9 @@ export function createTerminalCommandRegistry<
     get(name: string): TerminalSlashCommand<Context> | undefined {
       return this.commands.get(name) ?? this.aliasIndex.get(name);
     }
+    /** The commands on the first screen. */
     getVisible(): TerminalSlashCommand<Context>[] {
-      return this.getAll().filter((command) => !command.hidden);
+      return this.getAll().filter((command) => command.firstScreen !== false);
     }
     /** All registered commands. */
     getAll(): TerminalSlashCommand<Context>[] {
@@ -308,7 +386,8 @@ export function createTerminalCommandRegistry<
           const score = scoreMatch(q, candidate);
           if (score > bestScore) bestScore = score;
         }
-        if (cmd.hidden && !names.some((name) => name.toLowerCase() === q)) continue;
+        // Off the first screen means only that: an empty query leaves it out, any typed text finds it.
+        if (cmd.firstScreen === false && q === '') continue;
         if (bestScore > 0 || q === '') {
           // with no query yet, rank the curated common tier (score 2)
           // ahead of everything else (score 1), the tie-break below then sorts
@@ -333,7 +412,7 @@ export function createTerminalCommandRegistry<
       if (!cmd) return false;
       const after = commandDispatchScope.getStore() ? undefined : options.afterCommand?.(context);
       try {
-        await commandDispatchScope.run(true, () => cmd.handler(args, directOwnerCommands.has(context) ? { ...context } : context));
+        await commandDispatchScope.run(dispatchOf(cmd, args), () => cmd.handler(args, directOwnerCommands.has(context) ? { ...context } : context));
       } finally {
         if (after) await after().catch(() => { /* reporting cannot change the command's outcome */ });
       }
@@ -349,7 +428,7 @@ export function createTerminalCommandRegistry<
       }
       const after = commandDispatchScope.getStore() ? undefined : options.afterCommand?.(context);
       try {
-        await commandDispatchScope.run(true, () => cmd.handler(args, owned));
+        await commandDispatchScope.run(dispatchOf(cmd, args), () => cmd.handler(args, owned));
         return true;
       } finally {
         directOwnerCommands.delete(owned);
@@ -358,6 +437,9 @@ export function createTerminalCommandRegistry<
     }
   }
   return { CommandRegistry, isDirectOwnerCommandContext, directOwnerWorkstreamInput, directOwnerPlanningInput, directOwnerRemoteInput };
+}
+function dispatchOf(command: { readonly name: string; readonly secretArgs?: CommandSecretArgs | undefined }, args: readonly string[]): CommandDispatch {
+  return { name: command.name, args: [...args], secrets: secretArgPositions(args, command.secretArgs) };
 }
 function scoreMatch(query: string, candidate: string): number {
   if (query === '') return 1;

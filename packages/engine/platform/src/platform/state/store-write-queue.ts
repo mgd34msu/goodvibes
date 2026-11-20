@@ -104,6 +104,21 @@ export class StoreWriteQueue {
     await attempt;
   }
 
+  /**
+   * Save, then publish: runs `write(next)` in queue order and, only when it
+   * succeeded, calls `publish(next)` (the live state, the in-memory map, the
+   * event) before resolving. A failed write publishes nothing and rejects, so
+   * memory never runs ahead of the disk and a failed save is never reported as
+   * done. `publish` runs inside the queued unit, so two commits publish in the
+   * order their writes landed.
+   */
+  async commit<T>(next: T, write: (next: T) => Promise<void> | void, publish: (next: T) => void): Promise<void> {
+    await this.run(async () => {
+      await write(next);
+      publish(next);
+    });
+  }
+
   /** Settles when everything queued so far has finished. Test and shutdown seam. */
   async drain(): Promise<void> {
     await this.queue;

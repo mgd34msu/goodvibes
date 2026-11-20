@@ -290,8 +290,11 @@ export type CloudflareDaemonEndpoint =
   | { readonly available: false; readonly reason: string };
 
 export interface CloudflareRouteClientOptions {
-  /** Resolved per request, so a token written after start-up is used and a refusal is a value, not a throw. */
-  readonly resolveEndpoint: () => CloudflareDaemonEndpoint;
+  /**
+   * Resolved per request, so a token written after start-up is used and a refusal is a value, not a throw.
+   * May wait (the one identity check of this machine's declared public address) before answering.
+   */
+  readonly resolveEndpoint: () => CloudflareDaemonEndpoint | Promise<CloudflareDaemonEndpoint>;
   /** Injectable fetch for tests; defaults to the global fetch. */
   readonly fetch?: typeof fetch | undefined;
 }
@@ -322,7 +325,7 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
 
 export function createCloudflareRouteClient(options: CloudflareRouteClientOptions): CloudflareDaemonClient {
   const requestJson = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
-    const endpoint = options.resolveEndpoint();
+    const endpoint = await options.resolveEndpoint();
     if (!endpoint.available) {
       throw new CloudflareDaemonRouteError(
         `The daemon is not reachable from here: ${endpoint.reason}`,

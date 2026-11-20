@@ -170,8 +170,11 @@ function readPeerField(
     }
     case 'boolean':
       return typeof body[field] === 'boolean' ? body[field] : undefined;
-    case 'array':
-      return readStringArrayField(body, field, limit?.max);
+    case 'array': {
+      // An empty list is read as not sent, as before readStringArrayField returned [] for it.
+      const list = readStringArrayField(body, field, limit?.max);
+      return list?.length ? list : undefined;
+    }
     case 'object':
       return readRemoteMetadata(body[field]);
     default:
@@ -329,7 +332,8 @@ const remoteBodySchemas = createRouteBodySchemaRegistry({
       ...(label ? { label } : {}),
       ...(tokenId ? { tokenId } : {}),
       ...(typeof body.requeueClaimedWork === 'boolean' ? { requeueClaimedWork: body.requeueClaimedWork } : {}),
-      ...(scopes ? { scopes } : {}),
+      // An empty `scopes` list is read as not sent, as before readStringArrayField returned [] for it.
+      ...(scopes?.length ? { scopes } : {}),
     };
   }),
   invoke: createRouteBodySchema<RemoteInvokeBody>('POST /api/remote/peers/:peerId/invoke', (body) => {

@@ -62,6 +62,10 @@ export async function runSetupPairingCommand(runtime: CliCommandRuntime, termina
   try {
     const preview = await previewAgentHostPairing({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory }, name, controller.signal);
     io.write(runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(preview.result) : formatSetupPairing(preview.result));
+    // The preview names the one command that goes on from it.
+    if (!apply && preview.result.status === 'preview' && runtime.cli.flags.outputFormat === 'text') {
+      io.write(`  Next: run goodvibes-agent setup pair --apply${named ? ` --name ${JSON.stringify(name)}` : ''} in a terminal to confirm and pair.`);
+    }
     if (!apply || !preview.confirm || !preview.result.confirmation) return controller.signal.aborted ? 130 : preview.result.status === 'preview' || preview.result.status === 'already-paired' ? 0 : 1;
     if (!io.interactive) { io.write('No credential was created. Run --apply in a terminal to review and confirm persistent administrative access.'); return 2; }
     const answer = await io.question(`Type ${preview.result.confirmation} to ${preview.result.confirmationPrompt ?? 'create this host-bound administrative credential'}, or press Enter to cancel: `, controller.signal);

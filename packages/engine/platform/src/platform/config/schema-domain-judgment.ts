@@ -32,21 +32,20 @@ function isEndpoint(value: unknown): boolean {
 
 export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[] = [
   {
-    key: 'judgment.volumeMonitor', type: 'object', default: captureJudgmentVolumeMonitorControl({}),
+    key: 'judgment.volumeMonitor', type: 'object', 
     description: 'Local decision call-volume alerts. Set enabled:true and budgets:[{name:"All decisions",maxLogicalDecisions:1000,maxWireAttempts:2000}]. Optional battery/site restrict each budget; windowMs defaults to one hour, intervalMs to one minute, limit to 10000 log entries. Alerts report usage without calling models or stopping work. Disabled settings retain the optional GOODVIBES_JUDGMENT_MONITOR file override.',
     validate: value => { try { captureJudgmentVolumeMonitorControl(value); return value !== undefined; } catch { return false; } },
     closedShape: true,
     validationHint: 'object with enabled and up to 100 budgets; enabled monitoring needs at least one budget',
   },
   {
-    key: 'judgment.policy', type: 'enum', default: 'Hybrid',
+    key: 'judgment.policy', type: 'enum', 
     enumValues: ['Hybrid', 'Decision Model Only', 'No Decision Model'],
     description: 'Hybrid (default) uses the set decision model and, when none is set or it fails, continues without it: decisions take their fallbacks and a failure is shown once with the model, what failed and the next step. Decision Model Only stops the operation and reports when the set decision model fails. No Decision Model makes no decision-model calls. With no decision model set, every policy continues without one.',
   },
   {
     key: 'judgment.endpoint',
     type: 'string',
-    default: '',
     description: 'Address of the decision model server the engine asks for judgments (a server that answers the decision API, POST /v1/systemone, as the hosted Jev does); empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model. Choose credential references explicitly when changing destinations; embedded credentials, query strings and fragments are refused',
     validate: isEndpoint,
     validationHint: 'empty, or an http(s) URL without embedded credentials, query or fragment',
@@ -54,14 +53,12 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
   {
     key: 'judgment.keySource',
     type: 'enum',
-    default: 'env',
     description: 'Select where to resolve judgment.keyName: the literal enum env reads a process environment variable, secret reads a secret-store entry, and none disables authentication. This setting stores only one of those three words, never a credential or a credential reference',
     enumValues: ['env', 'secret', 'none'],
   },
   {
     key: 'judgment.keyName',
     type: 'string',
-    default: 'TYPESAFE_API_KEY',
     description: 'Primary decision credential reference, such as TYPESAFE_API_KEY or CLOUDFLARE_API_TOKEN; never an inline key value. Ignored when keySource is none',
     validate: validJudgmentCredentialName,
     validationHint: 'a credential reference name',
@@ -69,13 +66,11 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
   {
     key: 'judgment.model',
     type: 'string',
-    default: '',
     description: 'Judgment model or alias; empty uses TYPESAFE_DEFAULT_MODEL, then jev-latest',
   },
   {
     key: 'judgment.backend',
     type: 'object',
-    default: {},
     description: 'Optional adapter (system-one, cloudflare-workers-ai or laya), maxInputBytes, maxQuestions and responseModels for the primary deployment. Limits apply to the complete request; evidence is never silently shortened. Cloudflare run URLs select their adapter automatically',
     validate: value => { try { captureJudgmentBackendSettings(value); return value !== undefined; } catch { return false; } },
     closedShape: true,
@@ -84,7 +79,6 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
   {
     key: 'judgment.fallbacks',
     type: 'object',
-    default: [],
     description: 'Ordered decision targets with endpoint, model, keySource, keyName and optional backend capabilities. Each target may use a different decision model or adapter. keySource is env, secret or none; none requires an empty keyName. Credentials are privately resolved from references, never inline values. An empty array disables inherited fallbacks. Each target is attempted with a finite timeout; when the chain is exhausted, a decision that has a fallback takes it and any other decision stops',
     validate: validJudgmentFallbackSettings,
     validationHint: 'array of { endpoint, model, keySource: "env" | "secret" | "none", keyName } (keyName empty for "none"); no credentials in URLs or inline keys',
@@ -92,14 +86,12 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
   {
     key: 'judgment.timeoutMs',
     type: 'number',
-    default: 30_000,
     description: 'Finite timeout per judgment target in milliseconds; legacy 0 uses the default 30000 ms. Cancellation may stop the operation sooner',
     ...intRange(0, 2_147_483_647),
   },
   {
     key: 'judgment.decisionDeadlineMs',
     type: 'number',
-    default: DEFAULT_DECISION_DEADLINE_MS,
     description: 'How long a decision that a person or a tool call waits on may take, in milliseconds, before it takes its fallback (for example asking you, or the safe default). A decision target that misses this deadline three times in a row is skipped for a minute, so the next decisions take their fallback at once',
     ...intRange(1, MAX_DECISION_DEADLINE_MS),
   },

@@ -35,38 +35,32 @@ export const checkpointsConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'checkpoints.preferGitRoot',
     type: 'boolean',
-    default: true,
     description: 'Checkpoint the enclosing git repository (its top level) instead of only the working directory',
   },
   {
     key: 'checkpoints.allowBroadRoot',
     type: 'boolean',
-    default: false,
     description: 'Allow checkpoints of a broad directory: the filesystem root, your home directory or ~/.goodvibes. Off, such a directory is not checkpointed',
   },
   {
     key: 'checkpoints.allowLargeFirstSnapshot',
     type: 'boolean',
-    default: false,
     description: 'Allow the first checkpoint of a workspace to sweep more files than checkpoints.maxFirstSnapshotFiles. Off, that first checkpoint is refused with the file count',
   },
   {
     key: 'checkpoints.maxFirstSnapshotFiles',
     type: 'number',
-    default: DEFAULT_MAX_FIRST_SNAPSHOT_FILES,
     description: 'Most files the first checkpoint of a workspace may sweep before it is refused (unless checkpoints.allowLargeFirstSnapshot is on)',
     ...intRange(1, 10_000_000),
   },
   {
     key: 'checkpoints.autoRetention',
     type: 'boolean',
-    default: true,
     description: 'Prune old checkpoints automatically after each new one and once at start. Off, old checkpoints are pruned only when asked',
   },
   {
     key: 'checkpoints.unregisteredWorkspaces',
     type: 'enum',
-    default: 'off',
     enumValues: ['off', 'guarded'],
     description: 'Checkpoints in a workspace that is not registered (Agent and daemon; the terminal app checkpoints any workspace). off: automatic and explicit checkpoints are refused there until it is registered (`goodvibes-agent workspaces register`). guarded: they are taken there too, under the root and size guards above. A project settings file cannot change it',
   },

@@ -1053,6 +1053,16 @@ export class UserAuthManager {
     return () => { this.#revocationListeners.delete(listener); };
   }
 
+  /**
+   * The owner among the users: the first one the store holds, the user
+   * created at first start (the store keeps users in the order they were
+   * created). Null when there is none. Read from memory; no I/O.
+   */
+  ownerUsername(): string | null {
+    for (const username of this.users.keys()) return username;
+    return null;
+  }
+
   listUsers(): AuthUserRecord[] {
     return [...this.users.values()]
       .map(userRecord)

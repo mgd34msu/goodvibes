@@ -154,6 +154,10 @@ function wrapSpans(spans: readonly Piece[], width: number): Piece[][] {
           cw += chw;
         }
         if (cut.length === 0) { newRow(); continue; }
+        // Break after the last separator that fits (a file name's `-` or `.`,
+        // a path's `/`), not inside a name, when that keeps half the row.
+        const separator = Math.max(...[...'|/,;:&=?-_.'].map((mark) => cut.lastIndexOf(mark)));
+        if (separator >= 0 && separator + 1 < cut.length && getDisplayWidth(cut.slice(0, separator + 1)) * 2 >= width - used) cut = cut.slice(0, separator + 1);
         pushText(cut, span.style);
         word = word.slice(cut.length);
         newRow();

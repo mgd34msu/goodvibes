@@ -45,7 +45,7 @@ export interface McpWorkspaceFormBase {
   env: string;
   allowedPaths: string;
   allowedHosts: string;
-  /** Comma-separated tools refused on every call, kept with the entry. Kept allows are not edited here: they ask once, in Settings or with /mcp allow. */
+  /** Comma-separated tools refused on every call, kept with the entry. Kept exemptions are not edited here: they ask once, in Settings or with /mcp exempt. */
   deniedTools: string;
   /**
    * The saved config this form was opened from. The text fields cannot encode every
@@ -327,7 +327,7 @@ export function buildMcpWorkspaceFormFields(form: McpWorkspaceFormBase): readonl
       id: 'deniedTools',
       label: 'Denied tools',
       value: form.deniedTools,
-      help: 'Comma-separated tool names refused on every call, kept in this config past a restart. /mcp deny <server> <tool> denies one for this session only; a tool allow is set in Settings MCP or with /mcp allow.',
+      help: 'Comma-separated tool names refused on every call, kept in this config past a restart. /mcp block <server> <tool> blocks one for this session only; letting a tool past its server\'s limits is set in Settings MCP or with /mcp exempt.',
       editable: true,
     },
   ];

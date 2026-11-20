@@ -72,6 +72,8 @@ interface AgentWorkspaceActivationHost {
   dispatchWorkspaceCommand(command: string, behavior?: 'inline' | 'compose' | 'exit', displayCommand?: string): void;
   commitActionSearchSelection(): boolean;
   closeToComposer(): void;
+  /** Open a described command's action for this row instead of its form; false when the row keeps its form. */
+  openGuidedAction?(editorKind: string): boolean;
   /** The stored inbox settings, read when the inbox form opens. */
   emailConnectPrefill?(): AgentWorkspaceEmailConnectPrefill | null;
   /** The connected host's inbox settings, or null when no host holds them (then emailConnectPrefill answers). */
@@ -152,6 +154,8 @@ export function activateAgentWorkspaceSelection(
     return;
   }
   if (action.kind === 'editor' && action.editorKind) {
+    // A row whose command is described opens that action's guided path, not a form.
+    if (workspace.openGuidedAction?.(action.editorKind)) return;
     if (action.editorKind === 'email-connect-wizard') {
       // The connected host owns the inbox settings: the form opens with its values once it answers.
       const fromHost = workspace.loadEmailConnectPrefillFromHost?.();

@@ -1,3 +1,4 @@
+import { isTurnSettlingEvent } from './turn-settlement.js';
 
 export interface EventEnvelope<TType extends string, TPayload> {
   readonly type: TType;
@@ -63,7 +64,6 @@ export interface StreamTextAssembler {
   clear(): void;
 }
 
-const STREAM_TURN_END_TYPES: ReadonlySet<unknown> = new Set(['TURN_COMPLETED', 'TURN_ERROR', 'TURN_CANCEL', 'PREFLIGHT_FAIL']);
 /** Turns held at once; a reader watching more interleaved turns than this drops the oldest. */
 const STREAM_TEXT_TURNS_HELD = 64;
 
@@ -94,7 +94,7 @@ export function createStreamTextAssembler(): StreamTextAssembler {
         hold(turnId, text);
         return { ...record, accumulated: text } as TPayload;
       }
-      if (STREAM_TURN_END_TYPES.has(record['type'])) texts.delete(turnId);
+      if (isTurnSettlingEvent(record['type'])) texts.delete(turnId);
       return payload;
     },
     clear(): void {

@@ -120,7 +120,7 @@ export type BootstrapContext = RuntimeContext & {
   /** Shell-owned permission prompt bridge that main.ts patches after UI setup. */
   permissionPromptRef: { requestPermission: PermissionRequestHandler };
   /** Shell-owned trust-decision bridge that main.ts patches after UI setup (trust asks at consequence time). */
-  trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel> };
+  trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel>; awaitingOwner?: boolean };
   /** True once exit has durably saved the session, even while releases still run. */
   sessionSaved?: () => boolean;
   /** Load the most recently saved conversation from disk. */

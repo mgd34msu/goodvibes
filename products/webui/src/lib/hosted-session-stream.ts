@@ -17,6 +17,7 @@
  * approvals.ts document, so an event this client has never seen degrades to
  * being ignored rather than crashing the attached view.
  */
+import { isTurnSettlingEvent, readTurnSettlement, settlesRunningTurn } from '@goodvibes-jev/engine/transport-core/turn-settlement';
 import { asRecord, firstString } from './object';
 
 /** One decoded `turn`/`tools` domain frame, narrowed to what a hosted-session
@@ -72,47 +73,39 @@ export function streamDeltaAccumulated(frame: HostedStreamFrame): string | null 
   return typeof value === 'string' ? value : '';
 }
 
-/** A completed/errored/cancelled/context-overflowed turn rendered as one appended message, or
- * null when the frame is not a terminal turn event. */
+/** A settled turn rendered as one appended message (the model's answer, or a
+ * system line saying how the turn ended), or null when the frame does not end a
+ * turn. Read through the one settlement reader every surface uses, so an empty
+ * answer is a system line, never a blank assistant bubble. */
 export function hostedLiveMessageFromTurnFrame(frame: HostedStreamFrame, now: () => number = Date.now): HostedLiveMessage | null {
-  switch (frame.type) {
-    case 'TURN_COMPLETED': {
-      const response = frame.payload.response;
-      return { role: 'assistant', content: typeof response === 'string' ? response : '', at: now() };
-    }
-    case 'TURN_ERROR': {
-      const error = frame.payload.error;
-      return { role: 'system', content: `Turn failed: ${typeof error === 'string' ? error : 'unknown error'}`, at: now() };
-    }
-    case 'TURN_CANCEL':
+  const settlement = readTurnSettlement(frame);
+  if (!settlement) return null;
+  switch (settlement.kind) {
+    case 'answered':
+      return { role: 'assistant', content: settlement.response, at: now() };
+    case 'empty':
+      return { role: 'system', content: 'The model returned no answer. Send the message again or choose another model.', at: now() };
+    case 'failed':
+      return { role: 'system', content: `Turn failed: ${settlement.error}`, at: now() };
+    case 'cancelled':
       return { role: 'system', content: 'Turn cancelled.', at: now() };
-    case 'PREFLIGHT_FAIL': {
-      if (!endsTurn(frame)) return null;
-      const reason = frame.payload.reason;
+    case 'refused':
+      // A duplicate submission refused while a turn runs (`preflight_failed`) is not this view's
+      // turn ending: the running turn's text and tool calls stay.
+      if (!settlesRunningTurn(settlement)) return null;
       return {
         role: 'system',
-        content: `Turn could not start: ${typeof reason === 'string' && reason ? reason : 'the context window is full'}. Compact the conversation or start a new session.`,
+        content: `Turn could not start: ${settlement.reason.replace(/\.+\s*$/u, '')}. Compact the conversation or start a new session.`,
         at: now(),
       };
-    }
-    default:
-      return null;
   }
 }
 
-/** PREFLIGHT_FAIL ends a turn only when the context window was the reason. The daemon also
- * answers a rejected duplicate submission with PREFLIGHT_FAIL (`preflight_failed`) under a
- * fresh turn id while the real turn is still running, which must not clear that turn's live
- * text or tool calls. */
-function endsTurn(frame: HostedStreamFrame): boolean {
-  return frame.payload.stopReason === 'context_overflow';
-}
-
 /** The id of the turn a frame shows running (any turn or tool frame stamped with a
- * turnId, except the terminal ones and a PREFLIGHT_FAIL, which can name a rejected
- * duplicate under a fresh id), or null. What a Stop sends as its expected turn. */
+ * turnId, except the settling ones, which include a PREFLIGHT_FAIL that can name a
+ * rejected duplicate under a fresh id), or null. What a Stop sends as its expected turn. */
 export function liveTurnIdFromFrame(frame: HostedStreamFrame): string | null {
-  if (frame.type === 'PREFLIGHT_FAIL' || isTerminalTurnFrame(frame)) return null;
+  if (isTurnSettlingEvent(frame.type)) return null;
   const turnId = firstString(frame.payload, ['turnId']);
   return turnId || null;
 }
@@ -122,11 +115,12 @@ export function endedTurnIdFromFrame(frame: HostedStreamFrame): string | null {
   return isTerminalTurnFrame(frame) ? firstString(frame.payload, ['turnId']) : null;
 }
 
-/** True for a frame that means the turn is no longer in flight, the local
- * "streaming" indicator drops and any live-text buffer clears. */
+/** True for a frame that means the running turn is no longer in flight, the local
+ * "streaming" indicator drops and any live-text buffer clears. A duplicate submission
+ * refused while a turn runs (`preflight_failed` under a fresh id) is not one. */
 export function isTerminalTurnFrame(frame: HostedStreamFrame): boolean {
-  return frame.type === 'TURN_COMPLETED' || frame.type === 'TURN_ERROR' || frame.type === 'TURN_CANCEL'
-    || (frame.type === 'PREFLIGHT_FAIL' && endsTurn(frame));
+  const settlement = readTurnSettlement(frame);
+  return settlement !== null && settlesRunningTurn(settlement);
 }
 
 /** Read a `tools` domain frame into an active-call transition, or null for a

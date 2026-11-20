@@ -5,6 +5,7 @@ import { isNativeConversationTurnReady, nativeConversationTurnInputOptions } fro
 import { readShellFrameFacts, createShellSubmissionPorts, createUiEventPublisher, readUiFrame } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
 import { readInitialExecutionMode } from './permissions/execution-mode.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
+import { publishToSharedFeed } from './core/notices.ts';
 import type { NativeConversationIntakeState } from './runtime/native-conversation-intake.ts';
 import type { NativeConversationInput } from '@goodvibes-jev/engine/terminal-shell/native';
 import { formatRefusal, refusal } from '@goodvibes-jev/engine/errors';
@@ -82,7 +83,7 @@ import { createOwnerSubmission } from './shell/owner-submission.ts';
 import { createProcessFaultHandlers } from './runtime/process-fault-capture.ts';
 import { attachSpokenTurnModelRouting, createSpokenTurnInputOptions } from './audio/spoken-turn-model-routing.ts';
 import { bindOwnerInput } from '@goodvibes-jev/engine/terminal-shell/companion-input';
-import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
+import type { NoticeLevel, OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
 import { allowTerminalWrite, createShellLayout, installFullScreenTerminalOutputGuard } from '@goodvibes-jev/engine/terminal-shell';
 import { buildCommandArgsHint } from './input/command-args-hint.ts';
 import './config/surface.ts';
@@ -379,6 +380,14 @@ async function main(prepared: PreparedShellCliRuntime) {
     },
     render: () => render(),
   });
+  // The status line shows only the short chip; the full note goes to the notifications once each time it changes.
+  let postedPowerNote: string | null = null;
+  const currentPowerChip = (): string | undefined => {
+    const note = powerNote.get();
+    if (note && note.detail !== postedPowerNote) publishToSharedFeed(note.detail, { restored: false, notice: { level: 'warning' } });
+    postedPowerNote = note?.detail ?? null;
+    return note?.chip;
+  };
   unsubs.push(
     () => powerNote.stop(),
     configManager.subscribe('power.keepAwake', () => powerNote.refresh()),
@@ -557,9 +566,14 @@ async function main(prepared: PreparedShellCliRuntime) {
   // Shell output taken for a message that has not been admitted yet. If the message is refused
   // the output goes back to the buffer, so the retry still carries it.
   const shellContextHold = new ShellContextHold(shellPassthrough);
+  // Why a message was not sent, or what it needs: in the conversation at once (and the activity feed).
+  const showInputNotice = (message: string, level?: NoticeLevel): void => {
+    conversation.addInputNotice(message, level);
+    systemMessageRouter.activity(message);
+  };
   const remoteConversation = installRemoteConversationRouting(ctx, {
     render: () => render(),
-    notify: (message) => systemMessageRouter.userAction(message),
+    notify: (message) => showInputNotice(message),
     record: (message) => systemMessageRouter.activity(message),
   });
   unsubs.push(() => remoteConversation.dispose());
@@ -613,6 +627,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       high: (message, level) => systemMessageRouter.high(message, level),
       userAction: (message) => systemMessageRouter.userAction(message),
       activity: (message) => systemMessageRouter.activity(message),
+      aboutInput: (message, level) => showInputNotice(message, level),
     },
     render: () => render(),
   });
@@ -671,6 +686,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     restoreDraft: (text) => restoreDraft(text),
     onShellCommandsRunning: (running) => { shellCommandsRunning = running; },
     notify: (message, level) => systemMessageRouter.high(message, level),
+    showShellOutput: (result) => conversation.addShellOutput(result.display, result.failed),
     render: () => render(),
   });
   const { submitComposerText, submitTurn } = submission;
@@ -1034,7 +1050,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       // The footer and status report the same effective execution mode.
       dangerMode: readApprovalPostureFromConfig(configManager).automaticApprovals,
       executionMode: readApprovalPostureFromConfig(configManager).mode,
-      powerNote: powerNote.get() ?? undefined, // the daemon's state while one is adopted (runtime/power-note-source.ts)
+      powerNote: currentPowerChip(), // the daemon's state while one is adopted (runtime/power-note-source.ts)
       lastInputTokens: orchestrator.lastInputTokens,
       contextUsageAvailable: isConversationContextAvailable(orchestrator),
       commandArgsHint,
@@ -1086,7 +1102,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     overlayRows += orchestrator.messageQueue.length * 3; // queued messages
     // File picker and model picker overlay rows computed from actual rendered line count below
     // Selection modal overlay rows are computed from actual rendered line count below
-    if (input.searchManager.active) {
+    // The find bar and the reverse history search line each take a row under the transcript.
+    if (input.searchManager.active || input.historySearch.active) {
       overlayRows += 1;
     }
 

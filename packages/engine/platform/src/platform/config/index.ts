@@ -19,7 +19,7 @@ export type { PreparedConfigMutation, PreparedConfigMutationTransition, Prepared
 export type { HostBooleanSetting, HostBooleanSettingHandle, HostBooleanSettingResolved, HostManagedSettingLocks, HostNumberSetting, HostSetting, HostSettingValue, HostStringSetting } from './host-settings.js';
 export type { DeepReadonly, ConfigKeyTier, ConfigKeySource, DaemonConfigPatch } from './manager.js';
 export type { ConfigChange, ConfigSetOptions, DaemonWritePending, DaemonWriteRefusal, DaemonWriteRoute, SetResult, WriteOrigin } from './manager.js';
-export { configKeyFacts, isProtectedConfigValue, isProjectRestrictedKey } from './config-key-facts.js';
+export { configKeyFacts, displaySettingValue, isProtectedConfigValue, isProjectRestrictedKey } from './config-key-facts.js';
 export { readCheckpointGuardSettings, readCheckpointRegistrationSetting, type CheckpointGuardSettings } from './checkpoint-settings.js';
 export type { ConfigKeyFacts } from './config-key-facts.js';
 export { SHARED_CONFIG_KEYS, isSharedConfigKey } from './shared-config-tier.js';

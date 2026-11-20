@@ -187,6 +187,14 @@ export class InputTokenizer {
               continue;
             }
           }
+          // Back-tab (CSI Z) is Shift+Tab on every terminal that does not
+          // speak CSI-u; give it the same name and modifier as CSI 9;2u so
+          // every consumer handles one chord.
+          if (suffix === 'Z' && params === '') {
+            tokens.push({ type: 'key', name: full, logicalName: 'tab', ctrl: false, shift: true, meta: false });
+            this.buffer = this.buffer.slice(full.length);
+            continue;
+          }
           let logicalName = full;
           if (charCode === 13 || charCode === 10) logicalName = 'enter';
           if (charCode === 99 || charCode === 67 || charCode === 3) logicalName = 'c';

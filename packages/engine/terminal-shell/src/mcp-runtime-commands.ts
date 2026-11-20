@@ -1,789 +1,732 @@
-import type { McpApi, McpConfigScope, McpReloadResult, McpServerConfig, McpStoredToolRuleResult, McpToolRule } from '@goodvibes-jev/engine/platform/platform/mcp';
+/**
+ * `/mcp`, described once (command-actions/): its actions, their blanks, what
+ * each says before and after it runs, and what it touches. Both terminal apps
+ * register this one description, so their guided path, typed line, help,
+ * completion, confirmation and the model's catalogue entry are the same.
+ */
+import type { McpApi, McpConfigScope, McpServerConfig, McpStoredToolRuleResult } from '@goodvibes-jev/engine/platform/platform/mcp';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { commandRefusal, stripYesFlag, type CommandConfirmationContext } from './command-confirmation.js';
+import { commandRefusal } from './command-confirmation.js';
 import { maskLaunchArgs } from './renderer/mcp-form-rows.js';
-import { quoteSlashCommandArg } from './slash-command-parser.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
-export interface McpCommandContext extends CommandConfirmationContext {
+import { defineCommand } from './command-actions/define.js';
+import { defineList, type ListRow } from './command-actions/lists.js';
+import type { ActionValues, CommandActionContext, CommandDescription, CommandReport, FixedChoice, InputDescription } from './command-actions/types.js';
+
+export interface McpCommandContext extends CommandActionContext {
   readonly renderRequest: () => void;
-  /** The line came from the model's command runner: a loosening line (allow, clear) is refused for it. */
-  readonly invokedByModel?: boolean | undefined;
+  readonly clients?: { readonly mcpApi?: McpApi | undefined } | undefined;
+  readonly workspace: { readonly shellPaths?: ShellPathService | null | undefined };
   readonly openMcpWorkspace?: (() => void) | undefined;
-  readonly openSettingsModal?: (() => void) | undefined;
 }
-export function createMcpRuntimeCommands<Context extends McpCommandContext>(
-  requireMcpApi: (context: Context) => McpApi,
-  requireShellPaths: (context: Context) => ShellPathService,
-  policy: {
-    readonly hidden: boolean;
-    readonly allowAllOnAdd: boolean;
-    /** Product-specific wording; the defaults are the Agent's. */
-    readonly wording?: {
-      /** How the product names itself in "from inside ...". */
-      readonly host?: string;
-      /** Whose flags a server argument can be confused with. */
-      readonly flagOwner?: string;
-      /** Where the user adds a server outside the command line. */
-      readonly addServerPointer?: string;
-      /** The command that reviews connector auth. */
-      readonly authReviewCommand?: string;
-      /** Describes the add/remove/reload actions in the /mcp summary. */
-      readonly confirmedActions?: string;
-      /** States how trust, role and quarantine commands are authorised. */
-      readonly commandPolicy?: string;
-    };
+
+type McpSecurityServer = ReturnType<McpApi['listServerSecurity']>[number];
+type McpTrustMode = NonNullable<McpServerConfig['trustMode']>;
+type McpRole = NonNullable<McpServerConfig['role']>;
+
+function mcpApiOf(ctx: McpCommandContext): McpApi {
+  const api = ctx.clients?.mcpApi;
+  if (!api) throw commandRefusal('MCP is not available in this session.', 'Restart the app; MCP servers load with it.');
+  return api;
+}
+function shellPathsOf(ctx: McpCommandContext): ShellPathService {
+  const paths = ctx.workspace.shellPaths;
+  if (!paths) throw commandRefusal('MCP config files cannot be found: this session has no working directory.');
+  return paths;
+}
+function refuse(message: string, next?: string): never {
+  throw commandRefusal(message, next);
+}
+
+const ROLES: readonly FixedChoice[] = [
+  { value: 'general', label: 'General' },
+  { value: 'docs', label: 'Documentation' },
+  { value: 'filesystem', label: 'Files' },
+  { value: 'git', label: 'Git' },
+  { value: 'database', label: 'Database' },
+  { value: 'browser', label: 'Browser' },
+  { value: 'automation', label: 'Automation' },
+  { value: 'ops', label: 'Operations' },
+  { value: 'remote', label: 'Remote machines' },
+];
+const TRUST_MODES: readonly FixedChoice[] = [
+  { value: 'constrained', label: 'Ask before anything outside its limits', help: 'Calls inside its folders and sites run; anything else is put to you.' },
+  { value: 'ask-on-risk', label: 'Act inside its limits without asking', help: 'Calls inside its scope run without asking; a call outside is put to you.', risk: 'loosens-a-protection' },
+  { value: 'blocked', label: 'Refuse every call', help: 'No tool of the server runs.' },
+  { value: 'allow-all', label: 'Allow every call', help: 'Every call runs, inside its limits or not.', risk: 'loosens-a-protection' },
+];
+const SCOPES: readonly FixedChoice[] = [
+  { value: 'project', label: 'This project', help: 'Kept in this project\'s .goodvibes/mcp.json.' },
+  { value: 'global', label: 'All your projects', help: 'Kept in ~/.config/mcp/mcp.json.' },
+];
+
+function formatTrust(mode: McpSecurityServer['trustMode'] | McpTrustMode): string {
+  if (mode === 'ask-on-risk') return 'acts inside its limits without asking';
+  if (mode === 'allow-all') return 'allows every call';
+  if (mode === 'constrained') return 'asks outside its limits';
+  return String(mode).replace(/[_-]+/g, ' ');
+}
+function formatFreshness(value: McpSecurityServer['schemaFreshness']): string {
+  return value === 'quarantined' ? 'tools held back for review' : value.replace(/[_-]+/g, ' ');
+}
+function formatRole(value: McpSecurityServer['role'] | McpRole): string {
+  return value.replace(/[_-]+/g, ' ');
+}
+function serverState(server: McpSecurityServer): string {
+  const parts = [server.connected ? 'connected' : server.phase === 'restart-wait' ? 'reconnecting' : 'not connected'];
+  if (server.schemaFreshness === 'quarantined') parts.push('tools held back');
+  const blocked = server.toolRules?.filter((rule) => rule.rule === 'deny').length ?? 0;
+  if (blocked > 0) parts.push(`${blocked} blocked`);
+  return parts.join(', ');
+}
+
+// ---------------------------------------------------------------------------
+// Live lists, read only when a guided step or a completion asks
+// ---------------------------------------------------------------------------
+
+const MCP_SERVERS = defineList<McpCommandContext>({
+  name: 'mcp.servers',
+  async read(ctx) {
+    const api = mcpApiOf(ctx);
+    const running = api.listServerSecurity().map((server): ListRow => ({
+      value: server.name,
+      label: server.name,
+      detail: `Trust: ${formatTrust(server.trustMode)}; role: ${formatRole(server.role)}.`,
+      state: serverState(server),
+    }));
+    // A configured server that has not started yet (it starts when first used) is still one you have.
+    const paths = ctx.workspace.shellPaths;
+    const configured = paths ? api.getEffectiveConfig(paths).servers.map((entry) => entry.server.name) : [];
+    const known = new Set(running.map((row) => row.value));
+    return [...running, ...configured.filter((name) => !known.has(name)).map((name): ListRow => ({ value: name, label: name, state: 'not started yet' }))];
   },
-) {
-  const wording = {
-    host: 'Agent',
-    flagOwner: 'Agent',
-    addServerPointer: 'Agent Workspace -> Tools & MCP -> Add MCP server',
-    authReviewCommand: '/auth review',
-    confirmedActions: 'confirmed add/remove/reload actions',
-    commandPolicy: 'loosening a server\'s trust mode or approving a quarantined schema asks once before it applies.',
-    ...policy.wording,
-  };
-  const MCP_ROLES = ['general', 'docs', 'filesystem', 'git', 'database', 'browser', 'automation', 'ops', 'remote'] as const;
-  const MCP_TRUST_MODES = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'] as const;
-  const MCP_COMMAND_TRUST_MODES = ['constrained', 'ask-on-risk', 'blocked'] as const;
-  const MCP_ADD_COMMAND_USAGE =
-    `/mcp add <name> <command|https-url> [options] [-- <server args>]; options: --scope project|global, --role <role>, --trust constrained|ask-on-risk|blocked${policy.allowAllOnAdd ? '|allow-all' : ''}, --env KEY=VALUE (command servers), --header Name=Value (url servers), --path <path>, --host <host>; everything after -- is passed to the server command as it is`;
-  const MCP_TRUST_COMMAND_USAGE = '/mcp trust <server> <constrained|ask-on-risk|blocked|config>  (kept in the server\'s MCP config; config ends a value set for this session only)';
-  const MCP_ROLE_COMMAND_USAGE = '/mcp role <server> <general|docs|filesystem|git|database|browser|automation|ops|remote|config>  (kept in the server\'s MCP config; config ends a value set for this session only)';
-  const MCP_DENY_COMMAND_USAGE = '/mcp deny <server> <tool> [--keep]  (this session only; --keep keeps it in the server\'s MCP config past a restart; /mcp clear lifts it)';
-  const MCP_ALLOW_COMMAND_USAGE = '/mcp allow <server> <tool>  (kept in your global MCP config; lets the tool past the server\'s path and host scope; asks once)';
-  const MCP_CLEAR_COMMAND_USAGE = '/mcp clear <server> <tool>  (removes the rule set for the tool: this session\'s denial and the allow or denial kept in the server\'s MCP config; asks once)';
-  interface ParsedMcpAddArgs {
-    readonly scope: McpConfigScope;
-    readonly server: McpServerConfig;
-  }
-  type McpSecurityServer = ReturnType<McpApi['listServerSecurity']>[number];
-  type McpDisplayTrustMode = NonNullable<McpServerConfig['trustMode']> | McpSecurityServer['trustMode'];
-  type McpDisplayRole = NonNullable<McpServerConfig['role']> | McpSecurityServer['role'];
-  type McpDisplayFreshness = McpSecurityServer['schemaFreshness'];
-  function isMcpRole(value: string): value is NonNullable<McpServerConfig['role']> {
-    return MCP_ROLES.includes(value as NonNullable<McpServerConfig['role']>);
-  }
-  function isMcpTrustMode(value: string): value is NonNullable<McpServerConfig['trustMode']> {
-    return MCP_TRUST_MODES.includes(value as NonNullable<McpServerConfig['trustMode']>);
-  }
-  function isMcpCommandTrustMode(value: string): value is Exclude<NonNullable<McpServerConfig['trustMode']>, 'allow-all'> {
-    return MCP_COMMAND_TRUST_MODES.includes(value as Exclude<NonNullable<McpServerConfig['trustMode']>, 'allow-all'>);
-  }
-  function isMcpScope(value: string): value is McpConfigScope {
-    return value === 'project' || value === 'global';
-  }
-  function stripMcpAddYesFlag(args: readonly string[]): { readonly rest: readonly string[] } {
-    const rest: string[] = [];
-    let passthrough = false;
-    for (const token of args) {
-      if (passthrough) {
-        rest.push(token);
-        continue;
-      }
-      if (token === '--') {
-        passthrough = true;
-        rest.push(token);
-        continue;
-      }
-      if (token === '--yes') continue;
-      rest.push(token);
-    }
-    return { rest };
-  }
-  function formatMcpTrustMode(mode: McpDisplayTrustMode): string {
-    if (mode === 'ask-on-risk') return 'allow inside scope, ask you outside';
-    if (mode === 'allow-all') return 'allow all actions';
-    return mode.replace(/[_-]+/g, ' ');
-  }
-  function formatMcpFreshness(value: McpDisplayFreshness): string {
-    if (value === 'quarantined') return 'needs review';
-    return value.replace(/[_-]+/g, ' ');
-  }
-  function formatMcpRole(value: McpDisplayRole): string {
-    return value.replace(/[_-]+/g, ' ');
-  }
-  function validateServerName(name: string): string | null {
-    if (!name.trim()) return 'MCP server name is required.';
-    if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
-      return 'MCP server names may contain letters, numbers, dot, underscore, and dash only.';
-    }
-    return null;
-  }
-  function readFlagValue(tokens: string[], index: number, flag: string): string {
-    const value = tokens[index + 1];
-    if (!value) {
-      throw new Error(`Missing value after ${flag}.`);
-    }
-    return value;
-  }
-  /** Where a url server is, without the userinfo or query values a credential can ride in. */
-  function displayMcpUrl(value: string): string {
-    try {
-      const parsed = new URL(value);
-      return `${parsed.origin}${parsed.pathname}`;
-    } catch {
-      return '(url)';
-    }
-  }
-  function describeMcpEndpoint(server: McpServerConfig): string {
-    if (server.url) {
-      const headerKeys = Object.keys(server.headers ?? {});
-      return `url ${displayMcpUrl(server.url)}${headerKeys.length ? ` headerKeys=${headerKeys.join(',')}` : ''}`;
-    }
-    const envKeys = Object.keys(server.env ?? {});
-    return `command ${server.command ?? ''}${server.args?.length ? ` ${maskLaunchArgs(server.args).join(' ')}` : ''}${envKeys.length ? ` envKeys=${envKeys.join(',')}` : ''}`;
-  }
-  function parseAddServerArgs(args: string[]): ParsedMcpAddArgs {
-    const name = args[1]?.trim();
-    const target = args[2]?.trim();
-    if (!name || !target) {
-      throw new Error(`Usage: ${MCP_ADD_COMMAND_USAGE}`);
-    }
-    const nameError = validateServerName(name);
-    if (nameError) throw new Error(nameError);
-    const url = /^https?:\/\//i.test(target) ? target : undefined;
-    const serverArgs: string[] = [];
-    const env: Record<string, string> = {};
-    const headers: Record<string, string> = {};
-    const allowedPaths: string[] = [];
-    const allowedHosts: string[] = [];
-    let role: McpServerConfig['role'];
-    let trustMode: McpServerConfig['trustMode'];
-    let scope: McpConfigScope = 'project';
-    let passthrough = false;
-    const tokens = args.slice(3);
-    for (let index = 0; index < tokens.length; index += 1) {
-      const token = tokens[index]!;
-      if (passthrough) {
-        serverArgs.push(token);
-        continue;
-      }
-      if (token === '--') {
-        passthrough = true;
-        continue;
-      }
-      if (token === '--role') {
-        const value = readFlagValue(tokens, index, token);
-        if (!isMcpRole(value)) throw new Error(`Invalid MCP role "${value}". Expected one of ${MCP_ROLES.join(', ')}.`);
-        role = value;
-        index += 1;
-        continue;
-      }
-      if (token === '--scope') {
-        const value = readFlagValue(tokens, index, token);
-        if (!isMcpScope(value)) throw new Error(`Invalid MCP scope "${value}". Expected project or global.`);
-        scope = value;
-        index += 1;
-        continue;
-      }
-      if (token === '--trust') {
-        const value = readFlagValue(tokens, index, token);
-        if (!isMcpTrustMode(value)) throw new Error(`Invalid MCP trust mode "${value}". Expected one of ${MCP_TRUST_MODES.join(', ')}.`);
-        if (!policy.allowAllOnAdd && !isMcpCommandTrustMode(value)) {
-          throw new Error(`Use /settings -> MCP to explicitly enable allow-all.\nUsage: ${MCP_ADD_COMMAND_USAGE}`);
-        }
-        trustMode = value;
-        index += 1;
-        continue;
-      }
-      if (token === '--env') {
-        const value = readFlagValue(tokens, index, token);
-        const eq = value.indexOf('=');
-        if (eq <= 0) throw new Error('MCP env entries must use KEY=VALUE.');
-        env[value.slice(0, eq)] = value.slice(eq + 1);
-        index += 1;
-        continue;
-      }
-      if (token === '--header') {
-        const value = readFlagValue(tokens, index, token);
-        const eq = value.indexOf('=');
-        if (eq <= 0) throw new Error('MCP headers must use Name=Value, for example --header "Authorization=Bearer <token>".');
-        headers[value.slice(0, eq).trim()] = value.slice(eq + 1);
-        index += 1;
-        continue;
-      }
-      if (token === '--path') {
-        allowedPaths.push(readFlagValue(tokens, index, token));
-        index += 1;
-        continue;
-      }
-      if (token === '--host') {
-        allowedHosts.push(readFlagValue(tokens, index, token));
-        index += 1;
-        continue;
-      }
-      serverArgs.push(token);
-    }
-    if (url && (serverArgs.length > 0 || Object.keys(env).length > 0)) {
-      throw new Error('A url MCP server takes no launch arguments or --env; send credentials with --header Name=Value.');
-    }
-    if (!url && Object.keys(headers).length > 0) {
-      throw new Error('--header is sent only to a url (HTTP) MCP server; this server has a command. Use --env for a command server.');
-    }
-    return {
-      scope,
-      server: {
-        name,
-        ...(url ? { url } : { command: target }),
-        ...(serverArgs.length > 0 ? { args: serverArgs } : {}),
-        ...(Object.keys(env).length > 0 ? { env } : {}),
-        ...(Object.keys(headers).length > 0 ? { headers } : {}),
-        ...(role ? { role } : {}),
-        ...(trustMode ? { trustMode } : {}),
-        ...(allowedPaths.length > 0 ? { allowedPaths } : {}),
-        ...(allowedHosts.length > 0 ? { allowedHosts } : {}),
-      },
-    };
-  }
-  async function reloadMcpRuntime(ctx: Context): Promise<McpReloadResult> {
-    const result = await requireMcpApi(ctx).reload(requireShellPaths(ctx));
+  operator: { method: 'mcp.servers.list', input: {}, rows: { from: 'servers', value: 'name', label: 'name' } },
+});
+
+const MCP_QUARANTINED_SERVERS = defineList<McpCommandContext>({
+  name: 'mcp.servers.held-back',
+  async read(ctx) {
+    return mcpApiOf(ctx).listServerSecurity().filter((server) => server.schemaFreshness === 'quarantined').map((server): ListRow => ({
+      value: server.name,
+      label: server.name,
+      detail: server.quarantineDetail ?? server.quarantineReason ?? 'Its tools changed since you last accepted them.',
+      state: 'tools held back',
+    }));
+  },
+  operator: { terminalOnly: 'Accepting a server\'s changed tools is done in a terminal app, where its tools run.' },
+});
+
+const MCP_TOOLS = defineList<McpCommandContext>({
+  name: 'mcp.tools',
+  async read(ctx, earlier) {
+    const api = mcpApiOf(ctx);
+    const server = api.listServerSecurity().find((entry) => entry.name === earlier.server);
+    const rules = server?.toolRules ?? [];
+    const tools = (await api.listAllTools()).filter((tool) => tool.serverName === earlier.server);
+    return tools.map((tool): ListRow => {
+      const held = rules.filter((rule) => rule.toolName === tool.toolName);
+      const state = held.map((rule) => `${rule.rule === 'deny' ? 'blocked' : 'past its limits'}${rule.source === 'session' ? ' this session' : ', kept'}`).join('; ');
+      return { value: tool.toolName, label: tool.toolName, ...(tool.description ? { detail: tool.description } : {}), ...(state ? { state } : {}) };
+    });
+  },
+  operator: { method: 'mcp.tools.list', input: {}, rows: { from: 'tools', where: { field: 'serverName', equals: '{server}' }, value: 'toolName', label: 'toolName', detail: 'description' } },
+});
+
+const MCP_BLOCKED_TOOLS = defineList<McpCommandContext>({
+  name: 'mcp.tools.blocked',
+  async read(ctx, earlier) {
+    const server = mcpApiOf(ctx).listServerSecurity().find((entry) => entry.name === earlier.server);
+    return (server?.toolRules ?? []).filter((rule) => rule.rule === 'deny').map((rule): ListRow => ({
+      value: rule.toolName,
+      label: rule.toolName,
+      state: rule.source === 'session' ? 'blocked for this session only' : 'blocked, kept',
+    }));
+  },
+  // The web UI sees kept blocks; a block for this session belongs to the terminal app that set it.
+  operator: { method: 'mcp.config.get', input: {}, rows: { from: 'servers', where: { field: 'name', equals: '{server}' }, each: 'deniedTools', value: '.', label: '.' } },
+});
+
+const MCP_EXEMPT_TOOLS = defineList<McpCommandContext>({
+  name: 'mcp.tools.exempt',
+  async read(ctx, earlier) {
+    const server = mcpApiOf(ctx).listServerSecurity().find((entry) => entry.name === earlier.server);
+    return (server?.toolRules ?? []).filter((rule) => rule.rule === 'allow').map((rule): ListRow => ({
+      value: rule.toolName,
+      label: rule.toolName,
+      state: rule.inEffect ? 'goes past its server\'s limits' : 'past its limits, but blocked',
+    }));
+  },
+  operator: { method: 'mcp.config.get', input: {}, rows: { from: 'servers', where: { field: 'name', equals: '{server}' }, each: 'allowedTools', value: '.', label: '.' } },
+});
+
+const SERVER: InputDescription = {
+  id: 'server', label: 'Server', help: 'The MCP servers you have', kind: 'choice',
+  choices: { list: MCP_SERVERS }, required: true, typed: { position: 1 },
+};
+const TOOL: InputDescription = {
+  id: 'tool', label: 'Tool', help: 'Tools this server offers right now', kind: 'choice',
+  choices: { list: MCP_TOOLS, dependsOn: 'server', allowOther: { reason: 'a tool the server has not listed (it is not connected now)' } },
+  required: true, typed: { position: 2 },
+};
+const SCOPE: InputDescription = {
+  id: 'scope', label: 'Kept for', help: 'Which MCP config file keeps it', kind: 'choice', choices: SCOPES,
+  required: { default: 'project', defaultMeans: 'this project only' }, typed: { flag: '--scope' },
+};
+
+// ---------------------------------------------------------------------------
+// What the actions do
+// ---------------------------------------------------------------------------
+
+function knownServer(api: McpApi, name: string, change: string): McpSecurityServer {
+  const server = api.listServerSecurity().find((entry) => entry.name === name);
+  if (!server) refuse(`No MCP server named ${name}, so its ${change} was not changed.`, 'Run /mcp servers to list your servers.');
+  return server;
+}
+
+function where(result: McpStoredToolRuleResult): string {
+  return `${result.scope} MCP config ${result.path}`;
+}
+
+async function keepToolRule(ctx: McpCommandContext, server: string, tool: string, rule: 'allow' | 'deny' | 'clear'): Promise<McpStoredToolRuleResult> {
+  const api = mcpApiOf(ctx);
+  if (!api.storeServerToolRule) refuse(`MCP tool ${tool} not changed: this runtime cannot keep a per-tool rule.`, rule === 'deny' ? `Block it for this session only: /mcp block ${server} ${tool}.` : undefined);
+  try {
+    const result = await api.storeServerToolRule(server, tool, rule, shellPathsOf(ctx));
     ctx.renderRequest();
     return result;
+  } catch (error) {
+    refuse(`MCP tool ${tool} on ${server} not changed: ${summarizeError(error)}`);
   }
-  function registerMcpRuntimeCommands(registry: Pick<TerminalCommandRegistry<Context>, 'register'>): void {
-    registry.register({
-      name: 'mcp',
-      effect: 'mixed',
-      aliases: [],
-      // Env values and request headers carry credentials; the input history keeps neither.
-      secretArgs: { flags: ['--env', '--header'] },
-      description: 'Manage MCP servers and their tools; /mcp trust, /mcp role, deny --keep and allow are kept in the MCP config, /mcp deny lasts this session, clear removes a tool rule',
-      ...(policy.hidden ? { hidden: true } : {}),
-      usage: `[servers|review|tools [<server>]|config|add <name> <command|https-url> [--scope project|global] [--role <role>] [--trust constrained|ask-on-risk|blocked${policy.allowAllOnAdd ? '|allow-all' : ''}] [--env KEY=VALUE] [--header Name=Value] [-- <server args>]|remove|reload|auth-review|repair [server]|trust|role|quarantine <server> [detail|approve [operatorId]]|deny <server> <tool> [--keep]|allow <server> <tool>|clear <server> <tool>]`,
-      argsHint: '[servers|review|tools|config|add|remove]',
-      async handler(args, ctx) {
-        const print = (message: string) => ctx.print(message);
-        /** A line that did not do what was asked: thrown, so the terminal and a model caller both see it refused. */
-        const refuse: (message: string, next?: string) => never = (message, next) => { throw commandRefusal(message, next); };
-        const mcpApi = requireMcpApi(ctx);
-        const listServerSecurity = () => mcpApi.listServerSecurity();
-        /** The configured or connected server a change names; an unknown name is refused before anything is asked or changed. */
-        const knownServer = (name: string, change: string): McpSecurityServer | undefined => {
-          const server = listServerSecurity().find((entry) => entry.name === name);
-          if (!server) refuse(`No MCP server named ${name}, so its ${change} was not changed.`, 'Run /mcp servers to list configured servers.');
-          return server;
-        };
-        /** Return a server to its configured trust mode or role and say which value applies now. */
-        const clearSessionPolicy = (serverName: string, field: 'trustMode' | 'role'): void => {
-          const what = field === 'trustMode' ? 'trust mode' : 'role';
-          if (!mcpApi.clearServerSessionPolicy) refuse(`MCP ${what} not changed: this runtime cannot clear a session ${what}.`, 'Restart to return to the configured value.');
-          let cleared: boolean;
-          try {
-            cleared = mcpApi.clearServerSessionPolicy(serverName, field);
-          } catch (error) {
-            refuse(`MCP ${what} not changed: ${summarizeError(error)}`);
-          }
-          const now = listServerSecurity().find((server) => server.name === serverName);
-          const value = now ? (field === 'trustMode' ? formatMcpTrustMode(now.trustMode) : formatMcpRole(now.role)) : 'its configured value';
-          print(cleared
-            ? `${serverName} is back on its configured MCP ${what}: ${value}.`
-            : `${serverName} had no MCP ${what} set for this session; it runs on its configured ${what}: ${value}.`);
-        };
-        /**
-         * Keep a server's trust mode or role with its entry in its MCP config file and apply it.
-         * A server whose entry is in a file this program does not write gets the value for this
-         * session only, and is told why it was not kept.
-         */
-        const storePolicy = async (serverName: string, policy: { readonly trustMode: Exclude<NonNullable<McpServerConfig['trustMode']>, 'allow-all'> } | { readonly role: NonNullable<McpServerConfig['role']> }, label: string): Promise<void> => {
-          const what = 'trustMode' in policy ? 'trust mode' : 'role';
-          const sessionOnly = (why: string): void => {
-            try {
-              if ('trustMode' in policy) mcpApi.setServerTrustMode(serverName, policy.trustMode);
-              else mcpApi.setServerRole(serverName, policy.role);
-            } catch (error) {
-              refuse(`MCP ${what} not changed: ${summarizeError(error)}`);
-            }
-            print(`Updated MCP ${what} for ${serverName} to ${label} for this session only (${why}): it stays through reconnects and config reloads until \`/mcp ${'trustMode' in policy ? 'trust' : 'role'} ${serverName} config\` or a restart.`);
-          };
-          if (!mcpApi.storeServerPolicy) { sessionOnly('this runtime cannot keep it in the MCP config'); return; }
-          let result: McpStoredToolRuleResult;
-          try {
-            result = await mcpApi.storeServerPolicy(serverName, policy, requireShellPaths(ctx));
-          } catch (error) {
-            sessionOnly(summarizeError(error));
-            return;
-          }
-          ctx.renderRequest();
-          const where = `${result.scope} MCP config ${result.path}`;
-          print(result.changed
-            ? `Set the MCP ${what} of ${serverName} to ${label}, kept in ${where}: it applies now and after a restart.`
-            : `${serverName} already has the MCP ${what} ${label} in ${where}; it applies now.`);
-        };
-        /** The rule kept for a tool in the server's config, from the runtime's record; undefined when none is kept. */
-        const keptRule = (serverName: string, toolName: string): 'allow' | 'deny' | undefined =>
-          listServerSecurity().find((server) => server.name === serverName)?.toolRules
-            ?.find((rule) => rule.source === 'stored' && rule.toolName === toolName)?.rule;
-        /** True when this session denies the tool (set with /mcp deny, lifted with /mcp clear). */
-        const sessionDenied = (serverName: string, toolName: string): boolean =>
-          listServerSecurity().find((server) => server.name === serverName)?.toolRules
-            ?.some((entry) => entry.source === 'session' && entry.toolName === toolName) === true;
-        /** Keep one tool's allow or denial with the server's entry in its MCP config file and say what holds now. */
-        const storeToolRule = async (serverName: string, toolName: string, rule: Exclude<McpToolRule, 'clear'>): Promise<void> => {
-          if (!mcpApi.storeServerToolRule) {
-            refuse(`MCP tool ${toolName} not changed: this runtime cannot keep a per-tool rule.`, rule === 'deny' ? `Use /mcp deny ${serverName} ${toolName} to deny it for this session.` : undefined);
-          }
-          let result: McpStoredToolRuleResult;
-          try {
-            result = await mcpApi.storeServerToolRule(serverName, toolName, rule, requireShellPaths(ctx));
-          } catch (error) {
-            refuse(`MCP tool ${toolName} on ${serverName} not changed: ${summarizeError(error)}`);
-          }
-          ctx.renderRequest();
-          const where = `${result.scope} MCP config ${result.path}`;
-          const sessionNoteText = sessionDenied(serverName, toolName) ? ` This session's denial of it still applies until a restart or \`/mcp clear ${serverName} ${toolName}\`, which removes the kept rule too.` : '';
-          if (!result.changed) {
-            print(`${serverName} tool ${toolName} is already ${rule === 'allow' ? 'allowed' : 'denied'} in ${where}; nothing changed.${sessionNoteText}`);
-            return;
-          }
-          if (rule === 'deny') {
-            print(`Denied MCP tool ${toolName} on ${serverName}, kept in ${where}: every call to it is refused, whatever the server's trust mode and scope allow, after a restart too. \`/mcp clear ${serverName} ${toolName}\` lifts it.`);
-          } else {
-            print(`Allowed MCP tool ${toolName} on ${serverName}, kept in ${where}: calls to it pass the server's path and host scope. A blocked server, a quarantined schema or a denial of the tool still refuses it. \`/mcp clear ${serverName} ${toolName}\` removes the allow.${sessionNoteText}`);
-          }
-        };
-        /**
-         * Remove whatever rule is set for one tool: the denial set for this
-         * session and the allow or denial kept in the server's MCP config. Says
-         * which it removed and what decides the tool's calls now.
-         */
-        const clearToolRules = async (serverName: string, toolName: string): Promise<void> => {
-          const removed: string[] = [];
-          const deniedNow = sessionDenied(serverName, toolName);
-          if (deniedNow && !mcpApi.clearServerToolDenial) {
-            refuse(`MCP tool ${toolName} not changed: this runtime cannot lift a denial set for this session.`, 'A restart ends it.');
-          }
-          if (mcpApi.storeServerToolRule) {
-            let result: McpStoredToolRuleResult;
-            try {
-              result = await mcpApi.storeServerToolRule(serverName, toolName, 'clear', requireShellPaths(ctx));
-            } catch (error) {
-              refuse(`MCP tool ${toolName} on ${serverName} not changed: ${summarizeError(error)}`);
-            }
-            if (result.changed) removed.push(`the rule kept in ${result.scope} MCP config ${result.path}`);
-          } else if (keptRule(serverName, toolName) !== undefined) {
-            refuse(`MCP tool ${toolName} not changed: this runtime cannot change a kept per-tool rule.`, 'Edit the server\'s entry in its MCP config file.');
-          }
-          if (deniedNow && mcpApi.clearServerToolDenial) {
-            try {
-              if (mcpApi.clearServerToolDenial(serverName, toolName)) removed.push('the denial set for this session');
-            } catch (error) {
-              refuse(`MCP tool ${toolName} on ${serverName}: ${removed.length > 0 ? `${removed.join(' and ')} was removed, but ` : ''}this session's denial was not lifted: ${summarizeError(error)}`);
-            }
-          }
-          ctx.renderRequest();
-          const trust = listServerSecurity().find((server) => server.name === serverName)?.trustMode;
-          const now = `its trust mode${trust ? ` (${formatMcpTrustMode(trust)})` : ''} and scope decide each call.`;
-          print(removed.length > 0
-            ? `Removed ${removed.join(' and ')} for ${toolName} on ${serverName}; ${now}`
-            : `No rule is set for ${toolName} on ${serverName}, for this session or kept in its MCP config; nothing changed. ${now.charAt(0).toUpperCase()}${now.slice(1)}`);
-        };
-        // A --yes typed out of habit is dropped and never read as a server
-        // argument; only tokens after -- are passed on as typed.
-        const stripped = args[0] === 'add' ? stripMcpAddYesFlag(args) : stripYesFlag(args);
-        const commandArgs = [...stripped.rest];
-        const subcommand = commandArgs[0];
-        if (!subcommand && ctx.openMcpWorkspace) {
-          ctx.openMcpWorkspace();
-          return;
-        }
-        if (subcommand === 'review') {
-          const servers = listServerSecurity();
-          const authRequired = servers.filter((server) => !server.connected || server.schemaFreshness === 'quarantined');
-          print(
-            [
-              'MCP Review',
-              `  servers: ${servers.length}`,
-              `  connected: ${servers.filter((server) => server.connected).length}`,
-              `  auth or repair attention: ${authRequired.length}`,
-              ...servers.map(
-                (server) =>
-                  `  ${server.name}  trust=${formatMcpTrustMode(server.trustMode)}  role=${formatMcpRole(server.role)}  status=${formatMcpFreshness(server.schemaFreshness)}  connected=${server.connected ? 'yes' : server.phase === 'restart-wait' ? 'reconnecting' : 'no'}`,
-              ),
-              '  next: /mcp auth-review',
-              '  next: /mcp repair <server>',
-            ].join('\n'),
-          );
-          return;
-        }
-        if (subcommand === 'servers') {
-          const servers = listServerSecurity();
-          if (servers.length === 0) {
-            print(
-              'No MCP servers configured.\n' +
-                'Add servers to one of these locations (scanned in order):\n' +
-                '  ~/.config/mcp/mcp.json               (global XDG)\n' +
-                '  ~/.mcp/mcp.json                      (global dotdir)\n' +
-                '  ~/.config/claude/claude_desktop_config.json  (Claude Desktop)\n' +
-                '  .mcp/mcp.json                        (project-local)\n' +
-                '  .goodvibes/mcp.json                  (goodvibes project)\n' +
-                `\nOpen /mcp and choose Add or update server, or use ${wording.addServerPointer}.`,
-            );
-            return;
-          }
-          print(formatMcpServerList(servers));
-          return;
-        }
-        if (subcommand === 'tools') {
-          const filterServer = commandArgs[1];
-          print('Fetching MCP tool list...');
-          let allTools;
-          try {
-            allTools = await mcpApi.listAllTools();
-          } catch (e) {
-            refuse(`Listing MCP tools failed: ${summarizeError(e)}`);
-          }
-          const tools = filterServer ? allTools.filter((t) => t.serverName === filterServer) : allTools;
-          if (tools.length === 0) {
-            print(
-              filterServer
-                ? `No tools found for server "${filterServer}". Is it connected? Run /mcp to see server status.`
-                : 'No MCP tools available. Configure servers in .goodvibes/mcp.json or ~/.config/mcp/mcp.json.',
-            );
-            return;
-          }
-          const lines: string[] = [`MCP Tools (${tools.length} total):`];
-          let lastServer = '';
-          for (const tool of tools) {
-            if (tool.serverName !== lastServer) {
-              lines.push(`\n  [${tool.serverName}]`);
-              lastServer = tool.serverName;
-            }
-            lines.push(`    ${tool.toolName}${tool.description ? `: ${tool.description}` : ''}`);
-          }
-          print(lines.join('\n'));
-          return;
-        }
-        if (subcommand === 'auth-review') {
-          const servers = listServerSecurity();
-          const needingAttention = servers.filter((server) => !server.connected || server.schemaFreshness === 'quarantined');
-          print(
-            needingAttention.length > 0
-              ? [
-                  'MCP Auth Review',
-                  ...needingAttention.map(
-                    (server) =>
-                      `  ${server.name}  connected ${server.connected ? 'yes' : 'no'}  status ${formatMcpFreshness(server.schemaFreshness)}  trust ${formatMcpTrustMode(server.trustMode)}`,
-                  ),
-                  `  next: ${wording.authReviewCommand}`,
-                  '  next: /mcp repair <server>',
-                ].join('\n')
-              : 'MCP Auth Review\n  No MCP servers currently need auth or quarantine recovery.',
-          );
-          return;
-        }
-        if (subcommand === 'repair') {
-          const serverName = commandArgs[1];
-          const servers = listServerSecurity();
-          const selected = serverName
-            ? servers.find((server) => server.name === serverName)
-            : servers.find((server) => !server.connected || server.schemaFreshness === 'quarantined');
-          if (!selected) {
-            if (serverName) refuse(`Unknown MCP server ${serverName}.`, 'Run /mcp servers to list configured servers.');
-            print('MCP Repair\n  No MCP server currently needs repair.');
-            return;
-          }
-          const nextSteps = [
-            selected.schemaFreshness === 'quarantined'
-              ? `/mcp quarantine ${quoteSlashCommandArg(selected.name)} approve operator`
-              : null,
-            !selected.connected ? wording.authReviewCommand : null,
-            '/mcp review',
-            '/health review',
-          ].filter((entry): entry is string => entry !== null);
-          print(
-            [
-              `MCP Repair: ${selected.name}`,
-              `  connected: ${selected.connected ? 'yes' : 'no'}`,
-              `  trust: ${formatMcpTrustMode(selected.trustMode)}`,
-              `  role: ${formatMcpRole(selected.role)}`,
-              `  status: ${formatMcpFreshness(selected.schemaFreshness)}`,
-              ...(selected.quarantineReason ? [`  quarantine: ${selected.quarantineReason}`] : []),
-              ...(selected.quarantineDetail ? [`  detail: ${selected.quarantineDetail}`] : []),
-              '  next:',
-              ...nextSteps.map((step) => `    ${step}`),
-            ].join('\n'),
-          );
-          return;
-        }
-        if (subcommand === 'trust') {
-          const serverName = commandArgs[1];
-          const requestedMode = commandArgs[2];
-          if (serverName && requestedMode === 'config') {
-            if (!knownServer(serverName, 'trust mode')) return;
-            clearSessionPolicy(serverName, 'trustMode');
-            return;
-          }
-          if (serverName && requestedMode) {
-            if (!isMcpTrustMode(requestedMode)) {
-              refuse(`Invalid MCP trust mode "${requestedMode}". Expected constrained, ask-on-risk, blocked, config (back to the configured mode), or allow-all.`,
-                `Usage: ${MCP_TRUST_COMMAND_USAGE}. Use /settings -> MCP to explicitly enable allow-all.`);
-            }
-            const mode = requestedMode;
-            if (mode === 'allow-all') {
-              ctx.openSettingsModal?.();
-              refuse(`The trust mode of ${serverName} was not changed: allow-all is not set by a command.`, `Use /settings → MCP to explicitly enable allow-all for ${serverName}.`);
-            }
-            if (!knownServer(serverName, 'trust mode')) return;
-            await storePolicy(serverName, { trustMode: mode }, formatMcpTrustMode(mode));
-            return;
-          }
-          refuse(`Usage: ${MCP_TRUST_COMMAND_USAGE}`, 'Use /settings -> MCP to explicitly enable allow-all.');
-        }
-        if (subcommand === 'role') {
-          const serverName = commandArgs[1];
-          const requestedRole = commandArgs[2];
-          if (serverName && requestedRole === 'config') {
-            if (!knownServer(serverName, 'role')) return;
-            clearSessionPolicy(serverName, 'role');
-            return;
-          }
-          if (serverName && requestedRole) {
-            if (!isMcpRole(requestedRole)) {
-              refuse(`Invalid MCP role "${requestedRole}". Expected one of ${MCP_ROLES.join(', ')}, or config (back to the configured role).`, `Usage: ${MCP_ROLE_COMMAND_USAGE}`);
-            }
-            const role = requestedRole;
-            if (!knownServer(serverName, 'role')) return;
-            await storePolicy(serverName, { role }, formatMcpRole(role));
-            return;
-          }
-          refuse(`Usage: ${MCP_ROLE_COMMAND_USAGE}`);
-        }
-        if (subcommand === 'deny') {
-          const serverName = commandArgs[1];
-          const toolName = commandArgs[2];
-          const tail = commandArgs[3];
-          if (!serverName || !toolName || (tail !== undefined && tail !== '--keep') || commandArgs.length > 4) refuse(`Usage: ${MCP_DENY_COMMAND_USAGE}`);
-          if (!knownServer(serverName, `tool ${toolName}`)) return;
-          if (tail === '--keep') {
-            await storeToolRule(serverName, toolName, 'deny');
-            return;
-          }
-          if (!mcpApi.denyServerTool) refuse(`MCP tool ${toolName} not changed: this runtime cannot deny a single tool.`, `Use /mcp trust ${serverName} blocked to refuse the whole server.`);
-          try {
-            mcpApi.denyServerTool(serverName, toolName);
-          } catch (error) {
-            refuse(`MCP tool ${toolName} not denied: ${summarizeError(error)}`);
-          }
-          print(`Denied MCP tool ${toolName} on ${serverName} for this session only: every call to it is refused, whatever the server's trust mode, scope and kept rules allow, until \`/mcp clear ${serverName} ${toolName}\` or a restart. Add --keep to keep the denial in its MCP config past a restart.`);
-          return;
-        }
-        if (subcommand === 'allow' || subcommand === 'clear') {
-          const serverName = commandArgs[1];
-          const toolName = commandArgs[2];
-          if (!serverName || !toolName || commandArgs.length > 3) refuse(`Usage: ${subcommand === 'allow' ? MCP_ALLOW_COMMAND_USAGE : MCP_CLEAR_COMMAND_USAGE}`);
-          // The confirmation rule refuses a model-run line before this; a surface that registers the command without it is held here too.
-          if (ctx.invokedByModel === true) {
-            refuse(`/mcp ${subcommand} ${serverName} ${toolName} is the owner's own act: it loosens what an MCP server may do. Nothing was changed.`, `Ask the owner to type /mcp ${subcommand} ${serverName} ${toolName}, or to set it in Settings.`);
-          }
-          if (!knownServer(serverName, `tool ${toolName}`)) return;
-          if (subcommand === 'allow') await storeToolRule(serverName, toolName, 'allow');
-          else await clearToolRules(serverName, toolName);
-          return;
-        }
-        if (subcommand === 'add') {
-          let parsedAdd: ParsedMcpAddArgs;
-          try {
-            parsedAdd = parseAddServerArgs(commandArgs);
-          } catch (error) {
-            refuse(summarizeError(error), `Usage: ${MCP_ADD_COMMAND_USAGE}`);
-          }
-          const shellPaths = requireShellPaths(ctx);
-          try {
-            const result = await mcpApi.upsertServerConfig(shellPaths, parsedAdd.scope, parsedAdd.server);
-            const connected = listServerSecurity().find((entry) => entry.name === parsedAdd.server.name)?.connected ?? false;
-            print(
-              [
-                `MCP server "${parsedAdd.server.name}" saved`,
-                `  scope ${parsedAdd.scope}`,
-                `  path ${result.path}`,
-                ...(parsedAdd.scope === 'global' ? ['  global config'] : []),
-                `  Runtime reload: ${connected ? 'connected' : 'server saved; connection needs attention'} (+${result.reload.added} ~${result.reload.changed} -${result.reload.removed}, unchanged ${result.reload.unchanged})`,
-                `  ${describeMcpEndpoint(parsedAdd.server)}`,
-                '  next /mcp tools',
-              ].join('\n'),
-            );
-          } catch (error) {
-            refuse(`MCP add failed: ${summarizeError(error)}`);
-          }
-          return;
-        }
-        if (subcommand === 'remove') {
-          const serverName = commandArgs[1]?.trim();
-          if (!serverName) refuse('Usage: /mcp remove <server> [--scope project|global]');
-          let scope: McpConfigScope = 'project';
-          try {
-            for (let index = 2; index < commandArgs.length; index += 1) {
-              if (commandArgs[index] === '--scope') {
-                const value = readFlagValue(commandArgs, index, '--scope');
-                if (!isMcpScope(value)) refuse(`Invalid MCP scope "${value}". Expected project or global.`);
-                scope = value;
-                index += 1;
-              }
-            }
-          } catch (error) {
-            refuse(summarizeError(error));
-          }
-          const shellPaths = requireShellPaths(ctx);
-          try {
-            const result = await mcpApi.removeServerConfig(shellPaths, scope, serverName);
-            print(
-              result.removed
-                ? `Removed MCP server "${serverName}" from ${scope} config ${result.path}. Reload +${result.reload.added} ~${result.reload.changed} -${result.reload.removed}, unchanged ${result.reload.unchanged}.`
-                : `No ${scope} MCP server named "${serverName}" exists in ${result.path}.\nIf it still appears, it is coming from another config scope or external MCP config.`,
-            );
-          } catch (error) {
-            refuse(`MCP remove failed: ${summarizeError(error)}`);
-          }
-          return;
-        }
-        if (subcommand === 'reload') {
-          try {
-            const result = await reloadMcpRuntime(ctx);
-            const servers = listServerSecurity();
-            print(
-              `Reloaded MCP runtime from config. ${servers.filter((server) => server.connected).length}/${servers.length} server(s) connected. Result +${result.added} ~${result.changed} -${result.removed}, unchanged ${result.unchanged}.`,
-            );
-          } catch (error) {
-            refuse(`MCP reload failed: ${summarizeError(error)}`);
-          }
-          return;
-        }
-        if (subcommand === 'config') {
-          const shellPaths = requireShellPaths(ctx);
-          try {
-            const effective = mcpApi.getEffectiveConfig(shellPaths);
-            print(
-              [
-                'MCP Config',
-                '  locations',
-                ...effective.locations.map(
-                  (location) => `    ${location.scope}/${location.kind}${location.writable ? ' writable' : ' read-only'}  ${location.path}`,
-                ),
-                `  effective servers ${effective.servers.length}`,
-                ...effective.servers.map((entry) => {
-                  const server = entry.server;
-                  return `  - ${server.name}: ${describeMcpEndpoint(server)}  origin ${entry.source.scope}/${entry.source.kind}`;
-                }),
-                '',
-                `Add or update from inside ${wording.host} with explicit confirmation`,
-                `  Open /mcp and choose Add or update server, or use ${wording.addServerPointer}.`,
-                '  Use Settings -> MCP for allow-all decisions.',
-                `  Use -- before server args that look like ${wording.flagOwner} flags.`,
-                'Automation equivalent',
-                `  ${MCP_ADD_COMMAND_USAGE}`,
-              ].join('\n'),
-            );
-          } catch (error) {
-            refuse(`MCP config read failed: ${summarizeError(error)}`);
-          }
-          return;
-        }
-        if (subcommand === 'quarantine') {
-          const serverName = commandArgs[1];
-          const action = commandArgs[2];
-          if (!serverName) refuse('Usage: /mcp quarantine <server> [detail] | /mcp quarantine <server> approve [operatorId]');
-          const target = knownServer(serverName, action === 'approve' ? 'quarantine override' : 'quarantine');
-          if (!target) return;
-          if (action === 'approve') {
-            if (target.schemaFreshness !== 'quarantined') refuse(`MCP server ${serverName} is not quarantined (status ${formatMcpFreshness(target.schemaFreshness)}). Nothing was approved.`);
-            const operatorId = commandArgs[3] || 'operator';
-            mcpApi.approveSchemaQuarantine(serverName, operatorId);
-            print(`Approved MCP tool-definition quarantine override for ${serverName} as ${operatorId}. Refresh is still recommended.`);
-            return;
-          }
-          const detail = commandArgs.slice(2).join(' ') || 'quarantined by operator';
-          mcpApi.quarantineSchema(serverName, 'operator_flagged', detail);
-          print(`Quarantined MCP tool definitions for ${serverName}.\nReason: ${detail}`);
-          return;
-        }
-        const servers = listServerSecurity();
-        if (servers.length === 0) {
-          print(
-            'No MCP servers configured.\n' +
-              'Add servers to one of these locations (scanned in order):\n' +
-              '  ~/.config/mcp/mcp.json               (global XDG)\n' +
-              '  ~/.mcp/mcp.json                      (global dotdir)\n' +
-              '  ~/.config/claude/claude_desktop_config.json  (Claude Desktop)\n' +
-              '  .mcp/mcp.json                        (project-local)\n' +
-              '  .goodvibes/mcp.json                  (goodvibes project)\n' +
-              `\nOpen /mcp and choose Add or update server, or use ${wording.addServerPointer}.\n` +
-              '\nFormat: { "servers": [{ "name": "my-server", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"] }] }',
-          );
-          return;
-        }
-        print(formatMcpServerList(servers));
+}
+
+async function keepServerPolicy(ctx: McpCommandContext, server: string, policy: { readonly trustMode: McpTrustMode } | { readonly role: McpRole }): Promise<string> {
+  const api = mcpApiOf(ctx);
+  const what = 'trustMode' in policy ? 'trust level' : 'role';
+  const sessionOnly = (why: string): string => {
+    try {
+      if ('trustMode' in policy) api.setServerTrustMode(server, policy.trustMode);
+      else api.setServerRole(server, policy.role);
+    } catch (error) {
+      refuse(`MCP ${what} not changed: ${summarizeError(error)}`);
+    }
+    return `It is set for this session only (${why}).`;
+  };
+  if (!api.storeServerPolicy) return sessionOnly('this runtime cannot keep it in the MCP config');
+  try {
+    const result = await api.storeServerPolicy(server, policy, shellPathsOf(ctx));
+    ctx.renderRequest();
+    return result.changed ? `Kept in ${where(result)}; it applies now and after a restart.` : `It was already kept in ${where(result)}.`;
+  } catch (error) {
+    return sessionOnly(summarizeError(error));
+  }
+}
+
+function restoreSessionPolicy(ctx: McpCommandContext, server: string, field: 'trustMode' | 'role'): string {
+  const api = mcpApiOf(ctx);
+  const what = field === 'trustMode' ? 'trust level' : 'role';
+  if (!api.clearServerSessionPolicy) refuse(`MCP ${what} not changed: this runtime cannot end a value set for this session.`, 'A restart returns it to the saved value.');
+  let cleared: boolean;
+  try {
+    cleared = api.clearServerSessionPolicy(server, field);
+  } catch (error) {
+    refuse(`MCP ${what} not changed: ${summarizeError(error)}`);
+  }
+  const now = api.listServerSecurity().find((entry) => entry.name === server);
+  const value = now ? (field === 'trustMode' ? formatTrust(now.trustMode) : formatRole(now.role)) : 'its saved value';
+  return cleared ? `Its saved ${what} applies: ${value}.` : `It had no ${what} set for this session; its saved ${what} applies: ${value}.`;
+}
+
+function describeEndpoint(server: McpServerConfig): string {
+  if (server.url) {
+    let shown = '(url)';
+    try { const parsed = new URL(server.url); shown = `${parsed.origin}${parsed.pathname}`; } catch { /* shown as (url) */ }
+    const headerKeys = Object.keys(server.headers ?? {});
+    return `url ${shown}${headerKeys.length ? ` headerKeys=${headerKeys.join(',')}` : ''}`;
+  }
+  const envKeys = Object.keys(server.env ?? {});
+  return `command ${server.command ?? ''}${server.args?.length ? ` ${maskLaunchArgs(server.args).join(' ')}` : ''}${envKeys.length ? ` envKeys=${envKeys.join(',')}` : ''}`;
+}
+
+function pairs(text: string | undefined, label: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const entry of (text ?? '').split('\n').filter(Boolean)) {
+    const eq = entry.indexOf('=');
+    if (eq <= 0) refuse(`${label} entries are NAME=VALUE; "${entry.slice(0, Math.max(0, eq)) || '(empty)'}=" was not.`);
+    out[entry.slice(0, eq).trim()] = entry.slice(eq + 1);
+  }
+  return out;
+}
+
+/** A name for a new server from its command or address: `npx -y @acme/weather-mcp` → weather. */
+function suggestServerName(earlier: ActionValues): { readonly value: string; readonly from: string } | undefined {
+  if (earlier.start === 'url' && earlier.address) {
+    try {
+      const labels = new URL(earlier.address).hostname.split('.').filter((label) => !['mcp', 'www', 'api'].includes(label));
+      const value = labels[0];
+      return value ? { value, from: 'address' } : undefined;
+    } catch { return undefined; }
+  }
+  const words = (earlier.command ?? '').split('\n').filter((word) => word && !word.startsWith('-'));
+  const last = words.at(-1);
+  if (!last) return undefined;
+  const base = last.replace(/^@[^/]+\//, '').split('/').at(-1)!.replace(/\.(m?js|ts|py)$/, '')
+    .replace(/^(mcp-server-|server-|mcp-)/, '').replace(/(-mcp-server|-mcp|-server)$/, '').replace(/[^a-zA-Z0-9._-]/g, '');
+  return base ? { value: base, from: 'command' } : undefined;
+}
+
+function serverFromValues(values: ActionValues): McpServerConfig {
+  const name = values.name ?? '';
+  if (!/^[a-zA-Z0-9._-]+$/.test(name)) refuse('MCP server names may contain letters, numbers, dot, underscore and dash only.');
+  const url = values.start === 'url' ? values.address : undefined;
+  if (values.start === 'url' && !/^https?:\/\//i.test(url ?? '')) refuse('A web address starts with https:// (or http:// on this machine).');
+  const words = url ? [] : (values.command ?? '').split('\n').filter(Boolean);
+  const target = url ?? words[0] ?? '';
+  if (!target) refuse('Give the command that starts the server, or its web address.');
+  const args = words.slice(1);
+  const env = pairs(values.env, 'Environment');
+  const headers = pairs(values.header, 'Header');
+  if (url && Object.keys(env).length > 0) refuse('A server at a web address takes no environment; send credentials as a header.');
+  if (!url && Object.keys(headers).length > 0) refuse('Headers are sent only to a server at a web address; a command takes environment entries.');
+  const paths = (values.path ?? '').split('\n').filter(Boolean);
+  const hosts = (values.host ?? '').split('\n').filter(Boolean);
+  return {
+    name,
+    ...(url ? { url } : { command: target }),
+    ...(args.length > 0 ? { args } : {}),
+    ...(Object.keys(env).length > 0 ? { env } : {}),
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    ...(values.role ? { role: values.role as McpRole } : {}),
+    ...(values.trust ? { trustMode: values.trust as McpTrustMode } : {}),
+    ...(paths.length > 0 ? { allowedPaths: paths } : {}),
+    ...(hosts.length > 0 ? { allowedHosts: hosts } : {}),
+  };
+}
+
+const NO_SERVERS = [
+  'No MCP servers configured. Servers are read from (in order):',
+  '  ~/.config/mcp/mcp.json               (global)',
+  '  ~/.mcp/mcp.json                      (global dotdir)',
+  '  ~/.config/claude/claude_desktop_config.json  (Claude Desktop)',
+  '  .mcp/mcp.json                        (project)',
+  '  .goodvibes/mcp.json                  (this program, project)',
+  'Add one with /mcp, "Add a server".',
+].join('\n');
+
+function serverList(servers: readonly McpSecurityServer[]): string {
+  const connected = servers.filter((server) => server.connected).length;
+  const lines = [`MCP servers (${connected} of ${servers.length} connected):`];
+  for (const server of servers) {
+    const session = server.sessionTrustMode !== undefined ? ' (this session)' : '';
+    const rules = server.toolRules?.length
+      ? `; ${server.toolRules.map((rule) => `${rule.rule === 'deny' ? 'blocked' : 'past its limits'} ${rule.toolName} (${rule.source === 'session' ? 'this session' : 'kept'}${rule.inEffect ? '' : ', a block wins'})`).join(', ')}`
+      : '';
+    lines.push(`  ${server.name}: ${serverState(server)}; trust: ${formatTrust(server.trustMode)}${session}; role: ${formatRole(server.role)}${server.sessionRole !== undefined ? ' (this session)' : ''}${server.allowedPaths.length ? `; ${server.allowedPaths.length} folder(s)` : ''}${server.allowedHosts.length ? `; ${server.allowedHosts.length} site(s)` : ''}${rules}`);
+    if (!server.connected && server.lastError) lines.push(`      last error: ${server.lastError}`);
+    if (!server.connected && server.reconnect?.stoppedReason) lines.push(`      ${server.reconnect.stoppedReason}; fix the server or its entry, then /mcp reload`);
+  }
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// The description
+// ---------------------------------------------------------------------------
+
+export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
+  name: 'mcp',
+  title: 'MCP servers and tools',
+  summary: 'Connect tools from other programs',
+  group: 'Tools',
+  report: 'see-servers',
+  firstScreenRows: [
+    'see-servers',
+    'add-server',
+    { label: 'Choose what a server may do', actions: ['block-tool', 'unblock-tool', 'exempt-tool', 'unexempt-tool', 'set-trust', 'restore-trust', 'set-role', 'restore-role', 'remove-server'] },
+    { label: 'Check a server that isn\'t working', actions: ['review', 'repair', 'see-tools', 'reload', 'hold-back', 'accept-tools', 'see-config-files', 'open-screen'] },
+  ],
+  actions: [
+    {
+      id: 'see-servers', label: 'See your servers', word: 'servers', inputs: [],
+      async rowValue(ctx) {
+        const servers = mcpApiOf(ctx).listServerSecurity();
+        const connected = servers.filter((server) => server.connected).length;
+        const broken = servers.filter((server) => !server.connected && (server.lastError || server.reconnect?.stoppedReason)).length;
+        const paths = ctx.workspace.shellPaths;
+        const configured = paths ? new Set([...servers.map((server) => server.name), ...mcpApiOf(ctx).getEffectiveConfig(paths).servers.map((entry) => entry.server.name)]).size : servers.length;
+        if (configured === 0) return 'none yet';
+        const parts = [connected === 0 ? 'none connected yet' : `${connected} connected`];
+        if (broken > 0) parts.push(`${broken} not working`);
+        return parts.join(', ');
       },
-    });
-  }
-  /** ` (this session; config: X)` beside a value the owner set for this session, else nothing. */
-  function sessionNote<T extends string>(session: T | undefined, configured: T | undefined, format: (value: T) => string): string {
-    if (session === undefined) return '';
-    return configured === undefined ? ' (this session)' : ` (this session; config: ${format(configured)})`;
-  }
+      sentence: 'Shows every MCP server, whether it is connected, its trust level, role and tool rules.', done: '',
+      touches: 'reads', lasts: 'not-a-change', risk: 'none',
+      operator: { method: 'mcp.servers.list', fields: {} }, example: {},
+      async run(_values, ctx) {
+        const servers = mcpApiOf(ctx).listServerSecurity();
+        ctx.print(servers.length === 0 ? NO_SERVERS : serverList(servers));
+      },
+    },
+    {
+      id: 'see-tools', label: 'See a server\'s tools', word: 'tools',
+      inputs: [{ ...SERVER, required: { default: '', defaultMeans: 'every server' } }],
+      sentence: 'Lists the tools {server} offers right now.', done: '',
+      touches: 'reads', lasts: 'not-a-change', risk: 'none',
+      operator: { method: 'mcp.tools.list', fields: {} }, example: { server: 'github' },
+      async run(values, ctx) {
+        let all;
+        try { all = await mcpApiOf(ctx).listAllTools(); } catch (error) { refuse(`Listing MCP tools failed: ${summarizeError(error)}`); }
+        const tools = values.server ? all.filter((tool) => tool.serverName === values.server) : all;
+        if (tools.length === 0) {
+          ctx.print(values.server ? `${values.server} offers no tools right now. Is it connected? /mcp servers shows its state.` : 'No MCP tools are available. Add a server with /mcp, "Add a server".');
+          return;
+        }
+        const lines = [`MCP tools (${tools.length}):`];
+        let last = '';
+        for (const tool of tools) {
+          if (tool.serverName !== last) { lines.push(`  ${tool.serverName}`); last = tool.serverName; }
+          lines.push(`    ${tool.toolName}${tool.description ? `: ${tool.description}` : ''}`);
+        }
+        ctx.print(lines.join('\n'));
+      },
+    },
+    {
+      id: 'block-tool', label: 'Block a tool', word: 'block',
+      inputs: [SERVER, TOOL, {
+        id: 'lasts', label: 'How long', help: 'For this session, or kept with the server\'s settings', kind: 'choice',
+        choices: [
+          { value: 'session', label: 'This session only', help: 'Ends when you close this app.', lasts: 'session' },
+          { value: 'kept', label: 'Until I unblock it', help: 'Kept with the server\'s entry in its MCP config, after a restart too.', lasts: 'kept' },
+        ],
+        required: { default: 'session', defaultMeans: 'this session only' }, typed: { flag: '--keep', switchOn: 'kept' },
+      }],
+      sentence: 'Every call to {tool} on {server} will be refused {lasts}.',
+      done: 'Blocked {tool} on {server} {lasts}.',
+      touches: 'this-machine', lasts: { byInput: 'lasts' }, risk: 'none', undoneBy: 'unblock-tool',
+      operator: { method: 'mcp.servers.tools.deny', fields: { serverName: 'server', toolName: 'tool' } },
+      example: { server: 'github', tool: 'create_issue', lasts: 'kept' },
+      async run(values, ctx) {
+        const api = mcpApiOf(ctx);
+        const server = values.server!, tool = values.tool!;
+        knownServer(api, server, `tool ${tool}`);
+        if (values.lasts === 'kept') {
+          const result = await keepToolRule(ctx, server, tool, 'deny');
+          return result.changed ? `Kept in ${where(result)}.` : `It was already kept in ${where(result)}.`;
+        }
+        if (!api.denyServerTool) refuse(`MCP tool ${tool} not changed: this runtime cannot block a single tool.`, `Refuse the whole server instead: /mcp trust ${server} blocked.`);
+        try { api.denyServerTool(server, tool); } catch (error) { refuse(`MCP tool ${tool} not blocked: ${summarizeError(error)}`); }
+        ctx.renderRequest();
+        return undefined;
+      },
+    },
+    {
+      id: 'unblock-tool', label: 'Stop blocking a tool', word: 'unblock',
+      inputs: [SERVER, { ...TOOL, help: 'Tools blocked on this server', choices: { list: MCP_BLOCKED_TOOLS, dependsOn: 'server' } }],
+      sentence: '{tool} on {server} will be callable again, under {server}\'s usual trust and limits, until you change it.',
+      done: 'Stopped blocking {tool} on {server}.',
+      touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'block-tool',
+      ownerOnly: { reason: 'it loosens what an MCP server may do', instead: 'Ask the owner to unblock it from /mcp or Settings.' },
+      operator: { method: 'mcp.servers.tools.clear', fields: { serverName: 'server', toolName: 'tool' } },
+      example: { server: 'github', tool: 'create_issue' },
+      async run(values, ctx) {
+        const api = mcpApiOf(ctx);
+        const server = knownServer(api, values.server!, `tool ${values.tool!}`);
+        const tool = values.tool!;
+        const rules = (server.toolRules ?? []).filter((rule) => rule.toolName === tool && rule.rule === 'deny');
+        if (rules.length === 0) refuse(`${tool} on ${server.name} is not blocked; nothing changed.`, `/mcp servers shows ${server.name}'s tool rules.`);
+        const removed: string[] = [];
+        if (rules.some((rule) => rule.source === 'stored')) {
+          const result = await keepToolRule(ctx, server.name, tool, 'clear');
+          if (result.changed) removed.push(`the block kept in ${where(result)}`);
+        }
+        if (rules.some((rule) => rule.source === 'session')) {
+          if (!api.clearServerToolDenial) refuse(`MCP tool ${tool} not changed: this runtime cannot lift a block set for this session.`, 'A restart ends it.');
+          try { if (api.clearServerToolDenial(server.name, tool)) removed.push('this session\'s block'); } catch (error) { refuse(`This session's block of ${tool} was not lifted: ${summarizeError(error)}`); }
+        }
+        ctx.renderRequest();
+        return removed.length > 0 ? `Removed ${removed.join(' and ')}.` : undefined;
+      },
+    },
+    {
+      id: 'exempt-tool', label: 'Let a tool go beyond its server\'s limits', word: 'exempt',
+      inputs: [SERVER, TOOL],
+      sentence: 'Calls to {tool} on {server} will pass {server}\'s folder and site limits until you change it. A block of {tool}, a held-back server or a server set to refuse every call still refuses it.',
+      done: '{tool} on {server} now goes past {server}\'s limits, until you change it.',
+      touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'unexempt-tool',
+      ownerOnly: { reason: 'it loosens what an MCP server may do', instead: 'Ask the owner; it is kept in the global MCP config.' },
+      operator: { method: 'mcp.servers.tools.allow', fields: { serverName: 'server', toolName: 'tool' } },
+      example: { server: 'github', tool: 'get_file_contents' },
+      async run(values, ctx) {
+        knownServer(mcpApiOf(ctx), values.server!, `tool ${values.tool!}`);
+        const result = await keepToolRule(ctx, values.server!, values.tool!, 'allow');
+        return result.changed ? `Kept in ${where(result)}.` : `It was already kept in ${where(result)}.`;
+      },
+    },
+    {
+      id: 'unexempt-tool', label: 'Make a tool follow its server\'s limits again', word: 'unexempt',
+      inputs: [SERVER, { ...TOOL, help: 'Tools that go past this server\'s limits', choices: { list: MCP_EXEMPT_TOOLS, dependsOn: 'server' } }],
+      sentence: 'Calls to {tool} on {server} will be held to {server}\'s folder and site limits again, until you change it.',
+      done: '{tool} on {server} follows {server}\'s limits again.',
+      touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'exempt-tool',
+      operator: { method: 'mcp.servers.tools.clear', fields: { serverName: 'server', toolName: 'tool' } },
+      example: { server: 'github', tool: 'get_file_contents' },
+      async run(values, ctx) {
+        const api = mcpApiOf(ctx);
+        const server = knownServer(api, values.server!, `tool ${values.tool!}`);
+        const kept = server.toolRules?.find((rule) => rule.source === 'stored' && rule.toolName === values.tool);
+        if (kept?.rule !== 'allow') refuse(`${values.tool} on ${server.name} does not go past its limits; nothing changed.`);
+        const result = await keepToolRule(ctx, server.name, values.tool!, 'clear');
+        return `Removed from ${where(result)}.`;
+      },
+    },
+    {
+      id: 'add-server', label: 'Add a server', word: 'add',
+      stepTitles: ['', 'What may it do?'],
+      inputs: [
+        {
+          id: 'start', label: 'How it starts', help: 'How do you start it?', kind: 'choice', step: 1,
+          choices: [{ value: 'command', label: 'A command on this computer' }, { value: 'url', label: 'A web address' }],
+          required: { default: 'command', defaultMeans: 'a command on this computer' },
+          typed: { impliedBy: { input: 'address', ifGiven: 'url', ifNot: 'command' } },
+        },
+        { id: 'command', label: 'Command', help: 'The program to start and its own arguments, as you would type them', kind: 'list', freeTextReason: 'the program and its arguments', required: true, typed: { tail: true }, step: 1, showWhen: { input: 'start', is: 'command' } },
+        { id: 'address', label: 'Address', help: 'The https:// address the server answers at', kind: 'text', freeTextReason: 'the address the server answers at', required: true, typed: { flag: '--url' }, step: 1, showWhen: { input: 'start', is: 'url' } },
+        { id: 'name', label: 'Name', help: 'A short name you choose for it', kind: 'text', freeTextReason: 'a name you choose', required: true, typed: { position: 1 }, step: 1, suggest: suggestServerName },
+        { id: 'trust', label: 'Trust', help: 'What it may do without asking', kind: 'choice', choices: TRUST_MODES, required: { default: '', defaultMeans: 'ask before anything outside its limits' }, typed: { flag: '--trust' }, step: 2 },
+        { id: 'role', label: 'Role', help: 'What kind of server it is', kind: 'choice', choices: ROLES, required: { default: '', defaultMeans: 'general' }, typed: { flag: '--role' }, step: 2 },
+        { ...SCOPE, step: 2 },
+        { id: 'path', label: 'Folders it may use', help: 'Folders, separated by commas', kind: 'path', freeTextReason: 'a folder on this machine', required: { default: '', defaultMeans: 'none besides the project' }, typed: { flag: '--path', repeats: true }, step: 2 },
+        { id: 'host', label: 'Sites it may reach', help: 'Host names, separated by commas', kind: 'text', freeTextReason: 'a host name such as api.github.com', required: { default: '', defaultMeans: 'none' }, typed: { flag: '--host', repeats: true }, step: 2 },
+        { id: 'env', label: 'Environment', help: 'NAME=VALUE for a command, separated by commas; hidden as you type', kind: 'secret', required: { default: '', defaultMeans: 'none' }, typed: { flag: '--env', repeats: true }, step: 2, showWhen: { input: 'start', is: 'command' } },
+        { id: 'header', label: 'Request header', help: 'Name=Value for a web address (an Authorization header); hidden as you type', kind: 'secret', required: { default: '', defaultMeans: 'none' }, typed: { flag: '--header', repeats: true }, step: 2, showWhen: { input: 'start', is: 'url' } },
+      ],
+      sentence: '{name} will be added to the {scope} MCP config and started now, until you change it.',
+      done: 'Added {name}.',
+      touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'remove-server',
+      operator: { terminalOnly: 'Adding a server from the web UI comes with its MCP servers screen; add it here.' },
+      example: { name: 'weather', command: 'npx\n-y\n@acme/weather-mcp' },
+      async run(values, ctx) {
+        const api = mcpApiOf(ctx);
+        const server = serverFromValues(values);
+        const scope = (values.scope || 'project') as McpConfigScope;
+        try {
+          const result = await api.upsertServerConfig(shellPathsOf(ctx), scope, server);
+          const connected = api.listServerSecurity().find((entry) => entry.name === server.name)?.connected ?? false;
+          return [
+            `Kept in ${scope} MCP config ${result.path}; ${connected ? 'connected' : 'saved, but not connected yet (/mcp servers shows why)'}.`,
+            `  ${describeEndpoint(server)}`,
+          ].join('\n');
+        } catch (error) {
+          refuse(`MCP server ${server.name} was not added: ${summarizeError(error)}`);
+        }
+      },
+    },
+    {
+      id: 'remove-server', label: 'Remove a server', word: 'remove',
+      inputs: [SERVER, { ...SCOPE, label: 'From', help: 'Which MCP config file to remove it from' }],
+      sentence: '{server}\'s entry (its command, arguments, environment and trust) will be deleted from the {scope} MCP config and its tools stop being offered.',
+      done: 'Removed {server}.',
+      touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone',
+      operator: { method: 'mcp.servers.remove', fields: { serverName: 'server', scope: 'scope' } },
+      example: { server: 'files', scope: 'project' },
+      async run(values, ctx) {
+        const scope = (values.scope || 'project') as McpConfigScope;
+        let result: Awaited<ReturnType<McpApi['removeServerConfig']>>;
+        try {
+          result = await mcpApiOf(ctx).removeServerConfig(shellPathsOf(ctx), scope, values.server!);
+        } catch (error) {
+          refuse(`MCP server ${values.server} was not removed: ${summarizeError(error)}`);
+        }
+        if (!result.removed) refuse(`No ${scope} MCP server named ${values.server} is in ${result.path}; nothing was removed.`, 'If it still shows, it comes from another config file: /mcp files lists them.');
+        return `Deleted from ${result.path}.`;
+      },
+    },
+    {
+      id: 'reload', label: 'Reconnect every server from its config', word: 'reload', inputs: [],
+      sentence: 'Every MCP server is read again from its config file and reconnected.', done: '',
+      touches: 'this-machine', lasts: 'not-a-change', risk: 'none',
+      operator: { method: 'mcp.config.reload', fields: {} }, example: {},
+      async run(_values, ctx) {
+        const api = mcpApiOf(ctx);
+        try {
+          const result = await api.reload(shellPathsOf(ctx));
+          ctx.renderRequest();
+          const servers = api.listServerSecurity();
+          ctx.print(`Reconnected MCP servers from config: ${servers.filter((server) => server.connected).length} of ${servers.length} connected (added ${result.added}, changed ${result.changed}, removed ${result.removed}, unchanged ${result.unchanged}).`);
+        } catch (error) {
+          refuse(`MCP reload failed: ${summarizeError(error)}`);
+        }
+      },
+    },
+    {
+      id: 'set-trust', label: 'Set a server\'s trust level', word: 'trust',
+      inputs: [SERVER, { id: 'mode', label: 'Trust', help: 'What it may do without asking', kind: 'choice', choices: TRUST_MODES, required: true, typed: { position: 2 } }],
+      sentence: '{server} will be set to "{mode}" until you change it.',
+      done: '{server} is set to "{mode}".',
+      touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'restore-trust',
+      operator: { terminalOnly: 'The daemon has no method to set a server\'s trust level yet; set it here or in Settings → MCP.' },
+      example: { server: 'github', mode: 'constrained' },
+      async run(values, ctx) {
+        knownServer(mcpApiOf(ctx), values.server!, 'trust level');
+        return keepServerPolicy(ctx, values.server!, { trustMode: values.mode as McpTrustMode });
+      },
+    },
+    {
+      id: 'restore-trust', label: 'Go back to the saved trust level', word: 'restore-trust', inputs: [SERVER],
+      sentence: '{server} goes back to the trust level saved in its MCP config, which may allow more than the level set for this session, until you change it.',
+      done: '{server} is back on its saved trust level.',
+      touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection',
+      ownerOnly: { reason: 'the saved level may allow more than the one set for this session', instead: 'Ask the owner to choose "Go back to the saved trust level" in /mcp.' },
+      operator: { terminalOnly: 'A trust level set for this session belongs to that terminal app\'s session.' },
+      example: { server: 'github' },
+      async run(values, ctx) {
+        knownServer(mcpApiOf(ctx), values.server!, 'trust level');
+        return restoreSessionPolicy(ctx, values.server!, 'trustMode');
+      },
+    },
+    {
+      id: 'set-role', label: 'Set a server\'s role', word: 'role',
+      inputs: [SERVER, { id: 'role', label: 'Role', help: 'What kind of server it is', kind: 'choice', choices: ROLES, required: true, typed: { position: 2 } }],
+      sentence: '{server} will be treated as a {role} server until you change it.',
+      done: '{server} is a {role} server.',
+      touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'restore-role',
+      operator: { terminalOnly: 'The daemon has no method to set a server\'s role yet; set it here.' },
+      example: { server: 'github', role: 'git' },
+      async run(values, ctx) {
+        knownServer(mcpApiOf(ctx), values.server!, 'role');
+        return keepServerPolicy(ctx, values.server!, { role: values.role as McpRole });
+      },
+    },
+    {
+      id: 'restore-role', label: 'Go back to the saved role', word: 'restore-role', inputs: [SERVER],
+      sentence: '{server} goes back to the role saved in its MCP config, until you change it.',
+      done: '{server} is back on its saved role.',
+      touches: 'this-machine', lasts: 'kept', risk: 'none',
+      operator: { terminalOnly: 'A role set for this session belongs to that terminal app\'s session.' },
+      example: { server: 'github' },
+      async run(values, ctx) {
+        knownServer(mcpApiOf(ctx), values.server!, 'role');
+        return restoreSessionPolicy(ctx, values.server!, 'role');
+      },
+    },
+    {
+      id: 'hold-back', label: 'Hold back a server\'s tools for review', word: 'quarantine',
+      inputs: [SERVER, { id: 'reason', label: 'Why', help: 'A note you will see when you review it', kind: 'text', freeTextReason: 'your own words', required: { default: 'held back by you', defaultMeans: 'no note' }, typed: { tail: true } }],
+      sentence: '{server}\'s tools will not be offered {lasts}, until you accept them again.',
+      done: 'Held back {server}\'s tools.',
+      touches: 'this-machine', lasts: 'session', risk: 'none', undoneBy: 'accept-tools',
+      operator: { terminalOnly: 'Holding back tools applies to the terminal app\'s own MCP connections.' },
+      example: { server: 'github', reason: 'its tools changed' },
+      async run(values, ctx) {
+        const api = mcpApiOf(ctx);
+        knownServer(api, values.server!, 'quarantine');
+        api.quarantineSchema(values.server!, 'operator_flagged', values.reason || 'held back by you');
+        ctx.renderRequest();
+        return `Reason: ${values.reason || 'held back by you'}.`;
+      },
+    },
+    {
+      id: 'accept-tools', label: 'Accept a server\'s changed tools', word: 'accept-tools',
+      inputs: [{ ...SERVER, help: 'Servers whose tools are held back', choices: { list: MCP_QUARANTINED_SERVERS } }],
+      sentence: '{server}\'s changed tools will be accepted and offered again {lasts}.',
+      done: 'Accepted {server}\'s tools.',
+      touches: 'this-machine', lasts: 'session', risk: 'loosens-a-protection', undoneBy: 'hold-back',
+      ownerOnly: { reason: 'it offers tools that changed since they were last accepted', instead: 'Ask the owner to accept them from /mcp.' },
+      operator: { terminalOnly: 'Accepting a server\'s changed tools is done in a terminal app, where its tools run.' },
+      example: { server: 'github' },
+      async run(values, ctx) {
+        const api = mcpApiOf(ctx);
+        const server = knownServer(api, values.server!, 'held-back tools');
+        if (server.schemaFreshness !== 'quarantined') refuse(`${server.name}'s tools are not held back (${formatFreshness(server.schemaFreshness)}); nothing changed.`);
+        api.approveSchemaQuarantine(server.name, 'owner');
+        ctx.renderRequest();
+        return 'Run /mcp reload to read its tools again.';
+      },
+    },
+    {
+      id: 'review', label: 'See which servers need attention', word: 'review', inputs: [],
+      sentence: 'Shows the servers that are not connected or whose tools are held back, with what to do next.', done: '',
+      touches: 'reads', lasts: 'not-a-change', risk: 'none',
+      operator: { method: 'mcp.servers.list', fields: {} }, example: {},
+      async run(_values, ctx): Promise<CommandReport> {
+        const servers = mcpApiOf(ctx).listServerSecurity();
+        const attention = servers.filter((server) => !server.connected || server.schemaFreshness === 'quarantined');
+        if (attention.length === 0) return { verdict: 'ok', headline: servers.length === 0 ? 'No MCP servers yet.' : 'Every MCP server is working.', items: [] };
+        return {
+          verdict: 'attention',
+          headline: `${attention.length} of ${servers.length} MCP server(s) need attention:`,
+          items: attention.map((server) => ({
+            sentence: server.schemaFreshness === 'quarantined'
+              ? `${server.name}'s tools are held back for review${server.quarantineReason ? ` (${server.quarantineReason})` : ''}.`
+              : `${server.name} is not connected${server.lastError ? `: ${server.lastError}` : '.'}`,
+            fix: { label: 'See how to fix it', line: `/mcp repair ${server.name}` },
+          })),
+        };
+      },
+    },
+    {
+      id: 'repair', label: 'See how to fix a server', word: 'repair',
+      inputs: [{ ...SERVER, required: { default: '', defaultMeans: 'the first one that needs attention' } }],
+      sentence: 'Shows {server}\'s state and the steps that fix it.', done: '',
+      touches: 'reads', lasts: 'not-a-change', risk: 'none',
+      operator: { terminalOnly: 'The steps name terminal commands.' }, example: { server: 'github' },
+      async run(values, ctx) {
+        const servers = mcpApiOf(ctx).listServerSecurity();
+        const selected = values.server
+          ? servers.find((server) => server.name === values.server)
+          : servers.find((server) => !server.connected || server.schemaFreshness === 'quarantined');
+        if (!selected) {
+          if (values.server) refuse(`No MCP server named ${values.server}.`, 'Run /mcp servers to list your servers.');
+          ctx.print('No MCP server needs repair.');
+          return;
+        }
+        const steps = [
+          ...(selected.schemaFreshness === 'quarantined' ? [`/mcp accept-tools ${selected.name}  (after checking what changed)`] : []),
+          ...(!selected.connected ? ['fix its command or address, then /mcp reload'] : []),
+          '/mcp review',
+        ];
+        ctx.print([
+          `MCP repair: ${selected.name}`,
+          `  ${serverState(selected)}; trust: ${formatTrust(selected.trustMode)}; role: ${formatRole(selected.role)}; ${formatFreshness(selected.schemaFreshness)}`,
+          ...(selected.quarantineReason ? [`  held back: ${selected.quarantineReason}`] : []),
+          ...(selected.quarantineDetail ? [`  detail: ${selected.quarantineDetail}`] : []),
+          ...(selected.lastError ? [`  last error: ${selected.lastError}`] : []),
+          '  next:',
+          ...steps.map((step) => `    ${step}`),
+        ].join('\n'));
+      },
+    },
+    {
+      id: 'see-config-files', label: 'See where servers are configured', word: 'files', inputs: [],
+      sentence: 'Shows each MCP config file in use, whether it can be written, and which servers come from it.', done: '',
+      touches: 'reads', lasts: 'not-a-change', risk: 'none',
+      operator: { method: 'mcp.config.get', fields: {} }, example: {},
+      async run(_values, ctx) {
+        let effective;
+        try { effective = mcpApiOf(ctx).getEffectiveConfig(shellPathsOf(ctx)); } catch (error) { refuse(`Reading the MCP config failed: ${summarizeError(error)}`); }
+        ctx.print([
+          'MCP config files',
+          ...effective.locations.map((location) => `  ${location.scope}/${location.kind}${location.writable ? '' : ' (read-only)'}  ${location.path}`),
+          `Servers (${effective.servers.length})`,
+          ...effective.servers.map((entry) => `  ${entry.server.name}: ${describeEndpoint(entry.server)}  from ${entry.source.scope}/${entry.source.kind}`),
+        ].join('\n'));
+      },
+    },
+    {
+      id: 'open-screen', label: 'Open the MCP screen', word: 'open', inputs: [],
+      sentence: 'Opens the full-screen view of servers, tools and config files.', done: '',
+      touches: 'reads', lasts: 'not-a-change', risk: 'none',
+      operator: { terminalOnly: 'It is a terminal screen.' }, example: {},
+      async run(_values, ctx) {
+        if (!ctx.openMcpWorkspace) refuse('This surface has no MCP screen.', '/mcp servers lists the servers.');
+        ctx.openMcpWorkspace();
+      },
+    },
+  ],
+};
 
-  /** ` tools deny x (this session), allow y (config)` for the per-tool rules on a server, else nothing. */
-  function formatToolRules(rules: McpSecurityServer['toolRules']): string {
-    if (!rules?.length) return '';
-    return ` tools ${rules.map((rule) => `${rule.rule} ${rule.toolName} (${rule.source === 'session' ? 'this session' : 'config'}${rule.inEffect ? '' : ', overridden by a deny'})`).join(', ')}`;
-  }
+const MCP_SLASH_COMMAND = defineCommand(MCP_COMMAND);
 
-  /** The bracketed state of one server and, when it is not connected, what is happening to it. */
-  function formatMcpConnection(s: McpSecurityServer): { readonly label: string; readonly detail: readonly string[] } {
-    if (s.connected) return { label: '[connected]   ', detail: [] };
-    const detail: string[] = [];
-    if (s.lastError) detail.push(`      last error: ${s.lastError}`);
-    if (s.phase === 'restart-wait') {
-      const reconnect = s.reconnect;
-      const wait = reconnect?.nextAttemptAt !== undefined ? ` in ${Math.max(1, Math.ceil((reconnect.nextAttemptAt - Date.now()) / 1000))} s` : '';
-      detail.push(reconnect
-        ? `      reconnecting on its own: attempt ${reconnect.attempt} of ${reconnect.maxAttempts}${wait}`
-        : '      restarting on its own');
-      return { label: '[reconnecting]', detail };
-    }
-    if (s.phase === 'starting' || s.phase === 'negotiating') return { label: '[starting]    ', detail };
-    if (s.reconnect?.stoppedReason) detail.push(`      ${s.reconnect.stoppedReason}; fix the server or its entry, then run /mcp reload`);
-    return { label: '[disconnected]', detail };
-  }
-
-  function formatMcpServerList(servers: readonly McpSecurityServer[]): string {
-    const connected = servers.filter((s) => s.connected);
-    const recovering = servers.filter((s) => !s.connected && (s.phase === 'restart-wait' || s.phase === 'starting' || s.phase === 'negotiating'));
-    const disconnected = servers.filter((s) => !s.connected && !recovering.includes(s));
-    const lines: string[] = [`MCP Servers (${connected.length}/${servers.length} connected):`];
-    for (const s of servers) {
-      const pathScope = s.allowedPaths.length > 0 ? ` paths ${s.allowedPaths.length}` : '';
-      const hostScope = s.allowedHosts.length > 0 ? ` hosts ${s.allowedHosts.length}` : '';
-      const freshness = ` status ${formatMcpFreshness(s.schemaFreshness)}`;
-      const quarantine = s.schemaFreshness === 'quarantined' ? ` review reason ${s.quarantineReason ?? 'unknown'}` : '';
-      const connection = formatMcpConnection(s);
-      lines.push(
-        `  ${connection.label}  ${s.name}  trust=${formatMcpTrustMode(s.trustMode)}${sessionNote(s.sessionTrustMode, s.configuredTrustMode, formatMcpTrustMode)}  role=${formatMcpRole(s.role)}${sessionNote(s.sessionRole, s.configuredRole, formatMcpRole)}${freshness}${quarantine}${pathScope}${hostScope}${formatToolRules(s.toolRules)}`,
-        ...connection.detail,
-      );
-    }
-    if (connected.length > 0) {
-      lines.push('');
-      lines.push(
-        `Open "/mcp" for the fullscreen MCP workspace with server status, tools, config paths, and ${wording.confirmedActions}.`,
-      );
-      lines.push('Use "/mcp tools" for a compact tool list, or "/mcp tools <server>" for one server.');
-      lines.push(
-        `Use Settings -> MCP for allow-all decisions; ${wording.commandPolicy}`,
-      );
-      lines.push('Use /settings -> MCP to explicitly enable allow-all for a server.');
-      lines.push('Per-tool rules: /mcp deny <server> <tool> for this session (--keep keeps it in the MCP config); /mcp allow <server> <tool> is kept in the MCP config; /mcp clear <server> <tool> removes the tool\'s rule, this session\'s or kept. Allow and clear ask once.');
-    }
-    if (recovering.length > 0) {
-      lines.push('');
-      lines.push(`${recovering.length} server(s) starting or reconnecting on their own; run /mcp servers again to follow them.`);
-    }
-    if (disconnected.length > 0) {
-      lines.push('');
-      lines.push(`${disconnected.length} server(s) not connected. Check the server command and args in your config, then run /mcp reload.`);
-    }
-    return lines.join('\n');
-  }
-  return { registerMcpRuntimeCommands };
+/** Register `/mcp` (the one description) in a terminal app's registry. */
+export function registerMcpCommand<Context extends McpCommandContext>(registry: Pick<TerminalCommandRegistry<Context>, 'register'>): void {
+  registry.register(MCP_SLASH_COMMAND);
 }

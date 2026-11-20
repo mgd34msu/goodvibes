@@ -310,7 +310,8 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
   public setCommandRegistry(registry: CommandRegistry, context: CommandContext): void {
     this.commandRegistry = registry;
     this.commandContext = context;
-    this.autocomplete = new AutocompleteEngine(registry);
+    // A described command's blanks complete from its live lists, read with this context only once the dropdown asks.
+    this.autocomplete = new AutocompleteEngine(registry, { context: () => this.commandContext, rowsArrived: () => this.requestRender() });
   }
 
   /** Wire in the conversation manager for block copy/apply/collapse. */

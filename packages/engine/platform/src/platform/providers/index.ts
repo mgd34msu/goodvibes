@@ -284,3 +284,5 @@ export { chooseFailover, createTurnFailover, describeFailoverCost, readFallbackO
 export type { FailoverChoice, FailoverRegistry, FailoverRequest, TurnFailoverModel, TurnFailoverOptions } from './failover.js';
 export { OPENAI_SIGN_IN_ROUTE_LABELS } from './openai.js';
 export type { OpenAISignInRoute } from './openai.js';
+export { admitsCandidate, admittedCandidates } from './route-constraint.js';
+export type { RouteCandidate, RouteConstraint } from './route-constraint.js';

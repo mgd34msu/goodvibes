@@ -11,6 +11,7 @@ import {
   type ExternalSurfaceSpec,
 } from './onboarding-wizard-external-surfaces.ts';
 import { buildFeatureUnitSteps, onboardingConfigBaseline } from './onboarding-feature-units.ts';
+import { getBlockingFieldLabels } from './onboarding-wizard-state.ts';
 import { countSelected, modelSelectionLabel, normalizeText } from './onboarding-wizard-helpers.ts';
 import { deriveProviderKeyCaptureTargets } from '../../runtime/onboarding/provider-key-capture.ts';
 import { buildProviderKeyInventoryField, buildProviderKeyMaskedFields, buildSubscriptionPosture } from './onboarding-provider-key-fields.ts';
@@ -44,7 +45,8 @@ export function buildOnboardingWizardSteps(controller: OnboardingWizardControlle
   }
   steps.push(buildProviderAccessStep(controller), buildDefaultModelStep(controller), buildExperienceStep(controller));
   // Guided feature coverage: every remaining feature flag is reachable here as a unit.
-  steps.push(...buildFeatureUnitSteps(controller), buildReviewStep(controller));
+  steps.push(...buildFeatureUnitSteps(controller));
+  steps.push(buildReviewStep(controller, steps));
   return steps.map(addApplyAndContinueAction);
 }
 
@@ -778,7 +780,10 @@ function describeApplyChanges(controller: OnboardingWizardControllerLike): Array
   return changes;
 }
 
-export function buildReviewStep(controller: OnboardingWizardControllerLike): OnboardingWizardStepDefinition {
+export function buildReviewStep(
+  controller: OnboardingWizardControllerLike,
+  precedingSteps: readonly OnboardingWizardStepDefinition[],
+): OnboardingWizardStepDefinition {
     const feedback = controller.applyFeedback;
     const feedbackFields: OnboardingWizardFieldDefinition[] = feedback
       ? [
@@ -802,6 +807,9 @@ export function buildReviewStep(controller: OnboardingWizardControllerLike): Onb
       ? '1 screen has unapplied changes'
       : `${controller.dirtyStepCount} screens have unapplied changes`;
     const changes = describeApplyChanges(controller);
+    // Apply refuses while any screen has a missing, invalid or unacknowledged
+    // field; the review says so instead of offering a Ready it cannot keep.
+    const blockers = getBlockingFieldLabels(controller, precedingSteps);
     const changeFields = changes.slice(0, REVIEW_CHANGE_ROWS).map((change, index): OnboardingWizardFieldDefinition => ({
       kind: 'status',
       id: `review.change.${index}`,
@@ -829,7 +837,11 @@ export function buildReviewStep(controller: OnboardingWizardControllerLike): Onb
         unsavedLabel,
         changes.length === 0 ? 'Nothing differs from the saved settings' : `${changes.length} change(s) ready to apply, listed below`,
         feedback ? `Last apply: ${feedback.title}` : 'No apply errors reported',
-        controller.isEditingTextField() ? `Editing: ${controller.editingFieldId}` : 'Ready to apply',
+        controller.isEditingTextField()
+          ? `Editing: ${controller.editingFieldId}`
+          : blockers.length > 0
+            ? `${blockers.length} item(s) to finish before applying`
+            : 'Ready to apply',
       ],
       fields: [
         ...feedbackFields,
@@ -839,8 +851,10 @@ export function buildReviewStep(controller: OnboardingWizardControllerLike): Onb
           id: 'review.apply',
           action: 'apply',
           label: 'Apply settings and verify',
-          hint: 'Persist the wizard settings and verify the resulting runtime state. The global onboarding check marker is recorded when apply succeeds.',
-          defaultValue: 'Ready',
+          hint: blockers.length > 0
+            ? `Finish these first: ${blockers.join(' · ')}`
+            : 'Persist the wizard settings and verify the resulting runtime state. The global onboarding check marker is recorded when apply succeeds.',
+          defaultValue: blockers.length > 0 ? 'Blocked' : 'Ready',
         },
       ],
     };

@@ -42,7 +42,7 @@ export function registerVibeRuntimeCommands(registry: CommandRegistry): void {
       return { title: `Replace ${path}?`, detail: `${path} is replaced with the starter VIBE.md; what it says now cannot be recovered from here.`, confirmLabel: 'Replace' };
     },
     description: 'Inspect, create, and import VIBE.md personality files',
-    hidden: true,
+    firstScreen: false,
     usage: '[status|init|show|import-persona]',
     async handler(args, ctx) {
       const sub = (args[0] ?? 'status').toLowerCase();

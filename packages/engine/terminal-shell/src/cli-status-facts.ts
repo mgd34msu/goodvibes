@@ -219,11 +219,16 @@ export function readCliProviderSignInFacts(
     try { subscriptionSignedIn = new SubscriptionManager(sharedSubscriptionsPath(shellPaths)).hasSignIn(providerId); }
     catch { subscriptionSignedIn = false; }
   }
+  // A custom provider's key variable is the one its file names (apiKeyEnv), as the registry reads it.
+  const builtinVars = getBuiltinProviderEnvVars(providerId);
+  const customVar = builtinVars.length > 0 ? undefined
+    : readCustomProviderNames(join(config.getControlPlaneConfigDir(), 'providers'), builtinProviderNames())
+      .find((entry) => entry.name === providerId)?.apiKeyEnv;
   return cliProviderSignInFacts({
     providerId,
     persistenceRoot: config.getControlPlaneConfigDir(),
     subscriptionSignedIn,
-    apiKeyEnvVars: getBuiltinProviderEnvVars(providerId),
+    apiKeyEnvVars: customVar !== undefined ? [customVar] : builtinVars,
   });
 }
 

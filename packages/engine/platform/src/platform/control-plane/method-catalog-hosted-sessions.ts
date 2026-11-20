@@ -97,7 +97,7 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
     description: 'The folders sessions.hosted.create accepts as workspaceRoot: the daemon\'s working directory and every registered workspace (a path inside one is accepted too). The same list contract work dispatched into a hosted session is held to. ws-only invoke verb; no REST binding.',
     category: 'sessions',
     transport: ['ws'],
-    scopes: ['read:sessions'],
+    effects: ['sessions.read'],
     inputSchema: objectSchema({}),
     outputSchema: objectSchema({ roots: arraySchema(STRING_SCHEMA) }, ['roots']),
   }),
@@ -108,7 +108,7 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
     description: 'Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon\'s own directory, which is never what the caller meant, and must be the daemon\'s working directory or a registered workspace (or inside one); anything else is refused with the allowed folders named (sessions.hosted.workspaces lists them). `modelId` is resolved against this daemon\'s live model registry when given, so an unknown, ambiguous or unselectable id is refused here, 400 MODEL_NOT_FOUND, MODEL_AMBIGUOUS or MODEL_NOT_SELECTABLE, rather than at the first turn; omitted, the session follows the daemon\'s current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `originSurface` names the app the session is for (`agent`, `tui`, `webui`); its client-owned settings are that app\'s, and with `agent` the session answers as the GoodVibes Agent: the Agent\'s prompt and its tools that need no terminal, the others refused and named. Its operator tools act on this daemon with full operator authority, so `agent` is refused (HOSTED_SURFACE_FORBIDDEN) for a caller that does not hold admin. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused (429 HOSTED_SESSION_LIMIT_REACHED) with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.',
     category: 'sessions',
     transport: ['ws'],
-    scopes: ['write:sessions'],
+    effects: ['sessions.write'],
     // Both, honestly: the hosted lifecycle channel, and the broker's own
     // session-update, a hosted session REGISTERS on the shared spine, so it
     // shows up in `sessions.list` alongside every other kind.
@@ -140,7 +140,7 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
     description: 'Join a hosted session and receive its transcript so far, so a client that was never connected, or one reconnecting after the daemon restarted, renders what it missed instead of an empty screen. A session restored from disk has its loop rebuilt on this call, with a system line in the transcript stating that its in-flight turn did not survive the restart. Live output continues on the `turn` and `tools` event domains, filtered on this session id. Attaching is what keeps a `kill`-policy session alive: the policy is applied when the LAST client detaches. An attachment carries a LEASE, `hostedSessions.attachmentTtlMs`, ten minutes by default, or `leaseMs` for this attachment alone, because a client that crashed or closed its tab never calls detach, and a claim nothing expires would hold a kill-policy session open forever. Calling attach again with the same `clientId` renews it, and a client whose control-plane connection is still open renews automatically, so an attached client watching a long turn in silence is never reaped. When the last attachment lapses the session is treated as detached and its policy decides. ws-only invoke verb; no REST binding.',
     category: 'sessions',
     transport: ['ws'],
-    scopes: ['write:sessions'],
+    effects: ['sessions.write'],
     // Attaching changes who is watching, not the shared session record, so this
     // drives the hosted lifecycle channel and honestly claims nothing else.
     events: ['control.hosted_session_update'],
@@ -162,7 +162,7 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
     description: 'Leave a hosted session. When other clients are still attached, nothing else happens. When this was the LAST client, the effective detach policy decides: `kill` (the default, and what closing a client has always done) terminates the session with the reason `detached`; `survive` leaves it idle and reattachable. The policy is the session\'s own override when it was created with one and the `hostedSessions.detachPolicy` setting otherwise, and the returned record says which applied and what the session now is, never a guess by the caller. ws-only invoke verb; no REST binding.',
     category: 'sessions',
     transport: ['ws'],
-    scopes: ['write:sessions'],
+    effects: ['sessions.write'],
     // A detach that terminates the session also closes its spine record, but a
     // detach that does not is the common case, so only the channel this verb
     // ALWAYS drives is advertised.
@@ -176,12 +176,11 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
   methodDescriptor({
     id: 'sessions.hosted.kill',
     repeat: 'safe',
-    irreversible: true,
+    effects: ['session.end'],
     title: 'End a Daemon-Hosted Session',
     description: 'End a hosted session regardless of who is attached or what its detach policy says: the in-flight turn is interrupted, its loop is taken apart, its workspace floor is released when it was the last session using it, and the record is kept, terminated, with the reason `killed`, until `hostedSessions.terminatedRetentionMs` retires it. Killing an already-terminated session returns that record unchanged rather than reporting an error for work that is already done. ws-only invoke verb; no REST binding.',
     category: 'sessions',
     transport: ['ws'],
-    scopes: ['write:sessions'],
     // Ending one closes its shared-spine record too, so both channels fire.
     events: ['control.hosted_session_update', 'control.session_update'],
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
@@ -193,7 +192,7 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
     description: 'Every session this daemon hosts, most recently updated first. Terminated sessions are excluded unless `includeTerminated` is set, they are kept, with the reason they ended, until the retention window retires them, so a session that stopped can be asked about instead of having simply vanished. Each record carries the policy that would apply on the next detach, so a client can show what leaving will do before it leaves. A session\'s title is its first prompt unless one was given, so it needs read:transcripts. ws-only invoke verb; no REST binding.',
     category: 'sessions',
     transport: ['ws'],
-    scopes: ['read:transcripts'],
+    effects: ['transcripts.read'],
     inputSchema: objectSchema({ includeTerminated: BOOLEAN_SCHEMA }, []),
     outputSchema: objectSchema({
       sessions: arraySchema(HOSTED_SESSION_RECORD_SCHEMA),
@@ -205,7 +204,7 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
     description: 'Return a hosted session\'s record and its transcript, live or ended, without attaching. An ended session (its last client detached under the kill policy, its attachment lease lapsed, it was killed, or the daemon restarted) keeps its transcript on disk until `hostedSessions.terminatedRetentionMs` (24 hours by default) retires it, so its reply stays readable here, also after a daemon restart; after that the id answers 404 SESSION_NOT_FOUND. An admin credential reads any session; any other credential reads only a session its principal created or attached to, else 403 HOSTED_SESSION_NOT_OWNED. Reading changes nothing and does not keep a kill-policy session alive. ws-only invoke verb; no REST binding.',
     category: 'sessions',
     transport: ['ws'],
-    scopes: ['read:transcripts'],
+    effects: ['transcripts.read'],
     errorCodes: [
       { code: 'SESSION_NOT_FOUND', status: 404, meaning: 'This daemon holds no hosted session with that id, or its retention ended; nothing was read.' },
       { code: 'HOSTED_SESSION_NOT_OWNED', status: 403, meaning: 'The session was not created or attached to by this credential; read it with the credential that did, or an admin one.' },

@@ -45,18 +45,19 @@
  */
 
 import type { ExecSandboxPlan } from './sandbox.js';
+import type { Containment } from '../../runtime/sandbox/contained-spawn.js';
 
 /**
- * Whether a composition requires the exec boundary.
+ * Whether a composition requires the exec boundary: the same posture every
+ * contained spawn states (runtime/sandbox/contained-spawn.ts `Containment`).
+ * `required`: no boundary, the command is refused (what a hosted
+ * conversational turn composes). `host-allowed`: no boundary, the command runs
+ * on the host with the self-labelling note (the default).
  *
  * See the module header. Default everywhere is `host-allowed`, so adding this
  * concept changes nothing for a caller that does not state a posture.
  */
-export type ExecContainmentPosture =
-  /** No boundary ⇒ the command is refused. What a hosted conversational turn composes. */
-  | 'required'
-  /** No boundary ⇒ the command runs on the host with the self-labelling note. The default. */
-  | 'host-allowed';
+export type ExecContainmentPosture = Containment['boundary'];
 
 /** What a composition states about containment, and why. */
 export interface ExecContainmentRequirement {

@@ -156,6 +156,8 @@ export { CVV_PROMPT_TRADEOFF_WARNING } from './browser.js';
 // can be driven end to end without a browser or a real card.
 
 export { parseMinorUnits, parseQuantity, minorUnitExponent, MAX_PARSEABLE_MINOR_UNITS } from './money-parsing.js';
+export { CurrencyMismatchError, addMoney, cartDigest, compareMoney, formatMoney, money, settleSubmission } from './money.js';
+export type { Money, OrderEvidence, SubmissionDispatch } from './money.js';
 
 export { extractCheckout } from './checkout-extraction.js';
 export type { RawCheckoutReading, ExtractedCheckout, ExtractionResult } from './checkout-extraction.js';

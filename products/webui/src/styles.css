@@ -146,8 +146,11 @@ button:disabled {
 .banner.info > svg { color: var(--info); }
 .banner.info::before { background: var(--info); }
 
+/* On a phone a notice with a button lets the button drop below the words; a notice
+   of words alone keeps its dot (or icon) beside them, the text wrapping in its own
+   column rather than the whole text falling under a lone dot. */
 @media (max-width: 480px) {
-  .banner {
+  .banner:has(> button, > .gv-button) {
     flex-wrap: wrap;
   }
 }

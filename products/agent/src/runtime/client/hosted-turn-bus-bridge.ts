@@ -38,6 +38,7 @@ import {
   emitTurnError,
   emitTurnSubmitted,
 } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
+import { readTurnSettlement, type TurnSettlement } from '@goodvibes-jev/engine/transport-core/turn-settlement';
 import type { HostedSessionFrame } from './hosted-frame-render.ts';
 
 /** The stop reasons `emitTurnError` accepts, read from its own signature. */
@@ -100,16 +101,6 @@ export function bridgeHostedFrameOntoRuntimeBus(frame: HostedSessionFrame, optio
       emitTurnSubmitted(options.runtimeBus, ctx, { turnId, prompt });
       return;
     }
-    case 'PREFLIGHT_FAIL': {
-      const reason = readString(payload, 'reason') ?? 'preflight failed';
-      const stopReason = readString(payload, 'stopReason');
-      emitPreflightFail(options.runtimeBus, ctx, {
-        turnId,
-        reason,
-        stopReason: stopReason === 'context_overflow' ? 'context_overflow' : 'preflight_failed',
-      });
-      return;
-    }
     case 'STREAM_DELTA': {
       const content = readString(payload, 'content') ?? '';
       const accumulated = readString(payload, 'accumulated') ?? content;
@@ -124,32 +115,40 @@ export function bridgeHostedFrameOntoRuntimeBus(frame: HostedSessionFrame, optio
       emitStreamEnd(options.runtimeBus, ctx, { turnId });
       return;
     }
-    case 'TURN_COMPLETED': {
-      const response = readString(payload, 'response') ?? '';
-      const stopReason = readString(payload, 'stopReason');
-      emitTurnCompleted(options.runtimeBus, ctx, {
-        turnId,
-        response,
-        stopReason: stopReason === 'empty_response' ? 'empty_response' : 'completed',
-      });
-      return;
-    }
-    case 'TURN_ERROR': {
-      const error = readString(payload, 'error') ?? 'the hosting daemon reported this turn failed';
-      const stopReason = readString(payload, 'stopReason');
-      emitTurnError(options.runtimeBus, ctx, {
-        turnId,
-        error,
-        stopReason: isTurnErrorStopReason(stopReason) ? stopReason : 'unexpected_error',
-      });
-      return;
-    }
-    case 'TURN_CANCEL': {
-      const reason = readString(payload, 'reason');
-      emitTurnCancel(options.runtimeBus, ctx, { turnId, ...(reason !== undefined ? { reason } : {}), stopReason: 'cancelled' });
+    case 'TURN_COMPLETED':
+    case 'TURN_ERROR':
+    case 'TURN_CANCEL':
+    case 'PREFLIGHT_FAIL': {
+      // How the turn ended, from the one settlement reader every surface uses.
+      const settlement = readTurnSettlement({ type: frame.type, payload });
+      if (settlement) emitSettlement(settlement, turnId, ctx, options.runtimeBus);
       return;
     }
     default:
+      return;
+  }
+}
+
+function emitSettlement(settlement: TurnSettlement, turnId: string, ctx: Parameters<typeof emitTurnCompleted>[1], bus: RuntimeEventBus): void {
+  switch (settlement.kind) {
+    case 'answered':
+      emitTurnCompleted(bus, ctx, { turnId, response: settlement.response, stopReason: 'completed' });
+      return;
+    case 'empty':
+      emitTurnCompleted(bus, ctx, { turnId, response: '', stopReason: 'empty_response' });
+      return;
+    case 'refused':
+      emitPreflightFail(bus, ctx, { turnId, reason: settlement.reason, stopReason: settlement.stopReason });
+      return;
+    case 'failed':
+      emitTurnError(bus, ctx, {
+        turnId,
+        error: settlement.error,
+        stopReason: isTurnErrorStopReason(settlement.stopReason) ? settlement.stopReason : 'unexpected_error',
+      });
+      return;
+    case 'cancelled':
+      emitTurnCancel(bus, ctx, { turnId, reason: settlement.reason, stopReason: 'cancelled' });
       return;
   }
 }

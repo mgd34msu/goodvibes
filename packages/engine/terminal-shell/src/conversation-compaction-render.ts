@@ -86,6 +86,7 @@ export function renderCompactionContinuationMessage(
     startLine,
     lineCount: context.history.getLineCount() - startLine,
     rawContent: content,
+    title: `compaction handoff: ${preview}`,
   });
 }
 

@@ -38,9 +38,10 @@ export function latencyPhrase(ms: number | null): string {
   return `${(ms / 1000).toFixed(1)} s`;
 }
 
-export function activityPhrase(health: Pick<HealthSummary, 'activeTurns' | 'queuedTasks' | 'sse' | 'working'>): string {
+/** `running` is the Work page's count of what is doing something now (lib/needs-you.ts runningNow). */
+export function activityPhrase(health: Pick<HealthSummary, 'queuedTasks' | 'sse' | 'working'>, running: number): string {
   const parts: string[] = [];
-  if (health.activeTurns > 0) parts.push(`${health.activeTurns} turn${health.activeTurns === 1 ? '' : 's'} running`);
+  if (running > 0) parts.push(`${running} running`);
   if (health.queuedTasks > 0) parts.push(`${health.queuedTasks} queued`);
   if (parts.length === 0) parts.push('Nothing running');
   const live: Record<HealthSummary['sse'], string> = {
@@ -63,6 +64,8 @@ function initialOf(name: string): string {
 export interface AccountMenuProps {
   name: string;
   health: HealthSummary;
+  /** What Work counts as running right now. */
+  running: number;
   /** Rail form: only the avatar shows; the name moves to a tooltip. */
   compact?: boolean;
   /** Open the settings dialog, on a section when one is named. */
@@ -70,7 +73,7 @@ export interface AccountMenuProps {
   onSignOut: () => void;
 }
 
-export function AccountMenu({ name, health, compact = false, onOpenSettings, onSignOut }: AccountMenuProps) {
+export function AccountMenu({ name, health, running, compact = false, onOpenSettings, onSignOut }: AccountMenuProps) {
   const { theme, setTheme } = useTheme();
   const tone = connectionTone(health);
   const phrase = connectionPhrase(health);
@@ -131,7 +134,7 @@ export function AccountMenu({ name, health, compact = false, onOpenSettings, onS
       </MenuItem>
       <div role="none" className="gv-menu__text shell-account__activity">
         <span className="shell-account__spacer" aria-hidden="true" />
-        <span>{activityPhrase(health)}</span>
+        <span>{activityPhrase(health, running)}</span>
       </div>
       {health.modelName && (
         <div role="none" className="gv-menu__text">

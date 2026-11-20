@@ -38,6 +38,7 @@ import { sanitizeUrlForLog } from '../../utils/fetch-with-timeout.js';
 import { isIP } from 'node:net';
 import { logger } from '../../utils/logger.js';
 import { hostMatchesGlob, normalizeHost } from './host-utils.js';
+import { classifyResolvedAddress } from '../../runtime/network/destination.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -247,20 +248,6 @@ function isPlainLoopbackAddress(address: string): boolean {
 export const ALLOWED_PRIVATE_HOSTS_SETTING = 'fetch.allowedPrivateHosts';
 
 /**
- * Whether an address is in a range the caller may reach when it wrote the host
- * itself: private networks (10/8, 172.16/12, 192.168/16, where LAN devices and
- * containers live), IPv6 unique-local, and plain IPv4 carrier-grade NAT
- * (100.64/10, where VPN overlays put their peers) except the cloud metadata
- * endpoint 100.100.100.200. Loopback has its own approval; link-local (the
- * metadata range), reserved, multicast and unspecified addresses never are.
- */
-export function isCallerReachablePrivateAddress(address: string): boolean {
-  const range = classifyResolvedAddress(address);
-  if (range === 'private' || range === 'unique-local') return true;
-  return range === 'shared' && ipv4Octets(address) !== null && address !== '100.100.100.200';
-}
-
-/**
  * Whether the host the caller wrote may be reached at a private address
  * ({@link isCallerReachablePrivateAddress}): any host the owner lists in
  * fetch.allowedPrivateHosts (patterns as in fetch.trustedHosts), or an IP
@@ -275,105 +262,6 @@ export function writtenPrivateHostAllowed(
   const normalized = normalizeHost(host);
   if (options.allowedPrivateHosts.some((pattern) => hostMatchesGlob(normalized, pattern))) return true;
   return options.callerAdmitted && ipLiteral(normalized) !== null;
-}
-
-/** What a resolved address is, when it is one a fetch must not reach by a name. */
-export type ResolvedAddressRange = 'loopback' | 'private' | 'link-local' | 'metadata' | 'unspecified' | 'unique-local' | 'multicast' | 'shared' | 'reserved';
-
-const ipv4Octets = (address: string): number[] | null => {
-  const parts = address.split('.');
-  if (parts.length !== 4) return null;
-  const octets = parts.map((part) => (/^\d{1,3}$/.test(part) ? Number(part) : NaN));
-  return octets.every((octet) => octet >= 0 && octet <= 255) ? octets : null;
-};
-
-/** The IPv4 address an IPv4-mapped IPv6 address (::ffff:a.b.c.d or ::ffff:hhhh:hhhh) carries. */
-function mappedIpv4(address: string): string | null {
-  const lower = address.toLowerCase();
-  if (!lower.startsWith('::ffff:')) return null;
-  const rest = lower.slice(7);
-  if (ipv4Octets(rest)) return rest;
-  const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(rest);
-  if (!hex) return null;
-  const high = parseInt(hex[1]!, 16);
-  const low = parseInt(hex[2]!, 16);
-  return `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`;
-}
-
-/** The eight 16-bit groups of an IPv6 address (with `::` and a trailing dotted IPv4 expanded), or null. */
-function ipv6Groups(address: string): number[] | null {
-  let text = address;
-  const dotted = /^(.*:)(\d{1,3}(?:\.\d{1,3}){3})$/.exec(text);
-  if (dotted) {
-    const octets = ipv4Octets(dotted[2]!);
-    if (!octets) return null;
-    text = `${dotted[1]}${((octets[0]! << 8) | octets[1]!).toString(16)}:${((octets[2]! << 8) | octets[3]!).toString(16)}`;
-  }
-  const halves = text.split('::');
-  if (halves.length > 2) return null;
-  const parse = (part: string): number[] | null => {
-    if (part === '') return [];
-    const groups = part.split(':').map((group) => (/^[0-9a-f]{1,4}$/.test(group) ? parseInt(group, 16) : NaN));
-    return groups.some(Number.isNaN) ? null : groups;
-  };
-  const head = parse(halves[0]!);
-  const tail = halves.length === 2 ? parse(halves[1]!) : [];
-  if (!head || !tail) return null;
-  if (halves.length === 1) return head.length === 8 ? head : null;
-  const fill = 8 - head.length - tail.length;
-  return fill < 1 ? null : [...head, ...new Array<number>(fill).fill(0), ...tail];
-}
-
-function classifyIpv4(octets: readonly number[]): ResolvedAddressRange | null {
-  const [a, b, c, d] = octets as [number, number, number, number];
-  if (a === 127) return 'loopback';
-  if (a === 0) return 'unspecified';
-  if (a === 169 && b === 254) return c === 169 && d === 254 ? 'metadata' : 'link-local';
-  if (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) return 'private';
-  if (a === 100 && b >= 64 && b <= 127) return 'shared';
-  if ((a === 198 && (b === 18 || b === 19)) || (a === 192 && b === 0 && c === 0)) return 'reserved';
-  if (a >= 224) return 'multicast';
-  return null;
-}
-
-/**
- * The declared range a resolved address falls in, or null for an address a
- * fetch may reach. The ranges are the address assignments themselves: IPv4
- * 0.0.0.0/8 (this host), 127.0.0.0/8 (loopback), 10.0.0.0/8, 172.16.0.0/12 and
- * 192.168.0.0/16 (private), 169.254.0.0/16 (link-local, where 169.254.169.254
- * is the cloud metadata endpoint), 100.64.0.0/10 (carrier-grade NAT, where some
- * clouds put their metadata endpoint), 198.18.0.0/15 and 192.0.0.0/24
- * (reserved), 224.0.0.0/3 (multicast and reserved);
- * IPv6 :: and ::1, fe80::/10 (link-local), fec0::/10 (site-local), fc00::/7
- * (unique-local), ff00::/8 (multicast), and addresses that carry an IPv4
- * (IPv4-mapped ::ffff:0:0/96, NAT64 64:ff9b::/96, 6to4 2002::/16) by the IPv4
- * they carry. Comparing an address with these ranges is arithmetic on the
- * address.
- */
-export function classifyResolvedAddress(address: string): ResolvedAddressRange | null {
-  const v4 = ipv4Octets(address) ?? (() => { const mapped = mappedIpv4(address); return mapped ? ipv4Octets(mapped) : null; })();
-  if (v4) return classifyIpv4(v4);
-  const lower = address.toLowerCase().replace(/^\[|\]$/g, '').split('%')[0]!;
-  const groups = ipv6Groups(lower);
-  if (groups) {
-    const embedded = (high: number, low: number): number[] => [high >> 8, high & 255, low >> 8, low & 255];
-    if (groups[0] === 0x64 && groups[1] === 0xff9b && groups.slice(2, 6).every((group) => group === 0)) {
-      const range = classifyIpv4(embedded(groups[6]!, groups[7]!));
-      if (range !== null) return range;
-    }
-    if (groups[0] === 0x2002) {
-      const range = classifyIpv4(embedded(groups[1]!, groups[2]!));
-      if (range !== null) return range;
-    }
-  }
-  if (lower === '::' ) return 'unspecified';
-  if (lower === '::1') return 'loopback';
-  const first = parseInt(lower.split(':')[0] || '0', 16);
-  if ((first & 0xffc0) === 0xfe80) return 'link-local';
-  if ((first & 0xffc0) === 0xfec0) return 'reserved';
-  if ((first & 0xfe00) === 0xfc00) return 'unique-local';
-  if ((first & 0xff00) === 0xff00) return 'multicast';
-  return null;
 }
 
 /**

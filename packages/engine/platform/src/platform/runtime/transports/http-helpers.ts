@@ -218,7 +218,7 @@ export async function connectTelemetryStream(
   handlers: HttpTransportTelemetryStreamHandlers,
 ): Promise<() => void> {
   return await openRawServerSentEventStream(fetchImpl, url, {
-    onEvent: (eventName, payload) => {
+    onEvent: ({ name: eventName, payload }) => {
       if (eventName === 'telemetry' && payload && typeof payload === 'object') {
         handlers.onRecord(payload as TelemetryRecord);
       }
@@ -228,9 +228,9 @@ export async function connectTelemetryStream(
           handlers.onReady?.(payload as HttpTransportTelemetryStreamReady);
         }
       : undefined,
-    ...(handlers.onError ? { onError: handlers.onError } : {}),
     ...(handlers.onReconnect ? { onReconnect: handlers.onReconnect } : {}),
-    ...(handlers.onTerminate ? { onTerminate: handlers.onTerminate } : {}),
+    onGap: handlers.onGap,
+    onEnd: handlers.onEnd,
   }, {
     authToken: token,
   });

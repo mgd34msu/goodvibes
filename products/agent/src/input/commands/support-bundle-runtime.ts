@@ -13,7 +13,7 @@ export function registerSupportBundleRuntimeCommands(registry: CommandRegistry):
     name: 'bundle',
     effect: 'mixed',
     description: 'Export, inspect, or import redacted Agent support bundles from the TUI',
-    hidden: true,
+    firstScreen: false,
     usage: '[export [path]|inspect <path>|import <path> [--include-security] --yes]',
     argsHint: 'export|inspect|import',
     // A redacted export to a new file runs at once; over an existing file it

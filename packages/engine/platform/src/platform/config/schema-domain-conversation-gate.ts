@@ -46,21 +46,18 @@ export const conversationGateConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'conversationGate.mode',
     type: 'enum',
-    default: 'propose',
     description: 'How inbound channel messages are treated. propose (default): a message gets a conversational reply, and anything that reads as a work request is proposed and waits for your agreement over the same channel. confirm-all: every inbound message is confirmed before any agent runs. off: an inbound message starts work immediately (pre-1.14 behavior). Never applies to goodvibes-tui, and never to already-authorized work such as schedules, triggers, and on-exit chains.',
     enumValues: ['propose', 'confirm-all', 'off'],
   },
   {
     key: 'conversationGate.proposalTtlMs',
     type: 'number',
-    default: 30 * 60_000,
     description: 'How long an unanswered work proposal stays answerable, in milliseconds. After this it expires and a late reply is reported as expired rather than starting stale work. Between 1 minute and 24 hours.',
     ...intRange(60_000, 86_400_000),
   },
   {
     key: 'conversationGate.maxPendingProposals',
     type: 'number',
-    default: 20,
     description: 'Maximum work proposals awaiting an answer at once across all channels. The oldest is dropped past this cap. Between 1 and 200.',
     ...intRange(1, 200),
   },

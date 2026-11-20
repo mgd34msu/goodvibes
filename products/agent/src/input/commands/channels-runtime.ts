@@ -376,7 +376,7 @@ export function registerChannelsRuntimeCommands(registry: CommandRegistry): void
     effect: 'external-network',
     aliases: ['channel'],
     description: 'Inspect Agent channel readiness or send an explicitly confirmed delivery message',
-    hidden: true,
+    firstScreen: false,
     usage: '[list|readiness|ready|attention|triage [limit]|guide [id]|show <id>|deliveries [limit]|send --channel <id> --message <text> --yes|accounts|policies|status|doctor <id>|setup <id>|telegram-cursor]',
     argsHint: 'list|readiness|ready|attention|triage|guide|show|deliveries|send|accounts|policies|status|doctor|setup|telegram-cursor',
     async handler(args, ctx) {

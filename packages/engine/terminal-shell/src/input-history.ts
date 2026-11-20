@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { logger, readDocument, summarizeError, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, maskCredentialCandidates, readDocument, summarizeError, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
 /**
  * InputHistory, Persisted command history with arrow-key navigation.
  *
@@ -185,7 +185,10 @@ export class InputHistory {
         }
     }
     /**
-     * Apply all active redaction rules to a text string.
+     * Apply all active redaction rules to a text string, then mask every
+     * credential-shaped span a rule did not name (maskCredentialCandidates: a
+     * local pass, no request), so a token pasted into any line, a command's
+     * undeclared argument or a message, is never stored.
      * Returns the scrubbed text (password arguments replaced with `<redacted>`).
      */
     private applyRedaction(text: string): string {
@@ -193,7 +196,7 @@ export class InputHistory {
         for (const rule of this.redactionRules) {
             result = result.replace(rule.pattern, rule.replacement);
         }
-        return result;
+        return maskCredentialCandidates(result);
     }
     /**
      * Add a new entry. Called on submit.

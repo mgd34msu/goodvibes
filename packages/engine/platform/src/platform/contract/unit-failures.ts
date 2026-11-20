@@ -204,7 +204,7 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
       ...(record?.failureCode === undefined ? {} : { code: record.failureCode }),
       ...(record?.failureRetryAfterMs === undefined ? {} : { retryAfterMs: record.failureRetryAfterMs }),
     };
-    void run.work.run(() => retryOrFail(run, unit, agentId, evidence));
+    void run.work.run('retry or fail', () => retryOrFail(run, unit, agentId, evidence));
   }
 
   /** Whether the unit still waits on this failed agent: nothing released, replaced or ended it meanwhile. */

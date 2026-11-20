@@ -1,7 +1,7 @@
 /**
  * MCP tool rules, in Settings > Permissions: for each configured MCP server,
  * its tools and the allow or denial each one carries, with where it came from
- * (kept in the server's MCP config, or denied for this session with /mcp deny
+ * (kept in the server's MCP config, or blocked for this session with /mcp block
  * in a terminal app). The owner keeps a denial (mcp.servers.tools.deny), an
  * allow past the server's path and host scope (mcp.servers.tools.allow, asked
  * once here, and only in his global MCP config), or clears the kept rule
@@ -144,7 +144,7 @@ export function McpToolRules() {
   return (
     <SettingsBlock
       title="MCP tool rules"
-      description="Deny one tool of an MCP server, or allow it past the server's path and host scope. Rules here are kept with the server's entry in its MCP config; a denial set with /mcp deny in a terminal app lasts that app's session, or until /mcp clear there."
+      description="Deny one tool of an MCP server, or allow it past the server's path and host scope. Rules here are kept with the server's entry in its MCP config; a block set with /mcp block in a terminal app lasts that app's session, or until /mcp unblock there."
       actions={<IconButton label="Refresh MCP tool rules" icon={<RefreshCw />} onClick={refetch} />}
       testId="mcp-tool-rules"
     >

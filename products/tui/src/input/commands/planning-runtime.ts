@@ -165,7 +165,7 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
   };
   registry.register({
     name: 'plan',
-    description: 'Enter or exit plan mode, a read-only planning posture where writes, commands, and network calls are blocked',
+    description: 'Enter or exit plan mode for this session, a read-only planning posture where writes, commands, and network calls are blocked (the saved default is unchanged)',
     usage: '[on | off | toggle]',
     argsHint: '[on|off|toggle]',
     handler(args, ctx) {
@@ -181,7 +181,9 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
         }
         stopWatchingMode?.();
         modeBeforePlan = current;
-        configManager.set('permissions.mode', 'plan');
+        // A session posture, like Shift+Tab: the saved default in the settings
+        // file is not changed, and plan mode ends with the session.
+        configManager.setRuntimeOverride('permissions.mode', 'plan');
         // Leaving plan mode any other way (Shift+Tab) ends the remembered posture, so a later
         // re-entry by another route cannot restore a stale, possibly more permissive mode.
         stopWatchingMode = configManager.subscribe('permissions.mode', (next) => {
@@ -196,7 +198,7 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
       }
       const restored = modeBeforePlan !== undefined && !isPlanMode(modeBeforePlan) ? modeBeforePlan : togglePlanMode(current);
       forgetModeBeforePlan();
-      configManager.set('permissions.mode', restored);
+      configManager.setRuntimeOverride('permissions.mode', restored);
       ctx.print(`[Permissions] Plan mode OFF; mode: ${permissionModeLabel(restored)}.`);
     },
   });

@@ -13,6 +13,7 @@ import { isTerminalContractStatus, type ContractRunner, type ContractView } from
 import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import type { UiRuntimeEvents } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+import { readTurnSettlement, TURN_SETTLING_EVENTS } from '@goodvibes-jev/engine/transport-core/turn-settlement';
 import type { WorkTreeController } from './work-tree-focus.js';
 import type { WorkTreeSources } from './work-tree-sources.js';
 export interface WorkTreeConversation {
@@ -187,10 +188,14 @@ export function wireWorkTree(deps: WorkTreeWiringDeps): WorkTreeWiring {
         if (conversation.workTree.recordTurnOutcome({ index: ended.index, fingerprint: ended.timing.fingerprint, outcome }))
             persistView();
     };
-    unsubs.push(events.turns.on('TURN_COMPLETED', (ev) => endTurn(ev.stopReason === 'empty_response' ? 'failed' : 'completed', ev.turnId)));
-    unsubs.push(events.turns.on('TURN_ERROR', (ev) => endTurn('failed', ev.turnId)));
-    unsubs.push(events.turns.on('TURN_CANCEL', (ev) => endTurn('cancelled', ev.turnId)));
-    unsubs.push(events.turns.on('PREFLIGHT_FAIL', (ev) => endTurn('failed', ev.turnId)));
+    // How the turn ended, from the one settlement reader: an empty answer and a refused turn are failures.
+    for (const type of TURN_SETTLING_EVENTS) {
+        unsubs.push(events.turns.on(type, (ev) => {
+            const settlement = readTurnSettlement({ type, payload: ev });
+            if (settlement)
+                endTurn(settlement.kind === 'answered' ? 'completed' : settlement.kind === 'cancelled' ? 'cancelled' : 'failed', settlement.turnId);
+        }));
+    }
     const snapshots = new Map<string, SnapshotMemo>();
     // A new or resumed transcript: turn timings are keyed by message index and belong to the old one.
     unsubs.push(conversation.workTree.onReset(() => { timings.clear(); snapshots.clear(); rejectedDuplicateTurnIds.clear(); }));

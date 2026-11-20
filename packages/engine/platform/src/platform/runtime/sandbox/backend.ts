@@ -141,6 +141,46 @@ export function sandboxCommandWrapper(
   });
 }
 
+/** What a contained program is given: where it runs, what it may write and read, and whether it has a network. */
+export interface ContainedArgvInput {
+  readonly bwrapPath: string;
+  readonly command: string;
+  readonly args: readonly string[];
+  /** Absolute working directory; bound read-write only when it is in `writable`. */
+  readonly cwd: string;
+  readonly writable: readonly string[];
+  readonly readOnly: readonly string[];
+  readonly network: 'off' | 'on';
+}
+
+/**
+ * The full argv that runs one program inside a bubblewrap boundary: the same
+ * boundary a sandbox session's processes get (system read-only, $HOME and
+ * /tmp private, the program's own install root readable), with only the
+ * paths in `writable` writable. Shared by sessions and `runContained`.
+ */
+export function containedArgv(input: ContainedArgvInput): string[] {
+  const home = homedir();
+  const cwd = resolve(input.cwd);
+  const writable = input.writable.filter((path) => isAbsolute(path)).map((path) => resolve(path));
+  const resolverConfigPath = input.network === 'on' ? runResolverConfigPath() : undefined;
+  return [
+    ...buildBwrapArgv({
+      bwrapPath: input.bwrapPath,
+      workspaceDir: cwd,
+      readOnlyWorkspace: !writable.includes(cwd),
+      cwd,
+      writableExtras: writable.filter((path) => path !== cwd),
+      networkEnabled: input.network === 'on',
+      maskHomeDir: home,
+      readOnlyExtras: [...input.readOnly.filter((path) => isAbsolute(path)), ...programReadOnlyPaths(input.command, input.args, cwd, home)],
+      ...(resolverConfigPath ? { resolverConfigPath } : {}),
+    }),
+    input.command,
+    ...input.args,
+  ];
+}
+
 export interface SandboxCommandResult {
   readonly status: number | null;
   readonly stdout: string;

@@ -34,7 +34,7 @@ export function createProviderAccountCommands<
       readVerbs: ['review', 'routes', 'repair', 'show', 'list', 'status'],
       aliases: ['account'],
       description: 'Review provider auth routes, subscription windows, and billing-path safety',
-      hidden: policy.hidden,
+      firstScreen: !policy.hidden,
       usage: policy.usage,
       async handler(args, ctx) {
         const sub = (args[0] ?? 'review').toLowerCase();

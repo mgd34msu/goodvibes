@@ -15,11 +15,17 @@ import { sentence } from '../library/library-data';
 import { KnowledgeJobsPeekBody } from './KnowledgeJobsPeek';
 
 /** Scalar fields of a record as label / value facts (nested objects are left to the raw view). */
+/** A time field (`createdAt`, `lastCrawledAt`) holding epoch milliseconds, shown as a date. */
+function factValue(key: string, value: string | number | boolean): string {
+  if (typeof value === 'number' && /At$/.test(key) && value > 946_684_800_000) return new Date(value).toLocaleString();
+  return String(value);
+}
+
 export function scalarFacts(value: unknown, limit = 12): { label: string; value: string }[] {
   return Object.entries(asRecord(value))
-    .filter(([, v]) => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')
+    .filter((entry): entry is [string, string | number | boolean] => typeof entry[1] === 'string' || typeof entry[1] === 'number' || typeof entry[1] === 'boolean')
     .slice(0, limit)
-    .map(([key, v]) => ({ label: sentence(key.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase()), value: String(v) }));
+    .map(([key, v]) => ({ label: sentence(key.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase()), value: factValue(key, v) }));
 }
 
 export function KnowledgeActivity() {

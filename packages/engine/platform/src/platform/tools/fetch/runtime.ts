@@ -16,13 +16,13 @@ import {
   emitSsrfDeny,
   emitHostTrustTier,
   extractHostname,
-  isCallerReachablePrivateAddress,
   writtenPrivateHostAllowed,
   type TrustTierConfig,
 } from './trust-tiers.js';
 import { applyExtractDetailed, sniffContentType } from './extract.js';
 import { headersForOtherOrigin } from './redirect-headers.js';
-import { assertHttpScheme, pinnedFetch, resolveCheckedAddresses, type HostResolver } from './pinned-request.js';
+import { assertHttpScheme, resolveCheckedAddresses } from './pinned-request.js';
+import { isCallerReachablePrivateAddress, pinnedFetch, type HostResolver } from '../../runtime/network/destination.js';
 import type { FeatureFlagManager } from '../../runtime/feature-flags/index.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { createTimeoutController, sanitizeUrlForLog } from '../../utils/fetch-with-timeout.js';

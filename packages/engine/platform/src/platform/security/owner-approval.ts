@@ -54,8 +54,8 @@
  * CODE PATH rather than from any argument a tool call can carry.
  */
 
-import { createHash } from 'node:crypto';
 import { types } from 'node:util';
+import { contentDigest } from '../utils/target-ref.js';
 
 /**
  * How long an answered prompt stays spendable.
@@ -113,7 +113,9 @@ function immutableFingerprintFields(fields: object): boolean {
  * subject changes the fingerprint. Values are compared after the same
  * whitespace normalization the taint check uses, so a reflowed line does not
  * invalidate an approval the owner has just given for the same message, but
- * any change to the words does.
+ * any change to the words does. The digest is the one every reviewed target
+ * uses (utils/target-ref.ts, `contentDigest`) over the sorted name and value
+ * pairs, so `{a:'xy'}` and `{ax:'y'}` cannot digest alike.
  *
  * This commitment is retained because DaemonApprovalStore persists it and the
  * browser forwards it without persisting or exposing the approved message or
@@ -135,12 +137,7 @@ export function fingerprintOutwardContent(
     .map(([name, value]) => [name, value.replace(/\s+/g, ' ').trim()] as const)
     .sort((left, right) => (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0));
   if (normalized.length === 0) { if (retain) fingerprintApply(fingerprintSet, immutableFingerprints, [object!, null]); return null; }
-  const hash = createHash('sha256');
-  for (const [name, value] of normalized) {
-    // Length-prefixed so `{a:'xy'}` and `{ax:'y'}` cannot digest alike.
-    hash.update(`${String(name.length)}:${name}${String(value.length)}:${value}`);
-  }
-  const result = hash.digest('hex');
+  const result = contentDigest(normalized);
   if (retain) fingerprintApply(fingerprintSet, immutableFingerprints, [object!, result]);
   return result;
 }

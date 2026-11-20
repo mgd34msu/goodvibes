@@ -31,6 +31,7 @@
  * the decide verbs have always documented.
  */
 
+import { RefusalError } from '@goodvibes-jev/engine/errors';
 import { openRawServerSentEventStream } from '../transports/sse-stream.js';
 import { buildUrl } from '../transports/transport-paths.js';
 import { logger } from '../../utils/logger.js';
@@ -130,11 +131,20 @@ export async function watchApprovalUpdates(
     return null;
   }
   try {
+    // Set once the stream has ended (a gap, the source, a failure): onTerminate is told once.
+    let ended = false;
+    let handle: (() => void) | undefined;
+    const terminate = (error: unknown): void => {
+      if (ended) return;
+      ended = true;
+      handle?.();
+      options.onTerminate?.(error);
+    };
     const close = await openRawServerSentEventStream(
       fetchImpl,
       approvalUpdateStreamUrl(options.baseUrl),
       {
-        onEvent: (eventName, payload) => {
+        onEvent: ({ name: eventName, payload }) => {
           if (eventName !== APPROVAL_UPDATE_WIRE_EVENT) return;
           const notice = readApprovalUpdateNotice(payload);
           if (!notice) return;
@@ -146,20 +156,28 @@ export async function watchApprovalUpdates(
             logger.debug('[approvals] an approval-update subscriber threw', { error: summarizeError(error) });
           }
         },
-        onTerminate: ({ error }) => options.onTerminate?.(error),
-        // Reconnect is off here, so a clean end is as final as a failure.
-        onClose: () => options.onTerminate?.(new Error('The daemon closed the approval-update stream.')),
+        // Updates were dropped: this stream can no longer be trusted to carry every
+        // decision, so it ends and the caller reads the records again.
+        onGap: (gap) => terminate(new Error(`The daemon dropped ${gap.dropped} approval update(s) for this client.`)),
+        // Reconnect is off here, so a clean end is as final as a failure. A close() is not reported.
+        onEnd: (end) => {
+          if (end.kind === 'closed') return;
+          terminate(end.kind === 'failed' ? new RefusalError(end.refusal) : new Error('The daemon closed the approval-update stream.'));
+        },
       },
       {
         ...(options.getAuthToken ? { getAuthToken: options.getAuthToken } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
       },
     );
+    handle = close;
+    if (ended) close();
     let closed = false;
     return {
       close: (): void => {
         if (closed) return;
         closed = true;
+        ended = true;
         close();
       },
     };

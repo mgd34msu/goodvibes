@@ -1,4 +1,5 @@
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { ownerOnlyFor, parseTypedLine, type ActionTouches } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
 
 /**
@@ -50,8 +51,41 @@ export function resolveCommandVerb(verbs: CommandVerbs, args: readonly string[])
   return { ...policy, verb };
 }
 
+const TOUCHES_EFFECT: Readonly<Record<ActionTouches, CommandVerbEffect>> = {
+  reads: 'read',
+  'this-machine': 'local-write',
+  'another-machine': 'outward',
+  credential: 'credential',
+};
+
+/**
+ * A described command's policy for a line, read from its description: what the
+ * action touches, and whether only the owner may run it (declared, or a value
+ * that loosens a protection). A bare command runs its report; a word the
+ * command does not know reads nothing (the handler refuses it).
+ */
+function describedVerbPolicy(command: SlashCommand, args: readonly string[]): ResolvedCommandVerb | undefined {
+  const described = command.described;
+  if (!described) return undefined;
+  const parsed = parseTypedLine(described, args);
+  if ('bare' in parsed) {
+    const report = described.actions.find((action) => action.id === described.report);
+    return { verb: report?.word ?? '', effect: report ? TOUCHES_EFFECT[report.touches] : 'read', ownerOnly: false };
+  }
+  if ('unknownWord' in parsed) return { verb: parsed.unknownWord.toLowerCase(), effect: 'read', ownerOnly: false };
+  const owner = ownerOnlyFor(parsed.action, parsed.values);
+  return {
+    verb: parsed.action.word,
+    effect: TOUCHES_EFFECT[parsed.action.touches],
+    ownerOnly: owner !== undefined,
+    ...(owner ? { because: `(${parsed.action.label}) is the owner's own act: ${owner.reason}`, ...(owner.instead ? { instead: owner.instead } : {}) } : {}),
+  };
+}
+
 /** The declared verb of a registered command, or undefined when the command declares none. */
 export function commandVerbPolicy(command: SlashCommand | undefined, args: readonly string[]): ResolvedCommandVerb | undefined {
+  const described = command ? describedVerbPolicy(command, args) : undefined;
+  if (described) return described;
   const declared = command ? declarations.get(command) : undefined;
   return declared ? resolveCommandVerb(declared.verbs, args) : undefined;
 }

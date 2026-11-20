@@ -97,7 +97,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.enabled',
     type: 'boolean',
-    default: false,
     description:
       'Run the wake-word detector, listening continuously for the wake phrase on the configured input device. '
       + 'Turning it on starts a supervised capture process and a persistent listening indicator; turning it off stops '
@@ -116,7 +115,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.models',
     type: 'string',
-    default: DEFAULT_WAKE_MODEL_ID,
     description:
       'Comma-separated wake-word models to run concurrently, by id. Default "hey_goodvibes" is the model the platform pins, hosts, '
       + 'and verifies by checksum. Additional ids resolve against voice.wake.customModelDir. Each model costs one classifier '
@@ -130,7 +128,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.threshold',
     type: 'number',
-    default: 0.9,
     ...numRange(0, 1),
     description:
       'Score, 0 to 1, a frame must reach for the wake phrase to count as heard. '
@@ -144,7 +141,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.patienceFrames',
     type: 'number',
-    default: 2,
     ...intRange(1, 10),
     description:
       'Consecutive 80 ms frames that must all score above voice.wake.threshold before the wake fires. '
@@ -154,7 +150,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.cooldownMs',
     type: 'number',
-    default: 2000,
     ...intRange(0, 60_000),
     description:
       'Milliseconds after a confirmed wake during which further detections are ignored, so one spoken phrase cannot fire twice '
@@ -164,7 +159,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.vadThreshold',
     type: 'number',
-    default: 0,
     ...numRange(0, 1),
     description:
       'Speech-probability floor, 0 to 1, from the speech gate run ahead of the wake classifier; frames below it are withheld '
@@ -181,7 +175,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.noiseSuppression',
     type: 'enum',
-    default: 'none',
     enumValues: ['none', 'speex'],
     description:
       'Noise suppression applied to captured audio before anything reads it, the wake classifier scores filtered frames, and the '
@@ -197,7 +190,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.inputDevice',
     type: 'string',
-    default: '',
     description:
       'Capture device to listen on. Empty means the operating system default source. '
       + 'Shared by BOTH microphone consumers: wake detection and push-to-talk voice input open the same device through the '
@@ -210,7 +202,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.captureCommand',
     type: 'enum',
-    default: 'auto',
     enumValues: ['auto', 'pw-record', 'parecord', 'arecord', 'ffmpeg', 'sox'],
     description:
       'Which recorder feeds capture on a HOST surface, the terminal and the daemon child process. A browser tab ignores this '
@@ -223,7 +214,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.surfaces.tui',
     type: 'boolean',
-    default: true,
     description:
       'Listen for the wake phrase on the terminal, through a recorder subprocess on the host. On by default: once wake detection '
       + 'is enabled the terminal is the primary surface, and a wake that reaches no surface is a detector that appears broken. '
@@ -233,7 +223,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.surfaces.agent',
     type: 'boolean',
-    default: false,
     description:
       'Listen for the wake phrase on the agent surface, through a recorder subprocess on the host, the same capture path the '
       + 'terminal uses. Turning this on with voice.wake.enabled opens the microphone on the agent, and a confirmed wake sends '
@@ -246,7 +235,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.surfaces.webui',
     type: 'boolean',
-    default: false,
     description:
       'Listen for the wake phrase in the web UI, which runs the detector inside the browser tab on a WASM backend and downloads the '
       + 'pinned model through the daemon. Off by default because browser capture is a separate stack with its own per-origin '
@@ -257,7 +245,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.surfaces.app',
     type: 'boolean',
-    default: false,
     description:
       'Listen for the wake phrase in the desktop companion app, which runs the detector inside its embedded webview on a WASM '
       + 'backend, the same runtime and download path the web UI uses. Off by default because webview capture is a separate stack '
@@ -267,7 +254,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.activationSound',
     type: 'enum',
-    default: 'chime',
     enumValues: ['none', 'chime', 'custom'],
     description:
       'Sound played the moment a wake is confirmed. "chime" by default because audible confirmation is how a user knows the '
@@ -277,7 +263,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.activationSoundPath',
     type: 'string',
-    default: '',
     description:
       'Absolute path to the audio file played on wake. Read only when voice.wake.activationSound is "custom"; ignored otherwise. '
       + 'A host surface plays the file through the same player local voice output uses. A browser tab cannot read a path on your '
@@ -287,7 +272,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.indicator',
     type: 'enum',
-    default: 'statusline',
     enumValues: ['off', 'statusline', 'banner'],
     description:
       'How the surface shows that the microphone is live. "statusline" keeps a persistent listening marker for as long as the '
@@ -298,7 +282,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.preRollMs',
     type: 'number',
-    default: 500,
     ...intRange(0, 2000),
     description:
       'Milliseconds of audio kept from BEFORE the wake fired and prepended to the speech-to-text request, so a phrase run '
@@ -308,7 +291,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.captureMaxSeconds',
     type: 'number',
-    default: 10,
     ...intRange(0, 120),
     description:
       'Hard ceiling on how long capture runs before it stops on its own. Bounds memory and guarantees a stuck or silent stream '
@@ -325,7 +307,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.silenceStopMs',
     type: 'number',
-    default: 1200,
     ...intRange(100, 10_000),
     description:
       'Milliseconds of silence that end post-wake capture, so the request is sent when the user stops talking rather than at '
@@ -336,7 +317,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.silenceFloorRms',
     type: 'number',
-    default: 0,
     ...intRange(0, 8000),
     description:
       'The audio level at or below which a frame counts as silence, on the int16 magnitude scale the capture path uses '
@@ -357,7 +337,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.speechRetriggerMs',
     type: 'number',
-    default: 150,
     ...intRange(0, 2000),
     description:
       'How long a run of sound above the silence floor has to last before it counts as you talking again. Shorter runs are '
@@ -372,7 +351,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.autoSubmit',
     type: 'boolean',
-    default: false,
     description:
       'Submit the transcribed text as a turn automatically instead of placing it in the input for review. Applies to the '
       + 'utterance captured after a WAKE; push-to-talk always places its transcript in the composer, because a person who pressed '
@@ -383,7 +361,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.retainAudio',
     type: 'enum',
-    default: 'none',
     enumValues: ['none', 'session-temp'],
     description:
       'Whether captured audio is written to disk. "none" by default, nothing is stored, which is the only setting under which '
@@ -395,7 +372,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.customModelDir',
     type: 'string',
-    default: '',
     description:
       'Directory searched for wake models whose ids are not the pinned default. Empty uses the managed wake model directory '
       + 'under the surface storage root. Set it to keep your own models outside the managed tree; files there are loaded as-is '
@@ -404,7 +380,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.maxRestarts',
     type: 'number',
-    default: 3,
     ...intRange(0, 20),
     description:
       'How many times the supervisor restarts a crashed detector process inside voice.wake.crashWindowSeconds before it stops '
@@ -414,7 +389,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.restartBackoffMs',
     type: 'number',
-    default: 2000,
     ...intRange(0, 60_000),
     description:
       'Base delay before restarting a crashed detector, multiplied by the attempt number for linear backoff (2 s, 4 s, 6 s). '
@@ -423,7 +397,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.crashWindowSeconds',
     type: 'number',
-    default: 60,
     ...intRange(1, 3600),
     description:
       'Rolling window in which repeated crashes count toward voice.wake.maxRestarts. Exceeding the ceiling inside this window '
@@ -433,7 +406,6 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.browserBackend',
     type: 'enum',
-    default: 'wasm',
     enumValues: ['wasm', 'webgpu'],
     description:
       'Execution backend for the detector inside a browser tab. "wasm" is the default and the measured configuration: the '

@@ -22,7 +22,7 @@ export function createContextInspectionCommand<Context extends ContextInspection
     effect: 'mixed',
     aliases: ['ctx'],
     description: policy.description,
-    hidden: policy.hidden,
+    firstScreen: !policy.hidden,
     usage: '[window [<size>|clear]]',
     argsHint: '[window <size|clear>]',
     handler(args, context) {
@@ -56,7 +56,7 @@ export function createErrorNavigationCommands<Context extends ContextInspectionC
     name: direction + '-error',
     effect: 'ui-navigation',
     aliases: [direction === 'next' ? 'ne' : 'pe'],
-    hidden,
+    firstScreen: !hidden,
     description: 'Jump to the ' + (direction === 'next' ? 'next' : 'previous') + ' error message in the conversation',
     handler(_args, context) {
       const conversation = context.session.conversationManager;

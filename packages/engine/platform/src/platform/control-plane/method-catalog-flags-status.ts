@@ -22,8 +22,7 @@ export const builtinGatewayFlagsStatusMethodDescriptors: readonly GatewayMethodD
     description:
       'Return the features whose saved setting the running daemon has not applied yet. A feature that only changes at daemon start keeps its running state when its setting is saved; each entry names the feature id (the id settings surfaces render), the state it is running in and the saved state that takes effect at the next daemon restart. An empty list means every feature runs as saved. config.get returns saved values only; read this beside it to learn what is running.',
     category: 'flags',
-    scopes: ['read:config'],
-    access: 'admin',
+    effects: ['config.inspect'],
     transport: ['ws'],
     inputSchema: FLAGS_STATUS_INPUT_SCHEMA,
     outputSchema: FLAGS_STATUS_OUTPUT_SCHEMA,

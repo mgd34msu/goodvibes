@@ -31,13 +31,13 @@ import { judgmentInputBoundary, runBoundary, type BoundaryCheckName } from '../g
 import { readToolCall, shellCommandsIn } from '../gate/reading.js';
 import { currentExecutionMode, currentExecutionModeForReadDecision, currentExecutionModeOwner, isInvocationAdmitted, withExecutionMode, type ExecutionModeOwner } from '../gate/execution-context.js';
 import type { UntrustedContentLedger } from '../security/untrusted-content.js';
-import { currentTurnSurfaceId } from '../security/turn-boundary.js';
+import { currentTurn } from '../security/turn-boundary.js';
 import { effectPermittedForProvenance } from '../gate/surface-authority.js';
 import { isStateMutation } from '../gate/policy/state-policy.js';
 import { resolve } from 'node:path';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import { buildDurableRuleForDecision, buildRememberOptions, compileRules, sessionApprovalKey, type CompiledRules, type RememberTier } from './approval-rules.js';
-import { stableStringify } from '../providers/registry-helpers.js';
+import { canonicalJson } from '../utils/target-ref.js';
 import { callCommands, callRecipients, changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
 import { OWNER_ADDRESS_CONFIG_KEYS, splitRecipients } from '../security/owner-identity.js';
 import { undeclaredSendRecipients } from '../gate/send-recipients.js';
@@ -351,7 +351,7 @@ function sameSource(now: unknown, then: SourceFingerprint): boolean {
  * so trusting one MCP server does not trust another.
  */
 function ownerOnlySessionKey(kind: OwnerOnlyKind, key: string, args: Record<string, unknown>): string {
-  return `owner-only:${kind}|${key}|${stableStringify(args)}`;
+  return `owner-only:${kind}|${key}|${canonicalJson(args)}`;
 }
 
 /**
@@ -815,7 +815,7 @@ export class PermissionManager {
     this.hookDispatcher = hookDispatcher;
     this.featureFlags = featureFlags;
     this.userRuleStore = userRuleStore;
-    this.gate = { surfaceOf: currentTurnSurfaceId, ...gate };
+    this.gate = { surfaceOf: () => currentTurn()?.surface, ...gate };
   }
 
   /** Settle the existing rule/config owners before taking a new authority snapshot. */

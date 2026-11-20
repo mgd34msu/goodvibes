@@ -80,12 +80,16 @@ export async function watchDaemonPowerEvents(options: WatchDaemonPowerEventsOpti
         if (domains.includes(POWER_EVENT_DOMAIN)) options.onLive();
         else end(false);
       },
-      onEvent: (eventName, payload) => {
+      onEvent: ({ name: eventName, payload }) => {
         if (closed || eventName !== POWER_EVENT_DOMAIN) return;
         if (isRecord(payload) && payload.type === POWER_STATE_CHANGED_EVENT) options.onChange();
       },
-      onTerminate: ({ final }) => end(final !== true),
-      onClose: () => end(true),
+      // A power change may have been among the dropped frames: read the daemon's state again.
+      onGap: () => { if (!closed) options.onChange(); },
+      onEnd: (streamEnd) => {
+        if (streamEnd.kind === 'closed') return;
+        end(streamEnd.kind === 'failed' ? streamEnd.refusal.retryable : true);
+      },
     }, {
       ...(options.getAuthToken ? { getAuthToken: options.getAuthToken } : {}),
       reconnect: { enabled: true },

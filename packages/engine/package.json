@@ -134,6 +134,7 @@
     "./contracts/operator-contract.json": "./contracts/artifacts/operator-contract.json",
     "./contracts/operator-openapi.json": "./contracts/artifacts/operator-openapi.json",
     "./contracts/peer-contract.json": "./contracts/artifacts/peer-contract.json",
+    "./contracts/command-actions.json": "./contracts/artifacts/command-actions.json",
     "./daemon-api": {
       "bun": "./daemon-api/src/index.ts",
       "types": "./daemon-api/dist/index.d.ts",
@@ -1262,6 +1263,31 @@
       "types": "./platform/dist/platform/runtime/client/selection-observation.d.ts",
       "import": "./platform/dist/platform/runtime/client/selection-observation.js"
     },
+    "./platform/platform/runtime/client/daemon-credentials": {
+      "bun": "./platform/src/platform/runtime/client/daemon-credentials.ts",
+      "types": "./platform/dist/platform/runtime/client/daemon-credentials.d.ts",
+      "import": "./platform/dist/platform/runtime/client/daemon-credentials.js"
+    },
+    "./platform/platform/runtime/client/daemon-target": {
+      "bun": "./platform/src/platform/runtime/client/daemon-target.ts",
+      "types": "./platform/dist/platform/runtime/client/daemon-target.d.ts",
+      "import": "./platform/dist/platform/runtime/client/daemon-target.js"
+    },
+    "./platform/platform/runtime/client/daemon-target-resolver": {
+      "bun": "./platform/src/platform/runtime/client/daemon-target-resolver.ts",
+      "types": "./platform/dist/platform/runtime/client/daemon-target-resolver.d.ts",
+      "import": "./platform/dist/platform/runtime/client/daemon-target-resolver.js"
+    },
+    "./platform/platform/runtime/client/session-binding": {
+      "bun": "./platform/src/platform/runtime/client/session-binding.ts",
+      "types": "./platform/dist/platform/runtime/client/session-binding.d.ts",
+      "import": "./platform/dist/platform/runtime/client/session-binding.js"
+    },
+    "./platform/platform/utils/target-ref": {
+      "bun": "./platform/src/platform/utils/target-ref.ts",
+      "types": "./platform/dist/platform/utils/target-ref.d.ts",
+      "import": "./platform/dist/platform/utils/target-ref.js"
+    },
     "./platform/platform/workspace/registration/resolution": {
       "bun": "./platform/src/platform/workspace/registration/resolution.ts",
       "types": "./platform/dist/platform/workspace/registration/resolution.d.ts",
@@ -1605,6 +1631,11 @@
       "bun": "./transport-core/src/otel.ts",
       "types": "./transport-core/dist/otel.d.ts",
       "import": "./transport-core/dist/otel.js"
+    },
+    "./transport-core/turn-settlement": {
+      "bun": "./transport-core/src/turn-settlement.ts",
+      "types": "./transport-core/dist/turn-settlement.d.ts",
+      "import": "./transport-core/dist/turn-settlement.js"
     },
     "./transport-core/uuid": {
       "bun": "./transport-core/src/uuid.ts",
@@ -2787,6 +2818,11 @@
       "types": "./terminal-shell/dist/command-mode-route.d.ts",
       "import": "./terminal-shell/dist/command-mode-route.js"
     },
+    "./terminal-shell/held-input": {
+      "bun": "./terminal-shell/src/held-input.ts",
+      "types": "./terminal-shell/dist/held-input.d.ts",
+      "import": "./terminal-shell/dist/held-input.js"
+    },
     "./terminal-shell/session-picker-state": {
       "bun": "./terminal-shell/src/session-picker-state.ts",
       "types": "./terminal-shell/dist/session-picker-state.d.ts",
@@ -2881,6 +2917,36 @@
       "bun": "./terminal-shell/src/mcp-runtime-commands.ts",
       "types": "./terminal-shell/dist/mcp-runtime-commands.d.ts",
       "import": "./terminal-shell/dist/mcp-runtime-commands.js"
+    },
+    "./terminal-shell/command-actions": {
+      "bun": "./terminal-shell/src/command-actions/index.ts",
+      "types": "./terminal-shell/dist/command-actions/index.d.ts",
+      "import": "./terminal-shell/dist/command-actions/index.js"
+    },
+    "./terminal-shell/command-actions/data": {
+      "bun": "./terminal-shell/src/command-actions/data.ts",
+      "types": "./terminal-shell/dist/command-actions/data.d.ts",
+      "import": "./terminal-shell/dist/command-actions/data.js"
+    },
+    "./terminal-shell/plain-line-input": {
+      "bun": "./terminal-shell/src/plain-line-input.ts",
+      "types": "./terminal-shell/dist/plain-line-input.d.ts",
+      "import": "./terminal-shell/dist/plain-line-input.js"
+    },
+    "./terminal-shell/confirm-dialog": {
+      "bun": "./terminal-shell/src/confirm-dialog.ts",
+      "types": "./terminal-shell/dist/confirm-dialog.d.ts",
+      "import": "./terminal-shell/dist/confirm-dialog.js"
+    },
+    "./terminal-shell/confirm-dialog-types": {
+      "bun": "./terminal-shell/src/confirm-dialog-types.ts",
+      "types": "./terminal-shell/dist/confirm-dialog-types.d.ts",
+      "import": "./terminal-shell/dist/confirm-dialog-types.js"
+    },
+    "./terminal-shell/renderer/confirm-dialog": {
+      "bun": "./terminal-shell/src/renderer/confirm-dialog.ts",
+      "types": "./terminal-shell/dist/renderer/confirm-dialog.d.ts",
+      "import": "./terminal-shell/dist/renderer/confirm-dialog.js"
     },
     "./terminal-shell/subscription-runtime-commands": {
       "bun": "./terminal-shell/src/subscription-runtime-commands.ts",

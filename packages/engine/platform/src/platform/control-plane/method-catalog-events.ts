@@ -5,6 +5,7 @@ import { SHARED_APPROVAL_RECORD_SCHEMA } from './operator-contract-schemas-appro
 import { OWNER_ITEM_SCHEMA } from './operator-contract-schemas-owner-inbox.js';
 import { HOSTED_SESSION_RECORD_SCHEMA } from './method-catalog-hosted-sessions.js';
 import { RUNTIME_EVENT_DOMAINS, type RuntimeEventDomain } from '../../events/domain-map.js';
+import { EFFECTS, type EffectId } from '../security/effect-authority.js';
 
 /**
  * The discriminated `event` values carried inside every `session-update` wire frame.
@@ -126,41 +127,42 @@ const RUNTIME_DOMAIN_DESCRIPTIONS = {
  */
 export type GatewayEventAccess = 'authenticated' | 'admin';
 
-const RUNTIME_DOMAIN_ACCESS = {
-  session: 'admin',
-  turn: 'admin',
-  providers: 'authenticated',
-  tools: 'admin',
-  tasks: 'admin',
-  agents: 'admin',
-  contracts: 'admin',
-  communication: 'admin',
-  planner: 'admin',
-  gate: 'admin',
-  plugins: 'authenticated',
-  mcp: 'authenticated',
-  transport: 'authenticated',
-  compaction: 'authenticated',
-  ui: 'authenticated',
-  ops: 'authenticated',
-  forensics: 'admin',
-  security: 'admin',
-  automation: 'authenticated',
-  routes: 'authenticated',
-  'control-plane': 'admin',
-  deliveries: 'admin',
-  watchers: 'authenticated',
-  surfaces: 'authenticated',
-  knowledge: 'admin',
-  workspace: 'authenticated',
-  fleet: 'admin',
-  config: 'admin',
-} satisfies Record<RuntimeEventDomain, GatewayEventAccess>;
+/** The effect each runtime domain's frames are (security/effect-authority.ts); its row says who may watch it. */
+export const RUNTIME_DOMAIN_EFFECTS = {
+  session: 'events.session',
+  turn: 'events.turn',
+  providers: 'events.providers',
+  tools: 'events.tools',
+  tasks: 'events.tasks',
+  agents: 'events.agents',
+  contracts: 'events.contracts',
+  communication: 'events.communication',
+  planner: 'events.planner',
+  gate: 'events.gate',
+  plugins: 'events.plugins',
+  mcp: 'events.mcp',
+  transport: 'events.transport',
+  compaction: 'events.compaction',
+  ui: 'events.ui',
+  ops: 'events.ops',
+  forensics: 'events.forensics',
+  security: 'events.security',
+  automation: 'events.automation',
+  routes: 'events.routes',
+  'control-plane': 'events.control-plane',
+  deliveries: 'events.deliveries',
+  watchers: 'events.watchers',
+  surfaces: 'events.surfaces',
+  knowledge: 'events.knowledge',
+  workspace: 'events.workspace',
+  fleet: 'events.fleet',
+  config: 'events.config',
+} as const satisfies Record<RuntimeEventDomain, EffectId>;
 
 /** The descriptor that declares `read:own-sessions`; delivery is decided frame by frame in gateway-scope-enforcement.ts. */
 export const OWN_SESSION_ACTIVITY_EVENT_ID = 'control.own_session_activity';
-/** The scope that lets a credential without the admin role watch the sessions its principal owns. */
-export const OWN_SESSIONS_SCOPE = 'read:own-sessions';
+/** The scope that lets a credential without the admin role watch the sessions its principal owns: the `session.watch` row's. */
+export const OWN_SESSIONS_SCOPE = EFFECTS['session.watch'].scope;
 
 /** The wire events the distributed runtime publishes about paired peers and the work they run. */
 export const REMOTE_RUNTIME_WIRE_EVENTS = [
@@ -197,7 +199,9 @@ const BROADCAST_EVENT_ACCESS: Readonly<Record<string, GatewayEventAccess>> = {
 export function gatewayEventAccess(descriptor: Pick<GatewayEventDescriptor, 'id' | 'category' | 'domains'>): GatewayEventAccess {
   if (descriptor.category === 'runtime-domain') {
     const domain = descriptor.domains?.[0];
-    return domain !== undefined && Object.hasOwn(RUNTIME_DOMAIN_ACCESS, domain) ? RUNTIME_DOMAIN_ACCESS[domain] : 'admin';
+    if (domain === undefined || !Object.hasOwn(RUNTIME_DOMAIN_EFFECTS, domain)) return 'admin';
+    const least = EFFECTS[RUNTIME_DOMAIN_EFFECTS[domain]].least;
+    return least === 'owner' || least === 'admin' ? 'admin' : 'authenticated';
   }
   return BROADCAST_EVENT_ACCESS[descriptor.id] ?? 'admin';
 }

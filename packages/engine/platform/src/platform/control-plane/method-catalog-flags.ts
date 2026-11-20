@@ -22,7 +22,7 @@ export const builtinGatewayFlagsMethodDescriptors: readonly GatewayMethodDescrip
     description:
       'Return the feature defaults report: every platform capability with its current default, default-disposition state (dark = default-off with no evidence, soaking = accumulating evidence, graduate-candidate = judged ready and awaiting a release decision, graduated = default on, blocked = held off with a dated reason), and its validation evidence. The daemon collects no validation readings, so every entry\'s evidence says "no evidence collected"; the only instrumentation, the permissions divergence simulation, runs in the terminal app with /policy simulate and reports there. releaseBlockers lists every graduate-candidate entry: capabilities judged ready that are neither on by default nor held with a dated reason.',
     category: 'flags',
-    scopes: ['read:config'],
+    effects: ['config.read'],
     transport: ['ws'],
     inputSchema: FLAGS_GRADUATION_REPORT_INPUT_SCHEMA,
     outputSchema: FLAGS_GRADUATION_REPORT_OUTPUT_SCHEMA,

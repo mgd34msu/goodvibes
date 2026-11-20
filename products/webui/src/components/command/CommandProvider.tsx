@@ -29,6 +29,8 @@ import { SETTINGS_SECTIONS } from '../settings/dialog/sections';
 import { useHotkeys } from '../../hooks/useHotkeys';
 import { CommandPalette } from './CommandPalette';
 import { ShortcutCheatsheet } from './ShortcutCheatsheet';
+import { ActionSheet } from './ActionSheet';
+import { COMMAND_ACTIONS } from '../../lib/generated/command-actions';
 
 export type { ViewId };
 
@@ -53,6 +55,8 @@ interface CommandProviderProps {
 export default function CommandProvider({ onNavigate, onOpenSettings, children }: CommandProviderProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
+  /** The slash-command action whose sheet is open from the palette. */
+  const [sheet, setSheet] = useState<{ readonly command: string; readonly action: string } | null>(null);
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
   const closePalette = useCallback(() => setPaletteOpen(false), []);
@@ -153,6 +157,19 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
         hotkey: () => setCheatsheetOpen((open) => !open),
       },
     ];
+    // Every slash-command action the daemon can run is one palette entry; it opens the action's sheet.
+    for (const command of COMMAND_ACTIONS.commands) {
+      for (const action of command.actions) {
+        if (!('method' in action.operator) || action.touches === 'reads') continue;
+        defs.push({
+          id: `action.${command.name}.${action.id}`,
+          title: action.label,
+          group: 'system',
+          keywords: [command.title, `/${command.name}`, action.word],
+          run: () => setSheet({ command: command.name, action: action.id }),
+        });
+      }
+    }
     // Every other settings section is one command in the palette's Settings group
     // ("Models and providers" is nav.providers above).
     for (const section of SETTINGS_SECTIONS) {
@@ -193,6 +210,7 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
       {children}
       <CommandPalette open={paletteOpen} onClose={closePalette} />
       <ShortcutCheatsheet open={cheatsheetOpen} onClose={closeCheatsheet} />
+      {sheet ? <ActionSheet key={`${sheet.command}.${sheet.action}`} open command={sheet.command} action={sheet.action} onClose={() => setSheet(null)} /> : null}
     </>
   );
 }

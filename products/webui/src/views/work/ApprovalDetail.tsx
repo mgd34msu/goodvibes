@@ -275,7 +275,7 @@ export function ApprovalDetail({ record, actions, onClose }: ApprovalDetailProps
         <Disclosure summary="Add a reason for denying">
           <Input
             aria-label={`Deny reason for ${tool}`}
-            placeholder="Fed back to the model with the denial"
+            placeholder="Optional: why not. The agent reads it with the denial."
             value={denyReason}
             disabled={busy}
             onChange={(e) => setDenyReason(e.target.value)}

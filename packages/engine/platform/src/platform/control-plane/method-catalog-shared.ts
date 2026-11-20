@@ -1,7 +1,8 @@
 import type { RuntimeEventDomain } from '../runtime/events/index.js';
 import type { ContractErrorCode, ContractReplayKey } from '../types/foundation-contract.js';
 import type { NativeExecutionAuthority } from '../security/http-auth.js';
-import type { CredentialKind } from '../daemon/http-policy.js';
+import type { Actor, CredentialKind } from '../daemon/http-policy.js';
+import { effectFacts, type EffectId } from '../security/effect-authority.js';
 export type { NativeExecutionAuthority, NativePairedSnapshot } from '../security/http-auth.js';
 
 export type GatewayMethodTransport = 'http' | 'ws' | 'internal';
@@ -39,6 +40,14 @@ export interface GatewayMethodDescriptor {
   readonly outputSchema?: Record<string, unknown> | undefined;
   readonly pluginId?: string | undefined;
   readonly dangerous?: boolean | undefined;
+  /**
+   * What calling the method causes, as rows of the effect table
+   * (security/effect-authority.ts). Every builtin method declares them, and
+   * its `access`, `scopes`, `ownerOnly`, `irreversible`, `changesContract`
+   * and `effect` are computed from them; admission reads them
+   * (`admitEffects`). A plugin's method declares access and scopes instead.
+   */
+  readonly effects?: readonly EffectId[] | undefined;
   /** Set by `methodDescriptor` for every builtin method; see `GatewayMethodEffect`. */
   readonly effect?: GatewayMethodEffect | undefined;
   /**
@@ -137,10 +146,13 @@ export interface GatewayMethodInvocationContext {
    */
   readonly credentialKind?: CredentialKind | undefined;
   /**
-   * Set only by the transport: the credential is a device the owner paired
-   * himself through his pairing flow, so it makes the owner's own acts.
+   * Set only by the transport: who is causing what this call does (actor.ts),
+   * derived once from the credential it authenticated. A handler that decides
+   * an effect beyond its declared ones (a write that loosens a setting) admits
+   * it for this actor (`admitEffects`). Absent for a call the daemon makes
+   * in-process, which is the program's own (`systemActor`).
    */
-  readonly ownerDevice?: boolean | undefined;
+  readonly actor?: Actor | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
 }
 
@@ -232,6 +244,7 @@ export const METHOD_DESCRIPTOR_SCHEMA = objectSchema({
   outputSchema: JSON_OBJECT_SCHEMA,
   pluginId: STRING_SCHEMA,
   dangerous: BOOLEAN_SCHEMA,
+  effects: arraySchema(STRING_SCHEMA),
   effect: stringEnumSchema(['read', 'write', 'outward']),
   ownerOnly: BOOLEAN_SCHEMA,
   irreversible: BOOLEAN_SCHEMA,
@@ -379,11 +392,7 @@ export function exhaustiveStringEnumSchema<Member extends string>() {
   };
 }
 
-/**
- * A method that sends messages, drives a remote host or browser, or runs
- * metered model work states `effect: 'outward'` on its own descriptor; any
- * other method is a read when every scope is a read scope, else a write.
- */
+/** A method is a read when every scope it needs is a read scope, else a write; `outward` comes from its effects. */
 function defaultMethodEffect(scopes: readonly string[]): GatewayMethodEffect {
   return scopes.length > 0 && scopes.every((scope) => scope.startsWith('read:')) ? 'read' : 'write';
 }
@@ -434,25 +443,44 @@ export const OWNER_PRIVATE_READ_SCOPES: ReadonlySet<string> = new Set([
 /** Scopes whose admin writes change who can sign in or what the daemon is allowed to do. */
 const ACCESS_AND_SETTINGS_WRITE_SCOPES: ReadonlySet<string> = new Set(['write:auth', 'write:config']);
 
+/** The fields a builtin method's effects decide; a builtin descriptor states its effects instead. */
+type EffectDerivedField = 'access' | 'scopes' | 'ownerOnly' | 'irreversible' | 'changesContract' | 'effect' | 'effects';
+
+/** What a builtin method states: its effects (at least one), never the fields computed from them. */
+export type BuiltinMethodInput = Omit<GatewayMethodDescriptor, 'source' | 'transport' | EffectDerivedField>
+  & Partial<Pick<GatewayMethodDescriptor, 'source' | 'transport'>>
+  & { readonly effects: readonly [EffectId, ...EffectId[]] };
+
 /**
+ * A builtin method descriptor. `access`, `scopes`, `ownerOnly`,
+ * `irreversible`, `changesContract` and `effect` are computed from the
+ * effects it states (security/effect-authority.ts `effectFacts`), so the
+ * published contract and the admission check read the same rows.
+ *
  * `dangerous` means: a client should confirm before calling, and a generated
  * tool list marks it destructive. Every admin method that writes accounts,
  * sign-in or settings (a `write:auth` or `write:config` scope) is dangerous
  * unless its descriptor says `dangerous: false`; any other method sets the flag
  * itself.
  */
-export function methodDescriptor(input: Omit<GatewayMethodDescriptor, 'source' | 'transport' | 'access'> & Partial<Pick<GatewayMethodDescriptor, 'source' | 'transport' | 'access'>>): GatewayMethodDescriptor {
-  const access = input.access ?? 'authenticated';
+export function methodDescriptor(input: BuiltinMethodInput): GatewayMethodDescriptor {
+  const facts = effectFacts(input.effects);
+  const access = facts.access;
   const dangerous = input.dangerous
-    ?? (access === 'admin' && input.scopes.some((scope) => ACCESS_AND_SETTINGS_WRITE_SCOPES.has(scope)) ? true : undefined);
-  const effect = input.effect ?? defaultMethodEffect(input.scopes);
+    ?? (access === 'admin' && facts.scopes.some((scope) => ACCESS_AND_SETTINGS_WRITE_SCOPES.has(scope)) ? true : undefined);
+  const effect: GatewayMethodEffect = facts.outward ? 'outward' : defaultMethodEffect(facts.scopes);
   const repeat = methodRepeat(input.id, effect, input.repeat, input.replay);
   return {
     source: input.source ?? 'builtin',
     transport: input.transport ?? ['http', 'ws'],
-    access,
     ...input,
+    access,
+    scopes: facts.scopes,
+    effects: [...input.effects],
     ...(dangerous === undefined ? {} : { dangerous }),
+    ...(facts.ownerOnly ? { ownerOnly: true } : {}),
+    ...(facts.irreversible ? { irreversible: true } : {}),
+    ...(facts.changesContract ? { changesContract: true } : {}),
     effect,
     repeat,
   };

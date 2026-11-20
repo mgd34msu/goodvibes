@@ -23,7 +23,6 @@ export const pricingConfigSettings: ConfigSetting[] = [
   {
     key: 'pricing.modelPrices',
     type: 'object',
-    default: {},
     description:
       'Manual model prices, keyed provider:model (e.g. "openrouter:deepseek/deepseek-chat"). Each entry: '
       + '{ input, output, cacheRead?, cacheWrite? } in USD per 1M tokens. A manual price always wins over '

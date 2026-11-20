@@ -1,4 +1,6 @@
 import type { FetchLike } from '@goodvibes-jev/engine/transport-core';
+import type { StreamEnd, StreamGap } from '@goodvibes-jev/engine/transport-http';
+import type { Page } from '@goodvibes-jev/engine/errors';
 import type {
   ControlPlaneRecentEvent,
   ControlPlaneAuthSnapshot,
@@ -85,6 +87,8 @@ export interface HttpTransportSessionsClient {
   get(sessionId: string): Promise<SharedSessionRecord | null>;
   messages(sessionId: string, limit?: number): Promise<readonly SharedSessionMessage[]>;
   inputs(sessionId: string, limit?: number, options?: { readonly state?: string | undefined; readonly since?: number | undefined }): Promise<readonly SharedSessionInputRecord[]>;
+  /** A live surface's collection read: the oldest inputs after `since`, and whether more remain (ask again from `next`). */
+  inputsPage(sessionId: string, options: { readonly state?: string | undefined; readonly since?: number | undefined; readonly limit?: number | undefined }): Promise<Page<SharedSessionInputRecord>>;
   ensureSession(input?: HttpSessionEnsureInput): Promise<SharedSessionRecord>;
   register(input: RegisterSharedSessionInput): Promise<SharedSessionRegisterResult>;
   close(sessionId: string): Promise<SharedSessionRecord | null>;
@@ -176,12 +180,12 @@ export interface HttpTransportTelemetryStreamReady {
 export interface HttpTransportTelemetryStreamHandlers {
   readonly onRecord: (record: TelemetryRecord) => void;
   readonly onReady?: ((payload: HttpTransportTelemetryStreamReady) => void) | undefined;
-  /** A stream error; the client reconnects after it unless it was final. */
-  readonly onError?: ((error: unknown) => void) | undefined;
-  /** The stream reconnects after a drop. */
-  readonly onReconnect?: ((input: { readonly attempt: number; readonly delayMs: number }) => void) | undefined;
-  /** The stream ended for good: no more records will arrive. */
-  readonly onTerminate?: ((input: { readonly error: unknown; readonly reconnectAttempts: number; readonly final?: boolean | undefined }) => void) | undefined;
+  /** The stream reconnects after a drop: the attempt, the wait before it, and the failure that lost it. */
+  readonly onReconnect?: ((input: { readonly attempt: number; readonly delayMs: number; readonly error: unknown }) => void) | undefined;
+  /** Records were dropped for this reader: read a snapshot again; never ignore it. */
+  readonly onGap: (gap: StreamGap) => void;
+  /** The stream ended (closed by the caller, ended by the daemon, or failed for good): no more records will arrive. */
+  readonly onEnd: (end: StreamEnd) => void;
 }
 
 export interface HttpTransportTelemetryClient {

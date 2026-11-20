@@ -2,11 +2,12 @@
  * owner-act.ts, a change only the owner makes, asked of him.
  *
  * A write over the operator API that loosens a security, permission, judgment
- * or payment setting is the owner's own act. A paired device's token (the
- * credential a script or automation is given) does not carry that authority:
- * the change is put to the owner as an approval, and it is applied when he
- * approves it, from his own app (the operator token, a sign-in, a terminal on
- * the daemon's machine). Nothing is written before that.
+ * or payment setting is the owner's own act (`settings.loosen` in the effect
+ * table, security/effect-authority.ts). An admin who is not the owner (an
+ * admin sign-in, a full pairing minted for automation) does not carry that
+ * authority: the change is put to the owner as an approval, and it is applied
+ * when he approves it from his own credential (`approval.answer`). Nothing is
+ * written before that.
  */
 import { randomUUID } from 'node:crypto';
 import type { ApprovalBroker } from './approval-broker.js';
@@ -45,7 +46,7 @@ export async function putToOwner(broker: Pick<ApprovalBroker, 'raiseApproval'>, 
         classification: 'owner-act',
         riskLevel: 'high',
         summary: request.summary,
-        reasons: [...request.reasons, `Asked for by ${request.requestedBy}, a token minted for automation, which cannot make this change itself.`],
+        reasons: [...request.reasons, `Asked for by ${request.requestedBy}, who is not the owner and cannot make this change itself.`],
       },
       ownerOnly: 'loosen-security',
       rememberOptions: [],
@@ -60,11 +61,4 @@ export async function putToOwner(broker: Pick<ApprovalBroker, 'raiseApproval'>, 
     logger.warn('A change the owner approved could not be applied', { approvalId: raised.approval.id, error: summarizeError(error) });
   });
   return { approvalId: raised.approval.id };
-}
-
-/** Whether an approval may be answered only with the owner's own credential. */
-export function isOwnerActApproval(approval: unknown): boolean {
-  if (!approval || typeof approval !== 'object') return false;
-  const metadata = (approval as { metadata?: unknown }).metadata;
-  return !!metadata && typeof metadata === 'object' && (metadata as Record<string, unknown>)[OWNER_ACT_METADATA_KEY] === true;
 }

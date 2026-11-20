@@ -51,7 +51,8 @@ export function applyConversationPopupRows<Input extends {
  * Draw the modal stack bottom to top: a kit modal draws itself, a tracked
  * modal through the product's entry of the same name (an entry that is not
  * visible, or a modal with no entry, such as a composer popup, draws nothing
- * here). The permission dialog and toasts go above every modal.
+ * here), then the permission dialog. Toasts wait while any of these, or a
+ * full-screen flow, is open.
  */
 export function composeConversationLayers(options: {
   readonly entries: readonly ModalEntry[];
@@ -61,7 +62,10 @@ export function composeConversationLayers(options: {
   readonly permission?: SurfaceLayer | null | undefined;
   readonly headerRows?: number | undefined;
   readonly footerRows?: number | undefined;
-  readonly toasts: () => readonly ToastSpec[];
+  /** The toast state: held while a layer below would be covered, then read for this frame. */
+  readonly toasts: { hold(held: boolean): void; visible(): readonly ToastSpec[] };
+  /** A full-screen flow (the onboarding wizard) owns the screen, so toasts wait as they do over a modal. */
+  readonly screenOwned?: boolean | undefined;
 }): SurfaceLayer[] {
   const { entries, modals, width, height } = options;
   const layers: SurfaceLayer[] = [];
@@ -76,7 +80,10 @@ export function composeConversationLayers(options: {
     if (layer) layers.push(layer);
   }
   if (options.permission) layers.push(options.permission);
-  const toasts = renderToasts(width, height, options.toasts(), {
+  // A toast never covers a modal, the permission card or a full-screen flow:
+  // it waits until they close (toast-center.ts hold).
+  options.toasts.hold(layers.length > 0 || options.screenOwned === true);
+  const toasts = renderToasts(width, height, options.toasts.visible(), {
     top: options.headerRows ?? 1,
     bottom: height - (options.footerRows ?? 2),
   });

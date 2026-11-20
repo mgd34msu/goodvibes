@@ -92,7 +92,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // permission prompt: a script answering a `run --answer-permissions` sees it; otherwise nobody can
   // answer, and an unanswered question leaves the workspace undecided rather than recording a choice
   // nobody made.
-  const trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel> } = {
+  const trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel>; awaitingOwner?: boolean } = {
     requestTrustDecision: async () => {
       const workspace = workingDirectory;
       const decision = await localPromptRef.requestPermission({

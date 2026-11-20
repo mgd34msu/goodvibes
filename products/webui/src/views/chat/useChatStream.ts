@@ -2,7 +2,9 @@ import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState, Ref
 import { client as platformClient, DEFAULT_SSE_RECONNECT } from '../../lib/goodvibes';
 import { getClientLifetime, isClientLifetimeCurrent } from '../../lib/client-lifetime';
 import { asRecord, firstString } from '../../lib/object';
-import { RELAY_OVERFLOW_EVENT, noteRelayOverflow, readDroppedCount } from '../../lib/relay-stream-overflow';
+import { RefusalError } from '@goodvibes-jev/engine/errors';
+import { readStreamGapDropped } from '@goodvibes-jev/engine/transport-core/errors';
+import { noteRelayOverflow } from '../../lib/relay-stream-overflow';
 import { isSessionNotFoundError, isAuthExpiredError, isMethodUnavailableError, isNoActiveTurnError, isTurnStoppingError } from '../../lib/errors';
 import type { ToolActivityWords } from '@goodvibes-jev/engine/contracts';
 import { LocalCompanionMessage } from '../../lib/companion-chat';
@@ -159,7 +161,7 @@ export function useChatStream({
   const stoppedLocallyRef = useRef(false);
   const connectionOwner = useRef<object | null>(null);
   // Bumped by retryStream() to force a fresh connect after the platform's own
-  // reconnect loop gives up (it never retries again on its own past onTerminate).
+  // reconnect loop gives up (it never retries again on its own past onEnd).
   const [retryNonce, setRetryNonce] = useState(0);
   const [streamHealth, setStreamHealth] = useState<StreamHealth>('connecting');
   // True while this session's stream has been down since its last successful
@@ -303,10 +305,6 @@ export function useChatStream({
     }
     setStreamHealth('connecting');
 
-    // True once this connection instance reported a drop (onReconnect or
-    // onTerminate), so onError, which the platform pairs with each of those,
-    // does not report the same failure a second time.
-    let hadDrop = false;
     // Guards the auth-expiry handoff to fire exactly once per connection instance,
     // idempotent either way, but avoids redundant invalidateQueries churn if the dead
     // token keeps producing 401s across more than one handler callback.
@@ -328,7 +326,6 @@ export function useChatStream({
     void platformClient.chat.events.stream(activeSessionId, {
       onReady: () => {
         if (cancelled || stoppedRef.current) return;
-        hadDrop = false;
         setStreamHealth('live');
         if (streamWasDownRef.current) {
           streamWasDownRef.current = false;
@@ -347,16 +344,16 @@ export function useChatStream({
           ));
         }
       },
-      onEvent: (eventName, payload) => {
+      // Turn frames were dropped (by the daemon for a slow reader, or by the relay). Record the
+      // honest notice and resync this session's chat state: the missed frames may include turn
+      // deltas, so a refetch of the authoritative message list restores the true transcript.
+      onGap: (gap) => {
         if (cancelled || stoppedRef.current) return;
-        if (eventName === RELAY_OVERFLOW_EVENT) {
-          // Turn frames were dropped over the relay tunnel. Record the honest notice and
-          // resync this session's chat state, the missed frames may include turn deltas,
-          // so a refetch of the authoritative message list restores the true transcript.
-          noteRelayOverflow(readDroppedCount(payload));
-          void invalidateChatState(activeSessionId);
-          return;
-        }
+        noteRelayOverflow(gap.dropped);
+        void invalidateChatState(activeSessionId);
+      },
+      onEvent: ({ name: eventName, payload }) => {
+        if (cancelled || stoppedRef.current) return;
         if (!eventName.startsWith('companion-chat.')) return;
         if (firstString(payload, ['sessionId']) !== activeSessionId) return;
         const type = companionEventType(eventName, payload);
@@ -508,34 +505,34 @@ export function useChatStream({
           void invalidateChatState(activeSessionId);
         }
       },
-      // Paired with each onReconnect and onTerminate below; standalone only for a
-      // failure neither of them reports, which leaves the stream paused.
-      onError: (error) => {
+      // A drop the built-in reconnect is about to retry. The turn is untouched:
+      // the daemon keeps working, only this tab's channel is down.
+      onReconnect: ({ error }) => {
         if (cancelled || stoppedRef.current) return;
         if (isSessionNotFoundError(error)) {
           onSessionMissing(activeSessionId);
           return;
         }
         if (handleAuthExpiry(error)) return;
-        if (!hadDrop) {
-          streamWasDownRef.current = true;
-          setStreamHealth('paused');
-        }
-      },
-      // A drop the built-in reconnect is about to retry. The turn is untouched:
-      // the daemon keeps working, only this tab's channel is down.
-      onReconnect: () => {
-        if (cancelled || stoppedRef.current) return;
-        hadDrop = true;
         streamWasDownRef.current = true;
         setStreamHealth('reconnecting');
+        // The relay ended the tunnelled stream because it dropped chunks; the reconnect
+        // resumes from the last event id and the open refreshes the transcript.
+        const dropped = readStreamGapDropped(error);
+        if (dropped !== undefined) noteRelayOverflow(dropped);
       },
-      // The built-in reconnect gave up for good. ChatView then refreshes the
-      // transcript slowly until retryStream() re-opens the stream.
-      onTerminate: ({ error }) => {
-        if (cancelled || stoppedRef.current) return;
-        if (handleAuthExpiry(error)) return;
-        hadDrop = true;
+      // The stream ended for good (the built-in reconnect gave up, or the daemon ended it).
+      // ChatView then refreshes the transcript slowly until retryStream() re-opens the stream.
+      onEnd: (end) => {
+        if (cancelled || stoppedRef.current || end.kind === 'closed') return;
+        if (end.kind === 'failed') {
+          const error = new RefusalError(end.refusal);
+          if (isSessionNotFoundError(error)) {
+            onSessionMissing(activeSessionId);
+            return;
+          }
+          if (handleAuthExpiry(error)) return;
+        }
         streamWasDownRef.current = true;
         setStreamHealth('paused');
       },

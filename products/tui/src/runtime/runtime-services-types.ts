@@ -329,7 +329,7 @@ export interface RuntimeServices {
   /** Per-workspace trust gate, restricts write/execute/delegate tools until the workspace is trusted. */
   readonly workspaceTrustManager: WorkspaceTrustManager;
   /** The late-bound trust question the terminal UI patches in once it exists. */
-  readonly trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel> };
+  readonly trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel>; awaitingOwner?: boolean };
   /** Asks the trust question through `trustPromptRef`; concurrent callers share one prompt. */
   readonly requestTrustDecision: () => Promise<WorkspaceTrustLevel>;
   readonly integrationHelpers: IntegrationHelperService;

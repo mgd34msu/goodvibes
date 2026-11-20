@@ -503,7 +503,7 @@ export function registerRoutinesRuntimeCommands(registry: CommandRegistry): void
     effect: 'local-state',
     aliases: ['routine'],
     description: 'Manage Agent-local routines',
-    hidden: true,
+    firstScreen: false,
     usage: '[list|enabled|attention|discover|import-discovered <name>|search <query>|show <id>|receipts|reconcile|receipt <id>|create --name <name> --description <summary> --steps <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--steps ...]|enable <id>|disable <id>|start <id>|review <id>|stale <id> <reason...>|promote <id> --cron <expr> [--delivery-channel slack] --yes|delete <id>]',
     handler: runRoutinesRuntimeCommand,
   });

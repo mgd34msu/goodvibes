@@ -6,7 +6,7 @@ import { StringDecoder } from 'node:string_decoder';
 import type { BrowserContext, Page } from 'playwright-core';
 import { types as nodeTypes } from 'node:util';
 import { captureOwnedJson } from '../gate/judgment-input.js';
-import { OwnedWork } from '../utils/owned-work.js';
+import { OwnedScope } from '../utils/owned-work.js';
 
 /**
  * Talks to the Node-hosted browser process.
@@ -80,7 +80,7 @@ export interface BrowserHostOptions {
 }
 
 export class BrowserHostClient {
-  readonly #work = new OwnedWork();
+  readonly #work = new OwnedScope('browser host client');
   readonly #hosts = new Map<ChildProcessWithoutNullStreams, HostLifetime>();
   #starting: Promise<void> | null = null;
   #closing: Promise<void> | null = null;
@@ -101,7 +101,7 @@ export class BrowserHostClient {
     if (this.#starting) return this.#starting;
     // The startup reservation precedes filesystem/spawn callbacks and can be
     // joined even when close reenters before the child has been created.
-    const starting = this.#work.run(() => Promise.resolve().then(() => this.startOwned()));
+    const starting = this.#work.run('start owned', () => Promise.resolve().then(() => this.startOwned()));
     this.#starting = starting;
     const clear = (): void => { if (this.#starting === starting) this.#starting = null; };
     void starting.then(clear, clear);
@@ -342,7 +342,7 @@ export class BrowserHostClient {
 
   call<T>(command: string, params: Record<string, unknown> = {}, options: { readonly signal?: AbortSignal | undefined } = {}): Promise<T> {
     if (this.#closing) return Promise.reject(this.closedError());
-    return this.#work.run(() => this.callOwned<T>(command, params, options));
+    return this.#work.run('call owned', () => this.callOwned<T>(command, params, options));
   }
 
   private async callOwned<T>(command: string, params: Record<string, unknown>, options: { readonly signal?: AbortSignal | undefined }): Promise<T> {

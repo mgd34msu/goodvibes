@@ -1,6 +1,6 @@
 import type { ChannelDeliveryReceipt } from '../channels/delivery/types.js';
 import type { TelegramSourceAccountReader } from '../channels/telegram/source-account.js';
-import { OwnedWork } from '../utils/owned-work.js';
+import { OwnedScope } from '../utils/owned-work.js';
 import { capturePaymentNoticeReceipt } from './notice-receipt.js';
 import type { TelegramPaymentReceiveSelector } from '../channels/telegram/payment-receive-span.js';
 
@@ -22,7 +22,7 @@ interface Binding {
 export class PaymentReplySourceOwner {
   private binding: Binding | undefined;
   private closed = false;
-  private readonly work = new OwnedWork();
+  private readonly work = new OwnedScope('payment reply source');
 
   bindTelegram(reader: TelegramSourceAccountReader | undefined, lifetime: AbortSignal): void {
     if (this.closed) throw new Error('Payment reply source is unavailable');
@@ -55,7 +55,7 @@ export class PaymentReplySourceOwner {
     // Admit ownership before calling any injected reader, including one that
     // reenters shutdown. Retirement drains the original read, even if it
     // ignores cancellation; a late result never becomes source authority.
-    const ready = this.work.run(async () => {
+    const ready = this.work.run('reply source', async () => {
       await Promise.resolve(); current();
       if (!binding) throw new Error('Payment reply source is unavailable');
       const handle = await (binding.reader.acquireWhenAvailable
@@ -84,7 +84,7 @@ export class PaymentReplySourceOwner {
     };
     return Object.freeze({ ready, assertReceiptCurrent,
       coverageSelector: (receipt: ChannelDeliveryReceipt | undefined) => { assertReceiptCurrent(receipt); return retainedCoverage?.selector; },
-      waitForCoverage: (receipt: ChannelDeliveryReceipt | undefined, throughMs: number) => this.work.run(async () => {
+      waitForCoverage: (receipt: ChannelDeliveryReceipt | undefined, throughMs: number) => this.work.run('reply source', async () => {
       const original = capturePaymentNoticeReceipt(receipt, 'telegram');
       assertReceiptCurrent(original ?? undefined);
       if (!observed || !original) throw new Error('Payment receive coverage is unavailable');

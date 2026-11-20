@@ -22,7 +22,8 @@ import {
   saveWatcherSnapshotToPathSafe,
 } from './store.js';
 import type { AtomicWriteOutcome } from '../utils/atomic-json-store.js';
-import { ownerDeliveryTargetProblem, postToPublicWebhook, PRIVATE_DELIVERY_HOSTS_SETTING } from '../utils/url-safety.js';
+import { ownerDeliveryTargetProblem, postToPublicWebhook } from '../utils/url-safety.js';
+import { PRIVATE_DELIVERY_HOSTS_SETTING } from '../runtime/network/destination.js';
 import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled, requireFeatureGate } from '../runtime/feature-flags/index.js';
 import { GroupJobFamily, type GroupJobItem, type GroupWorkLink } from '../cluster/group-work.js';

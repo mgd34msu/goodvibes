@@ -82,7 +82,7 @@ export interface McpEntry {
 export interface McpEntryToolRule {
   readonly toolName: string;
   readonly rule: 'allow' | 'deny';
-  /** `session`: /mcp deny, until restart; `stored`: kept with the server's entry in its MCP config. */
+  /** `session`: /mcp block, until restart; `stored`: kept with the server's entry in its MCP config. */
   readonly source: 'session' | 'stored';
   /** False for an allow a deny of the same tool overrides. */
   readonly inEffect: boolean;

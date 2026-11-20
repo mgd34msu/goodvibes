@@ -1,5 +1,6 @@
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { readNativeConversationTurnPermit, revalidateNativeConversationTurnPermit, type NativeConversationTurnPermit } from '../workflow/work-ledger/native-intake-client.js';
+import type { Page } from '@goodvibes-jev/engine/errors';
 import { logger } from '../utils/logger.js';
 import { withChannelExecutionMode, type ChannelIntake } from '../channel-profiles/install-inbound-intake.js';
 import type { ChannelProfileDefaults } from '../channel-profiles/types.js';
@@ -8,6 +9,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { sessionsActive } from '../runtime/metrics.js';
 import { forgetVerificationJournal } from '../core/verification/store.js';
 import type { PersistentStore } from '../state/persistent-store.js';
+import { durableAfter, type Durable } from '../state/operation.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { RouteBindingManager } from '../channels/index.js';
 import type { AutomationRouteBinding } from '../automation/routes.js';
@@ -897,8 +899,13 @@ export class SharedSessionBroker {
     return updated;
   }
 
-  async submitMessage(input: SubmitSharedSessionMessageInput): Promise<SharedSessionSubmission> {
-    return await this.handleIntent('submit', input, true);
+  /**
+   * Resolves once the input row is on disk, also when the message was a repeat
+   * of one already recorded (its provider message id) whose write is still
+   * syncing: the result may acknowledge the message to its sender.
+   */
+  async submitMessage(input: SubmitSharedSessionMessageInput): Promise<Durable<SharedSessionSubmission>> {
+    return await durableAfter(await this.handleIntent('submit', input, true), this.storage.synced());
   }
 
   /** Host-private, synchronous original-source binding before message publication.
@@ -930,12 +937,12 @@ export class SharedSessionBroker {
     }, input, onQueued);
   }
 
-  async steerMessage(input: SteerSharedSessionMessageInput): Promise<SharedSessionSubmission> {
-    return await this.handleIntent('steer', input, input.allowSpawnFallback === true);
+  async steerMessage(input: SteerSharedSessionMessageInput): Promise<Durable<SharedSessionSubmission>> {
+    return await durableAfter(await this.handleIntent('steer', input, input.allowSpawnFallback === true), this.storage.synced());
   }
 
-  async followUpMessage(input: SubmitSharedSessionMessageInput): Promise<SharedSessionSubmission> {
-    return await this.handleIntent('follow-up', input, true);
+  async followUpMessage(input: SubmitSharedSessionMessageInput): Promise<Durable<SharedSessionSubmission>> {
+    return await durableAfter(await this.handleIntent('follow-up', input, true), this.storage.synced());
   }
 
   async appendSystemMessage(sessionId: string, body: string, metadata: Record<string, unknown> = {}): Promise<SharedSessionMessage | null> {
@@ -965,11 +972,11 @@ export class SharedSessionBroker {
       readonly source: string;
       readonly metadata?: Readonly<Record<string, unknown>> | undefined;
     },
-  ): Promise<SharedSessionMessage | null> {
+  ): Promise<Durable<SharedSessionMessage> | null> {
     if (!input.body.trim()) return null;
     await this.start();
     if (!this.sessions.has(sessionId)) return null;
-    return this.appendMessage(sessionId, {
+    const message = await this.appendMessage(sessionId, {
       role: 'user',
       body: input.body,
       metadata: {
@@ -979,6 +986,7 @@ export class SharedSessionBroker {
         timestamp: input.timestamp,
       },
     });
+    return await durableAfter(message, this.storage.synced());
   }
 
   /**
@@ -1430,11 +1438,23 @@ export class SharedSessionBroker {
     return structuredClone(updated);
   }
 
-  /** Collection read for a live surface (see the module helper `filterSessionInputsSince`). */
+  /**
+   * The inputs matching `state`/`since`, oldest first: every match without
+   * `limit`, the oldest `limit` with it. A reader that pages (a live surface on
+   * the wire) uses {@link getInputsPage}, which also says whether more remain.
+   */
   getInputsSince(
     sessionId: string,
     options: { readonly state?: SharedSessionInputRecord['state'] | undefined; readonly since?: number | undefined; readonly limit?: number | undefined } = {},
   ): SharedSessionInputRecord[] {
+    return [...filterSessionInputsSince(this.inputs.get(sessionId) ?? [], options).items];
+  }
+
+  /** One page of a live surface's collection read (see the module helper `filterSessionInputsSince`). */
+  getInputsPage(
+    sessionId: string,
+    options: { readonly state?: SharedSessionInputRecord['state'] | undefined; readonly since?: number | undefined; readonly limit?: number | undefined } = {},
+  ): Page<SharedSessionInputRecord> {
     return filterSessionInputsSince(this.inputs.get(sessionId) ?? [], options);
   }
 

@@ -209,7 +209,6 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
             `  connection failures: ${mcp.totalErrors}`,
             ...(issues.length > 0 ? issues.map((issue) => `  issue: ${issue}`) : ['  no active MCP lifecycle issues detected']),
             '  next: /mcp review',
-            '  next: /mcp auth-review',
             '  next: /mcp repair',
           ].join('\n'),
         );
@@ -404,7 +403,6 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
         } else if (domain === 'mcp') {
           lines.push('  domain: mcp');
           lines.push('  /mcp review');
-          lines.push('  /mcp auth-review');
           lines.push('  /mcp repair [server]');
           lines.push('  verify: /health mcp');
         } else if (domain === 'continuity') {

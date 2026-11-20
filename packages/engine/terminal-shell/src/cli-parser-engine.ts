@@ -21,13 +21,12 @@
  *    unknown-flag passthrough because its own handler reads its options), a
  *    missing value, each produces an error line, never an accept-and-ignore.
  *
- * A catalog that lets an unmatched first word through (a terminal app seeds
- * its first prompt from it) still refuses a lone word of five or more letters
- * one edit away from a command word: `goodvibes staus` is a typo, not a
- * prompt, and opening the full-screen app for it hides the mistake. `--`
- * before the word keeps it as a prompt. A shorter word, or one two edits away
- * (`hello`, `look`), may well be a prompt: it is kept and the near command is
- * named in a warning.
+ * A catalog that lets an unmatched first token through (a terminal app seeds
+ * its first prompt from it) still refuses a lone bare word (letters, digits,
+ * hyphens): `goodvibes staus` or `goodvibes frobnicate` is a command typed
+ * wrong, not a prompt, and opening the full-screen app for it hides the
+ * mistake. The refusal names the nearest command when one is close. `--`
+ * before the word keeps it as a prompt, and a quoted line is a prompt.
  */
 import {
   catalogCommandSpec,
@@ -289,7 +288,9 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
   let command: TCommand = catalog.defaultCommand;
   let rawCommand: string | undefined;
   let sawCommand = false;
-  let nearMiss: { readonly token: string; readonly suggestion: string; readonly typo: boolean } | undefined;
+  let nearMiss: { readonly token: string; readonly suggestion: string } | undefined;
+  // An unmatched first token that is one bare word, as a command is typed.
+  let bareWord: string | undefined;
 
   if (found) {
     const resolved = resolveCatalogCommand(catalog, found.token);
@@ -312,8 +313,9 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
       // command stays the catalog default and sawCommand stays false, so the
       // REST of argv is also parsed in the pre-command (strict) posture,
       // matching a single unmatched word never partially unlocking anything.
+      if (/^[a-z][a-z0-9-]*$/i.test(found.token)) bareWord = found.token;
       const near = nearestCommandMatch(catalog, found.token);
-      if (near !== undefined) nearMiss = { token: found.token, suggestion: near.word, typo: near.distance <= 1 && found.token.length >= 5 };
+      if (near !== undefined) nearMiss = { token: found.token, suggestion: near.word };
     } else {
       command = resolved;
       rawCommand = found.token;
@@ -480,13 +482,15 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
     if (flagSpec.warning) warnings.push(flagSpec.warning);
   }
 
-  // A lone near-miss word is a mistyped command; a longer line is a prompt that happens to start with one.
-  if (nearMiss !== undefined && positionals.length === 1) {
-    if (nearMiss.typo) {
-      errors.push(`Unknown command: ${nearMiss.token}. Did you mean \`${binary} ${nearMiss.suggestion}\`? To start with "${nearMiss.token}" as the first prompt instead, run: ${binary} -- ${nearMiss.token}`);
-    } else {
-      warnings.push(`"${nearMiss.token}" is not a command, so it was taken as the first prompt. For the command, run: ${binary} ${nearMiss.suggestion}`);
-    }
+  // A lone bare word is a command the person typed (or mistyped), not a
+  // prompt: it is refused, naming the nearest command when one is close.
+  // A prompt is a line (one quoted argument with spaces), or a word after `--`.
+  if (bareWord !== undefined && positionals.length === 1) {
+    const suggestion = nearMiss !== undefined ? ` Did you mean \`${binary} ${nearMiss.suggestion}\`?` : ` Run \`${binary} --help\` for the commands.`;
+    errors.push(`Unknown command: ${bareWord}.${suggestion} To start with "${bareWord}" as the first prompt instead, run: ${binary} -- ${bareWord}`);
+  } else if (nearMiss !== undefined && positionals.length === 1) {
+    // One argument that is not a bare word ("staus?"): a prompt, with the near command named.
+    warnings.push(`"${nearMiss.token}" is not a command, so it was taken as the first prompt. For the command, run: ${binary} ${nearMiss.suggestion}`);
   }
 
   const result: EngineParseResult<TCommand, TFlags> = {

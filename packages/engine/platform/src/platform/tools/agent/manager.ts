@@ -1,7 +1,7 @@
 import { bindContractInputAuthority } from '../../contract/input-authority.js';
 import { classicAgentInput } from './classic-policy.js';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { currentTurnSurfaceId, withTurnSurfaceId } from '../../security/turn-boundary.js';
+import { currentTurn, withTurnSurfaceId } from '../../security/turn-boundary.js';
 import { currentExecutionModeOwner, detachedFromInvocation, type ExecutionModeOwner } from '../../gate/execution-context.js';
 import { AgentCapacityError } from './capacity-error.js';
 import { bindContractActionSource, bindContractActionSignal, bindContractPlanConsumer } from './contract-binding.js';
@@ -26,7 +26,7 @@ import { evaluateOrchestrationSpawn } from '../../runtime/orchestration/spawn-po
 import { logger } from '../../utils/logger.js';
 import type { AgentInput } from './schema.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { OwnedWork } from '../../utils/owned-work.js';
+import { OwnedScope } from '../../utils/owned-work.js';
 import { splitModelRegistryKey } from '../../providers/registry-helpers.js';
 import type { ProviderRegistry } from '../../providers/registry.js';
 import { AgentSpawnInputError, requireProviderQualifiedModel, normalizeProviderQualifiedModelList } from './model-routing.js';
@@ -136,7 +136,7 @@ interface AgentExecutionSlot {
 }
 
 interface AgentExecutionState {
-  readonly work: OwnedWork;
+  readonly work: OwnedScope;
   readonly slots: Set<AgentExecutionSlot>;
   tail?: Promise<void> | undefined;
 }
@@ -450,7 +450,7 @@ export class AgentManager {
   private spawnInternal(input: AgentInput, spawnBinding?: AgentConstructionBinding, owned?: OwnedSpawnContext): AgentRecord {
     if (spawnBinding === undefined) input = classicAgentInput(input);
     const executionModeOwner = currentExecutionModeOwner();
-    const triggerSurface = currentTurnSurfaceId();
+    const triggerSurface = currentTurn()?.surface;
     const { unit: binding, owner: ownerBinding } = splitContractBinding(spawnBinding);
     const task = input.task;
     if (!task || typeof task !== 'string' || task.trim() === '') {
@@ -740,7 +740,7 @@ export class AgentManager {
   } {
     let state = this.executions.get(agentId);
     if (!state) {
-      state = { work: new OwnedWork(), slots: new Set() };
+      state = { work: new OwnedScope('agent execution'), slots: new Set() };
       this.executions.set(agentId, state);
     }
     const owner = state;
@@ -761,7 +761,7 @@ export class AgentManager {
         this.combinedCancellationSignals.delete(agentId);
       }
     };
-    void owner.work.run(() => settled).then(reclaim, reclaim);
+    void owner.work.run('agent execution', () => settled).then(reclaim, reclaim);
     return { begin, controller: slot.controller, previous, slot };
   }
 

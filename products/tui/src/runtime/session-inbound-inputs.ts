@@ -35,6 +35,7 @@
  */
 
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { Page } from '@goodvibes-jev/engine/errors';
 import type {
   SharedSessionInputIntent,
   SharedSessionInputRecord,
@@ -50,7 +51,7 @@ export interface SpineInboundInputsClient {
   listInputs(
     sessionId: string,
     options: { readonly state?: string; readonly since?: number; readonly limit?: number },
-  ): Promise<{ readonly inputs: readonly SharedSessionInputRecord[] }>;
+  ): Promise<Page<SharedSessionInputRecord>>;
   /**
    * `sessions.inputs.deliver { claim: true }`: queued → delivered for exactly one
    * caller; every other caller is refused. Absent on an older wire, where the
@@ -96,6 +97,8 @@ export interface SessionInboundInputPollerOptions {
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 4_000;
+/** Pages read in one poll at most; a larger backlog continues on the next tick from the cursor. */
+const MAX_POLL_PAGES = 16;
 
 export class SessionInboundInputPoller {
   private readonly sessionId: () => string | null;
@@ -188,8 +191,6 @@ export class SessionInboundInputPoller {
       for (const [inputId, steer] of this.claimedNotInjected) {
         if (this.inject(steer)) this.claimedNotInjected.delete(inputId);
       }
-      const result = await client.listInputs(sessionId, { state: 'queued', since: this.cursor });
-      const inputs = result?.inputs ?? [];
       // The cursor advances across a contiguous prefix of inputs that are done
       // (acknowledged, or not ours to deliver). After the first failure it holds,
       // so the failed input is listed again on the next tick.
@@ -200,64 +201,73 @@ export class SessionInboundInputPoller {
       const settle = (createdAt: number): void => {
         if (!cursorHeld && createdAt - 1 > this.cursor) this.cursor = createdAt - 1;
       };
-      for (const input of inputs) {
-        if (input.state !== 'queued'
-          || (input.intent !== 'steer' && input.intent !== 'follow-up')
-          // Never re-inject this surface's OWN submissions.
-          || input.surfaceId === this.ownSurfaceId) {
-          settle(input.createdAt);
-          continue;
-        }
+      // The daemon answers the OLDEST inputs after the cursor, a page at a time:
+      // read pages while it says more remain, so a backlog larger than one page
+      // is delivered in order instead of losing its oldest inputs.
+      for (let page = 0; page < MAX_POLL_PAGES; page += 1) {
+        const cursorBefore = this.cursor;
+        const result = await client.listInputs(sessionId, { state: 'queued', since: this.cursor });
+        const inputs = result?.items ?? [];
+        for (const input of inputs) {
+          if (input.state !== 'queued'
+            || (input.intent !== 'steer' && input.intent !== 'follow-up')
+            // Never re-inject this surface's OWN submissions.
+            || input.surfaceId === this.ownSurfaceId) {
+            settle(input.createdAt);
+            continue;
+          }
 
-        const steer: InboundSteer = {
-          inputId: input.id,
-          sessionId,
-          intent: input.intent,
-          body: input.body,
-          surfaceKind: input.surfaceKind,
-          surfaceId: input.surfaceId,
-          displayName: input.displayName,
-        };
-        if (client.claimInput) {
+          const steer: InboundSteer = {
+            inputId: input.id,
+            sessionId,
+            intent: input.intent,
+            body: input.body,
+            surfaceKind: input.surfaceKind,
+            surfaceId: input.surfaceId,
+            displayName: input.displayName,
+          };
+          if (client.claimInput) {
+            try {
+              await client.claimInput(sessionId, input.id);
+            } catch (error) {
+              // Refused: another surface claimed it and runs it; it is no longer
+              // queued, so it is not listed again. Unreachable: still queued, and
+              // the held cursor lists it again next tick. Either way, not injected here.
+              cursorHeld = true;
+              this.log.debug('session inbound steer not claimed; another surface holds it or the claim will be retried', {
+                error: error instanceof Error ? error.message : String(error),
+              });
+              continue;
+            }
+            delivered += 1;
+            settle(input.createdAt);
+            if (!this.inject(steer)) this.claimedNotInjected.set(input.id, steer);
+            continue;
+          }
+          if (!this.injected.has(input.id)) {
+            if (!this.inject(steer)) {
+              // Not injected, so not acknowledged: the sending surface must not be
+              // told a steer was delivered that never reached the turn. It is
+              // retried on the next tick, and the loop carries on with the rest.
+              cursorHeld = true;
+              continue;
+            }
+            this.injected.add(input.id);
+          }
           try {
-            await client.claimInput(sessionId, input.id);
+            // consumed:false → queued → delivered (surface has collected it).
+            await client.deliverInput(sessionId, input.id, { consumed: false });
+            this.injected.delete(input.id);
+            delivered += 1;
+            settle(input.createdAt);
           } catch (error) {
-            // Refused: another surface claimed it and runs it; it is no longer
-            // queued, so it is not listed again. Unreachable: still queued, and
-            // the held cursor lists it again next tick. Either way, not injected here.
             cursorHeld = true;
-            this.log.debug('session inbound steer not claimed; another surface holds it or the claim will be retried', {
+            this.log.debug('session inbound deliver ack failed; will retry the acknowledgement', {
               error: error instanceof Error ? error.message : String(error),
             });
-            continue;
           }
-          delivered += 1;
-          settle(input.createdAt);
-          if (!this.inject(steer)) this.claimedNotInjected.set(input.id, steer);
-          continue;
         }
-        if (!this.injected.has(input.id)) {
-          if (!this.inject(steer)) {
-            // Not injected, so not acknowledged: the sending surface must not be
-            // told a steer was delivered that never reached the turn. It is
-            // retried on the next tick, and the loop carries on with the rest.
-            cursorHeld = true;
-            continue;
-          }
-          this.injected.add(input.id);
-        }
-        try {
-          // consumed:false → queued → delivered (surface has collected it).
-          await client.deliverInput(sessionId, input.id, { consumed: false });
-          this.injected.delete(input.id);
-          delivered += 1;
-          settle(input.createdAt);
-        } catch (error) {
-          cursorHeld = true;
-          this.log.debug('session inbound deliver ack failed; will retry the acknowledgement', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
+        if (!result?.more || cursorHeld || this.cursor === cursorBefore) break;
       }
     } catch (error) {
       // Poll failed entirely (daemon gone, transient): keep the cursor, retry next tick.

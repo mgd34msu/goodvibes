@@ -149,7 +149,7 @@ function pageShowsApprovedTerms(expected: CheckoutTerms, state: object): boolean
     }
   }
   const text = texts.join('\n');
-  if (!printedAmounts(expected.totalMinorUnits, expected.currency).some(amount => holdsAmount(text, amount))) return false;
+  if (!printedAmounts(expected.total.minor, expected.total.currency).some(amount => holdsAmount(text, amount))) return false;
   const shipping = expected.shippingLabel.trim().toLowerCase();
   return shipping.length === 0 || text.toLowerCase().includes(shipping);
 }

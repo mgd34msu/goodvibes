@@ -34,7 +34,7 @@ import {
   statusLabel,
 } from '../../lib/sessions-union';
 import { companionMessagesFromListResponse } from '../../lib/companion-chat';
-import { firstString } from '../../lib/object';
+import { asRecord, firstString } from '../../lib/object';
 import { errorCode, formatError, isMethodUnavailableError, isSessionNotLocalError } from '../../lib/errors';
 import { gatePresetLabel, type SettableGatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import { outcomeLabel, type CompactionCheck, type CompactionReceipt } from '../../lib/compaction';
@@ -70,7 +70,8 @@ type DeleteCapability = 'available' | 'unavailable' | 'uncertain' | 'checking';
 /** Kinds whose sessions the Chat view can open. */
 const CHAT_KINDS = new Set(['companion-chat']);
 
-function PermissionModeFact({ sessionId }: { sessionId: string }) {
+/** `daemonWide`: the session has no mode of its own (a chat), so its mode is the daemon's and changing it changes that. */
+function PermissionModeFact({ sessionId, daemonWide = false }: { sessionId: string; daemonWide?: boolean }) {
   const queryClient = useQueryClient();
   const [sheetOpen, setSheetOpen] = useState(false);
   const modeQuery = useQuery({
@@ -107,6 +108,7 @@ function PermissionModeFact({ sessionId }: { sessionId: string }) {
   return (
     <span className="work-inline-action">
       {mode ? gatePresetLabel(mode) : modeQuery.isLoading ? 'Loading…' : 'Unknown'}
+      {mode && daemonWide ? <span className="text-muted-foreground"> (the daemon's mode, shared by every chat)</span> : null}
       {mode && chosenMode && chosenMode !== mode && reason
         ? <span className="text-muted-foreground" role="note">{` (in force; ${gatePresetLabel(chosenMode)} chosen, but ${reason})`}</span>
         : null}
@@ -205,12 +207,21 @@ export function SessionDetail({ record, agents, tab, onTabChange, streamPaused, 
   const contextUsage = useContextUsage(record.id, compaction.latestCheck);
   const cost = useKnownCost(record.id);
 
+  // A chat's messages are the chat's own (the companion chat store); its shared
+  // session record only mirrors that the chat exists, so its count reads 0. The
+  // read is the one the chat view makes, under the same key.
+  const companionChat = record.kind === 'companion-chat';
   const messages = useQuery({
-    queryKey: queryKeys.sessionMessages(record.id),
-    queryFn: () => platformClient.operator.sessions.messages.list(record.id),
+    queryKey: companionChat ? ['companion-chat', record.id, 'messages'] : queryKeys.sessionMessages(record.id),
+    queryFn: (): Promise<unknown> => companionChat
+      ? platformClient.chat.messages.list(record.id)
+      : platformClient.operator.sessions.messages.list(record.id),
     enabled: Boolean(record.id) && tab === 'transcript',
   });
   const items = useMemo(() => companionMessagesFromListResponse(messages.data), [messages.data]);
+  const messageTotal = companionChat
+    ? (typeof asRecord(messages.data).total === 'number' ? asRecord(messages.data).total as number : items.length)
+    : record.messageCount;
 
   // Whether this daemon has a real hard delete (sessions.delete). A 404
   // "Unknown gateway method" means it genuinely lacks it; any other failure is
@@ -314,11 +325,11 @@ export function SessionDetail({ record, agents, tab, onTabChange, streamPaused, 
         <>
           <Facts
             items={[
-              { label: 'Messages', value: `${record.messageCount}${retention ? ` (${retention})` : ''}` },
+              { label: 'Messages', value: companionChat && !messages.isSuccess ? '' : `${messageTotal}${retention ? ` (${retention})` : ''}` },
               { label: 'Waiting inputs', value: record.pendingInputCount > 0 ? String(record.pendingInputCount) : '' },
               { label: 'Surfaces', value: record.surfaceKinds.join(', ') },
               { label: 'Attributed to', value: attributionLabel(record) ?? '' },
-              { label: 'Permission mode', value: <PermissionModeFact sessionId={record.id} /> },
+              { label: 'Permission mode', value: <PermissionModeFact sessionId={record.id} daemonWide={companionChat} /> },
               { label: 'Context', value: contextUsage },
               { label: 'Cost, last 24 hours', value: cost },
             ]}

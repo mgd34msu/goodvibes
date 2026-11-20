@@ -428,7 +428,10 @@ function isFleetAggregateRollupNode(node: ProcessNode): boolean {
 
 /** Count actual running actors, excluding contract wrappers and observed external work. */
 function isFleetRunningLeaf(node: ProcessNode): boolean {
-  return node.kind !== 'observed-external' && !ROLLUP_KINDS.has(node.kind) && !isContractOwnerAgentNode(node) && isRunningProcessState(node.state);
+  // A watcher is a standing source, not work in flight (the platform's fleet
+  // registry counts it out the same way): a degraded or restored one waiting
+  // for its owner shows as stalled, which is not "running".
+  return node.kind !== 'observed-external' && node.kind !== 'watcher' && !ROLLUP_KINDS.has(node.kind) && !isContractOwnerAgentNode(node) && isRunningProcessState(node.state);
 }
 
 /** Build the full FleetSnapshot (rows + honest aggregates) from a flat node list. */

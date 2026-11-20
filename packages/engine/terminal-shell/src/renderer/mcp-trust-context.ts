@@ -38,7 +38,7 @@ export function buildMcpHelp(modal: McpTrustModal, entry: McpTrustEntry | null):
     text(''),
     { kind: 'heading', text: 'Tool rules:' },
     ...(rules.length > 0
-      ? rules.map((rule): HelpLine => ({ kind: 'text', text: `${rule.rule} ${rule.toolName}: ${rule.source === 'session' ? 'this session (/mcp deny)' : 'kept in the MCP config'}${rule.inEffect ? '' : '; overridden by a deny'}` }))
+      ? rules.map((rule): HelpLine => ({ kind: 'text', text: `${rule.rule} ${rule.toolName}: ${rule.source === 'session' ? 'this session (/mcp block)' : 'kept in the MCP config'}${rule.inEffect ? '' : '; overridden by a deny'}` }))
       : [text('None. Every tool is decided by the trust mode and scope.')]),
     text('Enter, then type deny <tool>, allow <tool> or clear <tool> to keep a rule in the server\'s MCP config. A deny refuses every call to the tool; an allow lets it past the path and host scope (kept only in your global config); clear drops the kept rule.'),
     text(''),

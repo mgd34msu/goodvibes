@@ -52,5 +52,5 @@ export function allowedWorkspaceRoots(workingDirectory: string, registerPath: st
 /** The refusal for a folder outside every allowed root, naming them and how to add one. */
 export function outsideAllowedRootsMessage(path: string, roots: readonly string[]): string {
   return `'${path}' is outside the folders this daemon runs work in (${roots.join(', ')}). `
-    + 'Pick one of them, or register the project first with workspaces.registrations.add (or by opening it in the terminal app).';
+    + 'Pick one of them, or register the project first: run goodvibes-agent workspaces register --yes in it, or open it in goodvibes and choose Register.';
 }

@@ -69,7 +69,7 @@ export function createSessionInputChangeSubscriber(
           fetchImpl,
           url.toString(),
           {
-            onEvent: (eventName, payload) => {
+            onEvent: ({ name: eventName, payload }) => {
               if (closed || eventName !== SESSION_UPDATE_WIRE_EVENT) return;
               const sessionId = inputChangeSessionId(payload);
               if (sessionId === undefined) return;
@@ -79,12 +79,13 @@ export function createSessionInputChangeSubscriber(
                 logger.debug('[session dispatch] an input-change subscriber threw', { error: summarizeError(error) });
               }
             },
-            onTerminate: end,
-            onClose: end,
+            // Input moves were dropped: the stream ends, so the dispatcher reads inputs on its interval.
+            onGap: () => { close?.(); close = null; end(); },
+            onEnd: (streamEnd) => { if (streamEnd.kind !== 'closed') end(); },
           },
           options.getAuthToken ? { getAuthToken: options.getAuthToken } : {},
         );
-        if (closed) { opened(); return; }
+        if (closed || ended) { opened(); return; }
         close = opened;
         handlers?.onOpen?.();
       } catch (error) {

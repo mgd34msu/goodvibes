@@ -320,6 +320,13 @@ export function wrapTextRows(text: string, width: number): WrappedRow[] {
           // at width===1). Without this guard splitIdx stays 0, remaining
           // never shrinks, and the while-loop hangs.
           if (splitIdx === 0) splitIdx = codePoints[0]!.length;
+          // A word too long for a row (a usage line such as
+          // `[session|working|staged|head]`, a path, a URL) breaks after its
+          // last separator that fits, not in the middle of a name, as long as
+          // that keeps at least half the row.
+          const head = remaining.slice(0, splitIdx);
+          const separator = Math.max(...[...'|/,;:&=?-_.'].map((mark) => head.lastIndexOf(mark)));
+          if (separator >= 0 && separator + 1 < splitIdx && getDisplayWidth(head.slice(0, separator + 1)) * 2 >= width) splitIdx = separator + 1;
           push(remaining.slice(0, splitIdx), '');
           remaining = remaining.slice(splitIdx);
         }

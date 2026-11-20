@@ -200,7 +200,7 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
       effect: 'mixed',
       aliases: ['p'],
       description: 'Switch provider or manage custom providers (add/remove)',
-      ...(policy.hidden ? { hidden: true } : {}),
+      ...(policy.hidden ? { firstScreen: false } : {}),
       usage: `[add <name> <baseURL>${policy.allowInlineKey ? ' [apiKey]' : ''} | remove <name> | <provider-name>]`,
       argsHint: '[add|remove|name]',
       async handler(args, context) {

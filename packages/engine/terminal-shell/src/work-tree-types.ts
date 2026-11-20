@@ -37,6 +37,12 @@ export type BlockMeta = Omit<PlatformBlockMeta, 'type'> & {
      */
     toolName?: string | undefined;
     /**
+     * How the transcript names a block whose raw text was written for the
+     * model, not the person (the compaction handoff): a bookmark or receipt
+     * shows this, never the start of that text.
+     */
+    title?: string | undefined;
+    /**
      * The collapse key that reveals each entry of groupMemberIndexes (same
      * order): the bead body the result sits behind (work-tree-model.ts
      * beadKeyOf). /expand opens them in the same pass that unfolds the turn,

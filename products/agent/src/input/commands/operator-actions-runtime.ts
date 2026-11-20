@@ -116,7 +116,7 @@ export function registerOperatorActionRuntimeCommands(registry: CommandRegistry)
     effect: 'connected-host-state',
     aliases: ['auto'],
     description: 'Run confirmed connected-host automation actions from the Agent TUI',
-    hidden: true,
+    firstScreen: false,
     usage: 'job <run|pause|resume> <job-id> --yes | run <cancel|retry> <run-id> --yes | schedule <run|enable|disable|delete> <schedule-id> --yes',
     argsHint: 'job run <id> --yes | run cancel <id> --yes | schedule disable <id> --yes',
     async handler(args, ctx) {

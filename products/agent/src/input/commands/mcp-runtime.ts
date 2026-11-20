@@ -1,7 +1,6 @@
-import { createMcpRuntimeCommands } from '@goodvibes-jev/engine/terminal-shell/mcp-runtime-commands';
-import type { CommandContext } from '../command-registry.ts';
-import { requireMcpApi, requireShellPaths } from './runtime-services.ts';
-export const { registerMcpRuntimeCommands } = createMcpRuntimeCommands<CommandContext>(requireMcpApi, requireShellPaths, {
-  hidden: true,
-  allowAllOnAdd: false,
-});
+import { registerMcpCommand } from '@goodvibes-jev/engine/terminal-shell/mcp-runtime-commands';
+import type { CommandRegistry } from '../command-registry.ts';
+/** `/mcp` is one description shared with the other terminal app (terminal-shell/mcp-runtime-commands.ts). */
+export function registerMcpRuntimeCommands(registry: CommandRegistry): void {
+  registerMcpCommand(registry);
+}

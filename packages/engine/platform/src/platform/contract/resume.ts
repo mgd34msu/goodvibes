@@ -262,7 +262,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
       resumed.push({ contractId: run.id, step });
       // Continuing can run a whole shaping, planning or work step (model calls). Start it without waiting, so the contracts
       // after this one get their slot and their resume now; the report still waits for all of them below.
-      const continuing = run.work.run(() => continueResumed(run));
+      const continuing = run.work.run('continue resumed', () => continueResumed(run));
       if (run.contract.nativeSource === undefined) continuations.push(continuing);
       else void continuing;
     }

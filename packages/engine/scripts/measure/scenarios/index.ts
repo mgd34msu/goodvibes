@@ -10,6 +10,7 @@ const state: Loader = async () => (await import('./state.ts')).scenarios;
 const mail: Loader = async () => (await import('./mail.ts')).scenarios;
 const hosted: Loader = async () => (await import('./hosted.ts')).scenarios;
 const find: Loader = async () => (await import('./find.ts')).scenarios;
+const acknowledge: Loader = async () => (await import('./acknowledge.ts')).scenarios;
 
 export interface ScenarioEntry {
   readonly name: string;
@@ -53,5 +54,9 @@ export const SCENARIOS: readonly ScenarioEntry[] = [
   { name: 'work-plan-edit-200', load: state },
   { name: 'config-set-5-keys', load: state },
   { name: 'mailbox-poll-nothing-new', load: mail, budgeted: ['imapCommands', 'imapLogins', 'imapConnections'] },
+  { name: 'companion-message-post', load: acknowledge },
+  { name: 'channel-reply-final', load: acknowledge, budgeted: ['fixtureRequests'] },
+  { name: 'automation-run-settle', load: acknowledge, budgeted: ['fixtureRequests'] },
+  { name: 'approval-raise-answer', load: acknowledge },
   { name: 'hosted-agent-request', load: hosted, budgeted: ['toolDefinitionsSent', 'toolDefinitionsWithParameters'], budgetedBytes: ['toolDefinitionBytesSent'] },
 ];

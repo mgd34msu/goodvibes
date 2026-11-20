@@ -1,0 +1,60 @@
+/**
+ * The shape of the generated command actions (lib/generated/command-actions.ts),
+ * which the engine writes from the terminal apps' command descriptions. The
+ * web UI draws its action sheets and buttons from it and never writes an
+ * action's name, blanks or sentence by hand.
+ */
+import type {
+  ActionRisk,
+  ActionShape,
+  CommandShape,
+  FixedChoice,
+  InputDescription,
+  ListRowsFromOutput,
+} from '@goodvibes-jev/engine/terminal-shell/command-actions/data';
+
+export type { ActionRisk, FixedChoice };
+
+/** A blank as data. A list's name is plain text here (its type-level brand does not survive JSON). */
+export type InputData = Omit<InputDescription, 'choices'> & {
+  readonly choices?: readonly FixedChoice[] | { readonly list: string; readonly dependsOn?: string; readonly allowOther?: { readonly reason: string } };
+};
+
+export type ListOperatorData =
+  | { readonly method: string; readonly input: Readonly<Record<string, string>>; readonly rows: ListRowsFromOutput }
+  | { readonly terminalOnly: string };
+
+export interface ActionData extends Omit<ActionShape, 'inputs'> {
+  readonly line: string;
+  readonly touches: 'reads' | 'this-machine' | 'another-machine' | 'credential';
+  readonly riskWords?: string;
+  readonly ownerOnly?: { readonly reason: string; readonly instead: string };
+  readonly undoneBy?: string;
+  readonly operator: { readonly method: string; readonly fields: Readonly<Record<string, string>> } | { readonly terminalOnly: string };
+  readonly inputs: readonly InputData[];
+}
+
+export interface CommandActionsData {
+  readonly name: string;
+  readonly title: string;
+  readonly summary: string;
+  readonly group: string;
+  readonly report?: string;
+  readonly actions: readonly ActionData[];
+}
+
+export interface CommandActionsSnapshot {
+  readonly commands: readonly CommandActionsData[];
+  readonly lists: Readonly<Record<string, ListOperatorData>>;
+}
+
+/**
+ * The engine's line and sentence functions read the same fields; only a
+ * list's branded name differs, and they never read it.
+ */
+export function asActionShape(action: ActionData): ActionShape {
+  return action as unknown as ActionShape;
+}
+export function asCommandShape(command: CommandActionsData): CommandShape {
+  return command as unknown as CommandShape;
+}

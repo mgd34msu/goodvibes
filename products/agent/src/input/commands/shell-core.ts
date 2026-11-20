@@ -7,6 +7,8 @@ import { compactConversation, requireKeybindingsManager, requireProviderApi } fr
 import { startFreshConversation } from './fresh-conversation.ts';
 import '@goodvibes-jev/engine/platform/platform/utils';
 import '@goodvibes-jev/engine/platform/platform/utils';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { helpForCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 
 function commandCategory(commandName: string): string {
   if (
@@ -90,20 +92,20 @@ function commandDetail(command: SlashCommand): string {
 /**
  * List registered commands as selection items.
  *
- * Hidden commands (`SlashCommand.hidden`) still run when typed and stay
- * discoverable via `/commands`, which lists everything labeled "(hidden)".
- * `/help` (both the interactive picker and the plain-text fallback) filters
- * them out per the doc contract on `SlashCommand.hidden`.
+ * Commands off the first screen (`firstScreen: false`) still run when typed
+ * and are found as soon as their name is typed; `/commands` lists everything,
+ * marking those "(not on the first screen)". `/help`'s first screen leaves
+ * them out.
  */
 function listRegisteredCommandItems(registry: CommandRegistry, options: { includeHidden: boolean }): SelectionItem[] {
   return registry
     .list()
     .slice()
-    .filter((command) => options.includeHidden || !command.hidden)
+    .filter((command) => options.includeHidden || command.firstScreen !== false)
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((command) => ({
       id: `/${command.name}`,
-      label: command.hidden ? `/${command.name} (hidden)` : `/${command.name}`,
+      label: command.firstScreen === false ? `/${command.name} (not on the first screen)` : `/${command.name}`,
       detail: commandDetail(command),
       category: commandCategory(command.name),
       primaryAction: 'select',
@@ -140,7 +142,7 @@ const coreActions = createShellCoreActions<CommandContext>(
   { requireProviderApi, requireKeybindingsManager, startFreshConversation },
   {
     hidden: true,
-    modelHint: '[name]',
+    modelHint: '[name] | fallback',
     choiceMarker: '◉',
     offeredIndent: '  ',
     shortcutOverlay: false,
@@ -183,7 +185,14 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
     aliases: ['h', '?'],
     description: 'Show available commands and keyboard shortcuts',
     argsHint: '[command]',
-    handler(_args, ctx) {
+    handler(args, ctx) {
+      const named = args[0]?.replace(/^\//, '');
+      if (named) {
+        const command = registry.get(named);
+        if (!command) throw commandRefusal(`No command named /${named}.`, '/help lists every command.');
+        ctx.print(helpForCommand(command));
+        return;
+      }
       if (ctx.openSelection) {
         openRegisteredCommandSelection(registry, ctx, { includeHidden: false });
         return;

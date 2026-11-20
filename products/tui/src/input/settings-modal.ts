@@ -429,7 +429,9 @@ export class SettingsModal extends TerminalSettingsModalState<
   }
 
   getSelected(): SettingEntry | null {
-    if (this.searchFocused && this.searchResults.length > 0) {
+    // While searching, only a result is selectable: a search that matches
+    // nothing selects nothing (not the category row it was started from).
+    if (this.searchFocused) {
       return this.searchResults[Math.max(0, Math.min(this.searchResults.length - 1, this.selectedIndex))] ?? null;
     }
     const items = this._currentItems();

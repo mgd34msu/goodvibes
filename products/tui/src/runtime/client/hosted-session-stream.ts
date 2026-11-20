@@ -24,6 +24,7 @@
  * resolves to null instead of throwing, and the caller says so honestly rather
  * than pretending the conversation ended.
  */
+import { RefusalError } from '@goodvibes-jev/engine/errors';
 import { openRawServerSentEventStream } from '@goodvibes-jev/engine/transport-http/sse-stream';
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import { createStreamTextAssembler } from '@goodvibes-jev/engine/transport-core';
@@ -157,12 +158,21 @@ export async function watchHostedSession(
   // Stream deltas arrive as increments between resync points; every turn frame
   // passes this, whichever session it belongs to, so the text it hands out is whole.
   const streamText = createStreamTextAssembler();
+  // Set once the stream has ended (a gap, the daemon, a failure): onTerminate is told once.
+  let ended = false;
+  let handle: (() => void) | undefined;
+  const terminate = (error: unknown): void => {
+    if (ended) return;
+    ended = true;
+    handle?.();
+    options.onTerminate?.(error);
+  };
   try {
     const close = await openRawServerSentEventStream(
       fetchImpl,
       hostedSessionStreamUrl(options.baseUrl),
       {
-        onEvent: (eventName, payload) => {
+        onEvent: ({ name: eventName, payload }) => {
           if (eventName === 'turn' || eventName === 'tools') {
             const event = readHostedStreamEnvelope(eventName, payload);
             if (!event) return;
@@ -179,18 +189,26 @@ export async function watchHostedSession(
             logger.debug('[hosted-sessions] a lifecycle subscriber threw', { error: summarizeError(error) });
           }
         },
-        onTerminate: ({ error }) => options.onTerminate?.(error),
+        // Frames were dropped: what the feed shows may have a hole, so the watch ends and says so.
+        onGap: (gap) => terminate(new Error(`the daemon dropped ${gap.dropped} event(s) for this terminal; attach again to see the whole session`)),
+        onEnd: (end) => {
+          if (end.kind === 'closed') return;
+          terminate(end.kind === 'failed' ? new RefusalError(end.refusal) : new Error('the daemon ended the session stream'));
+        },
       },
       {
         ...(options.getAuthToken ? { getAuthToken: options.getAuthToken } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
       },
     );
+    handle = close;
+    if (ended) close();
     let closed = false;
     return {
       close: (): void => {
         if (closed) return;
         closed = true;
+        ended = true;
         close();
       },
     };

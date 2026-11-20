@@ -134,6 +134,8 @@ export class AgentsModal implements SurfaceModal {
   private tailCache: { readonly nodeId: string; readonly texts: AgentsText[] } | null = null;
 
   constructor(private readonly deps: AgentsModalDeps) {
+    // What 'n' (new agent) finds or fails on is said here, not behind the modal.
+    deps.spawn?.reportTo((message) => { this.say(message, 'faint'); this.invalidate(); });
     this.unsubs.push(deps.readModel.subscribe(() => { this.invalidate(); this.onFleetChange(); deps.requestRender(); }));
     this.unsubs.push(deps.readModel.subscribeConsumed((event) => {
       // Unsubscribe cannot retract delivery already queued by the event bus.
@@ -173,6 +175,7 @@ export class AgentsModal implements SurfaceModal {
     this.closed = true;
     this.hostedViewport.reset();
     this.deps.spawn?.cancel();
+    this.deps.spawn?.reportTo(null);
     this.deps.acts?.cancelPick();
     this.deps.acts?.forgetGraphsExcept(new Set(this.deps.readModel.getSnapshot().rows.map((row) => row.node.id)));
     this.invalidate();

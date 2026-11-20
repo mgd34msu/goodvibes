@@ -237,6 +237,14 @@ function waitForTurn(key: string, state: PathState, deadline: number, started: n
     };
     const wake = (): void => {
       if (settled) { handOff(key, state); return; }
+      // An aborted waiter never takes the slot: it leaves with its reason and
+      // the slot goes straight to the next waiter.
+      if (signal?.aborted) {
+        finish();
+        reject(abortReason(signal));
+        handOff(key, state);
+        return;
+      }
       finish();
       resolvePromise();
     };
@@ -280,14 +288,20 @@ async function reserveFile(key: string, deadline: number, started: number, signa
   }
 }
 
-/** Take the lock at `path`, waiting up to `waitMs` for other holders. The caller must release it. */
+/**
+ * Take the lock at `path`, waiting up to `waitMs` for other holders. The caller
+ * must release it. `waitMs: 0` takes the lock only if it is free right now: a
+ * holder in this process or another one refuses it at once, with no timer turn.
+ */
 export async function acquireProcessLock(path: string, options: ProcessLockOptions = {}): Promise<HeldProcessLock> {
   const key = resolve(path);
   const started = Date.now();
-  const deadline = started + Math.max(0, options.waitMs ?? DEFAULT_PROCESS_LOCK_WAIT_MS);
+  const waitMs = Math.max(0, options.waitMs ?? DEFAULT_PROCESS_LOCK_WAIT_MS);
+  const deadline = started + waitMs;
   const signal = options.signal;
   if (signal?.aborted) throw abortReason(signal);
   const state = stateFor(key);
+  if (state.held && waitMs === 0) throw new ProcessLockBusyError(key, 'this-process', 0);
   if (state.held) await waitForTurn(key, state, deadline, started, signal);
   else state.held = true;
   try {

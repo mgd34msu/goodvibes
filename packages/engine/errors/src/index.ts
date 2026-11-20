@@ -742,9 +742,17 @@ export class RefusalError extends GoodVibesError {
 }
 
 export {
-  commandOk, commandRefused, formatRefusal, isRefusal, readNextSteps, readRefusal, refusal, refusalErrorBody, toRefusal,
-  type CommandResult, type Refusal, type RefusalInit,
+  commandOk, commandRefused, formatRefusal, isRefusal, readNextSteps, readRefusal, readTargetChanges, refusal, refusalErrorBody, toRefusal,
+  type CommandResult, type Refusal, type RefusalInit, type TargetChange,
 } from './refusal.js';
+export {
+  assertNeverOutcome, done, exitCodeOfTally, failedOutcome, isObservation, observe, pending, tally, unknownOutcome,
+  type EffectOutcome, type Observation, type Seen, type Tally,
+} from './outcome.js';
+export {
+  absent, assertNeverObserved, failedRead, present, presentOr,
+  type Observed, type Page, type Selection,
+} from './observed.js';
 export { installJudgmentPort, installJudgmentRuntimeScope, judgmentPort, restoreJudgmentPort, JudgmentPortMissingError } from './judgment-port.js';
 export { assertDecisionModelsEnabled, decisionModelPolicyState, installDecisionModelPolicyObserver, DecisionModelsDisabledError,
   tryClassicDecisionFallback, runDecisionOrClassic, DECISION_MODEL_POLICIES, DEFAULT_DECISION_MODEL_POLICY, decisionModelFailingLine, decisionModelPolicyLabel, decisionModelUse, parseDecisionModelPolicy, DECISION_MODEL_POLICY_HEADER,

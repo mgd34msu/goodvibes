@@ -56,6 +56,26 @@ export interface NoticeMeta {
   readonly priority?: SystemMessagePriorityLevel | undefined;
 }
 
+/** The runtime event a turn's failure line restates (`addTurnFailure`). */
+export const TURN_FAILURE_EVENT = 'TURN_ERROR';
+/** The runtime event the line saying a turn's model request failed and is being retried restates (`addTurnRetry`). */
+export const TURN_RETRY_EVENT = 'STREAM_RETRY';
+/** The output of a command the person ran with `!` (`addShellOutput`). */
+export const SHELL_OUTPUT_EVENT = 'SHELL_PASSTHROUGH';
+/** Why the person's message was not sent, or what it needs from them (`addInputNotice`). */
+export const INPUT_NOTICE_EVENT = 'INPUT_NOTICE';
+
+/**
+ * True for a line the transcript draws in place even where other notices are
+ * shown only as toasts and notifications: why a turn failed, why it is waiting
+ * on a retry, the output of a `!` command the person ran, and why a message
+ * the person sent was not taken.
+ */
+export function isTranscriptNotice(message: { readonly role: string; readonly runtimeEvent?: RuntimeEventProvenance | undefined }): boolean {
+  const type = message.role === 'system' ? message.runtimeEvent?.type : undefined;
+  return type === TURN_FAILURE_EVENT || type === TURN_RETRY_EVENT || type === SHELL_OUTPUT_EVENT || type === INPUT_NOTICE_EVENT;
+}
+
 /** The level a line takes when its writer declared nothing: shown as information, never read by a model. */
 export const INFO_NOTICE: NoticeMeta = Object.freeze({ level: 'info' });
 
@@ -286,7 +306,7 @@ export class ConversationManager {
   }
 
   public addUserMessage(content: string | ContentPart[]): void {
-    if (this._title === '' && typeof content === 'string' && content.trim().length > 0) {
+    if (this._title === '' && typeof content === 'string' && deriveConversationTitle(content).length > 0) {
       this.setSystemTitle(deriveConversationTitle(content));
     }
     this.messages.push({ role: 'user', content });
@@ -429,6 +449,38 @@ export class ConversationManager {
     this._noticeRevisions++;
   }
 
+  /**
+   * Why a turn ended without an answer, with what to do. Stored like any
+   * error notice, and declared as the turn's TURN_ERROR so the transcript
+   * draws it under the turn it ended instead of only a toast or a
+   * notification. Display only; never sent to the model.
+   */
+  public addTurnFailure(content: string): void {
+    this.addTurnStateNotice(content, 'error', TURN_FAILURE_EVENT);
+  }
+
+  /** Why a turn's model request failed while it is retried, with what the person can do; drawn under the turn like a failure. */
+  public addTurnRetry(content: string): void {
+    this.addTurnStateNotice(content, 'warning', TURN_RETRY_EVENT);
+  }
+
+  /** The output of a command the person ran with `!`: shown in the transcript where it ran. Display only; the model reads it with the next message. */
+  public addShellOutput(content: string, failed: boolean): void {
+    this.addTurnStateNotice(content, failed ? 'warning' : 'info', SHELL_OUTPUT_EVENT);
+  }
+
+  /** Why the person's message was not sent (or what it needs from them), with what to do: shown in the transcript at once. */
+  public addInputNotice(content: string, level: NoticeLevel = 'warning'): void {
+    this.addTurnStateNotice(content, level, INPUT_NOTICE_EVENT);
+  }
+
+  private addTurnStateNotice(content: string, level: NoticeLevel, type: string): void {
+    const notice: NoticeMeta = Object.freeze({ level });
+    this.messages.push({ role: 'system', content, notice, presentation: noticePresentation(notice), runtimeEvent: { type } });
+    this._messagesRevision++;
+    this._noticeRevisions++;
+  }
+
   public getLastUserMessage(): string | null {
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const msg = this.messages[i];
@@ -493,6 +545,19 @@ export class ConversationManager {
       }
     }
   }
+
+  /** The text of the reply streaming now, or '' when none is. */
+  public streamingReplyText(): string {
+    const message = this.streamingMessageIndex >= 0 ? this.messages[this.streamingMessageIndex] : undefined;
+    return message?.role === 'assistant' && typeof message.content === 'string' ? message.content : '';
+  }
+
+  /**
+   * A reply the person interrupted: it never becomes a message (no request
+   * reads it), but a display keeps showing what had arrived, marked as cut
+   * off, after the turn it belonged to. A manager with no display keeps nothing.
+   */
+  public keepInterruptedReply(_content: string): void {}
 
   /** True while a reply is still arriving: the last assistant message is cut off until the stream ends. */
   public hasPartialReply(): boolean {

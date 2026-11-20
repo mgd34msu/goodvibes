@@ -465,7 +465,7 @@ async function executeToolCallsInMode(
     }
     // A tool the request listed in one line and that is not loaded: not run; its full
     // definition is the answer (refused, with the next step) and it is sent in full from now on.
-    const deferred = typeof deps.toolRegistry.deferredCallRefusal === 'function' ? deps.toolRegistry.deferredCallRefusal(call.id, call.name) : undefined;
+    const deferred = typeof deps.toolRegistry.deferredCallRefusal === 'function' ? deps.toolRegistry.deferredCallRefusal(call.id, call.name, call.arguments) : undefined;
     if (deferred) {
       if (deps.runtimeBus) emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
         callId: call.id, turnId, tool: call.name, error: redactDiagnosticText(deferred.error ?? ''),

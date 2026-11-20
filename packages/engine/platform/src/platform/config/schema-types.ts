@@ -323,3 +323,22 @@ type ConfigLeafPaths<T, Prefix extends string> = {
 export type ConfigKey = Extract<ConfigLeafPaths<GoodVibesConfig, ''>, string>;
 
 export * from "./schema-types-values.js";
+
+/**
+ * One default per setting: each row's default is read from the defaults object
+ * (the owner) by the row's key path. A row whose key has no value there is a
+ * programming error and fails at module load, so every setting has exactly one
+ * default and nothing restates it.
+ */
+export function defineSettingsDomain<D extends object>(defaults: D, rows: readonly Omit<ConfigSetting, 'default'>[]): ConfigSetting[] {
+  return rows.map((row) => {
+    let value: unknown = defaults;
+    for (const part of row.key.split('.')) {
+      if (value === null || typeof value !== 'object' || !Object.hasOwn(value, part)) {
+        throw new Error(`Setting ${row.key} has no default in its defaults object; add it there (one default per setting).`);
+      }
+      value = (value as Record<string, unknown>)[part];
+    }
+    return { ...row, default: value } as ConfigSetting;
+  });
+}

@@ -701,7 +701,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   // lifetime. Reserve before calling it: steps can end the contract inline.
   const steps = Object.fromEntries(Object.entries(untrackedSteps).map(([key, step]) => [
     key,
-    (run: ContractRun, ...args: unknown[]) => run.work.run(() =>
+    (run: ContractRun, ...args: unknown[]) => run.work.run('contract work', () =>
       ((run.contract.nativeSource === undefined ? step : ownSteps[key as keyof typeof ownSteps]) as (run: ContractRun, ...args: unknown[]) => Promise<unknown>)(run, ...args)),
   ])) as unknown as ContractStepsWithReplies;
 
@@ -763,7 +763,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     admitted.add(run.id);
     if (run.contract.durableAdmission !== undefined) {
       void launchDurable(run).catch(() => cancelRun(run, 'native admission is no longer current'));
-    } else void run.work.run(() => run.contract.resumeFrom === undefined ? activate(run) : resume.continueResumed(run));
+    } else void run.work.run('contract work', () => run.contract.resumeFrom === undefined ? activate(run) : resume.continueResumed(run));
   }
 
   function dequeue(): void {
@@ -864,7 +864,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
 
   async function launchDurable(run: ContractRun): Promise<void> {
     return withCurrentDurableExecution(run, () => {
-      void run.work.run(() => run.contract.resumeFrom === undefined ? activate(run) : resume.continueResumed(run));
+      void run.work.run('contract work', () => run.contract.resumeFrom === undefined ? activate(run) : resume.continueResumed(run));
       return Promise.resolve();
     }, true);
   }
@@ -1645,8 +1645,8 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     groups,
     checks,
     steps,
-    activate: (run) => run.work.run(() => activate(run)),
-    plan: (run) => run.work.run(() => replan(run)),
+    activate: (run) => run.work.run('activate', () => activate(run)),
+    plan: (run) => run.work.run('replan', () => replan(run)),
     sessionUnitPassed,
     ownerProgress: updateOwnerProgress,
   });

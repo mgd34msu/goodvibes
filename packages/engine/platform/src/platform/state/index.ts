@@ -183,5 +183,16 @@ export { DECISION_LOG_FILE, decisionLogPath, openStateDecisionLog } from './deci
 // document is written with writeDocument from platform/utils.
 export { openSqliteFile, adoptSqliteDatabase, SqliteMigrationError } from './sqlite-file.js';
 export type { SqliteFile, SqliteFileOptions, SqliteMigration } from './sqlite-file.js';
-export { openRecordLog } from './record-log.js';
+export { openRecordLog, RecordLogBrokenError } from './record-log.js';
 export type { RecordLog, RecordLogOptions } from './record-log.js';
+// Save, then acknowledge: operation and effect identity, the durable
+// acknowledgement, the one failure classifier, the operation log, and one
+// commit point for a change spread over several writes.
+export { durableAfter, effectKey, newOperationId, operationIdFromClient, outcomeOfFailure } from './operation.js';
+export type { DispatchPhase, Durable, EffectKey, OperationId } from './operation.js';
+export { openOperationLog } from './operation-log.js';
+export type { OperationLine, OperationLog, OperationState } from './operation-log.js';
+export { publishReplacement, recoverIntents, recoverReplacements, stageReplacement, withIntent } from './commit-point.js';
+export type { IntentLine, IntentStep, Replacement } from './commit-point.js';
+export { StoreWriteQueue } from './store-write-queue.js';
+export * from './embedding-space.js';

@@ -15,7 +15,7 @@ const PHRASE_ROTATION_FRAMES = 375;
  * The five honest waiting states, in the TUI's precedence order:
  *  - 'approval'        , a card is waiting on the USER; the turn is not
  *                          stalled and the provider is not at fault.
- *  - 'reconnecting'    , the transport is retrying after a drop.
+ *  - 'reconnecting'    , a failed model request is being sent again.
  *  - 'pre-first-token' , no delta yet this turn; normal for reasoning models
  *                          that think before emitting (NOT "stalled", that
  *                          would wrongly blame the provider for ordinary
@@ -51,7 +51,8 @@ export function waitingPhrase(state: WaitingState, ctx: WaitingPhraseContext = {
       // stall/reconnect framing: waiting on the user is the true state.
       return 'Waiting for your approval';
     case 'reconnecting':
-      return `Reconnecting (attempt ${ctx.reconnectAttempt ?? 0}/${ctx.reconnectMaxAttempts ?? 0})...`;
+      // A failed request is sent again (an HTTP 500 is not a dropped connection); the transcript line said why.
+      return `Retrying (attempt ${ctx.reconnectAttempt ?? 0}/${ctx.reconnectMaxAttempts ?? 0})...`;
     case 'pre-first-token':
       return `Waiting for model ${Math.floor((ctx.msSinceLastDelta ?? 0) / 1000)}s...`;
     case 'stalled':

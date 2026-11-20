@@ -1,6 +1,25 @@
-export interface AutocompleteCommand { readonly name: string; readonly description: string }
+import { completeArguments, type ArgumentCompletion } from './command-actions/completion.js';
+import { readList, type ListRow } from './command-actions/lists.js';
+import type { CommandDescription, ListName } from './command-actions/types.js';
+
+export interface AutocompleteCommand {
+  readonly name: string;
+  readonly description: string;
+  /** Set on a command built with defineCommand: completion continues past its name. */
+  readonly described?: CommandDescription<never> | undefined;
+}
 export interface AutocompleteRegistry<Command extends AutocompleteCommand> {
   fuzzyMatch(query: string): AutocompleteResult<Command>[];
+  get?(name: string): Command | undefined;
+}
+/**
+ * Where completion reads a live list (the command context) and how it says the
+ * rows arrived, so the dropdown is drawn again. Without it, completion stops at
+ * action words, option names and fixed choices.
+ */
+export interface AutocompleteListSource {
+  readonly context: () => unknown;
+  readonly rowsArrived: () => void;
 }
 /**
  * AutocompleteResult - A ranked match from the command registry.
@@ -27,6 +46,8 @@ export interface AutocompleteState<Command extends AutocompleteCommand = Autocom
    * before the alphabetical rest.
    */
   commonCount: number;
+  /** Completion past a described command's name (actions, a blank's values, options); results are empty then. */
+  argument?: ArgumentCompletion | undefined;
 }
 
 /**
@@ -47,7 +68,43 @@ export class AutocompleteEngine<Command extends AutocompleteCommand = Autocomple
     commonCount: 0,
   };
 
-  constructor(private readonly registry: AutocompleteRegistry<Command>, private readonly commonNames: ReadonlySet<string> = new Set()) {}
+  /** Live list rows read for this dropdown, by list and earlier answers; cleared when the dropdown closes. */
+  private listRows = new Map<string, readonly ListRow[] | 'reading'>();
+
+  constructor(
+    private readonly registry: AutocompleteRegistry<Command>,
+    private readonly commonNames: ReadonlySet<string> = new Set(),
+    private readonly lists?: AutocompleteListSource | undefined,
+  ) {}
+
+  /** Rows of a live list for completion: read once per open dropdown, in the background. */
+  private readRows(list: ListName, earlier: Readonly<Record<string, string>>): readonly ListRow[] | undefined {
+    const key = `${list}\u0000${JSON.stringify(earlier)}`;
+    const held = this.listRows.get(key);
+    if (held === 'reading') return undefined;
+    if (held) return held;
+    if (!this.lists) return [];
+    const source = this.lists;
+    this.listRows.set(key, 'reading');
+    void readList(list, source.context(), earlier).then(
+      (rows) => { this.listRows.set(key, rows); },
+      () => { this.listRows.set(key, []); },
+    ).then(() => {
+      if (!this.state.active || !this.state.argument) return;
+      this.update(this.state.query);
+      source.rowsArrived();
+    });
+    return undefined;
+  }
+
+  /** The completion past a described command's name, or undefined. */
+  private argumentCompletion(query: string): ArgumentCompletion | undefined {
+    const space = query.indexOf(' ');
+    if (space < 0) return undefined;
+    const described = this.registry.get?.(query.slice(0, space))?.described;
+    if (!described) return undefined;
+    return completeArguments(described, query.slice(space + 1), (list, earlier) => this.readRows(list, earlier));
+  }
 
   /**
    * update - Refresh the autocomplete results for the given query.
@@ -57,6 +114,16 @@ export class AutocompleteEngine<Command extends AutocompleteCommand = Autocomple
     // A re-ranked list makes the old numeric index point at an unrelated command; only a repeat of the same query keeps the highlight.
     if (query !== this.state.query || !this.state.active) this.state.selectedIndex = 0;
     this.state.query = query;
+    if (query.includes(' ')) {
+      const argument = this.argumentCompletion(query);
+      this.state.argument = argument;
+      this.state.results = [];
+      this.state.commonCount = 0;
+      this.state.active = argument !== undefined;
+      if (argument && this.state.selectedIndex >= argument.items.length) this.state.selectedIndex = Math.max(0, argument.items.length - 1);
+      return;
+    }
+    this.state.argument = undefined;
     this.state.results = this.registry.fuzzyMatch(query);
     this.state.active = true;
     // fuzzyMatch('') sorts the curated common tier first (score 2),
@@ -83,15 +150,28 @@ export class AutocompleteEngine<Command extends AutocompleteCommand = Autocomple
 
   /** Move selection down one item (wraps around). */
   moveDown(): void {
-    if (this.state.results.length === 0) return;
-    this.state.selectedIndex = (this.state.selectedIndex + 1) % this.state.results.length;
+    const count = this.state.argument?.items.length ?? this.state.results.length;
+    if (count === 0) return;
+    this.state.selectedIndex = (this.state.selectedIndex + 1) % count;
   }
 
   /** Move selection up one item (wraps around). */
   moveUp(): void {
-    if (this.state.results.length === 0) return;
-    this.state.selectedIndex =
-      (this.state.selectedIndex - 1 + this.state.results.length) % this.state.results.length;
+    const count = this.state.argument?.items.length ?? this.state.results.length;
+    if (count === 0) return;
+    this.state.selectedIndex = (this.state.selectedIndex - 1 + count) % count;
+  }
+
+  /**
+   * The composer line with the highlighted argument completion put in place of
+   * the word being typed, or undefined when the dropdown lists commands.
+   */
+  completeArgument(prompt: string): string | undefined {
+    const argument = this.state.argument;
+    const item = argument?.items[this.state.selectedIndex];
+    if (!argument || !item) return undefined;
+    const value = /\s/.test(item.value) ? JSON.stringify(item.value) : item.value;
+    return `${prompt.slice(0, prompt.length - argument.partial.length)}${value} `;
   }
 
   /** Return the currently selected command, if any. */
@@ -102,6 +182,7 @@ export class AutocompleteEngine<Command extends AutocompleteCommand = Autocomple
 
   /** Reset autocomplete to inactive state. */
   reset(): void {
+    this.listRows.clear();
     this.state = {
       active: false,
       query: '',
@@ -120,6 +201,7 @@ export class AutocompleteEngine<Command extends AutocompleteCommand = Autocomple
    * isActive - True when the dropdown should be shown.
    */
   get isActive(): boolean {
+    if (this.state.argument) return this.state.active && (this.state.argument.items.length > 0 || this.state.argument.pending === true);
     return this.state.active && this.state.results.length > 0;
   }
 }

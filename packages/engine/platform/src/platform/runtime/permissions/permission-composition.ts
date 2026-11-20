@@ -100,6 +100,8 @@ export interface BrokeredPermissionManagerOptions {
   readonly hookDispatcher: HookDispatcher;
   readonly featureFlags: FeatureFlagManager;
   readonly userRuleStore: UserPermissionRuleAccess | null;
+  /** The session the call being checked belongs to, read when it asks: the approval is raised under that session. */
+  readonly sessionOfAsk?: (() => string | undefined) | undefined;
 }
 
 /**
@@ -120,9 +122,11 @@ export function createBrokeredPermissionManager(options: BrokeredPermissionManag
       const request: PermissionPromptRequest = callingAgent === undefined
         ? asked
         : { ...asked, attribution: { kind: 'background-agent', agentId: callingAgent } };
+      const sessionId = options.sessionOfAsk?.();
       return options.requestApproval({
         request,
         ...(execution?.signal === undefined ? {} : { signal: execution.signal }),
+        ...(sessionId === undefined ? {} : { sessionId }),
         ...(request.attribution?.kind === 'background-agent'
           ? {
               routeId: request.attribution.agentId,

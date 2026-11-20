@@ -350,7 +350,7 @@ export function createRemoteConversationRouter(
       // The platform parses id: before dispatching its event. After terminal release
       // or replacement, buffered frames no longer advance this watch's cursor.
       onEventId: (id: string) => { if (ownsWatch()) streamPositions.set(positionKey, id); },
-      onEvent: (_domain: string, payload: unknown) => {
+      onEvent: ({ name: _domain, payload }) => {
         // The first heartbeat follows catch-up replay. A terminal native
         // receipt remains authoritative even when bounded event history can
         // no longer reconstruct its reply; never wait forever or infer a turn.
@@ -412,13 +412,16 @@ export function createRemoteConversationRouter(
         if (renderer.isTurnFinished()) { turn.settledByHost = true; release(turn); }
         else sendCancellation(turn);
       },
-      onTerminate: ({ error }: { readonly error: unknown }) => {
-        if (ownsWatch()) abandon(turn, 'The connection to the hosting daemon ended before this turn finished. '
-          + `Cancellation and completion are unconfirmed${error ? `: ${String(error)}` : '.'} `
-          + 'The turn may still be running there; reopen this conversation to see how it ended.');
+      // Frames of this turn were dropped: what is rendered can no longer be trusted to be
+      // the whole turn, so the watch ends and says how to see the real outcome.
+      onGap: (gap) => {
+        if (ownsWatch()) abandon(turn, `The hosting daemon dropped ${gap.dropped} event(s) of this turn for this terminal. `
+          + 'What is shown may be incomplete; reopen this conversation to see how it ended.');
       },
-      onClose: () => {
-        if (ownsWatch()) abandon(turn, 'The connection to the hosting daemon ended before this turn finished. '
+      onEnd: (end) => {
+        if (end.kind === 'closed' || !ownsWatch()) return;
+        abandon(turn, 'The connection to the hosting daemon ended before this turn finished. '
+          + (end.kind === 'failed' ? `Cancellation and completion are unconfirmed: ${end.refusal.reason} ` : '')
           + 'The turn may still be running there; reopen this conversation to see how it ended.');
       },
     }, {

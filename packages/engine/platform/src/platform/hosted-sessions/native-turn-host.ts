@@ -20,6 +20,14 @@ import { nativeHostedTurnRequestSchema, nativeHostedTurnStartRequestSchema, type
 import type { GatePresetName } from '../gate/presets.js';
 
 import { NATIVE_HOSTED_TURN_SCOPES } from '../control-plane/method-catalog-native-hosted-turn.js';
+
+/** A request's session is named by the request: its first line, at most 80 characters. */
+function nativeSessionTitle(text: string): string {
+  const line = text.split('\n').map((part) => part.trim()).find((part) => part.length > 0)?.replace(/\s+/g, ' ') ?? '';
+  if (!line) return 'Request';
+  return line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line;
+}
+
 export { NATIVE_HOSTED_TURN_SCOPES };
 type NativeHostedTurnErrorCode = 'invalid' | 'forbidden' | 'unavailable' | 'not-turn' | 'stale' | 'closed' | 'recovery-required';
 const NEXT_STEP: Record<NativeHostedTurnErrorCode, string> = {
@@ -342,7 +350,7 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
       if (owned.cancelled) throw new NativeHostedTurnError('closed');
       const session = source.continuation
         ? assertSession(source.continuation.sessionId, identity.principalId, originSurface)
-        : await deps.manager.create({ workspaceRoot: projectRoot, title: 'Native conversation', originSurface, detachPolicy: 'survive' }, { nativeConversation: true, ...(permissionMode === undefined ? {} : { permissionMode }) });
+        : await deps.manager.create({ workspaceRoot: projectRoot, title: nativeSessionTitle(source.text), originSurface, detachPolicy: 'survive' }, { nativeConversation: true, ...(permissionMode === undefined ? {} : { permissionMode }) });
       createdNewSession = !source.continuation;
       owned.sessionId = session.id;
       if (session.originSurface !== originSurface || realpathSync(session.workspaceRoot) !== projectRoot || realpathSync(deps.projectRoot) !== projectRoot) throw new NativeHostedTurnError('stale');

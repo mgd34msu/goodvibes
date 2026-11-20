@@ -7,7 +7,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { AsyncResource } from 'node:async_hooks';
 import { withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
-import { OwnedWork } from '../../utils/owned-work.js';
+import { OwnedScope } from '../../utils/owned-work.js';
 import { logger } from '../../utils/logger.js';
 import { CheckoutOwnershipError } from '../checkout-ownership.js';
 import { CheckoutPageClaimedError, type CheckoutJournal, type CheckoutPhase, type InFlightCheckout } from '../checkout-registry.js';
@@ -169,7 +169,7 @@ export class CheckoutOperations {
   // Constructed with the registration, before request dispatch. Background
   // work must not inherit a request's tool proof, signal or notice sink.
   private readonly execution = new AsyncResource('GoodVibesPaymentOperations', { requireManualDestroy: true });
-  private readonly work = new OwnedWork();
+  private readonly work = new OwnedScope('checkout operations');
   private readonly active = new Map<string, ActiveOperation>();
   private readonly preparingRecovery = new Map<string, PreparingRecovery>();
   private readonly errors: unknown[] = [];
@@ -214,16 +214,16 @@ export class CheckoutOperations {
     };
     const binding = paymentReplyHistoryBinding(checkpoint);
     const recordCoverage = this.requests?.recordReceiveCoverage;
-    return this.history.retainReplyHistory(writer.purchaseId, checkpoint, (entry, receivedCurrent) => this.work.run(() =>
+    return this.history.retainReplyHistory(writer.purchaseId, checkpoint, (entry, receivedCurrent) => this.work.run('append', () =>
       append(writer.purchaseId, writer.read().operationId, binding, entry, () => { current(); receivedCurrent(); })), current,
-      recordCoverage ? (coverage, receivedCurrent) => this.work.run(() => recordCoverage(writer.purchaseId, writer.read().operationId,
+      recordCoverage ? (coverage, receivedCurrent) => this.work.run('record coverage', () => recordCoverage(writer.purchaseId, writer.read().operationId,
         binding, coverage, () => { current(); receivedCurrent(); })) : undefined);
   }
 
   /** Take actual execution leases before the conservative journal sweep.
    * Reading a checkpoint does not start a model, browser or merchant action. */
   retainInterruptedWindows(retainCleanup: (request: ProtectedPaymentRequest, assertEvidenceCurrent: () => void) => () => Promise<boolean>): Promise<void> {
-    return this.work.run(async () => {
+    return this.work.run('checkout operation', async () => {
       if (this.closed) throw new CheckoutOwnershipError();
       const requests = this.requests; if (!requests) return;
       const entries = await this.journal.list();
@@ -288,7 +288,7 @@ export class CheckoutOperations {
       if (recovery.started || this.closed) continue;
       recovery.started = true;
       this.execution.runInAsyncScope(() => {
-        const pending = this.work.run(async () => {
+        const pending = this.work.run('checkout operation', async () => {
           const { writer, abort, request } = recovery;
           let restored: RecoveredCheckoutExecution | undefined, operation: ActiveOperation | undefined, failure: unknown;
           const current = () => {
@@ -372,7 +372,7 @@ export class CheckoutOperations {
   admit(id: string, input: BeginCheckoutInput, source: DetachedCheckoutSource, admissionCurrent: () => void,
     admitInput: (input: BeginCheckoutInput) => BeginCheckoutInput | void): Promise<PaymentOperationView> {
     if (this.closed) return Promise.reject(new CheckoutOwnershipError());
-    return this.work.run(() => this.prepareAdmission(id, input, source, admissionCurrent, admitInput));
+    return this.work.run('prepare admission', () => this.prepareAdmission(id, input, source, admissionCurrent, admitInput));
   }
 
   private assertIdentityFree(id: string): void {
@@ -474,7 +474,7 @@ export class CheckoutOperations {
     const { writer } = operation;
     operation.launched = true;
     this.execution.runInAsyncScope(() => {
-      const pending = this.work.run(async () => {
+      const pending = this.work.run('checkout operation', async () => {
         try {
           await withConfiguredDecisionModelPolicy(async () => {
             await Promise.resolve();
@@ -779,7 +779,7 @@ export class CheckoutOperations {
    */
   async sweepSettledRequests(): Promise<number> {
     const sweep = this.sweepRequests; if (!sweep) return 0;
-    return this.work.run(() => sweep((purchaseId, operationId) => this.requestVerdict(purchaseId, operationId), this.retire));
+    return this.work.run('sweep', () => sweep((purchaseId, operationId) => this.requestVerdict(purchaseId, operationId), this.retire));
   }
   private requestVerdict(purchaseId: string, operationId: string): PaymentRequestVerdict {
     if (this.closed || this.active.has(purchaseId) || this.preparingRecovery.has(purchaseId)) return 'keep';
@@ -818,7 +818,7 @@ export class CheckoutOperations {
     // Prepared leases not yet launched also belong to this registration.
     for (const [id, operation] of this.preparingRecovery) if (!operation.started) {
       this.preparingRecovery.delete(id);
-      const cleanup = this.work.run(async () => { try { await operation.history?.retire(); } finally { operation.writer.release(); } });
+      const cleanup = this.work.run('checkout operation', async () => { try { await operation.history?.retire(); } finally { operation.writer.release(); } });
       void cleanup.catch(error => this.errors.push(error));
     }
     void this.work.join().then(() => {

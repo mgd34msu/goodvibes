@@ -64,6 +64,17 @@ export type EnvelopeListener<T extends AnyRuntimeEvent = AnyRuntimeEvent> = (
 ) => void;
 
 /**
+ * One subscription. The channel sets hold these, not callbacks, so the same
+ * callback subscribed twice is two subscriptions, each disposer removes only
+ * its own, and an event queued for a subscription that ended (even one whose
+ * callback subscribed again since) is never delivered to it.
+ */
+interface Subscription {
+  readonly callback: EnvelopeListener;
+  active: boolean;
+}
+
+/**
  * Maximum listeners per channel before a potential memory leak warning is emitted.
  *
  * 100 is a generous threshold for a single event type or domain; normal usage
@@ -187,9 +198,9 @@ function extractErrorMessage(err: unknown): string {
  */
 export class RuntimeEventBus {
   /** Per-event-type listener sets. Keyed by the exact event type string. */
-  private readonly _listeners = new Map<AnyRuntimeEvent['type'], Set<EnvelopeListener>>();
+  private readonly _listeners = new Map<AnyRuntimeEvent['type'], Set<Subscription>>();
   /** Per-domain listener sets. Keyed by RuntimeEventDomain. */
-  private readonly _domainListeners = new Map<RuntimeEventDomain, Set<EnvelopeListener>>();
+  private readonly _domainListeners = new Map<RuntimeEventDomain, Set<Subscription>>();
   /** Effective listener cap for this instance. */
   private readonly _maxListeners: number;
   /** Track per-listener error counts for misbehaving-listener dedup. */
@@ -206,7 +217,8 @@ export class RuntimeEventBus {
    *
    * @param eventType - The exact event type string to listen for.
    * @param callback - Called with the full envelope on each emission.
-   * @returns An unsubscribe function.
+   * @returns An unsubscribe function. Each call is its own subscription, even
+   *   for a callback already subscribed; the returned function ends only it.
    */
   public on<T extends AnyRuntimeEvent>(
     eventType: T['type'],
@@ -216,11 +228,13 @@ export class RuntimeEventBus {
       this._listeners.set(eventType, new Set());
     }
     const set = this._listeners.get(eventType)!;
-    set.add(callback as EnvelopeListener);
+    const subscription: Subscription = { callback: callback as EnvelopeListener, active: true };
+    set.add(subscription);
     if (set.size > this._maxListeners) {
       if (process.env['NODE_ENV'] === 'development') {
         // Remove the just-added listener before throwing to maintain state consistency.
-        set.delete(callback as EnvelopeListener);
+        subscription.active = false;
+        set.delete(subscription);
         if (set.size === 0) this._listeners.delete(eventType);
         throw new RangeError(
           `[RuntimeEventBus] listener cap exceeded, maxListeners=${this._maxListeners} eventType=${String(eventType)}`
@@ -232,7 +246,7 @@ export class RuntimeEventBus {
         max: this._maxListeners,
       });
     }
-    return () => this._off(eventType, callback as EnvelopeListener);
+    return () => this._off(eventType, subscription);
   }
 
   /**
@@ -250,11 +264,13 @@ export class RuntimeEventBus {
       this._domainListeners.set(domain, new Set());
     }
     const set = this._domainListeners.get(domain)!;
-    set.add(callback as EnvelopeListener);
+    const subscription: Subscription = { callback: callback as EnvelopeListener, active: true };
+    set.add(subscription);
     if (set.size > this._maxListeners) {
       if (process.env['NODE_ENV'] === 'development') {
         // Remove the just-added listener before throwing to maintain state consistency.
-        set.delete(callback as EnvelopeListener);
+        subscription.active = false;
+        set.delete(subscription);
         if (set.size === 0) this._domainListeners.delete(domain);
         throw new RangeError(
           `[RuntimeEventBus] domain listener cap exceeded, maxListeners=${this._maxListeners} domain=${String(domain)}`
@@ -266,7 +282,7 @@ export class RuntimeEventBus {
         max: this._maxListeners,
       });
     }
-    return () => this._offDomain(domain, callback as EnvelopeListener);
+    return () => this._offDomain(domain, subscription);
   }
 
   /**
@@ -308,36 +324,50 @@ export class RuntimeEventBus {
     // logged per-subscriber; a single bad handler never cascades to others.
 
     // Dispatch to per-type listeners
-    for (const handler of typeHandlers) {
-      const h = handler;
+    for (const subscription of typeHandlers) {
       const ev = envelope as RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>;
       const evType = envelope.type;
       queueMicrotask(() => {
         // Unsubscribing means no further calls, including for events already
         // emitted: a component that unsubscribes and tears down must not be called
-        // back on its disposed state.
-        if (!this._listeners.get(evType)?.has(h)) return;
-        try {
-          h(ev);
-        } catch (err) {
-          this._recordListenerError(h, evType, err);
-        }
+        // back on its disposed state. A later subscription of the same callback
+        // is a different subscription and does not revive this one.
+        if (!subscription.active) return;
+        this._deliver(subscription.callback, ev, evType);
       });
     }
     // Dispatch to per-domain listeners
-    for (const handler of domainHandlers) {
-      const h = handler;
+    for (const subscription of domainHandlers) {
       const ev = envelope as RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>;
       const evType = envelope.type;
-      const d = domain;
+      const d = String(domain);
       queueMicrotask(() => {
-        if (!this._domainListeners.get(d)?.has(h)) return;
-        try {
-          h(ev);
-        } catch (err) {
-          this._recordListenerError(h, evType, err, String(d));
-        }
+        if (!subscription.active) return;
+        this._deliver(subscription.callback, ev, evType, d);
       });
+    }
+  }
+
+  /**
+   * Call one listener. A thrown error and the rejection of a promise the
+   * listener returned (listeners are typed `void`, but an async function fits
+   * that type) are both recorded as that listener's error.
+   */
+  private _deliver(
+    listener: EnvelopeListener,
+    envelope: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>,
+    eventType: AnyRuntimeEvent['type'],
+    domain?: string,
+  ): void {
+    let returned: unknown;
+    try {
+      returned = listener(envelope);
+    } catch (err) {
+      this._recordListenerError(listener, eventType, err, domain);
+      return;
+    }
+    if (returned !== null && typeof returned === 'object' && typeof (returned as PromiseLike<unknown>).then === 'function') {
+      (returned as PromiseLike<unknown>).then(undefined, (err: unknown) => this._recordListenerError(listener, eventType, err, domain));
     }
   }
 
@@ -407,7 +437,7 @@ export class RuntimeEventBus {
     // Dispatch directly, no queueMicrotask, no recursion path through emit().
     const typeListeners = this._listeners.get('OPS_LISTENER_MISBEHAVING');
     if (typeListeners) {
-      for (const h of Array.from(typeListeners)) {
+      for (const { callback: h } of Array.from(typeListeners)) {
         try {
           h(envelope);
         } catch (error) {
@@ -417,7 +447,7 @@ export class RuntimeEventBus {
     }
     const domainListeners = this._domainListeners.get('ops');
     if (domainListeners) {
-      for (const h of Array.from(domainListeners)) {
+      for (const { callback: h } of Array.from(domainListeners)) {
         try {
           h(envelope);
         } catch (error) {
@@ -427,15 +457,17 @@ export class RuntimeEventBus {
     }
   }
 
-  private _off(eventType: AnyRuntimeEvent['type'], callback: EnvelopeListener): void {
+  private _off(eventType: AnyRuntimeEvent['type'], subscription: Subscription): void {
+    subscription.active = false;
     const set = this._listeners.get(eventType);
-    set?.delete(callback);
+    set?.delete(subscription);
     if (set?.size === 0) this._listeners.delete(eventType);
   }
 
-  private _offDomain(domain: RuntimeEventDomain, callback: EnvelopeListener): void {
+  private _offDomain(domain: RuntimeEventDomain, subscription: Subscription): void {
+    subscription.active = false;
     const set = this._domainListeners.get(domain);
-    set?.delete(callback);
+    set?.delete(subscription);
     if (set?.size === 0) this._domainListeners.delete(domain);
   }
 }

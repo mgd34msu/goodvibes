@@ -1,9 +1,11 @@
 /** Require both the close response and the matching real lifecycle frame. */
 export interface LifecycleHandlers {
   onReady: () => void;
-  onEvent: (eventName: string, payload: unknown) => void;
-  onError: (error: unknown) => void;
-  onTerminate: (info: unknown) => void;
+  onEvent: (event: { readonly name: string; readonly payload: unknown }) => void;
+  /** Frames were dropped: the matching frame may be among them. */
+  onGap: (gap: { readonly dropped: number }) => void;
+  /** The stream ended (`closed` is this proof's own cleanup). */
+  onEnd: (end: { readonly kind: string }) => void;
 }
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -59,7 +61,7 @@ export function requireSessionCloseReceipt(options: {
           complete();
         }, (error: unknown) => finish(new Error('sessions.close failed', { cause: error })));
       },
-      onEvent: (eventName, payload) => {
+      onEvent: ({ name: eventName, payload }) => {
         if (finished || !started || eventName !== options.eventName) return;
         const update = object(payload);
         const session = object(update?.payload);
@@ -67,8 +69,10 @@ export function requireSessionCloseReceipt(options: {
         received = true;
         complete();
       },
-      onError: (error) => finish(new Error('Session lifecycle stream failed', { cause: error })),
-      onTerminate: (info) => finish(new Error('Session lifecycle stream terminated before proof completed', { cause: info })),
+      onGap: (gap) => finish(new Error(`Session lifecycle stream dropped ${gap.dropped} frame(s) before proof completed`)),
+      onEnd: (end) => {
+        if (end.kind !== 'closed') finish(new Error('Session lifecycle stream ended before proof completed', { cause: end }));
+      },
     };
     // The stream can call handlers before its asynchronous open returns a closer.
     void Promise.resolve().then(() => options.open(handlers)).then((close) => {

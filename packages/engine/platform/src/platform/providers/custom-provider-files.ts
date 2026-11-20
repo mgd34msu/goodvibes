@@ -11,6 +11,8 @@ import { join } from 'node:path';
 export interface CustomProviderName {
   readonly name: string;
   readonly displayName: string;
+  /** The environment variable its file names for the API key (`apiKeyEnv`), when it names one. */
+  readonly apiKeyEnv?: string | undefined;
 }
 
 /**
@@ -149,10 +151,10 @@ export function readCustomProviderNames(providersDir: string, reservedNames: Rea
     try { parsed = JSON.parse(readFileSync(join(providersDir, filename), 'utf-8')); }
     catch { continue; }
     if (!validateCustomProvider(parsed).valid) continue;
-    const { name, displayName } = parsed as CustomProviderName;
+    const { name, displayName, apiKeyEnv } = parsed as CustomProviderName;
     if (reservedNames.has(name) || seen.has(name)) continue;
     seen.add(name);
-    names.push({ name, displayName });
+    names.push({ name, displayName, ...(typeof apiKeyEnv === 'string' && apiKeyEnv.length > 0 ? { apiKeyEnv } : {}) });
   }
   return names;
 }

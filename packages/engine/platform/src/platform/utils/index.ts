@@ -14,6 +14,7 @@ export * from './markdown-disclosure.js';
 export * from './notebook.js';
 export * from './notify.js';
 export * from './open-external.js';
+export * from './owner-fence.js';
 export * from './path-safety.js';
 export * from './process-lock.js';
 export * from './prompt-loader.js';
@@ -30,3 +31,5 @@ export * from './walk-dir.js';
 export type { WalkDirectoryCandidate } from './directory-reading.js';
 
 export { requireDefined } from './required-value.js';
+export * from './owner-stamp.js';
+export * from './format-codec.js';

@@ -104,7 +104,11 @@ export function scheduleDecisionLogRetention(
   const now = options.now ?? Date.now;
   let disposed = false;
   let running: Promise<number> | undefined;
-  const pass = (): Promise<number> => running ??= (async () => {
+  // The body starts a microtask after `running` is assigned, so its `finally`
+  // always clears the pass it belongs to, even when the first batch is the last
+  // and nothing in the body awaits. Otherwise a pass that finished without
+  // yielding would stay `running` forever and every later pass would be skipped.
+  const pass = (): Promise<number> => running ??= Promise.resolve().then(async () => {
     let removed = 0;
     try {
       const before = new Date(now() - rule.days * 24 * 60 * 60 * 1000).toISOString();
@@ -122,7 +126,7 @@ export function scheduleDecisionLogRetention(
       running = undefined;
     }
     return removed;
-  })();
+  });
   const first = setTimeout(() => { void pass(); }, rule.firstPassDelayMs);
   const daily = setInterval(() => { void pass(); }, rule.intervalMs);
   first.unref?.();

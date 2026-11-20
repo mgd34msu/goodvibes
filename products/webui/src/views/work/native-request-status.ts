@@ -76,7 +76,7 @@ export function turnStatusLine(snapshot: NativeHostedTurnSnapshot): string {
     case "cancelling":
       return "Stopping.";
     case "completed":
-      return "Replied.";
+      return snapshot.sessionId ? "Replied. Open the session to read the reply." : "Replied.";
     case "failed":
       return `The reply failed: ${snapshot.failure?.summary ?? "the model returned an error"}.${snapshot.failure?.retryable ? " Nothing was changed." : ""}`;
     case "cancelled":

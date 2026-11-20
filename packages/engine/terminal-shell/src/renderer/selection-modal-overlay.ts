@@ -66,6 +66,8 @@ function rowsFor(items: readonly SelectionItem[], selectedIndex: number): KitRow
     rows.push({
       label: item.label,
       detail: item.detail,
+      desc: item.desc,
+      right: item.right,
       selected: index === selectedIndex,
       labelFg: item.fg,
     });

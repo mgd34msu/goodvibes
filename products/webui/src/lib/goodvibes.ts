@@ -271,14 +271,16 @@ type BrowserCoveredMethodId =
 const SHARED_COVERAGE_IS_COMPLETE: [BrowserKnowledgeMethodId] extends [BrowserCoveredMethodId] ? true : never = true;
 void SHARED_COVERAGE_IS_COMPLETE;
 
+/** The method ids the browser platform routes natively (scopedPlatform.operator.invoke). */
+const BROWSER_COVERED_METHOD_IDS: ReadonlySet<string> = new Set<string>([
+  ...SHARED_BROWSER_METHOD_IDS,
+  ...Object.keys(KNOWLEDGE_BROWSER_ROUTES),
+]);
+
 function buildExtraMethodRoutes(): Record<string, RouteDefinition | undefined> {
-  const browserCovered = new Set<string>([
-    ...SHARED_BROWSER_METHOD_IDS,
-    ...Object.keys(KNOWLEDGE_BROWSER_ROUTES),
-  ]);
   const table: Record<string, RouteDefinition> = {};
   for (const [methodId, def] of Object.entries(WEBUI_METHOD_ROUTES)) {
-    if (browserCovered.has(methodId)) continue;
+    if (BROWSER_COVERED_METHOD_IDS.has(methodId)) continue;
     table[methodId] = { method: def.method, path: def.path };
   }
   return table;
@@ -526,11 +528,16 @@ const OWNER_APPROVAL_WRITES: ReadonlySet<string> = new Set(['config.set', 'confi
 async function invokeOperatorOnce(methodId: string, input?: unknown, signal?: AbortSignal): Promise<unknown> {
   const route = EXTRA_METHOD_ROUTES[methodId];
   if (!route) {
-    // The one unavoidable escape hatch: every methodId that reaches this branch (no
-    // EXTRA_METHOD_ROUTES row) is, by construction, a member of BrowserKnowledgeMethodId
+    // A method with no REST binding that the browser platform does not route either
+    // (inbox.list, inbox.answer, update.status, update.check) is reachable only through
+    // the generic method invoke; handing it to scopedPlatform would refuse it in the
+    // browser and no request would ever leave.
+    if (!BROWSER_COVERED_METHOD_IDS.has(methodId)) {
+      return invokeGatewayMethod(methodId as OperatorMethodId, input as OperatorMethodInput<OperatorMethodId>, signal);
+    }
+    // Every methodId that reaches this point is a member of BrowserKnowledgeMethodId
     // (SHARED_BROWSER_ROUTES ∪ KNOWLEDGE_BROWSER_ROUTES), a runtime invariant the type
-    // system cannot see through a string-keyed table lookup. isExtraRoutedMethod's test
-    // coverage below is what actually enforces it, not this cast.
+    // system cannot see through a string-keyed table lookup.
     return scopedPlatform.operator.invoke(
       methodId as BrowserKnowledgeMethodId,
       input as OperatorMethodInput<BrowserKnowledgeMethodId>,

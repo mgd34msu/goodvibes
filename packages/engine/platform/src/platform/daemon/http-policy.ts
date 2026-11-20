@@ -1,4 +1,8 @@
 export type {
+  Actor,
+  ActorClass,
+  ActorPrincipal,
+  OwnerIdentity,
   AuthenticatedPrincipal,
   AuthenticatedPrincipalKind,
   AuthenticatedPrincipalResolver,
@@ -9,6 +13,12 @@ export type {
   RequestPrincipal,
 } from '@goodvibes-jev/engine/daemon-api';
 export {
+  NO_OWNER_USER,
+  actorFromChannelSender,
+  actorFromPrincipal,
+  actorHoldsScope,
+  agentActor,
+  systemActor,
   principalHasScope,
   resolveAuthenticatedPrincipal,
   resolvePrivateHostFetchOptions,

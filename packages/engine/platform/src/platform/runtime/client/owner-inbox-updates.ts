@@ -72,11 +72,19 @@ export async function watchOwnerInboxUpdates(options: WatchOwnerInboxUpdatesOpti
   const url = new URL(buildUrl(options.baseUrl, '/api/control-plane/events'));
   url.searchParams.set('domains', OWNER_INBOX_UPDATE_DOMAIN);
   try {
+    let ended = false;
+    let handle: (() => void) | undefined;
+    const terminate = (): void => {
+      if (ended) return;
+      ended = true;
+      handle?.();
+      options.onTerminate?.();
+    };
     const close = await openRawServerSentEventStream(
       fetchImpl,
       url.toString(),
       {
-        onEvent: (eventName, payload) => {
+        onEvent: ({ name: eventName, payload }) => {
           if (eventName !== OWNER_INBOX_UPDATE_WIRE_EVENT || typeof payload !== 'object' || payload === null) return;
           const item = readOwnerItem((payload as Record<string, unknown>)['item']);
           if (!item) return;
@@ -86,13 +94,16 @@ export async function watchOwnerInboxUpdates(options: WatchOwnerInboxUpdatesOpti
             logger.debug('[owner-inbox] an update subscriber threw', { error: summarizeError(error) });
           }
         },
-        onTerminate: () => options.onTerminate?.(),
-        onClose: () => options.onTerminate?.(),
+        // Items were dropped: the stream ends and answers are read with query show.
+        onGap: terminate,
+        onEnd: (end) => { if (end.kind !== 'closed') terminate(); },
       },
       options.getAuthToken ? { getAuthToken: options.getAuthToken } : {},
     );
+    handle = close;
+    if (ended) close();
     let closed = false;
-    return { close: () => { if (!closed) { closed = true; close(); } } };
+    return { close: () => { if (!closed) { closed = true; ended = true; close(); } } };
   } catch (error) {
     logger.debug('[owner-inbox] the update stream could not be opened; answers are read with query show', { error: summarizeError(error) });
     return null;

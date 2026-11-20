@@ -240,7 +240,7 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
     description:
       'Whether the managed local voice runtime (piper TTS + a default voice) is installed: not-provisioned (with a size-labeled offer), partial, provisioned, or unsupported-platform. STT (whisper.cpp) reports its own managed state: goodvibes builds and pins the whisper.cpp bundle per platform (no official prebuilt exists; provisioning never compiles on your machine), so where a pinned bundle exists STT provisions like TTS, and elsewhere it reports unsupported honestly. While a voice.local.install run is active, the response also carries installInProgress, the live per-component progress (phase, byte sizes where known) of that run, so surfaces poll this read during the install to render real progress; the section is absent when no install is running. Once a run ends, lastInstall carries its receipt (or the reason it stopped without one) with the run\'s start and finish times; a surface that started an install reads its result here. Read-only.',
     category: 'health',
-    scopes: ['read:health'],
+    effects: ['health.read'],
     http: { method: 'GET', path: '/api/voice/local/status' },
     inputSchema: objectSchema({}, []),
     outputSchema: RUNTIME_STATUS_SCHEMA,
@@ -252,9 +252,8 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
     description:
       'Starts the one-act setup and answers at once with the run it started (or the run already in progress it joined); the install runs on in the daemon, voice.local.status serves its live progress as installInProgress and, when it ends, its receipt as lastInstall. The setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The install ends by speaking a test phrase and reading it back: the transcript is compared word by word in code, allowing one differing word, and the receipt carries the transcript and the comparison. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.',
     category: 'health',
-    scopes: ['write:config'],
+    effects: ['config.administer'],
     // Downloads and installs executables and rewrites voice.* config: admin, like config.set.
-    access: 'admin',
     http: { method: 'POST', path: '/api/voice/local/install' },
     inputSchema: objectSchema({}, []),
     outputSchema: INSTALL_START_SCHEMA,
@@ -274,9 +273,8 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
       + 'receipt. rendered is the plan as one reply a surface prints as-is; complete is true when nothing is left to answer '
       + 'and every step that ran finished.',
     category: 'health',
-    scopes: ['write:config'],
+    effects: ['config.administer'],
     // Writes voice settings and may install executables, like voice.local.install.
-    access: 'admin',
     http: { method: 'POST', path: '/api/voice/setup' },
     inputSchema: objectSchema({
       intent: { type: 'string', enum: ['wake', 'stt', 'tts', 'voice'] },
@@ -304,7 +302,7 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
       + 'to 0 and the detector runs without it. Also restates that the model\'s published recall figures are measured on '
       + 'synthesised speech only, which any surface describing the model must carry. Never downloads. Read-only.',
     category: 'health',
-    scopes: ['read:health'],
+    effects: ['health.read'],
     http: { method: 'GET', path: '/api/voice/wake/status' },
     inputSchema: objectSchema({}, []),
     outputSchema: WAKE_STATUS_SCHEMA,
@@ -324,7 +322,7 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
       + 'A failed or mismatched download keeps nothing at the destination. Single-flight: two surfaces asking at once, or a '
       + 'boot attempt and a user asking, join one download instead of racing for the same files.',
     category: 'health',
-    scopes: ['write:config'],
+    effects: ['config.write'],
     // Not admin: it fetches only checksum-pinned model files that install and
     // boot already fetch, runs nothing and changes no setting, so any caller
     // holding write:config may recover them.
@@ -347,7 +345,7 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
       + 'cannot satisfy the terms it received them under. Serves what is on disk and does not download; installation puts it '
       + 'there, and voice.wake.provision is the recovery path when it is missing.',
     category: 'health',
-    scopes: ['read:health'],
+    effects: ['health.read'],
     http: { method: 'GET', path: '/api/voice/wake/model' },
     inputSchema: objectSchema({
       component: {

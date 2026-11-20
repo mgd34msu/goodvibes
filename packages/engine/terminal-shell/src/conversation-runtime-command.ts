@@ -135,7 +135,7 @@ async function buildConversationRestoreReview(ctx: Context, source: ReturnType<t
   return {
     name: 'conversation',
     effect: 'session-lifecycle',
-    hidden,
+    firstScreen: !hidden,
     aliases: ['transcript', 'composer'],
     description: 'Review conversation structure, transcript hotspots, and composer posture',
     usage: '[review|events [kind]|groups [kind]|hotspots|composer|find <query> [kind]|next [kind]|prev [kind]|restore]',

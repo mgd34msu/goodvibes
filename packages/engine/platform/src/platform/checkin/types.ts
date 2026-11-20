@@ -32,8 +32,14 @@ export interface CheckinStateSnapshot {
   readonly blockedSessions: number;
   readonly unreadChannelItems: number;
   readonly recentCompletions: number;
-  /** Short human lines describing anything that may need attention. */
+  /** Short human lines describing anything that may need attention (a few per kind). */
   readonly needsAttention: readonly string[];
+  /**
+   * How many things wait for the owner (open approvals and questions, contracts
+   * waiting for his decision, failed runs), all of them: the lines above name only
+   * the first few of each kind. Absent when the reader cannot see those sources.
+   */
+  readonly waitingForOwner?: number | undefined;
 }
 
 export interface CheckinJudgmentReceipt {

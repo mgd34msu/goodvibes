@@ -17,10 +17,24 @@ import type { ConfigManager } from '../config/manager.js';
 import type { AutonomousToolSource } from '../permissions/autonomous.js';
 import { executeToolCalls as executeOrchestratorToolCalls, toolBudgetFromConfig } from '../core/orchestrator-tool-runtime.js';
 import { maxParallelToolCalls } from '../core/tool-batch.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 type HookDispatcherLike = {
   fire(event: HookEvent): Promise<HookResult>;
 };
+
+/** The companion chat whose tool calls run in the current async context. */
+const companionToolSession = new AsyncLocalStorage<string>();
+
+/**
+ * The chat a tool call being checked right now belongs to: the companion chat's
+ * permission manager gives it to the approval it raises, so the ask is tied to
+ * its chat (shown there, and in Work under that chat) instead of being taken
+ * to the owner as an ask from nowhere.
+ */
+export function companionToolCallSession(): string | undefined {
+  return companionToolSession.getStore();
+}
 
 export interface CompanionToolExecutionDeps {
   readonly toolRegistry: ToolRegistry | null;
@@ -73,7 +87,7 @@ export async function executeCompanionToolCalls(
   let results: ToolResult[];
   const settled = new Map<string, ToolResult>();
   try {
-    results = await executeOrchestratorToolCalls({
+    results = await companionToolSession.run(sessionId, () => executeOrchestratorToolCalls({
       toolRegistry,
       permissionManager: deps.permissionManager,
       hookDispatcher: deps.hookDispatcher,
@@ -89,7 +103,7 @@ export async function executeCompanionToolCalls(
         traceId: `${sessionId}:${id}`,
         source: 'companion-chat',
       }),
-    }, turnId, toolCalls);
+    }, turnId, toolCalls));
   } catch (error) {
     // A cancelled turn is closed by the turn loop. Any other failure becomes one
     // error result per call that has none, so the model sees what happened and

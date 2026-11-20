@@ -127,7 +127,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Browser Status',
     description: 'Report whether a browser is available on this machine, where its binary came from, whether a display exists, and which sessions are open.',
     category: 'browser',
-    scopes: ['read:browser'],
+    effects: ['browser.read'],
     http: { method: 'GET', path: '/api/browser/status' },
     inputSchema: objectSchema({}),
     outputSchema: objectSchema({
@@ -150,7 +150,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Provision Browser',
     description: 'Install the browser driver and binary this machine needs, reporting each step it actually ran. Slow on a clean machine; every other verb provisions on demand.',
     category: 'browser',
-    scopes: ['write:browser'],
+    effects: ['browser.write'],
     dangerous: true,
     http: { method: 'POST', path: '/api/browser/provision' },
     inputSchema: bodyEnvelopeSchema({
@@ -166,7 +166,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'List Browser Sessions',
     description: 'Return every open browser session, including whether the daemon started it and may therefore close it.',
     category: 'browser',
-    scopes: ['read:browser'],
+    effects: ['browser.read'],
     http: { method: 'GET', path: '/api/browser/sessions' },
     inputSchema: objectSchema({}),
     outputSchema: listOutputSchema('sessions', BROWSER_SESSION_SCHEMA),
@@ -177,7 +177,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Launch Browser Session',
     description: 'Start a browser the daemon owns. Pass a profileName to keep sign-ins across runs; headless defaults to true where no display exists.',
     category: 'browser',
-    scopes: ['write:browser'],
+    effects: ['browser.write'],
     dangerous: true,
     http: { method: 'POST', path: '/api/browser/sessions/launch' },
     inputSchema: bodyEnvelopeSchema({
@@ -196,7 +196,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Attach To Running Browser',
     description: 'Connect to a browser already running at a remote debugging endpoint on this machine (a bare port, localhost or a loopback address; a browser elsewhere is reached through a local port forward). The daemon can drive it but can never close it.',
     category: 'browser',
-    scopes: ['write:browser'],
+    effects: ['browser.write'],
     dangerous: true,
     http: { method: 'POST', path: '/api/browser/sessions/attach' },
     inputSchema: bodyEnvelopeSchema({
@@ -214,7 +214,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Release Browser Session',
     description: 'Disconnect from a session and leave the browser running. This is how an attached browser is let go of.',
     category: 'browser',
-    scopes: ['write:browser'],
+    effects: ['browser.write'],
     http: { method: 'POST', path: '/api/browser/sessions/release' },
     inputSchema: bodyEnvelopeSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
     outputSchema: objectSchema({
@@ -228,7 +228,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Close Browser Session',
     description: 'End a browser the daemon started. A session attached to a browser the daemon did not start is refused; release it instead.',
     category: 'browser',
-    scopes: ['write:browser'],
+    effects: ['browser.write'],
     dangerous: true,
     http: { method: 'POST', path: '/api/browser/sessions/close' },
     inputSchema: bodyEnvelopeSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
@@ -239,11 +239,10 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'browser.navigate',
     repeat: 'unsafe',
-    effect: 'outward',
+    effects: ['browser.write', 'outward.send'],
     title: 'Navigate',
     description: 'Load a URL, opening a session first if none is open. http, https, file and about schemes only; a javascript: URL is refused because it runs script against whatever page is already loaded.',
     category: 'browser',
-    scopes: ['write:browser'],
     http: { method: 'POST', path: '/api/browser/navigate' },
     inputSchema: pageInputSchema({
       url: STRING_SCHEMA,
@@ -264,7 +263,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Snapshot Page',
     description: 'Return addressable element refs for the current page. Element names come from the page, so the result is untrusted content and is labelled as such.',
     category: 'browser',
-    scopes: ['read:browser-content'],
+    effects: ['browser-content.read'],
     http: { method: 'POST', path: '/api/browser/snapshot' },
     inputSchema: pageInputSchema({ limit: NUMBER_SCHEMA }),
     outputSchema: pageResultSchema({
@@ -281,11 +280,10 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'browser.click',
     replay: IDEMPOTENCY_KEY_REPLAY,
-    effect: 'outward',
+    effects: ['browser.write', 'outward.send'],
     title: 'Click Element',
     description: 'Click an element resolved from the latest snapshot of this page. Activating a control that submits a form is an outward effect and is refused when this turn has read untrusted page content.',
     category: 'browser',
-    scopes: ['write:browser'],
     dangerous: true,
     http: { method: 'POST', path: '/api/browser/click' },
     inputSchema: pageInputSchema({
@@ -304,11 +302,10 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'browser.type',
     replay: IDEMPOTENCY_KEY_REPLAY,
-    effect: 'outward',
+    effects: ['browser.write', 'outward.send'],
     title: 'Type Into Element',
     description: 'Type into an element resolved from the latest snapshot. There is no variant that types into whatever window has focus. submit:true presses Enter afterwards and is an outward effect.',
     category: 'browser',
-    scopes: ['write:browser'],
     dangerous: true,
     http: { method: 'POST', path: '/api/browser/type' },
     inputSchema: pageInputSchema({
@@ -329,7 +326,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Select Options',
     description: 'Choose option values in a select element resolved from the latest snapshot.',
     category: 'browser',
-    scopes: ['write:browser'],
+    effects: ['browser.write'],
     http: { method: 'POST', path: '/api/browser/select' },
     inputSchema: pageInputSchema({
       ref: STRING_SCHEMA,
@@ -347,7 +344,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Press Key',
     description: 'Send one key to an element resolved from the latest snapshot. Enter is treated as a form submission and is an outward effect.',
     category: 'browser',
-    scopes: ['write:browser'],
+    effects: ['browser.write'],
     dangerous: true,
     http: { method: 'POST', path: '/api/browser/press' },
     inputSchema: pageInputSchema({
@@ -366,7 +363,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Scroll Page',
     description: 'Scroll the page by an amount, or bring a snapshot element into view.',
     category: 'browser',
-    scopes: ['write:browser'],
+    effects: ['browser.write'],
     http: { method: 'POST', path: '/api/browser/scroll' },
     inputSchema: pageInputSchema({
       ref: STRING_SCHEMA,
@@ -386,7 +383,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Wait For Page State',
     description: 'Wait for text to become visible, for the URL to match, or for the network to settle. The timeout bounds this call only and never ends the browser.',
     category: 'browser',
-    scopes: ['read:browser-content'],
+    effects: ['browser-content.read'],
     http: { method: 'POST', path: '/api/browser/wait-for' },
     inputSchema: pageInputSchema({
       text: STRING_SCHEMA,
@@ -403,7 +400,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Read Page Text',
     description: 'Read the page as text, including open shadow roots and embedded frames, each frame origin recorded separately. Returns the text inside an untrusted-content envelope.',
     category: 'browser',
-    scopes: ['read:browser-content'],
+    effects: ['browser-content.read'],
     http: { method: 'POST', path: '/api/browser/read-text' },
     inputSchema: pageInputSchema({ maxChars: NUMBER_SCHEMA, timeoutMs: NUMBER_SCHEMA }),
     outputSchema: pageResultSchema({
@@ -417,7 +414,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Extract Page Data',
     description: 'Read named fields out of elements matched by a snapshot ref or a CSS selector. The function that runs in the page is fixed and ships in the engine; there is no way to express code here. Password input values are never returned.',
     category: 'browser',
-    scopes: ['read:browser-content'],
+    effects: ['browser-content.read'],
     http: { method: 'POST', path: '/api/browser/extract' },
     inputSchema: pageInputSchema({
       ref: STRING_SCHEMA,
@@ -438,7 +435,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Screenshot Page',
     description: 'Write a PNG of the visible area or the whole scrollable page and report the exact path written.',
     category: 'browser',
-    scopes: ['read:browser-content'],
+    effects: ['browser-content.read'],
     http: { method: 'POST', path: '/api/browser/screenshot' },
     inputSchema: pageInputSchema({
       fullPage: BOOLEAN_SCHEMA,
@@ -456,7 +453,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'List Tabs',
     description: 'Return every open page in a session, with which one is active.',
     category: 'browser',
-    scopes: ['read:browser-content'],
+    effects: ['browser-content.read'],
     http: { method: 'GET', path: '/api/browser/tabs' },
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA }),
     outputSchema: objectSchema({
@@ -470,7 +467,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Open Tab',
     description: 'Open a new tab, optionally at a URL, opening a session first if none is open.',
     category: 'browser',
-    scopes: ['write:browser'],
+    effects: ['browser.write'],
     http: { method: 'POST', path: '/api/browser/tabs' },
     inputSchema: pageInputSchema({
       url: STRING_SCHEMA,
@@ -486,7 +483,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Switch Tab',
     description: 'Make another open tab the active one for later page verbs.',
     category: 'browser',
-    scopes: ['write:browser'],
+    effects: ['browser.write'],
     http: { method: 'POST', path: '/api/browser/tabs/switch' },
     inputSchema: pageInputSchema({}, ['pageId']),
     outputSchema: objectSchema({
@@ -500,7 +497,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Close Tab',
     description: 'Close one tab. The browser itself keeps running.',
     category: 'browser',
-    scopes: ['write:browser'],
+    effects: ['browser.write'],
     http: { method: 'POST', path: '/api/browser/tabs/close' },
     inputSchema: pageInputSchema({}, ['pageId']),
     outputSchema: objectSchema({
@@ -515,7 +512,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Go Back',
     description: 'Move the page back one entry in its history.',
     category: 'browser',
-    scopes: ['write:browser'],
+    effects: ['browser.write'],
     http: { method: 'POST', path: '/api/browser/history/back' },
     inputSchema: pageInputSchema({ timeoutMs: NUMBER_SCHEMA }),
     outputSchema: pageResultSchema({ moved: BOOLEAN_SCHEMA }),
@@ -526,7 +523,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Go Forward',
     description: 'Move the page forward one entry in its history.',
     category: 'browser',
-    scopes: ['write:browser'],
+    effects: ['browser.write'],
     http: { method: 'POST', path: '/api/browser/history/forward' },
     inputSchema: pageInputSchema({ timeoutMs: NUMBER_SCHEMA }),
     outputSchema: pageResultSchema({ moved: BOOLEAN_SCHEMA }),

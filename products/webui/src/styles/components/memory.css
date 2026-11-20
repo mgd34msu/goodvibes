@@ -11,9 +11,11 @@
 /* Memory copies: one row per copy, the restore button at the end. */
 .lib-copies {
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: var(--space-2, 8px);
-  padding: var(--space-2, 8px) 0;
+  /* Sits between the toolbar and the list, so it takes the toolbar's side padding. */
+  padding: 0 32px 12px;
 }
 .lib-copies__list {
   list-style: none;
@@ -33,4 +35,18 @@
 .lib-copies__reason { flex: 1 1 10em; }
 .lib-copies__count,
 .lib-copies__size { white-space: nowrap; color: var(--text-muted, inherit); }
-.lib-copies__empty { margin: 0; }
+.lib-copies__empty {
+  margin: 0;
+  padding: 10px 14px;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 899px) {
+  .lib-copies {
+    padding: 0 16px 12px;
+  }
+}

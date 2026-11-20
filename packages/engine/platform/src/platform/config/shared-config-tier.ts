@@ -19,19 +19,16 @@ import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { ProcessLockUnavailableError, withProcessLockSync } from '../utils/process-lock.js';
 import { logger } from '../utils/logger.js';
 import type { ConfigKey } from './schema.js';
+import { USER_SHARED_WINS_CONFIG_KEYS } from './config-ownership.js';
 import { raiseSettingsReaderFloor } from './settings-reader-floor.js';
 
 /**
- * The keys that ride the shared, surface-root-independent tier. Currently the
- * voice/tts settings, one voice across every surface.
+ * The keys that ride the shared, surface-root-independent tier: the table of
+ * user keys whose shared value wins (config-ownership.ts), so the tier that
+ * loads and writes shared keys and the table that says which keys are shared
+ * are one list (one voice, one decision-router table, on every surface).
  */
-export const SHARED_CONFIG_KEYS: readonly ConfigKey[] = [
-  'tts.provider',
-  'tts.voice',
-  'tts.speed',
-  'tts.llmProvider',
-  'tts.llmModel',
-];
+export const SHARED_CONFIG_KEYS: readonly ConfigKey[] = USER_SHARED_WINS_CONFIG_KEYS as readonly ConfigKey[];
 
 const SHARED_CONFIG_KEY_SET = new Set<string>(SHARED_CONFIG_KEYS);
 

@@ -10,6 +10,7 @@
  * or the gate fails.
  */
 import type { SlashCommand } from './command-registry.ts';
+import { actionSentence, linePattern, riskWords } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 
 export interface CategorizedCommand {
   readonly command: SlashCommand;
@@ -89,6 +90,22 @@ export function renderCommandReferenceMarkdown(entries: readonly CategorizedComm
       lines.push(`| ${name} | ${aliases} | ${usage} | ${description} |`);
     }
     lines.push('');
+    // A described command lists each action: its name, its line, what it does, and its risk.
+    for (const cmd of commands) {
+      const described = cmd.described;
+      if (!described) continue;
+      lines.push(`### /${cmd.name}: ${escapeCell(described.title)}`);
+      lines.push('');
+      lines.push(`\`/${cmd.name}\` alone opens these actions to choose from; each asks for what it needs.`);
+      lines.push('');
+      lines.push('| Action | Line | What happens | Risk |');
+      lines.push('| --- | --- | --- | --- |');
+      for (const action of described.actions) {
+        const blanks = Object.fromEntries(action.inputs.map((input) => [input.id, `<${input.label.toLowerCase()}>`]));
+        lines.push(`| ${escapeCell(action.label)} | \`/${cmd.name} ${escapeCell(linePattern(action))}\` | ${escapeCell(actionSentence(action, blanks))} | ${action.risk === 'none' ? 'None' : escapeCell(riskWords(action.risk))} |`);
+      }
+      lines.push('');
+    }
   }
 
   return `${lines.join('\n').trimEnd()}\n`;

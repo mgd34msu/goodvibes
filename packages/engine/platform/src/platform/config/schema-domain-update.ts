@@ -50,40 +50,34 @@ export const updateConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'update.auto',
     type: 'boolean',
-    default: true,
     description: 'While-running self-update of this installation (the daemon, and the Agent): check for a new release hourly, download and checksum-verify it, swap at a no-active-work moment, and restart (the previous binary is kept for one-command rollback). A daemon setting: one value for every program on this machine, kept in the daemon\'s settings file; a project settings file cannot set it. The release installer\'s --no-auto-update sets it false',
   },
   {
     key: 'update.autoUpdateAtLaunch',
     type: 'boolean',
-    default: true,
     description: 'The terminal app and the Agent check for and install a newer release at launch. Set false to disable launch updates; the Agent\'s while-running updates also stop unless update.auto is explicitly set. A daemon setting: one value for every program on this machine, kept in the daemon\'s settings file; a project settings file cannot set it. The release installer\'s --no-auto-update sets it false',
   },
   {
     key: 'update.launchCheckTimeoutMs',
     type: 'number',
-    default: 2500,
     description: 'Maximum milliseconds spent checking for a terminal update at launch; the installed version starts if the check cannot complete',
     ...intRange(250, 30_000),
   },
   {
     key: 'update.intervalMinutes',
     type: 'number',
-    default: 60,
     description: 'Minutes between daemon update checks',
     ...intRange(5, 24 * 60),
   },
   {
     key: 'update.firstCheckSeconds',
     type: 'number',
-    default: 30,
     description: 'Seconds after daemon start before the FIRST update check (a boot-settle delay, so a daemon that was down while releases shipped does not stay stale for a whole interval). Capped at one check interval',
     ...intRange(0, 60 * 60),
   },
   {
     key: 'update.releasesUrl',
     type: 'string',
-    default: DAEMON_RELEASES_LATEST_URL,
     description: 'GitHub releases/latest URL for a complete GoodVibes monorepo suite. Exact historical default feeds migrate to goodvibes. Native suite updates replace installed sibling programs and configured release WebUI/browser support together. Must be a release URL of the GoodVibes repository itself (https://github.com/mgd34msu/goodvibes/releases/...), or an http URL on this machine (loopback address) (empty turns the update loop off): the binaries and checksums are downloaded from this origin and are not signed, so any other repository or remote host would let a config write replace the installed programs',
     validate: (v) => {
       if (typeof v !== 'string') return false;
@@ -106,14 +100,12 @@ export const updateConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'update.rollbackAfterFailedStarts',
     type: 'number',
-    default: 3,
     description: 'Consecutive rapid boots that fail to reach a fully-started daemon before the startup path automatically restores the kept previous binary and restarts onto it. 0 leaves a bad update in place for a hand-run rollback',
     ...intRange(0, 10),
   },
   {
     key: 'update.alertAfterFailedChecks',
     type: 'number',
-    default: 3,
     description: 'Consecutive failed update checks before the daemon tells the owner over a channel that still works that it can no longer update itself. Lower is louder; 1 reports the first failure. A repeat is held back for 12 hours so an ongoing outage is one message rather than one an hour',
     ...intRange(1, 100),
   },

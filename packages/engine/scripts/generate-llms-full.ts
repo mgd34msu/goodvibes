@@ -378,7 +378,7 @@ interface SlashRecord {
   readonly description: string;
   readonly usage?: string | undefined;
   readonly argsHint?: string | undefined;
-  readonly hidden?: boolean | undefined;
+  readonly firstScreen?: boolean | undefined;
   readonly effect?: string | undefined;
   readonly readVerbs?: readonly string[] | undefined;
   readonly subcommands?: Readonly<Record<string, string>> | undefined;
@@ -413,7 +413,7 @@ function renderSlash(command: SlashRecord, category: string | undefined): string
     facts.push(`${EFFECT_WORDS[command.effect] ?? command.effect}${reads}`);
   }
   if (typeof command.confirm === 'function') facts.push('asks before a line that cannot be undone or changes access; `--yes` answers yes');
-  if (command.hidden) facts.push('hidden from the command list and /help');
+  if (command.firstScreen === false) facts.push('not on the first screen of the command list and /help; found as soon as its name is typed');
   const lines = [`- ${code(`/${command.name}`)}${usage ? ` ${code(usage.startsWith('/') ? usage : `/${command.name} ${usage}`.trim())}` : ''}: ${sentence(command.description)}`];
   if (facts.length > 0) lines.push(`  - ${sentence(facts.join('; ').replace(/^./, (c) => c.toUpperCase()))}`);
   for (const [sub, hint] of Object.entries(command.subcommands ?? {}).sort(([a], [b]) => byText(a, b))) {

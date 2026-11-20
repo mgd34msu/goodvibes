@@ -14,7 +14,8 @@
  * says is the payment reply inbox's Jev reading (payments/reply-inbox.ts).
  */
 import type { ChannelIngressPolicyInput, ChannelPolicyDecision } from '../channels/index.js';
-import { isChannelOwner } from '../channels/policy-manager.js';
+import { channelSenderActor } from '../channels/policy-manager.js';
+import { admitEffects } from '../security/effect-authority.js';
 import { PaymentReplyWindowError, type PaymentReplyInbox, type PaymentReplyOffer } from '../payments/reply-inbox.js';
 import { parseCommandAuthorityChannel } from '../payments/types.js';
 import { logger } from '../utils/logger.js';
@@ -82,7 +83,7 @@ export async function tryResolvePaymentReplyFromChannel(
   } = {},
 ): Promise<PaymentReplyOffer> {
   if (inbox === undefined || inbox.pending === 0 || !input.userId || !input.text) return { consumed: false, reason: 'no-window' };
-  if (!isChannelOwner(decision, input.userId)) return { consumed: false, reason: 'no-window' };
+  if (admitEffects(channelSenderActor(decision, input.surface, input.userId), ['purchase.approve']).kind !== 'allowed') return { consumed: false, reason: 'no-window' };
   const channel = parseCommandAuthorityChannel(input.surface);
   if (channel === null) return { consumed: false, reason: 'no-window' };
   const check = options.assertCurrent?.bind(options), signal = options.signal;

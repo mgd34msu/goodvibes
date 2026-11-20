@@ -62,7 +62,7 @@ export function createShellNavigationCommands<
       effect: 'ui-navigation',
       aliases: ['keys', 'keybinds'],
       description: 'Show keyboard shortcuts reference',
-      hidden: policy.shortcutsHidden,
+      firstScreen: !policy.shortcutsHidden,
       handler(_args, context) {
         if (context.openShortcutsOverlay) {
           context.openShortcutsOverlay();

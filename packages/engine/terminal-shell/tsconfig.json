@@ -25,6 +25,9 @@
     },
     {
       "path": "../operator-client"
+    },
+    {
+      "path": "../transport-core"
     }
   ]
 }

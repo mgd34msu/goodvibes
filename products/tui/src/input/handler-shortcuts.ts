@@ -7,6 +7,7 @@ import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { CommandContext } from './command-registry.ts';
 import type { KillRing } from './kill-ring.ts';
 import { nextPermissionMode, permissionModeLabel, type PermissionModeValue } from '../core/permission-mode.ts';
+import { describePermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 export type GlobalShortcutRouteState = GlobalShortcutState & {
   commandContext?: CommandContext;
@@ -25,13 +26,10 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
         return true;
       }
 
-      // cycle-permission-mode (Shift+Tab by default) arrives as the legacy xterm
-      // backtab literal ('\x1b[Z') or, under a kitty/CSI-u terminal, as
-      // tab-with-shift; the literal is read as Shift+Tab so the table decides
-      // either way. Only when the composer owns focus: modal/picker routes run
-      // earlier and keep their reverse-tab.
-      const chord = token.logicalName === '\x1b[Z' ? { ...token, logicalName: 'tab', shift: true } : token;
-      if (state.keybindingsManager.lookup(chord) === 'cycle-permission-mode') {
+      // cycle-permission-mode (Shift+Tab by default; the tokenizer reads the
+      // xterm back-tab CSI Z as tab-with-shift). Only when the composer owns
+      // focus: modal/picker routes run earlier and keep their reverse-tab.
+      if (state.keybindingsManager.lookup(token) === 'cycle-permission-mode') {
         void cycleSessionPermissionMode(state);
         return true;
       }
@@ -131,6 +129,13 @@ async function cycleSessionPermissionMode(state: GlobalShortcutRouteState): Prom
     return;
   }
   const skippedNote = skipped ? `${permissionModeLabel(skipped)} skipped. ` : '';
-  context.print(`[Permissions] ${skippedNote}Mode for this session: ${permissionModeLabel(next)} (the saved default is set in /settings; /permissions shows it)`);
+  // The mode in force can differ from the one chosen (jev-decides with no
+  // working decision model runs as ask-me): the line names what the status
+  // pill shows and why, never only the choice.
+  const inForce = describePermissionModeInForce(configManager, { chosen: next, explicitlyChosen: true });
+  const modeLine = inForce.mode === inForce.chosen
+    ? permissionModeLabel(next)
+    : `${permissionModeLabel(inForce.mode)} (${permissionModeLabel(next)} chosen, but ${inForce.reason})`;
+  context.print(`[Permissions] ${skippedNote}Mode for this session: ${modeLine} (the saved default is set in /settings; /permissions shows it)`);
   state.requestRender();
 }

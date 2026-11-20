@@ -41,7 +41,7 @@ export const builtinGatewayOpsDoctorMethodDescriptors: readonly GatewayMethodDes
     title: 'Diagnose a Symptom',
     description: 'Find the runbook for a symptom in plain words (for example "stuck turn", "mcp keeps disconnecting", "approval never answered", "compaction failed") and run its checks against the daemon\'s live state. Each check is pass, fail or unknown (it could not look), with a one-line summary; each runbook lists the next steps as real commands. Read-only, no model request. An empty `playbooks` means nothing matched; `available` lists what can be diagnosed.',
     category: 'health',
-    scopes: ['read:health'],
+    effects: ['health.read'],
     transport: ['ws'],
     inputSchema: objectSchema({ symptom: STRING_SCHEMA }, ['symptom']),
     outputSchema: OPS_DOCTOR_OUTPUT_SCHEMA,

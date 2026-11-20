@@ -4,6 +4,8 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
 import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
+import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
+import { isThisMachineHost } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target-resolver';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -96,6 +98,11 @@ export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: 
     if (pairing.status === 'unavailable') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: null, error: 'The Agent host-bound pairing store could not be read safely.' }, pairing);
   }
   const path = connectedHostOperatorTokenPath(homeDirectory);
+  // The operator file is the token of the daemon on THIS machine: never presented to a host elsewhere.
+  if (hostUrl !== undefined && !isThisMachineHost(parseDaemonOrigin(hostUrl)?.host ?? '')) {
+    return selected({ path, source: 'operator-file', present: false, token: null,
+      error: `This machine's daemon token is never sent to ${parseDaemonOrigin(hostUrl)?.baseUrl ?? hostUrl}, which is not this machine. Run goodvibes-agent setup pair to pair with that host, or set GOODVIBES_CONNECTED_HOST_TOKEN to its token.` });
+  }
   const stamp = fileStamp(path);
   if (stamp === 'absent' && !existsSync(path)) return selected({ path, source: 'operator-file', present: false, token: null });
   const prior = tokenFileReads.get(path);
@@ -116,10 +123,8 @@ export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: 
 
 export function connectedHostTokenRequiredMessage(path: string): string {
   return [
-    'Connected-host operator token is required.',
-    `  token path ${path}`,
-    '  Agent can create or repair the local canonical token only through the confirmed setup route:',
-    '  agent_harness mode:"provision_connected_host_token" setupItemId:"connected-host-auth" confirm:true explicitUserRequest:"..."',
-    '  Then rerun this command or inspect agent_harness mode:"connected_host_status".',
+    `Not connected to a GoodVibes host: there is no host token at ${path}.`,
+    '  Start the host on this machine with goodvibes-daemon serve (it writes the token), or pair with a host: goodvibes-agent setup pair shows the plan and goodvibes-agent setup pair --apply pairs.',
+    '  goodvibes-agent setup status shows the connection.',
   ].join('\n');
 }

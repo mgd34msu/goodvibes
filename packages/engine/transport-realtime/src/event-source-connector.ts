@@ -11,9 +11,11 @@
  *  tail of the previous turn, terminal frames included. The connector now keeps
  *  the last event id it saw and presents it as `Last-Event-ID` on every
  *  (re)establishment, so the gateway replays only what this connector has not
- *  already been given. The same position recovers frames the daemon (`gap`) or
- *  the relay (`relay-overflow`) dropped for a slow client: the stream is
- *  reopened from it and the gateway replays them.
+ *  already been given. The same position recovers frames the daemon dropped
+ *  for a slow client (its `gap` frame, read by the stream as a typed gap): the
+ *  stream is reopened from it and the gateway replays them. Chunks the relay
+ *  dropped end the tunnelled body with a typed gap error, and the stream's own
+ *  reconnect resumes from the same position.
  *
  *  ONE STREAM. Every domain the connector's feeds listen to is carried on one
  *  stream (`domains=a,b,c`, shared-connection.ts); a changed set reopens it
@@ -72,13 +74,6 @@ export function buildEventSourceUrl(
   return url.toString();
 }
 
-/** The notices that say frames were dropped between the daemon and this client, and how to word each. */
-const LOST_FRAME_NOTICES: ReadonlyMap<string, (count: string) => string> = new Map([
-  // The daemon's own stream fell behind this consumer.
-  ['gap', (count: string) => `The daemon dropped ${count} event(s)`],
-  // The relay's send buffer for this client overflowed.
-  ['relay-overflow', (count: string) => `The relay dropped ${count} event chunk(s)`],
-]);
 
 export function createEventSourceConnector<TEvent extends RuntimeEventRecord = RuntimeEventRecord>(
   baseUrl: string,
@@ -138,7 +133,7 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
     // frame arrived past it means the replay itself overflowed: not chased again.
     let recoveredFrom: string | null = null;
 
-    const onLostFrames = (notice: string, payload: unknown): void => {
+    const onLostFrames = (dropped: number): void => {
       const from = position;
       if (from !== null && from !== recoveredFrom) {
         // Reopen from the last frame this client holds: the daemon replays the
@@ -152,10 +147,8 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
       // start or end was among them.
       position = null;
       gate?.reset();
-      const dropped = (payload as { dropped?: unknown } | null)?.dropped;
-      const lead = LOST_FRAME_NOTICES.get(notice)!(typeof dropped === 'number' ? String(dropped) : 'some');
       report(new GoodVibesError(
-        `${lead} because this client was too slow; events, possibly including a turn's end, were lost.`,
+        `The daemon dropped ${dropped > 0 ? dropped : 'some'} event(s) because this client was too slow; events, possibly including a turn's end, were lost.`,
         { category: 'protocol', source: 'transport', recoverable: true, hint: 'Re-read current state instead of waiting for events that may already have happened.' },
       ));
     };
@@ -171,12 +164,9 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
       const close = await openServerSentEventStream(fetchImpl, url, {
         onEventId: (id) => { if (live()) position = id; },
         onReady: (ready) => { if (live()) handleResume(ready); },
-        onEvent: (eventName, payload) => {
+        onGap: (gap) => { if (live()) onLostFrames(gap.dropped); },
+        onEvent: ({ name: eventName, payload }) => {
           if (!live()) return;
-          if (LOST_FRAME_NOTICES.has(eventName)) {
-            onLostFrames(eventName, payload);
-            return;
-          }
           if (!carried.has(eventName)) return;
           if (!payload || typeof payload !== 'object') return;
           // The shared envelope reader (envelope.ts). Unlike the WS path this must NOT
@@ -206,15 +196,25 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
             }, observer?.onObserverError);
           }
         },
-        onError: (err) => {
-          if (live()) report(transportErrorFromUnknown(err, 'SSE runtime event stream error'));
+        onReconnect: ({ error }) => {
+          if (live()) report(transportErrorFromUnknown(error, 'SSE runtime event stream error'));
         },
-        // The stream ended and is not coming back by itself (closed with
-        // reconnect off, or a failure no reconnect clears). Tell the feeds,
-        // which open a new one unless the daemon's answer was final (a
-        // refused credential).
-        onClose: () => { if (live()) sink.ended({ final: false }); },
-        onTerminate: ({ final }) => { if (live()) sink.ended({ final: final === true }); },
+        // The stream ended and is not coming back by itself (the source ended
+        // it with reconnect off, or a failure no reconnect clears). Tell the
+        // feeds, which open a new one unless the daemon's answer was final (a
+        // refused credential). This connector's own close is not news to it.
+        onEnd: (end) => {
+          if (!live() || end.kind === 'closed') return;
+          if (end.kind === 'failed') {
+            report(new GoodVibesError(end.refusal.reason, {
+              code: end.refusal.code, category: 'network', source: 'transport',
+              recoverable: end.refusal.retryable, status: end.refusal.status, state: end.refusal.state, next: end.refusal.next,
+            }));
+            sink.ended({ final: !end.refusal.retryable });
+            return;
+          }
+          sink.ended({ final: false });
+        },
       }, {
         // On unless the caller turns it off, with no attempt limit by default:
         // a daemon restart or a sleep must not end the feed.

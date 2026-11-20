@@ -1,6 +1,6 @@
-import { assertDeliveryCurrent, runDeliveryPublication, type DeliveryLifetime } from '../../utils/delivery-lifetime.js';
 /**
- * Resolve, check and pin one fetch hop.
+ * Resolve and check one fetch hop (the connection is pinned by
+ * runtime/network/destination.ts `pinnedFetch`).
  *
  * The trust-tier check (trust-tiers.ts) sees only the host as written, so a
  * name whose DNS answer is a loopback, private, link-local or metadata address
@@ -21,31 +21,20 @@ import { assertDeliveryCurrent, runDeliveryPublication, type DeliveryLifetime } 
  * caller wrote (never a redirect target): a private-network answer is accepted
  * when the caller's hop says so (writtenPrivateHostAllowed in trust-tiers.ts).
  */
-import { lookup } from 'node:dns/promises';
-import { currentExecutionMode } from '../../gate/execution-context.js';
 import { isIP } from 'node:net';
-import { checkServerIdentity } from 'node:tls';
-import { instrumentedFetch } from '../../utils/fetch-with-timeout.js';
+import {
+  classifyResolvedAddress,
+  isCallerReachablePrivateAddress,
+  systemResolver,
+  type HostResolver,
+  type ResolvedAddress,
+} from '../../runtime/network/destination.js';
 import {
   ALLOWED_PRIVATE_HOSTS_SETTING,
   classifyHostTrustTier,
-  classifyResolvedAddress,
   emitSsrfDeny,
-  isCallerReachablePrivateAddress,
   type TrustTierConfig,
 } from './trust-tiers.js';
-
-/** One DNS answer. */
-export interface ResolvedAddress {
-  readonly address: string;
-  readonly family: number;
-}
-
-/** Resolves a host name to every A and AAAA answer. */
-export type HostResolver = (hostname: string) => Promise<readonly ResolvedAddress[]>;
-
-/** The system resolver: every answer, in the order the resolver gives them. */
-export const systemResolver: HostResolver = async (hostname) => lookup(hostname, { all: true, verbatim: true });
 
 /** A hop's host as the URL grammar gives it, without IPv6 brackets. */
 const bareHost = (url: URL): string => url.hostname.replace(/^\[|\]$/g, '');
@@ -129,64 +118,3 @@ export async function resolveCheckedAddresses(
   return answers;
 }
 
-/**
- * Sends the request to a checked address, trying the next one when a
- * connection cannot be made (an HTTP response of any status is final). A
- * request that is not GET, HEAD or OPTIONS is tried on the next address only
- * after a refused or unreachable connection, never after a reset. The URL carries the address; the
- * Host header carries the written host and port; for https the TLS server name
- * and the certificate check use the written host, so the certificate must be
- * valid for the name the caller asked for.
- */
-export async function pinnedFetch(
-  url: string,
-  init: RequestInit,
-  addresses: readonly ResolvedAddress[],
-  diagnosticMode: 'default' | 'opaque-url' = 'default',
-  assertCurrent?: () => void,
-  withPublication?: DeliveryLifetime['withPublication'],
-): Promise<Response> {
-  const host = bareHost(new URL(url));
-  const lifetime = { signal: init.signal ?? undefined, assertCurrent: () => {
-    currentExecutionMode();
-    assertCurrent?.();
-  }, withPublication };
-  assertDeliveryCurrent(lifetime);
-  if (isIP(host)) return runDeliveryPublication(lifetime, () => instrumentedFetch(url, init, diagnosticMode));
-  let lastError: unknown;
-  for (const address of addresses) {
-    assertDeliveryCurrent(lifetime);
-    try {
-      return await runDeliveryPublication(lifetime, () => fetchAddress(url, init, host, address, diagnosticMode));
-    } catch (error) {
-      if (init.signal?.aborted) throw error;
-      // A request with side effects is repeated against another address only
-      // when the failed attempt provably never reached a server: after the
-      // body is sent a reset says nothing about whether it was processed.
-      if (!isRepeatable(init.method) && !isConnectRefusal(error)) throw error;
-      lastError = error;
-    }
-  }
-  throw lastError;
-}
-
-const REPEATABLE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-const isRepeatable = (method: string | undefined): boolean => REPEATABLE_METHODS.has((method ?? 'GET').toUpperCase());
-
-const CONNECT_REFUSAL_CODES = new Set(['ECONNREFUSED', 'ENETUNREACH', 'EHOSTUNREACH', 'ConnectionRefused', 'FailedToOpenSocket']);
-function isConnectRefusal(error: unknown): boolean {
-  const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
-  return typeof code === 'string' && CONNECT_REFUSAL_CODES.has(code);
-}
-
-async function fetchAddress(url: string, init: RequestInit, host: string, address: ResolvedAddress, diagnosticMode: 'default' | 'opaque-url'): Promise<Response> {
-  const parsed = new URL(url);
-  const pinned = new URL(url);
-  pinned.hostname = address.family === 6 ? `[${address.address}]` : address.address;
-  const headers = new Headers(init.headers);
-  headers.set('host', parsed.host);
-  const tls = parsed.protocol === 'https:'
-    ? { tls: { serverName: host, checkServerIdentity: (_name: string, cert: Parameters<typeof checkServerIdentity>[1]) => checkServerIdentity(host, cert) } }
-    : {};
-  return instrumentedFetch(pinned.toString(), { ...init, headers, ...tls } as RequestInit, diagnosticMode);
-}

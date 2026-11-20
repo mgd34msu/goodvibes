@@ -13,6 +13,7 @@ import {
 import { summarizeError, logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { OpenSelection } from './selection-modal.js';
 import type { TerminalSlashCommand } from './command-registry.js';
+import { commandRefusal } from './command-confirmation.js';
 import type { KeyCombo } from './keybindings.js';
 interface ShellCoreContext {
   readonly session: { readonly runtime: { model: string; provider: string; reasoningEffort: string; sessionId: string } };
@@ -30,6 +31,43 @@ interface KeybindingsView {
   getAll(): { action: string; combos: KeyCombo[]; description: string }[];
   formatCombo(combo: KeyCombo): string;
 }
+/**
+ * "Choose a backup model": the models a failed turn moves to, in order
+ * (`provider.fallbackModels`). Bare, it lists the selectable models to pick one
+ * to add; with model ids it sets the order; `clear` empties it.
+ */
+async function chooseBackupModel(args: readonly string[], ctx: ShellCoreContext, providerApi: ProviderApi): Promise<void> {
+  const current = ctx.platform.configManager.get('provider.fallbackModels');
+  const order = Array.isArray(current) ? current.filter((entry): entry is string => typeof entry === 'string') : [];
+  const say = (list: readonly string[]) => ctx.print(list.length === 0
+    ? 'No backup model: a failed turn stops and says why. /model fallback chooses one.'
+    : `Backup models, in order: ${list.join(', ')}. A turn the main model fails moves to them, until you change it.`);
+  if (args[0]?.toLowerCase() === 'clear') {
+    ctx.platform.configManager.set('provider.fallbackModels', []);
+    say([]);
+    return;
+  }
+  const models = await providerApi.listModels({ selectableOnly: true });
+  if (args.length > 0) {
+    const unknown = args.filter((id) => !models.some((model) => model.registryKey === id || model.modelId === id));
+    if (unknown.length > 0) throw commandRefusal(`No selectable model named ${unknown.join(', ')}; the backup models were not changed.`, '/model fallback lists the models to choose from.');
+    const keys = args.map((id) => models.find((model) => model.registryKey === id || model.modelId === id)!.registryKey);
+    ctx.platform.configManager.set('provider.fallbackModels', [...new Set(keys)]);
+    say([...new Set(keys)]);
+    return;
+  }
+  if (!ctx.openSelection) { say(order); return; }
+  const items = models.filter((model) => !model.current && !order.includes(model.registryKey))
+    .map((model) => ({ id: model.registryKey, label: model.displayName, detail: `${model.registryKey} (${model.providerId})` }));
+  ctx.openSelection(`Choose a backup model${order.length > 0 ? `  (now: ${order.join(', ')})` : ''}`, items, { allowSearch: true, primaryVerbLabel: 'Add' }, (result) => {
+    if (!result) return;
+    const next = [...order, result.item.id];
+    ctx.platform.configManager.set('provider.fallbackModels', next);
+    say(next);
+    ctx.renderRequest();
+  });
+}
+
 export function createShellCoreActions<Context extends ShellCoreContext>(
   services: {
     readonly requireProviderApi: (context: Context) => ProviderApi;
@@ -55,11 +93,15 @@ export function createShellCoreActions<Context extends ShellCoreContext>(
       name: 'model',
       effect: 'mixed',
       aliases: ['m'],
-      description: 'Select or display the current LLM model',
-      usage: '[model-id]',
+      description: 'Select or display the current LLM model; /model fallback chooses a backup model a failed turn moves to',
+      usage: '[model-id] | fallback [model-id...|clear]',
       argsHint: policy.modelHint,
       async handler(args: string[], ctx: Context) {
         const providerApi = services.requireProviderApi(ctx);
+        if (args[0]?.toLowerCase() === 'fallback') {
+          await chooseBackupModel(args.slice(1), ctx, providerApi);
+          return;
+        }
         if (args.length === 0) {
           if (ctx.openModelPicker) {
             ctx.openModelPicker();
@@ -112,7 +154,7 @@ export function createShellCoreActions<Context extends ShellCoreContext>(
     effort: {
       name: 'effort',
       effect: 'mixed',
-      hidden: policy.hidden,
+      firstScreen: !policy.hidden,
       aliases: ['e'],
       description: 'Show or set reasoning effort level',
       usage: '[level]',
@@ -222,7 +264,7 @@ export function createShellCoreActions<Context extends ShellCoreContext>(
     keybindings: {
       name: 'keybindings',
       effect: 'read-only',
-      hidden: policy.hidden,
+      firstScreen: !policy.hidden,
       aliases: ['kb'],
       description: 'List current keyboard bindings and their config file path',
       handler(_args: string[], ctx: Context) {

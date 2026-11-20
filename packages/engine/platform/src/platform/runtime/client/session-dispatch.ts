@@ -76,6 +76,7 @@
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { logger, summarizeError } from '../../utils/index.js';
+import type { Page } from '@goodvibes-jev/engine/errors';
 import type { SharedSessionInputRecord } from '../../control-plane/index.js';
 import { SURFACE_INSTANCE_METADATA_KEY } from '../../control-plane/session-intents.js';
 import type { SharedSessionContinuationRunner } from '../../control-plane/session-intents.js';
@@ -111,11 +112,36 @@ export function readSurfaceAgentOutcome(
  * and `sessions.inputs.deliver`. A product's own operator client satisfies it
  * structurally, so a test injects a stub instead of a port.
  */
+/** Pages read per state per drain at most; the broker keeps at most 500 inputs per session, so this is never reached in practice. */
+const MAX_INPUT_PAGES = 64;
+
+/**
+ * Every input of a session in `state`, oldest first: pages of
+ * `sessions.inputs.list` read while the daemon says `more`, each from the
+ * cursor the previous page named. Stops if a page names no cursor that moves.
+ */
+async function listEveryInput(active: SessionInputsWireClient, sessionId: string, state: string): Promise<readonly SharedSessionInputRecord[]> {
+  const all: SharedSessionInputRecord[] = [];
+  let since: number | undefined;
+  for (let pages = 0; pages < MAX_INPUT_PAGES; pages += 1) {
+    const page = await active.listInputs(sessionId, { state, limit: 500, ...(since !== undefined ? { since } : {}) });
+    all.push(...page.items);
+    const next = page.more && page.next !== undefined ? Number(page.next) : undefined;
+    if (next === undefined || !Number.isFinite(next) || (since !== undefined && next <= since)) break;
+    since = next;
+  }
+  return all;
+}
+
 export interface SessionInputsWireClient {
+  /**
+   * One page of `sessions.inputs.list`: the oldest inputs after `since`, and
+   * `more` with the `next` cursor when inputs remain. A reader loops while `more`.
+   */
   listInputs(
     sessionId: string,
     options: { readonly state?: string; readonly since?: number; readonly limit?: number },
-  ): Promise<{ readonly inputs: readonly SharedSessionInputRecord[] }>;
+  ): Promise<Page<SharedSessionInputRecord>>;
   /**
    * Take an input before starting work on it: the daemon grants it to one
    * caller and refuses the rest (`INPUT_NOT_CLAIMABLE`, see
@@ -397,7 +423,7 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
     const bound = runner; const selectedGeneration = generation;
     const current = () => client === active && runner === bound && generation === selectedGeneration;
     if (!bound) return;
-    const { inputs: queued } = await active.listInputs(sessionId, { state: 'queued', limit: 500 });
+    const queued = await listEveryInput(active, sessionId, 'queued');
     let inputs = queued;
     // Claims are pruned only against a complete view: when the delivered list
     // failed, a claimed input missing from `inputs` is not evidence it was acknowledged.
@@ -406,7 +432,7 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
       // A claimed input waits for its agent as `delivered`. Ours are retried;
       // another process's are taken over only once its lease has run out.
       try {
-        const { inputs: delivered } = await active.listInputs(sessionId, { state: 'delivered', limit: 500 });
+        const delivered = await listEveryInput(active, sessionId, 'delivered');
         await failAbandoned(active, sessionId, delivered);
         inputs = [...queued, ...delivered.filter((input) => {
           if (input.activeAgentId) return false;
@@ -429,8 +455,7 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
         if (key.startsWith(`${sessionId}\0`) && !stillWaiting.has(key)) claimedUnstarted.delete(key);
       }
     }
-    // The broker retains at most 500 inputs. Read the whole bounded queue so
-    // a held tail never starves older eligible inputs.
+    // Every page was read, oldest first, so a held tail never starves older eligible inputs.
     for (const input of inputs) {
       if (!current()) return;
       // A `submit` is the continuation case: a message posted into a session

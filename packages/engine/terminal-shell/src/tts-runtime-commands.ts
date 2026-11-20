@@ -33,7 +33,7 @@ export function createTtsRuntimeCommands<Context extends TtsContext>(policy: {
       name: 'tts',
       effect: 'external-network',
       description: policy.description,
-      hidden: policy.hidden,
+      firstScreen: !policy.hidden,
       usage: policy.alwaysSpeakControls ? '<prompt>|stop|on|off' : '<prompt>|stop',
       // The prompt is free text, sent as typed: quotes and spacing included.
       rawRest: 0,

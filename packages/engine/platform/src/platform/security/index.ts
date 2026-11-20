@@ -70,7 +70,10 @@ export {
   inputOriginIsOwnerDirect,
   startTurnForOwnerInput,
   startTurnForOwnerRequest,
+  currentTurn,
+  withTurn,
   withTurnSurface,
+  type TurnContext,
 } from './turn-boundary.js';
 export {
   CONTENT_DERIVATION_SITE,
@@ -98,3 +101,7 @@ export type {
   ProtectedResearchReference, ResearchReferenceScreeningReceipt, ResearchReferenceScreeningResult, ResearchReferenceProjection,
   ResearchReferenceOperation,
 } from './source-screening/types.js';
+export { EFFECTS, EFFECT_IDS, admitEffects, admitRules, declaredAccessRules, effectFacts, isEffectId } from './effect-authority.js';
+export type { EffectAdmission, EffectClass, EffectFacts, EffectId, EffectRule } from './effect-authority.js';
+export { Secret, bearerHeader, isSecret } from './secret.js';
+export type { RevealPurpose } from './secret.js';

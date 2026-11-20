@@ -266,11 +266,15 @@ async function handleOwnedToolResponseOutcome(args: ToolResponseOutcomeArgs): Pr
   const startedContract = spawnedAgents && results.some(toolResultStartedContract);
 
   if (spawnedAgents) {
-    // Said to the model on its next request, and shown to the person as before.
+    // Said to the model on its next request. The person is told what happened
+    // in his own terms, never the instruction written for the model.
     const note = startedContract ? CONTRACT_STARTED_NOTE
       : 'You spawned agents for part of the task. You retain responsibility for the complete request. Incorporate their results, recover failures, and continue any remaining work.';
     args.conversation.hostInstructions.set('delegation', note, { once: true });
-    args.conversation.addNotice(note, { level: 'info', kind: 'operational' });
+    args.conversation.addNotice(startedContract
+      ? '[Agents] A contract started for part of this request; its work is checked against its acceptance criteria and the turn finishes with its results. F2 shows it.'
+      : '[Agents] Agents started for part of this request; the turn waits for them and finishes with their results. F2 shows them.',
+    { level: 'info', kind: 'operational' });
     // Every additional assignment must pass normal tool admission and appear
     // in the retained delegation evidence; no hidden plan-based spawns here.
     args.requestRender();

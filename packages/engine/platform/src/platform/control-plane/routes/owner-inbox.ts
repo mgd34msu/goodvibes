@@ -4,7 +4,6 @@
  * Who answered is the authenticated caller on the invocation (principal and
  * client kind), never a field of the body.
  */
-import { isAutomationCredential } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import {
@@ -38,7 +37,6 @@ function answerSource(invocation: GatewayMethodInvocation): OwnerAnswerSource {
   return {
     actor: invocation.context.principalId ?? 'operator',
     surface: invocation.context.clientKind ?? 'web',
-    ...(isAutomationCredential(invocation.context) ? { automation: true } : {}),
   };
 }
 

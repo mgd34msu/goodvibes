@@ -2,7 +2,8 @@
  * Runtime import boundaries of the products, run by `bun run architecture:check`:
  * the daemon's original four boundaries (adapted to current owners), the
  * Agent's layer rules plus "the Agent never imports TUI source", and the TUI's
- * layer rules and import cycles (relative and `@/` imports alike).
+ * layer rules and import cycles (relative and `@/` imports alike), and the
+ * platform files that may start a process (`PRODUCT_PROGRAM_SPAWN_FILES`).
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
@@ -197,15 +198,129 @@ export function tuiArchitectureProblems(root: string): string[] {
   });
 }
 
+/**
+ * The files under `packages/engine/platform/src` that may start a process
+ * (`Bun.spawn`, `Bun.spawnSync`, `child_process`), relative to that folder.
+ * Each was reviewed: it runs a fixed program the product chose, or it is the
+ * boundary itself. A program a project, a model or a plugin chooses starts
+ * through `runContained` (runtime/sandbox/contained-spawn.ts), which states
+ * what it may write and whether it has a network. A new file that spawns, or
+ * an entry that no longer spawns, fails the check.
+ */
+export const PRODUCT_PROGRAM_SPAWN_FILES: ReadonlySet<string> = new Set([
+  // The boundary's own spawn sites: the exec tool (bubblewrap per command), sandbox sessions and runContained.
+  'platform/runtime/sandbox/backend.ts',
+  'platform/runtime/sandbox/contained-spawn.ts',
+  'platform/tools/exec/captured-exec.ts',
+  'platform/tools/exec/interactive.ts',
+  'platform/tools/exec/process-tree.ts',
+  'platform/tools/exec/runtime.ts',
+  'platform/tools/exec/sandbox.ts',
+  // Programs someone else chooses, started here today; each is to start through runContained.
+  'platform/acp/connection.ts', // a configured ACP agent
+  'platform/acp/host.ts', // a configured ACP agent
+  'platform/contract/gates.ts', // a contract's gate command
+  'platform/hooks/runners/command.ts', // the owner's hook command
+  'platform/mcp/client.ts', // a configured MCP server
+  'platform/runtime/eval/headless-executor.ts', // the product binary for an eval task
+  'platform/runtime/eval/task-suite.ts', // a task's verify script
+  'platform/runtime/remote/host/backends/process-runner.ts', // work a remote peer sent
+  'platform/tools/shared/auto-heal.ts', // a project formatter or linter
+  'platform/tools/shared/process-manager.ts', // a background process the exec tool started
+  'platform/triggers/hosts.ts', // a command a trigger watches
+  'platform/workflow/automation-commands.ts', // an automation command
+  'platform/workflow/hook-action-executor.ts', // a hook's action command
+  // Fixed programs the product chose (git, gh, rg, systemctl, launchctl, tailscale, cloudflared, gcloud, bwrap, a language server it installs, ...).
+  'platform/agents/worktree.ts',
+  'platform/browser/browser-host-client.ts',
+  'platform/browser/browser-provision-io.ts',
+  'platform/ci-watch/auto-watch.ts',
+  'platform/ci-watch/gh-source.ts',
+  'platform/cloudflare/tunnel-connector.ts',
+  'platform/config/process-start-time.ts',
+  'platform/config/secret-refs.ts',
+  'platform/contract/completion.ts',
+  'platform/contract/evidence.ts',
+  'platform/contract/fix-planner-input.ts',
+  'platform/contract/gate-input.ts',
+  'platform/contract/git-placement.ts',
+  'platform/contract/input-apply.ts',
+  'platform/contract/input-snapshot.ts',
+  'platform/contract/private-read-receipts.ts',
+  'platform/contract/publication-input.ts',
+  'platform/contract/publication-merge.ts',
+  'platform/contract/review-inventory.ts',
+  'platform/contract/tree-baseline.ts',
+  'platform/contract/tree-identity.ts',
+  'platform/daemon/launchd-handover.ts',
+  'platform/daemon/service-handover.ts',
+  'platform/daemon/service-manager.ts',
+  'platform/git/service.ts',
+  'platform/google/gcloud.ts',
+  'platform/intelligence/lsp/binary-downloader.ts',
+  'platform/intelligence/lsp/client.ts',
+  'platform/orchestration/dirty-file-observation.ts',
+  'platform/orchestration/dirty-guard.ts',
+  'platform/orchestration/worktree-isolation.ts',
+  'platform/pairing/stable-host.ts',
+  'platform/power/child-hygiene.ts',
+  'platform/power/darwin-caffeinate.ts',
+  'platform/power/linux-logind.ts',
+  'platform/power/sleep-edge-watch.ts',
+  'platform/remote-access/tailscale.ts',
+  'platform/runtime/client/daemon-handover.ts',
+  'platform/runtime/ecosystem/bundle-pin.ts',
+  'platform/runtime/fleet/observed/detect.ts',
+  'platform/runtime/fleet/observed/source.ts',
+  'platform/runtime/global-package-owner.ts',
+  'platform/runtime/owner-read-evidence.ts',
+  'platform/runtime/reachability-check.ts',
+  'platform/runtime/worktree/registry.ts',
+  'platform/runtime/worktree/retention.ts',
+  'platform/runtime/worktree/setup.ts',
+  'platform/state/memory-file-projection.ts',
+  'platform/tools/analyze/captured-git.ts',
+  'platform/tools/find/ripgrep.ts',
+  'platform/utils/clipboard.ts',
+  'platform/utils/notify.ts',
+  'platform/utils/open-external.ts',
+  'platform/utils/process-runner.ts',
+  'platform/utils/shell-split.ts',
+  'platform/voice/providers/local.ts',
+  'platform/voice/provisioning/provisioner.ts',
+  'platform/workspace/registration/worktree-link.ts',
+])
+
+const SPAWN_PATTERN = /\bBun\.spawn(?:Sync)?\b|['"](?:node:)?child_process['"]/;
+
+/** Spawn sites under the platform sources that are not on the reviewed list, and list entries that no longer spawn. */
+export function programSpawnProblems(root: string): string[] {
+  const platform = resolve(root, 'packages/engine/platform/src');
+  const spawning = new Set(sources(platform)
+    .filter((file) => SPAWN_PATTERN.test(readFileSync(file, 'utf8')))
+    .map((file) => relative(platform, file).split(sep).join('/')));
+  const problems: string[] = [];
+  for (const file of spawning) {
+    if (!PRODUCT_PROGRAM_SPAWN_FILES.has(file)) {
+      problems.push(`process spawn outside the reviewed list: packages/engine/platform/src/${file}; start a program a project, model or plugin chose through runContained (runtime/sandbox/contained-spawn.ts), or add a fixed product program's file to PRODUCT_PROGRAM_SPAWN_FILES in scripts/daemon-architecture-check.ts`);
+    }
+  }
+  for (const file of PRODUCT_PROGRAM_SPAWN_FILES) {
+    if (!spawning.has(file)) problems.push(`PRODUCT_PROGRAM_SPAWN_FILES names packages/engine/platform/src/${file}, which no longer starts a process; remove the entry`);
+  }
+  return problems;
+}
+
 if (import.meta.main) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
   const input = daemonArchitecture(root);
   const tui = tuiArchitecture(root);
-  const problems = [...runtimeArchitectureProblems(input), ...clusterPackageImportProblems(root), ...agentArchitectureProblems(root), ...tuiArchitectureProblems(root)];
+  const problems = [...runtimeArchitectureProblems(input), ...clusterPackageImportProblems(root), ...agentArchitectureProblems(root), ...tuiArchitectureProblems(root), ...programSpawnProblems(root)];
   if (problems.length) { console.error(problems.join('\n')); process.exitCode = 1; }
   else {
     console.log(`Daemon architecture: ${input.files.length} runtime files, four non-vacuous boundaries (the cluster one also checked through the package specifier), no relative runtime cycles.`);
     console.log(`Agent architecture: ${agentArchitecture(root).files.length} runtime files, four non-vacuous layer boundaries, no TUI source imports.`);
     console.log(`TUI architecture: ${tui.files.length} runtime files, ${tui.rules.length} non-vacuous layer boundaries, no runtime cycles (relative or @/ imports).`);
+    console.log(`Process spawns: ${PRODUCT_PROGRAM_SPAWN_FILES.size} reviewed platform files; every other program starts through runContained.`);
   }
 }

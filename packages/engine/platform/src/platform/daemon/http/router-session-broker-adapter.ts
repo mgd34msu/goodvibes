@@ -28,7 +28,7 @@ export function buildRouterSessionBrokerAdapter(
     getSession: (sessionId) => sessionBroker.getSession(sessionId),
     getMessages: (sessionId, limit, offset) => sessionBroker.getMessages(sessionId, limit, offset),
     getInputs: (sessionId, limit) => sessionBroker.getInputs(sessionId, limit),
-    getInputsSince: (sessionId, options) => sessionBroker.getInputsSince(sessionId, options),
+    getInputsPage: (sessionId, options) => sessionBroker.getInputsPage(sessionId, options),
     markInputDelivered: (sessionId, inputId, options) => sessionBroker.markInputDelivered(sessionId, inputId, options),
     closeSession: (sessionId) => sessionBroker.closeSession(sessionId),
     reopenSession: (sessionId) => sessionBroker.reopenSession(sessionId),

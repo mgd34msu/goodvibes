@@ -189,7 +189,8 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
                   actions: '[Del] delete  [Ctrl+E] edit',
                 }));
           ctx.openSelection('Templates', items, { allowSearch: true, customActions: actions }, (result) => {
-            if (!result) return;
+            // The "No templates saved" row is a notice, not a template.
+            if (!result || result.item.id === '_empty') return;
             if (result.action === 'delete') {
               // The list holds one entry per name (a project template hides the global one), so its scope is the one shown.
               const entry = templates.find((t) => t.name === result.item.id);

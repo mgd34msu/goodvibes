@@ -24,9 +24,9 @@ const operations: Readonly<Record<DelegatedTelegramOperation, { readonly input: 
 export const builtinDelegatedInboundMethodDescriptors = (Object.keys(operations) as DelegatedTelegramOperation[]).map((operation) => methodDescriptor({
   id: `inbound.telegram.${operation}`, title: `Telegram Delegated Intake ${operation}`, category: 'inbound',
   description: operations[operation].description,
-  access: 'admin', scopes: ['read:work-ledger', WORK_LEDGER_WRITE_SCOPE], effect: operations[operation].effect,
-  // A second configure selects the chat again under a new configuration; every other write settles what is already settled.
-  ...(operations[operation].effect === 'read' ? {} : { repeat: operation === 'configure' ? 'unsafe' as const : 'safe' as const }),
+  effects: ['work-ledger.inspect', 'work-ledger.administer'],
+  // A second configure selects the chat again under a new configuration; every other call settles what is already settled.
+  repeat: operation === 'configure' ? 'unsafe' : 'safe',
   http: { method: 'POST', path: `/api/inbound/telegram/${operation}` },
   inputSchema: toJSONSchema(operations[operation].input), outputSchema: toJSONSchema(delegatedTelegramResultSchemas[operation]),
 }));

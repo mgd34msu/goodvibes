@@ -28,7 +28,7 @@ export function getStepFieldCount(controller: OnboardingWizardControllerLike, st
 export function getCompletedFieldCount(controller: OnboardingWizardControllerLike, stepIndex: number): number {
     const step = controller.steps[stepIndex];
     if (!step) return 0;
-    return step.fields.filter((field) => controller.isFieldSatisfied(field)).length;
+    return step.fields.filter((field) => controller.isFieldSatisfied(field) && controller.getFieldValidationError(step, field) === null).length;
   }
 
 export function isStepDirty(controller: OnboardingWizardControllerLike, stepIndex: number): boolean {
@@ -41,7 +41,10 @@ export function isFieldDirty(controller: OnboardingWizardControllerLike, fieldId
     return field ? controller.isFieldDirtyByDefinition(field) : false;
   }
 
-export function getBlockingFieldLabels(controller: OnboardingWizardControllerLike): readonly string[] {
+export function getBlockingFieldLabels(
+  controller: OnboardingWizardControllerLike,
+  steps: readonly OnboardingWizardStepDefinition[] = controller.steps,
+): readonly string[] {
     const labels: string[] = [];
     if (controller.hydrationPending) {
       labels.push('Loading: Current runtime settings are still being collected.');
@@ -52,7 +55,7 @@ export function getBlockingFieldLabels(controller: OnboardingWizardControllerLik
       return labels;
     }
 
-    for (const step of controller.steps) {
+    for (const step of steps) {
       for (const field of step.fields) {
         if (field.kind === 'acknowledgement' && field.required && !controller.isFieldSatisfied(field)) {
           labels.push(`${step.shortLabel}: ${field.label}`);

@@ -11,7 +11,7 @@ export function registerCompatRuntimeCommands(registry: CommandRegistry): void {
     effect: 'read-only',
     aliases: ['compatibility'],
     description: 'Inspect connected-host compatibility and Agent Knowledge route readiness',
-    hidden: true,
+    firstScreen: false,
     usage: '[--json]',
     argsHint: '[--json]',
     async handler(args, ctx) {

@@ -359,7 +359,31 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
             let eligibleTurn = false;
             if (command) {
                 phase = 'get';
-                const found = await binding.client.get({ inputId: command.inputId }, { signal: controller.signal });
+                let found: Awaited<ReturnType<typeof binding.client.get>>;
+                try {
+                    found = await binding.client.get({ inputId: command.inputId }, { signal: controller.signal });
+                }
+                catch (error) {
+                    const refused = definiteHostRefusal(error);
+                    if (refused === undefined || !current())
+                        throw error;
+                    const principal = PRINCIPAL_CODES.has((error as { readonly code?: unknown }).code);
+                    // The host refuses to look the saved message up (the workspace is not registered, say): it
+                    // cannot admit or run it either, since admission is refused the same way. Dropping it is safe.
+                    if (mode === 'cancel') {
+                        await settled();
+                        if (!current())
+                            return;
+                        if (this.retained?.command.requestId === command.requestId)
+                            this.retained = undefined;
+                        return { status: 'unavailable', ...(principal ? { cause: 'principal' as const } : {}), message: removeFailed
+                                ? `The host refused to look up the earlier message, so it is not running: ${refused} Its saved copy could not be removed now; run /work intake-cancel again.`
+                                : `The host refused to look up the earlier message, so it is not running: ${refused} Its saved copy was dropped.` };
+                    }
+                    return { status: 'unavailable', ...(principal ? { cause: 'principal' as const } : {}), request: request(), nextStep: 'cancel',
+                        message: `The host refused this: ${refused} Your earlier message is still saved here; drop it with /work intake-cancel, or send it with /work intake-retry once that is fixed.${mode === 'submit' ? ' This new message was not sent.' : ''}`,
+                        ...(mode === 'submit' ? { notSent: true as const } : {}) };
+                }
                 if (!current())
                     return;
                 if (found.kind !== 'not-found')
@@ -481,8 +505,21 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                     this.retained = undefined;
                 return { status: 'unavailable', message: 'The earlier input was written to the intake journal but never sent to the host. It was removed from the journal and nothing ran; submit a new input.' };
             }
+            if (!result && mode === 'cancel') {
+                // The host has no record of it, so nothing ran and nothing can: a capture still on its
+                // way would only be recorded, never admitted, since admission is a separate request
+                // that only this saved copy could send. Dropping the saved copy ends it.
+                await settled();
+                if (!current())
+                    return;
+                if (this.retained?.command.requestId === command.requestId)
+                    this.retained = undefined;
+                return { status: 'unavailable', message: removeFailed
+                        ? 'The earlier message never reached the host, so nothing ran, but its saved copy could not be removed now. Run /work intake-cancel again.'
+                        : 'The earlier message never reached the host, so nothing ran. Its saved copy was dropped; send a new message.' };
+            }
             if (!result)
-                return { status: 'unknown', message: 'Original input was not found at this lookup. Only intake-retry may replay its exact durable capture.', request: request() };
+                return { status: 'unknown', message: 'The host has no record of the earlier message, so nothing ran. Send it with /work intake-retry, or drop it with /work intake-cancel.', request: request(), nextStep: 'retry' };
             if (mode !== 'status') {
                 await preserveHostedSource();
                 if (!current())

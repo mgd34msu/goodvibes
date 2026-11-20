@@ -1,20 +1,17 @@
 /**
- * relay-stream-overflow.ts, honest accounting of live events dropped over the relay tunnel.
+ * relay-stream-overflow.ts, honest accounting of live events dropped for this browser.
  *
- * When the webui is connected to the daemon over the relay, live event streams are tunnelled
- * through the relay's bounded send buffer (see the platform's relay-transport). If that buffer
- * overflows, the daemon does NOT silently drop frames, it emits an honest `relay-overflow`
- * SSE event carrying the count of chunks dropped since the last notice. Every stream consumer
- * (session updates, control-plane invalidation, chat turns) routes that event here.
+ * Live event streams can lose frames two ways: the daemon drops frames for a reader that
+ * fell behind (the stream reports a typed gap), and the relay tunnel's bounded send buffer
+ * overflows (the tunnelled stream ends with a typed gap error and reconnects from its last
+ * event id). Every stream consumer (session updates, control-plane invalidation, chat turns)
+ * records either here with the dropped count; nothing is ever written into a stream's body.
  *
  * This tiny module-level store accumulates the dropped count and notifies React subscribers.
  * RelayOverflowBanner refetches every query once per burst, by itself: the missed events were
  * only ever invalidation triggers, so a full refetch restores the true state.
  * acknowledgeRelayOverflow() clears the count when that refetch starts.
  */
-
-/** The SSE event name the relay transport emits on a tunnel send-buffer overflow. */
-export const RELAY_OVERFLOW_EVENT = 'relay-overflow';
 
 export interface RelayOverflowSnapshot {
   /** Total live events dropped over the relay since the last acknowledge. */
@@ -30,19 +27,6 @@ const listeners = new Set<() => void>();
 
 function emit(): void {
   for (const listener of listeners) listener();
-}
-
-/** Parse the `dropped` count from a relay-overflow SSE payload (`{ dropped: N }`). */
-export function readDroppedCount(payload: unknown): number {
-  if (payload && typeof payload === 'object' && 'dropped' in payload) {
-    const value = (payload as { dropped: unknown }).dropped;
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string') {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) return parsed;
-    }
-  }
-  return 0;
 }
 
 /** Record an overflow notice. A non-positive count still bumps the notice (events were dropped). */

@@ -225,3 +225,6 @@ export type ExecutionRefusalCode =
   | 'held-reply-not-understood'
   /** Under `payments.cvvHandling: 'prompt'`, the security code was not typed before the deadline. */
   | 'security-code-not-given';
+
+/** An amount in its currency; see money.ts. */
+export type { Money } from './money.js';

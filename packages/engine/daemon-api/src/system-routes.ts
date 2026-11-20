@@ -9,7 +9,7 @@ import {
 } from './route-helpers.js';
 import { jsonErrorResponse, readJsonErrorResponse } from './error-response.js';
 import { withAdmin } from './auth-helpers.js';
-import { isAutomationCredential, requestActor } from './http-policy.js';
+import { requestActor } from './http-policy.js';
 import type {
   ApprovalRememberTier,
   AutomationRouteBindingKind,
@@ -239,24 +239,8 @@ export function createDaemonSystemRouteHandlers(
     approvalAction: (approvalId, action, req) => {
       const admin = context.requireAdmin(req);
       if (admin) return admin;
-      // Answering an approval put to the owner is his own act: the Agent's credential, which its
-      // model's calls on his behalf present, never gives the answer, whatever approved the call.
-      if ((action === 'approve' || action === 'deny') && context.resolveAuthenticatedPrincipal?.(req)?.credentialKind === 'agent') {
-        return context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({
-          error: `Approval ${approvalId} was put to the owner; only he answers it. Nothing was answered. Tell the owner it is waiting: he answers it in the approval prompt, with /approval, or in the web UI.`,
-          code: 'OWNER_ONLY',
-        }, { status: 403 }));
-      }
-      // A change put to the owner (owner-act.ts) is answered with his own credential only:
-      // an automation token cannot approve the change it, or another script, asked for.
-      if ((action === 'approve' || action === 'deny') && isPairedDeviceCredential(context, req)
-        && isOwnerActRecord(context.approvalBroker.getApproval?.(approvalId))) {
-        return context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({
-          error: `Approval ${approvalId} asks the owner to make a change only he makes; a token minted for automation cannot answer it. Nothing was answered.`,
-          code: 'OWNER_ONLY',
-          next: ['The owner answers it from his own app: the approval prompt, /approval in a terminal, or the web UI signed in as him.'],
-        }, { status: 403 }));
-      }
+      // Answering an approval is the owner's own act (`approval.answer` in the effect table): the
+      // catalog gate refused every other caller, the Agent's model included, before this route ran.
       return handleApprovalAction(context, approvalId, action, req);
     },
     getConfig: (req) => {
@@ -299,9 +283,9 @@ export function createDaemonSystemRouteHandlers(
       // once more immediately before the write, so they are not checked again here.
       // A settings import replaces the owner's settings wholesale: a paired
       // device's credential does not carry that act.
-      if (Object.hasOwn(payload, 'settingsImportPrecondition') && isPairedDeviceCredential(context, req)) {
+      if (Object.hasOwn(payload, 'settingsImportPrecondition') && (context.settingsLoosenAdmission?.(req) ?? 'allowed') !== 'allowed') {
         return jsonErrorResponse({
-          error: 'A settings import is the owner\'s own act; a token minted for automation cannot make it. Nothing was imported.',
+          error: 'A settings import is the owner\'s own act; only his own credential makes it. Nothing was imported.',
           code: 'OWNER_ONLY', state: 'the settings are unchanged',
           next: ['Import the settings from the owner\'s own app (the operator token, an admin sign-in or a terminal on the daemon\'s machine).'],
         }, { status: 403 });
@@ -951,22 +935,14 @@ async function handleApprovalAction(
     : context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({ error: 'Unknown approval', code: 'APPROVAL_NOT_FOUND' }, { status: 404 }));
 }
 
-/** Automation's credential (a paired device's token the owner's pairing flow did not mint), never the owner's own. */
-function isPairedDeviceCredential(context: DaemonSystemRouteContext, req: Request): boolean {
-  return isAutomationCredential(context.resolveAuthenticatedPrincipal?.(req));
-}
-
-/** Whether an approval record marks a change only the owner's own credential answers (control-plane/owner-act.ts). */
-function isOwnerActRecord(approval: unknown): boolean {
-  return isJsonRecord(approval) && isJsonRecord(approval.metadata) && approval.metadata.ownerAct === true;
-}
-
 /**
  * A settings write that loosens a security, permission, judgment or payment
- * setting is the owner's own act. From an automation token (a paired device's token the owner's pairing flow did not mint) it is not
- * made: it is put to the owner as an approval, applied when he approves it,
- * and the caller is answered 202 with the approval's id. Any other credential,
- * or a change that loosens nothing, gets null and the write goes on.
+ * setting is the owner's own act (`settings.loosen` in the effect table).
+ * From an admin who is not the owner (an admin sign-in, a full pairing minted
+ * for automation) it is not made: it is put to the owner as an approval,
+ * applied when he approves it, and the caller is answered 202 with the
+ * approval's id. The owner's own credential, or a change that loosens nothing,
+ * gets null and the write goes on.
  */
 async function ownerActResponse(
   context: DaemonSystemRouteContext,
@@ -977,23 +953,24 @@ async function ownerActResponse(
   args: Record<string, unknown>,
   apply: () => unknown,
 ): Promise<Response | null> {
-  if (!isPairedDeviceCredential(context, req) || !context.configLoosening) return null;
+  const admission = context.settingsLoosenAdmission?.(req) ?? 'allowed';
+  if (admission === 'allowed' || !context.configLoosening) return null;
   const reasons = changes.flatMap(({ key, value, toDefault }) => {
     const loosening = context.configLoosening!(key, value, toDefault ? { toDefault: true } : {});
     return loosening === null ? [] : [`Changing ${key} would ${loosening}.`];
   });
   if (reasons.length === 0) return null;
   const keys = changes.map(({ key }) => key);
-  if (!context.putToOwner) {
+  if (admission === 'refused' || !context.putToOwner) {
     return context.recordApiResponse(req, path, jsonErrorResponse({
-      error: `${reasons.join(' ')} Only the owner makes that change; a token minted for automation cannot. Nothing was changed.`,
+      error: `${reasons.join(' ')} Only the owner makes that change. Nothing was changed.`,
       code: 'OWNER_ONLY', state: 'the settings are unchanged',
       next: ['Make the change from the owner\'s own app (the operator token, an admin sign-in or a terminal on the daemon\'s machine).'],
     }, { status: 403 }));
   }
-  const requestedBy = context.resolveAuthenticatedPrincipal?.(req)?.principalId ?? 'an automation token';
+  const requestedBy = context.resolveAuthenticatedPrincipal?.(req)?.principalId ?? 'a caller who is not the owner';
   const { approvalId } = await context.putToOwner({
-    summary: `An automation token asks to change ${keys.join(', ')}`,
+    summary: `${requestedBy} asks to change ${keys.join(', ')}`,
     reasons, tool, args, requestedBy, apply,
   });
   return context.recordApiResponse(req, path, Response.json({

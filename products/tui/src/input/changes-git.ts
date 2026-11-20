@@ -125,6 +125,12 @@ export async function loadUntrackedDiff(cwd: string, only?: readonly string[]): 
  * untracked files this session wrote).
  */
 export async function loadDiff(cwd: string, source: ChangesSource, sessionFiles: readonly string[]): Promise<LoadedDiff> {
+  // "This session" is the files this session wrote, and only those: a file
+  // that was already changed or untracked before it (or one the app wrote for
+  // itself) is not one of its changes. Press v for the whole working tree.
+  if (source === 'session' && sessionFiles.length === 0) {
+    return { raw: '', label: 'this session · no files changed yet', error: null };
+  }
   let args: string[];
   let label: string;
   let untrackedOnly: readonly string[] | undefined;
@@ -140,7 +146,7 @@ export async function loadDiff(cwd: string, source: ChangesSource, sessionFiles:
     untrackedOnly = sessionFiles;
   } else {
     args = ['diff', '--no-color', ...DIFF_PREFIX_ARGS, 'HEAD'];
-    label = source === 'session' ? 'no files tracked this session · all changes vs HEAD' : 'all changes vs HEAD';
+    label = 'all changes vs HEAD';
   }
   let [result, untracked] = await Promise.all([
     run(args, cwd),

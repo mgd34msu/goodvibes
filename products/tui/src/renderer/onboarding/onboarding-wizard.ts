@@ -129,8 +129,12 @@ function focusLines(wizard: OnboardingWizardController): TextLine[] {
   let hint = field.hint;
   if (field.kind === 'modelPicker') hint = `${hint} Press Enter to open the picker.`;
   if (field.kind === 'text' || field.kind === 'masked') hint = `${hint} Press Enter to edit inline.`;
+  // A value the wizard will refuse (a confirmation that does not match, a bad
+  // port) is said at the field, not only at apply.
+  const problem = wizard.getFieldValidationError(wizard.currentStep, field);
   return [
     { text: `Focus: ${field.label} [${wizard.getFieldValueLabel(field)}]`, style: { fg: t.text, bold: true } },
+    ...(problem !== null ? [{ text: problem, style: { fg: t.error, bold: true } }] : []),
     { text: hint, style: { fg: t.textMuted } },
   ];
 }

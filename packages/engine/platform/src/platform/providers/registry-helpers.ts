@@ -16,16 +16,3 @@ export function splitModelRegistryKey(modelId: string): { providerId: string; re
   };
 }
 
-/**
- * Key-order-independent JSON serialisation used for model diff comparisons.
- * Recursively sorts object keys so that { a: 1, b: 2 } and { b: 2, a: 1 }
- * produce the same string.
- */
-export function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';
-  const sorted = Object.keys(value as Record<string, unknown>).sort();
-  return '{' + sorted.map((key) => (
-    JSON.stringify(key) + ':' + stableStringify((value as Record<string, unknown>)[key])
-  )).join(',') + '}';
-}

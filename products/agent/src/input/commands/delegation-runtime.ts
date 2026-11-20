@@ -290,7 +290,7 @@ export function registerDelegationRuntimeCommands(registry: CommandRegistry): vo
     effect: 'delegated-work',
     aliases: ['build'],
     description: 'Explicitly delegate build/fix/review work to GoodVibes TUI through shared-session routes',
-    hidden: true,
+    firstScreen: false,
     usage: '[--review] [--reason <why>] [--success <evidence>] [--workspace <hint>] [--priority <priority>] <task> | status [session-id]',
     argsHint: '[--review] [--reason <why>] [--success <evidence>] [--workspace <hint>] [--priority <priority>] <task> | status [session-id]',
     handler: makeHandler(),

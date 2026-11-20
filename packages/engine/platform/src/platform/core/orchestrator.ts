@@ -1323,6 +1323,8 @@ export class Orchestrator {
     turnId: string,
     providerRegistry: ReturnType<typeof requireProviderRegistry>,
   ): Promise<void> {
+    // What had streamed when the person interrupted stays on screen (never in the history).
+    const interrupted = this.isStreaming ? this.conversation.streamingReplyText() : '';
     // Close a stream left open by the throw, aborted or not, so this turn does
     // not end with STREAM_START unmatched and the next turn starts clean.
     if (this.isStreaming) {
@@ -1339,6 +1341,7 @@ export class Orchestrator {
       this.reconcileUnresolvedToolCalls([], 'exception-before-results');
       this.conversation.removeMessagesAfter(this.turnStartMessageCount, { preserveCompletedTools: true });
       this.conversation.markLastUserMessageCancelled(this.turnStartMessageCount);
+      if (interrupted.trim().length > 0) this.conversation.keepInterruptedReply(interrupted);
       this.conversation.addEventNotice('[Response cancelled]', { type: 'TURN_CANCEL' });
       this.turnCancellation.end(turnId);
       if (this.runtimeBus) {
@@ -1359,7 +1362,11 @@ export class Orchestrator {
     const structured = (error instanceof AppError && (error.statusCode !== undefined || error.category !== 'unknown')) || classifyFailure(error) !== undefined;
     const msg = judgmentFailed ? `[Judgment] ${error.message}` : structured ? formatError(error, display)
       : await readFormattedError(error, { site: 'core.orchestrator.turn-error', ...display }).catch(() => formatError(error, display));
-    this.conversation.addNotice(msg, { level: 'error' });
+    // The line in the transcript always ends with what the person can do next.
+    const next = judgmentFailed || /\n\s+Hint: /.test(msg) ? ''
+      : error instanceof ProviderError ? '\n  Next: send it again, or choose another provider or model with /model.'
+        : '\n  Next: send it again; if it keeps failing, /health shows what is wrong.';
+    this.conversation.addTurnFailure(`${msg}${next}`);
     this.requestRender();
     // The person's fallback order was already tried inside the turn (providers/failover.ts),
     // and its [Failover] line said which models answered or why the turn stopped.
@@ -1419,6 +1426,9 @@ export class Orchestrator {
     // The turn's whole phase ends here, whatever a stream or compaction left open. A native
     // turn's permit still holds execution until its owner settles it.
     try { this.stopThinking(); } finally { this.phase = this.activeNativeConversationPermit === undefined ? 'idle' : 'settling'; }
+    // stopThinking() painted while the phase still held the turn, and its frame timer is gone:
+    // paint the ended turn now, or the screen keeps showing it as working until the next key.
+    this.requestRender();
     const durationMs = Date.now() - turnStartTime;
     const notifyEnabled = configManager.get('behavior.notifyOnComplete') as boolean | undefined;
     if (outcome !== 'cancelled' && notifyEnabled !== false) {

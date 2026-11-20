@@ -44,7 +44,7 @@ export function createConfigWorkspaceCommand<Context extends EntryContext>(polic
     description: policy.description,
     usage: policy.usage,
     argsHint: policy.argsHint,
-    hidden: policy.hidden,
+    firstScreen: !policy.hidden,
     // Any other word opens the settings workspace filtered by it, so only `set` takes arguments.
     subcommands: policy.set ? { set: '<key> <value>' } : undefined,
     // `set`'s value is taken as typed: a string setting may hold quotes and spaces.

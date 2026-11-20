@@ -1,4 +1,6 @@
-import type { MemoryRecord } from '../../lib/goodvibes';
+import { useQuery } from '@tanstack/react-query';
+import { client as platformClient, type MemoryRecord } from '../../lib/goodvibes';
+import { queryKeys } from '../../lib/queries';
 import { DetailSection, Facts } from '../../components/data-view/DataView';
 import { Chip } from '../../components/ui/Chip';
 import { formatConfidence, formatProvenanceLink, formatTimestamp, isFlaggedReviewState } from './memory-helpers';
@@ -10,8 +12,33 @@ import { formatConfidence, formatProvenanceLink, formatTimestamp, isFlaggedRevie
  * plain text exactly like any other ref, never turned into a link or fetched, this view
  * has no read-file capability and never invents one.
  */
+/**
+ * Who reviewed a record, in words: the daemon records the reviewing credential's
+ * principal ('shared-token', 'local', 'pairing:<id>', 'consolidation', a user name).
+ * The owner's own credentials read as "you"; a paired device by its name.
+ */
+function useReviewerLabel(reviewedBy: string | undefined): string {
+  const pairingId = reviewedBy?.startsWith('pairing:') ? reviewedBy.slice('pairing:'.length) : '';
+  const tokens = useQuery({
+    queryKey: queryKeys.pairingTokens,
+    queryFn: () => platformClient.operator.pairing.tokens.list(),
+    enabled: pairingId.length > 0,
+    staleTime: 60_000,
+    retry: false,
+  });
+  if (!reviewedBy) return '';
+  if (reviewedBy === 'operator' || reviewedBy === 'shared-token' || reviewedBy === 'local') return 'you';
+  if (reviewedBy === 'consolidation') return 'memory consolidation';
+  if (pairingId) {
+    const name = tokens.data?.tokens.find((token) => token.id === pairingId)?.name;
+    return name ? `your device "${name}"` : 'a paired device';
+  }
+  return reviewedBy;
+}
+
 export function MemoryRecordDetail({ record }: { record: MemoryRecord }) {
   const flagged = isFlaggedReviewState(record.reviewState);
+  const reviewer = useReviewerLabel(record.reviewedBy);
 
   return (
     <>
@@ -38,7 +65,7 @@ export function MemoryRecordDetail({ record }: { record: MemoryRecord }) {
           {
             label: 'Reviewed',
             value: record.reviewedAt !== undefined
-              ? `${formatTimestamp(record.reviewedAt)}${record.reviewedBy ? ` by ${record.reviewedBy}` : ''}`
+              ? `${formatTimestamp(record.reviewedAt)}${reviewer ? ` by ${reviewer}` : ''}`
               : undefined,
           },
         ]}

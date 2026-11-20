@@ -67,7 +67,7 @@ export interface ProviderKeyCaptureTarget {
 
 /**
  * The providers onboarding offers an API-key field for: every registered
- * provider that declares an api-key route AND carries a resolved auth env var.
+ * provider whose registration declares an API-key env var.
  * Ordered by provider id so the wizard renders deterministically.
  */
 export function deriveProviderKeyCaptureTargets(
@@ -75,11 +75,15 @@ export function deriveProviderKeyCaptureTargets(
 ): ProviderKeyCaptureTarget[] {
   if (!providers) return [];
   return providers
-    .filter((record) => record.apiKeyEnvVar && record.availableRoutes.includes('api-key'))
+    // A provider accepts a key when its registration declares an auth env var
+    // (stamped as apiKeyEnvVar). availableRoutes lists only the routes that
+    // already hold a credential, so it says whether a key is stored, not
+    // whether one is accepted.
+    .filter((record) => record.apiKeyEnvVar)
     .map((record) => ({
       providerId: record.providerId,
       apiKeyEnvVar: record.apiKeyEnvVar as string,
-      configured: record.configured,
+      configured: record.availableRoutes.includes('api-key'),
     }))
     .sort((a, b) => a.providerId.localeCompare(b.providerId));
 }

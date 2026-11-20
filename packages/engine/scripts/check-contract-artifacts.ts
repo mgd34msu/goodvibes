@@ -46,3 +46,9 @@ if (consumerDrift) {
   console.error('[contracts:check] generated consumer transport drift, run `bun run refresh:contracts`');
   process.exit(1);
 }
+
+// The slash commands' actions as data for the web UI's sheets
+// (contracts/artifacts/command-actions.json), from the command descriptions:
+// stale, or naming an operator method the contract lacks, reddens the gate.
+const commandActions = Bun.spawnSync(['bun', 'packages/engine/scripts/generate-command-actions.ts', '--check'], { stdout: 'inherit', stderr: 'inherit' });
+if (commandActions.exitCode !== 0) process.exit(1);

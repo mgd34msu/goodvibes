@@ -1,4 +1,4 @@
-import { OwnedWork } from '../utils/owned-work.js';
+import { OwnedScope } from '../utils/owned-work.js';
 import type { HookEvent, HookResult } from './types.js';
 
 /** In-process ownership only. Never serialized in HookEvent or hook input. */
@@ -19,7 +19,7 @@ export class TurnHookOwner {
   readonly sessionId: string;
   readonly turnId: string;
   private readonly controller = new AbortController();
-  private readonly work = new OwnedWork();
+  private readonly work = new OwnedScope('turn hooks');
   private accepting = true;
   private drained = false;
   private draining: Promise<void> | undefined;
@@ -57,7 +57,7 @@ export class TurnHookOwner {
 
   private reserve<T>(start: (signal: AbortSignal) => T | PromiseLike<T>, admitted: boolean): Promise<T> {
     if (!admitted) return Promise.reject(new DOMException('Turn hook admission is closed', 'AbortError'));
-    return this.work.run(() => start(this.signal));
+    return this.work.run('start', () => start(this.signal));
   }
 
   /**

@@ -74,7 +74,7 @@ export { RouteBindingManager } from './route-manager.js';
 export { SurfaceRegistry } from './surface-registry.js';
 export type { ChannelPlugin } from './plugin-registry.js';
 export { ChannelPluginRegistry } from './plugin-registry.js';
-export { ChannelPolicyManager, isChannelOwner } from './policy-manager.js';
+export { ChannelPolicyManager, channelSenderActor, isChannelOwner } from './policy-manager.js';
 export { BuiltinChannelRuntime } from './builtin-runtime.js';
 // The authoritative per-channel credential/setup declaration. Exported so
 // consumers (command surfaces, setup UIs) read the one source of truth instead

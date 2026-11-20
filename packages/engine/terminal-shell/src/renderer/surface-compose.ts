@@ -10,7 +10,7 @@
  *
  * Stamp over: a SurfaceLayer is drawn over the (dimmed) screen at its own
  * position instead of replacing whole rows; cells outside its rectangle keep
- * their dimmed content. Layer cells with bg '' keep the bg underneath (the
+ * their dimmed colours (a modal's own rows lose their glyphs). Layer cells with bg '' keep the bg underneath (the
  * half-block caps), transparent cells are skipped, and a wide character cut by
  * the layer's edge is blanked so no half glyph is left behind.
  *
@@ -109,12 +109,10 @@ function dimGrid(grid: CellGrid, params: DimParams): void {
 
 /**
  * Stamp one layer over the grid. A dimming layer (a modal) also clears the
- * backdrop beside each row it stamps: the cell just outside the edge always,
- * and a word the edge cut in half out to its nearest space. The dimmed screen
- * keeps its colours there; only glyphs go. Whole words beside a modal stay
- * visible, but no fragment of one (a splash or transcript line a cell or two
- * wider than the modal read as a stray glyph of the modal itself) and no text
- * touching the fill edge.
+ * glyphs beside each row it stamps, out to the screen edges: the dimmed screen
+ * keeps its colours there, but no transcript text or mark sits on a modal's
+ * rows, where it would read as part of the modal. Rows above and below the
+ * modal keep their dimmed text.
  */
 function stampLayer(grid: CellGrid, layer: SurfaceLayer): void {
   for (let r = 0; r < layer.lines.length; r++) {
@@ -142,21 +140,20 @@ function stampLayer(grid: CellGrid, layer: SurfaceLayer): void {
     const right = grid.getCell(lastX + 1, y);
     if (right && right.char === '') grid.setCell(lastX + 1, y, { ...createEmptyCell(), bg: right.bg, fg: right.fg });
     if (layer.dim) {
-      clearCutWord(grid, firstX - 1, y, -1);
-      clearCutWord(grid, lastX + 1, y, 1);
+      clearGlyphs(grid, firstX - 1, y, -1);
+      clearGlyphs(grid, lastX + 1, y, 1);
     }
   }
 }
 
 /**
- * Blank glyphs from (x, y) outward in direction `step` until a space (or the
- * screen edge), keeping each cell's colours. Wide-glyph continuation cells are
- * part of their word and blank with it.
+ * Blank glyphs from (x, y) outward in direction `step` to the screen edge,
+ * keeping each cell's colours. Wide-glyph continuation cells blank with their glyph.
  */
-function clearCutWord(grid: CellGrid, x: number, y: number, step: 1 | -1): void {
+function clearGlyphs(grid: CellGrid, x: number, y: number, step: 1 | -1): void {
   for (let cx = x; cx >= 0 && cx < grid.width; cx += step) {
     const cell = grid.getCell(cx, y);
-    if (!cell || cell.char === ' ') return;
+    if (!cell || cell.char === ' ') continue;
     grid.setCell(cx, y, { ...cell, char: ' ' });
   }
 }

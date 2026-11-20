@@ -57,39 +57,33 @@ export const voiceLocalConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.local.sttEngine',
     type: 'enum',
-    default: '',
     enumValues: ['', 'whisper-cpp', 'faster-whisper'],
     description: 'Local speech-to-text engine: whisper-cpp (blessed default, CPU-first, realtime-capable) or faster-whisper (NVIDIA-GPU alternative via a wrapper script). Empty means not configured, and the machine says so honestly rather than erroring. Managed setup installs whisper-cpp and fills this in.',
   },
   {
     key: 'voice.local.sttBinary',
     type: 'string',
-    default: '',
     description: 'Absolute path to the local STT engine binary (e.g. whisper.cpp\'s whisper-cli). Managed setup installs the engine and sets this.',
   },
   {
     key: 'voice.local.sttModelPath',
     type: 'string',
-    default: '',
     description: 'Absolute path to the local STT model file (e.g. ggml-tiny.en.bin). Managed setup downloads the model, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens.',
   },
   {
     key: 'voice.local.ttsEngine',
     type: 'enum',
-    default: '',
     enumValues: ['', 'piper', 'kokoro'],
     description: 'Local text-to-speech engine: piper (blessed default, sub-50ms first-audio class, MIT) or kokoro (quality alternative, Apache 2.0, via a wrapper script). Empty means not configured. Managed setup installs piper and fills this in.',
   },
   {
     key: 'voice.local.ttsBinary',
     type: 'string',
-    default: '',
     description: 'Absolute path to the local TTS engine binary (e.g. piper). Managed setup installs the engine and sets this.',
   },
   {
     key: 'voice.local.ttsModelPath',
     type: 'string',
-    default: '',
     description: 'Absolute path to the local TTS voice model (e.g. en_US-lessac-low.onnx with its .json beside it). Managed setup downloads the voice, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens.',
   },
 ];

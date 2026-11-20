@@ -1,5 +1,6 @@
 import type { ModelDefinition } from './registry-types.js';
-import { splitModelRegistryKey, stableStringify, withRegistryKey } from './registry-helpers.js';
+import { splitModelRegistryKey, withRegistryKey } from './registry-helpers.js';
+import { canonicalJson } from '../utils/target-ref.js';
 import { sameProviderCatalog } from './provider-aliases.js';
 
 export function getProviderLookupCandidates(
@@ -134,7 +135,7 @@ export function diffCustomModels(
     // Only mark as updated if the model definition actually changed.
     const oldModel = previousModels.find((model) => withRegistryKey(model).registryKey === registryKey);
     const newModel = nextModels.find((model) => withRegistryKey(model).registryKey === registryKey);
-    if (stableStringify(oldModel && withRegistryKey(oldModel)) !== stableStringify(newModel && withRegistryKey(newModel))) {
+    if (canonicalJson(oldModel && withRegistryKey(oldModel)) !== canonicalJson(newModel && withRegistryKey(newModel))) {
       updated.push(registryKey);
     }
   }

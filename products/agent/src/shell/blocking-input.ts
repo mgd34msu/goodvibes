@@ -1,4 +1,4 @@
-import { handleSimplePermissionInput, routeCardInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
+import { enterAnswer, handleSimplePermissionInput, routeCardInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import type { PermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { applyHunkKey, hunkSelectionAnswer, type HunkSelectionState } from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
 import { describeCrashRecovery, type CrashRecoveryReport } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
@@ -149,9 +149,9 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
         return { handled: true, pendingPermission: null, recoveryPending };
       }
       if (commit === 'cancel') {
-        // Deny on this card stops the turn, as it does on the plain card.
+        // Deny tells the model the change was refused, as on the plain card; Ctrl+C stops the turn.
         req.resolve(false, false);
-        abortTurn();
+        if (data === '\x03') abortTurn();
         render();
         return { handled: true, pendingPermission: null, recoveryPending };
       }
@@ -166,20 +166,32 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
         render();
         return { handled: true, pendingPermission: null, recoveryPending };
       }
-      systemMessageRouter.userAction('[Approval] Not remembered. Answer the request: y allows once, a then Enter allows for this session, n denies.');
+      // Back to the card's own choices, which the card shows again.
       render();
       return { handled: true, pendingPermission: { ...req, rememberArmed: undefined }, recoveryPending };
     }
     if (canRemember && data.toLowerCase().trim() === 'a') {
-      // Remembering is never one bare key: Enter confirms it.
-      systemMessageRouter.userAction('[Approval] Press Enter to allow this for the rest of the session, or any other key to go back.');
+      // Remembering is never one bare key: Enter confirms it. The card shows the armed choice and its keys.
       render();
       return { handled: true, pendingPermission: { ...req, rememberArmed: true }, recoveryPending };
+    }
+    // A bare Enter is never the broadest answer: it allows this one call, or denies what cannot be undone.
+    if (data === '\r' || data === '\n') {
+      req.resolve(enterAnswer(req) === 'allow-once', false);
+      render();
+      return { handled: true, pendingPermission: null, recoveryPending };
+    }
+    // A denial is the call's answer: the model is told it was refused and the turn goes on (Ctrl+C stops the turn).
+    if (data === '\x03') {
+      req.resolve(false, false);
+      abortTurn();
+      render();
+      return { handled: true, pendingPermission: null, recoveryPending };
     }
     if (
       handleSimplePermissionInput(data, {
         escapeDenies: true,
-        abortOnDeny: true,
+        abortOnDeny: false,
         resolve: (approved) => req.resolve(approved, false),
         abort: abortTurn,
         render,

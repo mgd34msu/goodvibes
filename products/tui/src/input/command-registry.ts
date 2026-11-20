@@ -11,6 +11,7 @@ import type {
 
 import { createTerminalCommandRegistry, reportDaemonWriteRefusals, type TerminalSlashCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 import { SHARED_COMMAND_CONFIRMATIONS, withOwnerConfirmation, type ConfirmableCommand } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { assertDescribedCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 import type { CommandSubcommandHints } from '@goodvibes-jev/engine/terminal-shell/command-args-hint';
 import type { ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
@@ -181,6 +182,8 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
    * is pressed; Esc and "no" resolve false.
    */
   confirm?: (options: import('./confirm-dialog.ts').ConfirmOptions) => Promise<boolean>;
+  /** Push a kit modal on the surface's modal stack (a described command's guided panel). */
+  pushSurfaceModal?: (modal: import('@goodvibes-jev/engine/terminal-shell/surface-modal-host').SurfaceModal) => void;
   /** Show a toast in the top right corner for five seconds (a colored ┃ on both sides). */
   showToast?: (toast: import('../renderer/surface-kit-parts.ts').ToastSpec) => void;
   /**
@@ -427,6 +430,8 @@ export class CommandRegistry extends platformCommands.CommandRegistry {
    * irreversible lines from SHARED_COMMAND_CONFIRMATIONS, the table the Agent uses too.
    */
   override register(command: SlashCommand): void {
+    // A command built from a description takes every generated field from it; one written over by hand is refused here.
+    assertDescribedCommand(command);
     const confirm = command.confirm ?? SHARED_COMMAND_CONFIRMATIONS[command.name];
     super.register(withOwnerConfirmation<CommandContext, SlashCommand>(confirm ? { ...command, confirm } : command));
   }

@@ -1,4 +1,5 @@
 import { getOperatorContract, getPeerContract } from '@goodvibes-jev/engine/contracts';
+import type { Page } from '@goodvibes-jev/engine/errors';
 import type { AutomationSurfaceKind } from '../../automation/types.js';
 import type {
   ControlPlaneRecentEvent,
@@ -159,6 +160,18 @@ function createOperatorClient(
           ...(options?.since !== undefined ? { since: options.since } : {}),
         });
         return (response.inputs ?? []).map((entry) => normalizeSharedSessionInput(entry));
+      },
+      inputsPage: async (sessionId, options): Promise<Page<SharedSessionInputRecord>> => {
+        const response = await operatorApi.invoke<{ inputs: readonly Record<string, unknown>[]; more?: unknown; next?: unknown }>('sessions.inputs.list', {
+          sessionId,
+          ...(options.limit !== undefined ? { limit: options.limit } : {}),
+          ...(options.state !== undefined ? { state: options.state } : {}),
+          ...(options.since !== undefined ? { since: options.since } : {}),
+        });
+        const items = (response.inputs ?? []).map((entry) => normalizeSharedSessionInput(entry));
+        return response.more === true && typeof response.next === 'string'
+          ? { items, more: true, next: response.next }
+          : { items, more: false };
       },
       ensureSession: async (input: HttpSessionEnsureInput = {}): Promise<SharedSessionRecord> =>
         normalizeSharedSessionRecord(assertObjectField<Record<string, unknown>>(

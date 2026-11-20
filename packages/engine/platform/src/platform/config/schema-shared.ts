@@ -3,11 +3,16 @@ import type { ConfigKey } from './schema-types.js';
 import type { ConfigValue } from './schema-types-values.js';
 
 /**
- * One settings row: its key is a ConfigKey (a leaf of GoodVibesConfig) and its
- * default has that key's value type, so a row for a key that does not exist,
- * or with a default of the wrong type, is a compile error.
+ * One settings row: its key is a ConfigKey (a leaf of GoodVibesConfig), so a
+ * row for a key that does not exist is a compile error. A row states no
+ * default: the domain's defaults object is the one owner of every default,
+ * and `defineSettingsDomain` (schema-types.ts) reads each row's default from
+ * it by the row's key, so the row, `/settings`, the web UI's settings data,
+ * the docs and the loaded value cannot disagree.
  */
-export type ConfigSettingDefinition = { [K in ConfigKey]: ConfigSettingFields & { key: K; default: ConfigValue<K> } }[ConfigKey];
+export type ConfigSettingDefinition = { [K in ConfigKey]: ConfigSettingFields & { key: K; default?: never } }[ConfigKey];
+/** The default a row gets, read from its domain's defaults object. */
+export type ConfigSettingDefault<K extends ConfigKey> = ConfigValue<K>;
 
 /** What a settings row says besides its key and default. */
 export interface ConfigSettingFields {

@@ -544,7 +544,7 @@ export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspac
     base.push(
       { text: `MCP servers: ${snapshot.mcpConnectedServerCount}/${snapshot.mcpServerCount} connected; quarantined ${snapshot.mcpQuarantinedServerCount}; allow-all ${snapshot.mcpAllowAllServerCount}.`, fg: snapshot.mcpQuarantinedServerCount > 0 || snapshot.mcpAllowAllServerCount > 0 ? PALETTE.warn : PALETTE.info },
       { text: 'Add/update/reload and trust changes require confirmation.', fg: PALETTE.good },
-      { text: 'Start: /mcp review, /mcp tools, /mcp config, Add MCP server.', fg: PALETTE.muted },
+      { text: 'Start: /mcp review, /mcp tools, /mcp files, Add MCP server.', fg: PALETTE.muted },
     );
   } else if (category.id === 'profiles') {
     const defaultProfile = snapshot.selectedRuntimeProfile

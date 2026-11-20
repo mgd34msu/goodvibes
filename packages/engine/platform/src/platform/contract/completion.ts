@@ -312,7 +312,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     if (pending === undefined) { pending = new Map(); pendingVerifications.set(run, pending); }
     const existing = pending.get(targetId);
     if (existing !== undefined) return existing;
-    const operation = run.work.run(async () => {
+    const operation = run.work.run('contract completion', async () => {
       let failures = 0;
       let reported: string | undefined;
       while (!run.terminal) {

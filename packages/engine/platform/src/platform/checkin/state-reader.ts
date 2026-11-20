@@ -164,6 +164,7 @@ export function createRuntimeCheckinStateReader(readers: CheckinRuntimeReaders):
         unreadChannelItems: unpickedChannelMessages,
         recentCompletions,
         needsAttention: [...ownerLines, ...queuedLines],
+        waitingForOwner: ownerNeeded,
       };
     },
   };

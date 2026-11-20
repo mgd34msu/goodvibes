@@ -8,9 +8,9 @@ and never branch on a code without knowing which program produced it.
 | Code | `goodvibes run`, `goodvibes-agent run` | `goodvibes-contract` | `goodvibes-daemon` |
 | --- | --- | --- | --- |
 | `0` | Completed, or admitted work was recorded. | The contract passed, or the command did what it says. `reply` follows the contract it answered, so its code is the contract's; `reply --no-follow` exits `0` once the reply is read. | The command did what it says. |
-| `1` | Failed: model or provider error, empty response, `--max-turns` reached, or the host unavailable, blocked or refused the input. | Failed, was refused, or was cancelled. | It ran and failed; the reason is printed. |
+| `1` | Failed: model or provider error, empty response, `--max-turns` reached, a turn refused before it started (a failed preflight check, or a conversation too large for the model's context window), or the host unavailable, blocked or refused the input. | Failed, was refused, or was cancelled. | It ran and failed; the reason is printed. |
 | `2` | Invalid input: bad usage, a missing prompt, or a prompt given with a recovery flag. | Waiting on the owner with no terminal to ask on: answer with `goodvibes-contract reply <id> "<text>"`. | The command line was wrong: unknown command or flag, a flag this command does not take, a missing value. |
-| `3` | Outcome unknown (`turn-unsettled`): the turn ended without a final event, including a turn refused before it started by a failed preflight check or a conversation too large for the model's context window. For admitted native input, the input may have taken effect: run `run --intake-status` before retrying. | not used | Service commands: installed but not running. |
+| `3` | Outcome unknown (`turn-unsettled`): the turn ended without a final event. For admitted native input, the input may have taken effect: run `run --intake-status` before retrying. | not used | Service commands: installed but not running. |
 | `4` | not used | not used | Service commands: not installed. |
 | `5` | not used | not used | `install-service`, `refresh-service`, `uninstall-service`: the definition at the service's path was not written by GoodVibes; nothing was changed. |
 | `64` | not used | Usage error. | not used |
@@ -46,7 +46,7 @@ Branching rules that hold for every program:
 | `contract-failed`, `agent-failed` | `1` | Delegated work ended without a result; `error` says why. |
 | `awaiting-owner` | `1` | Delegated work stopped for an owner decision: open the session interactively, answer it, and the work continues. |
 | `turn-unsettled` | `3` | The turn ended without a final event, so its outcome is unknown; inspect the session before running again. |
-| `preflight_failed`, `context_overflow` | `3` (as `turn-unsettled`) | A turn refused before it started carries one of these on its `PREFLIGHT_FAIL` event: `preflight_failed` when an equivalent turn is already in flight, `context_overflow` when the conversation is too large for the model's context window. A headless run does not settle on that event, so it reports `turn-unsettled` and exits `3`. Compact the conversation or choose a model with a larger window, then run again. |
+| `preflight_failed`, `context_overflow` | `1` | The turn was refused before it started, so nothing ran; `error` says why. `preflight_failed`: an equivalent turn is already in flight; wait for it. `context_overflow`: the conversation is too large for the model's context window; compact it or choose a model with a larger window, then run again. |
 | `provider_error` | `1` | The provider refused or failed the request, and no model of `provider.fallbackModels` was left to try; `error` says why. Check the provider's key or sign-in and the model, then run again. |
 | `provider_exhausted` | `1` | Every provider serving the selected synthetic model is exhausted (rate limits). Wait and run again, or choose another model. |
 | `hook_denied` | `1` | A hook on the model request denied it; `error` is the hook's reason. Change or remove the hook. |

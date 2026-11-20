@@ -1,4 +1,4 @@
-import type { GatewayMethodDescriptor, GatewayMethodEffect } from './method-catalog-shared.js';
+import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
@@ -42,8 +42,8 @@ import {
 
 function homeGraphDescriptor(input: {
   readonly id: string;
-  /** Set where a method reaches outside the machine; otherwise read or write follows its scope. */
-  readonly effect?: GatewayMethodEffect | undefined;
+  /** `outward` where a method reaches outside the machine; otherwise read or write follows its scope. */
+  readonly effect?: 'outward' | undefined;
   /** What a repeat does; see GatewayMethodDescriptor.repeat. */
   readonly repeat?: GatewayMethodDescriptor['repeat'];
   /** A retry key; see GatewayMethodDescriptor.replay. */
@@ -68,16 +68,17 @@ function homeGraphDescriptor(input: {
     description: input.description,
     category: 'knowledge',
     // Every other read returns the owner's home records (devices, rooms, pages, answers), an owner-private scope.
-    scopes: [input.write ? 'write:knowledge' : input.statusOnly ? 'read:knowledge' : 'read:knowledge-content'],
-    ...(input.write ? { access: 'admin' as const } : {}),
-    ...(input.effect ? { effect: input.effect } : {}),
+    effects: [
+      input.write ? 'knowledge.administer' : input.statusOnly ? 'knowledge.read' : 'knowledge-content.read',
+      ...(input.effect === 'outward' ? ['outward.send' as const] : []),
+      ...(input.irreversible ? ['record.destroy' as const] : []),
+    ],
     ...(input.repeat ? { repeat: input.repeat } : {}),
     ...(input.replay ? { replay: input.replay } : {}),
     http: { method: input.method, path: input.path },
     inputSchema: input.inputSchema,
     outputSchema: input.outputSchema,
     ...(input.dangerous ? { dangerous: true } : {}),
-    ...(input.irreversible ? { irreversible: true } : {}),
     ...(input.metadata ? { metadata: input.metadata } : {}),
   });
 }

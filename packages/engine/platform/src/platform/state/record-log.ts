@@ -81,6 +81,22 @@ export interface RecordLog<T> extends RevisionSource {
   close(): void;
 }
 
+/**
+ * A log whose rewrite was published (renamed into place) but whose descriptor
+ * could not be moved onto it. Appending through the old descriptor would write
+ * into the replaced file, which no reader opens again, so the log refuses every
+ * append and flush until the process opens it afresh.
+ */
+export class RecordLogBrokenError extends Error {
+  readonly code = 'RECORD_LOG_BROKEN';
+  readonly path: string;
+  constructor(path: string, cause: unknown) {
+    super(`The log ${path} was rewritten but could not be reopened (${cause instanceof Error ? cause.message : String(cause)}); nothing more is written to it. Restart the daemon to open it again.`, { cause });
+    this.name = 'RecordLogBrokenError';
+    this.path = path;
+  }
+}
+
 const READ_WINDOW = 1 << 20;
 const NEWLINE = 0x0a;
 
@@ -108,6 +124,8 @@ class FileRecordLog<T> implements RecordLog<T> {
   #pendingKeys = new Map<string, number>();
   #revision = 0;
   #closed = false;
+  /** Set when a rewrite was published but the log could not be reopened on it: appends and flushes refuse. */
+  #broken: RecordLogBrokenError | null = null;
   #unsynced = false;
   #syncing: Promise<void> | null = null;
   #syncScheduled = false;
@@ -142,6 +160,7 @@ class FileRecordLog<T> implements RecordLog<T> {
 
   append(record: T): void {
     this.#assertOpen();
+    if (this.#broken) throw this.#broken;
     const line = this.#encode(record);
     if (line.includes('\n')) throw new Error(`${this.id}: an encoded record must be one line`);
     if (this.#tornTail > 0) this.#cutTornTail();
@@ -202,6 +221,7 @@ class FileRecordLog<T> implements RecordLog<T> {
 
   async compact(keep: (record: T) => boolean): Promise<void> {
     this.#assertOpen();
+    if (this.#broken) throw this.#broken;
     const temp = createAtomicTempPath(this.path);
     const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, this.#options.mode ?? 0o600);
     const starts: number[] = [];
@@ -224,13 +244,28 @@ class FileRecordLog<T> implements RecordLog<T> {
       throw error;
     }
     closeSync(fd);
-    renameSync(temp, this.path);
-    // The rename drops records; make it survive a power loss before saying so.
-    const dirFd = openSync(dirname(this.path), constants.O_RDONLY | constants.O_DIRECTORY);
-    try { fsyncSync(dirFd); } finally { closeSync(dirFd); }
+    try { renameSync(temp, this.path); } catch (error) {
+      try { unlinkSync(temp); } catch { /* nothing was published */ }
+      throw error;
+    }
+    // From here the path names the new file. Until the descriptor is reopened on
+    // it, an append would land in the replaced file, which nothing reads again:
+    // a failure now leaves the log refusing appends instead of losing them.
     const previous = this.#fd;
-    this.#fd = openSync(this.path, constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW);
-    this.#ino = fstatSync(this.#fd).ino;
+    let next = -1;
+    try {
+      // The rename drops records; make it survive a power loss before saying so.
+      const dirFd = openSync(dirname(this.path), constants.O_RDONLY | constants.O_DIRECTORY);
+      try { fsyncSync(dirFd); } finally { closeSync(dirFd); }
+      next = openSync(this.path, constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW);
+      this.#ino = fstatSync(next).ino;
+    } catch (error) {
+      if (next !== -1) { try { closeSync(next); } catch { /* already failing */ } }
+      this.#broken = new RecordLogBrokenError(this.path, error);
+      logger.error('[record-log] a rewritten log could not be reopened; it refuses appends until the daemon restarts', { path: this.path, error: error instanceof Error ? error.message : String(error) });
+      throw this.#broken;
+    }
+    this.#fd = next;
     closeSync(previous);
     this.#starts = starts;
     this.#keys = keys;
@@ -268,6 +303,7 @@ class FileRecordLog<T> implements RecordLog<T> {
 
   flush(): Promise<void> {
     if (this.#closed) return Promise.resolve();
+    if (this.#broken) return Promise.reject(this.#broken);
     if (this.#syncing) return this.#syncing.then(() => this.flush());
     if (!this.#unsynced) return Promise.resolve();
     return this.#syncNow();

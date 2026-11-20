@@ -88,6 +88,12 @@ export interface WorkItem {
   readonly sortAt: number;
   /** An externally launched agent GoodVibes only observes (not counted as its own work). */
   readonly external?: boolean;
+  /**
+   * Doing something right now: a turn, a run or a check in progress. An open
+   * session between turns, a watcher or schedule waiting for its next run and an
+   * idle code index are listed but not running.
+   */
+  readonly active: boolean;
 }
 
 export interface WorkSources {
@@ -97,6 +103,12 @@ export interface WorkSources {
   readonly nodes: readonly FleetProcessNode[];
   readonly attemptGroups: readonly FleetAttemptGroup[];
   readonly sessions: readonly UnionSessionRecord[];
+  /**
+   * A chat's current title by id, from the chat list. The chat owns its title; the
+   * shared session record keeps the one it was created with, so a renamed chat
+   * reads by this.
+   */
+  readonly chatTitles?: ReadonlyMap<string, string> | undefined;
   readonly hosted: readonly HostedSessionRecord[];
   readonly tasks: readonly RuntimeTaskSummary[];
   readonly ciWatches: readonly CiWatch[];
@@ -228,6 +240,7 @@ function approvalItem(record: ApprovalRecord): WorkItem {
     meta: metaParts.filter(Boolean).join(' · '),
     tone,
     status,
+    active: false,
     depth: 0,
     sortAt: record.resolvedAt ?? record.createdAt,
   };
@@ -249,6 +262,7 @@ function attemptGroupItem(group: FleetAttemptGroup): WorkItem {
     meta,
     tone: progress.tone,
     status: progress.status,
+    active: !progress.ready,
     depth: 0,
     sortAt: 0,
   };
@@ -264,6 +278,9 @@ function fleetMeta(node: FleetProcessNode): string {
   if (stall) parts.push(`quiet ${formatDurationMs(stall.quietForMs)}`);
   return parts.join(' · ');
 }
+
+/** Fleet states of a process that exists but is not doing anything now. */
+const IDLE_FLEET_STATES: ReadonlySet<string> = new Set(['idle', 'paused', 'queued']);
 
 function fleetItem(node: FleetProcessNode, depth: number, pendingApprovalSessions: ReadonlySet<string>): WorkItem {
   const reason = node.needsAttention?.reason;
@@ -285,6 +302,7 @@ function fleetItem(node: FleetProcessNode, depth: number, pendingApprovalSession
     meta: fleetMeta(node),
     tone: fleetTone(node),
     status: status.charAt(0).toUpperCase() + status.slice(1),
+    active: !terminal && !IDLE_FLEET_STATES.has(node.state),
     value: knownCost(node) ?? (terminal || typeof node.elapsedMs !== 'number' ? undefined : formatDurationMs(node.elapsedMs)),
     depth,
     ...(reason ? { attentionReason: reason } : {}),
@@ -304,7 +322,7 @@ function messageCountValue(count: number): string | undefined {
  * whether it has ended. A hosted record the union list does not carry yet
  * (registration still pending) is a row of its own under the same key.
  */
-function sessionItem(record: UnionSessionRecord | undefined, hosted: HostedSessionRecord | undefined): WorkItem {
+function sessionItem(record: UnionSessionRecord | undefined, hosted: HostedSessionRecord | undefined, chatTitle?: string): WorkItem {
   const id = record?.id ?? hosted?.id ?? '';
   const ended = hosted ? hosted.status === 'terminated' : isClosedStatus(record?.status ?? '');
   const reaped = !hosted && record !== undefined && isReapedStatus(record);
@@ -324,10 +342,11 @@ function sessionItem(record: UnionSessionRecord | undefined, hosted: HostedSessi
     id,
     kind: 'sessions',
     group: ended ? 'finished' : 'running',
-    title: record?.title || hosted?.title || id,
+    title: chatTitle || record?.title || hosted?.title || id,
     meta: parts.filter(Boolean).join(' · '),
     tone,
     status,
+    active: hosted?.status === 'running',
     value: messageCountValue(Math.max(record?.messageCount ?? 0, hosted?.messageCount ?? 0)),
     depth: 0,
     sortAt: updatedAt,
@@ -352,6 +371,7 @@ function taskItem(task: RuntimeTaskSummary): WorkItem {
     meta: ['Task', task.kind, task.owner ? `owner ${task.owner}` : '', task.error ?? ''].filter(Boolean).join(' · '),
     tone,
     status: task.status ? task.status.charAt(0).toUpperCase() + task.status.slice(1) : 'Unknown',
+    active: task.status === 'running',
     depth: 0,
     sortAt: task.startedAt ?? task.queuedAt,
   };
@@ -375,6 +395,7 @@ function ciItem(watch: CiWatch): WorkItem {
     meta: ['CI watch', `delivers to ${watch.deliveryChannel}`, watch.triggerFixSession ? 'starts a fix session on failure' : ''].filter(Boolean).join(' · '),
     tone,
     status: overall ? overall.charAt(0).toUpperCase() + overall.slice(1) : 'Watching',
+    active: false,
     depth: 0,
     sortAt: watch.createdAt,
   };
@@ -410,6 +431,7 @@ function contractItem(contract: ContractSummaryRecord): WorkItem {
     title: contract.goal || contract.ask || contract.id,
     meta: `Contract · ${contract.groupCount} groups · ${contract.unitCount} units`,
     status: sentenceCase(contract.status),
+    active: !terminal,
     tone: contract.status === 'passed' ? 'ok' : contract.status === 'failed' ? 'bad' : terminal ? 'idle' : 'live',
     depth: 0,
     sortAt: contract.createdAt,
@@ -444,7 +466,7 @@ export function buildWorkItems(sources: WorkSources): WorkItem[] {
   const hostedById = new Map(sources.hosted.map((session) => [session.id, session]));
   const unionIds = new Set(sources.sessions.map((record) => record.id));
   const sessions = [
-    ...sources.sessions.map((record) => sessionItem(record, hostedById.get(record.id))),
+    ...sources.sessions.map((record) => sessionItem(record, hostedById.get(record.id), sources.chatTitles?.get(record.id))),
     ...sources.hosted.filter((session) => !unionIds.has(session.id)).map((session) => sessionItem(undefined, session)),
   ].sort((a, b) => b.sortAt - a.sortAt);
   const tasks = sources.tasks.map(taskItem).sort((a, b) => b.sortAt - a.sortAt);
@@ -484,10 +506,17 @@ export function groupWorkItems(
  * their own ("· 2 external"), never folded into "running". In the archive the
  * line counts what is archived instead.
  */
+/** How many listed items are doing something right now (observed external agents apart). */
+export function runningNowCount(items: readonly WorkItem[]): number {
+  return items.filter((i) => i.group !== 'finished' && i.active && !i.external).length;
+}
+
 export function workSummary(items: readonly WorkItem[], archived = false): string {
   // The archive lists only finished work, so "running" and "needs you" would read as zeros.
   if (archived) return items.length === 0 ? 'nothing archived' : `${items.length} archived`;
-  const running = items.filter((i) => i.group === 'running' && !i.external).length;
+  // Running means doing something now: an idle watcher, a schedule between runs or
+  // an open chat between turns is listed under Running but not counted as running.
+  const running = runningNowCount(items);
   const external = items.filter((i) => i.group !== 'finished' && i.external).length;
   const needs = items.filter((i) => i.group === 'needs').length;
   const parts = [`${running} running`];

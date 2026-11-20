@@ -155,7 +155,5 @@ export function refreshCommandAutocomplete(source: {
   if (!source.prompt.startsWith('/')) {
     source.commandMode = false; source.autocomplete?.reset(); return;
   }
-  const query = source.prompt.slice(1);
-  if (query.includes(' ')) source.autocomplete?.reset();
-  else source.autocomplete?.update(query);
+  source.autocomplete?.update(source.prompt.slice(1));
 }

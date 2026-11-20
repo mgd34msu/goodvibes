@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { OwnedWork } from '../../utils/owned-work.js';
+import { OwnedScope } from '../../utils/owned-work.js';
 import { TelegramOffsetStore, TelegramOffsetStoreError, type TelegramLegacyCursorHandle } from './offset-store.js';
 import type { TelegramCursorPreview } from './cursor-migration-data.js';
 
@@ -19,7 +19,7 @@ class IdentityReadError extends Error {
  * binds only the cursor that was previewed. No bearer, raw cursor bytes or
  * file path enter views. */
 export class TelegramCursorMigration {
-  private readonly work = new OwnedWork();
+  private readonly work = new OwnedScope('telegram cursor migration');
   private readonly abort = new AbortController();
   private preparation: Preparation | undefined;
   private closing: Promise<void> | undefined;
@@ -35,7 +35,7 @@ export class TelegramCursorMigration {
     try { this.current(); } catch (error) { return Promise.reject(error); }
     const sequence = ++this.sequence;
     this.preparation = undefined;
-    return this.work.run(async () => {
+    return this.work.run('cursor migration', async () => {
       const current = () => { this.current(); if (sequence !== this.sequence) throw new TelegramOffsetStoreError('unavailable'); };
       try {
         current();
@@ -63,7 +63,7 @@ export class TelegramCursorMigration {
     if (!prepared || input.confirm !== true || input.previewId !== prepared.view.previewId) return Promise.reject(new TelegramOffsetStoreError('invalid-request'));
     // Consume before entering any publication callback, including reentry.
     this.preparation = undefined;
-    return this.work.run(() => {
+    return this.work.run('cursor migration', () => {
       prepared.current();
       const offset = prepared.store.migrateLegacy(prepared.handle, prepared.current);
       prepared.current(); return Object.freeze({ accountId: prepared.view.accountId, offset });

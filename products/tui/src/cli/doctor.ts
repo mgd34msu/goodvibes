@@ -17,6 +17,9 @@ import { describeConfiguredEffort } from '../providers/reasoning-effort-surface.
 import type { CliCommandOutput } from '@goodvibes-jev/engine/terminal-shell';
 import type { GoodVibesCliOutputFormat } from '@goodvibes-jev/engine/terminal-shell';
 import { buildHooksValidation } from './hooks-report.ts';
+import { createEditTool, createWriteTool } from '@goodvibes-jev/engine/platform/platform/tools';
+import { FileStateCache, FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
+import type { ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
 
 // ---------------------------------------------------------------------------
 // `goodvibes doctor <explain|routing|hooks>`, the diagnostician subcommands.
@@ -56,7 +59,34 @@ const PATH_TOOLS = new Set(['read', 'write', 'edit', 'find', 'fetch', 'analyze',
  * tool (with any remainder as its path/command arg); anything else is treated
  * as a shell command run through the `exec` tool.
  */
-function resolveExplainTarget(args: readonly string[]): { tool: string; args: Record<string, unknown>; interpretation: string } {
+interface ExplainTarget {
+  readonly tool: string;
+  readonly args: Record<string, unknown>;
+  readonly interpretation: string;
+  /** The path the call targets, for the tool's own containment check. */
+  readonly path?: string;
+  /** The tool's own registration (declared effects, path arguments, undo), as the running app registers it. */
+  readonly definition?: ToolDefinition;
+}
+
+/**
+ * The file tools as the running app registers them (tools/index.ts: with an
+ * undo manager, so a change inside the project is recoverable), and the call
+ * shape each takes, so the gate reads the same declared facts it reads in the
+ * app instead of an undeclared `{ path }` that only a judgment can settle.
+ */
+function fileToolCall(tool: string, path: string, workingDirectory: string): Pick<ExplainTarget, 'args' | 'definition'> | undefined {
+  const fileUndoManager = new FileUndoManager();
+  if (tool === 'write') {
+    return { args: { files: [{ path, content: '' }] }, definition: createWriteTool({ projectRoot: workingDirectory, fileUndoManager }).definition };
+  }
+  if (tool === 'edit') {
+    return { args: { edits: [{ path, find: '', replace: '' }] }, definition: createEditTool(new FileStateCache(), { cwd: workingDirectory, fileUndoManager }).definition };
+  }
+  return undefined;
+}
+
+function resolveExplainTarget(args: readonly string[], workingDirectory: string): ExplainTarget {
   const first = args[0] ?? '';
   if (KNOWN_TOOLS.has(first)) {
     const remainder = args.slice(1).join(' ').trim();
@@ -67,7 +97,8 @@ function resolveExplainTarget(args: readonly string[]): { tool: string; args: Re
       return { tool: 'exec', args: { command: remainder }, interpretation: `tool "exec" running command: ${remainder}` };
     }
     if (PATH_TOOLS.has(first)) {
-      return { tool: first, args: { path: remainder }, interpretation: `tool "${first}" targeting path: ${remainder}` };
+      const call = fileToolCall(first, remainder, workingDirectory);
+      return { tool: first, args: call?.args ?? { path: remainder }, ...(call?.definition ? { definition: call.definition } : {}), path: remainder, interpretation: `tool "${first}" targeting path: ${remainder}` };
     }
     return { tool: first, args: { command: remainder }, interpretation: `tool "${first}" with argument: ${remainder}` };
   }
@@ -156,8 +187,7 @@ const CONTAINED_WRITE_TOOLS = new Set(['write', 'edit']);
  * is yolo, and write tools refuse one in every mode. Undefined when the tool
  * has no path or keeps it.
  */
-function containmentRefusal(tool: string, args: Record<string, unknown>, workingDirectory: string, mode: string): string | undefined {
-  const path = typeof args.path === 'string' ? args.path : undefined;
+function containmentRefusal(tool: string, path: string | undefined, workingDirectory: string, mode: string): string | undefined {
   if (path === undefined || path.length === 0) return undefined;
   try {
     if (CONTAINED_WRITE_TOOLS.has(tool)) resolveWritablePath(path, workingDirectory);
@@ -175,7 +205,7 @@ async function explain(options: DoctorSubcommandOptions): Promise<CliCommandOutp
     return { output: 'Usage: goodvibes doctor explain <tool-name | shell command>', exitCode: 2 };
   }
   const config = options.configManager;
-  const target = resolveExplainTarget(args);
+  const target = resolveExplainTarget(args, options.workingDirectory);
   const savedMode = String(config.get('permissions.mode') ?? 'ask-me');
   const autoApprove = config.get('behavior.autoApprove') === true;
   const inForce = describePermissionModeInForce(config);
@@ -227,11 +257,11 @@ async function explain(options: DoctorSubcommandOptions): Promise<CliCommandOutp
       featureFlags,
       rules,
     );
-    category = manager.getCategory(target.tool, target.args);
+    category = manager.getCategory(target.tool, target.args, target.definition);
     // Whether this call is one the decision model is asked about at all (no request: the classifier only).
-    settledBy = (await manager.previewDecision(target.tool, target.args, undefined, controller.signal)).decided.kind;
+    settledBy = (await manager.previewDecision(target.tool, target.args, target.definition, controller.signal)).decided.kind;
     try {
-      result = await manager.checkDetailed(target.tool, target.args, undefined, { signal: controller.signal });
+      result = await manager.checkDetailed(target.tool, target.args, undefined, { signal: controller.signal, ...(target.definition ? { definition: target.definition } : {}) });
     } catch (error) {
       // Under Decision Model Only a decision the model could not answer stops the call: say so instead of a stack.
       if (!(error instanceof JudgmentError)) throw error;
@@ -256,7 +286,7 @@ async function explain(options: DoctorSubcommandOptions): Promise<CliCommandOutp
     controller.abort();
     await scope.close();
   }
-  const containment = result.approved ? containmentRefusal(target.tool, target.args, options.workingDirectory, inForce.mode) : undefined;
+  const containment = result.approved ? containmentRefusal(target.tool, target.path, options.workingDirectory, inForce.mode) : undefined;
   const verdict = containment !== undefined ? 'DENY' : verdictOf(result);
   const decidedLayer = containment !== undefined ? `The ${target.tool} tool (path containment)` : decidedLayerLabel(result, autoApprove);
   const toolKey = toolConfigKey(target.tool);

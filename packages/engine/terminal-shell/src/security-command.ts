@@ -33,7 +33,7 @@ export function createSecurityCommand<Context extends { print(text: string): voi
     effect: 'read-only',
     aliases: [],
     description: 'Inspect security posture, attack paths, and review state',
-    hidden: presentation.hidden,
+    firstScreen: !presentation.hidden,
     usage: '[review | attack-paths | tokens]',
     handler(args, ctx) {
       if (presentation.beforeRead(args, ctx)) return;

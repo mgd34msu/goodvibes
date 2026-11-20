@@ -103,7 +103,7 @@ export async function prepareShellCliRuntime(
   const isDiagnostic = cli.command === 'status' || cli.command === 'doctor' || (cli.command === 'onboarding' && cli.commandArgs[0] === 'status');
   if (cli.command !== 'run' && !isDiagnostic && ensureGoodvibesGitignore(bootstrapWorkingDir)) {
     startupNoticeWriter(cli, { out: console.log, err: console.error })(
-      "[goodvibes] added '.goodvibes/' to .gitignore: this directory holds transient TUI state (logs, session cache, exec output), not project source.",
+      "[goodvibes] git now ignores '.goodvibes/' in this clone (.git/info/exclude; your .gitignore is unchanged): it holds transient TUI state (logs, session cache, exec output), not project source.",
     );
   }
   const configManager = new TuiConfigManager({

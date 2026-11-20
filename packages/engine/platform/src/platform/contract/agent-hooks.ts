@@ -248,7 +248,7 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
    */
   function runCheck(run: ContractRun, unit: ContractUnit, trigger: CheckTrigger, given?: string): Promise<void> {
     if (run.terminal) return Promise.resolve();
-    return run.work.run(() => checkUnit(run, unit, trigger, given)).catch((error: unknown) => { abandonCheck(run, unit, trigger, error); });
+    return run.work.run('check unit', () => checkUnit(run, unit, trigger, given)).catch((error: unknown) => { abandonCheck(run, unit, trigger, error); });
   }
 
   /** A check threw outside its guarded block: say so, fail the contract with the reason, and never leave the agent on its hold. */
@@ -547,7 +547,7 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       else if (sent.kind === 'woke') run.decide('woke', unit.id, `woke ${agentId} from ${state} with nudge ${nudge.id}`, check.decisionIds);
       else if (sent.kind === 'undelivered') deps.respawnUnit(run, unit, `nudge ${nudge.id} could not reach ${agentId}: ${sent.reason}`, nudge.text);
     }
-    if (outcome.unmetCriterionIds.length > 0) void run.work.run(() => readSeverities(run, unit, runtime, check.id, outcome.unmetCriterionIds));
+    if (outcome.unmetCriterionIds.length > 0) void run.work.run('read severities', () => readSeverities(run, unit, runtime, check.id, outcome.unmetCriterionIds));
   }
 
   /** Severity of the unmet criteria, read after the nudge went out so it never delays one. */

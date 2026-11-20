@@ -14,12 +14,14 @@ import {
 } from '../../renderer/compaction-preview.ts';
 import { buildCompactionHistoryText } from '../../renderer/compaction-history-modal.ts';
 import { ensureProviderKeyThenSelect } from '../provider-key-intake.ts';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { helpForCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 
 const coreActions = createShellCoreActions<CommandContext>(
   { requireProviderApi, requireKeybindingsManager, startFreshConversation },
   {
     hidden: false,
-    modelHint: '[model-id]',
+    modelHint: '[model-id] | fallback',
     choiceMarker: '\\u25c9',
     offeredIndent: '',
     shortcutOverlay: true,
@@ -106,8 +108,16 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'help',
     aliases: ['h', '?'],
-    description: 'Browse every command with its description; picking one runs it',
-    handler(_args, ctx) {
+    description: 'Browse every command with its description; picking one runs it. /help <command> shows one command\'s actions and lines',
+    argsHint: '[command]',
+    handler(args, ctx) {
+      const named = args[0]?.replace(/^\//, '');
+      if (named) {
+        const command = registry.get(named);
+        if (!command) throw commandRefusal(`No command named /${named}.`, '/help lists every command.');
+        ctx.print(helpForCommand(command));
+        return;
+      }
       // Generated live from the command registry, never a hand-maintained
       // list, so /help can never drift from the real command set. Category
       // labels come from the same single source of truth as the generated

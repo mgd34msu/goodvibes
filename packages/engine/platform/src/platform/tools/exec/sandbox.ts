@@ -159,8 +159,10 @@ export function detectSandboxAvailability(probe: SandboxHostProbe): SandboxAvail
 /** Pure inputs for {@link buildBwrapArgv}. */
 export interface BwrapArgvInput {
   readonly bwrapPath: string;
-  /** Absolute workspace path, bound read-write. */
+  /** Absolute workspace path, bound read-write (read-only with `readOnlyWorkspace`). */
   readonly workspaceDir: string;
+  /** Bind the workspace read-only: a contained program that may change nothing (runtime/sandbox/contained-spawn.ts). */
+  readonly readOnlyWorkspace?: boolean | undefined;
   /** Absolute working directory for the child (chdir'd into the boundary). */
   readonly cwd: string;
   /** Extra absolute paths bound read-write. */
@@ -205,7 +207,7 @@ export function buildBwrapArgv(input: BwrapArgvInput): string[] {
     argv.push('--ro-bind-try', extra, extra);
   }
   // … then carve the writable workspace + extras back in (bound LAST so they win).
-  argv.push('--bind', input.workspaceDir, input.workspaceDir);
+  argv.push(input.readOnlyWorkspace === true ? '--ro-bind' : '--bind', input.workspaceDir, input.workspaceDir);
   for (const extra of input.writableExtras) {
     argv.push('--bind', extra, extra);
   }

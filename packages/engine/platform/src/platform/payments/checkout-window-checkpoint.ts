@@ -48,15 +48,17 @@ export function captureCheckoutWindowCheckpoint(value: unknown): CheckoutWindowC
   const terms = 'terms' in input ? input.terms : undefined;
   if (Object.hasOwn(input, 'terms')) {
     // `discounts` is absent from checkpoints saved before discount lines were read.
-    const keys = ['submitTarget', 'merchantDomain', 'currency', 'lines', 'taxMinorUnits', 'feesMinorUnits', 'feeLabels', 'shippingLabel', 'shippingMinorUnits', 'totalMinorUnits'];
+    const keys = ['submitTarget', 'merchantDomain', 'lines', 'taxMinorUnits', 'feesMinorUnits', 'feeLabels', 'shippingLabel', 'shippingMinorUnits', 'total'];
     const withDiscounts = !!terms && typeof terms === 'object' && Object.hasOwn(terms, 'discounts');
     if (!terms || typeof terms !== 'object' || Array.isArray(terms) || Object.keys(terms).length !== keys.length + (withDiscounts ? 1 : 0)
       || keys.some(key => !Object.hasOwn(terms, key))) throw new Error('The payment window checkpoint is unavailable');
     const selected = terms as Record<string, unknown>, checkout = extracted.checkout;
+    // The total is Money: its amount and currency are the record's, and nothing else.
     if (typeof selected['submitTarget'] !== 'string' || !selected['submitTarget'].trim()
-      || selected['merchantDomain'] !== record.merchantDomain || selected['currency'] !== record.currency
+      || selected['merchantDomain'] !== record.merchantDomain
+      || !isDeepStrictEqual(selected['total'], { minor: record.totalMinorUnits, currency: record.currency })
       || selected['taxMinorUnits'] !== checkout.taxMinorUnits || selected['feesMinorUnits'] !== checkout.feesMinorUnits
-      || selected['totalMinorUnits'] !== record.totalMinorUnits || !isDeepStrictEqual(selected['lines'], checkout.lines)
+      || !isDeepStrictEqual(selected['lines'], checkout.lines)
       || !isDeepStrictEqual(selected['feeLabels'], checkout.feeLabels)
       || (withDiscounts && !isDeepStrictEqual(selected['discounts'], checkout.discounts))
       || !checkout.shippingOptions.some(option => option.rawLabel === selected['shippingLabel'] && option.costMinorUnits === selected['shippingMinorUnits']

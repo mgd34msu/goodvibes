@@ -66,6 +66,8 @@ const STEPS: readonly Step[] = [
   script('gates', 'flags:graduation'),
   script('gates', 'internal-id:check'),
   script('gates', 'architecture:check'),
+  // Every slash command is one description, and every description holds to the command standard.
+  script('gates', 'commands:check'),
   script('gates', 'platform-console:check'),
   script('gates', 'any:check'),
   // The test runner's admission scan (header, risk table, refused forms) over

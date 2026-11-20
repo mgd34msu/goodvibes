@@ -1,5 +1,5 @@
 import { createDaemonPowerStateSource, type DaemonPowerEventHandlers, type DaemonPowerEventWatch, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
-import { describePowerStatus } from '../renderer/power-status.ts';
+import { describePowerChip } from '../renderer/power-status.ts';
 
 /**
  * The footer's power note, from the owner of keep-awake. With a daemon adopted
@@ -22,17 +22,23 @@ export interface PowerNoteSourceDeps {
   readonly render: () => void;
 }
 
+/** The status line's short power chip and the full note behind it (posted to the notifications when it changes). */
+export interface PowerNote {
+  readonly chip: string;
+  readonly detail: string;
+}
+
 export interface PowerNoteSource {
   /** The note to show, or null when nothing is held. */
-  get(): string | null;
+  get(): PowerNote | null;
   /** Read the daemon now (keep-awake changed here, a turn ended). */
   refresh(): void;
   stop(): void;
 }
 
-function describe(state: PowerState): string | null | undefined {
+function describe(state: PowerState): PowerNote | null | undefined {
   try {
-    return describePowerStatus(state);
+    return describePowerChip(state);
   } catch {
     return undefined; // an answer without the power fields says nothing about keep-awake
   }
@@ -46,10 +52,10 @@ export function createPowerNoteSource(deps: PowerNoteSourceDeps): PowerNoteSourc
     onChange: deps.render,
   });
   return {
-    get(): string | null {
+    get(): PowerNote | null {
       const state = daemon.current();
       const note = state ? describe(state) : undefined;
-      return note !== undefined ? note : describePowerStatus(deps.local());
+      return note !== undefined ? note : describePowerChip(deps.local());
     },
     refresh: () => daemon.refresh(),
     stop: () => daemon.stop(),

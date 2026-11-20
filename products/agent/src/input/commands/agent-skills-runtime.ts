@@ -585,7 +585,7 @@ export function registerAgentSkillsRuntimeCommands(registry: CommandRegistry): v
     effect: 'local-state',
     aliases: ['skill', 'agent-skills', 'askills', 'local-skills'],
     description: 'Manage Agent-local skills',
-    hidden: true,
+    firstScreen: false,
     usage: '[list|enabled|attention|discover|import-discovered <name> [--enabled]|import-standard <path/to/SKILL.md>|export-standard <id> <dest-directory> [--overwrite]|search <query>|show <id>|create --name <name> --description <summary> --procedure <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--procedure ...]|enable <id>|disable <id>|review <id>|stale <id> <reason...>|delete <id>|bundle ...]',
     handler: runAgentSkillsRuntimeCommand,
   });

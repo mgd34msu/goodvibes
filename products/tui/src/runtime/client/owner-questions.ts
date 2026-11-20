@@ -69,7 +69,7 @@ export function terminalOwnerQuestions(services: RuntimeServices, sessionId: () 
       daemon,
       // Only for a question a daemon on another machine holds: its update stream while one is open.
       watch: async (onItem, onEnd) => {
-        const endpoint = resolveDaemonEndpoint({ configManager: services.configManager, homeDirectory });
+        const endpoint = await resolveDaemonEndpoint({ configManager: services.configManager, homeDirectory });
         if (!endpoint.available) return null;
         const token = endpoint.token;
         return await watchOwnerInboxUpdates({ baseUrl: endpoint.baseUrl, getAuthToken: () => token, onItem, onTerminate: onEnd });

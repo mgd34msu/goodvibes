@@ -39,7 +39,7 @@ export function adaptCodeIndex(service: CodeIndexProcessSource, now: number): Pr
       ? `Code index: build failed (${buildError})`
     : lastBuild
       ? `Code index: ${stats.indexedFiles} files, ${stats.indexedChunks} chunks`
-      : 'Code index: idle';
+      : 'Code index: not built yet';
 
   return {
     id: codeIndexNodeId(),

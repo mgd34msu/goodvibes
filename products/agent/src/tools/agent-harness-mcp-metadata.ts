@@ -167,18 +167,18 @@ function describeServer(
         serversCommand: '/mcp servers',
         toolsCommand: `/mcp tools ${server.name}`,
         repairCommand: `/mcp repair ${server.name}`,
-        authReviewCommand: '/mcp auth-review',
-        configCommand: '/mcp config',
+        configCommand: '/mcp files',
         workspaceActionIds: [
           'mcp-tools-server',
           'mcp-repair',
           'mcp-add-server',
         ],
+        // Lines that ask the owner first (their risk is set in the /mcp description); a model's --yes is ignored.
         confirmationGatedCommands: [
-          `/mcp trust ${server.name} <constrained|ask-on-risk|blocked> --yes`,
-          `/mcp role ${server.name} <role> --yes`,
-          `/mcp quarantine ${server.name} approve <operatorId> --yes`,
-          `/mcp remove ${server.name} --yes`,
+          `/mcp trust ${server.name} ask-on-risk`,
+          `/mcp restore-trust ${server.name}`,
+          `/mcp accept-tools ${server.name}`,
+          `/mcp remove ${server.name}`,
         ],
       },
     } : {

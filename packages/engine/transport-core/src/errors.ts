@@ -59,3 +59,34 @@ export function transportErrorFromUnknown(error: unknown, context: string): Erro
     recoverable,
   });
 }
+
+/**
+ * A streamed body lost chunks in transit (a relay's bounded send buffer
+ * overflowed for a slow reader). The body ends with this error instead of
+ * carrying on with a hole in it, and nothing is written into the body to say
+ * so: the reader sees the loss as a typed end and recovers (an event stream
+ * reconnects from its last event id; any other stream reports it incomplete).
+ */
+export class StreamGapError extends GoodVibesError {
+  readonly dropped: number;
+
+  constructor(dropped: number) {
+    super(`The stream lost ${dropped} chunk(s) in transit because this reader fell behind.`, {
+      code: 'STREAM_GAP',
+      category: 'protocol',
+      source: 'transport',
+      recoverable: true,
+      hint: 'Reopen the stream from its last position, or re-read current state.',
+    });
+    // Named explicitly: a minifier may rename the class, and readers match on the name.
+    this.name = 'StreamGapError';
+    this.dropped = dropped;
+  }
+}
+
+/** The dropped count a {@link StreamGapError} carries (read structurally, across realms), or undefined. */
+export function readStreamGapDropped(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const record = error as { readonly name?: unknown; readonly dropped?: unknown };
+  return record.name === 'StreamGapError' && typeof record.dropped === 'number' ? record.dropped : undefined;
+}

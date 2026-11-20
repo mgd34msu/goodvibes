@@ -190,7 +190,7 @@ export const MessageItem = memo(function MessageItem({
       )}
       {failedReply && (
         <p className="message-failure" role="note">
-          Reply failed: {failureReason}. Regenerate to try again.
+          Reply failed: {failureReason.replace(/[.\s]+$/, '')}. Regenerate to try again.
         </p>
       )}
       {!text && attachments.length === 0 && !failedReply && <p>{JSON.stringify(asRecord(message))}</p>}

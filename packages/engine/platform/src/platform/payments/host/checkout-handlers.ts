@@ -5,7 +5,7 @@ import { retainCheckoutInvocation, retainDetachedCheckout } from './checkout-inv
 import { PaymentCheckoutJournalUnavailableError } from './checkout-journal-store.js';
 import { PaymentPurchaseLedgerError } from './purchase-ledger.js';
 import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperationOwnership } from '../checkout-ownership.js';
-import { OwnedWork } from '../../utils/owned-work.js';
+import { OwnedScope } from '../../utils/owned-work.js';
 import { CheckoutOperations, type DetachedCheckoutOwner, type DetachedCheckoutSource } from './checkout-operations.js';
 import { PaymentOperationStoreError, checkoutRequestId, type DurablePaymentOperations } from './operation-store.js';
 import type { BeginCheckoutInput } from '../payments-gateway-service.js';
@@ -374,7 +374,7 @@ export class CheckoutServiceHolder {
   private readonly recovery: CheckoutRecovery;
   readonly operations: CheckoutOperations;
   readonly reconciliations: PurchaseReconciliations;
-  private readonly work = new OwnedWork();
+  private readonly work = new OwnedScope('checkout handlers');
   private readonly abort = new AbortController();
   private closed = false;
   private closing: Promise<void> | undefined;
@@ -530,7 +530,7 @@ export class CheckoutServiceHolder {
 
   run<T>(callback: () => Promise<T>): Promise<T> {
     if (this.closed) return Promise.reject(new CheckoutOwnershipError());
-    return this.work.run(callback);
+    return this.work.run('checkout handler', callback);
   }
 
   ownership(options: CheckoutOperationOwnership) {

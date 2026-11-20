@@ -244,8 +244,10 @@ export function PairingHandoffOffers({ offers, onDone, postureNotice }: PairingH
                       disabled={disabled || phase === 'submitting'}
                       onChange={(checked) => setAccepted((prev) => ({ ...prev, [kind]: checked }))}
                     >
-                      <Icon size={16} aria-hidden="true" />
-                      <span className="pairing-handoff-offer__label">{meta.label}</span>
+                      <span className="pairing-handoff-offer__name">
+                        <Icon size={16} aria-hidden="true" />
+                        <span className="pairing-handoff-offer__label">{meta.label}</span>
+                      </span>
                     </Checkbox>
                     <p className="pairing-handoff-offer__desc">
                       {disabled ? 'This browser does not support passkeys, so this offer cannot be completed here.' : meta.description}

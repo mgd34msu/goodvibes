@@ -25,7 +25,7 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
     description: policy.description,
     usage: policy.usage,
     argsHint: policy.argsHint,
-    hidden: policy.hidden,
+    firstScreen: !policy.hidden,
     handler(args, ctx) {
       const mgr = ctx.ops.modeManager;
       if (!mgr) {

@@ -266,10 +266,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       input.cursorPos = input.prompt.length;
     }
 
-    const commandQuery = input.prompt.startsWith('/') ? input.prompt.slice(1) : '';
-    const hasArgs = commandQuery.includes(' ');
-    if (hasArgs) input.autocomplete?.reset();
-    else input.autocomplete?.update(commandQuery);
+    input.autocomplete?.update(input.prompt.startsWith('/') ? input.prompt.slice(1) : '');
     input.ensureInputCursorVisible();
     render();
     return true;
@@ -305,6 +302,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
 
   // The one confirmation rule for typed commands (command-confirmation.ts) asks here.
   commandContext.confirm = (confirmOptions) => confirmThrough(input.surfaceModals, confirmOptions);
+  // A described command's guided panel (command-actions/panel.ts) is a kit modal on the same stack.
+  commandContext.pushSurfaceModal = (modal) => input.surfaceModals.push(modal);
   commandContext.openSettingsModal = createSettingsWorkspaceOpener({
     configure: () => {
       input.settingsModal.open(configManager, featureFlags, subscriptionManager, serviceRegistry, mcpRegistry, secretsManager, {

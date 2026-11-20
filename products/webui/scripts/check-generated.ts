@@ -6,6 +6,7 @@ import { loadOwnershipSnapshot, renderTs as renderOwnership, TS_OUT_PATH as owne
 import { loadContractSnapshot, renderTs as renderPresentation, renderCss, TS_OUT_PATH as presentationPath, CSS_OUT_PATH } from './generate-presentation-tokens';
 
 import { CONTRACT_SCHEMA_PATH, CONTRACT_SUMMARY_SCHEMA_PATH, renderContractInspectionSchema, renderContractSummarySchema } from './generate-contract-inspection-schema';
+import { loadCommandActionsSnapshot, renderTs as renderCommandActions, TS_OUT_PATH as commandActionsPath } from './generate-command-actions';
 
 const presentation = loadContractSnapshot();
 const artifacts = [
@@ -15,6 +16,7 @@ const artifacts = [
   [ownershipPath, renderOwnership(loadOwnershipSnapshot())],
   [presentationPath, renderPresentation(presentation)],
   [CSS_OUT_PATH, renderCss(presentation)],
+  [commandActionsPath, renderCommandActions(loadCommandActionsSnapshot())],
 ] as const;
 const stale = artifacts.filter(([path, expected]) => readFileSync(path, 'utf8') !== expected);
 if (stale.length) {
@@ -22,4 +24,4 @@ if (stale.length) {
   console.error('Run bun run release:prepare from products/webui and review the generated changes.');
   process.exit(1);
 }
-console.log('WebUI configuration, ownership, presentation and contract inspection snapshots match the workspace engine.');
+console.log('WebUI configuration, ownership, presentation, contract inspection and command action snapshots match the workspace engine.');

@@ -1937,7 +1937,7 @@ The Agent picks the credential it sends to the daemon in this order; the first s
 1. The environment variable `GOODVIBES_CONNECTED_HOST_TOKEN`, when set and not empty.
 2. The environment variable `GOODVIBES_DAEMON_TOKEN`, when set and not empty.
 3. The Agent's stored pairing for that daemon address (written by `goodvibes-agent setup pair --apply`). When a pairing record exists but its token cannot be used, the search stops here with the reason: a lost pairing reply (`goodvibes-agent setup pair` repeats the request) or an unreadable pairing store.
-4. The `token` field of `operator-tokens.json` in the daemon home (`~/.goodvibes/daemon/operator-tokens.json`, or the directory `GOODVIBES_DAEMON_HOME` names, or `<GOODVIBES_AGENT_HOME>/.goodvibes/daemon/`). This file exists on the machine where the daemon runs.
+4. The `token` field of `operator-tokens.json` in the daemon home (`~/.goodvibes/daemon/operator-tokens.json`, or the directory `GOODVIBES_DAEMON_HOME` names, or `<GOODVIBES_AGENT_HOME>/.goodvibes/daemon/`). This file exists on the machine where the daemon runs, and is used only when the daemon address is this machine (a loopback address or one of its own interface addresses); it is never sent to a daemon elsewhere.
 
 `goodvibes-agent doctor` shows the source on its `access token:` line (`env:GOODVIBES_CONNECTED_HOST_TOKEN`, `env:GOODVIBES_DAEMON_TOKEN`, `Agent host-bound pairing store` or the file path). A token from step 1 or 2 hides a stored pairing; unset both variables to use the pairing.
 

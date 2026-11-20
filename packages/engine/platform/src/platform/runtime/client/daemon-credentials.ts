@@ -1,15 +1,17 @@
 /**
- * The bearer this terminal presents to a daemon it was pointed at
- * (`daemon.connectedHost.url`), keyed by that daemon's origin and kept in the
- * terminal's own state. The daemon home's operator-tokens.json is the token
- * record of the daemon on this machine; adopting a daemon elsewhere never
- * writes it, so the local daemon and its other clients keep their credential,
- * and pointing the terminal back finds each endpoint's own token.
+ * daemon-credentials.ts, the bearer a client presents to a daemon it was
+ * pointed at (`daemon.connectedHost.url`, an explicit `--host`), keyed by that
+ * daemon's origin and kept in the client's own state. The daemon home's
+ * operator-tokens.json is the token record of the daemon on this machine;
+ * adopting a daemon elsewhere never writes it, so the local daemon and its
+ * other clients keep their credential, and pointing the client back finds each
+ * endpoint's own token. Read by the one daemon target resolver
+ * (daemon-target-resolver.ts), which binds each token to its origin.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
-import { writeFileAtomic } from '@goodvibes-jev/engine/platform/platform/utils';
+import { parseDaemonOrigin } from '../../config/control-plane-base-url.js';
+import { writeFileAtomic } from '../../utils/atomic-json-store.js';
 
 interface ConnectedDaemonCredentialStore {
   readonly version: 1;

@@ -45,7 +45,7 @@ export interface ChannelIntake {
 export interface InboundIntakeBroker {
   setChannelIntake(intake: ChannelIntake | null): void;
   channelProfileForSession?(session: Pick<SharedSessionRecord, 'id' | 'participants'>): ChannelProfileDefaults | null;
-  getSession?(sessionId: string): { readonly status: string; readonly channelPermissionMode?: ChannelPermissionMode | undefined;
+  getSession?(sessionId: string): { readonly status: string; readonly kind?: string | undefined; readonly channelPermissionMode?: ChannelPermissionMode | undefined;
     readonly channelPermissionModeRevision?: number | undefined } | null;
   setChannelExecutionMode?(sessionId: string, mode: ChannelPermissionMode): Promise<void>;
 }

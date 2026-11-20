@@ -428,7 +428,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     fetchDaemonPowerState,
     // The daemon says when sleep ownership changes; the chip polls only while this stream is not open.
     watchDaemonPowerEvents: async (handlers) => {
-      const endpoint = resolveDaemonEndpoint({ configManager, homeDirectory });
+      const endpoint = await resolveDaemonEndpoint({ configManager, homeDirectory });
       return endpoint.available ? await watchDaemonPowerEvents({ baseUrl: endpoint.baseUrl, getAuthToken: () => endpoint.token, ...handlers }) : null;
     },
   });
@@ -571,6 +571,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     answerOptions: () => contractQuestions.answerOptions(),
     sendTurn: (text, content, inputOptions) => sendOwnerTurn(text, content, inputOptions),
     notify: (message, level) => systemMessageRouter.high(message, level),
+    showShellOutput: (result) => conversation.addShellOutput(result.display, result.failed),
     render: () => render(),
   });
   const { submitInput, submitTurn } = submission;
@@ -1000,6 +1001,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       compacting,
       compactingSinceMs,
       pendingApproval: mainApproval ? { name: mainApproval.tool, args: mainApproval.args } : null,
+      ownerChoice: trustPromptRef.awaitingOwner === true ? 'Choose a trust level for this workspace' : null,
       activeTool:
         runningTool !== undefined
           ? {
@@ -1109,7 +1111,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     overlayRows += orchestrator.messageQueue.length * 3; // queued messages
     // File picker and model picker overlay rows computed from actual rendered line count below
     // Selection modal overlay rows are computed from actual rendered line count below
-    if (input.searchManager.active) {
+    // The find bar and the reverse history search line each take a row under the transcript.
+    if (input.searchManager.active || input.historySearch.active) {
       overlayRows += 1;
     }
 

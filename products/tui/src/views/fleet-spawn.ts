@@ -122,6 +122,20 @@ export class FleetSpawn {
 
   public constructor(private readonly deps: FleetSpawnDeps) {}
 
+  /** While the Agents modal is open its status line takes the flow's messages, so they are seen where 'n' was pressed. */
+  private sink: ((message: string) => void) | null = null;
+
+  /** Route the flow's messages to the open modal's status line (null: back to the notifications feed). */
+  public reportTo(sink: ((message: string) => void) | null): void {
+    this.sink = sink;
+  }
+
+  private report(message: string): void {
+    if (this.sink === null) { this.deps.notify(message); return; }
+    this.sink(message);
+    this.deps.markDirty();
+  }
+
   /** True while the spawn picker owns the fleet view + input. */
   public spawnModeActive(): boolean {
     return this.mode !== null;
@@ -141,13 +155,13 @@ export class FleetSpawn {
       const agents = await gateway.listAgents();
       if (generation !== this.generation) return;
       if (agents.length === 0) {
-        this.deps.notify('No third-party ACP agents discovered (Claude Code, Codex, opencode). Install one on PATH to host it here.');
+        this.report('No third-party ACP agents discovered (Claude Code, Codex, opencode). Install one on PATH to host it here.');
         return;
       }
       this.mode = { step: 'agent', agents, index: 0 };
       this.deps.markDirty();
     } catch (err) {
-      if (generation === this.generation) this.deps.notify(`Could not list ACP agents: ${summarizeError(err)}`);
+      if (generation === this.generation) this.report(`Could not list ACP agents: ${summarizeError(err)}`);
     } finally {
       if (generation === this.generation) this.reading = false;
     }
@@ -226,12 +240,12 @@ export class FleetSpawn {
       const hosted = result.hosted;
       if (hosted.error) {
         // Structured failure rendered verbatim, never a hung row.
-        this.deps.notify(`[Fleet] Could not host ${hosted.title || agentId}: ${hosted.error.stage} stage failed for ${hosted.error.binary}; ${hosted.error.message}`);
+        this.report(`[Fleet] Could not host ${hosted.title || agentId}: ${hosted.error.stage} stage failed for ${hosted.error.binary}; ${hosted.error.message}`);
       } else {
-        this.deps.notify(`[Fleet] Hosting ${hosted.title || agentId} in ${cwd}; it appears as an acp-agent row; steer and stop it like any agent.`);
+        this.report(`[Fleet] Hosting ${hosted.title || agentId} in ${cwd}; it appears as an acp-agent row; steer and stop it like any agent.`);
       }
     } catch (err) {
-      this.deps.notify(`ACP session create failed: ${summarizeError(err)}`);
+      this.report(`ACP session create failed: ${summarizeError(err)}`);
     } finally {
       this.creating = false;
       if (generation === this.generation) {
@@ -267,7 +281,7 @@ export class FleetSpawn {
 
   private requireGateway(): AcpSpawnGateway | null {
     const resolution = this.deps.resolveGateway();
-    if (!resolution.available) { this.deps.notify(`[Fleet] ${resolution.reason}`); return null; }
+    if (!resolution.available) { this.report(`[Fleet] ${resolution.reason}`); return null; }
     return resolution.gateway;
   }
 }

@@ -316,7 +316,8 @@ export class InputHandler extends TerminalInputHandlerState {
     this.commandContext = context;
     // The root context serves agent_harness run_keybinding and run_command; without this their paste would find no route and report unavailable. A typed command still gets its own composer-bound copy from the command route.
     context.pasteFromClipboard ??= () => this.handlePaste();
-    this.autocomplete = new AutocompleteEngine(registry);
+    // A described command's blanks complete from its live lists, read with this context only once the dropdown asks.
+    this.autocomplete = new AutocompleteEngine(registry, { context: () => this.commandContext, rowsArrived: () => this.requestRender() });
   }
 
   /** Wire in the conversation manager for block copy/collapse. */

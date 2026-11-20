@@ -51,6 +51,8 @@ export interface SidebarProps {
   recentChats: readonly RecentChat[];
   deletingChatId: string | null;
   workAttention: number;
+  /** What Work counts as running right now (the account menu's activity line). */
+  runningNow: number;
   accountName: string;
   health: HealthSummary;
   onNavigate: (view: ViewId) => void;
@@ -106,6 +108,7 @@ export function SidebarContent({
   recentChats,
   deletingChatId,
   workAttention,
+  runningNow,
   accountName,
   health,
   onNavigate,
@@ -248,6 +251,7 @@ export function SidebarContent({
         <AccountMenu
           name={accountName}
           health={health}
+          running={runningNow}
           compact={compact}
           onOpenSettings={onOpenSettings}
           onSignOut={onSignOut}

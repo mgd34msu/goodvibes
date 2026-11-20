@@ -20,6 +20,23 @@ export function describePowerStatus(state: Pick<PowerState, 'work' | 'keepAwake'
   return held ?? edge;
 }
 
+/**
+ * The status line's power chip and the full note behind it. The status line
+ * keeps a chip at any width, so the chip is one short label (with a count when
+ * more than one note applies); the full note is read in the notifications,
+ * where it is posted when it changes. Null when nothing applies.
+ */
+export function describePowerChip(state: Pick<PowerState, 'work' | 'keepAwake'> & Partial<Pick<PowerState, 'sleepEdge'>>): { readonly chip: string; readonly detail: string } | null {
+  const detail = describePowerStatus(state);
+  if (detail === null) return null;
+  const labels: string[] = [];
+  if (state.keepAwake.enabled) labels.push(keepAwakeCondition(state.keepAwake) === 'refused' ? 'keep-awake refused' : 'sleep disabled');
+  else if (state.work.held && state.work.reasons.length > 0) labels.push('sleep held');
+  if (state.sleepEdge?.note) labels.push('sleep hooks off');
+  const chip = labels.length > 1 ? `${labels[0]} +${labels.length - 1}` : (labels[0] ?? 'power');
+  return { chip, detail };
+}
+
 function describeHeld(state: Pick<PowerState, 'work' | 'keepAwake'>): string | null {
   if (state.keepAwake.enabled) {
     // On but not holding: the OS refused the inhibitor, so saying "sleep disabled" would be false.

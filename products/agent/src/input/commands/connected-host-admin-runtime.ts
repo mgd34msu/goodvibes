@@ -47,7 +47,7 @@ export function registerConnectedHostAdminCommands(registry: CommandRegistry): v
     name: 'ci',
     effect: 'connected-host-state',
     description: 'Check a repo/PR CI status with per-job conclusions and manage standing CI watches on the connected host',
-    hidden: true,
+    firstScreen: false,
     usage: 'status <repo> [--ref <ref>] [--pr <number>] | watches list | watches create <repo> --delivery-channel <channel> [--trigger-fix-session] --yes | watches run <watch-id> | watches delete <watch-id> --yes',
     argsHint: 'status <repo> | watches list',
     async handler(args, ctx) {
@@ -59,7 +59,7 @@ export function registerConnectedHostAdminCommands(registry: CommandRegistry): v
     effect: 'connected-host-state',
     aliases: ['principal'],
     description: 'Manage the connected host cross-channel principal identity registry',
-    hidden: true,
+    firstScreen: false,
     usage: 'list | get <id> | resolve --channel <channel> --value <value> | create --name <name> --kind <user|bot|service|token> [--identity channel:value] --yes | update <id> [...] --yes | delete <id> --yes',
     argsHint: 'list | resolve --channel slack --value U123',
     async handler(args, ctx) {
@@ -71,7 +71,7 @@ export function registerConnectedHostAdminCommands(registry: CommandRegistry): v
     effect: 'connected-host-state',
     aliases: ['channel-profile'],
     description: 'Manage per-channel session profile bindings (model, provider, permission mode) on the connected host',
-    hidden: true,
+    firstScreen: false,
     usage: 'list | get <surface-kind> [--channel-id <id>] | set <surface-kind> [--model <model>] [--provider <provider>] [--permission-mode <mode>] --yes | delete <surface-kind> --yes',
     argsHint: 'list | get slack',
     async handler(args, ctx) {

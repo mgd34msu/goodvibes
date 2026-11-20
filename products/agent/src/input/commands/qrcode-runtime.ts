@@ -20,7 +20,7 @@ export function registerQrcodeRuntimeCommands(registry: CommandRegistry): void {
     effect: 'connected-host-state',
     aliases: ['qr', 'pair'],
     description: 'Pair a device with the connected host: mints a named device token and shows its link and QR',
-    hidden: true,
+    firstScreen: false,
     usage: '[--name <device name>]',
     argsHint: '[--name <device name>]',
     // The token is minted by the host and shown, never typed.

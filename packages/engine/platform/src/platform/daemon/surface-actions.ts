@@ -12,7 +12,8 @@ import type { AgentManager } from '../tools/agent/index.js';
 import type { ControlPlaneGateway, SharedSessionBroker } from '../control-plane/index.js';
 import type { ConversationMessageEnvelope } from '../control-plane/conversation-message.js';
 import type { RouteBindingManager, ChannelPolicyManager } from '../channels/index.js';
-import { isChannelOwner } from '../channels/policy-manager.js';
+import { channelSenderActor } from '../channels/policy-manager.js';
+import { admitEffects } from '../security/effect-authority.js';
 import type { GenericWebhookAdapterContext, SurfaceAdapterContext, SurfaceControlCommand, SurfaceControlOrigin, SurfaceIngressDecision } from '../adapters/index.js';
 import type { AutomationManager } from '../automation/index.js';
 import type { ChannelPolicyDecision, ChannelIngressPolicyInput } from '../channels/index.js';
@@ -242,7 +243,8 @@ export class DaemonSurfaceActionHelper {
         if (decision.allowed) {
           // A sender with no identity is admitted by its surface secret, which only an
           // empty allowlist allows; an identified sender is the operator only as the owner.
-          const operator = input.userId === undefined || isChannelOwner(decision, input.userId);
+          // A guest's turn (`turn.start` asks the owner) runs with everything beyond a plain read put to him.
+          const operator = admitEffects(channelSenderActor(decision, input.surface, input.userId), ['turn.start']).kind === 'allowed';
           authorization = { text: input.text ?? '', surface: input.surface, revision: policyRevision(input.surface), operator };
           if (decision.intent !== undefined && origin.current) origin.current = { ...origin.current, intent: decision.intent };
           // Authority belongs to the person: anyone else the channel admits starts a guest's turn.
@@ -385,12 +387,12 @@ export class DaemonSurfaceActionHelper {
 
   /**
    * Whether a sender on a channel is someone it admits who is not its owner,
-   * the same rule ingress applies (`isChannelOwner`): a sender with no id is
+   * the same rule ingress applies (`channelSenderActor`): a sender with no id is
    * admitted by the surface's secret and is not a guest.
    */
   senderIsGuest(surface: string, userId: string | undefined): boolean {
     if (userId === undefined || !isChannelSurfaceKind(surface)) return false;
-    return !isChannelOwner({ policy: this.context.channelPolicy.getPolicy(surface) }, userId);
+    return channelSenderActor({ policy: this.context.channelPolicy.getPolicy(surface) }, surface, userId).class === 'guest';
   }
 
   /** The owner's own conversations, those on `surface` first, newest first (owner-alert.ts). */
@@ -673,8 +675,9 @@ export class DaemonSurfaceActionHelper {
     const runMatch = actionId.match(/^gv:run:(cancel|retry):(.+)$/);
     if (runMatch) {
       const [, action, runId] = runMatch;
-      // A run button acts on the owner's work: only the channel's owner may press it, as for the typed commands.
-      if (!isChannelOwner({ policy: this.context.channelPolicy.getPolicy(surface) }, userId?.trim() || undefined)) {
+      // A run button acts on the owner's work (`run.cancel`, `run.retry`): a guest is refused, as for the typed commands.
+      const sender = channelSenderActor({ policy: this.context.channelPolicy.getPolicy(surface) }, surface, userId?.trim() || undefined);
+      if (!userId?.trim() || admitEffects(sender, [action === 'cancel' ? 'run.cancel' : 'run.retry']).kind !== 'allowed') {
         return `Not done: ${action} ${runId} was refused. Only the owner of this channel may cancel or retry a run.`;
       }
       if (action === 'cancel') {

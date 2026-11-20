@@ -65,7 +65,7 @@ export const builtinGatewayRelayMethodDescriptors: readonly GatewayMethodDescrip
     title: 'Relay Reachability',
     description: 'Whether this daemon is registered with the relay, and what state its registration is in. `disabled` is a distinct answer from every other one and the distinction is the point: it means a gate is off, `relay.enabled`, the relay-connect capability, or an empty `relay.url`, rather than that a connection is failing. `idle` means the gates are open and nothing has started; `connecting`, `registered` and `reconnecting` are the live registration; `refused` means the relay refused the registration for a reason another attempt cannot clear, and the daemon stops dialling until the relay settings or identity change; `stopped` is a controller that was told to stop. `configured` says whether all three gates are open, so a caller can render "turn it on" instead of "it is broken". `rendezvousId`, present while a registration is running, is the id the daemon is registered under, derived from its relay identity key; it is the id a pairing payload carries and a step-up challenge is bound to. `refusal`, present after the relay refused the registration, says why (`state`), what to do (`next`) and whether the daemon keeps trying (`retryable`). ws-only invoke verb; no REST binding.',
     category: 'control-plane',
-    scopes: ['read:control-plane'],
+    effects: ['control-plane.read'],
     transport: ['ws'],
     // Declared and empty rather than omitted: the invoke gate skips a verb with
     // no typed inputSchema, so "takes nothing" has to be stated to be enforced.
@@ -80,12 +80,10 @@ export const builtinGatewayRelayMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'relay.pairing.mint',
     repeat: 'unsafe',
-    ownerOnly: true,
+    effects: ['control-plane.administer', 'owner.act'],
     title: 'Mint A Relay Pairing Payload',
     description: 'Return the pairing payload one device scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, the daemon\'s static public key, and a relay code issued for this device alone (returned once; only its hash is kept). Every request the device tunnels through the relay presents that code, and the daemon refuses one whose code it did not issue or has revoked (401 relay-code-revoked), so one phone is cut off with relay.codes.revoke while every other keeps working. `name` labels the code in relay.codes.list (default: "Relay device" and the time). `codeId` and `codeName` name the code minted. `pairing` is null, not an error, and no code is kept, when there is no live registration to mint against, which is the honest answer for a daemon whose relay is off or has not connected yet. Minting does not create a second identity or a second registration; it describes the one that exists. 409 RELAY_CODE_LIMIT when 64 codes are held.',
     category: 'control-plane',
-    scopes: ['write:control-plane'],
-    access: 'admin',
     transport: ['ws'],
     inputSchema: objectSchema({ name: STRING_SCHEMA }, []),
     outputSchema: objectSchema({
@@ -100,9 +98,8 @@ export const builtinGatewayRelayMethodDescriptors: readonly GatewayMethodDescrip
     title: 'List Relay Codes',
     description: 'List the relay codes this daemon issued, one per device paired through the relay (relay.pairing.mint), as redacted views: id, name, created time and, when the device has used it, the last time a relayed request presented it. The code itself is never stored in listable form and is never returned.',
     category: 'control-plane',
-    scopes: ['read:control-plane'],
+    effects: ['control-plane.inspect'],
     // Which devices can reach the daemon is the owner's to see, as paired devices are.
-    access: 'admin',
     transport: ['ws'],
     inputSchema: objectSchema({}, []),
     outputSchema: objectSchema({ codes: arraySchema(RELAY_CODE_SCHEMA) }, ['codes']),
@@ -110,12 +107,10 @@ export const builtinGatewayRelayMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'relay.codes.revoke',
     repeat: 'safe',
-    ownerOnly: true,
+    effects: ['control-plane.administer', 'owner.act'],
     title: 'Revoke Relay Code',
     description: 'Revoke one device\'s relay code. Revocation is immediate: every relay connection the code opened is closed at once (each open stream gets a stream-close with reason relay-code-revoked, its in-flight requests are aborted; `closedConnections` counts them), the device\'s next request through the relay is refused with 401 relay-code-revoked, and every other device keeps working. The device reaches the daemon through the relay again only after pairing again on the home network. An unknown id is a 404 RELAY_CODE_NOT_FOUND, never a 200-noop.',
     category: 'control-plane',
-    scopes: ['write:control-plane'],
-    access: 'admin',
     transport: ['ws'],
     inputSchema: objectSchema({ id: STRING_SCHEMA }, ['id']),
     outputSchema: objectSchema({ id: STRING_SCHEMA, revoked: { type: 'boolean' }, closedConnections: NUMBER_SCHEMA }, ['id', 'revoked', 'closedConnections']),

@@ -202,9 +202,10 @@ export function StepUpSettings() {
         </>
       )}
 
-      {daemonCredentials && (
+      {/* The status line above already says when there are none; the list shows only when there is one. */}
+      {daemonCredentials && daemonCredentials.length > 0 && (
         <div className="stepup-credentials">
-          <p>{daemonCredentials.length === 0 ? 'The daemon has no registered passkeys.' : 'Passkeys registered on the daemon:'}</p>
+          <p>Passkeys registered on the daemon:</p>
           <ul>
             {daemonCredentials.map((credential) => (
               <li key={credential.credentialId}>

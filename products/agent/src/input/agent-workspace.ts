@@ -1,4 +1,5 @@
 import { settleEditorMessageTone } from './agent-workspace-editor-message.ts';
+import { openWorkspaceAction, workspaceActionFor } from './workspace-actions.ts';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import type { AgentConfigSetting } from '../config/settings-catalog.ts';
@@ -402,6 +403,14 @@ export class AgentWorkspace {
 
   activateSelected(requestRender?: () => void): void {
     activateAgentWorkspaceSelection(this, requestRender);
+  }
+
+  openGuidedAction(editorKind: string): boolean {
+    const target = workspaceActionFor(editorKind);
+    const context = this.context;
+    if (!target || !context?.openSelection) return false;
+    this.closeToComposer();
+    return openWorkspaceAction(target, context);
   }
 
   hasCommandDispatch(): boolean {

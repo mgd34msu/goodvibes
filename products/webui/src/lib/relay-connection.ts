@@ -13,11 +13,11 @@
  * `Accept` is `text/event-stream` (the SSE opener's header, see
  * @goodvibes-jev/engine/transport-http's sse-stream.js) is opened by the relay client as a
  * tunnelled stream: the returned `Response` carries a `ReadableStream` body fed by the
- * tunnel's `stream-data` frames, and a dropped-chunk overflow surfaces as a visible
- * `relay-overflow` SSE event (never a silent gap). So `routedFetch` no longer rejects SSE
- * over relay, it hands the request straight to the relay client like any other, and the
- * webui's stream consumers render the `relay-overflow` notice honestly (see
- * relay-stream-overflow.ts).
+ * tunnel's `stream-data` frames, and a dropped-chunk overflow ends the body with a typed
+ * `StreamGapError` (never a silent gap, never text written into the body). So `routedFetch`
+ * no longer rejects SSE over relay, it hands the request straight to the relay client like
+ * any other; the stream reconnects from its last event id and the webui's stream consumers
+ * record the drop and resync (see relay-stream-overflow.ts).
  *
  * STEP-UP ON STATE-CHANGING RELAY CALLS: the daemon gates state-changing relay calls behind
  * a WebAuthn step-up assertion, deciding from the called method's catalog scopes (not the HTTP

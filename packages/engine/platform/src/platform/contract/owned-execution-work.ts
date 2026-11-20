@@ -1,12 +1,13 @@
 import { bindExecutionModeContext, withRetainedExecutionMode } from '../gate/execution-context.js';
-import { OwnedWork } from '../utils/owned-work.js';
+import { OwnedScope } from '../utils/owned-work.js';
+import type { Fence } from '../utils/owner-fence.js';
 
 /** Contract callbacks retain their originating host mode until actual drainage. */
-export class ContractExecutionWork extends OwnedWork {
+export class ContractExecutionWork extends OwnedScope {
   private readonly enter: <T>(callback: () => T) => T;
 
   constructor(settled: Promise<void>) {
-    super();
+    super('contract execution');
     let enter!: <T>(callback: () => T) => T;
     // Capture before start returns (and before queued admission can move to
     // another contract's callback). Retention keeps host mode checks and the
@@ -19,7 +20,7 @@ export class ContractExecutionWork extends OwnedWork {
     this.enter = enter;
   }
 
-  override run<T>(callback: () => T | PromiseLike<T>): Promise<T> {
-    return this.enter(() => super.run(callback));
+  override run<T>(label: string, callback: (fence: Fence) => T | PromiseLike<T>): Promise<T> {
+    return this.enter(() => super.run(label, callback));
   }
 }

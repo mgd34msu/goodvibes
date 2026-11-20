@@ -94,7 +94,7 @@ export const knowledgeCommand: SlashCommand = withCommandVerbs({
   aliases: ['know'],
   description:
     'Agent Knowledge: isolated Agent-owned status, ask/search, source/node/issue lists, item lookup, map, connectors, ingest, and review queue.',
-  hidden: true,
+  firstScreen: false,
   usage: '<subcommand> [args]',
   // Ingests, imports, review, reindex, consolidation and cancelling a run are
   // recoverable and run at once. Letting an ingest fetch from private hosts

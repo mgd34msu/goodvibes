@@ -22,6 +22,7 @@
 import type { ContractView, ContractUnitView } from '@goodvibes-jev/engine/platform/platform/contract';
 import { contractIsActive, contractCommitNote, contractStatusSummary, projectContractTree } from './work-tree-contract.js';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
+import { isTranscriptNotice } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import { beadArgument, beadBody, beadName, beadStatus, beadSummary, cellText, formatBeadTime, formatCost, inferResultToolName, isBackgroundCall, needsAttention, toolFamily, type BeadBody, type BeadStatus, type BeadSummary, } from './renderer/bead.js';
 import { SPINE, type LaneId } from './renderer/lane-graph-layout.js';
@@ -141,6 +142,8 @@ export interface TurnModel {
         readonly content: string;
         /** The level stored on the notice by its writer. */
         readonly severity?: 'error' | 'warning' | 'info' | undefined;
+        /** Drawn in the transcript even where other notices are shown elsewhere (platform core isTranscriptNotice). */
+        readonly inTranscript?: boolean | undefined;
     }>;
 }
 /** A contiguous stretch of the transcript: one user message, one turn, or one standalone system message. */
@@ -612,7 +615,7 @@ export function buildTurnModel(input: BuildTurnInput): TurnModel {
             continue;
         }
         if (m.role === 'system') {
-            notices.push({ messageIndex: abs, content: m.content, severity: m.presentation?.severity });
+            notices.push({ messageIndex: abs, content: m.content, severity: m.presentation?.severity, ...(isTranscriptNotice(m) ? { inTranscript: true } : {}) });
             continue;
         }
         if (m.role !== 'assistant')

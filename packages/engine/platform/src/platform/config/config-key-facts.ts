@@ -15,7 +15,9 @@
 import type { ConfigKeyFacts } from './schema-shared.js';
 import { CONFIG_KEYS } from './schema.js';
 import { configKeyScope } from './config-ownership.js';
-import { isSecretBearingConfigKey } from './secret-bearing-config-keys.js';
+import { isSecretBearingConfigKey, isSecretReferenceValue } from './secret-bearing-config-keys.js';
+import { isSecret } from '../security/secret.js';
+import { maskCredentialCandidates } from '../utils/redaction.js';
 import { isPaymentsSyntheticConfigKey } from './payment-config-keys.js';
 import { CREDENTIAL_DESTINATION_KEYS } from './credential-destination-keys.js';
 import { SAFETY_GATE_CONFIG_PREFIXES } from './settings-ingestion.js';
@@ -318,4 +320,22 @@ export function isProjectRestrictedKey(key: string): boolean {
 export function isProtectedConfigValue(key: string): boolean {
   const facts = configKeyFacts(key);
   return facts.secret || facts.cardMaterial || !facts.inSchema;
+}
+
+/**
+ * The one projection of a setting's value for every screen, receipt and undo
+ * file. A credential or card field shows `(secret)`, or its
+ * `goodvibes://secrets/...` reference when that is what is stored (a
+ * reference is the safe at-rest shape); a `Secret` shows its label only; any
+ * other value is shown as written, with every credential-shaped span masked
+ * (maskCredentialCandidates, a local pass).
+ */
+export function displaySettingValue(key: string, value: unknown): string {
+  if (value === undefined || value === null) return '(unset)';
+  if (value === '') return '(empty)';
+  if (isSecret(value)) return value.toString();
+  if (isProtectedConfigValue(key)) return isSecretReferenceValue(value) ? String(value).trim() : '(secret)';
+  if (typeof value === 'string') return maskCredentialCandidates(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return maskCredentialCandidates(JSON.stringify(value) ?? String(value));
 }

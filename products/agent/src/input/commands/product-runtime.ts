@@ -24,7 +24,7 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
     name: 'trust',
     effect: 'mixed',
     description: "Review trust posture, set this workspace's trust level, or export portable trust bundles",
-    hidden: true,
+    firstScreen: false,
     usage: '[review|workspace [trusted|restricted]|bundle export <path>|bundle inspect <path>]',
     confirm: (args, ctx) => trustBundleExportConfirmation(args, (path) => requireShellPaths(ctx).resolveWorkspacePath(path)),
     async handler(args, ctx) {

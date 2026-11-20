@@ -83,4 +83,6 @@ export interface StructuredDaemonErrorBody {
   readonly providerCode?: string | undefined;
   readonly providerType?: string | undefined;
   readonly retryAfterMs?: number | undefined;
+  /** For `TARGET_CHANGED`: what changed in the reviewed target since it was shown. */
+  readonly changes?: readonly { readonly field: string; readonly was: string; readonly now: string | null }[] | undefined;
 }

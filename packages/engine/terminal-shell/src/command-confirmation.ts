@@ -1,4 +1,4 @@
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, readRefusal, refusal, type TargetChange } from '@goodvibes-jev/engine/errors';
 
 /**
  * What a slash command throws when it did not do what was asked: an unknown id,
@@ -85,25 +85,33 @@ export function requireYesFlag(_ctx: CommandConfirmationContext, action: string,
  * What a command line that cannot be undone, or that changes who has access,
  * asks once before it runs. A reversible line declares nothing and runs at once.
  */
-export interface CommandConfirmation {
+export interface CommandConfirmation<R = unknown> {
   /** The act, as a question title: "Delete principal p_123?". */
   readonly title: string;
   /** What will change and what cannot be recovered afterwards. */
   readonly detail: string;
   /** The confirming button: "Delete", "Revoke", "Send". */
   readonly confirmLabel: string;
+  /**
+   * What the person is being shown (a `TargetRef` from platform/utils/target-ref.ts,
+   * or the exact plan), handed to the handler unchanged so it acts on that and
+   * not on a second reading. A handler that finds its target changed throws
+   * `TargetChangedError` (code `TARGET_CHANGED`) and the owner is asked again.
+   */
+  readonly reviewed?: R | undefined;
 }
 
 /** A command that may declare the one confirmation its irreversible lines need. */
-export interface ConfirmableCommand<Context> {
+export interface ConfirmableCommand<Context, R = unknown> {
   readonly name: string;
-  readonly handler: (args: string[], context: Context) => void | Promise<void>;
+  /** `reviewed` is the confirmation's `reviewed` value when the line was confirmed; undefined for a line that asks nothing. */
+  readonly handler: (args: string[], context: Context, reviewed?: R) => void | Promise<void>;
   /**
    * Called with the line's arguments (without `--yes`). Returns the question
    * for a line that cannot be undone or changes access; undefined for a line
    * that is reversible, a read, or incomplete (the handler prints its usage).
    */
-  readonly confirm?: ((args: readonly string[], context: Context) => CommandConfirmation | undefined) | undefined;
+  readonly confirm?: ((args: readonly string[], context: Context) => CommandConfirmation<R> | undefined) | undefined;
   /**
    * The line's tail is free text: `--yes` counts only right after the
    * subcommand, before the first field (stripLeadingYesFlag), never inside the text.
@@ -116,7 +124,32 @@ export interface ConfirmationHost {
   readonly print: (message: string) => void;
   readonly invokedByModel?: boolean | undefined;
   /** A yes/no dialog; resolves true only when the confirming choice is made. */
-  readonly confirm?: ((options: { readonly title: string; readonly body: string; readonly confirmLabel: string; readonly tone?: 'danger' | 'warning' | 'primary' }) => Promise<boolean>) | undefined;
+  readonly confirm?: ((options: { readonly title: string; readonly body: string; readonly confirmLabel: string; readonly cancelLabel?: string; readonly tone?: 'danger' | 'warning' | 'primary' }) => Promise<boolean>) | undefined;
+}
+
+/**
+ * The words with the first one lower-cased when it is a word (letters, digits
+ * and dashes, starting with a letter): the action word of a command that
+ * declares a confirmation. Anything else (a path, an id, a flag) is left as typed.
+ */
+export function foldFirstWord(args: readonly string[]): string[] {
+  const first = args[0];
+  if (first === undefined || !/^[A-Za-z][A-Za-z0-9-]*$/.test(first) || first === first.toLowerCase()) return [...args];
+  return [first.toLowerCase(), ...args.slice(1)];
+}
+
+/** The changes a `TARGET_CHANGED` refusal carries, or undefined when `error` is not one. */
+function targetChangesOf(error: unknown): readonly TargetChange[] | undefined {
+  const carried = readRefusal(error);
+  return carried?.code === 'TARGET_CHANGED' ? carried.changes ?? [] : undefined;
+}
+
+/** The lines put above a question asked again: each change since the person looked. */
+export function describeTargetChanges(changes: readonly TargetChange[]): string {
+  const lines = changes.map((change) => change.now === null
+    ? `- ${change.field}: ${change.was} is gone`
+    : `- ${change.field}: was ${change.was}, now ${change.now}`);
+  return ['Changed since you looked:', ...(lines.length > 0 ? lines : ['- the target is not what was shown'])].join('\n');
 }
 
 /**
@@ -125,6 +158,13 @@ export interface ConfirmationHost {
  * irreversible asks once inline; `--yes` typed by the owner is the answer given
  * in advance (for scripts and surfaces with no dialog); `--yes` from a model is
  * ignored, so a model-run line is always put to the owner.
+ *
+ * The handler receives the question's `reviewed` value, what was shown. When
+ * it refuses with `TARGET_CHANGED` (the target moved between the question and
+ * the act), an owner's line on a surface with a dialog is asked once more,
+ * with the changes above the new question, and runs on the new `reviewed`; a
+ * model-run line, or a surface with no dialog, gets the refusal with the same
+ * line as its next step.
  */
 export function withOwnerConfirmation<Context extends ConfirmationHost, Command extends ConfirmableCommand<Context>>(command: Command): Command {
   const confirm = command.confirm;
@@ -135,15 +175,43 @@ export function withOwnerConfirmation<Context extends ConfirmationHost, Command 
     // Applied once: a command wrapped here and registered through a registry
     // that wraps every registration is not asked twice.
     confirm: undefined,
-    async handler(args: string[], context: Context): Promise<void> {
+    async handler(typed: string[], context: Context): Promise<void> {
+      // The first word is read case-folded once, here, so the question and the
+      // handler act on the same word: `/hooks Remove x` asks exactly as
+      // `/hooks remove x` does, and never runs unasked.
+      const args = foldFirstWord(typed);
       const { rest, yes } = command.leadingFlagsOnly === true ? stripLeadingYesFlag(args) : stripYesFlag(args);
       const question = confirm(rest, context);
       if (!question) {
         await handler(args, context);
         return;
       }
+      const run = async (reviewed: unknown): Promise<void> => {
+        try {
+          await handler([...rest], context, reviewed);
+        } catch (error) {
+          const changes = targetChangesOf(error);
+          if (changes === undefined) throw error;
+          const line = `/${command.name}${args.length > 0 ? ` ${args.join(' ')}` : ''}`;
+          if (context.invokedByModel === true || !context.confirm) {
+            const carried = readRefusal(error)!;
+            throw new RefusalError(refusal({ ...carried, next: [line, ...carried.next.filter((step) => step !== line)] }));
+          }
+          const again = confirm(rest, context);
+          if (!again) throw error;
+          const answered = await context.confirm({
+            title: again.title,
+            body: `${describeTargetChanges(changes)}\n\n${again.detail}`,
+            confirmLabel: again.confirmLabel,
+            tone: 'danger',
+          });
+          if (!answered) throw commandRefusal(`/${command.name}: cancelled; nothing was changed.`, undefined, 'CANCELLED');
+          // Asked once more only: a second change is the refusal itself.
+          await handler([...rest], context, again.reviewed);
+        }
+      };
       if (yes && context.invokedByModel !== true) {
-        await handler([...rest], context);
+        await run(question.reviewed);
         return;
       }
       if (!context.confirm) {
@@ -154,7 +222,7 @@ export function withOwnerConfirmation<Context extends ConfirmationHost, Command 
       }
       const answered = await context.confirm({ title: question.title, body: question.detail, confirmLabel: question.confirmLabel, tone: 'danger' });
       if (!answered) throw commandRefusal(`/${command.name}: cancelled; nothing was changed.`, undefined, 'CANCELLED');
-      await handler([...rest], context);
+      await run(question.reviewed);
     },
   };
 }
@@ -170,7 +238,8 @@ type SharedConfirm = (args: readonly string[], context: SharedConfirmationContex
 
 /**
  * The irreversible lines of the commands both terminal apps build from shared
- * shell code (`/notify`, `/mcp`, `/provider`), by command name. Each app's
+ * shell code (`/notify`, `/provider`), by command name. (`/mcp` is described:
+ * its questions come from its description, command-actions/.) Each app's
  * registry applies them through {@link withOwnerConfirmation}, so the two apps
  * answer the same line the same way; reversible lines are not listed and run
  * at once. (`/secrets` declares its own.)
@@ -185,55 +254,6 @@ export const SHARED_COMMAND_CONFIRMATIONS: Readonly<Partial<Record<string, Share
       title: `Remove all ${count} webhook URL${count === 1 ? '' : 's'}?`,
       detail: 'Every webhook notification URL is removed. They are shown masked, so note any you need before clearing; /notify add <url> adds one back.',
       confirmLabel: 'Clear',
-    };
-  },
-  mcp(args, context) {
-    // The words after the subcommand, without `--scope <scope>`.
-    const words = args.slice(1).filter((word, index, all) => !word.startsWith('--') && all[index - 1] !== '--scope');
-    const server = words[0];
-    if (!server) return undefined;
-    const tool = words[1];
-    // A kept per-tool allow, or clearing a tool's rules (which lifts any denial of it), loosens what a
-    // server may do: the owner's own act. A model-run line is refused here, before any question is put.
-    if ((args[0] === 'allow' || args[0] === 'clear') && tool) {
-      if (context.invokedByModel === true) {
-        throw commandRefusal(`/mcp ${args[0]} ${server} ${tool} is the owner's own act: it loosens what an MCP server may do. Nothing was changed.`,
-          `Ask the owner to type /mcp ${args[0]} ${server} ${tool}, or to set it in Settings.`, 'OWNER_ONLY_COMMAND');
-      }
-      return args[0] === 'allow'
-        ? {
-            title: `Allow ${tool} on ${server} past its scope?`,
-            detail: `Calls to ${tool} pass ${server}'s path and host scope, kept in your global MCP config until /mcp clear ${server} ${tool}. A blocked server, a quarantined schema or a denial of ${tool} still refuses it.`,
-            confirmLabel: 'Allow',
-          }
-        : {
-            title: `Clear the rules for ${tool} on ${server}?`,
-            detail: `This session's denial of ${tool} and the allow or denial kept for it in ${server}'s MCP config are removed; its trust mode and scope decide each call again.`,
-            confirmLabel: 'Clear',
-          };
-    }
-    // Loosening security is the owner's call: a looser trust mode, or lifting a quarantine.
-    if (args[0] === 'trust' && (words[1] === 'ask-on-risk' || words[1] === 'config')) {
-      return {
-        title: `Loosen MCP trust for ${server}?`,
-        detail: words[1] === 'config'
-          ? `${server} goes back to its configured trust mode, which may allow more than the mode set for this session.`
-          : `${server} may then act anywhere inside its scope without asking, kept in its MCP config past a restart; a call outside its scope is put to you.`,
-        confirmLabel: 'Loosen',
-      };
-    }
-    if (args[0] === 'quarantine' && words[1] === 'approve') {
-      return {
-        title: `Approve the quarantined schema of ${server}?`,
-        detail: `${server}'s changed tool schema is accepted and its tools are offered again.`,
-        confirmLabel: 'Approve',
-      };
-    }
-    if (args[0] !== 'remove') return undefined;
-    return {
-      title: `Remove MCP server ${server}?`,
-      detail: `${server}'s entry (its command, arguments, environment and trust settings) is deleted from the MCP config and its tools stop being offered. Re-adding it means typing the whole /mcp add line again.`,
-      confirmLabel: 'Remove',
     };
   },
   provider(args) {

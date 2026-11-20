@@ -33,7 +33,7 @@ export const builtinGatewayWorkLedgerMethodDescriptors: readonly GatewayMethodDe
   methodDescriptor({
     id: 'workLedger.prepareLegacyImport', title: 'Prepare Legacy Work Import', category: 'work-ledger',
     description: 'Capture bounded complete legacy sources on the selected authoritative host, plus every work-plan task of the project (the host adds those). Preparation does not write or grant execution authority.',
-    access: 'admin', scopes: [WORK_LEDGER_READ_SCOPE, 'read:knowledge'],
+    effects: ['work-ledger.inspect', 'knowledge.inspect'],
     http: { method: 'POST', path: '/api/work-ledger/legacy-import/prepare' },
     inputSchema: json(strictObject({ projectId, sourceIds: array(string().min(1).max(200)).max(500) }), 'input'),
     outputSchema: json(union([
@@ -44,7 +44,7 @@ export const builtinGatewayWorkLedgerMethodDescriptors: readonly GatewayMethodDe
   methodDescriptor({
     id: 'workLedger.importLegacy', title: 'Import Legacy Work Atomically', category: 'work-ledger',
     description: 'Import one exact versioned legacy manifest only after fresh recorded autonomous admission under paired authority. Durable exact-request replay bypasses new evaluation. Preserves source records and grants no execution or verification authority.',
-    access: 'admin', scopes: [WORK_LEDGER_IMPORT_SCOPE, 'read:knowledge'],
+    effects: ['work-ledger-import.administer', 'knowledge.inspect'],
     http: { method: 'POST', path: '/api/work-ledger/legacy-import' },
     replay: { in: 'body', name: 'requestId', behavior: 'Sending the same requestId again replays the durable result without a new admission evaluation.' },
     inputSchema: { type: 'object', additionalProperties: false, required: ['type','requestId','expectedRevision','manifest'],
@@ -59,14 +59,14 @@ export const builtinGatewayWorkLedgerMethodDescriptors: readonly GatewayMethodDe
   methodDescriptor({
     id: 'workLedger.snapshot', title: 'Read Native Work Ledger', category: 'work-ledger',
     description: 'Read the selected host project ledger, without mutation authority or allowedActions. Requires an owner operator and the dedicated read scope.',
-    access: 'admin', scopes: [WORK_LEDGER_READ_SCOPE],
+    effects: ['work-ledger.inspect'],
     http: { method: 'GET', path: '/api/work-ledger/snapshot' },
     inputSchema: json(strictObject({ projectId }), 'input'), outputSchema: json(workLedgerReadSnapshotSchema),
   }),
   methodDescriptor({
     id: 'workLedger.history', title: 'Read Native Work Ledger History', category: 'work-ledger',
     description: 'Read at most 100 events after an exclusive cursor, pinned to a history high-water mark. Advance with cursor while hasMore is true. No mutations or execution.',
-    access: 'admin', scopes: [WORK_LEDGER_READ_SCOPE],
+    effects: ['work-ledger.inspect'],
     http: { method: 'GET', path: '/api/work-ledger/history' },
     inputSchema: json(strictObject({ projectId, afterSequence: sequence, throughSequence: sequence.optional() }), 'input'),
     outputSchema: json(workLedgerHistoryPageSchema),

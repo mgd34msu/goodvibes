@@ -65,7 +65,7 @@ import { WorktreeRegistry } from '../runtime/worktree/registry.js';
 import { runWorktreeSetup, resolveEffectiveWorktreeSetup, type WorktreeSetupCommandAdmission } from '../runtime/worktree/setup.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { OwnedWork } from '../utils/owned-work.js';
+import { OwnedScope } from '../utils/owned-work.js';
 
 export interface OrchestrationEngineDeps {
   readonly nativeDataWriter?: import('../runtime/native-reader-compatibility.js').NativeDataWriteOwner | undefined;
@@ -241,7 +241,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
   }
   const listeners = new Set<OrchestrationEventListener>();
   let disposed = false;
-  const ownedWork = new OwnedWork();
+  const ownedWork = new OwnedScope('orchestration engine');
   const activeItems = new Map<WorkItem, Promise<void>>();
   const terminatedWorktreeCleanup = new WeakSet<WorkItem>();
 
@@ -722,7 +722,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       activeItems.set(item, new Promise<void>((resolve) => { releasePhase = resolve; }));
       // Reserve before invoking runItemPhase: spawn/events can synchronously
       // call join(), dispose(), kill(), or requeue this very item.
-      void ownedWork.run(async () => {
+      void ownedWork.run('orchestration work', async () => {
         const cancellation = cancellationFor(workstream);
         const signal = cancellation.start(item.id);
         let capacityRefused = false;
@@ -1053,7 +1053,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       found.item.conflictSessionId = sessionId;
       return true;
     },
-    retryItemIntegration: (itemId) => ownedWork.run(async () => {
+    retryItemIntegration: (itemId) => ownedWork.run('orchestration work', async () => {
       const found = findItemAndWorkstream(itemId);
       if (!found || found.item.mergeState !== 'conflict') return 'not-conflicted';
       // Same lane as first-pass integration; success clears markers + reclaims the tree.
@@ -1061,7 +1061,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       const resulting: string | undefined = found.item.mergeState; // mutated by the lane
       return resulting === 'merged' ? 'merged' : 'conflict';
     }),
-    retryItemCommit: (itemId) => ownedWork.run(() => retryItemCommit(itemId)),
+    retryItemCommit: (itemId) => ownedWork.run('retry item commit', () => retryItemCommit(itemId)),
     addDependency,
     requeueItem,
     getGraphSnapshot,

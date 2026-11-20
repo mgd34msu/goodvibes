@@ -33,7 +33,7 @@ import {
 } from './types.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { OwnedWork } from '../utils/owned-work.js';
+import { OwnedScope } from '../utils/owned-work.js';
 
 /** Thrown for an honest caller error against the best-of-N surface (unknown group, not-ready, bad winner). */
 export class AttemptError extends Error {
@@ -66,7 +66,7 @@ export class AttemptMergeError extends AttemptError {
 
 export interface AttemptsCoordinatorDeps {
   /** Shared with the engine so nested integration/cleanup belongs to the same drain. */
-  readonly ownedWork?: OwnedWork | undefined;
+  readonly ownedWork?: OwnedScope | undefined;
   readonly emit: (event: OrchestrationEvent) => void;
   readonly getWorkstream: (id: string) => Workstream | null;
   /** Route a (non-attempt terminal-passed item, or a picked winner) onto the sequential integration lane. */
@@ -145,7 +145,7 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
   const groups = new Map<string, GroupEntry>();
   /** Groups whose picked winner is still being integrated: not listed, not pickable. */
   const resolving = new Set<string>();
-  const ownedWork = deps.ownedWork ?? new OwnedWork();
+  const ownedWork = deps.ownedWork ?? new OwnedScope('orchestration attempts');
 
   function siblingsOf(workstream: Workstream, entry: GroupEntry): WorkItem[] {
     return entry.siblingItemIds
@@ -272,7 +272,7 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
     entry.readyEmitted = true;
     const candidateItemIds = siblings.filter((s) => s.state === 'held-merge').map((s) => s.id);
     if (entry.autoAccept && deps.judge && candidateItemIds.length > 0) {
-      void ownedWork.run(async () => {
+      void ownedWork.run('attempt work', async () => {
         deps.emit({ type: 'attempts-ready', workstreamId: workstream.id, groupId, candidateItemIds });
         await autoJudgeAndPick(groupId);
       }).catch((error) => {
@@ -284,7 +284,7 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
   }
 
   function enqueueIntegration(workstream: Workstream, item: WorkItem): void {
-    void ownedWork.run(() => deps.enqueueIntegration(workstream, item)).catch((error) => {
+    void ownedWork.run('attempt work', () => deps.enqueueIntegration(workstream, item)).catch((error) => {
       logger.warn('attempts: winner integration did not complete', { itemId: item.id, error: summarizeError(error) });
     });
   }
@@ -398,7 +398,7 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
       deps.emit({ type: 'item-attempt-held', workstreamId: entry.workstreamId, groupId, itemId: winner.id });
     };
     try {
-      await ownedWork.run(() => deps.enqueueIntegration(workstream, winner));
+      await ownedWork.run('attempt work', () => deps.enqueueIntegration(workstream, winner));
     } catch (error) {
       logger.warn('attempts: winner integration did not complete; the group stays pickable', { groupId, itemId: winner.id, error: summarizeError(error) });
       reopen();
@@ -418,7 +418,7 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
         loser.state = 'passed';
         (loser.warnings ??= []).push('best-of-N: not selected (loser worktree cleaned)');
       }
-      void ownedWork.run(() => deps.cleanupWorktree(workstream, loser)).catch((error) => {
+      void ownedWork.run('attempt work', () => deps.cleanupWorktree(workstream, loser)).catch((error) => {
         logger.warn('attempts: loser worktree cleanup did not complete', { itemId: loser.id, error: summarizeError(error) });
       });
     }
@@ -475,9 +475,9 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
 
   return {
     expandItems, assertImportable, reconcileGroups, onItemPassedTerminal, onItemFailedTerminal, onItemReopened,
-    listGroups: (workstreamId, groupId) => ownedWork.run(() => listGroups(workstreamId, groupId)),
-    pickWinner: (groupId, winnerItemId) => ownedWork.run(() => pickWinner(groupId, winnerItemId)),
-    proposeWinner: (groupId) => ownedWork.run(() => proposeWinner(groupId)),
+    listGroups: (workstreamId, groupId) => ownedWork.run('list groups', () => listGroups(workstreamId, groupId)),
+    pickWinner: (groupId, winnerItemId) => ownedWork.run('pick winner', () => pickWinner(groupId, winnerItemId)),
+    proposeWinner: (groupId) => ownedWork.run('propose winner', () => proposeWinner(groupId)),
     join: () => ownedWork.join(),
   };
 }

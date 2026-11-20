@@ -3,7 +3,7 @@ import { createAuthBundleHandler } from '@goodvibes-jev/engine/terminal-shell/au
 import { createAuthReviewHandler } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
-import { readDaemonSessionToken, writeDaemonSessionToken } from '../../runtime/client/connected-daemon-credentials.ts';
+import { readDaemonSessionToken, writeDaemonSessionToken } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-credentials';
 import { daemonTokenOverride, resolveControlPlaneBaseUrl } from '../../runtime/client/operator-endpoint.ts';
 import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';

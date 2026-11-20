@@ -1,3 +1,4 @@
+import { actorFromChannelSender, type Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import { randomUUID } from 'node:crypto';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
@@ -100,6 +101,18 @@ function normalizeConversationKind(input: ChannelIngressPolicyInput): ChannelCon
  */
 export function isChannelOwner(decision: { readonly policy: Pick<ChannelPolicyRecord, 'ownerId'> }, userId: string | undefined): boolean {
   return userId !== undefined && decision.policy.ownerId !== undefined && decision.policy.ownerId === userId;
+}
+
+/**
+ * The actor a sender on a channel is (actor.ts): the channel's owner, or a
+ * guest. What either may cause is decided by the effect table
+ * (`admitEffects`), never by testing the owner again at the call site. A
+ * sender with no identity is admitted by the surface's own secret and acts as
+ * the owner; a caller that needs to know who pressed or wrote refuses an
+ * anonymous sender before it asks.
+ */
+export function channelSenderActor(decision: { readonly policy: Pick<ChannelPolicyRecord, 'ownerId'> }, surface: string, userId: string | undefined): Actor {
+  return actorFromChannelSender({ surface, userId, isChannelOwner: isChannelOwner(decision, userId) });
 }
 
 /**

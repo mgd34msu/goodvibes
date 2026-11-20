@@ -9,6 +9,7 @@ export const GENERATORS = [
   'scripts/generate-config-schema.ts',
   'scripts/generate-config-ownership.ts',
   'scripts/generate-presentation-tokens.ts',
+  'scripts/generate-command-actions.ts',
 ] as const;
 
 /** Keep icon/manifest URLs in step with this product's declared version. */

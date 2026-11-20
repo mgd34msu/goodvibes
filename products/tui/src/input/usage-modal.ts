@@ -170,7 +170,7 @@ export class UsageModal implements SurfaceModal, UsageModalView {
     const key = token.logicalName ?? '';
     if (key === 'tab' && token.shift) this.stepTab(-1);
     else if (key === 'tab' || key === 'right') this.stepTab(1);
-    else if (key === 'left' || key === '\x1b[Z') this.stepTab(-1);
+    else if (key === 'left') this.stepTab(-1);
     else if (key === 'up') this.scroll(-1);
     else if (key === 'down') this.scroll(1);
     else if (key === 'pageup') this.scroll(-5);

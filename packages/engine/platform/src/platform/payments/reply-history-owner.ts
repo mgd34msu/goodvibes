@@ -1,7 +1,7 @@
 /** Owns only original operation-bound archive writers. An ingress caller has
  * already checked the owner's current allowlist; provider account authority is
  * independently acquired before retaining text. No semantic reading happens. */
-import { OwnedWork } from '../utils/owned-work.js';
+import { OwnedScope } from '../utils/owned-work.js';
 import { captureCheckoutOwnership } from './checkout-ownership.js';
 import type { CheckoutWindowCheckpoint } from './checkout-window-checkpoint.js';
 import type { PaymentReplyCorrelation } from './reply-inbox.js';
@@ -19,7 +19,7 @@ interface Watch {
   readonly binding: PaymentReplyHistoryBinding;
   readonly append: (entry: PaymentReplyHistoryEntry, assertCurrent: () => void) => Promise<void>;
   readonly current: () => void;
-  readonly work: OwnedWork;
+  readonly work: OwnedScope;
   readonly recordCoverage?: ((coverage: PaymentReplyReceiveCoverage, assertCurrent: () => void) => Promise<void>) | undefined;
 }
 export class PaymentReplyHistoryOwner {
@@ -33,7 +33,7 @@ export class PaymentReplyHistoryOwner {
     append: Watch['append'], assertCurrent: () => void, recordCoverage?: Watch['recordCoverage']): RetainedPaymentReplyHistory {
     if (this.closed || this.watches.has(purchaseId) || checkpoint.record.purchaseId !== purchaseId) throw new PaymentReplyHistoryError();
     const binding = paymentReplyHistoryBinding(checkpoint), current = captureCheckoutOwnership({ assertCurrent }).assertCurrent;
-    const watch = { binding, append, current, work: new OwnedWork(), recordCoverage };
+    const watch = { binding, append, current, work: new OwnedScope('payment reply history'), recordCoverage };
     watch.current();
     if (this.closed || this.watches.has(purchaseId)) throw new PaymentReplyHistoryError();
     this.watches.set(purchaseId, watch); let retired: Promise<void> | undefined;
@@ -51,7 +51,7 @@ export class PaymentReplyHistoryOwner {
     if (this.closed) return Promise.reject(new PaymentReplyHistoryError());
     const write = watch?.recordCoverage;
     if (!watch || !write) return Promise.resolve(false);
-    return watch.work.run(async () => {
+    return watch.work.run('reply history', async () => {
       try {
         const coverage = capturePaymentReplyReceiveCoverage(value, watch.binding);
         const source = captureCheckoutOwnership({ assertCurrent }).assertCurrent;
@@ -71,7 +71,7 @@ export class PaymentReplyHistoryOwner {
     const reservations = candidates.map(watch => {
       let release!: () => void;
       const pending = new Promise<void>(done => { release = done; });
-      void watch.work.run(() => pending);
+      void watch.work.run('reply history', () => pending);
       return { release };
     });
     return (async () => {

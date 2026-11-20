@@ -40,8 +40,12 @@ import { readGatewayVerbRefusal } from '../control-plane/routes/gateway-verb-err
 import { AUTHENTICATION_REQUIRED_GUIDANCE, authenticationRequiredResponse, buildErrorResponseBody, jsonErrorResponse } from './http/error-response.js';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import {
+  actorFromPrincipal,
+  NO_OWNER_USER,
+  type Actor,
   type AuthenticatedPrincipal,
   type CredentialKind,
+  type OwnerIdentity,
   type RequestContext,
   type RequestPrincipal,
 } from './http-policy.js';
@@ -75,6 +79,8 @@ export interface ControlPlaneWebSocketData {
   credentialKind?: CredentialKind | null | undefined;
   /** A device the owner paired himself; see RequestPrincipal.ownerDevice. */
   ownerDevice?: true | undefined;
+  /** Who the socket's principal is as a cause of effects; null before in-band auth. */
+  actor?: Actor | null | undefined;
   admin: boolean;
   scopes: readonly string[];
   readonly domains: readonly RuntimeEventDomain[];
@@ -237,6 +243,8 @@ interface GatewayMethodCallInput {
     readonly credentialKind?: CredentialKind | undefined;
     /** The daemon-assigned id of the connection the call arrived on; separates one client's untrusted-content window from another's under the same principal. */
     readonly connectionId?: string | undefined;
+    /** Who the call is admitted as; set by dispatch from the principal it verified, never by a caller. */
+    readonly actor?: Actor | undefined;
     /**
      * True when a person asked for this, now. Set ONLY by transports that
      * can honestly claim it; scheduled work and triggers leave it unset
@@ -252,7 +260,7 @@ interface GatewayMethodCallInput {
    * call (a socket compares its authentication revision first). Absent: the
    * call authenticates the token once itself.
    */
-  readonly principal?: (AuthenticatedPrincipal & { readonly credentialKind?: CredentialKind | null | undefined; readonly ownerDevice?: true | undefined }) | undefined;
+  readonly principal?: (AuthenticatedPrincipal & { readonly credentialKind?: CredentialKind | null | undefined; readonly ownerDevice?: true | undefined; readonly actor: Actor }) | undefined;
 }
 
 export class DaemonControlPlaneHelper {
@@ -582,15 +590,37 @@ export class DaemonControlPlaneHelper {
     const base = this.principalFor(authenticated);
     // Read after the credential stores were consulted: this is the state the principal was checked against.
     const authRevision = this.authRevision();
+    const credentialKind = credentialKindOf(authenticated, loopback);
+    const ownerDevice = authenticated.kind === 'pairing-token' && authenticated.ownerDevice === true && authenticated.client === undefined;
     return Object.freeze({
       ...base,
-      credentialKind: credentialKindOf(authenticated, loopback),
+      credentialKind,
       scopeSet: new Set(base.scopes),
       roles: authenticated.kind === 'session' ? authenticated.roles : [],
       authRevision,
       ...(authenticated.kind === 'session' ? { expiresAt: authenticated.expiresAt } : {}),
-      ...(authenticated.kind === 'pairing-token' && authenticated.ownerDevice === true && authenticated.client === undefined ? { ownerDevice: true as const } : {}),
+      ...(ownerDevice ? { ownerDevice: true as const } : {}),
+      actor: actorFromPrincipal({ ...base, credentialKind, ownerDevice }, this.ownerIdentity()),
     });
+  }
+
+  /**
+   * Who the owner is among the sign-in users: the first user the store holds
+   * (the one created at first start). Read from the store's memory; no I/O.
+   */
+  ownerIdentity(): OwnerIdentity {
+    const ownerUser = this.context.userAuth.ownerUsername?.() ?? null;
+    return ownerUser === null ? NO_OWNER_USER : { ownerUser };
+  }
+
+  /**
+   * The actor a call is admitted as: the principal the daemon verified,
+   * narrowed to the admin flag and scopes the call's context carries (a
+   * context never widens it).
+   */
+  private callActor(principal: { readonly principalId: string; readonly principalKind: AuthenticatedPrincipal['principalKind'] | 'remote-peer'; readonly credentialKind?: CredentialKind | null | undefined; readonly ownerDevice?: true | undefined },
+    admin: boolean, scopes: readonly string[]): Actor {
+    return actorFromPrincipal({ ...principal, admin, scopes }, this.ownerIdentity());
   }
 
   /**
@@ -721,14 +751,9 @@ export class DaemonControlPlaneHelper {
 
   validateGatewayInvocation(
     descriptor: GatewayMethodDescriptor,
-    context?: {
-      readonly principalKind?: 'user' | 'bot' | 'service' | 'token' | 'remote-peer' | undefined;
-      readonly scopes?: readonly string[] | undefined;
-      readonly admin?: boolean | undefined;
-      readonly credentialKind?: CredentialKind | null | undefined;
-    },
+    context?: { readonly actor?: Actor | null | undefined },
   ): { status: number; ok: false; body: Record<string, unknown> } | null {
-    return refuseGatewayInvocation(descriptor, context);
+    return refuseGatewayInvocation(descriptor, context?.actor ?? undefined);
   }
 
   tryUpgradeControlPlaneWebSocket(
@@ -776,6 +801,7 @@ export class DaemonControlPlaneHelper {
         principalKind: principal.principalKind,
         credentialKind: principal.credentialKind,
         ...(principal.ownerDevice === true ? { ownerDevice: true as const } : {}),
+        actor: principal.actor,
         scopes: principal.scopes,
         admin: principal.admin,
         domains,
@@ -941,6 +967,7 @@ export class DaemonControlPlaneHelper {
       ws.data.principalKind = principal.principalKind;
       ws.data.credentialKind = principal.credentialKind;
       ws.data.ownerDevice = principal.ownerDevice;
+      ws.data.actor = principal.actor;
       ws.data.scopes = principal.scopes;
       ws.data.admin = principal.admin;
       ws.data.authRevision = principal.authRevision;
@@ -1012,7 +1039,9 @@ export class DaemonControlPlaneHelper {
       const response = methodId
         ? await this.invokeGatewayMethodCall({
             authToken: ws.data.authToken,
-            principal: { principalId: ws.data.principalId, principalKind: ws.data.principalKind, credentialKind: ws.data.credentialKind, ...(ws.data.ownerDevice === true ? { ownerDevice: true as const } : {}), admin: ws.data.admin, scopes: ws.data.scopes },
+            ...(ws.data.principalId !== null && ws.data.principalKind !== null && ws.data.actor
+              ? { principal: { principalId: ws.data.principalId, principalKind: ws.data.principalKind, credentialKind: ws.data.credentialKind, ...(ws.data.ownerDevice === true ? { ownerDevice: true as const } : {}), admin: ws.data.admin, scopes: ws.data.scopes, actor: ws.data.actor } }
+              : {}),
             signal: this.socketSignal(ws),
             methodId,
             ...(typeof frame.idempotencyKey === 'string' ? { idempotencyKey: frame.idempotencyKey } : {}),
@@ -1043,6 +1072,7 @@ export class DaemonControlPlaneHelper {
               principalKind: ws.data.principalKind,
               admin: ws.data.admin,
               scopes: ws.data.scopes,
+              actor: ws.data.actor,
             },
             caller: callerKey(ws.data.clientId, ws.data.principalId ?? undefined),
           });
@@ -1081,6 +1111,8 @@ export class DaemonControlPlaneHelper {
       readonly principalKind?: 'user' | 'bot' | 'service' | 'token' | 'remote-peer' | undefined;
       readonly admin?: boolean | undefined;
       readonly scopes?: readonly string[] | undefined;
+      /** Who the call is admitted as (the socket's or the dispatched call's actor). */
+      readonly actor?: Actor | null | undefined;
     };
     /** Whose in-flight budget the call uses (see {@link callerKey}); a caller that names none shares one budget. */
     readonly caller?: string | undefined;
@@ -1170,8 +1202,7 @@ export class DaemonControlPlaneHelper {
   private retainGatewayAuthorization(token: string, descriptor: GatewayMethodDescriptor,
     context: GatewayMethodInvocationContext | undefined): (requiredScopes?: readonly string[]) => boolean {
     const catalog = this.context.gatewayMethods, pairing = this.context.pairingTokens, users = this.context.userAuth;
-    const captured = Object.freeze({ principalId: context?.principalId, principalKind: context?.principalKind,
-      admin: context?.admin === true, scopes: Object.freeze([...(context?.scopes ?? [])]) });
+    const captured = Object.freeze({ principalId: context?.principalId, principalKind: context?.principalKind, actor: context?.actor });
     // Authenticated again only when the credential owners' revision moved.
     let known: RequestPrincipal | null | undefined;
     return (requiredScopes = []) => {
@@ -1181,8 +1212,8 @@ export class DaemonControlPlaneHelper {
       if (!known || !isPrincipalCurrent(known, this.authRevision())) known = this.describeRequestPrincipal(token);
       const fresh = known;
       return fresh !== null && fresh.principalId === captured.principalId && fresh.principalKind === captured.principalKind
-        && refuseGatewayInvocation(descriptor, fresh, requiredScopes) === null
-        && refuseGatewayInvocation(descriptor, captured, requiredScopes) === null;
+        && refuseGatewayInvocation(descriptor, fresh.actor, requiredScopes) === null
+        && refuseGatewayInvocation(descriptor, captured.actor, requiredScopes) === null;
     };
   }
 
@@ -1252,10 +1283,12 @@ export class DaemonControlPlaneHelper {
       const scopes = cachedScopes.has('*') ? principal.scopes
         : principal.scopes.includes('*') ? [...cachedScopes]
         : principal.scopes.filter(scope => cachedScopes.has(scope));
+      const admin = (context === undefined || context.admin === true) && principal.admin;
       context = {
         ...context, principalId: principal.principalId, principalKind: principal.principalKind,
-        admin: (context === undefined || context.admin === true) && principal.admin, scopes,
+        admin, scopes,
         ...(principal.credentialKind ? { credentialKind: principal.credentialKind } : {}),
+        actor: this.callActor(principal, admin, scopes),
       };
     }
     const denied = this.validateGatewayInvocation(descriptor, context);
@@ -1319,7 +1352,7 @@ export class DaemonControlPlaneHelper {
             scopes: context?.scopes,
             clientKind: context?.clientKind,
             ...(authenticated?.credentialKind ? { credentialKind: authenticated.credentialKind } : {}),
-            ...(authenticated?.ownerDevice === true ? { ownerDevice: true } : {}),
+            ...(context?.actor ? { actor: context.actor } : {}),
             ...(context?.explicitUserRequest === undefined
               ? {}
               : { metadata: { explicitUserRequest: context.explicitUserRequest } }),

@@ -154,6 +154,6 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
     permission: context.permission,
     headerRows: context.headerRows,
     footerRows: context.footerRows,
-    toasts: () => getSharedToastCenter().visible(),
+    toasts: getSharedToastCenter(),
   });
 }

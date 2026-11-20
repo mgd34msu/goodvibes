@@ -40,6 +40,8 @@ export interface OwnerTurnSenderDeps {
     readonly high: (message: string, level?: NoticeLevel) => void;
     readonly userAction: (message: string) => void;
     readonly activity: (message: string) => void;
+    /** Why a message was not sent, or what it needs: shown in the conversation at once. */
+    readonly aboutInput: (message: string, level?: NoticeLevel) => void;
   };
   readonly render: () => void;
 }
@@ -125,7 +127,7 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
           source,
           notify: (message) => {
             if (how.quiet) messages.activity(message);
-            else messages.userAction(message);
+            else messages.aboutInput(message);
             deps.render();
           },
           record: (message) => messages.activity(message),
@@ -143,7 +145,7 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
         refused();
         const line = `Your message was not sent: ${summarizeError(error)}`;
         if (how.quiet) messages.activity(line);
-        else messages.high(line, 'error');
+        else messages.aboutInput(line, 'error');
         deps.render();
         return false;
       }

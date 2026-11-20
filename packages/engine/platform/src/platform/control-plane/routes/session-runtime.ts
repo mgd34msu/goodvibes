@@ -1,6 +1,7 @@
 import type { ApprovalBroker } from '../approval-broker.js';
 import { putToOwner } from '../owner-act.js';
-import { isAutomationCredential } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { systemActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { admitEffects } from '../../security/effect-authority.js';
 import { configKeyFacts } from '../../config/config-key-facts.js';
 import type { TurnCancellationResult } from '../../core/turn-cancellation.js';
 /**
@@ -212,20 +213,22 @@ export function createSessionPermissionModeSetHandler(
     const sessionId = requireLocalSessionId(controls, params);
     const nextMode = toConfigPermissionMode(typeof params.mode === 'string' ? params.mode : '');
     const previousMode = toOperatorPermissionMode(controls.getPermissionMode(sessionId));
-    // A looser mode is the owner's own act. A token minted for automation does
-    // not make it (a device the owner paired himself does): it is put to the owner,
-    // and the mode changes when he approves it from his own app.
+    // A looser mode is the owner's own act (`settings.loosen`): from an admin who
+    // is not the owner it is put to the owner, and the mode changes when he
+    // approves it from his own app.
     const loosens = configKeyFacts('permissions.mode').loosens?.(controls.getPermissionMode(sessionId), nextMode) === true;
-    if (loosens && isAutomationCredential(invocation.context)) {
-      if (!ownerApprovals) {
-        throw new GatewayVerbError(`Setting ${sessionId} to ${toOperatorPermissionMode(nextMode)} would loosen the permission mode, which only the owner does; a token minted for automation cannot. Nothing was changed.`, 'OWNER_ONLY', 403, 'mode');
+    const admission = loosens ? admitEffects(invocation.context.actor ?? systemActor('in-process'), ['settings.loosen']) : undefined;
+    if (admission !== undefined && admission.kind !== 'allowed') {
+      if (admission.kind === 'refused' || !ownerApprovals) {
+        throw new GatewayVerbError(`Setting ${sessionId} to ${toOperatorPermissionMode(nextMode)} would loosen the permission mode, which only the owner does. Nothing was changed.`, 'OWNER_ONLY', 403, 'mode');
       }
+      const requestedBy = invocation.context.principalId ?? 'a caller who is not the owner';
       const { approvalId } = await putToOwner(ownerApprovals, {
-        summary: `An automation token asks to set session ${sessionId} to ${toOperatorPermissionMode(nextMode)}`,
+        summary: `${requestedBy} asks to set session ${sessionId} to ${toOperatorPermissionMode(nextMode)}`,
         reasons: [`Changing the permission mode from ${previousMode} to ${toOperatorPermissionMode(nextMode)} loosens it.`],
         tool: 'sessions.permissionMode.set',
         args: { sessionId, mode: toOperatorPermissionMode(nextMode) },
-        requestedBy: invocation.context.principalId ?? 'an automation token',
+        requestedBy,
         apply: () => controls.setPermissionMode(nextMode, sessionId),
       });
       return Response.json({
@@ -422,6 +425,10 @@ export function createSessionRuntimeControls(deps: {
       if (deps.liveTurnHolder?.hasSession(sessionId) === true) return true;
       const channel = deps.channelSessions?.getSession?.(sessionId);
       if (channel?.status === 'active' && channel.channelPermissionMode !== undefined) return true;
+      // A chat's turns run in this daemon under the daemon-wide mode (the companion
+      // chat's permission manager reads permissions.mode), so its mode is answered
+      // and set as that mode; it keeps no context figure of its own (409).
+      if (channel?.kind === 'companion-chat') return true;
       const localId = deps.store.getState().session.id;
       return sessionId === LOCAL_RUNTIME_ALIAS || (localId.length > 0 && sessionId === localId);
     },

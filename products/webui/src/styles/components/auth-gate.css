@@ -134,7 +134,12 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-3);
-  min-height: 100%;
+  box-sizing: border-box;
+  /* The splash fills the viewport itself: its parent has no height to be 100% of,
+     which pinned it (and clipped the mark) at the top on a phone. */
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: max(24px, env(safe-area-inset-top, 0px)) 24px max(24px, env(safe-area-inset-bottom, 0px));
   color: var(--text-2);
 }
 
@@ -156,7 +161,24 @@
  */
 .app-shell-root {
   position: relative;
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* A notice above the shell (wake word, relay overflow, a receipt) takes its own
+ * height and the shell gets the rest, so the composer, an approval's action bar
+ * and the end of a list never fall below the fold. */
+.app-shell-root > * {
+  flex: none;
+}
+
+.app-shell-root > .app-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
 }
 
 .daemon-gate-overlay {

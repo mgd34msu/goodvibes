@@ -26,7 +26,7 @@ import { connect as netConnect } from 'node:net';
 import { connect as tlsConnect } from 'node:tls';
 import type { Socket } from 'node:net';
 import { IMAP_DEFAULT_TIMEOUT_MS } from './imap-client.js';
-import { SMTP_DEFAULT_TIMEOUT_MS } from './smtp-client.js';
+import { markSmtpGreeted, SMTP_DEFAULT_TIMEOUT_MS } from './smtp-client.js';
 import type { EmailTransportPort } from './email-service.js';
 
 const CRLF = '\r\n';
@@ -201,7 +201,8 @@ export function createSmtpStartTlsSocket(
                   rejectUnauthorized: true,
                 }, () => {
                   clearTimeout(timer);
-                  resolve(upgraded as unknown as Socket);
+                  // Greeted before the upgrade: the SMTP sequence sends EHLO next, without waiting for a 220.
+                  resolve(markSmtpGreeted(upgraded as unknown as Socket));
                 });
                 upgraded.once('error', (err: Error) => {
                   clearTimeout(timer);

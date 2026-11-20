@@ -53,7 +53,7 @@ export function createTerminalApprovalUpdateSubscriber(
   options: TerminalApprovalUpdateSubscriberOptions,
 ): ApprovalUpdateSubscriber {
   return async (onUpdate, onTerminate) => {
-    const endpoint = resolveDaemonEndpoint({ configManager: options.configManager, homeDirectory: options.homeDirectory });
+    const endpoint = await resolveDaemonEndpoint({ configManager: options.configManager, homeDirectory: options.homeDirectory });
     if (!endpoint.available) {
       logger.debug('[approvals] the approval-update stream is not opened', { reason: endpoint.reason });
       return null;

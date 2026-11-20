@@ -81,6 +81,8 @@ export interface SessionBrokerStorage {
    * so a failed write leaves it for the next one.
    */
   write(state: SessionBrokerStateView, changed: Set<string>, durable: boolean): Promise<void>;
+  /** Resolves once every write started so far has landed (on the daemon's store: synced). Starts no write. */
+  synced(): Promise<void>;
   /** Forget a session's loaded history; the next `loadSession` reads it again. */
   unload(sessionId: string): void;
   close(): void;
@@ -191,6 +193,13 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
   #indexDirty = false;
   #sequence = 0;
   #setAside: SetAsideSessionEntry[] = [];
+  /**
+   * The log syncs of every write still in flight. A write that finds nothing
+   * left to append (a concurrent write already took its change out of
+   * `changed`) waits for these before it resolves, so no caller is told its
+   * change is on disk while the sync carrying it is still running.
+   */
+  #syncing: Promise<void> | null = null;
 
   constructor(path: string) {
     this.path = path;
@@ -285,7 +294,12 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
     return { messages, inputs };
   }
 
-  /** Every write is synced before it resolves (one data sync per log written, one for the index when it changed), so `durable` asks for nothing more. */
+  /**
+   * Every write is synced before it resolves (one data sync per log written, one
+   * for the index when it changed), so `durable` asks for nothing more. A write
+   * with nothing left to append still waits for the syncs in flight, which may
+   * carry its change.
+   */
   async write(state: SessionBrokerStateView, changed: Set<string>, _durable: boolean): Promise<void> {
     const syncs: Promise<void>[] = [];
     for (const sessionId of [...changed]) {
@@ -310,8 +324,24 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
     }
     // Lines are synced before the index names them; a crash between the two
     // leaves a log the next start lists again (#recoverUnlistedLogs).
-    await Promise.all(syncs);
+    await this.#track(syncs);
     if (this.#indexDirty) this.#writeIndex(state.sessions);
+  }
+
+  synced(): Promise<void> {
+    return this.#track([]);
+  }
+
+  /** Waits for `syncs` and for every sync already in flight; adds no sync of its own. */
+  #track(syncs: readonly Promise<void>[]): Promise<void> {
+    const inFlight = this.#syncing;
+    if (syncs.length === 0) return inFlight ?? Promise.resolve();
+    const all = Promise.all(inFlight ? [inFlight, ...syncs] : syncs).then(() => undefined);
+    const tracked = all.finally(() => { if (this.#syncing === tracked) this.#syncing = null; });
+    // Each caller awaits `all` and sees its failure; the shared handle never reports an unobserved rejection.
+    tracked.catch(() => {});
+    this.#syncing = tracked;
+    return all;
   }
 
   unload(sessionId: string): void {
@@ -504,6 +534,11 @@ export class SessionBrokerSnapshotStorage implements SessionBrokerStorage {
       inputs: [...snapshot.inputs, ...unreadable.inputs as SharedSessionInputRecord[]],
     };
     await this.#writes.run(() => this.store.persist(whole, { durable }));
+  }
+
+  /** An injected store: resolves once every queued write has landed (synced when it was asked to be durable). */
+  synced(): Promise<void> {
+    return this.#writes.drain();
   }
 
   unload(): void {}

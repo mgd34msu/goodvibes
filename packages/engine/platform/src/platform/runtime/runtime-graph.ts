@@ -10,7 +10,7 @@
 import { dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { parsePrivateDeliveryHosts, PRIVATE_DELIVERY_HOSTS_SETTING } from '../utils/url-safety.js';
+import { PRIVATE_DELIVERY_HOSTS_SETTING, parseApprovedHosts } from './network/destination.js';
 import { resolveSecretInput } from '../config/secret-refs.js';
 import { ServiceRegistry } from '../config/service-registry.js';
 import { SubscriptionManager, sharedSubscriptionsPath } from '../config/subscriptions.js';
@@ -319,7 +319,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const bookmarkManager = new BookmarkManager(shellPaths.resolveUserPath(surfaceRoot, 'bookmarks'));
   const hookActivityTracker = new HookActivityTracker();
   // Hosts on the owner's own network that deliveries he configured may reach, read live on every delivery.
-  const privateDeliveryHosts = (): readonly string[] => parsePrivateDeliveryHosts(configManager.get(PRIVATE_DELIVERY_HOSTS_SETTING));
+  const privateDeliveryHosts = (): readonly string[] => parseApprovedHosts(configManager.get(PRIVATE_DELIVERY_HOSTS_SETTING));
   // featureFlags is required in practice: a registry without one treats
   // `watchers.enabled` as on, so turning the setting off would change nothing.
   const watcherRegistry = new WatcherRegistry({

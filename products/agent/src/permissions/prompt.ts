@@ -1,4 +1,5 @@
 import { PermissionPromptFacts } from '@goodvibes-jev/engine/terminal-shell/permission-prompt-facts';
+import { enterAnswer } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import { activeTokens } from '../renderer/theme.ts';
 import { beginModal, clipText, finishModal, wrapLines, type KitHint, type SurfaceLayer } from '../renderer/surface-kit.ts';
 import { button, buttonWidth, type ButtonTone } from '../renderer/surface-kit-parts.ts';
@@ -24,10 +25,10 @@ export type { PermissionPromptRequest, PermissionPromptDecision, PermissionReque
  * is pending. The prompt blocks orchestrator execution until the user responds.
  *
  * Keys:
- *   y / Y  -> Allow once
- *   a / A  -> Allow always (this session)
- *   n / N  -> Deny
- *   Escape -> Deny
+ *   y / Y        -> Allow once
+ *   a then Enter -> Allow for this session
+ *   n / N, Esc   -> Deny (the model is told; Ctrl+C stops the turn)
+ *   Enter        -> Allow once, or Deny for what cannot be undone
  */
 export class PermissionPromptUI extends PermissionPromptFacts {
   /**
@@ -107,7 +108,7 @@ export class PermissionPromptUI extends PermissionPromptFacts {
   static createPromptLayer(
     screenWidth: number,
     screenHeight: number,
-    request: PermissionRequest & { readonly replyBuffer?: string | undefined; readonly hunkState?: HunkSelectionState | undefined },
+    request: PermissionRequest & { readonly replyBuffer?: string | undefined; readonly hunkState?: HunkSelectionState | undefined; readonly rememberArmed?: boolean | undefined },
     view: { readonly awaitingTab?: boolean | undefined } = {},
   ): SurfaceLayer {
     const tokens = activeTokens();
@@ -133,7 +134,9 @@ export class PermissionPromptUI extends PermissionPromptFacts {
     const diffLines = diff ? renderDiffView(diff.text, width) : [];
     const body = factRows + diffLines.length + (diff && diff.hiddenLines > 0 ? 1 : 0) + 2;
     // While the composer holds a draft every key but Tab and Ctrl+C types into it.
-    const hints = view.awaitingTab ? AWAITING_TAB_HINTS : hunkState ? HUNK_HINTS : promptHints(request, (request.replyBuffer ?? '').length > 0);
+    // After `a` the card itself says what Enter now does (a toast waits while the card is open).
+    const hints = view.awaitingTab ? AWAITING_TAB_HINTS : hunkState ? HUNK_HINTS : request.rememberArmed ? REMEMBER_ARMED_HINTS
+      : promptHints(request, (request.replyBuffer ?? '').length > 0);
     const height = modalHeightFor(screenWidth, screenHeight, { hints }, body);
     const f = beginModal(screenWidth, screenHeight, {
       title: brief.title,
@@ -162,7 +165,7 @@ export class PermissionPromptUI extends PermissionPromptFacts {
     const by = f.bottom;
     for (const [key, text, tone] of hunkState ? HUNK_CHOICES : promptChoices(request)) {
       if (x + buttonWidth(`${text} ${key}`) > f.r) break;
-      x = button(f.canvas, x, by, `${text} ${key}`, false, tone) + 2;
+      x = button(f.canvas, x, by, `${text} ${key}`, request.rememberArmed === true && key === 'a', tone) + 2;
     }
     return finishModal(f);
   }
@@ -242,10 +245,19 @@ function drawLine(target: Line | undefined, x: number, row: Line): void {
 
 /** Keycap hints of the permission dialog (the keys live in shell/blocking-input.ts). */
 const PROMPT_HINTS: readonly KitHint[] = [
+  ['y, enter', 'allow once'],
+  ['a then enter', 'allow for this session'],
+  ['n, esc', 'deny'],
+];
+/** For what cannot be undone Enter answers No (terminal-shell blocking-permission-input.ts enterAnswer). */
+const PROMPT_HINTS_ENTER_DENIES: readonly KitHint[] = [
   ['y', 'allow once'],
-  ['a, enter', 'allow for this session'],
-  ['n', 'deny'],
-  ['esc', 'deny'],
+  ['a then enter', 'allow for this session'],
+  ['n, esc, enter', 'deny'],
+];
+const REMEMBER_ARMED_HINTS: readonly KitHint[] = [
+  ['enter', 'allow for the rest of this session'],
+  ['any other key', 'go back'],
 ];
 const AWAITING_TAB_HINTS: readonly KitHint[] = [
   ['tab', 'answer this request (your draft stays)'],
@@ -267,7 +279,8 @@ function isExecPrompt(request: PermissionRequest): boolean {
 }
 function promptHints(request: PermissionRequest, typed = false): readonly KitHint[] {
   if (isExecPrompt(request)) return [['⏎', 'send answer'], ['esc', typed ? 'clear' : 'decline'], ['ctrl+c', 'stop turn']];
-  return remembersAllow(request) ? PROMPT_HINTS : PROMPT_HINTS.filter(([key]) => key !== 'a');
+  const hints = enterAnswer(request) === 'deny' ? PROMPT_HINTS_ENTER_DENIES : PROMPT_HINTS;
+  return remembersAllow(request) ? hints : hints.filter(([key]) => key !== 'a then enter');
 }
 /** A multi-edit card: the hunk keys shared with the TUI (terminal-shell hunk-selection.ts). */
 const HUNK_HINTS: readonly KitHint[] = [

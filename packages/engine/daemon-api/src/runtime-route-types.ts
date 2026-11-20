@@ -1,6 +1,7 @@
 import type { DaemonRuntimeRouteHandlers } from './context.js';
 import type { JsonRecord } from './route-helpers.js';
 import type { ConversationMessageEnvelope } from '@goodvibes-jev/engine/contracts/conversation-message';
+import type { Page } from '@goodvibes-jev/engine/errors';
 
 /**
  * The conversation-message envelope, declared once in the contracts package.
@@ -270,7 +271,8 @@ export interface DaemonRuntimeRouteContext {
     getSession(sessionId: string): { id: string; status: string; messageCount: number; activeAgentId?: string | undefined } | null;
     getMessages(sessionId: string, limit: number, offset?: number): unknown[];
     getInputs(sessionId: string, limit: number): unknown[];
-    getInputsSince(sessionId: string, options: { state?: SessionInputState | undefined; since?: number | undefined; limit?: number | undefined }): unknown[];
+    /** One page of the session's inputs after `since`, oldest first; `more` says ask again from `next`. */
+    getInputsPage(sessionId: string, options: { state?: SessionInputState | undefined; since?: number | undefined; limit?: number | undefined }): Page<unknown>;
     markInputDelivered(sessionId: string, inputId: string, options: { consumed?: boolean | undefined; agentId?: string | undefined; claim?: boolean | undefined; surfaceInstance?: string | undefined; beforeApply?: (() => void) | undefined }): Promise<unknown | null>;
     closeSession(sessionId: string): Promise<{ id: string } | null>;
     reopenSession(sessionId: string): Promise<{ id: string } | null>;

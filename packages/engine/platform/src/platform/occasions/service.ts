@@ -315,6 +315,9 @@ export class OccasionsService {
           mirrored: occasion.mirrored,
         };
       });
+      // Soonest first, the order every surface lists them in; one with no next date
+      // (a past one-off) goes last. The sort is stable, so ties keep the file's order.
+      views.sort((a, b) => (a.daysUntil ?? Number.POSITIVE_INFINITY) - (b.daysUntil ?? Number.POSITIVE_INFINITY));
       op.admitted();
       return { today, timezone: reading.timezone, occasions: views, unparsed: declarations.unparsed, conflicts: declarations.conflicts,
         ...(reading.classic ? { provenance: 'classic' as const, subjectAssessment: 'not-evaluated' as const } : {}) };

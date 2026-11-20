@@ -1,9 +1,9 @@
 /**
- * RelayOverflowBanner, the resync owner for live events dropped over the relay.
+ * RelayOverflowBanner, the resync owner for live events dropped for this browser.
  *
- * When the webui is connected over the relay and the tunnel's send buffer overflows, the
- * daemon emits a `relay-overflow` event carrying the dropped count (never a silent gap). The
- * stream consumers record it into the relay-overflow store. The missed events were only ever
+ * When the daemon drops frames for a slow reader, or the relay tunnel's send buffer
+ * overflows, the stream reports a typed gap carrying the dropped count (never a silent
+ * one). The stream consumers record it into the relay-overflow store. The missed events were only ever
  * invalidation triggers, so refetching every query is the complete recovery: this component
  * runs it by itself, once per burst (notices inside the coalescing window share one pass),
  * and shows a passive one-line note while it runs. Nothing is asked of the operator.
@@ -53,7 +53,7 @@ export function RelayOverflowBanner() {
   return (
     <div className="banner relay-overflow-banner" role="status" aria-live="polite">
       <RefreshCw size={16} aria-hidden="true" />
-      <span>Live updates over the relay dropped events; refreshing this view.</span>
+      <span>Live updates dropped events; refreshing this view.</span>
     </div>
   );
 }

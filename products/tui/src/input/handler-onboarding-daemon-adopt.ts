@@ -6,7 +6,7 @@
  */
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { adoptedDaemonUrl } from './onboarding/onboarding-wizard-helpers.ts';
-import { readConnectedDaemonToken, writeConnectedDaemonToken } from '../runtime/client/connected-daemon-credentials.ts';
+import { readConnectedDaemonToken, writeConnectedDaemonToken } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-credentials';
 import { beginOnboardingOperation, endOnboardingOperation } from './onboarding-operation.ts';
 import type { InputHandlerLike as InputHandler } from './handler-types.ts';
 import {
@@ -19,7 +19,7 @@ import {
 /**
  * Immediately (not deferred to the final wizard Apply):
  *   1. Stores the pasted token for that host/port in the terminal's own
- *      endpoint-keyed credentials (connected-daemon-credentials.ts). The daemon
+ *      endpoint-keyed credentials (the engine's runtime/client/daemon-credentials.ts). The daemon
  *      home's operator-tokens.json, the local daemon's own record, is not touched.
  *   2. Points this terminal at the pasted host/port (`daemon.connectedHost.url`),
  *      leaving the control-plane bind settings, which describe only how a

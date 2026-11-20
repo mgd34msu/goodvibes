@@ -781,9 +781,12 @@ function ScopedNativeIntakeForm({
                     {record.command.text.slice(0, 80)}
                     {record.command.text.length > 80 ? "…" : ""}
                   </Button>
-                  <span className="dv-muted">
-                    {lines[id] ?? `Sent ${new Date(record.createdAt).toLocaleString()}.`}
-                  </span>
+                  {/* The open message states its status below, with its actions. */}
+                  {selected?.command.inputId !== id && (
+                    <span className="dv-muted">
+                      {lines[id] ?? `Sent ${new Date(record.createdAt).toLocaleString()}.`}
+                    </span>
+                  )}
                 </li>
               );
             })}
@@ -835,7 +838,8 @@ function ScopedNativeIntakeForm({
       {confirm.element}
       {selected && (
         <section className="native-intake__request" aria-label="Selected message">
-          <pre className="native-intake__source">{selected.command.text}</pre>
+          {/* The row above shows the first 80 characters; the whole text only when it was cut. */}
+          {selected.command.text.length > 80 && <pre className="native-intake__source">{selected.command.text}</pre>}
           {selected.command.unsupportedSources.length > 0 && (
             <ul>
               {selected.command.unsupportedSources.map((source, index) => (

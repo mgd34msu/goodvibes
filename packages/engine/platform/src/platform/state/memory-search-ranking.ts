@@ -197,7 +197,11 @@ export function compareReviewNeed(a: MemoryRecord, b: MemoryRecord): number {
     || a.createdAt - b.createdAt;
 }
 
-/** The review queue: the records most in need of a person first, at most `limit`. */
+/**
+ * The review queue: the records still waiting for a person (flagged, or never
+ * reviewed), most in need first, at most `limit`. A record a person reviewed has
+ * left the queue; a later flag (stale, contradicted) puts it back.
+ */
 export function rankReviewQueue(candidates: readonly MemoryRecord[], limit: number): MemoryRecord[] {
-  return [...candidates].sort(compareReviewNeed).slice(0, limit);
+  return candidates.filter((record) => record.reviewState !== 'reviewed').sort(compareReviewNeed).slice(0, limit);
 }

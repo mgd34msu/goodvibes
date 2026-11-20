@@ -163,6 +163,16 @@ export function startOnboardingFastPath(deps: OnboardingFastPathDeps): void {
         render();
         return;
       }
+      // "Add an API key to start": the key is typed here, masked, and stored
+      // for this user in every project (the same entry as /secrets set --user <VAR>).
+      const keyVar = readiness.kind === 'needs-key' ? readiness.authEnvVars[0] : undefined;
+      if (result?.item.id === 'start-now' && keyVar && commandContext.executeCommand) {
+        writeOnboardingCheckMarker(shellPaths, MARKER_OPTIONS);
+        void commandContext.executeCommand('secrets', ['set', '--user', keyVar])
+          .catch((error: unknown) => commandContext.print?.(`Could not open the key entry for ${keyVar}: ${error instanceof Error ? error.message : String(error)}. Run /secrets set --user ${keyVar} to add it.`))
+          .finally(render);
+        return;
+      }
       // Start now (or dismissed): mark first-run done and drop into a working
       // session on the configured model. The status line reuses the generated
       // copy so it can never promise readiness the registration state does not prove.

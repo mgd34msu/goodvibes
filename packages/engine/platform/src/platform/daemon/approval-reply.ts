@@ -2,7 +2,8 @@
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { LIMITS, toJson, type Selection } from '@goodvibes-jev/judgment';
 import type { ChannelIngressPolicyInput, ChannelPolicyDecision, RouteBindingManager } from '../channels/index.js';
-import { isChannelOwner } from '../channels/policy-manager.js';
+import { channelSenderActor } from '../channels/policy-manager.js';
+import { admitEffects } from '../security/effect-authority.js';
 import type { ApprovalBroker, SharedApprovalRecord } from '../control-plane/approval-broker.js';
 import type { SharedSessionBroker } from '../control-plane/session-broker.js';
 import { logger } from '../utils/logger.js';
@@ -59,8 +60,8 @@ interface ApprovalReplyDeps {
 
 /**
  * The asks a reply may answer, decided in code before anything is read: the
- * sender is the channel's owner (`isChannelOwner`; an allowlisted guest cannot
- * approve tool use), and the ask was delivered to the conversation the reply
+ * sender may answer an approval (`approval.answer`: the channel's owner; an
+ * allowlisted guest cannot approve tool use), and the ask was delivered to the conversation the reply
  * arrived in (same surface, channel and thread), or, for an ask a guest's turn
  * raised, the reply came from one of the owner's own conversations, where it
  * was delivered. Empty when there is none.
@@ -73,7 +74,7 @@ export function approvalReplyCandidates(
   const broker = deps.approvalBroker;
   const { userId, surface, text } = input;
   if (!broker || !decision.allowed || !userId || !text?.trim()) return [];
-  if (!isChannelOwner(decision, userId)) return [];
+  if (admitEffects(channelSenderActor(decision, surface, userId), ['approval.answer']).kind !== 'allowed') return [];
   // A guest's ask is delivered to the owner's own conversations, so it is
   // answered from one of them; the reply's conversation is resolved once.
   let ownConversation: boolean | undefined;

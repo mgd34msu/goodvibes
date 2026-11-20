@@ -1,6 +1,7 @@
 import type { ApprovalBroker } from '../control-plane/approval-broker.js';
 import type { ChannelPolicyManager } from '../channels/policy-manager.js';
-import { isChannelOwner } from '../channels/policy-manager.js';
+import { channelSenderActor } from '../channels/policy-manager.js';
+import { admitEffects } from '../security/effect-authority.js';
 import type { ChannelSurface } from '../channels/types.js';
 import { assertCanConfirm } from '../gate/surface-authority.js';
 
@@ -36,7 +37,10 @@ export async function handleInteractiveApprovalAction(
       }, { status: 403 }));
     }
     let fromChannelOwner = false;
-    try { fromChannelOwner = isChannelOwner({ policy: context.channelPolicy.getPolicy(interaction.surface as ChannelSurface) }, interaction.userId); }
+    try {
+      const sender = channelSenderActor({ policy: context.channelPolicy.getPolicy(interaction.surface as ChannelSurface) }, interaction.surface, interaction.userId);
+      fromChannelOwner = admitEffects(sender, ['approval.answer']).kind === 'allowed';
+    }
     catch { fromChannelOwner = false; }
     const verdict = assertCanConfirm(interaction.surface, { fromChannelOwner });
     if (!verdict.allowed) {

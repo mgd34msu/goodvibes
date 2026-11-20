@@ -85,9 +85,7 @@ export function createSpineAdoptionSync(
       return {
         sessionTransport: createSessionsClientSpineTransport(sessionsClient),
         inboundInputs: {
-          listInputs: async (sessionId, opts) => ({
-            inputs: await httpTransport.operator.sessions.inputs(sessionId, opts.limit, { state: opts.state, since: opts.since }),
-          }),
+          listInputs: (sessionId, opts) => httpTransport.operator.sessions.inputsPage(sessionId, opts),
           claimInput: (sessionId, inputId) =>
             httpTransport.operator.sessions.deliverInput(sessionId, inputId, { claim: true }),
           deliverInput: (sessionId, inputId, opts) =>

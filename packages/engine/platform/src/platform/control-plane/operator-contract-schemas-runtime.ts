@@ -303,6 +303,9 @@ export const SHARED_SESSION_WITH_MESSAGES_SCHEMA = objectSchema({
 export const SHARED_SESSION_WITH_INPUTS_SCHEMA = objectSchema({
   session: SHARED_SESSION_RECORD_SCHEMA,
   inputs: arraySchema(SHARED_SESSION_INPUT_RECORD_SCHEMA),
+  /** A `state`/`since` read only: more inputs remain after this page; ask again with `since` set to `next`. */
+  more: BOOLEAN_SCHEMA,
+  next: STRING_SCHEMA,
 }, ['session', 'inputs']);
 
 export const SHARED_SESSION_CREATE_OUTPUT_SCHEMA = objectSchema({

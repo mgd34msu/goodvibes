@@ -74,7 +74,7 @@ export interface SessionViewRouteState {
     readonly expandPastes?: ((text: string) => string) | undefined;
 }
 function isBackTab(token: InputToken): boolean {
-    return token.type === 'key' && (token.logicalName === '\x1b[Z' || (token.logicalName === 'tab' && token.shift === true));
+    return token.type === 'key' && token.logicalName === 'tab' && token.shift === true;
 }
 /** Returns true when the token was handled here. */
 export function handleSessionViewToken(state: SessionViewRouteState, token: InputToken): boolean {

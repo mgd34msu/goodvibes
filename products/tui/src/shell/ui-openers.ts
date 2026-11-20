@@ -77,7 +77,7 @@ type WireShellUiOpenersOptions = {
   getPinned: () => Promise<string[]>;
   render: () => void;
   /** Trust-at-consequence-time bridge, patched here with the real modal-driving implementation. */
-  trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel> };
+  trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel>; awaitingOwner?: boolean };
 };
 
 let commandCategoryMapCache: Map<string, string> | null = null;
@@ -142,7 +142,10 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
         resolve('restricted');
         return;
       } // no selection surface (should not happen live)
+      // While the question is open the turn waits on the owner, not the model (the throbber says so).
+      trustPromptRef.awaitingOwner = true;
       commandContext.openSelection(title, items, { allowSearch: false, primaryVerbLabel: 'Choose' }, (result) => {
+        trustPromptRef.awaitingOwner = false;
         const level = decodeFirstOpenChoice(result?.item.id ?? null);
         resolve(level);
         if (level === 'trusted') void selfRecordWorkspaceRegistration(commandContext.workspace?.workspaceRegistrationManager);
@@ -371,6 +374,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
 
   input.surfaceModals.onChange = render;
   commandContext.confirm = (options) => confirmThrough(input.surfaceModals, options);
+  // A described command's guided panel (command-actions/panel.ts) is a kit modal on the same stack.
+  commandContext.pushSurfaceModal = (modal) => input.surfaceModals.push(modal);
   const toasts = getSharedToastCenter();
   toasts.onChange = render;
   commandContext.showToast = (toast) => toasts.show(toast);

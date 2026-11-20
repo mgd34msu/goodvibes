@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { Page } from '@goodvibes-jev/engine/errors';
 import { logger } from '../utils/logger.js';
 import type { SubmitSharedSessionMessageInput } from './session-types.js';
 import type { SharedSessionInputIntent, SharedSessionInputRecord, SharedSessionInputState, SharedSessionSurfaceReplyBinding } from './session-intents.js';
@@ -223,15 +224,18 @@ export function claimNextQueuedSessionInput(
 }
 
 /**
- * Collection read for a live surface: filter a session's inputs by state and/or a
- * `since` cursor (createdAt, exclusive), oldest-first, capped to `limit`. With
- * `state: 'queued'` + the last-seen cursor this yields exactly the PENDING inputs
- * a surface has not collected yet (see SharedSessionBroker.getInputsSince).
+ * Collection read for a live surface: a session's inputs filtered by state
+ * and/or a `since` cursor (createdAt, exclusive), as one page, OLDEST first.
+ * With `limit` it returns the oldest `limit` after the cursor (extended to the
+ * end of the last item's millisecond, so a cursor at that createdAt skips
+ * nothing) and says `more` when inputs remain; `next` is the cursor to ask
+ * again from. Never the newest slice: a reader that loops while `more` sees
+ * every input exactly in order. Without `limit` every match is returned.
  */
 export function filterSessionInputsSince(
   bucket: readonly SharedSessionInputRecord[],
   options: { readonly state?: SharedSessionInputRecord['state'] | undefined; readonly since?: number | undefined; readonly limit?: number | undefined },
-): SharedSessionInputRecord[] {
+): Page<SharedSessionInputRecord> {
   const filtered = bucket.filter((entry) => {
     // Polling a persisted marker must never recover process-local authority.
     if (isDelegatedSessionInput(entry)) return false;
@@ -239,7 +243,14 @@ export function filterSessionInputsSince(
     if (options.since !== undefined && entry.createdAt <= options.since) return false;
     return true;
   });
-  return filtered.slice(-Math.max(1, options.limit ?? 100));
+  if (options.limit === undefined || filtered.length <= Math.max(1, options.limit)) {
+    return { items: filtered, more: false };
+  }
+  let end = Math.max(1, options.limit);
+  const lastAt = filtered[end - 1]!.createdAt;
+  while (end < filtered.length && filtered[end]!.createdAt === lastAt) end += 1;
+  if (end >= filtered.length) return { items: filtered, more: false };
+  return { items: filtered.slice(0, end), more: true, next: String(lastAt) };
 }
 
 /**

@@ -219,6 +219,12 @@ export async function executeNativeHeadless(options: NativeHeadlessOptions, poli
                         return record;
                     }, confirm: (binding, command) => journal.confirm(binding, command),
                     claimTurn: (binding, command, revision) => journal.claimTurn(binding, command, revision),
+                    // Settling an input (refused by the host, dropped, its turn finished or never started) goes to
+                    // the same file the interactive app reads, so no stale record holds the next message back.
+                    remove: (binding, command) => journal.remove(binding, command),
+                    finishTurn: (binding, command, revision) => journal.finishTurn(binding, command, revision),
+                    releaseTurnClaim: (binding, command, revision) => journal.releaseTurnClaim(binding, command, revision),
+                    discardUncaptured: (binding, command) => journal.discardUncaptured(binding, command),
                     saveExecutionIntent: (binding, command, intent) => journal.saveExecutionIntent(binding, command, intent),
                     async save(binding, command, expected) {
                         await journal.save(binding, command, expected);
@@ -314,7 +320,9 @@ export function writeNativeHeadlessResult(result: NativeHeadlessResult, format: 
         ...(use.failure ? { failure: { model: use.failure.model, what: use.failure.what, nextStep: use.failure.nextStep } } : {}) } };
     if (diagnostics)
         stderr(diagnostics.decisionModel.line);
-    const response = headlessRecoveryText(turn.response);
+    // A model turn's answer (the run reached a session) is printed as the model gave it; only
+    // product-written text (intake messages and recovery lines) names the `run` flags.
+    const response = turn.sessionId === undefined ? headlessRecoveryText(turn.response) : turn.response;
     const error = turn.error === undefined ? undefined : headlessRecoveryText(turn.error);
     const execution = native?.execution ? { ...native.execution, message: headlessRecoveryText(native.execution.message) } : undefined;
     // Capabilities remain process-local. Never spread the state containing its permit.

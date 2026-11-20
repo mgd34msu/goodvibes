@@ -252,6 +252,14 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       return { handled: false, pendingPermission };
     }
 
+    // Text that arrives as one burst (typed fast, or pasted) is a reason being
+    // typed, never a key: it starts deny-with-reason with all of it, so
+    // nothing typed is lost and no burst can answer the card by itself.
+    if (data.length > 1 && /^[^\x00-\x1f\x7f]+$/.test(data)) {
+      render();
+      return { handled: true, pendingPermission: { ...req, replyMode: 'deny-reason', replyBuffer: data } };
+    }
+
     const key = data.toLowerCase().trim();
     if (
       handleSimplePermissionInput(data, {

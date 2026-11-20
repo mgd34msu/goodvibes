@@ -28,3 +28,26 @@ export {
   readPemEntriesFromDirectory,
   resolvePathFromGoodVibesRoot,
 } from './shared.js';
+export {
+  DESTINATION_RULES,
+  DestinationRefusedError,
+  checkDestination,
+  classifyResolvedAddress,
+  createHostAdmission,
+  egress,
+  hostIsApproved,
+  isCallerReachablePrivateAddress,
+  parseApprovedHosts,
+  pinnedFetch,
+  systemResolver,
+} from './destination.js';
+export type {
+  CheckDestinationOptions,
+  CheckedDestination,
+  ConfigReader as DestinationConfigReader,
+  DestinationPurpose,
+  DestinationRule,
+  HostResolver,
+  ResolvedAddress,
+  ResolvedAddressRange,
+} from './destination.js';

@@ -121,6 +121,8 @@ export interface ThrobberActivityInput {
     readonly compactingSinceMs?: number | undefined;
     /** The permission prompt the turn is blocked on. */
     readonly pendingApproval?: (ThrobberToolCall | null) | undefined;
+    /** A question put to the owner that is not a tool approval (the workspace trust choice): the turn waits on him. */
+    readonly ownerChoice?: (string | null) | undefined;
     /**
      * The tool the turn is executing now (the oldest, when several run), when
      * it started (epoch ms), and how many other calls run at the same time.
@@ -160,6 +162,8 @@ export function resolveThrobberActivity(input: ThrobberActivityInput): ThrobberA
     if (input.turnActive && input.pendingApproval) {
         return { kind: 'approval', ...describeToolCall(input.pendingApproval), elapsedMs: turnElapsed };
     }
+    if (input.turnActive && input.ownerChoice)
+        return { kind: 'approval', tool: input.ownerChoice, argument: '', elapsedMs: turnElapsed };
     if (input.compacting)
         return { kind: 'compacting', elapsedMs: since(input.compactingSinceMs) };
     const delegatedActivity = (): ThrobberActivity | null => {

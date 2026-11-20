@@ -24,6 +24,7 @@ import { answerAsAModelWould, startFakeDecision } from './fake-decision.ts';
 const JOURNEYS = [
   'j1-tool-turn', 'j2-delegation', 'j3-channels', 'j4-knowledge', 'j5-purchases', 'j6-pairing', 'j7-webui',
   'j8-permission-modes', 'j9-crash-recovery', 'j10-inbox-and-hosted-agent', 'j11-contracts', 'j12-mail', 'j13-decision-notice',
+  'j14-save-then-acknowledge',
 ] as const;
 const POLICY_DEFAULT = ['j1', 'j8', 'j10', 'j13'];
 const POLICIES = ['No Decision Model', 'Hybrid', 'Decision Model Only'] as const;

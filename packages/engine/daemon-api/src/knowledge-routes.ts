@@ -419,8 +419,9 @@ const knowledgeBodySchemas = createRouteBodySchemaRegistry({
       ...(typeof body.includeSources === 'boolean' ? { includeSources: body.includeSources } : {}),
       ...(typeof body.includeConfidence === 'boolean' ? { includeConfidence: body.includeConfidence } : {}),
       ...(typeof body.includeLinkedObjects === 'boolean' ? { includeLinkedObjects: body.includeLinkedObjects } : {}),
-      ...(candidateSourceIds ? { candidateSourceIds } : {}),
-      ...(candidateNodeIds ? { candidateNodeIds } : {}),
+      // Empty candidate lists are read as not sent, as before readStringArrayField returned [] for them.
+      ...(candidateSourceIds?.length ? { candidateSourceIds } : {}),
+      ...(candidateNodeIds?.length ? { candidateNodeIds } : {}),
       ...(typeof body.strictCandidates === 'boolean' ? { strictCandidates: body.strictCandidates } : {}),
     };
   }),
@@ -448,7 +449,8 @@ const knowledgeBodySchemas = createRouteBodySchemaRegistry({
     const sourceIds = readStringArrayField(body, 'sourceIds');
     return {
       ...(mode ? { mode } : {}),
-      ...(sourceIds ? { sourceIds } : {}),
+      // An empty `sourceIds` list is read as not sent, as before readStringArrayField returned [] for it.
+      ...(sourceIds?.length ? { sourceIds } : {}),
       ...(Object.hasOwn(body, 'limit') ? { limit: readBoundedBodyInteger(body.limit, 50, 500) } : {}),
     };
   }),
@@ -736,7 +738,7 @@ async function handleKnowledgeIngestUrl(context: DaemonKnowledgeRouteContext, re
       url,
       ...(typeof body.title === 'string' ? { title: body.title } : {}),
       ...(typeof body.folderPath === 'string' ? { folderPath: body.folderPath } : {}),
-      ...(tags ? { tags } : {}),
+      ...(tags?.length ? { tags } : {}),
       ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
       ...sourceType,
       ...(typeof body.connectorId === 'string' ? { connectorId: body.connectorId } : {}),
@@ -792,7 +794,7 @@ async function handleKnowledgeIngestArtifact(context: DaemonKnowledgeRouteContex
       ...(typeof body.uri === 'string' ? { uri: body.uri } : {}),
       ...(typeof body.title === 'string' ? { title: body.title } : {}),
       ...(typeof body.folderPath === 'string' ? { folderPath: body.folderPath } : {}),
-      ...(tags ? { tags } : {}),
+      ...(tags?.length ? { tags } : {}),
       ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
       ...sourceType,
       ...(typeof body.connectorId === 'string' ? { connectorId: body.connectorId } : {}),

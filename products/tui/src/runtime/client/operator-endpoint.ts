@@ -22,15 +22,13 @@
  * daemon that has not wired a verb returns) throws `GoodVibesError` and
  * `describeOperatorRpcError` renders it.
  *
- * Auth for the daemon on this machine is the loopback file-token bootstrap: the
- * token is read (or minted) from the daemon's own state directory. A daemon this
- * terminal was pointed at (`daemon.connectedHost.url`) is dialled with the
- * bearer setup stored for that address in the terminal's own state
- * (connected-daemon-credentials.ts); the local daemon's record is left alone.
- * A session token from `/auth login daemon <baseUrl>` is held for that address
- * in the same record and is the bearer for it until `/auth logout` drops it.
- * `GOODVIBES_DAEMON_TOKEN`, when set, wins here, once, for every caller, as it
- * does for the daemon itself (`resolveDaemonEndpoint`).
+ * Which daemon and which credential is the engine's one resolver
+ * (platform/runtime/client/daemon-target-resolver.ts): the daemon this terminal
+ * was pointed at (`daemon.connectedHost.url`) with the bearer stored for that
+ * address, or a `/auth login daemon` session held for it; otherwise the daemon
+ * on this machine with `GOODVIBES_DAEMON_TOKEN` or the token read (or minted)
+ * from its own state directory. This machine's token is never sent to another
+ * daemon's address.
  */
 import { statSync } from 'node:fs';
 import { createGoodVibesPlatform, getOperatorMethod, isOperatorMethodId } from '@goodvibes-jev/engine/platform';
@@ -38,10 +36,12 @@ import type { GoodVibesPlatform } from '@goodvibes-jev/engine/platform';
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import { validateOperatorResponse } from '@goodvibes-jev/engine/operator-client/client-core';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { readConnectedDaemonOrigin, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { formatRefusal } from '@goodvibes-jev/engine/errors';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
 import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { connectedDaemonCredentialsPath, connectedDaemonCredentialsRevision, readConnectedDaemonToken, readDaemonSessionToken } from './connected-daemon-credentials.ts';
+import { connectedDaemonCredentialsPath, connectedDaemonCredentialsRevision } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-credentials';
+import { bearerFor, type DaemonTarget } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
+import { configuredDaemonOrigin, resolveDaemonTarget, resolveDaemonTargetProven, type DaemonTargetResolution } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target-resolver';
 import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
 import { readDaemonOperatorBearer } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
@@ -66,33 +66,17 @@ export interface OperatorRpcAvailable {
 export type OperatorRpc = OperatorRpcUnavailable | OperatorRpcAvailable;
 
 /**
- * Derive the dial address of the configured control-plane daemon.
- *
- * The daemon this terminal was pointed at (`daemon.connectedHost.url`) wins,
- * then an explicitly declared external address; otherwise the URL is DERIVED
- * from hostMode/host/port/tls.mode. This deliberately does not prefer a stored
- * `controlPlane.baseUrl`: that key had no writers and so drifted from the bind
- * on port, scheme, and host at once.
+ * The dial address of the configured daemon: the engine resolver's choice
+ * (the connected host, a declared public address, else the address derived
+ * from the bind), never a stored `controlPlane.baseUrl`.
  */
 export function resolveControlPlaneBaseUrl(configManager: Pick<ConfigManager, 'get'>): string | null {
-  const connected = readConnectedDaemonOrigin((key) => configManager.get(key));
-  if (connected) return connected.baseUrl;
-  const explicit = String(configManager.get('controlPlane.publicBaseUrl' as never) ?? '').trim();
-  if (explicit) return explicit.replace(/\/+$/, '');
-  const host = String(configManager.get('controlPlane.host') ?? '').trim();
-  const port = configManager.get('controlPlane.port');
-  if (host && typeof port === 'number' && port > 0) {
-    const scheme = String(configManager.get('controlPlane.tls.mode') ?? 'off') !== 'off' ? 'https' : 'http';
-    // A wildcard bind is not a dial target; loopback is the interface it answers on.
-    const dialHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
-    return `${scheme}://${dialHost.includes(':') && !dialHost.startsWith('[') ? `[${dialHost}]` : dialHost}:${port}`;
-  }
-  return null;
+  return configuredDaemonOrigin(configManager)?.baseUrl ?? null;
 }
 
 /** Where an enabled daemon answers, or null when it is disabled or has no address. Reads settings only. */
 export function resolveDaemonBaseUrl(configManager: Pick<ConfigManager, 'get'>): string | null {
-  if (!resolveDaemonEnabled(configManager)) return null;
+  if (configManager.get('daemon.enabled') === false) return null;
   return resolveControlPlaneBaseUrl(configManager);
 }
 
@@ -103,7 +87,7 @@ export function resolveDaemonStateDirectory(homeDirectory: string): string {
 
 /** Where the daemon answers and the bearer this terminal presents to it, or why it cannot be reached. */
 export type DaemonEndpoint =
-  | { readonly available: true; readonly baseUrl: string; readonly token: string }
+  | { readonly available: true; readonly baseUrl: string; readonly token: string; readonly target: DaemonTarget }
   | OperatorRpcUnavailable;
 
 /**
@@ -113,8 +97,7 @@ export type DaemonEndpoint =
  */
 export type DaemonTokenMode = 'mint' | 'read-only';
 
-/** The `GOODVIBES_DAEMON_TOKEN` override, applied in one place for every caller. */
-/** GOODVIBES_DAEMON_TOKEN: when set it is the bearer for every daemon call, ahead of any stored token or session. */
+/** GOODVIBES_DAEMON_TOKEN: when set it is the bearer for the daemon on this machine, ahead of a session or its token file; never sent to another daemon. */
 export function daemonTokenOverride(): string | null {
   return process.env.GOODVIBES_DAEMON_TOKEN?.trim() || null;
 }
@@ -133,69 +116,50 @@ export function resolveDaemonBearer(homeDirectory: string, mode: DaemonTokenMode
   return getOrCreateCompanionToken('tui', { daemonHomeDir: resolveDaemonStateDirectory(homeDirectory) }).token;
 }
 
-/**
- * The one resolver of "the daemon I talk to": enabled, base URL, bearer. Every
- * daemon call from this terminal (verbs, the approval stream, the Cloudflare
- * routes, the hosted-session stream) goes through it, so the override, the
- * mint rule and the refusals are the same everywhere. A refusal is a VALUE,
- * never a throw: callers print an honest line rather than crash a keystroke.
- */
-export function resolveDaemonEndpoint(deps: {
+type EndpointDeps = {
   readonly configManager: Pick<ConfigManager, 'get'>;
   readonly homeDirectory: string | (() => string);
   readonly mode?: DaemonTokenMode | undefined;
-}): DaemonEndpoint {
-  const { configManager } = deps;
-  // A context whose config manager cannot answer (a narrow embed, a partially
-  // wired test double) is one more case of "no daemon can be resolved".
-  if (typeof (configManager as { get?: unknown } | null)?.get !== 'function') {
-    return { available: false, reason: 'no config manager is wired here, so no control-plane daemon can be resolved.' };
-  }
-  if (!resolveDaemonEnabled(configManager)) {
-    return { available: false, reason: 'the daemon is disabled (daemon.enabled=false): no operator surface to reach. Enable it in /settings, then retry.' };
-  }
-  const baseUrl = resolveControlPlaneBaseUrl(configManager);
-  if (!baseUrl) {
-    return { available: false, reason: 'no control-plane base URL is configured (daemon.connectedHost.url, controlPlane.publicBaseUrl or controlPlane.host+port): cannot reach the operator surface.' };
-  }
-  // Resolve the home directory only AFTER the static refusals, a caller whose
-  // shell paths are not wired (a disabled-daemon path) must still get the honest
-  // unavailable reason above, never a "shell paths not wired" throw.
-  const homeDirectory = typeof deps.homeDirectory === 'function' ? deps.homeDirectory() : deps.homeDirectory;
-  // A session the owner signed in to this daemon with (/auth login daemon) is the
-  // bearer while it is held; /auth logout drops it and the address's own bearer applies.
-  const session = daemonTokenOverride() ? null : readDaemonSessionToken(homeDirectory, baseUrl);
-  if (session) return { available: true, baseUrl, token: session };
-  // A daemon this terminal was pointed at is dialled with the bearer stored for that address; the
-  // address and its token come from one record, so they cannot disagree.
-  const connected = readConnectedDaemonOrigin((key) => configManager.get(key));
-  if (connected) {
-    const stored = daemonTokenOverride() ?? readConnectedDaemonToken(homeDirectory, connected.baseUrl);
-    return stored
-      ? { available: true, baseUrl, token: stored }
-      : { available: false, reason: `no access token is stored for the daemon at ${connected.baseUrl}: connect to it again from setup (/setup, Network step) with its token.` };
-  }
-  let token: string | null;
+};
+
+function targetInput(deps: EndpointDeps) {
+  return { configManager: deps.configManager, homeDirectory: deps.homeDirectory, mode: deps.mode ?? 'mint', client: 'tui' } as const;
+}
+
+function endpointOf(resolution: DaemonTargetResolution): DaemonEndpoint {
+  if (!resolution.ok) return { available: false, reason: formatRefusal(resolution.refusal) };
+  const { target } = resolution;
+  if (target.credential === null) return { available: false, reason: `no credential was resolved for ${target.origin.baseUrl}.` };
+  return { available: true, baseUrl: target.origin.baseUrl, token: bearerFor(target.credential, target.origin.baseUrl), target };
+}
+
+/**
+ * The one resolver of "the daemon I talk to": enabled, base URL, bearer, as
+ * the engine's daemon target resolver decides them, so the override, the mint
+ * rule, the per-origin credentials and the refusals are the same for every
+ * daemon call from this terminal. A refusal is a VALUE, never a throw: callers
+ * print an honest line rather than crash a keystroke. A declared public
+ * address of this machine's daemon is resolved after its one identity check
+ * (bounded by the check's timeout), so the first call after start succeeds or
+ * fails for a real reason.
+ */
+export async function resolveDaemonEndpoint(deps: EndpointDeps): Promise<DaemonEndpoint> {
   try {
-    token = resolveDaemonBearer(homeDirectory, deps.mode ?? 'mint');
+    return endpointOf(await resolveDaemonTargetProven(targetInput(deps)));
   } catch (error) {
-    // An unwritable state directory or a token file that cannot be replaced is a
-    // refusal like the others: the caller prints a line, nothing crashes.
-    return {
-      available: false,
-      reason: `the daemon's access token could not be read or created (${error instanceof Error ? error.message : String(error)}): check that ${resolveDaemonStateDirectory(homeDirectory)} is writable, then retry.`,
-    };
+    // Shell paths not wired, an unreadable home: one more case of "cannot be resolved".
+    return { available: false, reason: error instanceof Error ? error.message : String(error) };
   }
-  if (!token) {
-    return { available: false, reason: `no daemon access token exists yet in ${resolveDaemonStateDirectory(homeDirectory)}: start the daemon or run any daemon command once, then retry.` };
-  }
-  return { available: true, baseUrl, token };
 }
 
 /**
  * Resolve (or honestly refuse to resolve) an operator platform client wired to this
  * workspace's control-plane daemon, from just the two things the resolution
- * actually needs, the config manager and the home directory.
+ * actually needs, the config manager and the home directory. Synchronous for
+ * its many callers: while this machine's declared public address still has to
+ * prove itself, the client is returned at once and its first request waits for
+ * that check (the bearer is read per request), so nothing is refused for it
+ * and the token is sent only once the address proved it is this daemon.
  */
 export function resolveOperatorRpc(deps: {
   readonly configManager: ConfigManager;
@@ -203,12 +167,28 @@ export function resolveOperatorRpc(deps: {
   /** Injectable fetch for tests; defaults to the global fetch. */
   readonly fetch?: typeof fetch | undefined;
 }): OperatorRpc {
-  const endpoint = resolveDaemonEndpoint(deps);
+  const input = targetInput(deps);
+  let resolution: DaemonTargetResolution;
+  try {
+    resolution = resolveDaemonTarget(input);
+  } catch (error) {
+    return { available: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+  if (!resolution.ok && resolution.pendingProof) {
+    const proven = async (): Promise<string> => {
+      const endpoint = endpointOf(await resolveDaemonTargetProven(input));
+      if (!endpoint.available) throw new GoodVibesError(endpoint.reason, { category: 'authorization', source: 'transport', code: 'CREDENTIAL_NOT_FOR_TARGET', recoverable: false });
+      return endpoint.token;
+    };
+    return { available: true, platformClient: operatorClientFor(resolution.pendingProof.baseUrl, proven, deps.fetch) };
+  }
+  const endpoint = endpointOf(resolution);
   if (!endpoint.available) return endpoint;
-  return { available: true, platformClient: operatorClientFor(endpoint, deps.fetch) };
+  const token = endpoint.token;
+  return { available: true, platformClient: operatorClientFor(endpoint.baseUrl, async () => token, deps.fetch) };
 }
 
-function operatorClientFor(endpoint: { readonly baseUrl: string; readonly token: string }, fetchImpl: typeof fetch | undefined): GoodVibesPlatform {
+function operatorClientFor(baseUrl: string, bearer: () => Promise<string>, fetchImpl: typeof fetch | undefined): GoodVibesPlatform {
   // Every call names this app, so what the owner does here is attributed to the terminal (an inbox answer says tui).
   const base = fetchImpl ?? fetch;
   const named = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
@@ -216,8 +196,8 @@ function operatorClientFor(endpoint: { readonly baseUrl: string; readonly token:
     headers.set('x-goodvibes-client', 'tui');
     return base(input, { ...init, headers });
   }) as typeof fetch;
-  const platformClient = createGoodVibesPlatform({ baseUrl: endpoint.baseUrl, authToken: endpoint.token, fetch: named });
-  return withGatewayRouteForWsOnlyVerbs(platformClient, endpoint.baseUrl, endpoint.token, named);
+  const platformClient = createGoodVibesPlatform({ baseUrl, getAuthToken: bearer, fetch: named });
+  return withGatewayRouteForWsOnlyVerbs(platformClient, baseUrl, bearer, named);
 }
 
 /**
@@ -260,10 +240,11 @@ export function describeOperatorRpcError(error: unknown): string {
 async function invokeGatewayMethodOverHttp<T>(
   fetchImpl: typeof fetch,
   baseUrl: string,
-  authToken: string,
+  bearer: () => Promise<string>,
   methodId: string,
   input: unknown,
 ): Promise<T> {
+  const authToken = await bearer();
   const response = await fetchImpl(`${baseUrl}/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
@@ -320,13 +301,13 @@ function hasHttpBinding(client: GoodVibesPlatform, methodId: string): boolean {
 function withGatewayRouteForWsOnlyVerbs(
   client: GoodVibesPlatform,
   baseUrl: string,
-  authToken: string,
+  bearer: () => Promise<string>,
   fetchImpl: typeof fetch,
 ): GoodVibesPlatform {
   const typedInvoke = client.operator.invoke;
   const invoke = ((methodId: string, ...rest: unknown[]) => {
     if (hasHttpBinding(client, methodId)) return (typedInvoke as (id: string, ...args: unknown[]) => Promise<unknown>)(methodId, ...rest);
-    return invokeGatewayMethodOverHttp<unknown>(fetchImpl, baseUrl, authToken, methodId, rest[0]);
+    return invokeGatewayMethodOverHttp<unknown>(fetchImpl, baseUrl, bearer, methodId, rest[0]);
   }) as typeof typedInvoke;
   return { ...client, operator: { ...client.operator, invoke } };
 }

@@ -119,6 +119,12 @@ export interface CompanionChatHistoryToolCall {
   readonly id: string;
   readonly name: string;
   readonly arguments: Record<string, unknown>;
+  /**
+   * The words the tool's definition gave this call when it ran ("Read files"), the
+   * same `turn.tool_call` carried live, so a reloaded chat names its tool calls the
+   * way the live turn did. Never sent back to the model.
+   */
+  readonly activity?: ToolActivityWords | undefined;
 }
 
 /** One tool result, as the model received it. */

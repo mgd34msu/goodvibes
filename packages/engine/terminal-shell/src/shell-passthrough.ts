@@ -4,7 +4,7 @@
  *
  * The submission router reads a leading `!` as "shell"; this runs the command
  * directly (a user-initiated terminal escape, not an agent tool call), shows
- * its output, and buffers a context block that is prepended to the user's next
+ * its output in the transcript, and buffers a context block that is prepended to the user's next
  * real message, making the result visible to the model on the next turn
  * without triggering a turn of its own.
  *
@@ -12,12 +12,16 @@
  * platform drops `system` messages from the LLM view and does not merge consecutive
  * `user` messages (which would trip a consecutive-user-message API error).
  */
+import { SHELL_CONTEXT_CLOSE, SHELL_CONTEXT_OPEN } from '@goodvibes-jev/engine/platform/platform/core';
+
 export const SHELL_USAGE_HINT =
   '[Shell] Usage: !<command>, runs a shell command; its output is shown and added as context for your next message. Esc stops a command that is still running.';
 
 export interface ShellRunResult {
-  /** Formatted output for the conversation/activity feed. */
+  /** The command, its output and its exit status, as the transcript shows them. */
   readonly display: string;
+  /** It exited with a failure status or was stopped. */
+  readonly failed: boolean;
   /** Context block buffered for the user's next turn. */
   readonly context: string;
 }
@@ -123,8 +127,9 @@ export class ShellPassthrough {
       const body = combined.length > 0 ? combined : '(no output)';
       const status = `exit ${exitCode}${notes.length > 0 ? `; ${notes.join('; ')}` : ''}`;
       const result: ShellRunResult = {
-        display: `[Shell] ${body}\n(${status})`,
-        context: `The user ran a shell command via the \`!\` prefix:\n$ ${command}\n--- output (${status}) ---\n${body}`,
+        display: `$ ${command}\n${body}\n(${status})`,
+        failed: exitCode !== 0 || outcome.stoppedBy !== null,
+        context: `${SHELL_CONTEXT_OPEN}\n$ ${command}\n--- output (${status}) ---\n${body}\n${SHELL_CONTEXT_CLOSE}`,
       };
       this.pending.push(result.context);
       while (this.pending.length > MAX_PENDING_BLOCKS) this.pending.shift();

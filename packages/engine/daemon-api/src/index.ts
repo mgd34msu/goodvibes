@@ -31,10 +31,17 @@ export { dispatchDaemonApiRoutes } from './api-router.js';
 export type { DaemonApiRouteExtension } from './api-router.js';
 export { dispatchGatewayRestRoutes } from './gateway-rest-routes.js';
 export {
+  NO_OWNER_USER,
+  actorFromChannelSender,
+  actorFromPrincipal,
+  actorHoldsScope,
+  agentActor,
   principalHasScope,
   resolveAuthenticatedPrincipal,
   resolvePrivateHostFetchOptions,
+  systemActor,
 } from './http-policy.js';
+export type { Actor, ActorClass, ActorPrincipal, OwnerIdentity } from './http-policy.js';
 export type { AuthenticatedPrincipal, AuthenticatedPrincipalKind, AuthenticatedPrincipalResolver, CredentialKind, ElevatedPrivateHostFetchConfig, PrivateHostFetchConfig, RequestContext, RequestPrincipal } from './http-policy.js';
 export {
   createRouteBodySchema,
@@ -49,6 +56,7 @@ export {
   readOptionalBoundedInteger,
   readOptionalStringField,
   readStringArrayField,
+  readSelectionField,
   scopeMatches,
 } from './route-helpers.js';
 export type {

@@ -223,6 +223,11 @@ function idleCloseReason(
   options: SharedSessionGcOptions,
 ): 'idle-empty' | 'idle-long' | null {
   if (session.status !== 'active') return null;
+  // A companion chat's record mirrors a chat the companion manager owns, and
+  // idleness never closes a chat there (companion-chat-gc.ts): closing is the
+  // person's. Its messages live in the chat, not this record, so this record's
+  // count and activity say nothing about whether the chat is idle.
+  if (session.kind === 'companion-chat') return null;
   if (session.activeAgentId) return null;
   if (session.pendingInputCount > 0) return null;
   // Work running out of this store's sight counts as activity. Asked BEFORE any

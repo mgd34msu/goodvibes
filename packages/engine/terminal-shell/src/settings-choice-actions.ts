@@ -32,7 +32,7 @@ const POLICY_DETAILS: Readonly<Record<string, string>> = {
   Hybrid: 'Use the set decision model; when none is set, or it fails, continue without it. A failure is shown once with the model, what failed and the next step.',
   'Decision Model Only': 'Use the set decision model; when it fails, stop the operation and report the model, what failed and the next step. With none set, work still continues without one.',
   'No Decision Model': 'Make no decision-model requests. Ordinary chat and tools remain available with the chosen execution permissions.',
-  'ask-me': 'With a working decision model, ordinary work runs automatically and dangerous actions and owner-only decisions ask you; without one, every action that is not a plain read asks you.',
+  'ask-me': 'With a working decision model, ordinary work runs automatically and dangerous actions and owner-only decisions ask you; without one, every action asks you except a read inside the workspace and a change to files inside it that can be undone.',
   'jev-decides': 'A decision model decides every action the permission rules do not settle, critical ones included; owner-only decisions ask you. With no working decision model it behaves as ask-me.',
   'just-vibes': 'Does as much as it can without interrupting you; anything that needs you is held and listed at the end.',
   yolo: 'Run without general execution approval prompts. Authentication, workspace boundaries and spending rules still apply.',

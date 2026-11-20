@@ -287,8 +287,10 @@ streaming subscription over the same E2E channel rather than a unary call:
 - **Flow control.** The daemon reads the source with natural backpressure and
   holds a **bounded** per-stream send buffer. If a slow consumer makes it
   overflow, chunks are dropped and **counted**, and a `stream-overflow` frame
-  carries the dropped count, the client surfaces it as a visible
-  `relay-overflow` SSE event. Never a silent gap. Per-pipe stream count is
+  carries the dropped count; the client ends that stream's body with a typed
+  `StreamGapError` naming the count and tells the daemon to stop sending it.
+  Never a silent gap, and nothing is written into the body. A clean end of
+  the source first sends every chunk already queued. Per-pipe stream count is
   capped, consistent with the relay server's other limits.
 - **Clean close** is explicit in both directions (`stream-close`): the daemon
   closes when its source ends or errors; the client closes (unsubscribing the

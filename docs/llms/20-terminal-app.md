@@ -721,7 +721,7 @@ The default table of the terminal app:
 Before `yolo` it asks for confirmation (default No); declining skips to the mode after it.
 The change lasts for the session only. The saved default is changed in `/settings` (or `/config set permissions.mode <mode>`); `/permissions` shows it but does not change it.
 Plan mode is outside the cycle; `/plan` turns it on and off.
-The line `[Permissions] Mode for this session: just-vibes (the saved default is set in /settings; /permissions shows it)` confirms each change; when `yolo` was declined it begins `[Permissions] yolo skipped. Mode for this session: ask-me ...`.
+The line `[Permissions] Mode for this session: just-vibes (the saved default is set in /settings; /permissions shows it)` confirms each change; when `yolo` was declined it begins `[Permissions] yolo skipped. Mode for this session: ask-me ...`. When the mode chosen is not the one in force (`jev-decides` with no working decision model runs as `ask-me`), the line names the mode in force, as the status pill does, and why: `[Permissions] Mode for this session: ask-me (jev-decides chosen, but judgment.policy is No Decision Model, so Jev cannot decide and every call it would decide asks you) ...`.
 A managed lock on `permissions.mode` stops the change: `[Permissions] Mode stays <mode>: <reason>`.
 
 ### Changing a key
@@ -1507,9 +1507,10 @@ Each move prints a line naming both models, the position in the fallback order, 
 
 When prices are unknown the line says `[cost data unavailable]`. In the terminal app a second line names the billing class left and joined, for example `[Failover] billing: API key → Subscription: billing class changed`, and while the move is in force the header and footer name the model answering, with `failover from <selected model>`. In a headless run (`goodvibes run`, `goodvibes-agent run`) the move is one line on standard error, `[Failover] <from> -> <to>, <position>; <to> answers the rest of this turn.`, and the result's `model` and `provider` name the model that answered. Text the failed attempt had already streamed is withdrawn (`DRAFT_WITHDRAWN`) before the next model streams its answer. A companion chat (`companion.chat.*`) moves the same way: the reply's `metadata.failover` holds the moves (`from`, `to`, `because`), `answeredBy` and the `[Failover]` lines, and the `turn.completed` envelope carries the same `metadata`; when nothing is left to try, the `turn.error` text ends with the `[Failover] Stopped:` line. The selection itself never changes: the next turn starts on the selected model again.
 
-Set a fallback order (it applies from the next failure, in every program that reads the same settings):
+Set a fallback order (it applies from the next failure, in every program that reads the same settings). `/model fallback` ("Choose a backup model", in both programs) lists the models you can select and adds the one you pick to the end of the order; `/model fallback <model> [<model>...]` sets the whole order; `/model fallback clear` empties it. The same setting by key:
 
 ```text
+/model fallback anthropic:claude-sonnet-5 groq:llama-3.3-70b-versatile
 /config set provider.fallbackModels ["anthropic:claude-sonnet-5","groq:llama-3.3-70b-versatile"]
 ```
 
@@ -1926,13 +1927,13 @@ Every MCP call first passes the permission gate like any other tool call: the pe
 
 Besides that, they differ in the risk level `/mcp review` reports for the server: `constrained` is `low` (`medium` when either scope list is empty), `ask-on-risk` is `medium` (`high`), `allow-all` is `high` (`critical`), and `blocked` or a quarantined server is `critical`.
 
-There is no allow-list of tools. `allowedTools` does not limit a server to those tools: it only lets them past the path and host scope. To let the model use only some of a server's tools, deny each of the others:
+There is no allow-list of tools. `allowedTools` does not limit a server to those tools: it only lets them past the path and host scope. To let the model use only some of a server's tools, block each of the others:
 
 ```text
 /mcp tools github
-/mcp deny github delete_repository --keep
-/mcp deny github create_or_update_file --keep
-/mcp deny github push_files --keep
+/mcp block github delete_repository --keep
+/mcp block github create_or_update_file --keep
+/mcp block github push_files --keep
 ```
 
 The same rules written by hand in the server's entry:
@@ -1941,67 +1942,74 @@ The same rules written by hand in the server's entry:
 { "name": "github", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "trustMode": "ask-on-risk", "deniedTools": ["delete_repository", "create_or_update_file", "push_files"] }
 ```
 
-A tool the server adds later is allowed until it is denied. To refuse every tool of a server, set `trustMode` to `blocked`.
+A tool the server adds later is allowed until it is blocked. To refuse every tool of a server, set `trustMode` to `blocked`.
 
 ### Where each rule is kept
 
-- `/mcp trust` and `/mcp role` write `trustMode` or `role` into the file that holds the server's entry (`<project>/.goodvibes/mcp.json` or `~/.config/mcp/mcp.json`) and apply it at once; it holds after a restart: `Set the MCP trust mode of <server> to <mode>, kept in <scope> MCP config <path>: it applies now and after a restart.` A server that comes only from a read-only file gets the value for this session only, and the line says why: `Updated MCP trust mode for <server> to <mode> for this session only (<reason>): ...`. `/mcp trust <server> config` ends a value set for this session only. Settings → MCP keeps a trust mode the same way (`<server> trust mode is <mode>, kept in <scope> MCP config <path>: it applies now and after a restart.`). In the terminal app `/mcp add ... --trust allow-all --scope global` keeps `allow-all`; with `--scope project` it is written but ignored when the file is read. The Agent's `/mcp add` refuses `allow-all` (`Use /settings -> MCP to explicitly enable allow-all.`). `allow-all` cannot be given to `/mcp trust` in either program: in Settings → MCP, type `allow-all` on the server's row, then type exactly `ALLOW ALL <server>` to confirm; it is kept in `~/.config/mcp/mcp.json` (a server whose entry is in a project file keeps it for this session only, since a project file's `allow-all` is ignored).
-- `/mcp deny <server> <tool>` lasts for the session. With `--keep` it is written as `deniedTools` into the file that holds the server's entry (`<project>/.goodvibes/mcp.json` or `~/.config/mcp/mcp.json`).
-- `/mcp allow` writes `allowedTools` into `~/.config/mcp/mcp.json` only; for a project server it is refused.
-- A server that comes only from a read-only file (`.mcp/mcp.json`, `~/.mcp/mcp.json`, Claude Desktop's file) cannot keep per-tool rules: `Add <server> to your own MCP config (/mcp add with --scope global) to keep per-tool rules, or use /mcp deny for this session.`
+- `/mcp trust` and `/mcp role` write `trustMode` or `role` into the file that holds the server's entry (`<project>/.goodvibes/mcp.json` or `~/.config/mcp/mcp.json`) and apply it at once; it holds after a restart: `<server> is set to "<mode>". Kept in <scope> MCP config <path>; it applies now and after a restart.` A server that comes only from a read-only file gets the value for this session only, and the line says why: `It is set for this session only (<reason>).` `/mcp restore-trust <server>` and `/mcp restore-role <server>` end a value set for this session only. Both programs take `allow-all` and `ask-on-risk` from `/mcp trust` and `/mcp add --trust`; each loosens a protection, so the line asks first and a model's line is refused. Settings → MCP keeps a trust mode the same way (`<server> trust mode is <mode>, kept in <scope> MCP config <path>: it applies now and after a restart.`). `allow-all` is read only from `~/.config/mcp/mcp.json`: written to a project file it is ignored when the file is read.
+- `/mcp block <server> <tool>` lasts for the session. With `--keep` it is written as `deniedTools` into the file that holds the server's entry (`<project>/.goodvibes/mcp.json` or `~/.config/mcp/mcp.json`). `/mcp unblock` removes the block, this session's and the kept one.
+- `/mcp exempt` writes `allowedTools` into `~/.config/mcp/mcp.json` only; for a project server it is refused. `/mcp unexempt` removes it.
+- A server that comes only from a read-only file (`.mcp/mcp.json`, `~/.mcp/mcp.json`, Claude Desktop's file) cannot keep per-tool rules: `Add <server> to your own MCP config (/mcp add with --scope global) to keep per-tool rules, or use /mcp block for this session.`
 - A rule written while a server runs applies at once.
 - `deniedTools`, `trustMode` `blocked`, the path and host scope and quarantine are enforced by the MCP registry itself, so they apply in every permission mode, `yolo` included.
 
 ### `/mcp`
 
-| Form | Effect |
-| --- | --- |
-| `/mcp` | Open the MCP workspace. |
-| `/mcp servers` | Each server's phase (`starting`, `negotiating`, `ready`, `restart-wait`, `gave-up`, `closed`), last error, reconnect attempts, and per-tool rules. |
-| `/mcp tools [<server>]` | Tools of all servers or one. |
-| `/mcp config` | The config files in use. |
-| `/mcp add <name> <command\|https-url> [args...] [--scope project\|global] [--role <role>] [--trust constrained\|ask-on-risk\|allow-all\|blocked] [--env KEY=VALUE] [--header Name=Value] [--path <path>] [--host <host>] [-- <server args...>]` | Add a server to the file and reload without restarting (see "Adding a server with `/mcp add`"). |
-| `/mcp remove <server> [--scope project\|global]` | Remove a server. |
-| `/mcp reload` | Reconnect every server. |
-| `/mcp review`, `/mcp auth-review` | Trust, quarantine and auth posture. |
-| `/mcp repair [server]` | Suggested repairs. |
-| `/mcp trust <server> <constrained\|ask-on-risk\|blocked\|config>` | Set a server's trust mode, kept in its MCP config (`config` ends a value set for this session only). |
-| `/mcp role <server> <general\|docs\|filesystem\|git\|database\|browser\|automation\|ops\|remote\|config>` | Set a server's role label, kept in its MCP config. |
-| `/mcp deny <server> <tool> [--keep]` | Refuse one tool for this session; `--keep` stores the denial in the server's entry as `deniedTools`. |
-| `/mcp allow <server> <tool>` | Let one tool past the server's path and host scope; stored as `allowedTools` in the global file; asks once; refused when the model runs it. |
-| `/mcp clear <server> <tool>` | Remove the tool's session denial and stored rule; asks once. |
-| `/mcp quarantine <server> [detail]`, `/mcp quarantine <server> approve [operatorId]` | Quarantine a server, or approve it again. |
+`/mcp` alone opens a short list: "See your servers" (with how many are connected beside it), "Add a server…", "Choose what a server may do…" and "Check a server that isn't working…"; the last two open short lists of their actions. An action with blanks opens a form a step at a time ("Add a server · step 1 of 2": how it starts, the command or address, and its name, suggested from the command; step 2, what it may do): Enter goes on, tab moves between blanks, left and right change a choice, a blank chosen from a list (your servers, the tools a server offers right now, the tools you blocked) opens that list, Esc goes back a step. Under the form, "This will run:" shows the line it will run as you type. Then one sentence says what is about to happen, and after it runs the app prints what happened, how to undo it and "The command for this is: <line>". A typed line that leaves a blank out opens the same form with what it gave filled in; a complete line runs at once (asking first when the action is marked). From a model, or where no list can be shown, a line with a blank missing is refused with the blank's name and its current choices, and `/mcp` alone shows the servers. `/help mcp` lists every action with its sentence and its line; completion after `/mcp ` offers the actions, then the blank being typed (`/mcp block ` lists servers, `/mcp block github ` that server's tools), then options after `--`. The same actions, names and sentences are in both programs.
+
+| Action | Line | Risk |
+| --- | --- | --- |
+| See your servers | `/mcp servers` (each server's connection, trust level, role and per-tool rules) | |
+| See a server's tools | `/mcp tools [<server>]` | |
+| Block a tool | `/mcp block <server> <tool> [--keep]` (this session only; `--keep`: until you unblock it, as `deniedTools`) | |
+| Stop blocking a tool | `/mcp unblock <server> <tool>` (picks from the tools blocked) | loosens a protection |
+| Let a tool go beyond its server's limits | `/mcp exempt <server> <tool>` (`allowedTools` in the global file) | loosens a protection |
+| Make a tool follow its server's limits again | `/mcp unexempt <server> <tool>` | |
+| Add a server | `/mcp add <name> [--url <https address>] [--scope project\|global] [--trust <mode>] [--role <role>] [--path <dir>]... [--host <host>]... [--env NAME=VALUE]... [--header Name=Value]... [-- <command and its arguments>...]`, for example `/mcp add weather -- npx -y @acme/weather-mcp` (see "Adding a server with `/mcp add`") | `allow-all` and `ask-on-risk` loosen a protection |
+| Remove a server | `/mcp remove <server> [--scope project\|global]` | cannot be undone |
+| Reconnect every server from its config | `/mcp reload` | |
+| Set a server's trust level | `/mcp trust <server> <constrained\|ask-on-risk\|blocked\|allow-all>` | `ask-on-risk` and `allow-all` loosen a protection |
+| Go back to the saved trust level | `/mcp restore-trust <server>` | loosens a protection |
+| Set a server's role | `/mcp role <server> <general\|docs\|filesystem\|git\|database\|browser\|automation\|ops\|remote>` | |
+| Go back to the saved role | `/mcp restore-role <server>` | |
+| Hold back a server's tools for review | `/mcp quarantine <server> [<why>]` (this session only) | |
+| Accept a server's changed tools | `/mcp accept-tools <server>` | loosens a protection |
+| See which servers need attention | `/mcp review` (`✓ Every MCP server is working.`, or one `✕` line per server with `Fix: /mcp repair <server>` under it) | |
+| See how to fix a server | `/mcp repair [<server>]` | |
+| See where servers are configured | `/mcp files` | |
+| Open the MCP screen | `/mcp open` | |
+
+An action marked "loosens a protection" only counts when you type it or choose it: a model's line is refused before anything is asked. Old spellings (`deny`, `allow`, `clear`, `config`, `auth-review`, `trust <server> config`, `quarantine <server> approve`) are not accepted; the refusal lists the actions.
 
 ### Adding a server with `/mcp add`
 
-`/mcp add <name> <command-or-https-url> [words...]` writes the server to `<project>/.goodvibes/mcp.json` (`--scope project`, the default) or `~/.config/mcp/mcp.json` (`--scope global`) and reloads.
-Words after the target that are not GoodVibes options become the server's `args`. To pass words that look like GoodVibes options (`--path`, `--host`, `--env`, `--scope`) to the server, put `--` first: every word after `--` goes to the server unchanged.
+`/mcp add <name> -- <command> [words...]` (or `/mcp add <name> --url <https address>`) writes the server to `<project>/.goodvibes/mcp.json` (`--scope project`, the default) or `~/.config/mcp/mcp.json` (`--scope global`) and reloads.
+The words after `--` are the command and its own `args`, passed unchanged, including words that look like GoodVibes options (`--path`, `--host`, `--env`, `--scope`). Words after the name that are not GoodVibes options and come before any `--` are read the same way.
 
 ```text
-/mcp add data /usr/local/bin/my-mcp-server --scope global -- --path /srv/data --verbose
+/mcp add data --scope global -- /usr/local/bin/my-mcp-server --path /srv/data --verbose
 ```
 
-The entry gets `"args": ["--path", "/srv/data", "--verbose"]`; without `--`, `--path /srv/data` would set the server's `allowedPaths` instead.
+The entry gets `"command": "/usr/local/bin/my-mcp-server"` and `"args": ["--path", "/srv/data", "--verbose"]`; before `--`, `--path /srv/data` would set the server's `allowedPaths` instead.
 
 Refusals (nothing is written):
 
 | Input | Message |
 | --- | --- |
-| A url server with launch words or `--env` | `A url MCP server takes no launch arguments or --env; send credentials with --header Name=Value.` |
-| A command server with `--header` | `--header is sent only to a url (HTTP) MCP server; this server has a command. Use --env for a command server.` |
-| `--env` without `=` | `MCP env entries must use KEY=VALUE.` |
-| `--header` without `=` | `MCP headers must use Name=Value, for example --header "Authorization=Bearer <token>".` |
-| An unknown `--role`, `--scope` or `--trust` value | `Invalid MCP role "<value>". Expected one of ...` (or scope, or trust mode) |
-| `--trust allow-all` in the Agent | `Use /settings -> MCP to explicitly enable allow-all.` |
+| A server at a web address with `--env` | `A server at a web address takes no environment; send credentials as a header.` |
+| A command server with `--header` | `Headers are sent only to a server at a web address; a command takes environment entries.` |
+| `--env` or `--header` without `=` | `Environment entries are NAME=VALUE; "<entry>=" was not.` (or `Header entries ...`) |
+| An unknown `--role`, `--scope` or `--trust` value | `Role: "<value>" is not one of general, docs, ...` (or `Kept for`, or `Trust`) |
+| `--trust allow-all` or `ask-on-risk` | Asks first (it loosens a protection); refused when a model runs it. |
 
 `--env` values are written into the file as given; the file is the server's own configuration, so keep it private.
 
 Worked example:
 
 ```text
-/mcp add github npx -y @modelcontextprotocol/server-github --env GITHUB_PERSONAL_ACCESS_TOKEN=<your-token> --scope global
+/mcp add github --env GITHUB_PERSONAL_ACCESS_TOKEN=<your-token> --scope global -- npx -y @modelcontextprotocol/server-github
 /mcp tools github
-/mcp deny github delete_repository --keep
+/mcp block github delete_repository --keep
 ```
 
 A server that fails to connect is retried after 1, 2, 4, 8 and 16 seconds while `runtime.mcpLifecycle` is on (the default); after five failures it stays disconnected until `/mcp reload`.
@@ -2572,13 +2580,13 @@ For each tool call the gate decides first, so `PERMISSION_REQUESTED` and `PERMIS
 | `contract-failed` | 1 | Delegated work (a contract) ended without passing; `error` says why. |
 | `awaiting-owner` | 1 | Delegated work stopped for an owner decision; open the session interactively and answer it. |
 | `agent-failed` | 1 | A helper agent started outside a contract ended without a completed report. |
-| (`preflight_failed`, `context_overflow`) | 3 | Never reported by a headless run. When the turn fails its preflight check or its context does not fit, the run sees no completion, error or cancellation event and reports `turn-unsettled` (exit `3`) instead. |
+| `preflight_failed`, `context_overflow` | 1 | The turn was refused before it started, so nothing ran; `error` says why. `preflight_failed`: an equivalent turn is already in flight. `context_overflow`: the conversation does not fit the model's context window; compact it or choose a model with a larger window. |
 | `provider_error` | 1 | The provider failed (after any sign-in move inside the provider, the retries, and every model of `provider.fallbackModels` not yet tried). |
 | `provider_exhausted` | 1 | Every backend of the selected `synthetic` model is exhausted (rate limits and cooldowns) and no model of `provider.fallbackModels` was left to try: `All providers for the selected synthetic model are exhausted`. |
 | `hook_denied` | 1 | A `Pre:llm:chat` hook refused the model request, which ends the turn. (A `Pre:tool:*` hook that refuses a tool call fails only that call; the turn goes on.) |
 | `tool_loop_circuit_breaker` | 1 | The turn was stopped by a turn limit or its budget before the request was complete: `Stopped: <the limit, or 'a turn limit was reached'>. The request is not complete.` |
 | `unexpected_error` | 1 | The turn failed in an unexpected way (the run's own error is in `error`), including a turn admitted through native intake that then failed in this process (`The turn failed in this process: <reason>`). |
-| `turn-unsettled` | 3 | The turn ended without a completion, error or cancellation event; this includes a failed preflight check and a context that does not fit. |
+| `turn-unsettled` | 3 | The turn ended without a completion, error, cancellation or refusal event. |
 | `session-open-elsewhere` | 1 | The session named by `--continue`, `--resume` or `--session` is open in another running copy. |
 | `invalid-input` | 2 | No prompt, or a prompt given with an `--intake-*` flag. |
 | `native-<kind>` | varies | An `--intake-*` run: `<kind>` is the kind of the host's record. `--intake-status` exits `0` whenever the host has a record. Otherwise `native-work` exits `0` when the work has an execution state, `native-blocked` and `native-refused` exit `1`, `native-cancelled` exits `130`, and any other kind (`native-captured`, `native-processing`, `native-turn` not run by this process) exits `3`. With no record kind the reason is `native-<status>`: `native-invalid` exits `2`, `native-unavailable` exits `1`, and `native-pending` (another intake action is already in progress), `native-recorded` (the host recorded the input without a result kind) and `native-detached` (no intake state came back at all) exit `3`. |
@@ -2645,9 +2653,9 @@ A session another running copy has open is refused before anything is sent: exit
 | Code | Meaning |
 | --- | --- |
 | `0` | Completed. |
-| `1` | Failed: model or provider error, empty response, delegated work failed, `--max-turns` reached, or the daemon was unavailable or refused the input. |
+| `1` | Failed: model or provider error, empty response, delegated work failed, `--max-turns` reached, a turn refused before it started (`preflight_failed`, `context_overflow`), or the daemon was unavailable or refused the input. |
 | `2` | Invalid input: a usage error, a missing prompt, or a prompt given with an `--intake-*` flag (`Recovery uses the original journal input; do not supply a replacement prompt.`). |
-| `3` | Outcome unknown: the turn ended without a final event (`turn-unsettled`, which includes a failed preflight check or a context that does not fit), or a native input may have taken effect on the daemon (run `goodvibes run --intake-status` before retrying). |
+| `3` | Outcome unknown: the turn ended without a final event (`turn-unsettled`), or a native input may have taken effect on the daemon (run `goodvibes run --intake-status` before retrying). |
 | `124` | `--timeout` reached. |
 | `130` | Cancelled (Ctrl-C, SIGTERM, or the saved input was cancelled). |
 

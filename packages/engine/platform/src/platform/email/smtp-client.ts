@@ -37,6 +37,20 @@ import { composePlainTextMessage } from './message-compose.js';
 // Public types
 // ---------------------------------------------------------------------------
 
+/**
+ * Sockets whose server already greeted (the 220 was read before STARTTLS).
+ * After the TLS handshake a server sends no second greeting (RFC 3207 §4.2):
+ * the client sends EHLO again at once. The STARTTLS connector marks the socket
+ * it hands over, so the one SMTP sequence below knows which start it has.
+ */
+const GREETED_SOCKETS = new WeakSet<object>();
+
+/** Mark a socket whose server greeting was already read (an upgraded STARTTLS socket). */
+export function markSmtpGreeted<T extends object>(socket: T): T {
+  GREETED_SOCKETS.add(socket);
+  return socket;
+}
+
 export interface SmtpClientOptions {
   readonly socket: Socket;
   readonly hostname: string;
@@ -468,9 +482,12 @@ export class SmtpClient {
     hostname: string,
     lifetime: DeliveryLifetime = {},
   ): Promise<{ capabilities: readonly string[] }> {
-    const greeting = await session.readResponse();
-    if (greeting.code !== 220) {
-      throw new SmtpReplyError('greeting', greeting.code, greeting.lines);
+    // An upgraded STARTTLS socket was greeted before the handshake; its server waits for EHLO now.
+    if (!GREETED_SOCKETS.has(this.options.socket)) {
+      const greeting = await session.readResponse();
+      if (greeting.code !== 220) {
+        throw new SmtpReplyError('greeting', greeting.code, greeting.lines);
+      }
     }
     assertDeliveryCurrent(lifetime);
     const ehlo = await session.cmd(`EHLO ${hostname}`, 250, 'EHLO');

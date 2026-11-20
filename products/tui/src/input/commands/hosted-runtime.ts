@@ -33,6 +33,7 @@ import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-
 import {
   createDaemonVerbCaller,
   resolveDaemonEndpoint,
+  type DaemonEndpoint,
 } from '../../runtime/client/operator-endpoint.ts';
 import {
   createHostedSessionsClient,
@@ -118,10 +119,8 @@ export function readDetachOverride(args: readonly string[]): {
 
 interface HostedCommandSeams {
   readonly client: HostedSessionsClient;
-  readonly baseUrl: string | null;
-  readonly authToken: string | null;
-  /** Why the live stream cannot be opened, when it cannot. */
-  readonly streamUnavailable: string | null;
+  /** Where the live stream is opened and its bearer, or why it cannot be: resolved when the stream opens. */
+  readonly endpoint: () => Promise<DaemonEndpoint>;
 }
 
 /**
@@ -137,18 +136,9 @@ function resolveSeams(context: CommandContext): HostedCommandSeams | null {
   const configManager = context.platform.configManager;
   const homeDirectory = (): string => requireShellPaths(context).homeDirectory;
   const client = createHostedSessionsClient(createDaemonVerbCaller({ configManager, homeDirectory }));
-  let endpoint: ReturnType<typeof resolveDaemonEndpoint>;
-  try {
-    endpoint = resolveDaemonEndpoint({ configManager, homeDirectory });
-  } catch (error) {
-    // Shell paths that are not wired here; the verbs report the same on their own.
-    endpoint = { available: false, reason: describeOperatorRpcError(error) };
-  }
   // An endpoint that cannot be resolved is a stream that cannot be opened; the
   // verbs report their own refusal, so this is not a refusal of the command.
-  return endpoint.available
-    ? { client, baseUrl: endpoint.baseUrl, authToken: endpoint.token, streamUnavailable: null }
-    : { client, baseUrl: null, authToken: null, streamUnavailable: endpoint.reason };
+  return { client, endpoint: () => resolveDaemonEndpoint({ configManager, homeDirectory }) };
 }
 
 /**
@@ -183,13 +173,15 @@ async function openStream(
   // The feed owns the subscription handle: the exit path has to be able to
   // close it too, and it has no way to reach a variable in this module.
   feed.closeStream();
-  if (!seams.baseUrl || !seams.authToken) {
-    feed.setStreaming(false, `nothing can be watched live: ${seams.streamUnavailable ?? 'no daemon address or access token could be resolved'}`);
+  const endpoint = await seams.endpoint();
+  if (signal.aborted) return;
+  if (!endpoint.available) {
+    feed.setStreaming(false, `nothing can be watched live: ${endpoint.reason}`);
     return;
   }
-  const token = seams.authToken;
+  const token = endpoint.token;
   const subscription: HostedSessionSubscription | null = await watchHostedSession({
-    baseUrl: seams.baseUrl,
+    baseUrl: endpoint.baseUrl,
     sessionId,
     getAuthToken: () => token,
     signal,

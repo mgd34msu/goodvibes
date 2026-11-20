@@ -13,7 +13,7 @@ import { capturePrivateSqliteDirectory } from '../state/private-sqlite-path.js';
 import { openSqliteFile, type SqliteFile } from '../state/sqlite-file.js';
 import { fileObservationIdentity } from '../utils/file-observation.js';
 import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
-import { OwnedWork } from '../utils/owned-work.js';
+import { OwnedScope } from '../utils/owned-work.js';
 import { INBOX_SWEEP_INTERVAL_MS, isInboxRetentionPolicy, type InboxRetentionPolicy } from './cursor-store.js';
 import { isActiveInboxStore } from './active-stores.js';
 
@@ -116,7 +116,7 @@ export function createInactiveInboxRetentionOwner(input: InactiveInboxRetentionO
   const limit = options.maxFilesPerPass ?? 8, interval = options.intervalMs ?? INBOX_SWEEP_INTERVAL_MS;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 64 || !Number.isSafeInteger(interval) || interval < 1 || interval > 2_147_483_647) throw unavailable();
   const root = realpathSync(options.workingDirectory), workspace = rootStamp(root);
-  const work = new OwnedWork(); let closed = false, directory: Dir | undefined;
+  const work = new OwnedScope('inactive intake retention'); let closed = false, directory: Dir | undefined;
   let storage: ReturnType<typeof capturePrivateSqliteDirectory> | undefined;
   let sweeping: Promise<InactiveInboxSweep> | undefined, timer: ReturnType<typeof setTimeout> | undefined;
   const assertWorkspace = () => {
@@ -126,7 +126,7 @@ export function createInactiveInboxRetentionOwner(input: InactiveInboxRetentionO
   const current = () => { assertWorkspace(); storage?.assertCurrent(); };
   const sweep = (): Promise<InactiveInboxSweep> => {
     if (sweeping) return sweeping;
-    const pending = work.run(async () => {
+    const pending = work.run('retention sweep', async () => {
       current();
       const result = { examined: 0, expired: 0, capped: 0, busy: 0, unknownPolicy: 0, unavailable: 0, more: false };
       if (!storage) {

@@ -33,7 +33,7 @@ import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgm
 import { BudgetLedger, type BudgetLimits } from './budget.js';
 import { captureOwnedJson } from '../gate/judgment-input.js';
 import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperationOwnership } from './checkout-ownership.js';
-import { OwnedWork } from '../utils/owned-work.js';
+import { OwnedScope } from '../utils/owned-work.js';
 import { CheckoutRegistry, type CheckoutJournal } from './checkout-registry.js';
 import { CardMaterialRedactor } from './card-redaction.js';
 import type { CardFieldTarget } from './fill-card.js';
@@ -180,7 +180,7 @@ export interface CheckoutBeginOptions extends CheckoutOperationOwnership {
 export class PaymentsGatewayServiceImpl {
   private readonly registry: CheckoutRegistry;
   private readonly redactor: CardMaterialRedactor;
-  private readonly work = new OwnedWork();
+  private readonly work = new OwnedScope('payments gateway');
   private readonly abort = new AbortController();
   private closed = false;
   private closing: Promise<void> | undefined;
@@ -261,7 +261,7 @@ export class PaymentsGatewayServiceImpl {
     owner.assertCurrent?.();
     const taintEvidence = options.taintEvidence === undefined ? retainTaintEvidence(this.deps.untrusted)
       : captureOwnedJson(options.taintEvidence) as RetainedTaintEvidence;
-    return this.work.run(() => this.runBeginCheckout(input, owner, gates, purchaseId, taintEvidence, retainWindowCheckpoint, keepWindowOnStop, resumption, restoredDriver));
+    return this.work.run('run begin checkout', () => this.runBeginCheckout(input, owner, gates, purchaseId, taintEvidence, retainWindowCheckpoint, keepWindowOnStop, resumption, restoredDriver));
   }
 
   private async runBeginCheckout(input: BeginCheckoutInput, options: CheckoutOperationOwnership, gates: GateInput, purchaseId: string | undefined, taintEvidence: RetainedTaintEvidence,

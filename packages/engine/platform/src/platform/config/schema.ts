@@ -31,7 +31,7 @@ import { pricingConfigDefaults, pricingConfigSettings } from './schema-domain-pr
 import { paymentsConfigDefaults, paymentsConfigSettings } from './schema-domain-payments.js';
 import { daemonLocationConfigSettings } from './schema-domain-daemon-location.js';
 import { listConfigSettings } from './schema-domain-lists.js';
-import type { ConfigKey, ConfigSetting, GoodVibesConfig, SurfacesConfig } from './schema-types.js';
+import { defineSettingsDomain, type ConfigKey, type ConfigSetting, type GoodVibesConfig, type SurfacesConfig } from './schema-types.js';
 
 export * from './schema-types.js';
 
@@ -96,7 +96,7 @@ export const DEFAULT_CONFIG = {
   google: connectorConfigDefaults.google,
 } as GoodVibesConfig;
 
-export const CONFIG_SCHEMA: ConfigSetting[] = [
+export const CONFIG_SCHEMA: ConfigSetting[] = defineSettingsDomain(DEFAULT_CONFIG, [
   ...coreHeadConfigSettings,
   ...runtimePrimaryConfigSettings,
   ...conversationGateConfigSettings,
@@ -128,7 +128,7 @@ export const CONFIG_SCHEMA: ConfigSetting[] = [
   ...pricingConfigSettings,
   ...connectorConfigSettings,
   ...listConfigSettings,
-] as ConfigSetting[];
+] as unknown as readonly Omit<ConfigSetting, 'default'>[]);
 
 /** Set of all valid config keys for runtime validation. */
 export const CONFIG_KEYS = new Set<string>(CONFIG_SCHEMA.map((setting) => setting.key));

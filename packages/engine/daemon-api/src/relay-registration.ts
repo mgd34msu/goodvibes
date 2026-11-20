@@ -281,7 +281,10 @@ async function readTunnelBodyBounded(response: Response, maxBytes: number, signa
  * limit. When the buffer is full a chunk is DROPPED and counted, and the next
  * successful flush emits a `stream-overflow` notice carrying the dropped count,
  * an honest gap signal, never a silent one. Clean close is explicit in both
- * directions (`stream-close`).
+ * directions (`stream-close`). A clean close (`source-ended`) first sends every
+ * chunk already queued, and an overflow notice for any still uncounted, so the
+ * end of a source is never the loss of its last chunks; only a cancellation
+ * (`cancelPending`) discards the queue.
  */
 class DaemonStreamPump {
   private readonly queue: Uint8Array<ArrayBuffer>[] = [];
@@ -321,11 +324,11 @@ class DaemonStreamPump {
 
   private async flush(): Promise<void> {
     try {
-      while (this.queue.length > 0 && !this.closed) {
+      while (this.queue.length > 0 && !this.cancelPending) {
         const chunk = this.queue.shift()!;
         const frame = encodeTunnelFrame({ id: this.streamId, kind: 'stream-data', seq: this.seq++ }, chunk);
         await this.send(frame, () => !this.cancelPending);
-        if (this.dropped > 0 && !this.closed) {
+        if (this.dropped > 0 && !this.cancelPending) {
           const dropped = this.dropped;
           this.dropped = 0;
           const notice = encodeTunnelFrame({ id: this.streamId, kind: 'stream-overflow', dropped }, new Uint8Array(0));
@@ -343,12 +346,18 @@ class DaemonStreamPump {
     // A clean end retains its accepted in-flight frame; cancellation suppresses
     // it even when a clean close is already awaiting that same flush.
     this.cancelPending ||= cancelPending;
+    if (this.cancelPending) this.queue.length = 0;
     if (this.closing) return this.closing;
+    // No chunk is accepted after this; the ones already queued still go out on a clean close.
     this.closed = true;
-    this.queue.length = 0;
     this.closing = (async () => {
       try {
         await this.flushingDone;
+        if (this.dropped > 0 && !this.cancelPending) {
+          const dropped = this.dropped;
+          this.dropped = 0;
+          await this.send(encodeTunnelFrame({ id: this.streamId, kind: 'stream-overflow', dropped }, new Uint8Array(0)), () => !this.cancelPending);
+        }
         const frame = encodeTunnelFrame({ id: this.streamId, kind: 'stream-close', ...(reason ? { reason } : {}) }, new Uint8Array(0));
         await this.send(frame);
       } catch (error) {

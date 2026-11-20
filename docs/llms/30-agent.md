@@ -23,7 +23,7 @@ These work in the Agent exactly as described under the named heading of the term
 | Helper agents, archetypes, worktrees | "Helper agents and worktrees" |
 | Contracts and workstreams | "Contracts, workstreams and work plans" |
 | Durable memory records, classes, scopes, review states | "Memory and knowledge" |
-| MCP servers and `/mcp`, read from the same server files | "MCP servers" (the Agent's `/mcp add` refuses `--trust allow-all`) |
+| MCP servers and `/mcp`, read from the same server files | "MCP servers" (one description: the same actions, guided questions and lines in both programs) |
 | Plugin manifests, directories, trust tiers, capability bundles | "Plugins" (enabling differs; see "Plugins in the Agent") |
 | Headless frames, final frame fields, answering permission prompts, crash recovery in runs, exit codes | "Headless runs" |
 | System instruction files (`SYSTEM.md`, `GOODVIBES.md`, `AGENTS.md`, `provider.systemPromptFile`) | "Project instructions" |
@@ -75,9 +75,9 @@ The Agent picks its credential for the connected host in this order, taking the 
 1. the environment variable `GOODVIBES_CONNECTED_HOST_TOKEN`;
 2. the environment variable `GOODVIBES_DAEMON_TOKEN`;
 3. the Agent's own pairing with that host, created by `goodvibes-agent setup pair --apply` and kept per host address. A pairing whose reply was lost reports `The reply to this Agent's pairing request was lost. Run goodvibes-agent setup pair to repeat the same request; the host answers it with the credential it made, or makes it now.`;
-4. the daemon's token file, `<daemon home>/operator-tokens.json`. The daemon home is `~/.goodvibes/daemon/`, or the value of `GOODVIBES_DAEMON_HOME` when set; a relative value is resolved against the directory the Agent was started in (not `-C`). The file must be a JSON object whose top-level `token` is a non-empty string, as the daemon writes it (`{"token":"...","peerId":"...","createdAt":...}`; only `token` is read here).
+4. the daemon's token file, `<daemon home>/operator-tokens.json`, only when the host address is this machine (a loopback address, or an address of one of this machine's network interfaces); for a host elsewhere this step gives no token and says `This machine's daemon token is never sent to <address>, which is not this machine.` with the pairing step. The daemon home is `~/.goodvibes/daemon/`, or the value of `GOODVIBES_DAEMON_HOME` when set; a relative value is resolved against the directory the Agent was started in (not `-C`). The file must be a JSON object whose top-level `token` is a non-empty string, as the daemon writes it (`{"token":"...","peerId":"...","createdAt":...}`; only `token` is read here).
 
-Step 4 gives no token, and the Agent reports the token missing (`access token: missing (<path>)` in `status`, `Connected-host operator token is required.` from daemon-backed commands), when:
+Step 4 gives no token, and the Agent reports the token missing (`access token: missing (<path>)` in `status`, `Not connected to a GoodVibes host: there is no host token at <path>.` from daemon-backed commands), when:
 
 - the file does not exist at the resolved path (`status` prints the path it looked at; check it, especially for a relative `GOODVIBES_DAEMON_HOME`);
 - the file cannot be read by this user (for example mode `000`, or a daemon running as another user), or is not valid JSON;
@@ -91,11 +91,9 @@ Without a credential a daemon-backed command refuses and says how to get one; `r
 
 ```text
 $ goodvibes-agent run "hello"
-Connected-host operator token is required.
-  token path /home/me/.goodvibes/daemon/operator-tokens.json
-  Agent can create or repair the local canonical token only through the confirmed setup route:
-  agent_harness mode:"provision_connected_host_token" setupItemId:"connected-host-auth" confirm:true explicitUserRequest:"..."
-  Then rerun this command or inspect agent_harness mode:"connected_host_status".
+Not connected to a GoodVibes host: there is no host token at /home/me/.goodvibes/daemon/operator-tokens.json.
+  Start the host on this machine with goodvibes-daemon serve (it writes the token), or pair with a host: goodvibes-agent setup pair shows the plan and goodvibes-agent setup pair --apply pairs.
+  goodvibes-agent setup status shows the connection.
 ```
 
 The fix, in order:
@@ -294,7 +292,7 @@ On top of the files under "Project instructions", the Agent applies:
 | `/quit` | Aliases `/:q` and `/:wq` only. |
 | `/help` | Shows commands and keyboard shortcuts. |
 
-Some shared commands are hidden in the Agent (they run when typed but are left out of `/commands`): `/shortcuts`, `/keybindings`, `/effort`, `/config`, `/context`, `/next-error`, `/prev-error`, `/trust`, `/auth`, `/subscription`, `/security`, `/mcp`, `/approval`, `/tasks`, `/provider`, `/health`, `/accounts`, `/conversation`, `/qrcode`, `/setup`, `/tts`, `/services`, `/expand`, `/collapse`, `/bookmarks`, `/secrets`, `/image`, `/refresh-models`, `/pin`, `/unpin`, `/knowledge`, and the Agent-only `/bundle`, `/compat`, `/automation`, `/ci`, `/principals`, `/channel-profiles`, `/agent-profile`, `/vibe`, `/personas`, `/skills`, `/routines`, `/channels`, `/delegate`, `/media`.
+Some shared commands are not on the Agent's first screen (the bare `/` list and `/help`'s list leave them out; they are found as soon as their name is typed, run when typed, and `/commands` lists them): `/shortcuts`, `/keybindings`, `/effort`, `/config`, `/context`, `/next-error`, `/prev-error`, `/trust`, `/auth`, `/subscription`, `/security`, `/approval`, `/tasks`, `/provider`, `/health`, `/accounts`, `/conversation`, `/qrcode`, `/setup`, `/tts`, `/services`, `/expand`, `/collapse`, `/bookmarks`, `/secrets`, `/image`, `/refresh-models`, `/pin`, `/unpin`, `/knowledge`, and the Agent-only `/bundle`, `/compat`, `/automation`, `/ci`, `/principals`, `/channel-profiles`, `/agent-profile`, `/vibe`, `/personas`, `/skills`, `/routines`, `/channels`, `/delegate`, `/media`.
 
 Terminal-app slash commands the Agent does not have (an alias the Agent gives another command, such as `/channel` for `/channels`, `/onboarding` for `/setup` and `/memory`, is not listed): `/agents`, `/bootstrap`, `/branch`, `/bridge`, `/changes`, `/checkin`, `/checkpoint`, `/cluster`, `/cockpit`, `/codebase`, `/commit-all`, `/communication`, `/compact-history`, `/cost`, `/debug`, `/deeplink`, `/diff`, `/editor`, `/eval`, `/find`, `/forensics`, `/fork`, `/git`, `/graph`, `/guidance`, `/handoff`, `/helpers`, `/hooks`, `/host`, `/hosted`, `/imagine`, `/incident`, `/incident-review`, `/install`, `/keep`, `/local-auth`, `/login`, `/logout`, `/mail`, `/managed`, `/marketplace`, `/memory-review`, `/memory-sync`, `/merge`, `/note`, `/ops`, `/orchestration`, `/palette`, `/panel`, `/pastes`, `/plan`, `/policy`, `/power`, `/profile`, `/profiles`, `/profile-sync`, `/project-memory`, `/project-plan`, `/provider-opt`, `/queue`, `/recall`, `/relay`, `/release`, `/remote`, `/remote-env`, `/remote-setup`, `/replay`, `/resume`, `/review`, `/rewind`, `/runner-pool`, `/sandbox`, `/scan`, `/search`, `/secret`, `/session-memory`, `/settings-sync`, `/share`, `/storage`, `/team-memory`, `/teamwork`, `/teleport`, `/template`, `/test`, `/tool`, `/tools`, `/tunnel`, `/usage`, `/work-plan`, `/worktree`. Their nearest Agent equivalents: `/media` for `/imagine`, `/email` and `/google` for `/mail`, `/owner-profile` for `/profile`, `/memory` for `/recall`, `/network-scan` for `/scan`, `/workplan` for `/work-plan`, `/work` for `/project-plan`, `/sessions` for `/resume`, `goodvibes-agent relay` for `/relay`.
 

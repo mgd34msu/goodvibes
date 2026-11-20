@@ -47,7 +47,7 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
     name: 'auth',
     effect: 'mixed',
     description: 'Review provider auth posture and export redacted auth review bundles',
-    hidden: true,
+    firstScreen: false,
     usage: '[review|show <provider>|repair <provider>|bundle export <path>|bundle inspect <path>]',
     confirm: (args, ctx) => authBundleExportConfirmation(args, (path) => requireShellPaths(ctx).resolveWorkspacePath(path)),
     // Login and local-auth lines are refused here, but a password typed into one must still never reach the input history.

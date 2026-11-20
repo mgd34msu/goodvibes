@@ -17,7 +17,6 @@
  *   result, and a declined/omitted offer is reported as declined, never
  *   silently half-applied.
  */
-import { isAutomationCredential } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import type { MintedPairingToken, PairingTokenManager } from '../../pairing/pairing-token-store.js';
@@ -114,12 +113,12 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     const minted: MintedPairingToken = ((): MintedPairingToken => {
       try {
         const scopes = mintedPairingScopes(invocation.context, undefined);
-        // The owner's pairing flow: a device paired from the owner's own credential (the
-        // operator token, an admin sign-in, an app on his machine, a device he paired himself)
-        // with full authority is his device. From an automation or Agent credential, or
-        // narrowed, it is automation. Recorded at the mint and never changed afterwards.
-        const ownerPairing = scopes === undefined && invocation.context.admin === true
-          && invocation.context.credentialKind !== 'agent' && !isAutomationCredential(invocation.context);
+        // The owner's pairing flow: a device paired by the owner himself (his actor, not a
+        // model acting for him) with full authority is his device. From an admin who is not
+        // the owner, the Agent, or narrowed, it is automation. Recorded at the mint and never
+        // changed afterwards.
+        const actor = invocation.context.actor;
+        const ownerPairing = scopes === undefined && actor?.class === 'owner' && actor.agentFor === undefined;
         const input = { name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId),
           ...(scopes !== undefined ? { scopes } : {}), ...(ownerPairing ? { origin: 'owner-pairing' as const } : {}) };
         // A client moving off the shared token pairs ITSELF through this flow: it already

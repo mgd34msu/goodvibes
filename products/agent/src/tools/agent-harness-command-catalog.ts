@@ -4,6 +4,7 @@ import { describeCommandPolicy } from './agent-harness-metadata.ts';
 import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { describeCommandForModel } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 
 export interface AgentHarnessCommandCatalogArgs {
   readonly query?: unknown;
@@ -104,6 +105,8 @@ function describeCommand(command: CatalogCommand, lookup?: CommandDetailLookup):
       },
     } : {}),
     policy,
+    // A described command gives each action: its label, what it does in one sentence, the exact line, what it touches, and why only the owner may run it.
+    ...(command.described ? { actions: describeCommandForModel(command.described).actions } : {}),
   };
 }
 

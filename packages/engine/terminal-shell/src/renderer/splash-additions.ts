@@ -14,8 +14,8 @@
  * row and the composer, one blank row kept above the composer; a block that
  * does not fit is left out whole and the next one is tried.
  */
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
+import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { SurfaceCanvas } from './surface-kit.js';
 import { activeTokens } from './theme.js';
 import { drawSegments, wrapSegments, type StyledSegment } from './first-run.js';

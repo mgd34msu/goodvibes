@@ -2,7 +2,7 @@ import type { AgentWorkspaceLocalLibraryItem } from './local-library-items.js';
 import type { LearningCandidateDraft, LearningConsolidationDiff, LearningConsolidationPlan, LocalLearningCandidateDomain } from './learning-curator-types.js';
 import { isReviewed, localRegistryRoute, routeValue } from './learning-curator-common.js';
 import type { LearningRecord } from './learning-curator-source.js';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 
 function uniqueText(values: readonly string[]): readonly string[] {
   const seen = new Set<string>();

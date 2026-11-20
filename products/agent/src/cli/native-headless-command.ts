@@ -1,21 +1,21 @@
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
-import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { runHeadlessCommand, type HeadlessCommandRuntime } from '@goodvibes-jev/engine/terminal-shell/headless-command';
-import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell-paths';
+import { OwnedSelectionObservation } from '@goodvibes/engine/platform/platform/runtime/client/selection-observation';
+import { buildPersistedSessionContextFromFacts } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { runHeadlessCommand, type HeadlessCommandRuntime } from '@goodvibes/engine/terminal-shell/headless-command';
+import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
 import { bootstrapRuntime } from '../runtime/bootstrap.ts';
 import { executeNativeHeadless, runWithHeadlessTimeout, writeNativeHeadlessResult, type NativeHeadlessHost } from './native-headless.ts';
-import type { HeadlessRunFlags } from '@goodvibes-jev/engine/terminal-shell/headless-turn-events';
+import type { HeadlessRunFlags } from '@goodvibes/engine/terminal-shell/headless-turn-events';
 import { executeAdmittedHeadlessTurn, settleHeadlessTurn } from './native-headless-turn.ts';
-import type { NativeHeadlessMode } from '@goodvibes-jev/engine/terminal-shell/native-headless-options';
+import type { NativeHeadlessMode } from '@goodvibes/engine/terminal-shell/native-headless-options';
 
 import { createAgentNativeHostSelection } from '../runtime/agent-native-host-selection.ts';
 import { type SessionSnapshot } from '@/runtime/index.ts';
 import { conversationMessagesAsSessionRecords } from '../core/conversation-message-snapshot.ts';
-import { claimHeadlessSession, restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
-import { closeSessionHere, createSessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { claimHeadlessSession, restoreHeadlessSession } from '@goodvibes/engine/terminal-shell/startup-lifecycle';
+import { closeSessionHere, createSessionSurface } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { announceHeadlessRecovery, refusedHeadlessRun } from '@goodvibes-jev/engine/terminal-shell/headless-command';
-import { keepHeadlessSessionRecoverable } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
+import { announceHeadlessRecovery, refusedHeadlessRun } from '@goodvibes/engine/terminal-shell/headless-command';
+import { keepHeadlessSessionRecoverable } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
 
 /**
  * A run that could not start (for example `--resume` named a session that is not

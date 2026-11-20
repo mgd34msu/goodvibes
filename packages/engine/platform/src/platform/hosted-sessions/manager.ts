@@ -1,6 +1,6 @@
 import type { GatePresetName } from '../gate/presets.js';
 import { allowedRootFor, outsideAllowedRootsMessage } from './workspace-roots.js';
-import type { FailureReadOptions } from '@goodvibes-jev/engine/errors';
+import type { FailureReadOptions } from '@goodvibes/engine/errors';
 import { createHash } from 'node:crypto';
 import { captureNativeConversationContinuation, canonicalNativeConversationContinuation, createNativeContinuationSnapshotOwner, type NativeConversationContinuation } from '../workflow/work-ledger/native-continuation-context.js';
 import { isDeepStrictEqual } from 'node:util';

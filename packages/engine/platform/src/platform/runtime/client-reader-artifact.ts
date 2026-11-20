@@ -6,7 +6,7 @@ import { parseSemanticVersion } from './semantic-version.js';
 import { parseNativeReaderCapabilities, type NativeReaderCapabilities } from './native-reader-compatibility.js';
 import { nativeCohortMembers, nativeCohortProductOf, type NativeCohortMember } from './native-cohort-table.js';
 
-export type ClientReaderPackage = '@goodvibes-jev/tui' | '@goodvibes-jev/agent' | '@goodvibes-jev/daemon';
+export type ClientReaderPackage = '@goodvibes/tui' | '@goodvibes/agent' | '@goodvibes/daemon';
 export type ClientReaderTarget = 'linux-x64' | 'linux-arm64' | 'darwin-x64' | 'darwin-arm64';
 export interface ClientReaderArtifact {
   readonly schema: 1;
@@ -22,7 +22,7 @@ export interface ClientReaderArtifact {
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const exact = (value: Record<string, unknown>, keys: readonly string[]): boolean => Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 export function clientReaderAsset(packageName: ClientReaderPackage, target: ClientReaderTarget): string {
-  return `${packageName === '@goodvibes-jev/tui' ? 'goodvibes' : packageName === '@goodvibes-jev/agent' ? 'goodvibes-agent' : 'goodvibes-daemon'}-${target.replace(/^darwin-/, 'macos-')}`;
+  return `${packageName === '@goodvibes/tui' ? 'goodvibes' : packageName === '@goodvibes/agent' ? 'goodvibes-agent' : 'goodvibes-daemon'}-${target.replace(/^darwin-/, 'macos-')}`;
 }
 /** The reader-evidence members of one cohort (native-cohort-table.ts); evidence never chooses additional filesystem paths. */
 function readerMembers(packageName: ClientReaderPackage, target: ClientReaderTarget): readonly NativeCohortMember[] {
@@ -48,7 +48,7 @@ export function clientReaderMemberAsset(artifact: Pick<ClientReaderArtifact, 'pa
 }
 export function parseClientReaderArtifact(value: unknown): ClientReaderArtifact {
   if (!record(value) || !exact(value, ['schema', 'packageName', 'version', 'target', 'sourceCommit', 'sourceTree', 'headCommit', 'files', 'readers'])
-    || value.schema !== 1 || (value.packageName !== '@goodvibes-jev/tui' && value.packageName !== '@goodvibes-jev/agent' && value.packageName !== '@goodvibes-jev/daemon')
+    || value.schema !== 1 || (value.packageName !== '@goodvibes/tui' && value.packageName !== '@goodvibes/agent' && value.packageName !== '@goodvibes/daemon')
     || typeof value.version !== 'string' || !parseSemanticVersion(value.version)
     || (value.target !== 'linux-x64' && value.target !== 'linux-arm64' && value.target !== 'darwin-x64' && value.target !== 'darwin-arm64')
     || ![value.sourceCommit, value.sourceTree, value.headCommit].every(item => typeof item === 'string' && /^[a-f0-9]{40}$/.test(item))

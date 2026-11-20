@@ -9,8 +9,8 @@ import {
   type OnboardingStep1CapabilityItem,
   type OnboardingStepDerivationState,
 } from '../../runtime/onboarding/index.ts';
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import type { SetupTopicId } from '@goodvibes-jev/engine/terminal-shell/setup-command';
+import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import type { SetupTopicId } from '@goodvibes/engine/terminal-shell/setup-command';
 
 export type OnboardingWizardMode = OnboardingMode;
 

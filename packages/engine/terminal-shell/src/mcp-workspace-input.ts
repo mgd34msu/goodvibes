@@ -1,4 +1,4 @@
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 export interface McpWorkspaceControls {
   readonly active: boolean;
   mode: 'browse' | 'form' | 'delete-confirm' | 'reload-confirm';

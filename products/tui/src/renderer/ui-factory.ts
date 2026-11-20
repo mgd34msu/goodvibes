@@ -1,10 +1,10 @@
-import { createUiFactory, type ThinkingStallInfo } from '@goodvibes-jev/engine/terminal-shell/ui-factory';
+import { createUiFactory, type ThinkingStallInfo } from '@goodvibes/engine/terminal-shell/ui-factory';
 import { VERSION } from '../version.ts';
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
 import { renderHeaderLine } from './header-line.ts';
 import type { GitHeaderInfo } from './git-status.ts';
 import type { StreamMetrics } from '../core/stream-metrics.ts';
-export type { ThinkingStallInfo } from '@goodvibes-jev/engine/terminal-shell/ui-factory';
+export type { ThinkingStallInfo } from '@goodvibes/engine/terminal-shell/ui-factory';
 export class UIFactory extends createUiFactory({ secondaryQueue: false, previewEndInset: 0 }) {
 public static createHeader(width: number, model: string, title?: string, gitInfo?: GitHeaderInfo, version: string = VERSION, modelNote?: string): Line[] {
     return renderHeaderLine(width, model, title, gitInfo, version, modelNote);

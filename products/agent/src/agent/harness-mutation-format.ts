@@ -11,7 +11,7 @@
  *    nothing; the write takes that row with it, and this is where it says so.
  */
 import type { HarnessSettingMutationResult } from './harness-control.ts';
-import { configKeyFacts, displaySettingValue } from '@goodvibes-jev/engine/platform/platform/config';
+import { configKeyFacts, displaySettingValue } from '@goodvibes/engine/platform/platform/config';
 
 /** A credential key's value through the one display projection (`(secret)` or its reference); any other as written. */
 function shownValue(key: string, value: unknown): string {

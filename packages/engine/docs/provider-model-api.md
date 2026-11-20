@@ -288,7 +288,7 @@ The `previous` field is omitted when there is no meaningful prior selection (e.g
 These routes are described as the `models.*` operator methods in the method
 catalog, and their shapes come from there: the generated operator contract
 (`getOperatorMethod('models.list').outputSchema` and its siblings from
-`@goodvibes-jev/engine/contracts`) is the one statement of each response, and the
+`@goodvibes/engine/contracts`) is the one statement of each response, and the
 operator client validates responses against it.
 
 ---

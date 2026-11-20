@@ -1,16 +1,16 @@
-import { classicPersonalOpsReceiptStatus } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { classicPersonalOpsReceiptStatus } from '@goodvibes/engine/platform/platform/runtime';
 import type { CommandContext } from '../input/command-registry.ts';
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
-import { AgentResearchRunRegistry, researchRunStorePath, type AgentResearchRunRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-run-registry';
+import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import { redactSensitiveData } from '@goodvibes/engine/platform/platform/utils';
+import { AgentResearchRunRegistry, researchRunStorePath, type AgentResearchRunRecord } from '@goodvibes/engine/terminal-shell/agent-turn/research-run-registry';
 import { summarizeResearchRunItem } from '../input/agent-workspace-local-library-snapshot.ts';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
+import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
 import { researchCheckpointRoute, researchRouteString } from './agent-harness-research-catalog-source.ts';
 import type { UiAutomationSnapshot, UiTasksSnapshot, UiControlPlaneSnapshot } from '../runtime/ui-read-models.ts';
 import type { AutonomyQueueLiveRecord, AutonomyQueueRecordControl, AutonomyQueueRecordOutput, SnapshotReader } from './agent-harness-autonomy-queue-types.ts';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 export interface AutonomyLiveRecordBundle {
   readonly tasks: readonly AutonomyQueueLiveRecord[];
   readonly approvals: readonly AutonomyQueueLiveRecord[];

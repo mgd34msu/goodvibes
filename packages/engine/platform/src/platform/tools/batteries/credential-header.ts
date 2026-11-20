@@ -17,7 +17,7 @@
  * medium yes. Code drops every header the reading does not clear with an
  * acting no, including when no reading arrives in time.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 const named = (header: string) => ({ header });
 

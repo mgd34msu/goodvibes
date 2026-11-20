@@ -8,9 +8,9 @@
  * model's reading. A test that is about a specific answer overrides it.
  */
 import { afterEach, beforeEach } from 'bun:test';
-import type { EntryType, JudgmentPort, JudgmentRequest, Questions } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import type { EntryType, JudgmentPort, JudgmentRequest, Questions } from '@goodvibes/judgment';
+import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes/judgment/testing';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 
 /** A yes, a no, or a reading too unsure to act on. */
 export type FakeVerdict = boolean | 'unsure';

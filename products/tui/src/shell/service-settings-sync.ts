@@ -2,11 +2,11 @@ import {
   classifyServiceSettingChange,
   type ServiceSettingChange,
   type ServiceSettingResult,
-} from '@goodvibes-jev/engine/terminal-shell/service-setting-change';
+} from '@goodvibes/engine/terminal-shell/service-setting-change';
 import { mkdirSync } from 'node:fs';
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import type { ManagedServiceStatus } from '@goodvibes/engine/platform/platform/daemon';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { createPlatformServiceManager, getServiceStateRoot, type CliServiceRuntime } from '../cli/service-posture.ts';
 
 type ManagedServiceAction = 'install' | 'uninstall' | 'start' | 'stop' | 'restart' | 'status';

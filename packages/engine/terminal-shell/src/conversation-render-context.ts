@@ -6,15 +6,15 @@
  * SHAPE of a render without depending on each other. Every import here is
  * type-only, which is what makes this a leaf of the import graph.
  */
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
 import type { BlockMeta } from './work-tree-types.js';
 import type { WorkTreeSources } from './work-tree-sources.js';
 import type { TreeGlyphSetName } from './renderer/lane-graph-glyphs.js';
 import type { SplashOptions } from './splash-lines.js';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 // SystemMessageKind imported from runtime directly to avoid cycle:
 //   conversation-rendering.ts → system-message-router.ts → conversation.ts → conversation-rendering.ts
-import type { SystemMessageKind } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { SystemMessageKind } from '@goodvibes/engine/platform/platform/runtime/shell';
 export interface ConversationRenderContext {
     readonly beadContentCache?: import('./bead-content-cache.js').BeadContentCache | undefined;
     readonly history: {

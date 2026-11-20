@@ -19,7 +19,7 @@
  * operations are dropped by a rewrite (one temp file, one rename) when they
  * outnumber the open ones 4 to 1 and number at least 64.
  */
-import type { EffectOutcome } from '@goodvibes-jev/engine/errors';
+import type { EffectOutcome } from '@goodvibes/engine/errors';
 import { openRecordLog, type RecordLog } from './record-log.js';
 import { durableAfter, type Durable, type EffectKey, type OperationId } from './operation.js';
 import { logger } from '../utils/logger.js';

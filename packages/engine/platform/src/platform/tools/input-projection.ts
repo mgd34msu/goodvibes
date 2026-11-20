@@ -8,7 +8,7 @@ import type { ConfigManager, PreparedConfigMutation } from '../config/manager.js
 import type { ConfigWriteRoute } from '../config/daemon-config-route.js';
 import { assertPreparedConfigWriteRoute } from '../config/settings-precondition-client.js';
 import { assertRemoteSettingsImportPrecondition, type RemoteSettingsImportPrecondition } from '../config/settings-import-precondition-client.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 
 export type ToolInputProjectionProblem = 'held' | 'capacity' | 'unconfigured' | 'invalid' | 'unavailable' | 'stale' | 'cancelled' | 'released' | 'binding-changed';
 

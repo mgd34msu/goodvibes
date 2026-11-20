@@ -11,7 +11,7 @@
  * directory, under the project's own `.goodvibes/` control directory,
  * alongside the (separate) KV-state memory directory used by the state tool.
  */
-import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes/engine/platform/platform/config';
 
 export const MEMORY_PROJECTION_DIR_CONFIG_KEY = 'memory.projection.dir' as ConfigKey;
 

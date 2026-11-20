@@ -18,7 +18,7 @@
  * Band: low stakes. The result only filters a listing; installing an entry
  * still takes an explicit review and `/marketplace install`.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 import type { EcosystemCatalogEntry } from '../catalog.js';
 
 /** What the question sees of an entry: its words, never its source path, signature or version. */

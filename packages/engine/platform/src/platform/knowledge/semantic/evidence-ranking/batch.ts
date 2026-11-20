@@ -1,4 +1,4 @@
-import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { judgmentPort, JudgmentPortMissingError } from '@goodvibes/engine/errors';
 import { withAnswerVerificationBudget } from '../answer-verification/budget.js';
 import { KnowledgeAnswerQualityHeldError } from '../answer-verification/types.js';
 import { freezeSupport } from '../verification/projection.js';

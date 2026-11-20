@@ -9,7 +9,7 @@
  * long-lived command, arrives through one of these interfaces.
  */
 
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import type { TriggerProcessHost } from './process-triggers.js';
 import type { ProbeIo } from './probes.js';
 import { DEFAULT_RETENTION, type TriggerRetentionPolicy } from './store.js';

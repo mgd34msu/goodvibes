@@ -30,7 +30,7 @@ import {
   rowsFromOutput,
   withoutSecrets,
   type InputDescription,
-} from '@goodvibes-jev/engine/terminal-shell/command-actions/data';
+} from '@goodvibes/engine/terminal-shell/command-actions/data';
 import { COMMAND_ACTIONS } from '../../lib/generated/command-actions';
 import { asActionShape, asCommandShape, type ActionData, type CommandActionsData, type InputData } from '../../lib/command-actions-types';
 import { invokeMethod, invokeOwnerMethod } from '../../lib/goodvibes';

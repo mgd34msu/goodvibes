@@ -12,7 +12,7 @@ import {
   type FailureConclusions,
   type JudgmentReadingOptions,
   type JudgmentPortCapture,
-} from '@goodvibes-jev/engine/errors';
+} from '@goodvibes/engine/errors';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { AppError, ProviderError, type PlatformErrorCategory, type PlatformErrorSource, type ProviderErrorOptions } from '../types/errors.js';
 import type { StructuredDaemonErrorBody } from '../types/daemon-error-contract.js';

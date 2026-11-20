@@ -13,7 +13,7 @@
  * carries (a wrong one is a 400 on every request to that model until the
  * process restarts), so it takes the medium bands.
  */
-import { defineBattery, defineDispatch, oneOf, STAKES_BANDS, yesNo, type JsonValue } from '@goodvibes-jev/judgment/decisions';
+import { defineBattery, defineDispatch, oneOf, STAKES_BANDS, yesNo, type JsonValue } from '@goodvibes/judgment/decisions';
 
 const LOW = STAKES_BANDS.low;
 const MEDIUM = STAKES_BANDS.medium;

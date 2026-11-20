@@ -1,5 +1,5 @@
-import type { WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
-import type { OperatorNativeWorkExecutionClient, NativeWorkExecutionIdentity, NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import type { WorkLedgerReadSnapshot } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
+import type { OperatorNativeWorkExecutionClient, NativeWorkExecutionIdentity, NativeWorkExecutionSnapshot } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client';
 
 export type NativeWorkExecutionAction = 'start' | 'status' | 'cancel' | 'resume';
 export interface NativeWorkExecutionState {

@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { projectGeneratedFactRecordAdmission } from './generated-fact-record-references.js';
 import { captureKnowledgeSourceReferences, projectKnowledgeSourceReferences, projectKnowledgeNodeActivationMetadata, projectGeneratedKnowledgeNodeIdentity } from './source-structural-references.js';
 import { knowledgeRowGenerationFromRows, knowledgeRawRowForAdmission } from './store-row-revisions.js';

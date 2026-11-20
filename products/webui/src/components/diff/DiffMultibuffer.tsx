@@ -15,7 +15,7 @@
  * maxHunkLines with an honest "… N more" marker so a huge file never blows out the column.
  */
 import type { DiffFile, DiffHunk } from '../../lib/unified-diff';
-import { contentDigest } from '@goodvibes-jev/engine/platform/platform/utils/target-ref';
+import { contentDigest } from '@goodvibes/engine/platform/platform/utils/target-ref';
 import { Chip } from '../ui/Chip';
 import { StatusDot, type StatusTone } from '../ui/StatusDot';
 import '../../styles/components/diff-multibuffer.css';

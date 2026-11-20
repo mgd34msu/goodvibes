@@ -32,8 +32,8 @@
  * consolidate memory / do not restart the binary", the safe direction for both
  * consumers.
  */
-import type { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import type { TurnEvent } from '@goodvibes-jev/engine/platform/events';
+import type { RuntimeEventBus } from '@goodvibes/engine/platform/platform/runtime/state';
+import type { TurnEvent } from '@goodvibes/engine/platform/events';
 export interface HostedSessionRegistry {
   /** Start counting this session id as hosted here. Idempotent. */
   adopt(sessionId: string): void;

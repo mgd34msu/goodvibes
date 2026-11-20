@@ -1,9 +1,9 @@
 import { resolve } from 'node:path';
-import { optionArgsOf } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
-import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+import { optionArgsOf } from '@goodvibes/engine/terminal-shell/cli-parser-engine';
+import { commandJsonOrText as jsonOrText } from '@goodvibes/engine/terminal-shell/cli-output';
 import { createShellPathService } from '@/runtime/index.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { WorkspaceRegistrationError } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { WorkspaceRegistrationError } from '@goodvibes/engine/platform/platform/workspace';
 import {
   createWorkspaceRegistrationStore,
   normalizeWorkspaceRoot,

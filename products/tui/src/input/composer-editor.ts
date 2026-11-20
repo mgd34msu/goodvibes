@@ -25,7 +25,7 @@ import {
   type EditorSpawn,
   type EditorSpawnResult,
   type EditorTerminalDeps,
-} from '@goodvibes-jev/engine/terminal-shell';
+} from '@goodvibes/engine/terminal-shell';
 
 export {
   makeFileEditorOpener,
@@ -36,7 +36,7 @@ export {
   type EditorSpawnResult,
   type FileEditorOpener,
   type FileEditorOpenerDeps,
-} from '@goodvibes-jev/engine/terminal-shell';
+} from '@goodvibes/engine/terminal-shell';
 
 export interface ComposerEditorDeps {
   readonly readDraft: () => string;

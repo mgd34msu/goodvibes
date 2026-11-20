@@ -3,16 +3,16 @@ import type {
   CommonSettingEntryState,
   SettingsValueSource,
   SettingsModalChangeHandler,
-} from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
+} from '@goodvibes/engine/terminal-shell/settings-model-types';
 import type { AgentConfigSetting } from '../config/settings-catalog.ts';
 
 import type { FeatureSetting, FlagState } from '@/runtime/index.ts';
 
-export type { SettingsModalChange } from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
+export type { SettingsModalChange } from '@goodvibes/engine/terminal-shell/settings-model-types';
 
-export type { SettingsModalChangeResult } from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
+export type { SettingsModalChangeResult } from '@goodvibes/engine/terminal-shell/settings-model-types';
 
-export type { SettingsModalChangeHandler } from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
+export type { SettingsModalChangeHandler } from '@goodvibes/engine/terminal-shell/settings-model-types';
 
 export interface SettingsModalOpenOptions {
   readonly onSettingApplied?: SettingsModalChangeHandler;
@@ -24,7 +24,7 @@ export interface SettingsModalOpenOptions {
 
 export type SettingsCategory = CommonSettingsCategory | 'flags' | 'fleet' | 'cluster';
 
-export type { SettingsFocusRegion as SettingsFocusPane } from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
+export type { SettingsFocusRegion as SettingsFocusPane } from '@goodvibes/engine/terminal-shell/settings-model-types';
 
 /**
  * Config-key roots that have no category of their own, and the category each
@@ -166,6 +166,6 @@ export interface FlagEntry {
   enablementValue: string;
 }
 
-export type { McpEntry } from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
+export type { McpEntry } from '@goodvibes/engine/terminal-shell/settings-model-types';
 
-export type { SubscriptionEntry } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';
+export type { SubscriptionEntry } from '@goodvibes/engine/terminal-shell/settings-subscriptions';

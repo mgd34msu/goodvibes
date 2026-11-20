@@ -23,7 +23,7 @@ export type DaemonCiArtifact = DaemonCiArtifactBase & (
 );
 export interface DaemonInstallationReceipt {
   schema: 1;
-  packageName: '@goodvibes-jev/daemon';
+  packageName: '@goodvibes/daemon';
   version: string;
   artifact: DaemonCiArtifact;
   /** Evidence issued by the outgoing running program, bound to its entire
@@ -77,7 +77,7 @@ export function parseDaemonCiArtifact(value: unknown, target: DaemonNativeTarget
 }
 export function parseDaemonInstallationReceipt(value: unknown, target: DaemonNativeTarget): DaemonInstallationReceipt {
   if (!record(value) || !exact(value, Object.hasOwn(value, 'previousReader') ? ['schema', 'packageName', 'version', 'artifact', 'previousReader']
-    : ['schema', 'packageName', 'version', 'artifact']) || value.schema !== 1 || value.packageName !== '@goodvibes-jev/daemon'
+    : ['schema', 'packageName', 'version', 'artifact']) || value.schema !== 1 || value.packageName !== '@goodvibes/daemon'
     || typeof value.version !== 'string' || !parseSemanticVersion(value.version)) throw new Error('Native daemon installation receipt is invalid');
   const artifact = parseDaemonCiArtifact(value.artifact, target);
   if (artifact.schema === 2 && artifact.readers.version !== value.version) throw new Error('Native daemon reader version differs from its installed product');
@@ -91,7 +91,7 @@ export function parseDaemonInstallationReceipt(value: unknown, target: DaemonNat
     if (previousArtifact.schema !== 2 || previousArtifact.readers.version !== previous.version) throw new Error('Previous native reader evidence is invalid');
     previousReader = { version: previous.version, artifact: previousArtifact };
   }
-  return { schema: 1, packageName: '@goodvibes-jev/daemon', version: value.version, artifact,
+  return { schema: 1, packageName: '@goodvibes/daemon', version: value.version, artifact,
     ...(previousReader === undefined ? {} : { previousReader }) };
 }
 /** Both receipts must already belong to the retained native transaction. A

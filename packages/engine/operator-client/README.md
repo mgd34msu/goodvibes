@@ -1,11 +1,11 @@
-# @goodvibes-jev/engine/operator-client
+# @goodvibes/engine/operator-client
 
 Public GoodVibes operator package for the contract-driven operator and control-plane HTTP client.
 
-Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/platform/operator`. These modules are subpath exports of the engine package.
+Most applications should install `@goodvibes/engine` and import `@goodvibes/engine/platform/operator`. These modules are subpath exports of the engine package.
 
 ```ts
-import { createOperatorApiClient } from '@goodvibes-jev/engine/platform/operator';
+import { createOperatorApiClient } from '@goodvibes/engine/platform/operator';
 
 const operator = createOperatorApiClient({
   baseUrl: 'http://127.0.0.1:3421',
@@ -53,9 +53,9 @@ the client also implements `Symbol.dispose` / `Symbol.asyncDispose`.
 Advanced consumers can also build directly from a preconfigured transport and contract:
 
 ```ts
-import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
-import { createOperatorRemoteClient } from '@goodvibes-jev/engine/platform/operator';
-import { createHttpTransport } from '@goodvibes-jev/engine/platform/transport-http';
+import { getOperatorContract } from '@goodvibes/engine/platform/contracts';
+import { createOperatorRemoteClient } from '@goodvibes/engine/platform/operator';
+import { createHttpTransport } from '@goodvibes/engine/platform/transport-http';
 
 const transport = createHttpTransport({
   baseUrl: 'http://127.0.0.1:3421',
@@ -68,14 +68,14 @@ const status = await operator.control.status();
 
 ## See also
 
-- Main platform: [`@goodvibes-jev/engine/platform`](../platform/README.md)
+- Main platform: [`@goodvibes/engine/platform`](../platform/README.md)
 - [Getting Started](../docs/getting-started.md)
 
 
 ## Native work ledger reads
 
 `createOperatorWorkLedgerReadClient(operator, expectedProjectId, options?)`, from
-`@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client`, adapts
+`@goodvibes/engine/platform/platform/workflow/work-ledger/operator-read-client`, adapts
 an already selected, authenticated `OperatorRemoteClient` to the shared host
 read-client contract. It never discovers a database or selects another host.
 The runtime owns `dispose()`; a view owns only the cleanup returned by

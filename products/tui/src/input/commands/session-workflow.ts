@@ -1,6 +1,6 @@
-import { exportMessageFromRecord, formatTranscript, resolveSessionExportRequest, type TranscriptFormat } from '@goodvibes-jev/engine/terminal-shell/session-export-format';
-import { createSessionWorkflowCommands } from '@goodvibes-jev/engine/terminal-shell/session-workflow-commands';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { exportMessageFromRecord, formatTranscript, resolveSessionExportRequest, type TranscriptFormat } from '@goodvibes/engine/terminal-shell/session-export-format';
+import { createSessionWorkflowCommands } from '@goodvibes/engine/terminal-shell/session-workflow-commands';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -16,10 +16,10 @@ import {
 } from '@/runtime/index.ts';
 import { requireProviderApi, requireSessionManager, requireShellPaths, requireSurface } from './runtime-services.ts';
 import { resumeSessionCore } from '../../core/session-resume-core.ts';
-import { isSessionOpenElsewhere } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { isSessionOpenElsewhere } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { moveLiveSessionArtifacts } from '../../core/session-resume-core.ts';
-import { redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
+import { redactSensitiveDataAsync, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes/engine/platform/platform/rewind';
 import { saveWorkTreeFolds } from '../../core/work-tree-fold-store.ts';
 
 function copySessionSidecars(ctx: CommandContext, destination: string): void {

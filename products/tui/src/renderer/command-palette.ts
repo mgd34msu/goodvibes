@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/renderer/command-palette';
+export * from '@goodvibes/engine/terminal-shell/renderer/command-palette';

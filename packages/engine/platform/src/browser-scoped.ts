@@ -1,11 +1,11 @@
-import { createStreamTextAssembler, type FetchLike, type StreamTextAssembler } from '@goodvibes-jev/engine/transport-core';
-import { buildUrl } from '@goodvibes-jev/engine/transport-http';
-import { ConfigurationError, ContractError, RefusalError } from '@goodvibes-jev/engine/errors';
+import { createStreamTextAssembler, type FetchLike, type StreamTextAssembler } from '@goodvibes/engine/transport-core';
+import { buildUrl } from '@goodvibes/engine/transport-http';
+import { ConfigurationError, ContractError, RefusalError } from '@goodvibes/engine/errors';
 import type {
   OperatorMethodInput,
   OperatorMethodOutput,
   OperatorTypedMethodId,
-} from '@goodvibes-jev/engine/contracts/generated/foundation-client-types';
+} from '@goodvibes/engine/contracts/generated/foundation-client-types';
 import type {
   AuthTokenResolver,
   HttpRetryPolicy,

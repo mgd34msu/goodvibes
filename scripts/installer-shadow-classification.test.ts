@@ -21,7 +21,7 @@ function plan(path: string, command: string, globalPrefix = join(home, 'global')
     },
   });
 }
-for (const owner of ['@pellux/goodvibes-custom-tool', '@pellux/goodvibes-tui-helper', '@other/goodvibes-tui', '@goodvibes-jev/tui', '@goodvibes-jev/agent', '@goodvibes-jev/daemon', '@goodvibes-jev/engine']) {
+for (const owner of ['@pellux/goodvibes-custom-tool', '@pellux/goodvibes-tui-helper', '@other/goodvibes-tui', '@goodvibes/tui', '@goodvibes/agent', '@goodvibes/daemon', '@goodvibes/engine']) {
   test(`unknown or private package ${owner} is never removed by prefix/banner or standalone fallback`, () => {
     const copy = candidate(owner, 'goodvibes'), result = plan(copy.path, 'goodvibes'); expect(result.status, result.stderr).toBe(0);
     expect(result.stdout.trim()).toBe(''); expect(existsSync(join(root, 'probed'))).toBe(false);

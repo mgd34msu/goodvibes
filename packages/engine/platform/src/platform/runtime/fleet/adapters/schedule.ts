@@ -1,6 +1,6 @@
 import type { ScheduleEntry } from '../../../tools/workflow/index.js';
 import type { ProcessNode, ProcessState } from '../types.js';
-import { parseIntervalWords } from '@goodvibes-jev/engine/contracts';
+import { parseIntervalWords } from '@goodvibes/engine/contracts';
 
 /** Schedule node ids are namespaced: entries are keyed by user-chosen names. */
 export function scheduleNodeId(name: string): string {

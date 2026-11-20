@@ -1,4 +1,4 @@
-import { RETRYABLE_STATUS_CODES } from '@goodvibes-jev/engine/errors';
+import { RETRYABLE_STATUS_CODES } from '@goodvibes/engine/errors';
 import { computeBackoffDelay, normalizeBackoffPolicy, type BackoffPolicy, type ResolvedBackoffPolicy } from './backoff.js';
 
 export interface PerMethodRetryPolicy {

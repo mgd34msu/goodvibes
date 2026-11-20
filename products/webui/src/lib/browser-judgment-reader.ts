@@ -1,4 +1,4 @@
-import type { BrowserJudgmentBatteryId, BrowserJudgmentValueMap } from '@goodvibes-jev/engine/daemon-api';
+import type { BrowserJudgmentBatteryId, BrowserJudgmentValueMap } from '@goodvibes/engine/daemon-api';
 
 export type BrowserJudgmentReading<K extends BrowserJudgmentBatteryId> =
   | { readonly status: 'settled'; readonly value: BrowserJudgmentValueMap[K] }

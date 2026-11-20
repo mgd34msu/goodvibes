@@ -1,7 +1,7 @@
-import { fireSessionStart } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
-import { emitSessionStarted, emitSessionReady } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { NoticeLevel } from '@goodvibes-jev/engine/platform/platform/core';
+import { fireSessionStart } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
+import { emitSessionStarted, emitSessionReady } from '@goodvibes/engine/platform/platform/runtime/state';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { NoticeLevel } from '@goodvibes/engine/platform/platform/core';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { startMcpConfigAutoReload, type McpRuntimeReloadOptions } from './mcp-runtime-reload.js';
 

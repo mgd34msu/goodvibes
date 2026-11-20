@@ -19,8 +19,8 @@
  */
 
 import { homedir } from 'node:os';
-import { disclosedDateOf, type DisclosedDate } from '@goodvibes-jev/engine/platform/platform/security';
-import { getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+import { disclosedDateOf, type DisclosedDate } from '@goodvibes/engine/platform/platform/security';
+import { getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes/engine/platform/platform/security';
 import { homeRelativePath } from './home-path.js';
 import {
   narrowOccasionsGifts,

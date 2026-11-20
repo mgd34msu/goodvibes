@@ -6,7 +6,7 @@
  * The verdict is the per-job conclusions, never a rollup: every job and its
  * conclusion is listed, and continue-on-error jobs are shown as violations.
  */
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';

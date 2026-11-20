@@ -7,11 +7,11 @@ import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import {
   JudgmentError,
   type EntryType, type JudgmentPort, type JudgmentRetryProgress,
-} from '@goodvibes-jev/judgment';
+} from '@goodvibes/judgment';
 import {
   type JevContinuation, type JevDecision,
   type JevDecisionBinding, type JevDecisionContext, type JevVersionRef,
-} from '@goodvibes-jev/judgment/decisions';
+} from '@goodvibes/judgment/decisions';
 import { captureAutonomousCatalogContext, captureCurrentAutonomousCatalogContext, decideAutonomous } from '../gate/autonomous-decision.js';
 import { AUTONOMOUS_TOOL_ACTION, AUTONOMOUS_TOOL_INSTRUCTIONS } from '../gate/batteries/autonomous.js';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';

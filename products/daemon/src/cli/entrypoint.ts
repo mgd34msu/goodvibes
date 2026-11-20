@@ -4,7 +4,7 @@ import { NATIVE_STARTUP_REPAIR_MESSAGE } from './native-startup-repair.js';
 import { nativeStartupFailureLine, type NativeStartupStage } from './native-startup-failure.js';
 import { initializeOriginalDarwinDaemonInstallation } from '../config/original-darwin-installation.js';
 import { initializeDaemonNativeSqlite } from './native-sqlite-runtime.js';
-import { exemptLoopbackFromProxy } from '@goodvibes-jev/engine/transport-http/paths';
+import { exemptLoopbackFromProxy } from '@goodvibes/engine/transport-http/paths';
 
 // Requests to this machine never go through a proxy, from the first one on.
 exemptLoopbackFromProxy();
@@ -18,7 +18,7 @@ if (args[0] === '--internal-launchd-handover') {
   process.once('SIGTERM', abort);
   process.once('SIGINT', abort);
   try {
-    const { runLaunchdHandoverWorker } = await import('@goodvibes-jev/engine/platform/platform/daemon/launchd-handover');
+    const { runLaunchdHandoverWorker } = await import('@goodvibes/engine/platform/platform/daemon/launchd-handover');
     process.exitCode = process.platform === 'darwin'
       ? await runLaunchdHandoverWorker(args.slice(1), controller.signal) : 1;
   } catch { process.exitCode = 1; }

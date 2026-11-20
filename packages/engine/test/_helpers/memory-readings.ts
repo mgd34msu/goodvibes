@@ -13,9 +13,9 @@
  * reading pass their own function.
  */
 import { afterEach, beforeEach } from 'bun:test';
-import type { Question } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import type { Question } from '@goodvibes/judgment';
+import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes/judgment/testing';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 
 export interface RecordText {
   readonly class?: string;

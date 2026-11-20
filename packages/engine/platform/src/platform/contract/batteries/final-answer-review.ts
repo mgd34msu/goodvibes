@@ -1,4 +1,4 @@
-import { defineBattery, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, yesNo } from '@goodvibes/judgment';
 import type { ContractAcceptanceStakes } from '../config.js';
 import { UNIT_JUDGE_BANDS } from './unit-judge.js';
 

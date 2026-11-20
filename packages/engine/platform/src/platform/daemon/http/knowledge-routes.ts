@@ -1,1 +1,1 @@
-export { createDaemonKnowledgeRouteHandlers } from '@goodvibes-jev/engine/daemon-api';
+export { createDaemonKnowledgeRouteHandlers } from '@goodvibes/engine/daemon-api';

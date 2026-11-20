@@ -6,9 +6,9 @@
  * architecture line ceiling, and cohesive on its own: everything here answers
  * "when does this process stop, and what do we call the way it stopped".
  */
-import type { BackgroundProcess } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { BackgroundProcess } from '@goodvibes/engine/platform/platform/tools';
 import type { AgentHarnessBackgroundProcessArgs } from './agent-harness-background-processes-types.ts';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 export const DEFAULT_BACKGROUND_TIMEOUT_MS = 0;
 export const MAX_BACKGROUND_TIMEOUT_MS = 2_147_483_647;

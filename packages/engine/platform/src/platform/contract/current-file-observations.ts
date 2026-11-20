@@ -3,7 +3,7 @@ import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readSync, realpathSync, type BigIntStats } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import { summarizeError } from '../utils/error-display.js';
 import { ownedContractCheckpointText, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 

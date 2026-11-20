@@ -29,10 +29,10 @@
  * same carve-out `DaemonVerbCaller` records). The resolution here is the one
  * every other client seam in this repo uses: operator-endpoint.ts.
  */
-import { watchApprovalUpdates } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import type { ApprovalUpdateSubscriber } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { watchApprovalUpdates } from '@goodvibes/engine/platform/platform/runtime/client';
+import type { ApprovalUpdateSubscriber } from '@goodvibes/engine/platform/platform/runtime/client';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { resolveDaemonEndpoint } from './operator-endpoint.ts';
 
 export interface TerminalApprovalUpdateSubscriberOptions {

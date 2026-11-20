@@ -1,10 +1,10 @@
-import { TerminalSystemMessageRouter } from '@goodvibes-jev/engine/terminal-shell/system-message-router';
+import { TerminalSystemMessageRouter } from '@goodvibes/engine/terminal-shell/system-message-router';
 import {
   defaultSystemMessageTarget,
   type SystemMessageKind,
   type SystemMessageTarget,
-} from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { declaredNoticeLevel, type SystemMessageActivityFeed } from '@goodvibes-jev/engine/terminal-shell/system-message-router';
+} from '@goodvibes/engine/platform/platform/runtime/shell';
+import { declaredNoticeLevel, type SystemMessageActivityFeed } from '@goodvibes/engine/terminal-shell/system-message-router';
 import type { NoiseGateDeps } from './system-message-noise.ts';
 import type { ConversationManager } from './conversation.ts';
 import { publishNotice } from './notices.ts';
@@ -13,7 +13,7 @@ export type {
   SystemMessageKind,
   SystemMessageTarget,
   SystemMessagePriority,
-} from '@goodvibes-jev/engine/terminal-shell/system-message-router';
+} from '@goodvibes/engine/terminal-shell/system-message-router';
 
 /**
  * The panel is the Notifications history, as in the terminal app: a line whose

@@ -12,7 +12,7 @@
  * Read from the session's cached contract list (rebuilt on a contract event),
  * so a frame costs one walk of the open contracts' escalations and no copy.
  */
-import { openEscalation, type ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
+import { openEscalation, type ContractView } from '@goodvibes/engine/platform/platform/contract';
 
 export const DISMISS_CONTRACT_QUESTION_CHORD_LABEL = 'Alt+X';
 /** Characters of the question the line above the composer quotes; the transcript has it whole. */

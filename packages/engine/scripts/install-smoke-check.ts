@@ -218,8 +218,8 @@ let bashManifest;
 try { bashManifest = engineRequire.resolve('bash-language-server/package.json'); }
 catch { bashManifest = join(packageRoot, 'vendor/bash-language-server/package.json'); }
 const bashRequire = createRequire(bashManifest);
-if (bashRequire('@goodvibes-jev/bash-zod/package.json').version !== '4.6.6' ||
-    bashRequire('@goodvibes-jev/bash-web-tree-sitter/package.json').version !== '0.24.5') {
+if (bashRequire('@goodvibes/bash-zod/package.json').version !== '4.6.6' ||
+    bashRequire('@goodvibes/bash-web-tree-sitter/package.json').version !== '0.24.5') {
   throw new Error('packaged Bash dependency aliases resolved the wrong versions');
 }
 const discovered = await bashRequire('./out/util/fs.js').getFilePaths({
@@ -272,7 +272,7 @@ if (typeof Bun !== 'undefined') {
   if (unloadable.length > 0) throw new Error('installed subpaths that do not load:\\n' + unloadable.join('\\n'));
   console.log('all ' + codeSubpaths.length + ' code subpaths load through the package name');
 }
-const nestedInternalRoot = join(packageRoot, 'node_modules', '@goodvibes-jev');
+const nestedInternalRoot = join(packageRoot, 'node_modules', '@goodvibes');
 if (existsSync(nestedInternalRoot)) {
   const leaked = readdirSync(nestedInternalRoot);
   if (leaked.length > 0) {

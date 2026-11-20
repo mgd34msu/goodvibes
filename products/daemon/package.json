@@ -1,5 +1,5 @@
 {
-  "name": "@goodvibes-jev/daemon",
+  "name": "@goodvibes/daemon",
   "version": "3.3.1",
   "private": true,
   "type": "module",
@@ -37,10 +37,10 @@
     "native:package": "bun scripts/package-native.ts"
   },
   "dependencies": {
-    "@goodvibes-jev/engine": "workspace:*"
+    "@goodvibes/engine": "workspace:*"
   },
   "devDependencies": {
-    "@goodvibes-jev/judgment": "workspace:*",
+    "@goodvibes/judgment": "workspace:*",
     "undici": "7.30.1"
   },
   "bin": {

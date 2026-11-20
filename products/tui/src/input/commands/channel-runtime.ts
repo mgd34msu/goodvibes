@@ -5,7 +5,7 @@
  * and delivery snapshots, the integration overview and the routes view.
  * Pairing a channel is "Pair something" under /devices.
  */
-import { registerChannelsCommand } from '@goodvibes-jev/engine/terminal-shell/channels-command';
+import { registerChannelsCommand } from '@goodvibes/engine/terminal-shell/channels-command';
 import { openTelegramCursorRecovery } from './telegram-cursor.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireIntegrationHelpers } from './runtime-services.ts';

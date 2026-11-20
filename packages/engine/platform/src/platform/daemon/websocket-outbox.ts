@@ -2,7 +2,7 @@ import { constants, closeSync, lstatSync, mkdtempSync, openSync, readdirSync, re
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { logger } from '../utils/logger.js';
-import { encodeWebSocketMessage, sendWebSocketMessage } from '@goodvibes-jev/engine/transport-core';
+import { encodeWebSocketMessage, sendWebSocketMessage } from '@goodvibes/engine/transport-core';
 
 /** A client that stops reading must not grow the spill file without bound. */
 const DEFAULT_MAX_PENDING_BYTES = 64 * 1024 * 1024;

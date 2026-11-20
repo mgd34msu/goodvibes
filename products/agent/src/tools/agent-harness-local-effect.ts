@@ -1,10 +1,10 @@
 import { lstatSync, realpathSync } from 'node:fs';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import { resolveAndValidatePath } from '@goodvibes/engine/platform/platform/utils';
 import type { CommandContext } from '../input/command-registry.ts';
-import { harnessCatalogInvocationAuthority } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ingress';
+import { harnessCatalogInvocationAuthority } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ingress';
 
 /** Retain a concrete user-store target through model-owned synchronous writes. */
 export function captureHarnessLocalEffect(context: Pick<CommandContext, 'workspace'>, args: Record<string, unknown>,

@@ -2,12 +2,12 @@ export {
   handleEscapeOnlyModalToken,
   handleFilePickerToken,
   handleBlockActionsToken,
-} from '@goodvibes-jev/engine/terminal-shell/modal-input-routes';
-import { createModelPickerTokenHandler, closeModelPickerRoute } from '@goodvibes-jev/engine/terminal-shell/model-picker-token-route';
+} from '@goodvibes/engine/terminal-shell/modal-input-routes';
+import { createModelPickerTokenHandler, closeModelPickerRoute } from '@goodvibes/engine/terminal-shell/model-picker-token-route';
 import type { CommandContext } from './command-registry.ts';
 import type { ModelPickerModal } from './model-picker.ts';
 import { MODEL_PICKER_CHROME_LINES } from '../renderer/model-workspace.ts';
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { ProcessEntry } from '../renderer/process-modal.ts';
 import { isLocalFitRecommendation, isProviderSignInRow } from './model-picker-local-fit.ts';
 export const handleModelPickerToken = createModelPickerTokenHandler<CommandContext, ModelPickerModal>({

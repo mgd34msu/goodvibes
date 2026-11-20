@@ -1,5 +1,5 @@
-import { createSubmissionRouter } from '@goodvibes-jev/engine/terminal-shell/submission-router';
-export type { SubmissionRouterInput } from '@goodvibes-jev/engine/terminal-shell/submission-router';
+import { createSubmissionRouter } from '@goodvibes/engine/terminal-shell/submission-router';
+export type { SubmissionRouterInput } from '@goodvibes/engine/terminal-shell/submission-router';
 export const routeSubmissionIntent = createSubmissionRouter([
   {
     "commands": [

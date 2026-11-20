@@ -26,8 +26,8 @@ import { decisionReceipt } from '../contract/decision-records.js';
 import { resolve } from 'node:path';
 import { createOwnerReadEvidenceReader } from './owner-read-evidence.js';
 import { resolveSurfaceDirectory } from './surface-root.js';
-import { mapLimit } from '@goodvibes-jev/judgment';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { mapLimit } from '@goodvibes/judgment';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import type { ConfigManager } from '../config/manager.js';
 import { ContractStore } from '../contract/store.js';
 import { createContractRunner, type ContractRunner } from '../contract/runner.js';
@@ -60,7 +60,7 @@ export interface NativeContractCompositionOwner {
 }
 
 export interface ContractRunnerCompositionOptions {
-  readonly judgmentLog?: Pick<import('@goodvibes-jev/judgment').DecisionLog, 'get'> | undefined;
+  readonly judgmentLog?: Pick<import('@goodvibes/judgment').DecisionLog, 'get'> | undefined;
   /** Registered conversation surface, read for an owner session not loaded in this process. */
   readonly surfaceRoot?: string | undefined;
   /**

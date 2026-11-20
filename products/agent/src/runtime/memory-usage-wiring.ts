@@ -6,4 +6,4 @@
  * columns on the memory record, so every product reading the store sees the
  * same counts and consolidation's decay reads them from there.
  */
-export { injectedMemoryIds as extractInjectedMemoryIds } from '@goodvibes-jev/engine/terminal-shell/agent-turn/prompt-context-receipts';
+export { injectedMemoryIds as extractInjectedMemoryIds } from '@goodvibes/engine/terminal-shell/agent-turn/prompt-context-receipts';

@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/transcript-reading';
+export * from '@goodvibes/engine/terminal-shell/transcript-reading';

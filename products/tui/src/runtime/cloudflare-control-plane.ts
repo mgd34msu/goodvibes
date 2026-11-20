@@ -3,8 +3,8 @@
  * route client are shared with the Agent (terminal-shell); this file supplies
  * the daemon this terminal dials and the bearer it presents.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { createCloudflareRouteClient, type CloudflareDaemonClient } from '@goodvibes-jev/engine/terminal-shell/cloudflare-control-plane';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { createCloudflareRouteClient, type CloudflareDaemonClient } from '@goodvibes/engine/terminal-shell/cloudflare-control-plane';
 import { resolveDaemonBaseUrl, resolveDaemonEndpoint } from './client/operator-endpoint.ts';
 
 export {
@@ -34,7 +34,7 @@ export {
   type CloudflareValidateResult,
   type CloudflareVerifyRequest,
   type CloudflareVerifyResult,
-} from '@goodvibes-jev/engine/terminal-shell/cloudflare-control-plane';
+} from '@goodvibes/engine/terminal-shell/cloudflare-control-plane';
 
 export interface CloudflareDaemonClientOptions {
   readonly configManager: Pick<ConfigManager, 'get'>;

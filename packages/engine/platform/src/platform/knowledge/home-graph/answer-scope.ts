@@ -1,4 +1,4 @@
-import { toJson, type JsonValue } from '@goodvibes-jev/judgment';
+import { toJson, type JsonValue } from '@goodvibes/judgment';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';

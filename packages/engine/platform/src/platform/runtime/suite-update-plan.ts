@@ -44,9 +44,9 @@ export interface SuiteUpdatePlan {
   assertCurrent(): void;
 }
 const products: readonly { readonly name: SuiteProgram; readonly packageName: ClientReaderPackage }[] = [
-  { name: 'goodvibes-daemon', packageName: '@goodvibes-jev/daemon' },
-  { name: 'goodvibes', packageName: '@goodvibes-jev/tui' },
-  { name: 'goodvibes-agent', packageName: '@goodvibes-jev/agent' },
+  { name: 'goodvibes-daemon', packageName: '@goodvibes/daemon' },
+  { name: 'goodvibes', packageName: '@goodvibes/tui' },
+  { name: 'goodvibes-agent', packageName: '@goodvibes/agent' },
 ];
 
 export function resolveSuiteUpdatePlan(options: {

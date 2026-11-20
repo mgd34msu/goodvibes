@@ -1,4 +1,4 @@
-import { JudgmentContextLimitError, type CallOptions, type YesNoReading } from '@goodvibes-jev/judgment';
+import { JudgmentContextLimitError, type CallOptions, type YesNoReading } from '@goodvibes/judgment';
 import { PAGE_AUDIT_SLOTS, PAGE_AUDIT_SLOT_NAMES, verificationAudit, verificationInstructionAudit, verificationInstructionPageAudit, verificationPageAudit } from './batteries.js';
 import type { VerificationAccess } from './types.js';
 

@@ -1,4 +1,4 @@
-import { registerProviderCommand } from '@goodvibes-jev/engine/terminal-shell/provider-command';
+import { registerProviderCommand } from '@goodvibes/engine/terminal-shell/provider-command';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireProviderApi, requireSecretsManager, requireServiceRegistry, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
 import { ensureProviderKeyThenSelect } from '../provider-key-intake.ts';

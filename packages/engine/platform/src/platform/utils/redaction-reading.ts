@@ -1,5 +1,5 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
+import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { profileDistinctive } from './batteries/redaction.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';

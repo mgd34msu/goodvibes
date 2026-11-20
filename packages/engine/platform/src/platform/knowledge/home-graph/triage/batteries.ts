@@ -1,4 +1,4 @@
-import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 const state = (code: string, title: string, evidence: Record<string, string>) => {
   const { objectKind, description, ...identity } = evidence;

@@ -1,4 +1,4 @@
-import { JudgmentError } from '@goodvibes-jev/judgment';
+import { JudgmentError } from '@goodvibes/judgment';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 
 /**

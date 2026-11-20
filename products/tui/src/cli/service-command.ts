@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
+import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes/engine/terminal-shell';
 import {
   buildCliServicePosture,
   createPlatformServiceManager,

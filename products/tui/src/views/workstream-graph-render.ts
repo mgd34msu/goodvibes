@@ -10,8 +10,8 @@
 // no horizontal overflow), so the same output drives a view or a command.
 // ---------------------------------------------------------------------------
 
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
-import { truncateDisplay, getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import type { OperatorMethodOutput } from '@goodvibes/engine/platform';
+import { truncateDisplay, getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 
 export type WorkstreamGraphSnapshot = OperatorMethodOutput<'fleet.graph.get'>;
 export type WorkstreamGraphNode = WorkstreamGraphSnapshot['nodes'][number];

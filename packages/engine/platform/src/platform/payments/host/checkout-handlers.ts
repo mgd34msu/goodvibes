@@ -1,6 +1,6 @@
 import { readCheckoutReadingInput } from '../checkout-reading-input.js';
 import { PostalAddressHeldError } from '../../config/postal-address.js';
-import { mapLimit } from '@goodvibes-jev/judgment';
+import { mapLimit } from '@goodvibes/judgment';
 import { retainCheckoutInvocation, retainDetachedCheckout } from './checkout-invocation.js';
 import { PaymentCheckoutJournalUnavailableError } from './checkout-journal-store.js';
 import { PaymentPurchaseLedgerError } from './purchase-ledger.js';

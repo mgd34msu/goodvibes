@@ -1,5 +1,5 @@
-import { drainOwned, reuseObservedJudgmentResult } from '@goodvibes-jev/judgment/decisions';
-import type { JudgmentPort, JudgmentRequest, JudgmentResult, Questions } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned, reuseObservedJudgmentResult } from '@goodvibes/judgment/decisions';
+import type { JudgmentPort, JudgmentRequest, JudgmentResult, Questions } from '@goodvibes/judgment/decisions';
 import { JudgmentPortMissingError, judgmentPortInstallation } from './judgment-port.js';
 import { DecisionModelsDisabledError } from './decision-policy.js';
 

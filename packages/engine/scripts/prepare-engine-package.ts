@@ -44,7 +44,7 @@ const RUNTIME_ASSETS: readonly string[] = ['platform/browser/browser-host.mjs'];
  * dependency probe) had to keep its own byte-identical copy of the declaration
  * to typecheck at all. Copying it here makes the engine the one place the shape
  * is written; consumers reach it through the `./sql-js` export with a single
- * `/// <reference types="@goodvibes-jev/engine/platform/sql-js" />`.
+ * `/// <reference types="@goodvibes/engine/platform/sql-js" />`.
  *
  * Ambient declarations are global by nature, so this list stays deliberately
  * short: only declarations a consumer genuinely needs. The other files in

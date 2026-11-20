@@ -13,10 +13,10 @@
  * change). A change that cannot be made (a managed lock on the setting, a
  * host that refuses it) is a notice.
  */
-import { DECISION_MODEL_SET_KEYS, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { gatePresetLabel, nextPermissionMode, type PermissionModeValue } from '@goodvibes-jev/engine/platform/platform/gate/presets';
-import { describeModeInForceWords, type ModeInForceWords } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { onDecisionModelEpisode } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
+import { DECISION_MODEL_SET_KEYS, type ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { gatePresetLabel, nextPermissionMode, type PermissionModeValue } from '@goodvibes/engine/platform/platform/gate/presets';
+import { describeModeInForceWords, type ModeInForceWords } from '@goodvibes/engine/platform/platform/permissions';
+import { onDecisionModelEpisode } from '@goodvibes/engine/platform/platform/runtime/decision-policy';
 
 /** How long the mode segment flashes after a change. */
 export const MODE_FLASH_MS = 1500;

@@ -1,7 +1,7 @@
 import {
   TerminalHostPairingController,
   type HostPairingUi as PairingUi,
-} from '@goodvibes-jev/engine/terminal-shell/host-pairing-controller';
+} from '@goodvibes/engine/terminal-shell/host-pairing-controller';
 import { previewTuiHostPairing, type TuiHostPairingPreview, type TuiHostPairingOptions } from '../runtime/tui-host-pairing.ts';
 
 import { formatTuiHostPairing } from '../runtime/tui-host-pairing.ts';

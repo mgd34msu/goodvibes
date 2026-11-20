@@ -1,5 +1,5 @@
 /** Runtime-neutral native application error identity and metadata. No decision readers. */
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 
 export type PlatformErrorCategory =
   | 'authentication'

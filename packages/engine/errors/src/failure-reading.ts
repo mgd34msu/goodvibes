@@ -6,9 +6,9 @@ import {
   yesNo,
   type ChoiceReading,
   type YesNoReading,
-} from '@goodvibes-jev/judgment/decisions';
+} from '@goodvibes/judgment/decisions';
 import type { DaemonErrorCategory } from './daemon-error-contract.js';
-import type { CallOptions, JudgmentPort } from '@goodvibes-jev/judgment';
+import type { CallOptions, JudgmentPort } from '@goodvibes/judgment';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError } from './judgment-authority.js';
 import { decisionModelPolicyState, tryClassicDecisionFallback } from './decision-policy.js';
 
@@ -148,12 +148,12 @@ export const failureReading = defineBattery({
     },
     {
       name: 'package install cut off mid-download',
-      state: 'Message: Command failed: bun add --force --no-cache @goodvibes-jev/engine zod@^4\nerror: ConnectionRefused downloading package manifest zod',
+      state: 'Message: Command failed: bun add --force --no-cache @goodvibes/engine zod@^4\nerror: ConnectionRefused downloading package manifest zod',
       expect: { category: 'network', transient_network: 'yes', billing: 'no', context_exceeded: 'no' },
     },
     {
       name: 'package install of a missing package',
-      state: 'Message: Command failed: bun add --force --no-cache @goodvibes-jev/engine@2.0.23\nerror: GET https://registry.npmjs.org/@goodvibes-jev%2fengine - 404\nerror: package "@goodvibes-jev/engine" not found registry.npmjs.org/@goodvibes-jev/engine 404',
+      state: 'Message: Command failed: bun add --force --no-cache @goodvibes/engine@2.0.23\nerror: GET https://registry.npmjs.org/@goodvibes%2fengine - 404\nerror: package "@goodvibes/engine" not found registry.npmjs.org/@goodvibes/engine 404',
       expect: { category: 'not_found', transient_network: 'no', rate_limited: 'no' },
     },
     {

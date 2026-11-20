@@ -20,7 +20,7 @@ import {
   type ConversationMessageSnapshot,
   type TurnFailureAction,
   type TurnFailureReading,
-} from '@goodvibes-jev/engine/platform/platform/core';
+} from '@goodvibes/engine/platform/platform/core';
 import { registerTranscriptRowRenderer } from './transcript-row-renderers.js';
 import { renderTurnFailureRow } from './renderer/turn-failure-row.js';
 

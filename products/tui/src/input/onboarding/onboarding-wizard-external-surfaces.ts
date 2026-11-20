@@ -26,14 +26,14 @@ import {
   NTFY_TOPIC_SETTINGS,
   resolveGoodVibesNtfyTopics,
   type GoodVibesNtfyTopicConfig,
-} from '@goodvibes-jev/engine/platform/platform/integrations';
-import { getBuiltinSetupSchema } from '@goodvibes-jev/engine/platform/platform/channels';
+} from '@goodvibes/engine/platform/platform/integrations';
+import { getBuiltinSetupSchema } from '@goodvibes/engine/platform/platform/channels';
 import type {
   ChannelSetupFieldDescriptor,
   ChannelSetupFieldKind,
   ChannelSurface,
-} from '@goodvibes-jev/engine/platform/platform/channels';
-import { DEFAULT_CONFIG, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/platform/platform/channels';
+import { DEFAULT_CONFIG, type ConfigKey } from '@goodvibes/engine/platform/platform/config';
 import type { OnboardingSnapshotState } from '../../runtime/onboarding/index.ts';
 import { TELEGRAM_MODE_OPTIONS, WHATSAPP_PROVIDER_OPTIONS } from './onboarding-wizard-constants.ts';
 import type { ExternalSurfaceSetupFieldSpec, ExternalSurfaceSpec, OnboardingWizardRadioOption } from './onboarding-wizard-types.ts';

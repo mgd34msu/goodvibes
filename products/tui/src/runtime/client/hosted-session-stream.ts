@@ -24,12 +24,12 @@
  * resolves to null instead of throwing, and the caller says so honestly rather
  * than pretending the conversation ended.
  */
-import { RefusalError } from '@goodvibes-jev/engine/errors';
-import { openRawServerSentEventStream } from '@goodvibes-jev/engine/transport-http/sse-stream';
-import { buildUrl } from '@goodvibes-jev/engine/transport-http';
-import { createStreamTextAssembler } from '@goodvibes-jev/engine/transport-core';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { HostedSessionUpdatePayload } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import { RefusalError } from '@goodvibes/engine/errors';
+import { openRawServerSentEventStream } from '@goodvibes/engine/transport-http/sse-stream';
+import { buildUrl } from '@goodvibes/engine/transport-http';
+import { createStreamTextAssembler } from '@goodvibes/engine/transport-core';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { HostedSessionUpdatePayload } from '@goodvibes/engine/platform/platform/hosted-sessions';
 
 /** The domains a hosted session's whole story arrives on. */
 export const HOSTED_SESSION_STREAM_DOMAINS = ['turn', 'tools', 'session'] as const;

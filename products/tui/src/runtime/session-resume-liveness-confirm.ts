@@ -12,7 +12,7 @@
  * This process's own hold does not count; re-resuming the session already open
  * here is not a fork.
  */
-import { isSessionOpenElsewhere } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { isSessionOpenElsewhere } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { SessionSurface } from '@/runtime/index.ts';
 import type { SelectionItem, SelectionResult } from '../input/selection-modal.ts';
 import type { ConfirmOptions } from '../input/confirm-dialog.ts';

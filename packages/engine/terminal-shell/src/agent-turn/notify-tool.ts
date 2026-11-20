@@ -1,8 +1,8 @@
-import type { WebhookNotifierSendResult } from '@goodvibes-jev/engine/platform/platform/integrations';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { snapshotJudgmentInput, captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+import type { WebhookNotifierSendResult } from '@goodvibes/engine/platform/platform/integrations';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { snapshotJudgmentInput, captureStrictJudgmentJson } from '@goodvibes/engine/platform/platform/gate';
+import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes/engine/platform/platform/security';
 import { screenOutboundForCardMaterial, CardMaterialRefusedError } from './payments-channel-guard.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import { toolErrorText } from './tool-error-text.js';

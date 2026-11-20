@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import { chmodSync, closeSync, existsSync, openSync, readSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MutationPublication } from '../utils/file-mutation.js';

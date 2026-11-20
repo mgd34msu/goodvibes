@@ -145,7 +145,7 @@ export interface SurfaceAdapterContext {
    * as a result naming its reason; it never throws. Absent when the embedder wires no delivery.
    */
   readonly deliverSurfaceNotice?: ((binding: AutomationRouteBinding | undefined, text: string) => Promise<import('../daemon/types.js').SurfaceNoticeDelivery>) | undefined;
-  readonly parseSurfaceControlCommand: (text: string, options?: import('@goodvibes-jev/judgment/decisions').CallOptions) => SurfaceControlCommand | null | Promise<SurfaceControlCommand | null>;
+  readonly parseSurfaceControlCommand: (text: string, options?: import('@goodvibes/judgment/decisions').CallOptions) => SurfaceControlCommand | null | Promise<SurfaceControlCommand | null>;
   readonly performSurfaceControlCommand: (command: SurfaceControlCommand, origin?: SurfaceControlOrigin) => Promise<string>;
   readonly performInteractiveSurfaceAction: (
     actionId: string,

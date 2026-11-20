@@ -1,5 +1,5 @@
 import { types as nodeTypes } from 'node:util';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes/judgment/decisions';
 import { logger } from '../utils/logger.js';
 
 function warn(message: string): void {

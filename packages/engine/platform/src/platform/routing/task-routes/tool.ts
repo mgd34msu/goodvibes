@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /**
  * The `route` tool: the agent's route adapter, backed by the Jev task route
  * planner. The definition, the action aliases and the status output are the

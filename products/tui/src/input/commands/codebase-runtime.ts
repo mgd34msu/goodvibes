@@ -2,7 +2,7 @@
 // codebase-runtime.ts, /codebase
 //
 // Explicit-query + transparency surface over the repo source-tree code index
-// (CodeIndexStore, @goodvibes-jev/engine/platform/platform/state, landed on platform main
+// (CodeIndexStore, @goodvibes/engine/platform/platform/state, landed on platform main
 // with explicit-query build/status/search) via the TUI's own wiring in
 // src/runtime/code-index-services.ts, threaded through
 // CommandContext.session.codeIndexStore exactly like wrfcController/
@@ -19,13 +19,13 @@
 // auto-injection flag+setting gate, and the last reindex activity).
 // ---------------------------------------------------------------------------
 
-import type { CodeIndexStats, CodeContextResult, CodeIndexReindexActivity } from '@goodvibes-jev/engine/platform/platform/state';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { isCodeIndexAutoStartEnabled, CODE_INDEX_MAX_FILES, CODE_INDEX_MAX_FILE_BYTES, CODE_INDEX_MAX_TOTAL_BYTES } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { CodeIndexStats, CodeContextResult, CodeIndexReindexActivity } from '@goodvibes/engine/platform/platform/state';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { isCodeIndexAutoStartEnabled, CODE_INDEX_MAX_FILES, CODE_INDEX_MAX_FILE_BYTES, CODE_INDEX_MAX_TOTAL_BYTES } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 
 // ---------------------------------------------------------------------------
 // Formatting helpers

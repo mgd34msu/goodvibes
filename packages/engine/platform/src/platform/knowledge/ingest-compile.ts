@@ -5,7 +5,7 @@ import { createKnowledgeIngestUriCanonicalizer, type KnowledgeIngestUriCanonical
 import type { KnowledgeUriCanonicalizer } from './uri-canonicalization/reader.js';
 import { knowledgeSourceCrawledNow } from './store-record-representation.js';
 import { prepareKnowledgeSourceRecord, prepareKnowledgeExtractionRecord } from './store-evidence-writes.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes/judgment/decisions';
 import { snapshotNodeInput } from './activation/projection.js';
 import { knowledgeIngestGuard } from './ingest-preparation.js';
 import { stableText } from './store-schema.js';

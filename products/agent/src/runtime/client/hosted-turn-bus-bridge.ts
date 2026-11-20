@@ -37,8 +37,8 @@ import {
   emitTurnCompleted,
   emitTurnError,
   emitTurnSubmitted,
-} from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
-import { readTurnSettlement, type TurnSettlement } from '@goodvibes-jev/engine/transport-core/turn-settlement';
+} from '@goodvibes/engine/platform/platform/runtime/emitters';
+import { readTurnSettlement, type TurnSettlement } from '@goodvibes/engine/transport-core/turn-settlement';
 import type { HostedSessionFrame } from './hosted-frame-render.ts';
 
 /** The stop reasons `emitTurnError` accepts, read from its own signature. */

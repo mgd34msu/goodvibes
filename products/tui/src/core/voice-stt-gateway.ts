@@ -1,4 +1,4 @@
-import type { SpeechTranscriptionGateway, SpeechTranscriptionResolution } from '@goodvibes-jev/engine/terminal-shell/voice-stt-contract';
+import type { SpeechTranscriptionGateway, SpeechTranscriptionResolution } from '@goodvibes/engine/terminal-shell/voice-stt-contract';
 /**
  * voice-stt-gateway.ts, speech-to-text for captured audio.
  *
@@ -15,9 +15,9 @@ import type { SpeechTranscriptionGateway, SpeechTranscriptionResolution } from '
  * honest refusal reasons up front rather than a throw mid-capture.
  */
 
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { GoodVibesError } from '@goodvibes-jev/engine/platform';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { GoodVibesError } from '@goodvibes/engine/platform';
+import type { OperatorMethodOutput } from '@goodvibes/engine/platform';
 
 import { resolveOperatorRpc, describeOperatorRpcError } from '../input/commands/operator-rpc.ts';
 

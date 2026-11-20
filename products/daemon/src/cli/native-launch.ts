@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 import { lstatSync } from 'node:fs';
 import { join } from 'node:path';
-import { releaseAbandonedUpdateClaim, UPDATE_TRANSACTION_SUFFIXES } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { releaseAbandonedUpdateClaim, UPDATE_TRANSACTION_SUFFIXES } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { assertNativeInstallHost, inspectInstallation, targetPaths, validateOwner, type DaemonInstallOwner } from './native-installation.ts';
 
 export function assertNativeInstallationIdle(prefix: string): void {

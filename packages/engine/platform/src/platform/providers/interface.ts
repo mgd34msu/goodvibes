@@ -1,5 +1,5 @@
 import type { DecisionRoutingContext } from './decision-router-context.js';
-import type { DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import type { DecisionModelPolicyState } from '@goodvibes/engine/errors';
 import type { DecisionRouterRouteInfo } from './decision-router.js';
 import type { ToolDefinition, ToolCall } from '../types/tools.js';
 import type { ProviderCapability } from './capabilities.js';

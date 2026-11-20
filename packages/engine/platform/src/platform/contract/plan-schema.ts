@@ -6,7 +6,7 @@
  * never judged.
  */
 import { checkNativeSourcePlan } from './native-source.js';
-import { normalizeForMatch } from '@goodvibes-jev/judgment';
+import { normalizeForMatch } from '@goodvibes/judgment';
 import { GROUP_KINDS, UNIT_ROLES, type ContractPlanProblem } from '../../events/contract.js';
 import { PLANNER_DECOMPOSITION_TOOLS } from '../agents/planner-decomposition-runner.js';
 import { wouldCreateCycle, type GraphNode } from '../orchestration/graph-dynamics.js';

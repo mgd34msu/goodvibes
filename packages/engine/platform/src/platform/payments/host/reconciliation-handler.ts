@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { assertConfirmed, HandlerError, type TypedHandler } from './handler-plumbing.js';
 import { PurchaseReconciliationError, type PurchaseReconciliations } from './purchase-reconciliation.js';
 import { PaymentOperationStoreError } from './operation-store.js';
-import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
+import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
 
 /** An explicit observation of merchant history, with the same current paired
  * admin authority as answering a window. Classic policy may settle old funds;

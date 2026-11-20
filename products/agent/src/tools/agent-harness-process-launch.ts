@@ -1,5 +1,5 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import type { ProcessManager, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import type { ProcessManager, ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { AgentHarnessBackgroundProcessArgs } from './agent-harness-background-processes-types.ts';
 import { resolveProcessLifetime } from './agent-harness-process-timeout-policy.ts';

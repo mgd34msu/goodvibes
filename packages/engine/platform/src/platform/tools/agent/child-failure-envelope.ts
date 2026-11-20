@@ -8,7 +8,7 @@
 // envelope is assembled ENTIRELY from what the child's own record + transcript
 // actually hold; partialOutputs is whatever the child genuinely produced (its
 // last committed output and a transcript-tail summary), never fabricated.
-import { captureJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, judgmentPort } from '@goodvibes/engine/errors';
 import { assertProjectionCurrent } from '../input-projection.js';
 import { childFailureReason, childFailureView } from '../batteries/child-failure-reason.js';
 import type { AgentRecord } from './manager.js';

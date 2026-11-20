@@ -1,7 +1,7 @@
-import { findSessionCandidates } from '@goodvibes-jev/engine/platform/platform/sessions';
-import { exportToMarkdown, type ExportMessage, type ExportMetadata } from '@goodvibes-jev/engine/platform/platform/export';
-import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
+import { findSessionCandidates } from '@goodvibes/engine/platform/platform/sessions';
+import { exportToMarkdown, type ExportMessage, type ExportMetadata } from '@goodvibes/engine/platform/platform/export';
+import type { ContentPart } from '@goodvibes/engine/platform/platform/providers';
+import type { ToolCall } from '@goodvibes/engine/platform/platform/types';
 import { commandRefusal } from './command-confirmation.js';
 
 /** The two transcript forms every export command writes. */

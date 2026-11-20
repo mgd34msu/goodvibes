@@ -4,9 +4,9 @@
  * the readiness and problems this terminal tracks in its read model.
  */
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { CodeIntelligence } from '@goodvibes-jev/engine/platform/platform/intelligence';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { registerIntelligenceCommand, type IntelligenceHold } from '@goodvibes-jev/engine/terminal-shell/intelligence-command';
+import { CodeIntelligence } from '@goodvibes/engine/platform/platform/intelligence';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { registerIntelligenceCommand, type IntelligenceHold } from '@goodvibes/engine/terminal-shell/intelligence-command';
 import { requireReadModels, requireShellPaths } from './runtime-services.ts';
 
 export interface IntelligenceRuntimeOptions {

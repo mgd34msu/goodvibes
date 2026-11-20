@@ -10,14 +10,14 @@
  * where the window came from, with the platform's describeContextWindowSource
  * ('catalog: abacus', 'consensus of 4 providers', 'family default').
  */
-import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
 export interface ContextWindowCommandContext {
   readonly provider: { readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getKnownContextWindowForModel' | 'getModelContextCap' | 'getObservedContextWindow' | 'clearModelContextCap' | 'setModelContextCap'> };
   readonly print: (text: string) => void;
   readonly renderRequest: () => void;
 }
-import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
-import { MAX_CONTEXT_WINDOW_OVERRIDE, describeContextWindowSource } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ModelDefinition } from '@goodvibes/engine/platform/platform/providers';
+import { MAX_CONTEXT_WINDOW_OVERRIDE, describeContextWindowSource } from '@goodvibes/engine/platform/platform/providers';
 
 /**
  * Parse a user-supplied context window size. Accepts plain token counts

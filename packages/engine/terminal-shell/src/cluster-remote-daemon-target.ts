@@ -44,12 +44,12 @@
  * verbs mean. It resolves a target, makes a request, and returns the parsed
  * body. Every decision about what the answer MEANS belongs to the daemon.
  */
-import { parseDaemonOrigin, readConnectedDaemonOrigin, readControlPlaneBinding, type DaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { readOperatorTokenFile } from '@goodvibes-jev/engine/platform/platform/workspace/daemon-home';
-import { readConnectedDaemonToken, readDaemonSessionToken } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-credentials';
-import { classifyDaemonOrigin, proveDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target-resolver';
-import { bindCredential, daemonAuthHeaders, daemonTarget, CredentialOriginError } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
+import { parseDaemonOrigin, readConnectedDaemonOrigin, readControlPlaneBinding, type DaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { readOperatorTokenFile } from '@goodvibes/engine/platform/platform/workspace/daemon-home';
+import { readConnectedDaemonToken, readDaemonSessionToken } from '@goodvibes/engine/platform/platform/runtime/client/daemon-credentials';
+import { classifyDaemonOrigin, proveDaemonOrigin } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
+import { bindCredential, daemonAuthHeaders, daemonTarget, CredentialOriginError } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target';
 
 /** Where to send a verb, and what to authenticate with. */
 export interface RemoteDaemonTarget {

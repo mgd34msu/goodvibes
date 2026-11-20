@@ -6,9 +6,9 @@
  * the host's live schedules, each annotated with its latest run when that run
  * was missed or failed.
  */
-import { formatScheduleTiming, registerScheduleCommand, scheduleTimingFields, type ScheduleHost, type ScheduleView } from '@goodvibes-jev/engine/terminal-shell/schedule-command';
-import { buildOperatorActionRequest, formatOperatorActionFailure, postOperatorAction, type OperatorActionId } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-actions';
-import { buildScheduleEditPreview, parseScheduleEditArgs } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-edit';
+import { formatScheduleTiming, registerScheduleCommand, scheduleTimingFields, type ScheduleHost, type ScheduleView } from '@goodvibes/engine/terminal-shell/schedule-command';
+import { buildOperatorActionRequest, formatOperatorActionFailure, postOperatorAction, type OperatorActionId } from '@goodvibes/engine/terminal-shell/agent-turn/operator-actions';
+import { buildScheduleEditPreview, parseScheduleEditArgs } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-edit';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { resolveAgentConnectedHostConnection, type AgentConnectedHostConnection } from '../../agent/routine-schedule-promotion.ts';
 import { fetchLiveSchedules } from '../../agent/routine-schedule-receipts.ts';

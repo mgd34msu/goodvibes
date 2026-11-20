@@ -23,10 +23,10 @@ import {
   driverSearchDirectories,
   managedDriverRoot,
   type BrowserSessionManagerDeps,
-} from '@goodvibes-jev/engine/platform/platform/browser';
-import type { UntrustedContentPort } from '@goodvibes-jev/engine/platform/platform/browser';
-import { browserGatewayOverEngine } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { BrowserToolBackend } from '@goodvibes-jev/engine/terminal-shell/agent-turn/browser-tool';
+} from '@goodvibes/engine/platform/platform/browser';
+import type { UntrustedContentPort } from '@goodvibes/engine/platform/platform/browser';
+import { browserGatewayOverEngine } from '@goodvibes/engine/platform/platform/control-plane';
+import type { BrowserToolBackend } from '@goodvibes/engine/terminal-shell/agent-turn/browser-tool';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { createAgentUntrustedContentPort } from '../trust/untrusted-content-port.ts';
 
@@ -37,7 +37,7 @@ import { createAgentUntrustedContentPort } from '../trust/untrusted-content-port
  * same one the agent printed before the host client moved.
  */
 const MISSING_HOST_SCRIPT_FIX =
-  'Reinstall the agent so its files are complete: bun add -g @goodvibes-jev/agent';
+  'Reinstall the agent so its files are complete: bun add -g @goodvibes/agent';
 
 /** Where saved browser profiles live, under the agent's own storage root. */
 export function agentBrowserProfileRoot(homeDirectory: string): string {

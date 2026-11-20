@@ -32,7 +32,7 @@
  * A refusal is a value: `{ ok: false, refusal }`, never a throw.
  */
 import { randomBytes } from 'node:crypto';
-import { refusal, type Refusal } from '@goodvibes-jev/engine/errors';
+import { refusal, type Refusal } from '@goodvibes/engine/errors';
 import type { ConfigManager } from '../../config/manager.js';
 import {
   deriveControlPlaneBaseUrl,

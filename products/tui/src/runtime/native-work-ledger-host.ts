@@ -1,14 +1,14 @@
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
-import { registerWorkCommand } from '@goodvibes-jev/engine/terminal-shell/native/work-command';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { OwnedSelectionObservation } from '@goodvibes/engine/platform/platform/runtime/client/selection-observation';
+import { registerWorkCommand } from '@goodvibes/engine/terminal-shell/native/work-command';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import {
   createBoundNativeWorkLedgerView,
   type NativeLedgerBindingFactory,
   type NativeLedgerHost,
-} from '@goodvibes-jev/engine/terminal-shell/native/bound-work-ledger-host';
-import type { NativeWorkLedgerView } from '@goodvibes-jev/engine/terminal-shell/native/work-ledger-view';
-import { TUI_NATIVE_INTAKE_POLICY } from '@goodvibes-jev/engine/terminal-shell/native-intake';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/terminal-shell/native/bound-work-ledger-host';
+import type { NativeWorkLedgerView } from '@goodvibes/engine/terminal-shell/native/work-ledger-view';
+import { TUI_NATIVE_INTAKE_POLICY } from '@goodvibes/engine/terminal-shell/native-intake';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { resolveNativeHostCredential } from './client/native-host-credential.ts';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { openTuiLegacyImport } from '../input/commands/legacy-work-ledger-import-runtime.ts';

@@ -1,1 +1,1 @@
-export { createDaemonTelemetryRouteHandlers } from '@goodvibes-jev/engine/daemon-api';
+export { createDaemonTelemetryRouteHandlers } from '@goodvibes/engine/daemon-api';

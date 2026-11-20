@@ -1,5 +1,5 @@
 /**
- * @goodvibes-jev/engine/platform/platform/calendar
+ * @goodvibes/engine/platform/platform/calendar
  *
  * External-calendar connectivity, the platform machinery behind the agent's
  * `/calendar import`, `/calendar subscribe`, the connect wizard, and the

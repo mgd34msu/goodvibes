@@ -307,7 +307,7 @@ function indexMarkdown(): string {
   }
   lines.push('', '## Error codes', '', 'Declared by each method beside its route; every operation also lists its own under `x-error-codes`.', '', '| Code | Status | Meaning |', '| --- | --- | --- |');
   for (const entry of declaredCodes) lines.push(`| \`${entry.code}\` | ${entry.status} | ${entry.meaning.replace(/\|/g, '/')} |`);
-  lines.push(`| ${[...Object.values(EngineErrorCodes)].map((code) => `\`${code}\``).join(', ')} | varies | The shared engine codes (\`@goodvibes-jev/engine/errors\`); the status is the route's. |`, '');
+  lines.push(`| ${[...Object.values(EngineErrorCodes)].map((code) => `\`${code}\``).join(', ')} | varies | The shared engine codes (\`@goodvibes/engine/errors\`); the status is the route's. |`, '');
   return lines.join('\n');
 }
 

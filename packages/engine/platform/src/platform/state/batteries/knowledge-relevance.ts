@@ -19,7 +19,7 @@
  * reference material for this task only; a wrong pick costs a few prompt
  * tokens and is never acted on as policy.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 const LOW = STAKES_BANDS.low.yesNo;
 

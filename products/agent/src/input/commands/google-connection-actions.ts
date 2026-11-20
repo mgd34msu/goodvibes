@@ -1,6 +1,6 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { googleSetupWritePorts } from './google-setup-effects.ts';
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 /**
  * The Google connection actions, owned in one place so every surface runs the
  * same code.
@@ -17,7 +17,7 @@ import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
  * happens and returns text; the caller decides where that text goes, the
  * console for the command, an action result panel for the workspace.
  *
- * The connector itself is `@goodvibes-jev/engine/platform/platform/google`, the flows,
+ * The connector itself is `@goodvibes/engine/platform/platform/google`, the flows,
  * the step plan, the credential handling and the browser-driven pages all live
  * there now, so the daemon can run them too. What stayed here is the wiring
  * that only this product can supply: config and secret access through the
@@ -61,12 +61,12 @@ import {
   type GoogleSetupActionDeps,
   type GoogleSetupPath,
   type GoogleSetupReport,
-} from '@goodvibes-jev/engine/platform/platform/google';
+} from '@goodvibes/engine/platform/platform/google';
 import {
   createProcessCommandPort,
   nodeGoogleFilePort,
   startLoopbackListener,
-} from '@goodvibes-jev/engine/platform/platform/google/node';
+} from '@goodvibes/engine/platform/platform/google/node';
 import {
   agentBrowserProfileRoot,
   agentBrowserScreenshotRoot,

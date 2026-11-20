@@ -2,7 +2,7 @@
  * session-spine-rest-transport.ts
  *
  * The REST transport, probe, and receipt consumer live in the platform itself
- * (`@goodvibes-jev/engine/platform/platform/runtime/session-spine`,
+ * (`@goodvibes/engine/platform/platform/runtime/session-spine`,
  * `rest-transport.ts`, adopted from this agent's own implementation
  * verbatim, per that module's "Hoist provenance" doc comment). Callers import
  * `createSessionSpineRestTransport` / `createSessionSpineRestProbe` /
@@ -20,13 +20,13 @@
  * `resolveConnection` option expects a consumer to supply.
  */
 
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { formatRefusal } from '@goodvibes-jev/engine/errors';
-import { readConnectedHostPairing } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
-import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
-import { isThisMachineHost, resolveDaemonTarget } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target-resolver';
-import { bearerFor } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
-import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { formatRefusal } from '@goodvibes/engine/errors';
+import { readConnectedHostPairing } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
+import { connectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { isThisMachineHost, resolveDaemonTarget } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
+import { bearerFor } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target';
+import { parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 
 export interface SessionRegistrationConnection {
   readonly baseUrl: string;

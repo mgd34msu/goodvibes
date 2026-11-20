@@ -7,8 +7,8 @@
  * its subcommand's declared flags and read by the one parser below, so a bad
  * value is refused before anything is sent.
  */
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { readRefusal } from '@goodvibes/engine/errors';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import type { ActionDescription, ActionValues, CommandActionContext, FixedChoice, InputDescription } from './command-actions/types.js';

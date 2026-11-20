@@ -4,8 +4,8 @@
  * and copying them out to files. Each action is one call of the
  * `agent_artifacts` tool, run as the owner's own act (owner-tool-call.ts).
  */
-import { defineCommand, defineList, type ActionDescription, type InputDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { choiceInput, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { defineCommand, defineList, type ActionDescription, type InputDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { choiceInput, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { given, ownerRead, ownerToolCall, positiveNumber, runOwnerToolCall, splitWords } from './owner-tool-call.ts';
 

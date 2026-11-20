@@ -8,12 +8,12 @@ import type { GoodVibesPlatform } from './client.js';
  * Options for {@link createWebGoodVibesPlatform}.
  *
  * This type is an alias for {@link BrowserGoodVibesPlatformOptions} and carries the
- * same shape. It exists so that code importing from `@goodvibes-jev/engine/platform/web`
+ * same shape. It exists so that code importing from `@goodvibes/engine/platform/web`
  * has a semantically accurate name without requiring an empty-interface declaration.
  *
- * Use `WebGoodVibesPlatformOptions` when importing from `@goodvibes-jev/engine/platform/web`;
+ * Use `WebGoodVibesPlatformOptions` when importing from `@goodvibes/engine/platform/web`;
  * use {@link BrowserGoodVibesPlatformOptions} when importing from
- * `@goodvibes-jev/engine/platform/browser`.
+ * `@goodvibes/engine/platform/browser`.
  */
 export type WebGoodVibesPlatformOptions = BrowserGoodVibesPlatformOptions;
 

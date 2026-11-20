@@ -1,18 +1,18 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogSnapshot, captureCatalogSnapshotGuard } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import { captureCatalogSnapshot, captureCatalogSnapshotGuard } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import type { McpApi } from '@goodvibes-jev/engine/platform/platform/mcp';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import type { McpApi } from '@goodvibes/engine/platform/platform/mcp';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 type McpCatalogContext = {
   readonly clients?: { readonly mcpApi?: Pick<McpApi, 'listServerSecurity' | 'listAllTools' | 'captureToolCatalog'> };
   readonly extensions?: { readonly mcpRegistry?: Pick<McpApi, 'listServerSecurity' | 'listAllTools' | 'captureToolCatalog'> };
 };
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 // Server-supplied strings are shortened before they reach the model.
 const SERVER_TEXT_LIMIT = 240;

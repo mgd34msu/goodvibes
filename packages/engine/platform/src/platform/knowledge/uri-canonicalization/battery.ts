@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 const state = (url: string, position = 0) => ({ url, parameters: [...new URL(url).searchParams].map(([key, value]) => ({ key, value })),
   target: { position, key: 'ref', value: [...new URL(url).searchParams][position]?.[1] ?? '' } });

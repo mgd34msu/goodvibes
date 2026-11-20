@@ -1,21 +1,21 @@
-import { buildPersistedSessionContextFromFacts, type CrashSnapshotTurnMoment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { buildPersistedSessionContextFromFacts, type CrashSnapshotTurnMoment } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { UiRuntimeEvents, RuntimeEventBus } from '@/runtime/index.ts';
 import { deleteRecoveryFile, persistConversation } from '@/runtime/index.ts';
 import { writeCrashSnapshotIfChanged } from '../runtime/recovery-autosave.ts';
 import { markConversationDurable } from './session-resume-core.ts';
 import { buildCompactionReceiptBlock } from './compaction-receipt.ts';
 import { workstreamFailureNotification } from './workstream-notification.ts';
-import { captureTurnAnchor, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { HookDispatcher, HookPhase, HookCategory, HookEventPath } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { captureTurnAnchor, persistTurnAnchors, recordTurnAnchor } from '@goodvibes/engine/platform/platform/rewind';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { HookDispatcher, HookPhase, HookCategory, HookEventPath } from '@goodvibes/engine/platform/platform/hooks';
 import type { ConversationManager } from './conversation.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
-import { openSessionHere, writeCrashSnapshotAtTurnMoments } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import { notifyNow } from '@goodvibes-jev/engine/platform/platform/utils';
+import { openSessionHere, writeCrashSnapshotAtTurnMoments } from '@goodvibes/engine/platform/platform/runtime/operations';
+import type { WebhookNotifier } from '@goodvibes/engine/platform/platform/integrations';
+import { notifyNow } from '@goodvibes/engine/platform/platform/utils';
 import { maybeNotifyLongTask, readNotifyAfterSeconds } from './long-task-notifier.ts';
-import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
 import {
   shouldFireAlert,
   NOTIFICATION_TEXT_LIMITS,
@@ -25,10 +25,10 @@ import {
   resolveTurnName,
   trimAtWordBoundary,
   type TurnOutcome,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+} from '@goodvibes/engine/platform/platform/runtime/operations';
 import { createBudgetBreachNotifier, type BudgetBreachNotifier } from './budget-breach-notifier.ts';
 import { createUserTurnOwner, type UserTurnEnd, type UserTurnOwner } from './user-turn.ts';
-import { readBudgetAlertUsd } from '@goodvibes-jev/engine/platform/platform/providers';
+import { readBudgetAlertUsd } from '@goodvibes/engine/platform/platform/providers';
 
 /** Minimal orchestrator surface required by turn-event wiring. */
 interface TurnOrchestrator {

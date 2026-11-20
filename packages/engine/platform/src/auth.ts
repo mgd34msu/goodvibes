@@ -1,8 +1,8 @@
-import { ConfigurationError } from '@goodvibes-jev/engine/errors';
+import { ConfigurationError } from '@goodvibes/engine/errors';
 import type { PlatformObserver } from './observer/index.js';
 import { invokeObserver } from './observer/index.js';
-import type { AuthTokenResolver } from '@goodvibes-jev/engine/transport-http';
-import type { OperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import type { AuthTokenResolver } from '@goodvibes/engine/transport-http';
+import type { OperatorApiClient } from '@goodvibes/engine/operator-client';
 import {
   AutoRefreshCoordinator,
   PermissionResolver,
@@ -114,7 +114,7 @@ function requireStorage(storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeI
  * refreshes or process restarts. Suitable for server-side scripts and tests.
  *
  * @example
- * import { createMemoryTokenStore } from '@goodvibes-jev/engine/platform';
+ * import { createMemoryTokenStore } from '@goodvibes/engine/platform';
  *
  * const store = createMemoryTokenStore('initial-token');
  * const platform = createGoodVibesPlatform({ baseUrl: '...', tokenStore: store });
@@ -163,8 +163,8 @@ export function createMemoryTokenStore(initialToken: string | null = null, initi
  * Pass `options.storage` to use `sessionStorage` or a custom adapter.
  *
  * @example
- * import { createBrowserTokenStore } from '@goodvibes-jev/engine/platform/auth';
- * import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+ * import { createBrowserTokenStore } from '@goodvibes/engine/platform/auth';
+ * import { createBrowserGoodVibesPlatform } from '@goodvibes/engine/platform/browser';
  *
  * const tokenStore = createBrowserTokenStore({ storage: sessionStorage });
  * const platform = createBrowserGoodVibesPlatform({ tokenStore });
@@ -255,7 +255,7 @@ function assertWritableTokenStore(tokenStore: GoodVibesTokenStore | null): GoodV
  * `platform.auth`.
  *
  * @example
- * import { createGoodVibesPlatform, createBrowserTokenStore } from '@goodvibes-jev/engine/platform';
+ * import { createGoodVibesPlatform, createBrowserTokenStore } from '@goodvibes/engine/platform';
  *
  * const platform = createGoodVibesPlatform({
  *   baseUrl: 'https://daemon.example.com',

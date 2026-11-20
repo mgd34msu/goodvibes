@@ -17,7 +17,7 @@
  *   [what happened] · [why] · [what to do]
  */
 
-import { GoodVibesError, structuredTransience } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError, structuredTransience } from '@goodvibes/engine/errors';
 import type { GoodVibesTokenStore } from './types.js';
 import type { PlatformObserver } from '../observer/index.js';
 import { invokeObserver } from '../observer/index.js';

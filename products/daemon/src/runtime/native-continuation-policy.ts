@@ -1,7 +1,7 @@
 /** Fresh policy tuples compare exact ordinary revisions. Actual saved CI1 grants
  * retain their independently expected private-frame verification recipe. */
 import { createHash } from 'node:crypto';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 
 type ConfigurationOwner = Pick<ConfigManager, 'captureDurableConfigurationIncarnation' | 'getDurableConfigurationIncarnation'>;
 interface ScopeOwner { current(version?: 1 | 2): { readonly revision: string; readonly scopes: readonly string[] } }

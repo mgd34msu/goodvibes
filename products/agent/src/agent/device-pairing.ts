@@ -17,8 +17,8 @@ import {
   renderQrToString,
   type OriginPosture,
   type PairingHandoffOfferKind,
-} from '@goodvibes-jev/engine/platform/platform/pairing';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+} from '@goodvibes/engine/platform/platform/pairing';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 
 /** What `pairing.handoff.create` answers. */
 interface PairingHandoffCreateResult {

@@ -20,8 +20,8 @@ import {
   type AnalyzeRefusal,
 } from './shared.js';
 import { instrumentedFetch } from '../../utils/fetch-with-timeout.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import type { YesNoReading } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import type { YesNoReading } from '@goodvibes/judgment';
 import { semanticDiff, semanticDiffView } from '../batteries/semantic-diff.js';
 import { exportBreak, exportBreakView } from '../batteries/export-break.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';

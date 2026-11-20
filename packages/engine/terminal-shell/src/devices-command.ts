@@ -8,8 +8,8 @@
  * grants and the captures the daemon keeps. Each app says how it reaches the
  * daemon; an action only one app can do is refused in the other with why.
  */
-import type { DevicesClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { formatDeviceLine, resolveTokenByIdPrefix, type PublicPairingToken } from '@goodvibes-jev/engine/platform/platform/pairing';
+import type { DevicesClient } from '@goodvibes/engine/platform/platform/runtime/client';
+import { formatDeviceLine, resolveTokenByIdPrefix, type PublicPairingToken } from '@goodvibes/engine/platform/platform/pairing';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';

@@ -43,10 +43,10 @@
  * is often something the owner must complete themselves.
  */
 
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { linkHost, linkHostView, renderedHost } from './batteries/link-host.js';
 import { registrableDomain } from './public-suffix.js';
-import { runDecisionOrClassic as decisionOrClassic } from '@goodvibes-jev/engine/errors';
+import { runDecisionOrClassic as decisionOrClassic } from '@goodvibes/engine/errors';
 
 /** The decision site the link-host reading is logged under. */
 export const LINK_HOST_SITE = 'security.link-validation';

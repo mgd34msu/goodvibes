@@ -3,10 +3,10 @@
  * (terminal-shell/memory-command.ts). This app opens the Memory screen and
  * shows the memory each recorded turn was given.
  */
-import { createMemoryCommand } from '@goodvibes-jev/engine/terminal-shell/memory-command';
-import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { createMemoryCommand } from '@goodvibes/engine/terminal-shell/memory-command';
+import type { MemoryApi } from '@goodvibes/engine/platform/platform/knowledge';
+import type { MemorySpineClient } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
 import { buildMainSessionTurnInjectionsText, buildTurnInjectionsText } from '../../renderer/turn-injection.ts';
 

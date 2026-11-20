@@ -9,8 +9,8 @@
  * request with an error naming its battery, so a stray reading cannot change
  * what the test sees.
  */
-import type { JudgmentPort, JudgmentRequest, Questions } from '@goodvibes-jev/judgment';
-import { fakePort, type Answerer } from '@goodvibes-jev/judgment/testing';
+import type { JudgmentPort, JudgmentRequest, Questions } from '@goodvibes/judgment';
+import { fakePort, type Answerer } from '@goodvibes/judgment/testing';
 
 export function decisionPort(batteries: readonly string[], answer: Answerer): { port: JudgmentPort; requests: JudgmentRequest<Questions>[] } {
   const own = fakePort(answer);

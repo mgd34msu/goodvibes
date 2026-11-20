@@ -17,14 +17,14 @@
  * over its command registry and terminal); this turn names them in its prompt
  * and a call to one is refused with the state, the reason and the next step.
  */
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { HostedSurfaceTurn } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
-import type { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell-paths';
-import { readTierPromptSupplement } from '@goodvibes-jev/engine/platform/platform/providers';
-import { factsFor } from '@goodvibes-jev/engine/platform/platform/routing';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
+import type { HostedSurfaceTurn } from '@goodvibes/engine/platform/platform/hosted-sessions';
+import type { MemoryRegistry } from '@goodvibes/engine/platform/platform/state';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
+import { readTierPromptSupplement } from '@goodvibes/engine/platform/platform/providers';
+import { factsFor } from '@goodvibes/engine/platform/platform/routing';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { joinPromptParts } from '../prompt-parts.js';
 import { GOODVIBES_AGENT_OPERATOR_POLICY } from './operator-policy.js';
 import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt, injectedMemoryIds } from './prompt-context-receipts.js';
@@ -49,8 +49,8 @@ import { registerAgentResearchReportTool } from './research-report-tool.js';
 import { registerAgentModelCompareTool } from './model-compare-tool.js';
 import type { AgentModelCompareToolDeps } from './model-compare-types.js';
 import { createAgentCredentialReader, createAgentResearchSourceOwner, createAgentSettingsReader } from './research-source-screening.js';
-import { createClassicProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security/source-screening/classic-owner';
-import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
+import { createClassicProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security/source-screening/classic-owner';
+import type { ProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security';
 import { randomUUID } from 'node:crypto';
 import { registerAgentOperatorActionTool } from './operator-action-tool.js';
 import { registerAgentOperatorBriefingTool } from './operator-briefing-tool.js';
@@ -65,7 +65,7 @@ import { createDaemonExpectationClient, type DaemonExpectationClient } from './s
 import { inProcessVerbCaller } from './in-process-host.js';
 import { connectedHostBaseUrl } from './connected-host-dial.js';
 import type { ConnectedHostConfigReader } from './connected-host-client.js';
-import type { HostedDaemonRequestPath } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import type { HostedDaemonRequestPath } from '@goodvibes/engine/platform/platform/hosted-sessions';
 import { registerAgentChannelSendTool } from './channel-send-tool.js';
 import { registerAgentBrowserTool, type AgentBrowserToolOptions, type BrowserToolBackend } from './browser-tool.js';
 import { wireAgentGoogleTool, type GoogleToolWiringDeps } from './google-wiring.js';
@@ -75,10 +75,10 @@ import { AGENT_PLATFORM_TOOL_ADMISSION, decorateAgentWorkerRegistry, installAgen
 import { connectedHostFamilyRemote } from './family-remote.js';
 import { registerAgentLocalRegistryTool } from './local-registry-tool.js';
 import { registerAgentLearningConsolidationTool } from './learning-consolidation-tool.js';
-import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import type { MemoryAccess } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
 import { resolve } from 'node:path';
-import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 
 /** What the Agent turn tools are built from, in either process. */
 export interface AgentTurnToolDeps {

@@ -14,9 +14,9 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes/judgment';
+import { choiceAnswer, fakePort } from '@goodvibes/judgment/testing';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { executeToolCalls, type ToolExecutionDeps } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
@@ -28,7 +28,7 @@ import { createAgentInProcessHost } from '../terminal-shell/src/agent-turn/in-pr
 import { registerAgentOperatorActionTool } from '../terminal-shell/src/agent-turn/operator-action-tool.ts';
 import { registerAgentOperatorMethodTool } from '../terminal-shell/src/agent-turn/operator-method-tool.ts';
 import { forgetGateReadings, gateReadingsPort } from './_helpers/gate-readings.ts';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 
 let dir: string;
 let restorePort: () => void;

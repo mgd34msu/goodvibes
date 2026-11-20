@@ -2,7 +2,7 @@
  * Platform runtime UI surface barrel.
  *
  * Source file: `packages/engine/platform/src/platform/runtime/ui.ts`
- * Public path: `@goodvibes-jev/engine/platform/platform/runtime/ui`
+ * Public path: `@goodvibes/engine/platform/platform/runtime/ui`
  *
  * The `./platform/runtime/ui` export map path resolves here. It re-exports
  * the `runtime/ui/` subdirectory (the provider-health status types) whole, plus

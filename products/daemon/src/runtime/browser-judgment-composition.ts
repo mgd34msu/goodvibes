@@ -1,10 +1,10 @@
-import { endpointKind, HOSTED_BASE_URL, validEndpointURL } from '@goodvibes-jev/judgment';
-import { BrowserJudgmentError } from '@goodvibes-jev/engine/daemon-api';
-import { captureJudgmentFallbackSettings, type ConfigManager, type SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { createWebuiBrowserJudgment, type BrowserJudgmentRoute } from '@goodvibes-jev/engine/platform/platform/judgment-browser';
-import { createJudgmentSourceLifetime, type JudgmentServices } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { endpointKind, HOSTED_BASE_URL, validEndpointURL } from '@goodvibes/judgment';
+import { BrowserJudgmentError } from '@goodvibes/engine/daemon-api';
+import { captureJudgmentFallbackSettings, type ConfigManager, type SecretsManager } from '@goodvibes/engine/platform/platform/config';
+import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
+import type { GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
+import { createWebuiBrowserJudgment, type BrowserJudgmentRoute } from '@goodvibes/engine/platform/platform/judgment-browser';
+import { createJudgmentSourceLifetime, type JudgmentServices } from '@goodvibes/engine/platform/platform/runtime/operations';
 
 const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 

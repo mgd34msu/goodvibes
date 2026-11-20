@@ -12,14 +12,14 @@
 // The provider stack and the decision model from their own modules: the
 // bootstrap and operations barrels load the whole runtime, which a one-shot
 // command (`status` among them) would pay for at every start.
-import { createProviderStack, type ProviderStackOptions } from '@goodvibes-jev/engine/platform/platform/runtime/provider-stack';
-import { composeJudgment } from '@goodvibes-jev/engine/platform/platform/runtime/judgment-services';
-import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
-import { createFeatureFlagManager } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/manager';
-import { deriveFeatureStates } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/feature-settings';
-import { RuntimeEventBus, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
-import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell-paths';
+import { createProviderStack, type ProviderStackOptions } from '@goodvibes/engine/platform/platform/runtime/provider-stack';
+import { composeJudgment } from '@goodvibes/engine/platform/platform/runtime/judgment-services';
+import { createAsyncDisposalScope } from '@goodvibes/engine/platform/platform/runtime/disposal';
+import { createFeatureFlagManager } from '@goodvibes/engine/platform/platform/runtime/feature-flags/manager';
+import { deriveFeatureStates } from '@goodvibes/engine/platform/platform/runtime/feature-flags/feature-settings';
+import { RuntimeEventBus, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom } from '@goodvibes/engine/platform/platform/runtime/state';
+import { createRuntimeStore } from '@goodvibes/engine/platform/platform/runtime/store';
+import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
 import {
   ServiceRegistry,
   SubscriptionManager,
@@ -28,11 +28,11 @@ import {
   sharedSubscriptionsPath,
   type ConfigManager,
   type SecretsManager,
-} from '@goodvibes-jev/engine/platform/platform/config';
-import type { ProviderCatalogOptions, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+} from '@goodvibes/engine/platform/platform/config';
+import type { ProviderCatalogOptions, ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
+import { SessionManager } from '@goodvibes/engine/platform/platform/sessions';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 
 type ProviderStackServices = ReturnType<typeof createProviderStack>;
 

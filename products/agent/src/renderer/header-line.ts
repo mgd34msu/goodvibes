@@ -1,6 +1,6 @@
-import { createHeaderRenderer, type HeaderView } from '@goodvibes-jev/engine/terminal-shell/renderer/header-line';
+import { createHeaderRenderer, type HeaderView } from '@goodvibes/engine/terminal-shell/renderer/header-line';
 import { VERSION } from '../version.ts';
-export { HEADER_GAP_ROWS, withHeaderGap } from '@goodvibes-jev/engine/terminal-shell/renderer/header-line';
+export { HEADER_GAP_ROWS, withHeaderGap } from '@goodvibes/engine/terminal-shell/renderer/header-line';
 export type { HeaderView };
 const render = createHeaderRenderer({ brand: 'GoodVibes Agent', defaultVersion: VERSION, versionPrefix: 'v', truncateModel: true });
 /** Agent headers name the session and model; delegated build posture stays in the TUI. */

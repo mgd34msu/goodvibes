@@ -15,7 +15,7 @@
  *
  * Cost: none outside a concealed prompt; within one, a string splice per key.
  */
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { ConcealedInputRequest } from './concealed-input.js';
 
 type KeyToken = InputToken & { type: 'key' };

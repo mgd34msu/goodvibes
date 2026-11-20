@@ -5,14 +5,14 @@
  * exports, its conversation branches and the cross-session task graph.
  */
 import { existsSync } from 'node:fs';
-import { createSessionGraphHandler } from '@goodvibes-jev/engine/terminal-shell/session-graph-command';
-import { createSessionCommands } from '@goodvibes-jev/engine/terminal-shell/session-command';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { createSessionGraphHandler } from '@goodvibes/engine/terminal-shell/session-graph-command';
+import { createSessionCommands } from '@goodvibes/engine/terminal-shell/session-command';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
 import { exportSavedSession, resumeSavedSession, sessionWorkflow } from './session-workflow.ts';
 import { requireBookmarkManager, requireSessionOrchestration, requireShellPaths } from './runtime-services.ts';
 import { contentCommands } from './session-content.ts';
-import { handleBookmarks } from '@goodvibes-jev/engine/terminal-shell/bookmark-command';
+import { handleBookmarks } from '@goodvibes/engine/terminal-shell/bookmark-command';
 import { conversationReading } from './conversation-runtime.ts';
 import { localActions } from './local-runtime.ts';
 import { buildCompactionHistoryText } from '../../renderer/compaction-history-modal.ts';

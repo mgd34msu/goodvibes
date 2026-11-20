@@ -1,9 +1,9 @@
 import { directOwnerRemoteInput, isDirectOwnerCommandContext, type CommandRegistry, type CommandContext } from '../command-registry.ts';
-import { AGENT_TEMPLATES } from '@goodvibes-jev/engine/platform/platform/tools';
-import { defineCommand, defineList, type ActionDescription, type InputDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { AGENT_TEMPLATES } from '@goodvibes/engine/platform/platform/tools';
+import { defineCommand, defineList, type ActionDescription, type InputDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import {
   exportRemoteBootstrap,
   exportRemoteFile,

@@ -1,5 +1,5 @@
 /**
- * `@goodvibes-jev/engine/platform/embed`, platform Embedding API 1.0
+ * `@goodvibes/engine/platform/embed`, platform Embedding API 1.0
  *
  * The supported, stability-marked surface for embedding a GoodVibes session in
  * another application: create a session against a workspace, send input, receive

@@ -1,5 +1,5 @@
-import { dispatchDaemonApiRoutes } from '@goodvibes-jev/engine/daemon-api';
-import type { DaemonApiRouteHandlers, GatewayRestVerbMatch } from '@goodvibes-jev/engine/daemon-api';
+import { dispatchDaemonApiRoutes } from '@goodvibes/engine/daemon-api';
+import type { DaemonApiRouteHandlers, GatewayRestVerbMatch } from '@goodvibes/engine/daemon-api';
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import { UNSERVED_METHOD_REASON_KEY, type GatewayMethodCatalog } from './method-catalog.js';
 import { MODEL_ROUTES } from '../daemon/http/model-routes.js';
@@ -28,7 +28,7 @@ import { COMPANION_CHAT_ROUTES } from '../companion/companion-chat-routes.js';
  *
  * This module answers, for a batch of descriptors, whether each one's http
  * binding actually resolves against the real dispatch pipeline:
- * `dispatchDaemonApiRoutes` from @goodvibes-jev/engine/daemon-api, the function
+ * `dispatchDaemonApiRoutes` from @goodvibes/engine/daemon-api, the function
  * DaemonHttpRouter.dispatchApiRoutes (packages/platform/src/platform/daemon/http/
  * router.ts, read as this reconcile's route authority, never edited by it)
  * ultimately delegates to for every method-catalog family except the

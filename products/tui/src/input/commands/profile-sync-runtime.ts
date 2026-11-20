@@ -6,9 +6,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { choiceInput, doAction, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { choiceInput, doAction, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import type { ProfileBundleEntry, ProfileSyncBundle } from '@/runtime/index.ts';
 import { recordSettingsSyncEvent, recordSettingsSyncFailure } from '@/runtime/index.ts';
 import { requireProfileManager, requireShellPaths } from './runtime-services.ts';

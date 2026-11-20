@@ -18,7 +18,7 @@
  * costs what `POST /login` costs (one session write); a code or token costs one
  * authentication, as any request presenting it does.
  */
-import type { RequestPrincipal } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import type { RequestPrincipal } from '@goodvibes/engine/daemon-api/http-policy';
 import {
   buildExpiredRemoteNodeCookie, buildIdentityMarkerCookie, buildOperatorSessionCookie, buildRemoteNodeCookie, mintIdentityMarker,
   NON_EXPIRING_BROWSER_CREDENTIAL_MS, type CredentialRefusal,

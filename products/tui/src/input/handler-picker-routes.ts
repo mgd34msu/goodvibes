@@ -2,8 +2,8 @@ export {
   handleEscapeOnlyModalToken,
   handleFilePickerToken,
   handleBlockActionsToken,
-} from '@goodvibes-jev/engine/terminal-shell/modal-input-routes';
-import { createModelPickerTokenHandler } from '@goodvibes-jev/engine/terminal-shell/model-picker-token-route';
+} from '@goodvibes/engine/terminal-shell/modal-input-routes';
+import { createModelPickerTokenHandler } from '@goodvibes/engine/terminal-shell/model-picker-token-route';
 import type { CommandContext } from './command-registry.ts';
 import type { ModelPickerModal } from './model-picker.ts';
 import { MODEL_PICKER_CHROME_LINES } from '../renderer/model-workspace.ts';

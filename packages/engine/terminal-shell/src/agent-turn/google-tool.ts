@@ -1,7 +1,7 @@
-import { assertDecisionModelsEnabled } from '@goodvibes-jev/engine/errors';
-import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
-import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
+import { assertDecisionModelsEnabled } from '@goodvibes/engine/errors';
+import type { ProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security';
+import type { ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } from './personal-ops-effect-receipt.js';
 import { agentResearchSourceOwner } from './protected-research-report.js';
 import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostSelection, type HostCallApplied } from './connected-host-client.js';
@@ -51,11 +51,11 @@ import { readString } from './tool-args.js';
  * around, and then there is no guard.
  */
 
-import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { captureStrictJudgmentJson, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { captureStrictJudgmentJson, snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate';
 import { CardMaterialRefusedError, screenOutboundForCardMaterial } from './payments-channel-guard.js';
-import { assertDeliveryCurrent } from '@goodvibes-jev/engine/platform/platform/utils';
+import { assertDeliveryCurrent } from '@goodvibes/engine/platform/platform/utils';
 import {
   beginGoogleConsent,
   GoogleApiClient,
@@ -67,12 +67,12 @@ import {
   type GoogleConnectionSources,
   type GoogleConsentSession,
   type GoogleLoopbackListenerFactory,
-} from '@goodvibes-jev/engine/platform/platform/google';
-import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/platform/platform/google';
+import type { ConfigManager, SecretsManager } from '@goodvibes/engine/platform/platform/config';
 import { createGoogleSettingsProjector, commitGoogleSettings, NO_GOOGLE_CLIENT_SECRET, retainGoogleConnectionOwners, retainGoogleCredentials, retainGooglePreparedEffectSource, type GooglePendingCredential } from './google-admission.js';
-import { nodeGoogleFilePort } from '@goodvibes-jev/engine/platform/platform/google/node';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
-import { readSurfaceEmailSettings } from '@goodvibes-jev/engine/platform/platform/email';
+import { nodeGoogleFilePort } from '@goodvibes/engine/platform/platform/google/node';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes/engine/platform/platform/google';
+import { readSurfaceEmailSettings } from '@goodvibes/engine/platform/platform/email';
 import {
   evaluateOutwardEffect,
   getProcessUntrustedContentLedger as getSessionUntrustedContentLedger,
@@ -81,12 +81,12 @@ import {
   resolveOwnerAddresses,
   type OwnerApprovalStore,
   type TaintOptions,
-} from '@goodvibes-jev/engine/platform/platform/security';
+} from '@goodvibes/engine/platform/platform/security';
 import { rememberRefusedOutwardAction, type OutwardActionOutcome } from './outward-approvals.js';
-import type { GoogleApiFailure, GoogleApiResult } from '@goodvibes-jev/engine/platform/platform/google';
+import type { GoogleApiFailure, GoogleApiResult } from '@goodvibes/engine/platform/platform/google';
 import { describeDaemonExpectationState, getSessionExpectationBook, type DaemonExpectationClient } from './session-expectations.js';
-import { deliveryEvidenceFromMessage, describeDeliveryEvidence, NO_ALIAS_MAILBOXES } from '@goodvibes-jev/engine/platform/platform/google';
-import { readVerificationArtifact } from '@goodvibes-jev/engine/platform/platform/google';
+import { deliveryEvidenceFromMessage, describeDeliveryEvidence, NO_ALIAS_MAILBOXES } from '@goodvibes/engine/platform/platform/google';
+import { readVerificationArtifact } from '@goodvibes/engine/platform/platform/google';
 import { confirmParameter } from './effect-admission.js';
 
 const GOOGLE_ACTIONS = [

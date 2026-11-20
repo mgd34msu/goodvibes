@@ -14,9 +14,9 @@
 import { UIFactory, type ThinkingStallInfo } from '../renderer/ui-factory.ts';
 import { resolveThrobberActivity, type ThrobberState, type ThrobberToolCall } from '../renderer/throbber.ts';
 import { trackActiveTool, type ActiveToolCall } from './active-tool-tracker.ts';
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
+import type { Orchestrator } from '@goodvibes/engine/platform/platform/core';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 
 /**
  * Per-turn last-delta clock. tick() seeds at turn start, then pushes the clock

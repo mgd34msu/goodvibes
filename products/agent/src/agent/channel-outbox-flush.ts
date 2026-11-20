@@ -1,8 +1,8 @@
 import type { ShellPathService } from '@/runtime/index.ts';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { syncChannelDrafts, type ChannelDraftSyncReport } from './channel-draft.ts';
 import { syncChannelProfileRoutes, type ChannelProfileRouteSyncReport } from './channel-profile-routing.ts';
-import type { DaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn/daemon-operator-client';
+import type { DaemonOperatorInvoke } from '@goodvibes/engine/terminal-shell/agent-turn/daemon-operator-client';
 
 /**
  * The daemon is the store of record for channel drafts and routing

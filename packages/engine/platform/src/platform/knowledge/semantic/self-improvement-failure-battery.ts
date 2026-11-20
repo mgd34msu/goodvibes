@@ -1,4 +1,4 @@
-import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment/decisions';
+import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes/judgment/decisions';
 
 /** Failure cause, not retry authority: the existing owner applies its fixed disposition. */
 export const repairFailureCause = defineBattery({

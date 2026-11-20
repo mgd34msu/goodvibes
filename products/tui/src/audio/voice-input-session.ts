@@ -24,7 +24,7 @@ import {
   type CapturedUtterance,
   type PushToTalkPhase,
   type WakeRuntimeSettings,
-} from '@goodvibes-jev/engine/platform/platform/voice';
+} from '@goodvibes/engine/platform/platform/voice';
 import type { VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import type { VoiceSttGateway } from '../core/voice-stt-gateway.ts';
 import { describeTranscriptionFailure } from '../core/voice-stt-gateway.ts';

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { logger, maskCredentialCandidates, readDocument, summarizeError, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, maskCredentialCandidates, readDocument, summarizeError, writeDocument } from '@goodvibes/engine/platform/platform/utils';
 /**
  * InputHistory, Persisted command history with arrow-key navigation.
  *

@@ -5,10 +5,10 @@
  * folder's trust (which decides whether every tool may run here), the policy
  * bundles, the sandbox setting and the sandbox sessions.
  */
-import { createSecurityCommand } from '@goodvibes-jev/engine/terminal-shell/security-command';
-import { createTrustReviewTools } from '@goodvibes-jev/engine/terminal-shell/trust-review';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { createSecurityCommand } from '@goodvibes/engine/terminal-shell/security-command';
+import { createTrustReviewTools } from '@goodvibes/engine/terminal-shell/trust-review';
+import { atomicWriteFileSync } from '@goodvibes/engine/platform/platform/config';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import {
   requireReadModels,

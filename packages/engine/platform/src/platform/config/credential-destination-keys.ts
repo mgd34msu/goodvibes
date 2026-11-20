@@ -12,7 +12,7 @@
  * target (`keySource`/`keyName` beside `endpoint`), so every write of the chain
  * states each target's credential with its endpoint; it has no separate key.
  */
-import { refusal, type Refusal } from '@goodvibes-jev/engine/errors';
+import { refusal, type Refusal } from '@goodvibes/engine/errors';
 
 export interface CredentialDestination {
   /** The settings that name the credential sent to this destination; any one in the same update states it. */

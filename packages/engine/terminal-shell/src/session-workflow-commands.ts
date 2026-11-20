@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { resolveSessionTarget, type SessionManager, type SessionMeta } from '@goodvibes-jev/engine/platform/platform/sessions';
-import { formatReturnContextForDisplay } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { resolveSessionTarget, type SessionManager, type SessionMeta } from '@goodvibes/engine/platform/platform/sessions';
+import { formatReturnContextForDisplay } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import {
   captureTranscriptSource,

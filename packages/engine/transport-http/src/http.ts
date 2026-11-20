@@ -1,4 +1,4 @@
-import { GoodVibesError, HttpStatusError, createHttpStatusError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError, HttpStatusError, createHttpStatusError } from '@goodvibes/engine/errors';
 import {
   type AuthTokenResolver,
   type HeaderResolver,

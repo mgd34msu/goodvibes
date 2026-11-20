@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import type { JudgmentPort } from '@goodvibes/judgment';
 import type { IntakeCredentialStore } from '../../context.js';
 import { applySlackReactions } from './slack.js';
 import { applyDiscordTagEffects, observeDiscordForumTags } from './discord.js';

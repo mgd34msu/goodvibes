@@ -13,8 +13,8 @@
  */
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { UtteranceAudioArtifact } from '@goodvibes-jev/engine/platform/platform/voice/capture';
-import type { WakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
+import type { UtteranceAudioArtifact } from '@goodvibes/engine/platform/platform/voice/capture';
+import type { WakeRuntimeSettings } from '@goodvibes/engine/platform/platform/voice/wake/runtime';
 import { client as platformClient } from '../goodvibes';
 import { getClientLifetime } from '../client-lifetime';
 import type { OperatorMethodOutput } from '../goodvibes';

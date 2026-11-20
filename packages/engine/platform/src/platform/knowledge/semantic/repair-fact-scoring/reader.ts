@@ -1,8 +1,8 @@
 import { requireSemanticKnowledge } from '../../decision-policy.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { types as nodeTypes } from 'node:util';
-import { captureJudgmentPort, judgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { checkAnswers, toJson, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort, judgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError } from '@goodvibes/engine/errors';
+import { checkAnswers, toJson, type JudgmentPort } from '@goodvibes/judgment';
 import { assertJudgmentInput, retainOwnedJson, JudgmentInputError } from '../../../gate/judgment-input.js';
 import { prepareJudgmentResult } from '../../../gate/judgment-result.js';
 import { createRepairFactUsefulnessReader } from '../repair-usefulness/reader.js';

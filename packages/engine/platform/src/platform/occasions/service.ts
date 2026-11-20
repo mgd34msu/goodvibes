@@ -9,7 +9,7 @@
  * No step on the sweep, list or pull path asks a model, except reading who a new
  * or changed `remember-only` line is about, which is stored (subject.ts).
  */
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import type { OccasionMutationOptions } from './operation.js';
 import { captureOccasionOperation, captureSettingsRevision, retainOccasionStateReceipts } from './operation.js';
 import { OccasionReadingWork, OccasionReadingHeldError } from './readings.js';

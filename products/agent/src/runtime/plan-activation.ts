@@ -1,4 +1,4 @@
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 /**
  * Starts the turn that carries out an activated plan. The turn begins after the

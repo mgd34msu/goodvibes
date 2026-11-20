@@ -4,7 +4,7 @@
  * (inbound-message.ts), where a conditional yes is an amendment, never
  * permission to run the original arguments.
  */
-import { defineSelector, NONE, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineSelector, NONE, STAKES_BANDS } from '@goodvibes/judgment';
 
 const DEPLOY = { approvalId: 'deploy', tool: 'run_command', summary: 'Deploy the production application', arguments: { command: 'deploy production' } };
 const EXPORT = { approvalId: 'export', tool: 'export_data', summary: 'Export the customer database', arguments: { destination: 'customers.csv' } };

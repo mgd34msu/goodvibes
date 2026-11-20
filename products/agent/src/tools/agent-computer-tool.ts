@@ -1,10 +1,10 @@
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
 import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { confirmParameter, requestParameter } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 type AgentComputerAction =
   | 'status'

@@ -1,8 +1,8 @@
 import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { isDeepStrictEqual } from 'node:util';
 import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
-import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { JudgmentError, mapLimit, type JudgmentResult, type Questions, type YesNoReading } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
+import { JudgmentError, mapLimit, type JudgmentResult, type Questions, type YesNoReading } from '@goodvibes/judgment';
 import { logger } from '../utils/logger.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
 import { CompletionEvidenceProjection } from './response-completion-evidence.js';

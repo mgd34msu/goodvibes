@@ -17,7 +17,7 @@ import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-m
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { isSurfaceDeliveryEnabled, isSurfaceIngressEnabled } from '../platform/src/platform/daemon/surface-policy.ts';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });

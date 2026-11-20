@@ -6,4 +6,4 @@ export {
   readCheckpointGuardSettings,
   readCheckpointRegistrationSetting,
   type CheckpointGuardSettings,
-} from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/platform/platform/config';

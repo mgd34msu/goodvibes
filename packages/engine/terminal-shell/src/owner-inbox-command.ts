@@ -14,10 +14,10 @@
  * and who is typing. A command the model runs may read the inbox but never
  * answers it: the owner's answer is the owner's.
  */
-import { formatRefusal } from '@goodvibes-jev/engine/errors';
-import { listEveryOwnerItem } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { OwnerAnswerDelivery, OwnerInboxPort, OwnerItem } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
+import { formatRefusal } from '@goodvibes/engine/errors';
+import { listEveryOwnerItem } from '@goodvibes/engine/platform/platform/control-plane';
+import type { OwnerAnswerDelivery, OwnerInboxPort, OwnerItem } from '@goodvibes/engine/platform/platform/control-plane';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand } from './command-actions/define.js';
@@ -25,7 +25,7 @@ import { defineList, type ListRow } from './command-actions/lists.js';
 import type { ActionDescription, CommandActionContext, InputDescription } from './command-actions/types.js';
 import { listInput, readAction, textInput } from './described-command-kit.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
-import { JEV_DECISION_CHOICES } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { JEV_DECISION_CHOICES } from '@goodvibes/engine/platform/platform/permissions';
 
 export interface OwnerInboxCommandContext extends CommandActionContext {
   readonly renderRequest: () => void;

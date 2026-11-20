@@ -15,9 +15,9 @@
  */
 
 import { isDeepStrictEqual } from 'node:util';
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { OnboardingApplyOperation } from '../../runtime/onboarding/index.ts';
-import { getFeatureSetting, isFeatureConfigEnabled, isFeatureDefaultEnabled } from '@goodvibes-jev/engine/terminal-shell';
+import { getFeatureSetting, isFeatureConfigEnabled, isFeatureDefaultEnabled } from '@goodvibes/engine/terminal-shell';
 import type {
   OnboardingWizardControllerLike,
   OnboardingWizardFieldDefinition,

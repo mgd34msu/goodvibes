@@ -26,7 +26,7 @@ import {
   parsePactlSources,
   type AudioInputDevice,
   type AudioInputDeviceEnumerator,
-} from '@goodvibes-jev/engine/platform/platform/voice/capture';
+} from '@goodvibes/engine/platform/platform/voice/capture';
 import { findExecutable } from './player.js';
 
 /** How long the listing may take before it is abandoned. */

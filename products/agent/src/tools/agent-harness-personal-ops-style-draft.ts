@@ -1,9 +1,9 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { composeDraftReply, extractStyleProfile, type StyleReplyMessage, type StyleSentMessage } from '@goodvibes-jev/engine/platform/platform/email';
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { assertJudgmentInput, retainStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
+import { composeDraftReply, extractStyleProfile, type StyleReplyMessage, type StyleSentMessage } from '@goodvibes/engine/platform/platform/email';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes/engine/platform/platform/runtime';
+import { assertJudgmentInput, retainStrictJudgmentJson } from '@goodvibes/engine/platform/platform/gate';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import { type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import type { PersonalOpsLiveRecord, PersonalOpsWorkflow } from './agent-harness-personal-ops-types.ts';
 
 export const STYLE_DRAFT_RECORD_ID = 'inbox-style-reply-draft';

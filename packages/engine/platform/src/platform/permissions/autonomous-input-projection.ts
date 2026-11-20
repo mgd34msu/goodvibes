@@ -1,6 +1,6 @@
 /** Manager-owned host-alternative projection. Raw catalogs never become model evidence. */
 import { isDeepStrictEqual } from 'node:util';
-import type { EntryType } from '@goodvibes-jev/judgment';
+import type { EntryType } from '@goodvibes/judgment';
 import { captureJsonEntry } from '../gate/judgment-input.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ProjectedToolCall } from '../tools/input-projection.js';

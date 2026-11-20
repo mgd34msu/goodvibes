@@ -1,6 +1,6 @@
-import { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-export { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { stableUrlHostForBindHost } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { yesNo, formatJsonOrText } from '@goodvibes/engine/terminal-shell/cli-output';
+export { yesNo, formatJsonOrText } from '@goodvibes/engine/terminal-shell/cli-output';
+import { stableUrlHostForBindHost } from '@goodvibes/engine/platform/platform/pairing';
 import {
   splitCommandOption,
   readOptionValue,
@@ -8,7 +8,7 @@ import {
   hasCommandFlag,
   commandValues,
   isPresentConfigValue,
-} from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
+} from '@goodvibes/engine/terminal-shell/cli-arguments';
 export {
   splitCommandOption,
   readOptionValue,
@@ -16,9 +16,9 @@ export {
   hasCommandFlag,
   commandValues,
   isPresentConfigValue,
-} from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
+} from '@goodvibes/engine/terminal-shell/cli-arguments';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
-import { createDaemonConfigClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { createDaemonConfigClient } from '@goodvibes/engine/platform/platform/runtime/client';
 import { createDaemonVerbCaller } from '../runtime/client/operator-endpoint.ts';
 /**
  * management-utils.ts, shared CLI utility functions.
@@ -39,18 +39,18 @@ import { readFileSync } from 'node:fs';
 import net from 'node:net';
 import 'node:child_process';
 import 'node:os';
-import type { ConfigManager, GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
-import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { ConfigManager, GoodVibesConfig } from '@goodvibes/engine/platform/platform/config';
+import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes/engine/platform/platform/knowledge';
 import { createRuntimeServices } from '../runtime/services.ts';
-import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { createRuntimeStore } from '@goodvibes/engine/platform/platform/runtime/state';
 import type { RuntimeServices } from '../runtime/services.ts';
-import type { ProviderCatalogOptions } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ProviderCatalogOptions } from '@goodvibes/engine/platform/platform/providers';
 import { RuntimeEventBus, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom } from '@/runtime/index.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
-import { applyRuntimeEndpointFlagOverrides } from '@goodvibes-jev/engine/terminal-shell';
-import type { RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
-import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell';
+import { applyRuntimeEndpointFlagOverrides } from '@goodvibes/engine/terminal-shell';
+import type { RuntimeEndpointId } from '@goodvibes/engine/terminal-shell';
+import type { CliCommandRuntime } from '@goodvibes/engine/terminal-shell';
 import '../utils/browser.ts';
 
 export function readPassword(args: readonly string[]): string | null {

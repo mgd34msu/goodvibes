@@ -1,4 +1,4 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
 
 /**
  * The text of a tool's catch-all. An admission problem (held, stale, invalid

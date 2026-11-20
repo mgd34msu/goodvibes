@@ -1,13 +1,13 @@
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { AgentWorkspaceChannelStatus } from '../input/agent-workspace-channels.ts';
-import { readAgentChannelDeliveryReceipts } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery-receipts';
+import { readAgentChannelDeliveryReceipts } from '@goodvibes/engine/terminal-shell/agent-turn/channel-delivery-receipts';
 import { buildAgentWorkspaceChannelTriage, type AgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
 import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { withInventoryDisclosure } from '@goodvibes-jev/engine/terminal-shell/agent-turn/inventory-disclosure';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { withInventoryDisclosure } from '@goodvibes/engine/terminal-shell/agent-turn/inventory-disclosure';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 export interface AgentHarnessChannelArgs {
   readonly channelId?: unknown;

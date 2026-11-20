@@ -1,5 +1,5 @@
-import { mapLimit } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { mapLimit } from '@goodvibes/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { policyBreadth } from '../../gate/batteries/policy-breadth.js';
 import type { PermissionsConfig, PolicyRule } from './types.js';
 import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../decision-policy.js';

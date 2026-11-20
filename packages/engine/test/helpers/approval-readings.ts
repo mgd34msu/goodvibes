@@ -1,8 +1,8 @@
 /** Explicit test answers for the daemon approval patterns, never production heuristics. */
 import { afterEach, beforeEach } from 'bun:test';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { JudgmentError, SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
+import { JudgmentError, SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes/judgment';
+import { choiceAnswer, noulAnswer } from '@goodvibes/judgment/testing';
 import { decisionPort } from './decision-port.ts';
 import { securityPort } from './security-readings.ts';
 

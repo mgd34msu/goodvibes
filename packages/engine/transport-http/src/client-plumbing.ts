@@ -1,5 +1,5 @@
-import type { OmitNamed, RequiredNamedKeys } from '@goodvibes-jev/engine/contracts';
-import { ContractError, admitRegex, failedRead, present, refusal, type Observed, type SharedRegexTester } from '@goodvibes-jev/engine/errors';
+import type { OmitNamed, RequiredNamedKeys } from '@goodvibes/engine/contracts';
+import { ContractError, admitRegex, failedRead, present, refusal, type Observed, type SharedRegexTester } from '@goodvibes/engine/errors';
 
 const MAX_SCHEMA_PATTERN_CHARS = 512;
 

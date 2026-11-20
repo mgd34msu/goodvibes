@@ -5,18 +5,18 @@
  * readiness of the channels it can send to, the setup guide, the inbox, sends
  * and their receipts.
  */
-import { registerChannelsCommand, type ChannelReadinessFilter, type ChannelSendValues } from '@goodvibes-jev/engine/terminal-shell/channels-command';
+import { registerChannelsCommand, type ChannelReadinessFilter, type ChannelSendValues } from '@goodvibes/engine/terminal-shell/channels-command';
 import { openTelegramCursorRecovery } from './telegram-cursor.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { AgentWorkspaceChannelSetupGuide, AgentWorkspaceChannelStatus } from '../agent-workspace-channels.ts';
 import { buildAgentWorkspaceChannelTriage, formatAgentWorkspaceChannelTriage } from '../agent-workspace-channel-triage.ts';
 import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from '../agent-workspace-channels.ts';
 import { invokeConnectedHostMethod } from '../connected-host-routes.ts';
-import { buildAgentChannelDeliveryPreview, deliverAgentChannelMessage, formatAgentChannelDeliveryResult } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery';
-import { formatAgentChannelDeliveryReceiptLine, readAgentChannelDeliveryReceipts, recordAgentChannelDeliveryReceipt } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery-receipts';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { buildAgentChannelDeliveryPreview, deliverAgentChannelMessage, formatAgentChannelDeliveryResult } from '@goodvibes/engine/terminal-shell/agent-turn/channel-delivery';
+import { formatAgentChannelDeliveryReceiptLine, readAgentChannelDeliveryReceipts, recordAgentChannelDeliveryReceipt } from '@goodvibes/engine/terminal-shell/agent-turn/channel-delivery-receipts';
+import { readRefusal } from '@goodvibes/engine/errors';
 import { commandRefusal } from './confirmation.ts';
-import { Secret } from '@goodvibes-jev/engine/platform/platform/security';
+import { Secret } from '@goodvibes/engine/platform/platform/security';
 
 function readLimitValue(value: string | undefined, fallback: number): number {
   if (!value) return fallback;

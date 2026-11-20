@@ -2,7 +2,7 @@ import {
   JudgmentError, matchesJudgmentModel, checkAnswers,
   type JudgmentErrorKind, type JudgmentLineage, type JudgmentPort,
   type JudgmentResult, type Questions,
-} from '@goodvibes-jev/judgment';
+} from '@goodvibes/judgment';
 
 const INVALID = (): never => { throw new JudgmentError('invalid-response', 'Invalid WebUI judgment response.'); };
 const ERROR_KINDS: readonly JudgmentErrorKind[] = ['invalid-request', 'rejected', 'unavailable', 'aborted', 'invalid-response', 'internal', 'unrecorded'];

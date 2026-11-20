@@ -1,7 +1,7 @@
 /** Side-effect-free admission for one retained unattended service operation. */
 import type { AutoUpdateServiceActions } from './auto-updater.js';
 import type { ServiceHandoverOutcome } from './service-handover.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes/judgment/decisions';
 
 export interface ServiceHandoverSupport {
   readonly supported: boolean;

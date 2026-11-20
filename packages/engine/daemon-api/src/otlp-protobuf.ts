@@ -1,4 +1,4 @@
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 
 type WireType = 0 | 1 | 2 | 3 | 4 | 5;
 

@@ -9,9 +9,9 @@
  * uninstalled entry of a live need's kind is listed in need and catalog order,
  * marked `unranked`, under the same cap.
  */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { isClassicOperation } from '../decision-policy.js';
-import { mapLimit } from '@goodvibes-jev/judgment';
+import { mapLimit } from '@goodvibes/judgment';
 import type { RuntimeStore } from '../store/index.js';
 import {
   type EcosystemCatalogPathOptions,

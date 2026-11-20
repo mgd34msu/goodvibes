@@ -1,8 +1,8 @@
-import { KEEP_AWAKE_NOT_HELD } from '@goodvibes-jev/engine/platform/platform/power';
+import { KEEP_AWAKE_NOT_HELD } from '@goodvibes/engine/platform/platform/power';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { defineCommand, type ActionDescription } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { readAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { defineCommand, type ActionDescription } from '@goodvibes/engine/terminal-shell/command-actions';
+import { readAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { powerStatusLines, type PowerSurfaceState } from '../../core/power-status.ts';
 
 /** The surface state carries the platform's refused note when keep-awake is on but the OS granted nothing. */

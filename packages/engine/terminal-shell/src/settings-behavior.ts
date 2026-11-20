@@ -1,4 +1,4 @@
-import type { ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigSetting } from '@goodvibes/engine/platform/platform/config';
 import type { ModelPickerTarget as PlatformModelTarget } from './model-picker-types.js';
 export type ModelPickerTarget = Exclude<PlatformModelTarget, 'embeddings'>;
 export type ModelPickerLaunch =

@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/lane-graph-paint';
+export * from '@goodvibes/engine/terminal-shell/lane-graph-paint';

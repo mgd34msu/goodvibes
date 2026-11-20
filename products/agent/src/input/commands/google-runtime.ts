@@ -24,17 +24,17 @@
  * Nothing here ever prints a credential.
  */
 
-import type { FeedFetcher } from '@goodvibes-jev/engine/platform/platform/calendar';
+import type { FeedFetcher } from '@goodvibes/engine/platform/platform/calendar';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { subscriptionRegistryForWrite } from './calendar-subscription-runtime.ts';
 import { requireSecretsManager, requireShellPaths } from './runtime-services.ts';
 import { routeConfigWrite } from '../../config/daemon-config-routing.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { defineCommand, defineList, type ActionDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { choiceInput, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { renderGoogleSetupReport } from '@goodvibes-jev/engine/platform/platform/google';
-import { renderGoogleSetupRunbook } from '@goodvibes-jev/engine/platform/platform/google';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { defineCommand, defineList, type ActionDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { choiceInput, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { renderGoogleSetupReport } from '@goodvibes/engine/platform/platform/google';
+import { renderGoogleSetupRunbook } from '@goodvibes/engine/platform/platform/google';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes/engine/platform/platform/google';
 import { buildGoodVibesSecretRef } from '../../config/secret-config.ts';
 import {
   adoptGoogleCredentials,
@@ -48,10 +48,10 @@ import {
   reauthorizeGoogle,
   runGoogleSetup,
 } from './google-connection-actions.ts';
-import type { GoogleProgressPort, GoogleSetupPath, GoogleSetupStepSpec, GoogleStepResult } from '@goodvibes-jev/engine/platform/platform/google';
-import { getOutwardApprovalStore, listRefusedOutwardActions, takeRefusedOutwardAction, type PendingOutwardAction } from '@goodvibes-jev/engine/terminal-shell/agent-turn/outward-approvals';
+import type { GoogleProgressPort, GoogleSetupPath, GoogleSetupStepSpec, GoogleStepResult } from '@goodvibes/engine/platform/platform/google';
+import { getOutwardApprovalStore, listRefusedOutwardActions, takeRefusedOutwardAction, type PendingOutwardAction } from '@goodvibes/engine/terminal-shell/agent-turn/outward-approvals';
 import { commandRefusal } from './confirmation.ts';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { readRefusal } from '@goodvibes/engine/errors';
 
 
 /** Live progress. A setup run is never a silent grind. */

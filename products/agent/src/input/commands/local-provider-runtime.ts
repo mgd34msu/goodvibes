@@ -1,5 +1,5 @@
-import { registerProviderCommand } from '@goodvibes-jev/engine/terminal-shell/provider-command';
-import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
+import { registerProviderCommand } from '@goodvibes/engine/terminal-shell/provider-command';
+import { formatAgentRecordSource } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireProviderApi, requireSecretsManager, requireServiceRegistry, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
 

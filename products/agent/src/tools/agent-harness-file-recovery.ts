@@ -1,12 +1,12 @@
 import { isAbsolute, relative } from 'node:path';
 import type { EffectResult } from './agent-harness-tool-utils.ts';
 import { lstatSync, realpathSync } from 'node:fs';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
-import { FileUndoConflictError } from '@goodvibes-jev/engine/platform/platform/state';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { resolveAndValidatePath } from '@goodvibes/engine/platform/platform/utils';
+import { FileUndoConflictError } from '@goodvibes/engine/platform/platform/state';
 import type { CommandContext } from '../input/command-registry.ts';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 type FileRecoveryContext = Readonly<{ workspace: Readonly<Pick<CommandContext['workspace'], 'fileUndoManager'>> & {
   readonly shellPaths?: Readonly<Pick<NonNullable<CommandContext['workspace']['shellPaths']>, 'workingDirectory'>>;

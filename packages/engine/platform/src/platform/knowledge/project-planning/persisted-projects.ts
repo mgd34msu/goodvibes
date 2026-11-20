@@ -2,7 +2,7 @@
  * No schema callback, migration, directory creation, chmod or persistence runs.
  * Returned IDs are ordinary data; this module cannot authorize a project.
  */
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { closeSync, constants, lstatSync, openSync, readSync, readlinkSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { inspectPlanningProjectsFile } from '../../state/sqlite-store.js';

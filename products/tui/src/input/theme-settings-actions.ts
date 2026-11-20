@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/theme-settings-actions';
+export * from '@goodvibes/engine/terminal-shell/theme-settings-actions';

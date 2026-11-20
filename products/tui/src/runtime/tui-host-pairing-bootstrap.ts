@@ -1,8 +1,8 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, type Stats } from 'node:fs';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
-import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
-import { isTrustedAncestorDirectory } from '@goodvibes-jev/engine/terminal-shell/host-pairing-store';
+import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
+import { operatorTokenPath } from '@goodvibes/engine/platform/platform/pairing/companion-token';
+import { isTrustedAncestorDirectory } from '@goodvibes/engine/terminal-shell/host-pairing-store';
 
 /** The daemon's operator token on this machine, read with every ancestor checked: the bootstrap of
  * explicit /devices pair host, and the credential native work presents to a daemon on this machine when

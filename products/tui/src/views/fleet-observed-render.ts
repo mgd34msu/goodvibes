@@ -13,10 +13,10 @@
 //     real channel exists; where steer.kind is 'none' the detail states why.
 // ---------------------------------------------------------------------------
 
-import type { ProcessNode, ProcessObserved, ObservedAgentKind } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ProcessNode, ProcessObserved, ObservedAgentKind } from '@goodvibes/engine/platform/platform/runtime/fleet';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
 import { buildViewLine, buildSearchInputLine, DEFAULT_VIEW_PALETTE, type ViewPalette } from './polish.ts';
-import { truncateDisplay, wrapText } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import { truncateDisplay, wrapText } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 
 /** An observed-external node carries its foreign-agent facts on `observed`. */
 export type ObservedNode = ProcessNode & { readonly observed: ProcessObserved };

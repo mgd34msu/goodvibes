@@ -29,7 +29,7 @@
  * host/checkout-handlers.ts) reads the same registry.
  */
 import type { SecurityCodeRequests } from './security-code-requests.js';
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import { BudgetLedger, type BudgetLimits } from './budget.js';
 import { captureOwnedJson } from '../gate/judgment-input.js';
 import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperationOwnership } from './checkout-ownership.js';

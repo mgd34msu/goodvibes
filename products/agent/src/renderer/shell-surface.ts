@@ -1,7 +1,7 @@
 import { renderThrobberLine } from './throbber.ts';
-import { createShellFooter, statusCostText as priceUsage } from '@goodvibes-jev/engine/terminal-shell/shell-footer';
-import { presetForMode, type GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate';
-import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
+import { createShellFooter, statusCostText as priceUsage } from '@goodvibes/engine/terminal-shell/shell-footer';
+import { presetForMode, type GatePresetName } from '@goodvibes/engine/platform/platform/gate';
+import { type Line, createEmptyLine } from '@goodvibes/engine/platform/platform/types';
 import { type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { activeTokens, activeUiTones } from './theme.ts';
 import { UIFactory } from './ui-factory.ts';
@@ -46,7 +46,7 @@ import { type BackToBottomState } from './back-to-bottom.ts';
  * which says what the next Esc does, then main kept in sight.
  */
 
-import type { ShellFooterView } from '@goodvibes-jev/engine/terminal-shell/shell-footer-view';
+import type { ShellFooterView } from '@goodvibes/engine/terminal-shell/shell-footer-view';
 export type { ShellFooterView };
 
 export interface ShellFooterBuildOptions {

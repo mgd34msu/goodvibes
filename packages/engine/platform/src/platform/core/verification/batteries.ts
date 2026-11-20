@@ -1,4 +1,4 @@
-import { defineBattery, defineSelector, yesNo, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, defineSelector, yesNo, STAKES_BANDS } from '@goodvibes/judgment';
 import { HOST_COMPLETION_REVIEW_CONTEXT, RESPONSE_REVIEW_CONTEXT } from '../batteries/response-completion.js';
 
 export const verificationScope = defineBattery({

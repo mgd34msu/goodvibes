@@ -13,8 +13,8 @@
  *
  * Pure: projections of the fetched records.
  */
-import type { AskChoice, AskPresentation } from '@goodvibes-jev/engine/platform/platform/permissions';
-import type { WorkBoardAsk } from '@goodvibes-jev/engine/contracts';
+import type { AskChoice, AskPresentation } from '@goodvibes/engine/platform/platform/permissions';
+import type { WorkBoardAsk } from '@goodvibes/engine/contracts';
 import type { ApprovalRecord } from './goodvibes';
 import { approvalReading, isActionableApproval, type ApprovalReading } from './approvals';
 

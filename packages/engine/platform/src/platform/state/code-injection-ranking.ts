@@ -1,7 +1,7 @@
 /** Vector recall is a shortlist only. This operation owns fresh canonical relevance readings. */
-import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes/engine/errors';
 import type { ReadAccessFilter } from '../tools/shared/read-access.js';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import type { JudgmentPort } from '@goodvibes/judgment';
 import { captureOwnedJson, assertJudgmentInput } from '../gate/judgment-input.js';
 import { codeChunkView, rerankCodeParts } from './batteries/code-search-rerank.js';
 import type { CodeContextResult } from './code-index-types.js';

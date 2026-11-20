@@ -1,8 +1,8 @@
-import { getPeerEndpoint, type PeerEndpointContract } from '@goodvibes-jev/engine/contracts';
+import { getPeerEndpoint, type PeerEndpointContract } from '@goodvibes/engine/contracts';
 import type { DaemonRemoteManagementRouteHandlers } from './context.js';
 import { jsonErrorResponse, readJsonErrorResponse, serviceFailureStatus } from './error-response.js';
 import { requestActor } from './http-policy.js';
-import type { Selection } from '@goodvibes-jev/engine/errors';
+import type { Selection } from '@goodvibes/engine/errors';
 import {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,

@@ -9,8 +9,8 @@ import { isNativeConversationTurn, markNativeConversationTurnEffectsPossible, na
 import { TurnHookOwner, bindTurnHookDispatcher } from '../hooks/turn-ownership.js';
 import { TurnCancellationFence, type TurnCancellationResult } from './turn-cancellation.js';
 import { resolveSystemPrompt } from './orchestrator-system-prompt.js';
-import { JudgmentError } from '@goodvibes-jev/judgment';
-import { classifyFailure, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { JudgmentError } from '@goodvibes/judgment';
+import { classifyFailure, JudgmentPortMissingError } from '@goodvibes/engine/errors';
 import { decisionModelUse, inheritClassicDecisionFallback, isClassicOperation, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
 import { PlannerJudgmentError } from './adaptive-planner.js';
@@ -29,7 +29,7 @@ import { notifyCompletion } from '../utils/notify.js';
 import { logger } from '../utils/logger.js';
 import type { PermissionManager } from '../permissions/manager.js';
 import { currentTurn, inputOriginIsOwnerDirect, startTurnForOwnerInput, turnSurfaceOf, withTurn } from '../security/turn-boundary.js';
-import type { Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import {
   isPassiveCodeInjectionEnabled,
   isPassiveKnowledgeInjectionEnabled,

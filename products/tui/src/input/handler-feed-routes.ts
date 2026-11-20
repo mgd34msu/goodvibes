@@ -4,7 +4,7 @@ import {
   type TextRouteState as SharedTextState,
   type KeyRouteState as SharedKeyState,
   type MouseRouteState as SharedMouseState,
-} from '@goodvibes-jev/engine/terminal-shell/feed-token-routes';
+} from '@goodvibes/engine/terminal-shell/feed-token-routes';
 import type { CommandContext } from './command-registry.ts';
 import type { FooterTarget } from '../renderer/footer-targets.ts';
 import type { KillRing } from './kill-ring.ts';

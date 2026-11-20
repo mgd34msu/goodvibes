@@ -12,7 +12,7 @@
  *   [what happened] · [why] · [what to do]
  */
 
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import type { ConfigManager } from '../config/manager.js';
 
 // ---------------------------------------------------------------------------

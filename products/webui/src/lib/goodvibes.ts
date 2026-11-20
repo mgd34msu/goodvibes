@@ -3,21 +3,21 @@ import {
   createBrowserKnowledgePlatform,
   forSession,
   KNOWLEDGE_BROWSER_ROUTES,
-} from '@goodvibes-jev/engine/platform/browser/knowledge';
-import type { BrowserKnowledgeMethodId } from '@goodvibes-jev/engine/platform/browser/knowledge';
-import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
+} from '@goodvibes/engine/platform/browser/knowledge';
+import type { BrowserKnowledgeMethodId } from '@goodvibes/engine/platform/browser/knowledge';
+import { WEBUI_METHOD_ROUTES } from '@goodvibes/engine/contracts/generated/webui-facade';
 import { getClientLifetime, heldBearerSync, invalidateClientLifetime, isClientLifetimeCurrent, readSignedInIdentity, tokenStore } from './client-lifetime';
 import { clearHeldInputs } from './held-input';
 export { hasSignInSync, tokenStore } from './client-lifetime';
-import { isRuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
+import { isRuntimeEventDomain } from '@goodvibes/engine/contracts';
 import { getActiveRoute, routedFetch } from './relay-connection';
 import { acceptOwnerApprovalAnswer, type AppliedAnswer } from './owner-approval';
-import { readTelegramCursorPreview, readTelegramCursorMigrationResult, type TelegramCursorPreview } from '@goodvibes-jev/engine/platform/platform/channels/telegram-cursor';
-import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/platform/browser/decision-policy';
+import { readTelegramCursorPreview, readTelegramCursorMigrationResult, type TelegramCursorPreview } from '@goodvibes/engine/platform/platform/channels/telegram-cursor';
+import { DecisionModelsDisabledError } from '@goodvibes/engine/platform/browser/decision-policy';
 import { browserDecisionPolicy } from './decision-policy';
-import type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, PaymentOperationView, PaymentOperationCancellation } from '@goodvibes-jev/engine/platform/platform/payments';
-import type { PaymentSecurityCodeRequestView, PaymentSecurityCodeAcceptance } from '@goodvibes-jev/engine/platform/platform/payments/browser';
-import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentSecurityCodeAcceptance, readPaymentOperation, readPaymentOperationCancellation, PAYMENT_PURCHASE_RECONCILE_HTTP } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, PaymentOperationView, PaymentOperationCancellation } from '@goodvibes/engine/platform/platform/payments';
+import type { PaymentSecurityCodeRequestView, PaymentSecurityCodeAcceptance } from '@goodvibes/engine/platform/platform/payments/browser';
+import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentSecurityCodeAcceptance, readPaymentOperation, readPaymentOperationCancellation, PAYMENT_PURCHASE_RECONCILE_HTTP } from '@goodvibes/engine/platform/platform/payments/browser';
 import { readClientCompatibilityFloor, recordObservedClientCompatibilityFloor } from './client-compatibility';
 // The union profile.forget accepts as a target (a field id OR a raw line index), named in
 // lib/owner-profile.ts beside the readers for the same verbs' output. The generated
@@ -31,7 +31,7 @@ import type {
   OperatorMethodOutput,
   OperatorTypedMethodId,
   RuntimeEventDomain,
-} from '@goodvibes-jev/engine/contracts';
+} from '@goodvibes/engine/contracts';
 import type {
   ContractsSummariesInput,
   ContractsSummariesResult,
@@ -219,7 +219,7 @@ interface RequestOptions {
  * The webui's transport layer is GENERATED, not hand-maintained. The mechanical facts,
  * which operator methods carry a plain-REST http binding, at what path, and which are
  * reachable only through the generic gateway-method invoke endpoint, come from the
- * contract-emitted facade artifact (@goodvibes-jev/engine/contracts/generated/webui-facade):
+ * contract-emitted facade artifact (@goodvibes/engine/contracts/generated/webui-facade):
  * WEBUI_METHOD_ROUTES (every REST-routed method id → route). The ergonomic layer below
  * (the platform.operator.* call shapes, error normalization, auth handling, and the
  * routedFetch relay integration) stays hand-written on top; every request and reply type

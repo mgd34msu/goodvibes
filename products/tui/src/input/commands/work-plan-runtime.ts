@@ -1,5 +1,5 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { registerTodoCommand } from '@goodvibes-jev/engine/terminal-shell/todo-command';
+import { registerTodoCommand } from '@goodvibes/engine/terminal-shell/todo-command';
 import { openModalCommand } from './runtime-services.ts';
 
 /** `/todo` is one description shared with the Agent (terminal-shell/todo-command.ts); here it also opens the to-do panel. */

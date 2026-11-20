@@ -32,10 +32,10 @@
  * waiting. `revision()` is one statement over SQLite's change counters.
  */
 import { randomUUID } from 'node:crypto';
-import { refusal, type Refusal } from '@goodvibes-jev/engine/errors';
+import { refusal, type Refusal } from '@goodvibes/engine/errors';
 import type { ApprovalBroker, SharedApprovalRecord } from './approval-broker.js';
 import { approvalViewerOfActor, localApprovalActions, type ApprovalActions } from './approval-actions.js';
-import type { Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { formatApprovalRef, readApproval, type ApprovalReading, type ApprovalViewer } from './approval-lifecycle.js';
 import { FenceIssuer } from '../utils/owner-fence.js';
 import {

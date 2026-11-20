@@ -1,9 +1,9 @@
-import { createPendingHostServices } from '@goodvibes-jev/engine/terminal-shell/host-service-status';
+import { createPendingHostServices } from '@goodvibes/engine/terminal-shell/host-service-status';
 import {
   pendingHostServiceStatus,
   hostServiceIsActive,
   hostServiceIsBlocked,
-} from '@goodvibes-jev/engine/terminal-shell/host-service-status';
+} from '@goodvibes/engine/terminal-shell/host-service-status';
 /**
  * Connected-host (daemon + HTTP listener) discovery for GoodVibes Agent.
  *
@@ -23,8 +23,8 @@ import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
   type DaemonServiceControl,
-} from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import type { SpineReachability } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
+} from '@goodvibes/engine/platform/platform/runtime/client';
+import type { SpineReachability } from '@goodvibes/engine/platform/platform/runtime/session-spine';
 import type {
   DeferredStartupCoordinator,
   ExternalServicesHandle,
@@ -32,14 +32,14 @@ import type {
   HostServicesConfig,
   RuntimeEventBus,
 } from '@/runtime/index.ts';
-import type { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { HookDispatcher } from '@goodvibes/engine/platform/platform/hooks';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { DAEMON_INSTALL_COMMAND, DAEMON_START_COMMAND, readDaemonServiceState, type DaemonHost, type DaemonBringUpResult } from './daemon-repair.ts';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import type { RuntimeServices } from './services.ts';
 import type { UiRuntimeServices } from './ui-services.ts';
-import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
-import { firstShowingOfSettingsNotice } from '@goodvibes-jev/engine/terminal-shell/cli-config-overrides';
+import { connectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { firstShowingOfSettingsNotice } from '@goodvibes/engine/terminal-shell/cli-config-overrides';
 
 /**
  * This is a PROBE address, so it goes through the same wildcard→loopback

@@ -19,7 +19,7 @@ import { completeJudgmentView } from './complete-view.js';
  * wrong retry reruns a command that fails again, a wrong stop returns the
  * failure for the caller to act on.
  */
-import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes/judgment';
 
 /**
  * The work-note marker word, assembled at run time: this fixture data needs

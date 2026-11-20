@@ -3,7 +3,7 @@
  * identical for Discord, Slack, email and generic triage selectors. */
 import { chmodSync, lstatSync, mkdirSync, realpathSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { writeJsonFileAtomic } from '../../state/durable-file-io.js';
 import { tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
 import { readFileObservation, fileObservationIdentity } from '../../utils/file-observation.js';

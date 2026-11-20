@@ -1,10 +1,10 @@
-import { LIMITS, type JsonValue } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
-import { registrySelect, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
-import { type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
-import { isClassicOperation, rankClassicCatalog } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { LIMITS, type JsonValue } from '@goodvibes/judgment';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
+import { prepareJudgmentResult } from '@goodvibes/engine/platform/platform/gate';
+import { registrySelect, ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import { captureCatalogData } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
+import { type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
+import { isClassicOperation, rankClassicCatalog } from '@goodvibes/engine/platform/platform/runtime';
 
 const ALLOWED_OPTIONS: readonly string[] = ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource', 'semantic'];
 

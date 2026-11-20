@@ -1,7 +1,7 @@
 /** Shared execution modes for the engine and every product surface. */
 import { decisionModelSet, type DecisionModelSettings } from '../config/decision-model-set.js';
 import type { PermissionMode } from '../config/schema-types-permissions.js';
-import type { Stakes } from '@goodvibes-jev/judgment';
+import type { Stakes } from '@goodvibes/judgment';
 import type { GateRiskFamily } from './batteries/risk-family.js';
 
 /** What the gate does with a call at a given stakes level. */
@@ -10,7 +10,7 @@ export type GateAction = 'allow' | 'ask' | 'deny';
 /** The preset names, as the mode pill shows them. */
 export type GatePresetName = 'ask-me' | 'jev-decides' | 'just-vibes' | 'yolo' | 'plan';
 
-export type { Stakes as GateStakes } from '@goodvibes-jev/judgment';
+export type { Stakes as GateStakes } from '@goodvibes/judgment';
 
 /** Stakes levels from lowest to highest; the index is the level number. */
 export const GATE_STAKES: readonly Stakes[] = ['low', 'medium', 'high', 'critical'];

@@ -1,5 +1,5 @@
 import { captureNativeConversationContinuation, type NativeConversationContinuation } from './native-continuation-context.js';
-import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
+import type { OperatorRemoteClient } from '@goodvibes/engine/operator-client';
 import {
   nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeLookupRequestSchema,
   nativeConversationIntakeTransitionRequestSchema, nativeConversationIntakeResultSchema,

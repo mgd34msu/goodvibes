@@ -6,9 +6,9 @@ lookup, route binding, and surface-specific tools.
 
 Public API surfaces:
 
-- `@goodvibes-jev/engine/platform/platform/channels` (channel surface contract; home of the `ChannelSurface`, `ChannelRenderPolicy`, and `ChannelRouteBinding` types)
-- `@goodvibes-jev/engine/platform/platform/daemon` (daemon HTTP routes)
-- `@goodvibes-jev/engine/platform/platform/integrations` (notifier integrations)
+- `@goodvibes/engine/platform/platform/channels` (channel surface contract; home of the `ChannelSurface`, `ChannelRenderPolicy`, and `ChannelRouteBinding` types)
+- `@goodvibes/engine/platform/platform/daemon` (daemon HTTP routes)
+- `@goodvibes/engine/platform/platform/integrations` (notifier integrations)
 - operator control-plane methods for channel setup, delivery, and route binding
 
 ## Supported surfaces

@@ -1,1 +1,1 @@
-export { captureScheduleEffect, createScheduleInputProjector, formatScheduleOperatorResult } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-effect';
+export { captureScheduleEffect, createScheduleInputProjector, formatScheduleOperatorResult } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-effect';

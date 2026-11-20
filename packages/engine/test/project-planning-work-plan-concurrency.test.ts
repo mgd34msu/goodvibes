@@ -11,9 +11,9 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
+import type { JudgmentPort } from '@goodvibes/judgment';
+import { fakePort, noulAnswer } from '@goodvibes/judgment/testing';
 import { ProjectPlanningService } from '../platform/src/platform/knowledge/index.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { WorkPlanRows } from '../platform/src/platform/knowledge/project-planning/work-plan-rows.js';
@@ -39,8 +39,8 @@ function create(root = mkdtempSync(join(tmpdir(), 'goodvibes-work-plan-concurren
 
 /** The other app: its own process and knowledge database, editing the same plan file. */
 const OTHER_APP = `
-  import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-  import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+  import { installJudgmentPort } from '@goodvibes/engine/errors';
+  import { fakePort, noulAnswer } from '@goodvibes/judgment/testing';
   import { ProjectPlanningService } from './platform/src/platform/knowledge/index.ts';
   import { KnowledgeStore } from './platform/src/platform/knowledge/store.ts';
   installJudgmentPort(fakePort(() => noulAnswer(0.99)).port);

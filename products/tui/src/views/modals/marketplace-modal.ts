@@ -6,10 +6,10 @@ import type {
 } from '../../input/config-modal-types.ts';
 import { MODAL_TONES } from './modal-theme.ts';
 import { infoRow, headerRow, runModalCommand } from './modal-surface-helpers.ts';
-import { loadEcosystemCatalog, listInstalledEcosystemEntries, reviewEcosystemCatalogEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
+import { loadEcosystemCatalog, listInstalledEcosystemEntries, reviewEcosystemCatalogEntry } from '@goodvibes/engine/platform/platform/runtime/ecosystem/catalog';
 import type { EcosystemCatalogEntry, EcosystemCatalogPathOptions, EcosystemEntryKind } from '@/runtime/index.ts';
 import type { UiMarketplaceReadModel } from '../../runtime/ui-read-models.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 /** Live deps the marketplace modal captures (mirrors the earlier view factory). */
 export interface MarketplaceModalDeps {

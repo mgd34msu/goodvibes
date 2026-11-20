@@ -1,8 +1,8 @@
-import { createKnowledgeAnswerRenderer } from '@goodvibes-jev/engine/terminal-shell/knowledge-answer';
-import { cleanInline, sourceLabel, createKnowledgeLabels } from '@goodvibes-jev/engine/terminal-shell/knowledge-labels';
-export { cleanInline, sourceLabel } from '@goodvibes-jev/engine/terminal-shell/knowledge-labels';
+import { createKnowledgeAnswerRenderer } from '@goodvibes/engine/terminal-shell/knowledge-answer';
+import { cleanInline, sourceLabel, createKnowledgeLabels } from '@goodvibes/engine/terminal-shell/knowledge-labels';
+export { cleanInline, sourceLabel } from '@goodvibes/engine/terminal-shell/knowledge-labels';
 export const { nodeLabel } = createKnowledgeLabels('  confidence ');
-import type { KnowledgeMapResult, KnowledgeService } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { KnowledgeMapResult, KnowledgeService } from '@goodvibes/engine/platform/platform/knowledge';
 
 export type KnowledgeAskResult = Awaited<ReturnType<KnowledgeService['ask']>>;
 

@@ -1,8 +1,8 @@
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { assertJudgmentInput, prepareJudgmentResult, retainStrictJudgmentJson } from '../gate/index.js';
 import { planningGoal } from './batteries/planning-goal.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 
 export type PlanningGoalReading = 'goal' | 'command' | 'held' | 'unassessed';
 export interface PlanningGoalObservation {

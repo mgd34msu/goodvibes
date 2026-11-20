@@ -1,8 +1,8 @@
 import { createNativeHostFetch } from './native-host-fetch.js';
 import { realpathSync, writeSync } from 'node:fs';
-import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
-import { getOperatorWorkLedgerProject, nativeWorkExecutionSnapshotSchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
-import { nativeConversationIntakeResultSchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
+import { createOperatorApiClient } from '@goodvibes/engine/operator-client';
+import { getOperatorWorkLedgerProject, nativeWorkExecutionSnapshotSchema } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import { nativeConversationIntakeResultSchema } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import { NativeConversationIntakeControls, nativeIntakeFailureCause, type NativeIntakeFailureCause, type NativeConversationIntakeSelection, type NativeConversationIntakeState, type NativeConversationIntakePolicy } from './native-conversation-intake.js';
 import { NativeConversationIntakeJournal, type NativeIntakeJournalRecord } from './native-conversation-intake-journal.js';
 import { createNativeConversationIntakeBinding } from './native-conversation-intake-host.js';
@@ -10,8 +10,8 @@ import { captureNativeConversationInput } from './native-conversation-input.js';
 import { createNativeSubmissionIdentity, type NativeSubmissionHost, type NativeHostIdentityFormat } from './native-work-submission-host.js';
 import type { NativeHeadlessMode } from './native-headless-options.js';
 import { HEADLESS_SCHEMA_VERSION, type HeadlessUsage } from './headless-turn-events.js';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { DecisionModelUse } from '@goodvibes-jev/engine/errors';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { DecisionModelUse } from '@goodvibes/engine/errors';
 export type NativeHeadlessHost = (NativeSubmissionHost & {
     readonly journalPath: string;
 }) | {

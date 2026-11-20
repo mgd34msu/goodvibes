@@ -20,21 +20,21 @@ import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
  * session identity is mirrored to the daemon's spine and an ask is raised on the
  * daemon (`approvals.raise`) so every other surface can see and answer it.
  */
-import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import type { SharedSessionContinuationOutcome } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { buildContinuationSpawnInput, composeRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
+import type { SharedSessionContinuationOutcome } from '@goodvibes/engine/platform/platform/control-plane';
+import { buildContinuationSpawnInput, composeRuntimeServices } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 import { forwardGatewayMethodsToDaemon } from './gateway-daemon-forward.ts';
 import { terminalRunsRoutines } from './terminal-routines.ts';
 import { gateConsolidationToLocalWriter } from './memory-consolidation-gate.ts';
 import { createNotificationDispatcher, wireRuntimeNotificationBridge, wireMemoryPressureNotice } from './notification-dispatch.ts';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
 import { createWorkspaceCheckpointing } from './workspace-checkpointing.ts';
-import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell-paths';
+import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
 import { createViewPanelAdapter } from '../views/view-panel-adapter.ts';
-import { createContractIntake } from '@goodvibes-jev/engine/platform/platform/contract';
+import { createContractIntake } from '@goodvibes/engine/platform/platform/contract';
 import { KeybindingsManager } from '../input/keybindings.ts';
-import { startReplayRecording } from '@goodvibes-jev/engine/platform/platform/core';
-import { WorkspaceTrustDecisionUnsettledError, type WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { startReplayRecording } from '@goodvibes/engine/platform/platform/core';
+import { WorkspaceTrustDecisionUnsettledError, type WorkspaceTrustLevel } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { GOODVIBES_TUI_SURFACE_ROOT, TUI_TRUSTS_SAVED_SCANNED_SERVERS } from '../config/surface.ts';
@@ -50,14 +50,14 @@ import {
   createDevicesClient,
   createWireSessionDispatch,
   readSurfaceAgentOutcome,
-} from '@goodvibes-jev/engine/platform/platform/runtime/client';
+} from '@goodvibes/engine/platform/platform/runtime/client';
 import { ClientBuildGuard } from './client/build-floors.ts';
 import { createFleetUnionReadModel } from './client/fleet-union.ts';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { VERSION } from '../version.ts';
 import { createSessionConversationRewindPort, hasSessionConversation } from './conversation-rewind-port.ts';
 import { createFleetReadModel } from '../views/fleet-read-model.ts';
-import type { PermissionPromptDecision, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { PermissionPromptDecision, PermissionPromptRequest } from '@goodvibes/engine/platform/platform/permissions';
 import { sandboxAwareApprovalRaiser, sandboxExecAskDepsFromRuntime } from '../permissions/sandbox-exec-gate.ts';
 import type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.ts';
 export type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.ts';

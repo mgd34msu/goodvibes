@@ -56,9 +56,9 @@
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute } from 'node:path';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import type { HostedSessionRecord } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
+import type { HostedSessionRecord } from '@goodvibes/engine/platform/platform/hosted-sessions';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { ConnectedHostVerbError, describeConnectedHostVerbError, isDefiniteHostRefusal } from './daemon-verbs.ts';
 
 /** How many characters of the owner's message become the hosted session's title. */

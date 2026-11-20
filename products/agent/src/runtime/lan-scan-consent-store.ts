@@ -6,11 +6,11 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { isScannedServerOnThisComputer } from '@goodvibes-jev/engine/platform/platform/discovery/persisted-providers';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell-paths';
-import type { DiscoveredServer } from '@goodvibes-jev/engine/platform/platform/discovery';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { isScannedServerOnThisComputer } from '@goodvibes/engine/platform/platform/discovery/persisted-providers';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
+import type { DiscoveredServer } from '@goodvibes/engine/platform/platform/discovery';
 
 export type LanScanDecision = 'granted' | 'declined';
 

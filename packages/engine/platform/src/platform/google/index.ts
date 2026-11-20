@@ -1,5 +1,5 @@
 /**
- * @goodvibes-jev/engine/platform/platform/google
+ * @goodvibes/engine/platform/platform/google
  *
  * Gmail and Google Calendar as platform capability: connecting an account,
  * keeping the credential alive, and then actually reading and sending mail and

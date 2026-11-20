@@ -14,7 +14,7 @@
  * `key is ConfigKey` predicate so `key` narrows at the call site instead of
  * being asserted. Same shape as isSecretConfigKey in ./secret-config.ts.
  */
-import type { ConfigKey, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigSetting } from '@goodvibes/engine/platform/platform/config';
 
 /** True when `key` names a setting in `schema`; narrows `key` to ConfigKey. */
 export function isKnownConfigKey(key: string, schema: readonly ConfigSetting[]): key is ConfigKey {

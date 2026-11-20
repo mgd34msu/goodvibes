@@ -1,4 +1,4 @@
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import { withModalState as withState, type ModalTokenSnapshot } from './modal-input-routes.js';
 import { isTrackedModal, type StackedModal } from './surface-modal-host.js';
 type ModalRoute =

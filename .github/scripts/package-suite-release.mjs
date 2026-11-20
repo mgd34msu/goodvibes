@@ -99,11 +99,11 @@ try {
     const extension = platform === 'linux' ? 'so' : 'dylib';
     const daemonPayloads = product === 'daemon' && platform === 'linux' ? resolveDaemonNativePayloads(platform, arch) : undefined;
     const readerCurrent = daemonPayloads ? retainDaemonNativeFiles(daemonPayloads.map(payload => ({ label: payload.relativePath, path: join(directory, payload.relativePath), assetName: payload.assetName, executable: payload.executable })), realUpdateFileIo)
-      : retainTerminalReaderCohort(directory, `@goodvibes-jev/${product}`, target);
+      : retainTerminalReaderCohort(directory, `@goodvibes/${product}`, target);
     readerCurrent?.();
     assert.equal(run(binary, ['--version']), `${command} ${tag.slice(1)}`);
     readerCurrent?.();
-    const packageName = `@goodvibes-jev/${product}`;
+    const packageName = `@goodvibes/${product}`;
     const names = daemonPayloads ? [] : clientReaderPayloadPaths(packageName, target);
     // Capture only after the cheap version refusal. Publication and compiled
     // reader inspection share this genuine original owner, avoiding a second

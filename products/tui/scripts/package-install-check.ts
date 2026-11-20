@@ -3,7 +3,7 @@
  * package-install-check.ts, private workspace readiness and published-package verification.
  *
  * The shared tarball path/size policy + bin-shim (present/executable/shebang)
- * checks are owned by @goodvibes-jev/engine/toolchain and driven by this repo's
+ * checks are owned by @goodvibes/engine/toolchain and driven by this repo's
  * toolchain.config.json (publish section). Private workspace builds use their
  * actual source-tarball paths while retaining the same forbidden paths/size cap.
  * Local binary readiness and legacy published fallbacks are distribution-specific
@@ -13,7 +13,7 @@
 import {
   loadToolchainConfig,
   runPackageInstallCheck,
-} from '@goodvibes-jev/engine/toolchain';
+} from '@goodvibes/engine/toolchain';
 import { verifyPackageCliInstall, WORKSPACE_REQUIRED_TARBALL_PATHS } from '../src/cli/package-verification.ts';
 
 const root = process.cwd();

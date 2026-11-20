@@ -3,7 +3,7 @@
  * project's to-do list (the work plan kept for this project). Items are added,
  * changed, marked and removed here; nothing on it runs by itself.
  */
-import { summarizeWorkPlanCounts, summarizeWorkPlanEdit, type ProjectWorkPlan, type ProjectWorkPlanMutationResult } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { summarizeWorkPlanCounts, summarizeWorkPlanEdit, type ProjectWorkPlan, type ProjectWorkPlanMutationResult } from '@goodvibes/engine/platform/platform/knowledge';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';

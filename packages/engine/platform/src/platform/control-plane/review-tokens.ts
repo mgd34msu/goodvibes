@@ -14,7 +14,7 @@
  * is acknowledged here, not in a durable two-phase protocol.
  */
 import { randomUUID } from 'node:crypto';
-import type { TargetChange } from '@goodvibes-jev/engine/errors';
+import type { TargetChange } from '@goodvibes/engine/errors';
 import { compareTarget, type TargetRef } from '../utils/target-ref.js';
 
 /** ~2 minutes: long enough to read a preview and confirm, short enough not to linger. */

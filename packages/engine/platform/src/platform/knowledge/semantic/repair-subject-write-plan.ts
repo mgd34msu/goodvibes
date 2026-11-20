@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { knowledgeClockIso } from '../store-record-representation.js';
 import type { KnowledgeStore } from '../store.js';
 import { captureOwnedJson, retainOwnedJson } from '../../gate/judgment-input.js';

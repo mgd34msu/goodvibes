@@ -1,11 +1,11 @@
-import { ConfigurationError } from '@goodvibes-jev/engine/errors';
+import { ConfigurationError } from '@goodvibes/engine/errors';
 
 export { forSession } from './companion-realtime.js';
 import {
   createRemoteRuntimeEvents,
   createWebSocketConnector,
   type RemoteRuntimeEvents,
-} from '@goodvibes-jev/engine/transport-realtime';
+} from '@goodvibes/engine/transport-realtime';
 import {
   createGoodVibesPlatform,
   type GoodVibesPlatformOptions,
@@ -66,7 +66,7 @@ function requireReactNativeWebSocket(webSocketImpl?: typeof WebSocket): typeof W
  *
  * @example
  * // Example only: replace baseUrl and authToken with your own values.
- * import { createReactNativeGoodVibesPlatform } from '@goodvibes-jev/engine/platform/react-native';
+ * import { createReactNativeGoodVibesPlatform } from '@goodvibes/engine/platform/react-native';
  *
  * const platform = createReactNativeGoodVibesPlatform({
  *   baseUrl: 'https://daemon.example.com',

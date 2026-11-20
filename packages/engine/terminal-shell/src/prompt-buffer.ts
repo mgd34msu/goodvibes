@@ -1,4 +1,4 @@
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
+import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils';
 
 type WrappedSegment = { rawStart: number; length: number };
 

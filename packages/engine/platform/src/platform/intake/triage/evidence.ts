@@ -1,5 +1,5 @@
 import { types as nodeTypes } from 'node:util';
-import type { YesNoReading } from '@goodvibes-jev/judgment';
+import type { YesNoReading } from '@goodvibes/judgment';
 import { JudgmentInputError, snapshotJudgmentInput } from '../../gate/judgment-input.js';
 import { inboxTriage } from './battery.js';
 import type { TriageBinding, TriageEvidence, TriageInput, TriageLabel, TriageReceiptScope, TriageSourceBinding } from './types.js';

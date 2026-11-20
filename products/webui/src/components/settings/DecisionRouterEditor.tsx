@@ -5,7 +5,7 @@ import {
   DEFAULT_DECISION_ROUTER_SETTINGS,
   type DecisionRouterSettings,
   type DecisionRouterCategory,
-} from "@goodvibes-jev/engine/platform/browser/decision-router";
+} from "@goodvibes/engine/platform/browser/decision-router";
 import { client as platformClient } from "../../lib/goodvibes";
 import {
   modelOptionsForProvider,

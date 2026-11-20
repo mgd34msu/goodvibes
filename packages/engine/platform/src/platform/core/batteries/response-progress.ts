@@ -1,4 +1,4 @@
-import { defineBattery, yesNo, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, yesNo, STAKES_BANDS } from '@goodvibes/judgment';
 
 /** Interim prose may describe ongoing work without claiming the task is done. */
 export const responseProgress = defineBattery({

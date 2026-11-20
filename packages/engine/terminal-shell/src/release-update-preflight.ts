@@ -1,18 +1,18 @@
-import { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { PREVIOUS_FILE_SUFFIX } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { describeDaemonUpdates, type DaemonUpdateVerbs } from './daemon-update-status.js';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import type { CommandActionContext, InputDescription } from './command-actions/types.js';
 import { choiceInput, readAction, textInput } from './described-command-kit.js';
-import { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/install-kind';
-import type { InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { detectInstallKind } from '@goodvibes/engine/platform/platform/runtime/install-kind';
+import type { InstallKind } from '@goodvibes/engine/platform/platform/runtime/operations';
 import {
   compareVersions,
   suiteUpdateRequiresRecovery,
   normalizeVersion,
   resolveLatestReleaseTag,
   type UpdateFetchLike,
-} from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+} from '@goodvibes/engine/platform/platform/runtime/self-update';
 export interface ReleaseUpdateCheck {
   readonly latestTag: string;
   readonly isCurrent: boolean;
@@ -269,7 +269,7 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
   });
 }
 
-export { retainSuiteUpdateConfiguration, type SuiteUpdateConfigurationSource } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+export { retainSuiteUpdateConfiguration, type SuiteUpdateConfigurationSource } from '@goodvibes/engine/platform/platform/runtime/self-update';
 /** Shared terminal report for the actual products/directories the suite changed. */
 export function formatSuiteUpdateReport(result: {
   readonly version: string; readonly programs: readonly string[];

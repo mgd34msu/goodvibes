@@ -7,8 +7,8 @@ import {
   noul, readYesNo, recordReadings, STAKES_BANDS,
   type CallOptions, type ChoiceReading, type DecisionLog, type EntryType, type JudgmentPort,
   type JudgmentRetryProgress, type NamedDecision, type NoulResponse, type Questions, type YesNoReading,
-} from '@goodvibes-jev/judgment';
-import { assertSynchronousJudgmentGuard, captureJevDecisionContext, type JevDecisionBinding, type JevVersionRef } from '@goodvibes-jev/judgment/decisions';
+} from '@goodvibes/judgment';
+import { assertSynchronousJudgmentGuard, captureJevDecisionContext, type JevDecisionBinding, type JevVersionRef } from '@goodvibes/judgment/decisions';
 import { criterionTrace, traceClaim } from '../../contract/batteries/criterion-trace.js';
 import { requestRoute } from '../../contract/batteries/request-route.js';
 import { decideAutonomous, inspectDecisionProtocolReferences, type AutonomousCondition, type AutonomousContinuation, type AutonomousDecision } from '../../gate/autonomous-decision.js';

@@ -22,8 +22,8 @@
  * arguments can be typed.
  */
 
-import { readCommandDiscovery, type CommandDiscoveryReading } from '@goodvibes-jev/engine/platform/platform/routing';
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import { readCommandDiscovery, type CommandDiscoveryReading } from '@goodvibes/engine/platform/platform/routing';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { SurfaceModal, SurfaceModalHost } from './surface-modal-host.js';
 import type { SurfaceLayer } from './renderer/surface-kit.js';
 import { renderCommandPalette } from './renderer/command-palette.js';

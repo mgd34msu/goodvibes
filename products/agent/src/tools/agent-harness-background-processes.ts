@@ -1,22 +1,22 @@
 import { withBackgroundPrivilegeCheck } from './agent-harness-background-privilege.ts';
 import type { EffectResult } from './agent-harness-tool-utils.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import { realpathSync } from 'node:fs';
 import { relative } from 'node:path';
 import { homedir } from 'node:os';
-import { mapLimit } from '@goodvibes-jev/judgment';
-import { redactSensitiveData, resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
-import { harnessCatalogInvocationAuthority } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ingress';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { mapLimit } from '@goodvibes/judgment';
+import { redactSensitiveData, resolveAndValidatePath } from '@goodvibes/engine/platform/platform/utils';
+import { harnessCatalogInvocationAuthority } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ingress';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { processClassificationOptions, spawnBackgroundProcess, type ProcessClassificationOptions } from './agent-harness-process-launch.ts';
 import { DETACHED_LOG_CAP_BYTES, DETACHED_LOG_KEEP_BYTES, detachedProcessLogPath, findDetachedProcess, forgetDetachedProcess, listDetachedProcesses, readDetachedProcessLog, recordDetachedProcess, stopDetachedProcess,
   type DetachedProcessRecord } from './agent-harness-detached-processes.ts';
-import { operatorContractMethods, type OperatorContractMethodEntry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-contract-routes';
-import type { BackgroundProcess, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import { operatorContractMethods, type OperatorContractMethodEntry } from '@goodvibes/engine/terminal-shell/agent-turn/operator-contract-routes';
+import type { BackgroundProcess, ProcessManager } from '@goodvibes/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { sudoExecutionPosture } from './agent-harness-sudo-posture.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
 import { acquireInteractiveRuntimeSnapshot, type InteractiveRuntimeParity } from './agent-harness-interactive-runtime-records.ts';
 import { DEFAULT_BACKGROUND_TIMEOUT_MS, clampTimeout, clampWaitTimeout, processAgeMs, processStatus } from './agent-harness-process-timeout-policy.ts';
 import type {
@@ -25,8 +25,8 @@ import type {
   BackgroundProcessResolution,
   ProcessCapabilityStatus,
 } from './agent-harness-background-processes-types.ts';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 export type {
   AgentHarnessBackgroundProcessArgs,
   BackgroundProcessResolution,

@@ -1,6 +1,6 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { defineBattery, mapLimit, STAKES_BANDS, yesNo, type CallOptions, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
+import { defineBattery, mapLimit, STAKES_BANDS, yesNo, type CallOptions, type JudgmentPort } from '@goodvibes/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import type { ModelDefinition } from '../providers/registry-types.js';
 import { sameProviderCatalog } from '../providers/provider-aliases.js';
 

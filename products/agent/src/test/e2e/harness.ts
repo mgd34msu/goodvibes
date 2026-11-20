@@ -15,8 +15,8 @@
 import { AgentConfigManager } from '../../config/host-settings.ts';
 import type { ConfigKey, ConfigValue } from '../../config/index.ts';
 import { seedProviderMetadataCacheFixture, seedProviderModelListCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
-import { startScriptedDecisionServer, type ScriptedDecisionServer } from '@goodvibes-jev/judgment/testing';
-import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
+import { startScriptedDecisionServer, type ScriptedDecisionServer } from '@goodvibes/judgment/testing';
+import { createAsyncDisposalScope } from '@goodvibes/engine/platform/platform/runtime/disposal';
 import { TerminalFrame } from './terminal-frame.ts';
 import { COMPOSER_ECHO } from '../helpers/owner-workspace-startup.ts';
 import { WORKSPACE_REGISTRATION_QUESTION } from '../../shell/workspace-registration-question.ts';

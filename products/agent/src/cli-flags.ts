@@ -1,4 +1,4 @@
-import { createCliFlagParser } from '@goodvibes-jev/engine/terminal-shell';
+import { createCliFlagParser } from '@goodvibes/engine/terminal-shell';
 // Compatibility wrapper for older imports. New CLI code lives in src/cli.
 export type { GoodVibesCliFlags as CliFlags } from './cli/types.ts';
 export {

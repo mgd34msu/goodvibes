@@ -7,9 +7,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config';
-import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
-import { verificationDaemonHome } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
+import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '@goodvibes/engine/platform/platform/config';
+import { operatorTokenPath } from '@goodvibes/engine/platform/platform/pairing/companion-token';
+import { verificationDaemonHome } from '@goodvibes/engine/terminal-shell/verification-primitives';
 
 export type HomeFileOwner = 'tui' | 'daemon' | 'foreign-goodvibes-product' | 'unknown-root';
 

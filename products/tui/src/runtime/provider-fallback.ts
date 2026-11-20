@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/provider-boot';
+export * from '@goodvibes/engine/terminal-shell/provider-boot';

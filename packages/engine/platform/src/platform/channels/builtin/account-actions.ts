@@ -1,4 +1,4 @@
-import { refusal } from '@goodvibes-jev/engine/errors';
+import { refusal } from '@goodvibes/engine/errors';
 import { DiscordIntegration, SlackIntegration } from '../../integrations/index.js';
 import type { ProviderRuntimeSurface } from '../provider-runtime.js';
 import { describeActorAdmission, type ChannelPolicyManager } from '../policy-manager.js';

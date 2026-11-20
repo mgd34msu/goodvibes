@@ -15,18 +15,18 @@
 //     Confirmation rechecks that record and preserves the gateway receipt.
 // ---------------------------------------------------------------------------
 
-import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import { isTerminalContractStatus } from '@goodvibes-jev/engine/platform/platform/contract/types';
-import type { ContractView, ContractUnitView } from '@goodvibes-jev/engine/platform/platform/contract';
-import type { WorkItem } from '@goodvibes-jev/engine/platform/platform/orchestration';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import type { ProcessNode } from '@goodvibes/engine/platform/platform/runtime/fleet';
+import { isTerminalContractStatus } from '@goodvibes/engine/platform/platform/contract/types';
+import type { ContractView, ContractUnitView } from '@goodvibes/engine/platform/platform/contract';
+import type { WorkItem } from '@goodvibes/engine/platform/platform/orchestration';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { isViewSearchBackspace, isViewSearchCancel, isViewSearchCommit, isViewSearchPrintable } from './search-focus.ts';
 import { appendSteerText } from './fleet-session-tabs.ts';
 import { isObservedExternalNode, observedKindLabel, type ObservedNode } from './fleet-observed-render.ts';
 import { formatAgentCost } from './fleet-format.ts';
 import { rootContractFromNode } from './fleet-contract-targets.ts';
 import { fleetNodeAttention } from './fleet-read-model.ts';
-import { contractGroupNodeId, contractUnitNodeId } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import { contractGroupNodeId, contractUnitNodeId } from '@goodvibes/engine/platform/platform/runtime/fleet';
 import {
   type FleetAttemptCandidate,
   type FleetGateway,

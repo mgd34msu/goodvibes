@@ -1,4 +1,4 @@
-import { BatteryRegistry } from '@goodvibes-jev/judgment';
+import { BatteryRegistry } from '@goodvibes/judgment';
 import { channelApprovalTarget } from './batteries/approval-reply.js';
 import { surfaceControl } from './batteries/surface-control.js';
 import { inboundMessage } from './batteries/inbound-message.js';

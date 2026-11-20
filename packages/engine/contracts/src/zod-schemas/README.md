@@ -20,12 +20,12 @@ what the daemon sends.
 ## Import path
 
 ```ts
-import { SerializedEventEnvelopeSchema } from '@goodvibes-jev/engine/contracts';
+import { SerializedEventEnvelopeSchema } from '@goodvibes/engine/contracts';
 // or the narrower subpath
-import { SerializedEventEnvelopeSchema } from '@goodvibes-jev/engine/contracts/zod-schemas/events';
+import { SerializedEventEnvelopeSchema } from '@goodvibes/engine/contracts/zod-schemas/events';
 ```
 
 ## See also
 
-- Main platform: [`@goodvibes-jev/engine/platform`](../../../platform/README.md)
+- Main platform: [`@goodvibes/engine/platform`](../../../platform/README.md)
 - [Getting Started](../../../docs/getting-started.md)

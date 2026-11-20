@@ -3,7 +3,7 @@
  *
  * Every GoodVibes product keeps a small `toolchain.config.json` (or a
  * `toolchain.config.ts` that default-exports a {@link ToolchainConfig}) at its
- * root. The `@goodvibes-jev/engine` toolchain holds the behavior;
+ * root. The `@goodvibes/engine` toolchain holds the behavior;
  * the config holds the repo-specific values (package names, binary matrix,
  * smoke banner, packed-tarball rules) so one implementation serves every repo.
  */
@@ -12,7 +12,7 @@ import { z } from 'zod/v4';
 
 /** Where the engine dependency pin lives and how the pin gate is parameterized. */
 export interface EnginePinConfig {
-  /** Name of the engine package the repo depends on, e.g. `@goodvibes-jev/engine`. */
+  /** Name of the engine package the repo depends on, e.g. `@goodvibes/engine`. */
   readonly enginePackage: string;
   /** Manifest group the pin is read from. TUI/webui use `dependencies`; the agent bundles the engine as a `devDependencies` pin. */
   readonly pinSource: 'dependencies' | 'devDependencies';
@@ -96,7 +96,7 @@ export interface PublishPackageConfig {
 
 /** The complete repo config. All sections are optional so a repo declares only the tools it uses. */
 export interface ToolchainConfig {
-  /** npm name of the repo's primary package, e.g. `@goodvibes-jev/engine`. */
+  /** npm name of the repo's primary package, e.g. `@goodvibes/engine`. */
   readonly packageName: string;
   readonly enginePin?: EnginePinConfig;
   readonly build?: BuildConfig;
@@ -104,7 +104,7 @@ export interface ToolchainConfig {
   readonly publish?: PublishPackageConfig;
 }
 
-export const DEFAULT_ENGINE_PACKAGE = '@goodvibes-jev/engine';
+export const DEFAULT_ENGINE_PACKAGE = '@goodvibes/engine';
 export const DEFAULT_LOCKFILE = 'bun.lock';
 export const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
 /** Fill an EnginePinConfig with the conventional defaults for any missing field. */

@@ -1,7 +1,7 @@
 /**
  * GENERATED FILE. DO NOT EDIT BY HAND.
  * Produced by scripts/generate-config-schema.ts from the installed
- * @goodvibes-jev/engine: CONFIG_SCHEMA (platform/config) plus the per-feature
+ * @goodvibes/engine: CONFIG_SCHEMA (platform/config) plus the per-feature
  * settings metadata (FEATURE_SETTINGS, platform/runtime/feature-flags).
  *
  * This is a build-time snapshot so the browser bundle never imports the engine

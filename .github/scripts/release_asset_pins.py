@@ -72,7 +72,7 @@ def validate_reader_assets(pins, metadata, tag, source=None):
         assert value['target'] == target, f'Reader target mismatch: {name}'
         assert value['schema'] == (2 if native_linux and reader else 1), f'Reader schema mismatch: {name}'
         if not native_linux:
-            package = '@goodvibes-jev/' + {'goodvibes': 'tui', 'goodvibes-agent': 'agent', 'goodvibes-daemon': 'daemon'}[product]
+            package = '@goodvibes/' + {'goodvibes': 'tui', 'goodvibes-agent': 'agent', 'goodvibes-daemon': 'daemon'}[product]
             assert value['packageName'] == package and value['version'] == version, f'Reader product/version mismatch: {name}'
         if reader:
             assert value['readers']['schema'] == 1 and value['readers']['version'] == version, f'Reader version mismatch: {name}'
@@ -99,7 +99,7 @@ def validate_reader_assets(pins, metadata, tag, source=None):
             assert producer_name in metadata, f'Darwin SQLite producer is absent: {asset}'
             owner = json.loads(metadata[producer_name])
             library = pins[f'sqlite-{target}.dylib']
-            assert owner['schema'] == 1 and owner['packageName'] == '@goodvibes-jev/daemon' and owner['daemonVersion'] == version and owner['target'] == target, f'Darwin SQLite producer identity mismatch: {asset}'
+            assert owner['schema'] == 1 and owner['packageName'] == '@goodvibes/daemon' and owner['daemonVersion'] == version and owner['target'] == target, f'Darwin SQLite producer identity mismatch: {asset}'
             assert owner['sha256'] == library['sha256'] and owner['size'] == library['size'], f'Darwin SQLite producer does not bind selected library: {asset}'
 
 

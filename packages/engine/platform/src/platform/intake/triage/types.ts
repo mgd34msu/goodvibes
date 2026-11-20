@@ -1,4 +1,4 @@
-import type { YesNoReading } from '@goodvibes-jev/judgment';
+import type { YesNoReading } from '@goodvibes/judgment';
 
 /** Provider-neutral semantic input; the complete supplied object is inspected before projection. */
 export interface TriageInput {

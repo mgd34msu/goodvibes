@@ -9,7 +9,7 @@ import { walkDir, DirectoryWalk, WALK_SKIP_DIRS, type WalkDirOptions } from '../
 import { summarizeError } from '../../utils/error-display.js';
 import { logger } from '../../utils/logger.js';
 import { resolveAndValidatePath } from '../../utils/path-safety.js';
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { accessRestrictedNote, partitionByReadAccess, type ReadAccessFilter } from '../shared/read-access.js';
 
 export type FindSearchOptions = JudgmentReadingOptions & WalkDirOptions & {

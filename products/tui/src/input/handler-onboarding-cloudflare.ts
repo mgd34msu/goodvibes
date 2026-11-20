@@ -22,7 +22,7 @@ import {
   getCloudflareSetupSource,
   shouldShowCloudflareStep,
 } from './onboarding/onboarding-wizard-cloudflare.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { beginOnboardingOperation, endOnboardingOperation } from './onboarding-operation.ts';
 
 type CloudflareOnboardingAction = Extract<OnboardingWizardAction,

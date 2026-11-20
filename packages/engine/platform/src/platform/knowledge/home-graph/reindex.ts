@@ -27,7 +27,7 @@ import type {
 } from './types.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/native-error-summary.js';
-import { done, failedOutcome, observe, refusal, tally, type EffectOutcome } from '@goodvibes-jev/engine/errors';
+import { done, failedOutcome, observe, refusal, tally, type EffectOutcome } from '@goodvibes/engine/errors';
 
 export interface HomeGraphReindexContext {
   readonly signal?: AbortSignal | undefined;

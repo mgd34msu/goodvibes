@@ -17,9 +17,9 @@
  */
 
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { registerCalendarCommand, type CalendarEventChange, type CalendarNewEvent } from '@goodvibes-jev/engine/terminal-shell/calendar-command';
-import type { ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { registerCalendarCommand, type CalendarEventChange, type CalendarNewEvent } from '@goodvibes/engine/terminal-shell/calendar-command';
+import type { ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import {
   EXPLICIT_WRITE_INVOCATION_CONTEXT,
   claimIrreversibleWrite,

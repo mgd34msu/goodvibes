@@ -1,4 +1,4 @@
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 /**
  * What the Google setup runners need, and how the OAuth client is obtained.
  *

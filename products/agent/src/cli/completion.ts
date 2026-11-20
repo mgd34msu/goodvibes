@@ -3,7 +3,7 @@ import {
   runCompletionCommand,
   type CompletionCommandResult,
   type CompletionTable,
-} from '@goodvibes-jev/engine/terminal-shell/shell-completion';
+} from '@goodvibes/engine/terminal-shell/shell-completion';
 import { AGENT_CLI_CATALOG } from './catalog.ts';
 import { describeGoodVibesCommandHelp } from './help.ts';
 

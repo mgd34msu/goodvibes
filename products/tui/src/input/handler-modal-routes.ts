@@ -1,12 +1,12 @@
-import { openDecisionRouterSettings } from '@goodvibes-jev/engine/terminal-shell/decision-router-settings-actions';
-import { openSettingsChoice, type SettingsChoiceAction } from '@goodvibes-jev/engine/terminal-shell/settings-choice-actions';
-import { sessionPickerDeleteNamedKey } from '@goodvibes-jev/engine/terminal-shell/searchable-modal-route';
+import { openDecisionRouterSettings } from '@goodvibes/engine/terminal-shell/decision-router-settings-actions';
+import { openSettingsChoice, type SettingsChoiceAction } from '@goodvibes/engine/terminal-shell/settings-choice-actions';
+import { sessionPickerDeleteNamedKey } from '@goodvibes/engine/terminal-shell/searchable-modal-route';
 import {
   createSearchableModalTokenRoute,
   createProfilePickerTokenRoute,
-} from '@goodvibes-jev/engine/terminal-shell/searchable-modal-route';
-import { createSettingsModalRoute } from '@goodvibes-jev/engine/terminal-shell/settings-modal-route';
-import { openPaymentsCardsFromSettings } from '@goodvibes-jev/engine/terminal-shell/payments-settings';
+} from '@goodvibes/engine/terminal-shell/searchable-modal-route';
+import { createSettingsModalRoute } from '@goodvibes/engine/terminal-shell/settings-modal-route';
+import { openPaymentsCardsFromSettings } from '@goodvibes/engine/terminal-shell/payments-settings';
 export const { handleSettingsModalToken } = createSettingsModalRoute<
   CommandContext,
   import('./model-picker.ts').ModelPickerTarget,
@@ -43,15 +43,15 @@ export const { handleSettingsModalToken } = createSettingsModalRoute<
     });
   },
 });
-export { handleSelectionModalToken, handleBookmarkModalToken } from '@goodvibes-jev/engine/terminal-shell/modal-input-routes';
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+export { handleSelectionModalToken, handleBookmarkModalToken } from '@goodvibes/engine/terminal-shell/modal-input-routes';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { CommandContext } from './command-registry.ts';
 import type { ConfigModal } from './config-modal.ts';
 import { CONFIG_MODAL_ACTION_LEADER } from './config-modal-keys.ts';
 import { openTtsProviderPicker, openTtsVoicePicker } from './tts-settings-actions.ts';
 import { openThemePicker } from './theme-settings-actions.ts';
 import { isTextBackspace } from './delete-key-policy.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 type SessionPickerRouteState = {
   sessionPickerModal: {

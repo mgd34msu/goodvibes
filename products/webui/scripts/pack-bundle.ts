@@ -39,9 +39,9 @@ import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createReleaseStage, planReleaseDirectory } from '@goodvibes-jev/engine/toolchain/release-publication';
-import type { PublishedReleaseFile } from '@goodvibes-jev/engine/toolchain/release-publication';
-import { readFileObservation } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createReleaseStage, planReleaseDirectory } from '@goodvibes/engine/toolchain/release-publication';
+import type { PublishedReleaseFile } from '@goodvibes/engine/toolchain/release-publication';
+import { readFileObservation } from '@goodvibes/engine/platform/platform/utils';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 

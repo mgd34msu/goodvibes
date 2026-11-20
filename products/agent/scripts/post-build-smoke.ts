@@ -7,13 +7,13 @@
  * there) fails the smoke. It never starts or owns a daemon.
  *
  * The boot/version policy lives in the shared
- * @goodvibes-jev/engine/toolchain `post-build-smoke` (one implementation across
+ * @goodvibes/engine/toolchain `post-build-smoke` (one implementation across
  * tui/agent). This file is a thin adapter: it resolves the binary (from
  * --binary or the configured default) and delegates to the toolchain, sourcing
  * the version banner contract from toolchain.config.json.
  */
 import { existsSync } from 'node:fs';
-import { runPostBuildSmoke, loadToolchainConfig } from '@goodvibes-jev/engine/toolchain';
+import { runPostBuildSmoke, loadToolchainConfig } from '@goodvibes/engine/toolchain';
 
 const root = process.cwd();
 const smoke = loadToolchainConfig(root).smoke;

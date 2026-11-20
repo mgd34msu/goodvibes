@@ -23,7 +23,7 @@
  * no review; a false yes silently corrupts it. A repair is accepted only
  * when every question asked reads yes and acts.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** What the readings see: the file, the errors to fix, and the change as a unified diff. */
 export type HealChangeView = { file: string; errors: string[]; change: string };

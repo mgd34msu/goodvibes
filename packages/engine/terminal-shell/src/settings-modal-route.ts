@@ -1,4 +1,4 @@
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import { isTextBackspace } from './delete-key-policy.js';
 import type { OpenSelection, SelectionItem } from './selection-modal.js';
 import { describedCommandByName } from './command-actions/define.js';

@@ -10,7 +10,7 @@
  * sweep writes the providers it could not reach. The route planner, the
  * optimizer and the health views read it through `ProviderRegistry.health()`.
  */
-import { classifyFailure } from '@goodvibes-jev/engine/errors';
+import { classifyFailure } from '@goodvibes/engine/errors';
 
 /** Health status for a single provider. */
 export type ProviderStatus =

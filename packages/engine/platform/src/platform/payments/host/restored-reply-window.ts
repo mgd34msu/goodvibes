@@ -14,7 +14,7 @@ import type { ChannelDeliveryReceipt } from '../../channels/delivery/types.js';
 import type { PaymentNoticeWindow } from '../payment-ports.js';
 import type { ChannelDelivery } from '../windows.js';
 import type { OwnerItem } from '../../control-plane/owner-inbox.js';
-import { RefusalError } from '@goodvibes-jev/engine/errors';
+import { RefusalError } from '@goodvibes/engine/errors';
 import { inboxAnswer, purchaseInboxItem, unreadableAnswer, type PaymentOwnerInbox } from './notifier.js';
 import { formatMinorUnits } from '../message.js';
 

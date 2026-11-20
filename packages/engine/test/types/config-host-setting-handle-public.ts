@@ -1,5 +1,5 @@
-import { ConfigManager, type ConfigKey, type HostBooleanSettingHandle, type HostBooleanSettingResolved, type HostSetting } from '@goodvibes-jev/engine/platform/platform/config';
-import { getSettingsControlPlaneSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/settings';
+import { ConfigManager, type ConfigKey, type HostBooleanSettingHandle, type HostBooleanSettingResolved, type HostSetting } from '@goodvibes/engine/platform/platform/config';
+import { getSettingsControlPlaneSnapshot } from '@goodvibes/engine/platform/platform/runtime/settings';
 
 const config = new ConfigManager({
   configDir: '/tmp/compile-only-host-setting',

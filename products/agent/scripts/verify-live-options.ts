@@ -1,4 +1,4 @@
-import { resolveGoodVibesTreeDirectory } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveGoodVibesTreeDirectory } from '@goodvibes/engine/platform/platform/config';
 import type { LiveVerificationReport } from '../src/verification/live-verifier.ts';
 
 /**

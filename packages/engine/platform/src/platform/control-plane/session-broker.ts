@@ -1,6 +1,6 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { readNativeConversationTurnPermit, revalidateNativeConversationTurnPermit, type NativeConversationTurnPermit } from '../workflow/work-ledger/native-intake-client.js';
-import type { Page } from '@goodvibes-jev/engine/errors';
+import type { Page } from '@goodvibes/engine/errors';
 import { logger } from '../utils/logger.js';
 import { withChannelExecutionMode, type ChannelIntake } from '../channel-profiles/install-inbound-intake.js';
 import type { ChannelProfileDefaults } from '../channel-profiles/types.js';

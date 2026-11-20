@@ -3,8 +3,8 @@ import { strict as assert } from 'node:assert';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { chromium, expect, type Page, type Request, type APIResponse } from '@playwright/test';
-import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
-import { isJsonRecord } from '@goodvibes-jev/engine/daemon-api';
+import { WEBUI_METHOD_ROUTES } from '@goodvibes/engine/contracts/generated/webui-facade';
+import { isJsonRecord } from '@goodvibes/engine/daemon-api';
 
 const url = process.env.GOODVIBES_WEBUI_CONNECTED_URL;
 const token = process.env.GOODVIBES_WEBUI_CONNECTED_TOKEN;

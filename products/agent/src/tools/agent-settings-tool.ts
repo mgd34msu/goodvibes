@@ -1,15 +1,15 @@
 import { isHarnessSettingsQuery } from './agent-harness-settings-catalog.ts';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
+import { captureCatalogData } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
 import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 import { createPreferredSettingsProjector, executeAdmittedPreferredSettings, settingsThrownFailure } from './agent-settings-admission.ts';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { createAgentSettingsImportTool } from './agent-settings-import-tool.ts';
 import { executeAdmittedAgentSettingsImport } from './agent-settings-import-admission.ts';
 import { readSettingsAction, SETTINGS_ACTION_WORDS } from './agent-settings-action.ts';
-import { confirmParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { confirmParameter } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 interface AgentSettingsToolArgs {
   readonly action?: unknown;

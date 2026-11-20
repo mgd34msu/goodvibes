@@ -1,8 +1,8 @@
-import type { ArtifactCreateInput, ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
-import { assertCurrentToolEffect, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolNativeReferencesCapture } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { containsIssuerCredential } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ArtifactCreateInput, ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
+import { judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate/judgment-input';
+import { assertCurrentToolEffect, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolNativeReferencesCapture } from '@goodvibes/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { containsIssuerCredential } from '@goodvibes/engine/platform/platform/utils';
 import type { CommandContext } from '../input/command-registry.ts';
 import { SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS, redactSetupSmokeEvidence, redactSetupSmokeEvidenceFull } from './agent-harness-setup-smoke.ts';
 import type { SetupSmokeArtifactStore, SetupSmokeEvidenceField } from './agent-harness-setup-posture-types.ts';

@@ -2,12 +2,12 @@ import {
   runLaunchAutoUpdate as runSharedLaunchAutoUpdate,
   type LaunchAutoUpdateInput,
   type LaunchAutoUpdateOutcome,
-} from '@goodvibes-jev/engine/terminal-shell/launch-auto-update';
+} from '@goodvibes/engine/terminal-shell/launch-auto-update';
 import {
   restartOntoUpdatedBinary as restart,
   type RestartOntoUpdatedBinaryOptions,
-} from '@goodvibes-jev/engine/terminal-shell/service-io';
-export type { RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';
+} from '@goodvibes/engine/terminal-shell/service-io';
+export type { RestartOntoUpdatedBinaryOptions } from '@goodvibes/engine/terminal-shell/service-io';
 import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime/workspace-update-policy.ts';
 /**
  * Launch-time self-update, clients land on the newest release at startup so
@@ -51,11 +51,11 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime
  */
 import { detectInstallKind, type UpdateFetchLike } from '../runtime/update-check.ts';
 import { applyUpdate, checkForUpdate, type ApplyUpdateOptions } from '../input/commands/update-runtime.ts';
-import { configuredSuiteWebuiDirectory, installedSuiteNeedsRepair, type SuiteUpdateResult } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { configuredSuiteWebuiDirectory, installedSuiteNeedsRepair, type SuiteUpdateResult } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { readUpdateSettings, type UpdateSettings } from '../config/tui-extension-settings.ts';
-import { runDaemonHandover, type DaemonHandoverOutcome } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { runDaemonHandover, type DaemonHandoverOutcome } from '@goodvibes/engine/platform/platform/runtime/client';
 import { resolveGoodVibesDaemonExecutable } from './service-posture.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { VERSION } from '../version.ts';
 import { join } from 'node:path';
 
@@ -74,7 +74,7 @@ function launchCheckFile(configManager: Partial<Pick<ConfigManager, 'getControlP
  */
 export const LAUNCH_UPDATED_FROM_ENV = 'GOODVIBES_LAUNCH_UPDATED_FROM';
 
-export { LAUNCH_UPDATE_CHECK_TIMEOUT_MS, LAUNCH_APPLY_TIMEOUT_MS, type LaunchAutoUpdateOutcome } from '@goodvibes-jev/engine/terminal-shell/launch-auto-update';
+export { LAUNCH_UPDATE_CHECK_TIMEOUT_MS, LAUNCH_APPLY_TIMEOUT_MS, type LaunchAutoUpdateOutcome } from '@goodvibes/engine/terminal-shell/launch-auto-update';
 
 export interface RunLaunchAutoUpdateOptions extends LaunchAutoUpdateInput {
   readonly platform: NodeJS.Platform;

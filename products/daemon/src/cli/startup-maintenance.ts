@@ -1,8 +1,8 @@
 /** Original startup maintenance, scoped to the admitted CLI owner. */
-import { controlPlaneScheme, ensurePublicBaseUrl, pruneStaleOperatorTokens } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { formatWorktreeStartupReport, WorktreeRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { workspaceOperatorTokenCandidates } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
+import { controlPlaneScheme, ensurePublicBaseUrl, pruneStaleOperatorTokens } from '@goodvibes/engine/platform/platform/pairing';
+import { formatWorktreeStartupReport, WorktreeRegistry } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { workspaceOperatorTokenCandidates } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import { hasReadableWebuiBundle } from '../config/webui-bundle.js';
 import type { DaemonCliConfiguration } from './configuration.js';

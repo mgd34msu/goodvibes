@@ -1,5 +1,5 @@
 import { captureJudgmentFailure } from '../gate/failure-input.js';
-import { judgmentPort, readFailureTransience, type FailureReadOptions } from '@goodvibes-jev/engine/errors';
+import { judgmentPort, readFailureTransience, type FailureReadOptions } from '@goodvibes/engine/errors';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 /**
  * spine-intake.ts, how a hosted session reaches the SHARED session spine, and

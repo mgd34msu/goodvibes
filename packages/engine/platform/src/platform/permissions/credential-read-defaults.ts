@@ -23,8 +23,8 @@ import { decisionOrClassic } from '../runtime/decision-policy.js';
  * claiming that a file contains secrets or issuing a semantic request.
  */
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import type { JudgmentPort } from '@goodvibes/judgment';
 import { sideEffect } from '../gate/batteries/side-effect.js';
 import { readingState } from '../gate/reading.js';
 

@@ -1,5 +1,5 @@
-import { createDaemonRuntimeRouteHandlers as createDaemonApiRuntimeRouteHandlers } from '@goodvibes-jev/engine/daemon-api';
-import type { DaemonRuntimeRouteContext as PlatformDaemonRuntimeRouteContext } from '@goodvibes-jev/engine/daemon-api';
+import { createDaemonRuntimeRouteHandlers as createDaemonApiRuntimeRouteHandlers } from '@goodvibes/engine/daemon-api';
+import type { DaemonRuntimeRouteContext as PlatformDaemonRuntimeRouteContext } from '@goodvibes/engine/daemon-api';
 import type { CreateAutomationJobInput, UpdateAutomationJobInput } from '../../automation/index.js';
 import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import {

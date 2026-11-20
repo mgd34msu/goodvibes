@@ -28,7 +28,7 @@ export function assertStagedClientReaderCompatible(execPath: string, candidatePa
   const asset = clientReaderAsset(artifact.packageName, artifact.target);
   if (expectedAsset !== undefined && asset !== expectedAsset) throw new NativeDataCompatibilityError('unconfirmed-reader');
   const basename = execPath.slice(execPath.lastIndexOf('/') + 1);
-  const product = artifact.packageName === '@goodvibes-jev/tui' ? 'goodvibes' : artifact.packageName === '@goodvibes-jev/agent' ? 'goodvibes-agent' : 'goodvibes-daemon';
+  const product = artifact.packageName === '@goodvibes/tui' ? 'goodvibes' : artifact.packageName === '@goodvibes/agent' ? 'goodvibes-agent' : 'goodvibes-daemon';
   if (basename !== product && basename !== asset) throw new NativeDataCompatibilityError('unconfirmed-reader');
   const alreadyVerified = suffix === '.update-download' && verifiedStage
     ? verifiedUpdateStageMembers(verifiedStage) : undefined;

@@ -1,14 +1,14 @@
-import { createPendingHostServices } from '@goodvibes-jev/engine/terminal-shell/host-service-status';
-import { joinPromptParts } from '@goodvibes-jev/engine/terminal-shell/prompt-parts';
+import { createPendingHostServices } from '@goodvibes/engine/terminal-shell/host-service-status';
+import { joinPromptParts } from '@goodvibes/engine/terminal-shell/prompt-parts';
 import {
   createPluginCommandAdapter,
   wireTerminalMcpReload,
   announceTerminalSessionStarted,
-} from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
-import { createTerminalOrchestrator, terminalCompanionInputHandler } from '@goodvibes-jev/engine/terminal-shell/bootstrap-orchestrator';
-import { buildPluginStartupContext } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
-import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
-import { ownerInputFor } from '@goodvibes-jev/engine/terminal-shell/companion-input';
+} from '@goodvibes/engine/terminal-shell/bootstrap-lifecycle';
+import { createTerminalOrchestrator, terminalCompanionInputHandler } from '@goodvibes/engine/terminal-shell/bootstrap-orchestrator';
+import { buildPluginStartupContext } from '@goodvibes/engine/terminal-shell/plugin-startup';
+import { createPluginStartupTask } from '@goodvibes/engine/terminal-shell/plugin-startup';
+import { ownerInputFor } from '@goodvibes/engine/terminal-shell/companion-input';
 /**
  * Bootstrap composition root for goodvibes-tui.
  *
@@ -21,20 +21,20 @@ import { ownerInputFor } from '@goodvibes-jev/engine/terminal-shell/companion-in
  *   - lifecycle.ts: save/shutdown helpers
  */
 import { join } from 'node:path';
-import { readConnectedDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
-import '@goodvibes-jev/engine/platform/platform/core';
-import { AcpManager } from '@goodvibes-jev/engine/platform/platform/acp';
-import { readTierPromptSupplement } from '@goodvibes-jev/engine/platform/platform/providers';
-import { factsFor } from '@goodvibes-jev/engine/platform/platform/routing';
-import { CONTROL_PLANE_FEATURE_FLAG, resumeContracts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
-import type { WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { readConnectedDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
+import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
+import '@goodvibes/engine/platform/platform/core';
+import { AcpManager } from '@goodvibes/engine/platform/platform/acp';
+import { readTierPromptSupplement } from '@goodvibes/engine/platform/platform/providers';
+import { factsFor } from '@goodvibes/engine/platform/platform/routing';
+import { CONTROL_PLANE_FEATURE_FLAG, resumeContracts } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { PermissionRequestHandler } from '@goodvibes/engine/platform/platform/permissions';
+import type { WorkspaceTrustLevel } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHistory } from '../input/input-history.ts';
 import type { GitStatusProvider, GitHeaderInfo } from '../renderer/git-status.ts';
-import type { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
+import type { SelectionManager } from '@goodvibes/engine/terminal-shell';
 import type { Compositor } from '../renderer/compositor.ts';
 
 import type { RuntimeContext, BootstrapOptions } from './context.ts';
@@ -51,14 +51,14 @@ import {
   type ExternalServicesHandle,
   createDeferredStartupCoordinator,
 } from '@/runtime/index.ts';
-import { bindWriteLastSessionPointerToSurface, ProcessTaskAdapter } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { deriveSpineFooterStatus, type SessionSpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
-import { transportRetryHooks } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
+import { bindWriteLastSessionPointerToSurface, ProcessTaskAdapter } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { deriveSpineFooterStatus, type SessionSpineClient } from '@goodvibes/engine/platform/platform/runtime/session-spine';
+import { transportRetryHooks } from '@goodvibes/engine/platform/platform/runtime/emitters';
 import { bindControlCommands } from './control-surfaces.ts';
-import { formatWorktreeStartupReport } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { formatWorktreeStartupReport } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { createSpineAdoptionSync } from './client/spine-adoption.ts';
-import { pruneStaleOperatorTokens } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { resolveDaemonCompanionToken, workspaceOperatorTokenCandidates } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { pruneStaleOperatorTokens } from '@goodvibes/engine/platform/platform/pairing';
+import { resolveDaemonCompanionToken, workspaceOperatorTokenCandidates } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { UiRuntimeServices } from './ui-services.ts';
 import { initializeBootstrapCore } from './bootstrap-core.ts';
 import { createBootstrapShutdown } from './bootstrap-shutdown.ts';
@@ -69,12 +69,12 @@ import { announceResumeState } from './resume-notice.ts';
 import { announceInstallHealth } from './install-self-check-startup.ts';
 import { buildSharedOrchestratorCoreServices, refreshMemoryRecallSnapshot } from './orchestrator-core-services.ts';
 import './daemon-attach-notices.ts';
-import { bindSessionContextAccounting } from '@goodvibes-jev/engine/platform/platform/tools';
+import { bindSessionContextAccounting } from '@goodvibes/engine/platform/platform/tools';
 import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
   describeDaemonAutostart,
-} from '@goodvibes-jev/engine/platform/platform/runtime/client';
+} from '@goodvibes/engine/platform/platform/runtime/client';
 import { createDaemonAttachHandshake } from './client/daemon-attach-handshake.ts';
 import { createPendingServiceStatus, hostServiceIsActive, hostServiceIsBlocked } from './client/host-service-status.ts';
 import { createRelayReadAccessors } from './relay-reachability-bridge.ts';
@@ -82,7 +82,7 @@ import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { registerStartupProviders } from './startup-provider-registration.ts';
 import { createSerialSteps } from './serial-steps.ts';
 import { retryTerminalRoutineMove, startTerminalRoutines } from './terminal-routines.ts';
-import { wireFailedTurnActions } from '@goodvibes-jev/engine/terminal-shell/turn-failure-actions';
+import { wireFailedTurnActions } from '@goodvibes/engine/terminal-shell/turn-failure-actions';
 
 type ExternalServiceFactories = NonNullable<Parameters<typeof startExternalServices>[3]>;
 

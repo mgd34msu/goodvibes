@@ -1,10 +1,10 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { captureDecisionRouterSettings, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
-import { effortLevelsForModel } from '@goodvibes-jev/engine/platform/platform/providers/reasoning-effort-surface';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { captureDecisionRouterSettings, type ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { ModelDefinition } from '@goodvibes/engine/platform/platform/providers';
+import { effortLevelsForModel } from '@goodvibes/engine/platform/platform/providers/reasoning-effort-surface';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { OpenSelection } from './selection-modal.js';
 import type { FileEditorOpener } from './external-editor.js';
 

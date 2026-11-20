@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { formatMinorUnits } from '../message.js';
 import type { CheckoutTerms } from '../checkout-page.js';

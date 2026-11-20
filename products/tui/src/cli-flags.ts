@@ -1,6 +1,6 @@
-import { createCliFlagParser } from '@goodvibes-jev/engine/terminal-shell';
+import { createCliFlagParser } from '@goodvibes/engine/terminal-shell';
 // Compatibility wrapper for older imports. New CLI code lives in src/cli.
-export type { GoodVibesCliFlags as CliFlags } from '@goodvibes-jev/engine/terminal-shell';
+export type { GoodVibesCliFlags as CliFlags } from '@goodvibes/engine/terminal-shell';
 export {
   applyRuntimeConfigDefault,
   applyRuntimeConfigOverrides,
@@ -15,7 +15,7 @@ export {
   renderGoodVibesVersion,
 } from './cli/index.ts';
 
-import { parseGoodVibesCli } from '@goodvibes-jev/engine/terminal-shell';
-import type { GoodVibesCliFlags } from '@goodvibes-jev/engine/terminal-shell';
+import { parseGoodVibesCli } from '@goodvibes/engine/terminal-shell';
+import type { GoodVibesCliFlags } from '@goodvibes/engine/terminal-shell';
 
 export const parseCliFlags = createCliFlagParser(parseGoodVibesCli);

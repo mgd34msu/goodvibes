@@ -1,4 +1,4 @@
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/contracts';
 
 // Agent delivery chooses the namespace in the server route. Neither source
 // text, transcript history nor a caller-supplied surface is a public input.

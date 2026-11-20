@@ -1,5 +1,5 @@
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { hasPurpose, PURPOSE_MODEL_COMPARE_ROUTE_DECISION } from '@goodvibes-jev/engine/terminal-shell/agent-turn/review-packet-presets-core';
+import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
+import { hasPurpose, PURPOSE_MODEL_COMPARE_ROUTE_DECISION } from '@goodvibes/engine/terminal-shell/agent-turn/review-packet-presets-core';
 import type { AgentWorkspaceRecentReviewerHandoffArtifact, AgentWorkspaceReviewPacketPresetLineage } from './agent-workspace-types.ts';
 import { readArtifactMetadataNumber, readArtifactMetadataString, readArtifactMetadataStringList } from './agent-workspace-artifact-metadata.ts';
 

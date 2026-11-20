@@ -25,7 +25,7 @@
  * settings inside it that match on their name, key or description
  * (settings-model.ts's filterSettingsModel).
  */
-import { SETTING_TOPICS, UNCLAIMED_SETTINGS_SECTION, type SettingTopicId } from '@goodvibes-jev/engine/platform/platform/config/setting-topics';
+import { SETTING_TOPICS, UNCLAIMED_SETTINGS_SECTION, type SettingTopicId } from '@goodvibes/engine/platform/platform/config/setting-topics';
 import type { SettingsGroupModel } from '../../../lib/settings-model';
 import { filterSettingsModel } from '../../../lib/settings-model';
 

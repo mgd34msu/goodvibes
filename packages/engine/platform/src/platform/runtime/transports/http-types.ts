@@ -1,6 +1,6 @@
-import type { FetchLike } from '@goodvibes-jev/engine/transport-core';
-import type { StreamEnd, StreamGap } from '@goodvibes-jev/engine/transport-http';
-import type { Page } from '@goodvibes-jev/engine/errors';
+import type { FetchLike } from '@goodvibes/engine/transport-core';
+import type { StreamEnd, StreamGap } from '@goodvibes/engine/transport-http';
+import type { Page } from '@goodvibes/engine/errors';
 import type {
   ControlPlaneRecentEvent,
   ControlPlaneAuthSnapshot,

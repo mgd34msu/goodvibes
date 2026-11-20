@@ -1,12 +1,12 @@
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { randomUUID } from 'node:crypto';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { createSetupSmokeReferenceCapture, resolveSetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts';
 import { runSetupInstallSmoke } from './agent-harness-setup-posture.ts';
 import { effectOutput, requireConfirmedAction } from './agent-harness-tool-utils.ts';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
-import { readFlag, readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { confirmParameter, requestParameter } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
+import { readFlag, readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 type AgentSetupAction =
   | 'status'

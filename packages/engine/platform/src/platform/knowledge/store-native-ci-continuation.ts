@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import { isDeepStrictEqual } from 'node:util';
 import { knowledgeSchemaColumns } from './store-schema-validation-data.js';
 /** One durable transaction publishes native continuation claim and its exact ledger successor. */

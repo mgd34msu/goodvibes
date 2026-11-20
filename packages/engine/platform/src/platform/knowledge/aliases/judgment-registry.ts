@@ -1,4 +1,4 @@
-import { BatteryRegistry } from '@goodvibes-jev/judgment';
+import { BatteryRegistry } from '@goodvibes/judgment';
 import { entityAlias } from '../batteries/entity-alias.js';
 
 export const registry = new BatteryRegistry();

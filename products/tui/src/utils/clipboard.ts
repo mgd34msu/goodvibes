@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/clipboard';
+export * from '@goodvibes/engine/terminal-shell/clipboard';

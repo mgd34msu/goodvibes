@@ -5,7 +5,7 @@
  */
 import { NotificationEnvelope, type NotificationPrivacyReader } from '../runtime/notification-envelope.js';
 import { readNotificationsMetadataOnly } from '../runtime/notification-privacy.js';
-import type { TargetChange } from '@goodvibes-jev/engine/errors';
+import type { TargetChange } from '@goodvibes/engine/errors';
 import type { DeadLetterCodec, DeadLetterEntry, DeliveryOutcome } from './delivery.js';
 
 /** One failed notification, as an operator or the owner sees it. */

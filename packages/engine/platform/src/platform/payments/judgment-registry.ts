@@ -1,4 +1,4 @@
-import { BatteryRegistry } from '@goodvibes-jev/judgment';
+import { BatteryRegistry } from '@goodvibes/judgment';
 import { merchantReading } from './batteries/merchant.js';
 import { recurringCharge } from './batteries/recurring-charge.js';
 import { cartLine } from './batteries/cart-line.js';

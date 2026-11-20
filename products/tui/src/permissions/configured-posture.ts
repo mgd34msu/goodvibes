@@ -1,6 +1,6 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { presetForMode } from '@goodvibes-jev/engine/platform/platform/gate/presets';
-import { describePermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { presetForMode } from '@goodvibes/engine/platform/platform/gate/presets';
+import { describePermissionModeInForce } from '@goodvibes/engine/platform/platform/permissions';
 
 /** Display the same canonical preset the permission owner applies. */
 export function describePermissionMode(mode: unknown): { readonly label: string; readonly detail: string } {

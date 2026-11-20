@@ -15,7 +15,7 @@
  * reply it is sent.
  */
 import { useMemo, useState, type ReactNode } from 'react';
-import { agoWords } from '@goodvibes-jev/engine/contracts';
+import { agoWords } from '@goodvibes/engine/contracts';
 import { hunkSummary, readApprovalEditHunks, readExecPromptAsk } from '../../lib/approvals';
 import { askReading, isAnswerable, type AskChoice, type OpenAsk } from '../../lib/asks';
 import { Button } from '../../components/ui/Button';

@@ -1,4 +1,4 @@
-import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError } from '@goodvibes/engine/errors';
 import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { selectKnowledgePassages, splitKnowledgePassages } from './passages.js';
 

@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/term-caps';
+export * from '@goodvibes/engine/terminal-shell/term-caps';

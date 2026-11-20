@@ -1,4 +1,4 @@
-import { defineBattery, yesNo, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, yesNo, STAKES_BANDS } from '@goodvibes/judgment';
 import { RESPONSE_REVIEW_CONTEXT } from './response-completion.js';
 
 function toolEvidence(name: string, args: Record<string, string>, output: string): Record<string, string | { id: string; name: string; arguments: Record<string, string> }[]>[] {

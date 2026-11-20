@@ -1,12 +1,12 @@
 import {
   TerminalHostPairingController,
   type HostPairingUi as PairingUi,
-} from '@goodvibes-jev/engine/terminal-shell/host-pairing-controller';
+} from '@goodvibes/engine/terminal-shell/host-pairing-controller';
 import { previewAgentHostPairing, type AgentHostPairingPreview } from '../runtime/agent-host-pairing.ts';
 import type { AgentDaemonVerbCallerOptions } from '../runtime/client/daemon-verbs.ts';
 import { formatSetupPairing } from '../runtime/setup-pairing-presentation.ts';
 
-import { readAgentHostPairing } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-pairing-store';
+import { readAgentHostPairing } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-pairing-store';
 export type SetupPairingUi = PairingUi;
 type PairingRequest = { readonly apply: boolean; readonly name: string };
 export class SetupPairingController extends TerminalHostPairingController<PairingRequest, AgentHostPairingPreview['result']> {

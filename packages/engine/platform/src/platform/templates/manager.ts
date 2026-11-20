@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { basename, join, resolve } from 'path';
-import { refusal, type Refusal } from '@goodvibes-jev/engine/errors';
+import { refusal, type Refusal } from '@goodvibes/engine/errors';
 
 export type TemplateScope = 'project' | 'global';
 

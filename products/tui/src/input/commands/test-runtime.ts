@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { getContractGateTimeoutMs, projectTestCommandMissing, resolveProjectTestCommand } from '@goodvibes-jev/engine/platform/platform/contract';
-import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
+import { getContractGateTimeoutMs, projectTestCommandMissing, resolveProjectTestCommand } from '@goodvibes/engine/platform/platform/contract';
+import type { ToolCall } from '@goodvibes/engine/platform/platform/types';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
 
 /**
  * The one /test run of a terminal. Esc and Ctrl-C stop it (the terminal's

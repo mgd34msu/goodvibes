@@ -5,7 +5,7 @@ import { DeliveryError } from './delivery.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
-import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+import { HttpStatusError } from '@goodvibes/engine/errors';
 import { VERSION } from '../version.js';
 
 const USER_AGENT = `DiscordBot (https://github.com/mgd34msu/goodvibes, ${VERSION})`;

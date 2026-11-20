@@ -1,14 +1,14 @@
 import { attachDaemonInboxTagging, type DaemonTriageTaggingActivation } from './tagged-inbox-composition.js';
 import { createMultiOwnerDaemonInboxFactory } from './multiowner-inbox-composition.js';
-import { createInboxRouteResolver } from '@goodvibes-jev/engine/platform/platform/channels';
-import type { ClusterClock } from '@goodvibes-jev/engine/platform/platform/cluster';
+import { createInboxRouteResolver } from '@goodvibes/engine/platform/platform/channels';
+import type { ClusterClock } from '@goodvibes/engine/platform/platform/cluster';
 import { ownAccountInboxStore } from './account-inbox-store.js';
 import { atInboxBuildStage, type InboxBuildStage } from './inbox-admission-refusal.js';
 /** Explicit single-account mail inbox; does not enable all-provider default serve. */
 import { realpath } from 'node:fs/promises';
-import { configReaderWithOrigins, createSurfaceEmailInboxConfigReader, mailboxReaderKey } from '@goodvibes-jev/engine/platform/platform/email';
+import { configReaderWithOrigins, createSurfaceEmailInboxConfigReader, mailboxReaderKey } from '@goodvibes/engine/platform/platform/email';
 import { createEmailInboxOwner, acquireAccountInboxIdentity, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
-  type EmailInboxAccount, type EmailInboxOwner, type EmailInboxScreening, type InboxSurfaceRegistration, type InboxTriageAuthority } from '@goodvibes-jev/engine/platform/platform/intake';
+  type EmailInboxAccount, type EmailInboxOwner, type EmailInboxScreening, type InboxSurfaceRegistration, type InboxTriageAuthority } from '@goodvibes/engine/platform/platform/intake';
 import type { DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
 

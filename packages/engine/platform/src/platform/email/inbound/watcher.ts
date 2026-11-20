@@ -38,7 +38,7 @@
  * asking again sooner cannot clear a limit that our own asking is part of.
  */
 
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { assertImapReadingCurrent, imapFailureText, ImapReadingError } from '../imap-readings.js';
 import {
   BackoffSchedule,

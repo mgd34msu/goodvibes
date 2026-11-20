@@ -1,10 +1,10 @@
 import type { CommandContext } from '../input/command-registry.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import { captureCatalogData } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 export interface AgentHarnessDelegationArgs {
   readonly delegationRouteId?: unknown;

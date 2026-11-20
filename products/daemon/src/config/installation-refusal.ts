@@ -3,7 +3,7 @@
  * on the error, so the command failure lines and the native start-up line read
  * it directly; rewording a reason cannot drop the diagnostic.
  */
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 
 export type InstallationRefusalCode = 'INSTALLATION_NOT_OWNED' | 'INSTALLATION_UNSETTLED' | 'INSTALLATION_UNAVAILABLE';
 

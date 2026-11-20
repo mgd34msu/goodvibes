@@ -1,12 +1,12 @@
-import { revealOrNull } from '@goodvibes-jev/engine/platform/platform/security';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { revealOrNull } from '@goodvibes/engine/platform/platform/security';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /** Root-held credential and permission owners for explicit provider tag handles. */
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { daemonSecretKeyFor } from '@goodvibes-jev/engine/platform/platform/config';
-import { createSurfaceEmailSecretReader } from '@goodvibes-jev/engine/platform/platform/email';
-import { createOwnedInboxTagging, createTriageTagger, type OwnedInboxTagging, type OwnedInboxSource, type TriageTaggerOptions } from '@goodvibes-jev/engine/platform/platform/intake';
+import type { JudgmentPort } from '@goodvibes/judgment';
+import { daemonSecretKeyFor } from '@goodvibes/engine/platform/platform/config';
+import { createSurfaceEmailSecretReader } from '@goodvibes/engine/platform/platform/email';
+import { createOwnedInboxTagging, createTriageTagger, type OwnedInboxTagging, type OwnedInboxSource, type TriageTaggerOptions } from '@goodvibes/engine/platform/platform/intake';
 import type { DaemonInboxControls } from './daemon-handler-composition.js';
-import type { InboxSurfaceRegistration } from '@goodvibes-jev/engine/platform/platform/intake';
+import type { InboxSurfaceRegistration } from '@goodvibes/engine/platform/platform/intake';
 import type { SecretsManager } from '../config/secrets.js';
 /** What a provider label write needs from the daemon: the decision port that reads a custom label name, and its lifetime. */
 export interface DaemonTriagePermissionHost {

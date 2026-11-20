@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { parseJevDecision } from '@goodvibes-jev/judgment/decisions';
-import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { parseJevDecision } from '@goodvibes/judgment/decisions';
+import { createOperatorApiClient } from '@goodvibes/engine/operator-client';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import { array, boolean, discriminatedUnion, enum as enumSchema, literal, object, record, strictObject, string, unknown } from 'zod/v4';
-import { validateLegacyWorkLedgerManifest, type LegacyMigrationPreparation } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import { validateLegacyWorkLedgerManifest, type LegacyMigrationPreparation } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
 import { LegacyImportJournal, type LegacyImportBinding, type LegacyImportEntry, type LegacyImportCommand, type LegacyImportJournalOptions, legacyImportResultSchema } from './legacy-work-ledger-import-journal.js';
 
 export interface LegacyImportHost { readonly baseUrl: string; readonly token: string; readonly workspace: string; readonly selectionIdentity?: string }

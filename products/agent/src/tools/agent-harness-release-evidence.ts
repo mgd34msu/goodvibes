@@ -1,13 +1,13 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
-import { type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import { captureCatalogData } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
+import { type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { withNativeCatalog, rankResearchRecords } from './agent-harness-research-catalog-source.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
 import { RELEASE_EVIDENCE_ORIGIN, RELEASE_PACKAGE_ROOT } from './agent-harness-release-readiness.ts';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 const RELEASE_EVIDENCE_ARTIFACTS = [
   {

@@ -1,5 +1,5 @@
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { allowTerminalWrite } from './terminal-write.js';
 
 /**
@@ -22,6 +22,6 @@ export function copyToClipboard(text: string): boolean {
   }
 }
 
-export { pasteFromClipboard, pasteImageFromClipboard } from '@goodvibes-jev/engine/platform/platform/utils';
+export { pasteFromClipboard, pasteImageFromClipboard } from '@goodvibes/engine/platform/platform/utils';
 
-export { missingClipboardReaderHint } from '@goodvibes-jev/engine/platform/platform/utils';
+export { missingClipboardReaderHint } from '@goodvibes/engine/platform/platform/utils';

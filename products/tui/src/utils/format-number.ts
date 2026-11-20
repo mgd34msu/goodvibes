@@ -1,1 +1,1 @@
-export { abbreviateCount, type AbbreviateCountOpts } from '@goodvibes-jev/engine/terminal-shell/format';
+export { abbreviateCount, type AbbreviateCountOpts } from '@goodvibes/engine/terminal-shell/format';

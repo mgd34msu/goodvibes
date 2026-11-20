@@ -1,4 +1,4 @@
-import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes/judgment';
 
 export const ARCHETYPE_FAMILIES = {
   implement: 'Implement changes to code, documents, configuration or other deliverables.',

@@ -43,7 +43,7 @@
  * stale with no person involved (reversible and receipted), where a weaker
  * reading sends the pair to a person instead. Nothing is ever deleted.
  */
-import { defineBattery, defineEntityAligner, oneOf, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, defineEntityAligner, oneOf, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 import type { MemoryRecord } from '../memory-store.js';
 
 const MEDIUM = STAKES_BANDS.medium;

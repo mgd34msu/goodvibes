@@ -1,5 +1,5 @@
 import { notifyKnowledgeCommitted } from '../commit-notification.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { createHomeGraphSourceIdentityPlanner, type HomeGraphSourceIdentity } from './source-identity-plan.js';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { withOrWithoutDecisionModel } from '../decision-policy.js';
@@ -12,7 +12,7 @@ import { registerGeneratedKnowledgeExtractionReferences } from '../source-struct
 import { captureStrictRepairJson } from '../semantic/web-gap-repair/admission.js';
 import { knowledgeSourceCrawledNow, sameKnowledgeRecord } from '../store-record-representation.js';
 import { registerGeneratedKnowledgeSourceReferences } from '../source-structural-references.js';
-import { ConfigurationError, GoodVibesError, RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { ConfigurationError, GoodVibesError, RefusalError, refusal } from '@goodvibes/engine/errors';
 import { acquireArtifactPublication, type ArtifactStore } from '../../artifacts/index.js';
 import type { ArtifactOriginalObservation, ArtifactDescriptor } from '../../artifacts/types.js';
 import { logger } from '../../utils/logger.js';

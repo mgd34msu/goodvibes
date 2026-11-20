@@ -1,12 +1,12 @@
-import { productVersionFromModule } from '@goodvibes-jev/engine/terminal-shell/cli-help';
-import { normalizeHelpTopic as normalizeTopic } from '@goodvibes-jev/engine/terminal-shell/cli-help';
-import { renderDetailedCommandHelp, COMMON_COMMAND_HELP, type TerminalCommandHelp } from '@goodvibes-jev/engine/terminal-shell/cli-help';
+import { productVersionFromModule } from '@goodvibes/engine/terminal-shell/cli-help';
+import { normalizeHelpTopic as normalizeTopic } from '@goodvibes/engine/terminal-shell/cli-help';
+import { renderDetailedCommandHelp, COMMON_COMMAND_HELP, type TerminalCommandHelp } from '@goodvibes/engine/terminal-shell/cli-help';
 import 'node:fs';
 import { join } from 'node:path';
 import 'node:url';
 import { VERSION } from '../version.ts';
 
-export const getPackageVersion = (): string => productVersionFromModule(import.meta.url, '@goodvibes-jev/tui', VERSION);
+export const getPackageVersion = (): string => productVersionFromModule(import.meta.url, '@goodvibes/tui', VERSION);
 
 export function renderGoodVibesVersion(binary = 'goodvibes'): string {
   return `${binary} ${getPackageVersion()}`;

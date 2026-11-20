@@ -12,10 +12,10 @@ import {
   createDaemonControlRouteHandlers,
   createDaemonTelemetryRouteHandlers,
   jsonErrorResponse,
-} from '@goodvibes-jev/engine/platform/daemon';
-import type { AuthenticatedPrincipal } from '@goodvibes-jev/engine/daemon-api';
-import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
-import enginePackage from '@goodvibes-jev/engine/package.json' with { type: 'json' };
+} from '@goodvibes/engine/platform/daemon';
+import type { AuthenticatedPrincipal } from '@goodvibes/engine/daemon-api';
+import { getOperatorContract } from '@goodvibes/engine/platform/contracts';
+import enginePackage from '@goodvibes/engine/package.json' with { type: 'json' };
 
 /** The bearer token on the request, or '' when there is none. */
 function extractAuthToken(request: Request): string {

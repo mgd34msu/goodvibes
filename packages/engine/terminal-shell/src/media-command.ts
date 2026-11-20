@@ -10,11 +10,11 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, relative } from 'node:path';
-import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { MediaProviderRegistry, MediaProviderTask } from '@goodvibes-jev/engine/platform/platform/media';
-import { redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import type { ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
+import type { MediaProviderRegistry, MediaProviderTask } from '@goodvibes/engine/platform/platform/media';
+import { redactSensitiveDataAsync, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { readRefusal } from '@goodvibes/engine/errors';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';

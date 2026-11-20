@@ -5,10 +5,10 @@ import {
   type SubscriptionStatus,
   type SubscriptionSecretStore,
 } from '../../agent/calendar-subscription-registry.ts';
-import type { FeedFetcher } from '@goodvibes-jev/engine/platform/platform/calendar';
+import type { FeedFetcher } from '@goodvibes/engine/platform/platform/calendar';
 import type { CommandContext } from '../command-registry.ts';
-import type { CalendarSubscription } from '@goodvibes-jev/engine/terminal-shell/calendar-command';
-import type { ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import type { CalendarSubscription } from '@goodvibes/engine/terminal-shell/calendar-command';
+import type { ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
 import { requireShellPaths } from './runtime-services.ts';
 import { getSessionUntrustedContentLedger } from '../../trust/untrusted-content.ts';
 import { commandRefusal } from './confirmation.ts';

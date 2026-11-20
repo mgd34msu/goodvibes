@@ -1,1 +1,1 @@
-export {buildMcpEntries} from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
+export {buildMcpEntries} from '@goodvibes/engine/terminal-shell/settings-mcp-entries';

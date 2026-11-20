@@ -16,8 +16,8 @@
  * one line.
  */
 
-import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
-import { parseEveryInterval } from '@goodvibes-jev/engine/platform/platform/automation';
+import type { OperatorMethodInput } from '@goodvibes/engine/platform/contracts';
+import { parseEveryInterval } from '@goodvibes/engine/platform/platform/automation';
 import { getModelIdFromProviderModel, getProviderIdFromModel } from './provider-model.js';
 
 type ScheduleCreateInput = OperatorMethodInput<'automation.schedules.create'>;

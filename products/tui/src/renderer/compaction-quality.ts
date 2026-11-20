@@ -27,11 +27,11 @@
  * models, see runtime-services.ts) can create index gaps.
  */
 
-import { computeQualityScore, describeScore } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import type { CompactionQualityScore, StrategyInput, StrategyOutput } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import type { ProviderMessage } from '@goodvibes-jev/engine/platform/platform/providers';
+import { computeQualityScore, describeScore } from '@goodvibes/engine/platform/platform/runtime/operations';
+import type { CompactionQualityScore, StrategyInput, StrategyOutput } from '@goodvibes/engine/platform/platform/runtime/operations';
+import type { ProviderMessage } from '@goodvibes/engine/platform/platform/providers';
 
-export type { CompactionQualityScore } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+export type { CompactionQualityScore } from '@goodvibes/engine/platform/platform/runtime/operations';
 
 /**
  * Bound the TUI-local score store the same way the platform bounds its own

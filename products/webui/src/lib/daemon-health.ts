@@ -7,7 +7,7 @@ import type { ClientCompatibilityVerdict } from './client-compatibility';
 import {
   evaluateDaemonStatusCompatibility,
   type DaemonCompatibilityVerdict,
-} from '@goodvibes-jev/engine/platform/platform/control-plane/daemon-compatibility';
+} from '@goodvibes/engine/platform/platform/control-plane/daemon-compatibility';
 
 export type { DaemonCompatibilityVerdict };
 

@@ -1,2 +1,2 @@
-export type { TransportPaths } from '@goodvibes-jev/engine/transport-http';
-export { buildUrl, createTransportPaths, normalizeBaseUrl } from '@goodvibes-jev/engine/transport-http';
+export type { TransportPaths } from '@goodvibes/engine/transport-http';
+export { buildUrl, createTransportPaths, normalizeBaseUrl } from '@goodvibes/engine/transport-http';

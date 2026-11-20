@@ -8,7 +8,7 @@
  * holds, so rotating through a host's own addresses does not reset either.
  */
 
-import type { AddressRateLimiter } from '@goodvibes-jev/engine/daemon-api';
+import type { AddressRateLimiter } from '@goodvibes/engine/daemon-api';
 import { logger } from '../utils/logger.js';
 import { authFailureTotal, authSuccessTotal } from '../runtime/metrics.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';

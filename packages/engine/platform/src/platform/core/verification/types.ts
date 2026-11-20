@@ -1,4 +1,4 @@
-import type { CallOptions, JudgmentPort } from '@goodvibes-jev/judgment';
+import type { CallOptions, JudgmentPort } from '@goodvibes/judgment';
 import type { CompletionFinding } from '../response-completion-findings.js';
 
 /**

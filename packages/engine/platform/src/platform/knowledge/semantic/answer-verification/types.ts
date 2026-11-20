@@ -1,4 +1,4 @@
-import type { Outcome } from '@goodvibes-jev/judgment';
+import type { Outcome } from '@goodvibes/judgment';
 export type AnswerCandidateId = 'generated' | 'rendered';
 export interface AnswerEvidenceProjection {
   /** Local structural label, never the store ID. */

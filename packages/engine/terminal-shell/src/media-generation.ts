@@ -4,7 +4,7 @@
  * making), and keep what it made in the artifact store, each artifact stamped
  * with the running program and the path that asked (`MediaOrigin`).
  */
-import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
 import type {
   MediaArtifact,
   MediaCollectOptions,
@@ -13,11 +13,11 @@ import type {
   MediaProvider,
   MediaProviderRegistry,
   MediaProviderTask,
-} from '@goodvibes-jev/engine/platform/platform/media';
-import { mediaOutputKindOf } from '@goodvibes-jev/engine/platform/platform/media';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import { assertDeliveryCurrent, type DeliveryLifetime } from '@goodvibes-jev/engine/platform/platform/utils';
+} from '@goodvibes/engine/platform/platform/media';
+import { mediaOutputKindOf } from '@goodvibes/engine/platform/platform/media';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import { assertDeliveryCurrent, type DeliveryLifetime } from '@goodvibes/engine/platform/platform/utils';
 
 /** Who asked for the media: the running program and the path inside it, kept with every artifact. */
 export interface MediaOrigin {

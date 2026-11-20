@@ -1,4 +1,4 @@
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 /** Request-local references are mapped to exact records only by the preparing caller. */
 export interface AnswerObjectCandidate {
   readonly reference: string;

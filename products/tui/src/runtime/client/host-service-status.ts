@@ -1,9 +1,9 @@
-import { pendingHostServiceStatus, formatHostServiceBaseUrl } from '@goodvibes-jev/engine/terminal-shell/host-service-status';
+import { pendingHostServiceStatus, formatHostServiceBaseUrl } from '@goodvibes/engine/terminal-shell/host-service-status';
 export {
   formatHostServiceBaseUrl,
   hostServiceIsActive,
   hostServiceIsBlocked,
-} from '@goodvibes-jev/engine/terminal-shell/host-service-status';
+} from '@goodvibes/engine/terminal-shell/host-service-status';
 /**
  * host-service-status.ts, reading a background service's posture.
  *
@@ -15,12 +15,12 @@ export {
  */
 
 import type { HostServiceStatus } from '@/runtime/index.ts';
-import { readConnectedDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { readConnectedDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 
 /** Which of the two background services a question is about. */
-import type { HostServiceName } from '@goodvibes-jev/engine/terminal-shell/host-service-status';
-export type { HostServiceName } from '@goodvibes-jev/engine/terminal-shell/host-service-status';
+import type { HostServiceName } from '@goodvibes/engine/terminal-shell/host-service-status';
+export type { HostServiceName } from '@goodvibes/engine/terminal-shell/host-service-status';
 
 /**
  * The URL a configured host/port is actually reachable at. A wildcard bind is

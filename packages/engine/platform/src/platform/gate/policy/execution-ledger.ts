@@ -26,7 +26,7 @@ import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolic
  * stated in `argsReadingError` / `routeKindError`. YOLO and Classic take no
  * reading: such a tool's values stay withheld there.
  */
-import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
+import type { JevDecision } from '@goodvibes/judgment/decisions';
 import type { ToolEvent } from '../../../events/tools.js';
 import type { TurnEvent } from '../../../events/turn.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
@@ -34,9 +34,9 @@ import { logger } from '../../utils/logger.js';
 import type { SideEffectKind } from '../batteries/side-effect.js';
 import { snapshotJudgmentInput, JudgmentInputError } from '../judgment-input.js';
 import { readSideEffectKind, shellCommandsIn } from '../reading.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { isYoloExecution } from '../execution-context.js';
-import { mapLimit } from '@goodvibes-jev/judgment';
+import { mapLimit } from '@goodvibes/judgment';
 import { ledgerArg } from '../batteries/ledger-arg.js';
 import { withheldFieldKind } from '../../utils/field-kind-reading.js';
 import { declaredValues } from '../classify.js';

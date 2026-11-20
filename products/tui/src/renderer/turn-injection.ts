@@ -23,7 +23,7 @@
  * record onto their own `AgentRecord.turnInjections`, rendered per-agent by
  * `buildTurnInjectionsText` when an explicit agent id is given.
  */
-import type { TurnInjectionRecord } from '@goodvibes-jev/engine/platform/platform/agents';
+import type { TurnInjectionRecord } from '@goodvibes/engine/platform/platform/agents';
 
 /** One per-turn injection record, under the name this renderer already used. */
 export type TurnInjectionEntry = TurnInjectionRecord;

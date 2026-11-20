@@ -8,7 +8,7 @@
  * Band: low stakes. The result is a listing a person reads; an unsure entry is
  * listed and marked as such.
  */
-import { defineBattery, STAKES_BANDS, yesNo, type Fixture, type YesNoItem } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo, type Fixture, type YesNoItem } from '@goodvibes/judgment';
 import { listHookPointContracts, type HookPointContract } from '../contracts.js';
 
 function hookPointQuestion(contract: HookPointContract): YesNoItem {

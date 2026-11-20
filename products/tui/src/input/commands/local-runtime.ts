@@ -1,5 +1,5 @@
-import { createSecretsCommand } from '@goodvibes-jev/engine/terminal-shell/secrets-command';
-import { createLocalCommandActions } from '@goodvibes-jev/engine/terminal-shell/local-command-actions';
+import { createSecretsCommand } from '@goodvibes/engine/terminal-shell/secrets-command';
+import { createLocalCommandActions } from '@goodvibes/engine/terminal-shell/local-command-actions';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import { toolsCommand } from './tools-command.ts';
 

@@ -13,8 +13,8 @@
  * the command ends, exit 0, when the editor closes stdin or the process is
  * told to stop.
  */
-import { serveAcpAgent, type AcpStdio } from '@goodvibes-jev/engine/platform/platform/acp';
-import { resolveGoodVibesHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { serveAcpAgent, type AcpStdio } from '@goodvibes/engine/platform/platform/acp';
+import { resolveGoodVibesHome } from '@goodvibes/engine/platform/platform/config';
 
 export const ACP_USAGE = 'Usage: goodvibes acp   (speaks the Agent Client Protocol on stdin/stdout; configure it as the editor\'s agent-server command)';
 

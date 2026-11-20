@@ -1,10 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils/lifecycle-machine';
-import { holdProcessLock } from '@goodvibes-jev/engine/platform/platform/utils/process-lock';
-import type { HeldProcessLock } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { defineLifecycle } from '@goodvibes/engine/platform/platform/utils/lifecycle-machine';
+import { holdProcessLock } from '@goodvibes/engine/platform/platform/utils/process-lock';
+import type { HeldProcessLock } from '@goodvibes/engine/platform/platform/utils';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { readJsonStore, updateJsonStore, type JsonStoreSpec, type JsonStoreWriteReport } from './store-file.js';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import { assertNoSecretLikeText } from './persona-registry.js';

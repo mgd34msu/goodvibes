@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/autocomplete-overlay';
+export * from '@goodvibes/engine/terminal-shell/autocomplete-overlay';

@@ -3,7 +3,7 @@ import type {
   VoiceProvider,
   VoiceProviderStatus,
 } from '../types.js';
-import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+import { HttpStatusError } from '@goodvibes/engine/errors';
 import { fetchWithTimeout, instrumentedFetch } from '../../utils/fetch-with-timeout.js';
 import { isRecord } from '../../utils/record-coerce.js';
 import { redactDiagnosticText } from '../../utils/redaction.js';

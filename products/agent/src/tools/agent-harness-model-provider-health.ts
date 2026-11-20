@@ -1,4 +1,4 @@
-import { measureLlmRoute } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
+import { measureLlmRoute } from '@goodvibes/engine/platform/platform/runtime/observability';
 import type { ModelProviderHealthSignal } from './agent-harness-model-routing-types.ts';
 
 const POLICY = 'Provider health is what this Agent process measured on its own provider calls: successes, errors and latency per provider and model. Local benchmark artifacts remain separate task-fit evidence.';

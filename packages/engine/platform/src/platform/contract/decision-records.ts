@@ -9,7 +9,7 @@
  * decision's whole sentence; `decisionReceipt` still reads those, and only
  * those, so a contract saved then resumes without being re-judged.
  */
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import type { ContractRun } from './run-context.js';
 import type { ContractDecision, ContractDecisionRecord, DeepReadonly } from './types.js';
 

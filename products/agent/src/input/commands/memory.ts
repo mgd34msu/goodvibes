@@ -3,7 +3,7 @@
  * (terminal-shell/memory-command.ts). The Agent opens its workspace's Memory
  * page and records no per-turn memory.
  */
-import { createMemoryCommand } from '@goodvibes-jev/engine/terminal-shell/memory-command';
+import { createMemoryCommand } from '@goodvibes/engine/terminal-shell/memory-command';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
 import { commandRefusal } from './confirmation.ts';
 

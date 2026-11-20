@@ -1,4 +1,4 @@
-import type { FailureReadOptions } from '@goodvibes-jev/engine/errors';
+import type { FailureReadOptions } from '@goodvibes/engine/errors';
 import { createNativeHostedTurnHost, type NativeHostedTurnDependencies, type NativeHostedTurnHost } from '../hosted-sessions/native-turn-host.js';
 import { registerNativeHostedTurnGatewayMethods } from '../control-plane/routes/native-hosted-turn.js';
 import type { SharedSessionBroker } from '../control-plane/session-broker.js';

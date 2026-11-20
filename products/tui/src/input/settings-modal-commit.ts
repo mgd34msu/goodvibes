@@ -10,13 +10,13 @@
  * stays a thin delegator.
  */
 
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { McpRegistry } from '@goodvibes/engine/platform/platform/mcp';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
-import { parseNumberEditBuffer } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
-import { keepMcpTrustModeFromSettings, MCP_TOOL_RULE_EDIT_WORDS, mcpGuidedActionFromSettings, type SettingsGuidedAction } from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
+import { parseNumberEditBuffer } from '@goodvibes/engine/terminal-shell/settings-behavior';
+import { keepMcpTrustModeFromSettings, MCP_TOOL_RULE_EDIT_WORDS, mcpGuidedActionFromSettings, type SettingsGuidedAction } from '@goodvibes/engine/terminal-shell/settings-mcp-entries';
 import { parseListSettingEdit } from './settings-modal-lists.ts';
 import type { SettingsDaemonCredentialWriter } from './settings-modal-secrets.ts';
 import type { McpEntry, SettingEntry } from './settings-modal-types.ts';

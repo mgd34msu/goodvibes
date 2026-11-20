@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /**
  * card-fields.ts, recognising a payment field on any page.
  *
@@ -35,11 +35,11 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
  * comparable, so a control is treated as a payment field unless the reading
  * is a confident no.
  */
-import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { checkAnswers, recordAction, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { judgmentPort, JudgmentPortMissingError } from '@goodvibes/engine/errors';
+import { checkAnswers, recordAction, type EntryType, type JudgmentPort } from '@goodvibes/judgment';
 import { cardField, type CardFieldView } from './batteries/card-field.js';
 import { askEach } from './batteries/ask-each.js';
-import { runDecisionOrClassic as decisionOrClassic } from '@goodvibes-jev/engine/errors';
+import { runDecisionOrClassic as decisionOrClassic } from '@goodvibes/engine/errors';
 
 /**
  * Everything about one control the classification may look at.

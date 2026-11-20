@@ -1,9 +1,9 @@
-import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { agentArtifactEffectGuard, assertAgentArtifactBytes } from './artifact-effect.js';
 import { toolErrorText } from './tool-error-text.js';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import {
   AgentDocumentRegistry,
   renderAgentDocumentMarkdown,

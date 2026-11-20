@@ -6,17 +6,17 @@
  * the runtime loop.
  */
 import type { TerminalConversationManager } from './terminal-conversation.js';
-import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
-import type { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
-import type { FileStateCache } from '@goodvibes-jev/engine/platform/platform/state';
-import type { ProjectIndex } from '@goodvibes-jev/engine/platform/platform/state';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { RuntimeStore, RuntimeEventBus, FeatureFlagManager } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import type { MutableRuntimeState, WorktreeRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import type { SessionSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import type { SandboxSessionRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
+import type { Orchestrator } from '@goodvibes/engine/platform/platform/core';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { PermissionManager } from '@goodvibes/engine/platform/platform/permissions';
+import type { HookDispatcher } from '@goodvibes/engine/platform/platform/hooks';
+import type { FileStateCache } from '@goodvibes/engine/platform/platform/state';
+import type { ProjectIndex } from '@goodvibes/engine/platform/platform/state';
+import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
+import type { RuntimeStore, RuntimeEventBus, FeatureFlagManager } from '@goodvibes/engine/platform/platform/runtime/state';
+import type { MutableRuntimeState, WorktreeRegistry } from '@goodvibes/engine/platform/platform/runtime/shell';
+import type { SessionSnapshot } from '@goodvibes/engine/platform/platform/runtime/operations';
+import type { SandboxSessionRegistry } from '@goodvibes/engine/platform/platform/runtime/sandbox';
 /**
  * Options accepted by bootstrapRuntime().
  */
@@ -35,7 +35,7 @@ export interface BootstrapOptions {
    */
   daemonHomeDirectory?: string | undefined;
   /** Explicit app-owned config manager for this runtime instance. */
-  configManager: import('@goodvibes-jev/engine/platform/platform/config').ConfigManager;
+  configManager: import('@goodvibes/engine/platform/platform/config').ConfigManager;
   /**
    * Callback invoked when the app should exit.
    * If provided, commandContext.exit is wired during bootstrap.
@@ -45,7 +45,7 @@ export interface BootstrapOptions {
   onHookDispatcherReady?:
     | ((state: {
         readonly runtime: Pick<MutableRuntimeState, 'sessionId'>;
-        readonly surface: import('@goodvibes-jev/engine/platform/platform/runtime/operations').SessionSurface;
+        readonly surface: import('@goodvibes/engine/platform/platform/runtime/operations').SessionSurface;
         readonly hookDispatcher: HookDispatcher;
       }) => void)
     | undefined;

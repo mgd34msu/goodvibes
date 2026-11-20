@@ -12,7 +12,7 @@
  * model, which may still start a contract through the agent tool, so they read
  * at medium. Below act on any route the turn goes on as a normal turn.
  */
-import { defineDispatch, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineDispatch, STAKES_BANDS } from '@goodvibes/judgment';
 
 export const REQUEST_ROUTE_SITE = 'contract.request-route';
 

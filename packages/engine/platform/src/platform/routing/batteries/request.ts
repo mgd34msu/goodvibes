@@ -14,7 +14,7 @@
  * low bands. A wrong route is reversible: the work is still checked, and the
  * provider failover chain covers an outage.
  */
-import { defineBattery, oneOf, rated, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, rated, STAKES_BANDS } from '@goodvibes/judgment';
 import { WORK_TIER_OPTIONS } from '../tiers.js';
 
 const LOW = STAKES_BANDS.low;

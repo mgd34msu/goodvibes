@@ -12,10 +12,10 @@ import {
   pendingProjectServiceLines,
   projectServiceRef,
   type ServiceRegistry,
-} from '@goodvibes-jev/engine/platform/platform/config';
-import { compareTarget } from '@goodvibes-jev/engine/platform/platform/utils/target-ref';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+} from '@goodvibes/engine/platform/platform/config';
+import { compareTarget } from '@goodvibes/engine/platform/platform/utils/target-ref';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { commandRefusal, describeTargetChanges } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';

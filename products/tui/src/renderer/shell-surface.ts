@@ -1,6 +1,6 @@
-import { createShellFooter, statusCostText as priceUsage } from '@goodvibes-jev/engine/terminal-shell/shell-footer';
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import '@goodvibes-jev/engine/platform/platform/providers';
+import { createShellFooter, statusCostText as priceUsage } from '@goodvibes/engine/terminal-shell/shell-footer';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
+import '@goodvibes/engine/platform/platform/providers';
 import { UIFactory } from './ui-factory.ts';
 import { type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { activeTokens, activeUiTones } from './theme.ts';
@@ -51,7 +51,7 @@ import { wrapText } from '../utils/terminal-width.ts';
  * Esc leads: the way back to typing is never dropped for lack of room; the
  * other keys give way from the end (status-line.ts keeps whole keys in order).
  */
-import type { ShellFooterView } from '@goodvibes-jev/engine/terminal-shell/shell-footer-view';
+import type { ShellFooterView } from '@goodvibes/engine/terminal-shell/shell-footer-view';
 export type { ShellFooterView };
 
 export interface ShellFooterBuildOptions {
@@ -176,7 +176,7 @@ function composerBarColor(permissionMode: string | undefined, shell: boolean): s
 
 export const statusCostText = (usage: ShellFooterBuildOptions['usage'], model: string | undefined) => priceUsage(usage, model, true);
 
-export { promptCursorOffset, type WrappedPromptCursorInfo } from '@goodvibes-jev/engine/terminal-shell/shell-footer';
+export { promptCursorOffset, type WrappedPromptCursorInfo } from '@goodvibes/engine/terminal-shell/shell-footer';
 
 export const { buildShellFooter, estimateShellFooterHeight } = createShellFooter<ShellFooterBuildOptions>({
   blankRow,

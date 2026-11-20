@@ -1,16 +1,16 @@
 import { assertAgentLocalRegistryWrite, assertAgentLocalRegistryEffectCurrent, createAgentLocalRegistryWriteLifecycle, createAgentLocalRegistryInputProjector } from './local-registry-admission.js';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
-import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { MemoryRegistry } from '@goodvibes/engine/platform/platform/state';
+import type { MemoryAccess } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
 import { AgentPersonaRegistry, type AgentPersonaRecord } from './persona-registry.js';
 import { AgentNoteRegistry, type AgentNoteRecord } from './note-registry.js';
 import { AgentRoutineRegistry, type AgentRoutineRecord } from './routine-registry.js';
 import { AgentSkillRegistry, type AgentSkillBundleRecord, type AgentSkillRecord } from './skill-registry.js';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from './record-labels.js';
 import { assertActorMayEnable, assertActorMayMarkReviewed } from './review-authority.js';
-import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
+import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import { buildAgentLocalRequirements } from './local-registry-requirements.js';
 import {
   AGENT_TOOL_PROVENANCE,

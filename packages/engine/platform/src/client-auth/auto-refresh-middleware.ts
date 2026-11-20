@@ -25,11 +25,11 @@
  *      `kind:'unknown'`.
  */
 
-import type { TransportContext, TransportMiddleware } from '@goodvibes-jev/engine/transport-core';
-import type { HttpJsonTransport } from '@goodvibes-jev/engine/transport-http/http-core';
+import type { TransportContext, TransportMiddleware } from '@goodvibes/engine/transport-core';
+import type { HttpJsonTransport } from '@goodvibes/engine/transport-http/http-core';
 import type { GoodVibesTokenStore } from './types.js';
 import type { AutoRefreshCoordinator } from './auto-refresh.js';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import { is401Error } from './auto-refresh.js';
 
 /** Request-local flag key that never conflicts with public HttpJsonRequestOptions fields. */

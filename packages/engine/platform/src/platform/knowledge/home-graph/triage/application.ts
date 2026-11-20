@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import type { KnowledgeStore } from '../../store.js';
 import type { KnowledgeIssueRecord, KnowledgeNodeRecord, KnowledgeNodeUpsertInput, KnowledgeIssueUpsertInput } from '../../types.js';
 import { KnowledgeNodeMutationHeldError } from '../../store-node-authority.js';

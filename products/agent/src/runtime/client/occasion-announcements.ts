@@ -13,9 +13,9 @@
  * next idle pass.
  */
 
-import { buildUrl } from '@goodvibes-jev/engine/transport-http/paths';
-import { openRawServerSentEventStream } from '@goodvibes-jev/engine/transport-http/sse-stream';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { buildUrl } from '@goodvibes/engine/transport-http/paths';
+import { openRawServerSentEventStream } from '@goodvibes/engine/transport-http/sse-stream';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 export interface OccasionAnnouncementWatch {
   close(): void;

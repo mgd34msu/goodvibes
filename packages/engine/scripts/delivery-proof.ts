@@ -12,8 +12,8 @@ import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
  *
  *   TYPESAFE_API_KEY=... bun run --cwd packages/engine delivery:proof
  */
-import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes-jev/judgment';
-import { HttpStatusError, installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes/judgment';
+import { HttpStatusError, installJudgmentPort } from '@goodvibes/engine/errors';
 import { DeliveryQueue, readFailureTransience, type DeliveryFailureClass } from '../platform/src/platform/integrations/delivery.ts';
 import { readAutomationRunTransience } from '../platform/src/platform/automation/manager-runtime-delivery.ts';
 

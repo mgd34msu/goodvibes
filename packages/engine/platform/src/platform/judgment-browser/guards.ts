@@ -1,5 +1,5 @@
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { BrowserJudgmentError, type BrowserJudgmentErrorCode } from '@goodvibes-jev/engine/daemon-api';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
+import { BrowserJudgmentError, type BrowserJudgmentErrorCode } from '@goodvibes/engine/daemon-api';
 
 /** A refused asynchronous hook must not leave a private rejection unhandled. */
 export function consumeRejectedHook(value: unknown): void {

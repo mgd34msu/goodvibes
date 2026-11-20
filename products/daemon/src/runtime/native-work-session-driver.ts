@@ -1,16 +1,16 @@
 /** Drive no-delegation native units through the real foreground turn loop. */
-import { ConversationManager, Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
-import { createContractIntake, isTerminalContractStatus, readContractConfig, TRANSPORT_RETRY_SITE, type ContractRunner, type ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
-import { readFailureTransience } from '@goodvibes-jev/engine/errors';
-import type { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agents';
-import { ToolRegistry, registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
-import { CONVERSATIONAL_CONTAINMENT, resolveHostedModelDefinition, withHostedSessionModel } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
-import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import type { FeatureFlagManager } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import type { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { ConversationManager, Orchestrator } from '@goodvibes/engine/platform/platform/core';
+import { createContractIntake, isTerminalContractStatus, readContractConfig, TRANSPORT_RETRY_SITE, type ContractRunner, type ContractView } from '@goodvibes/engine/platform/platform/contract';
+import { readFailureTransience } from '@goodvibes/engine/errors';
+import type { AgentOrchestrator } from '@goodvibes/engine/platform/platform/agents';
+import { ToolRegistry, registerAllTools } from '@goodvibes/engine/platform/platform/tools';
+import { CONVERSATIONAL_CONTAINMENT, resolveHostedModelDefinition, withHostedSessionModel } from '@goodvibes/engine/platform/platform/hosted-sessions';
+import type { PermissionManager } from '@goodvibes/engine/platform/platform/permissions';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
+import type { RuntimeEventBus } from '@goodvibes/engine/platform/platform/runtime/state';
+import type { FeatureFlagManager } from '@goodvibes/engine/platform/platform/runtime/state';
+import type { HookDispatcher } from '@goodvibes/engine/platform/platform/hooks';
 
 type ToolDependencies = Parameters<AgentOrchestrator['setDependencies']>[0];
 export interface NativeSessionDriverOptions {

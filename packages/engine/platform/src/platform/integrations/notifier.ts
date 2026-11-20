@@ -10,7 +10,7 @@ import {
   describeDeadLetters, notificationDeadLetterCodec,
   type NotificationDeadLetter, type NotificationDeadLetterSource, type NotificationReplayOptions, type NotificationReplayResult,
 } from './notification-dead-letters.js';
-import type { TargetChange } from '@goodvibes-jev/engine/errors';
+import type { TargetChange } from '@goodvibes/engine/errors';
 import { compareTarget, contentDigest, targetRef, type TargetRef } from '../utils/target-ref.js';
 import { snapshotQueueStatus } from './delivery.js';
 import { attachRuntimeNotifications, RUNTIME_NOTIFICATION_EVENTS, type RuntimeNotificationOptions } from './notification-dispatcher.js';

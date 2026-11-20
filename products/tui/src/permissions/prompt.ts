@@ -1,5 +1,5 @@
-import type { TerminalAskContext } from '@goodvibes-jev/engine/terminal-shell/permission-prompt-facts';
-import { cardAwaitsTab } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
+import type { TerminalAskContext } from '@goodvibes/engine/terminal-shell/permission-prompt-facts';
+import { cardAwaitsTab } from '@goodvibes/engine/terminal-shell/blocking-permission-input';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';
 import type { HunkSelectionState } from './hunk-selection.ts';
 import { renderPermissionCard, type PermissionCardState } from './prompt-card.ts';
@@ -11,7 +11,7 @@ import type {
   PermissionPromptDecision,
   PermissionRequestHandler,
   PermissionRequest,
-} from '@goodvibes-jev/engine/platform/platform/permissions';
+} from '@goodvibes/engine/platform/platform/permissions';
 export type { PermissionPromptRequest, PermissionPromptDecision, PermissionRequestHandler, PermissionRequest };
 
 /** The pending-permission fields the card reads (see shell/blocking-input.ts PendingPermissionState). */

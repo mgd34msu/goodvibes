@@ -24,20 +24,20 @@ import type {
   operations,
   shell,
   ui,
-} from '@goodvibes-jev/engine/platform/platform/runtime';
+} from '@goodvibes/engine/platform/platform/runtime';
 
 // State, the event bus and the read-model store.
-export * from '@goodvibes-jev/engine/platform/platform/runtime/state';
-export * from '@goodvibes-jev/engine/platform/platform/runtime/store';
-export * from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags';
-export * from '@goodvibes-jev/engine/platform/platform/runtime/settings';
-export * from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
+export * from '@goodvibes/engine/platform/platform/runtime/state';
+export * from '@goodvibes/engine/platform/platform/runtime/store';
+export * from '@goodvibes/engine/platform/platform/runtime/feature-flags';
+export * from '@goodvibes/engine/platform/platform/runtime/settings';
+export * from '@goodvibes/engine/platform/platform/runtime/sandbox';
 
 // Shell paths + the surface-scoped storage handle. Grouped live re-exports:
 // class values (WorktreeRegistry etc.) carry their instance types with them.
-export { createShellPathService, WorktreeRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+export { createShellPathService, WorktreeRegistry } from '@goodvibes/engine/platform/platform/runtime/shell';
 export type ShellPathService = shell.ShellPathService;
-export { createSessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+export { createSessionSurface } from '@goodvibes/engine/platform/platform/runtime/operations';
 export type SessionSurface = operations.SessionSurface;
 
 // Remote execution + the distributed runtime.
@@ -46,19 +46,19 @@ export {
   RemoteBackendHost,
   RemoteRunnerRegistry,
   RemoteSupervisor,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+} from '@goodvibes/engine/platform/platform/runtime/operations';
 
 // Boot helpers the daemon runs itself (the facade does not know about them).
-export { synchronizeConfiguredServices as syncConfiguredServices } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+export { synchronizeConfiguredServices as syncConfiguredServices } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 
 // Observability.
 export {
   TelemetryApiService,
   IdempotencyStore,
-} from '@goodvibes-jev/engine/platform/platform/runtime/observability';
+} from '@goodvibes/engine/platform/platform/runtime/observability';
 
 // Security.
-export { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+export { PolicyRuntimeState } from '@goodvibes/engine/platform/platform/runtime/security';
 
 // Integration helpers (surface-scoped continuity reads) and the no-op screen
 // stand-ins. The daemon facade's service-graph contract names a panel manager
@@ -69,7 +69,7 @@ export {
   IntegrationHelperService,
   createNoopPanelManager,
   createNoopKeybindingsManager,
-} from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+} from '@goodvibes/engine/platform/platform/runtime/ui';
 export type PanelManagerLike = ui.PanelManagerLike;
 export type KeybindingsManagerLike = ui.KeybindingsManagerLike;
 
@@ -78,7 +78,7 @@ export type Notification = ui.Notification;
 export type RoutingDecision = ui.RoutingDecision;
 
 // Outbound network transport installation (proxy/TLS policy from settings).
-export { GlobalNetworkTransportInstaller } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
+export { GlobalNetworkTransportInstaller } from '@goodvibes/engine/platform/platform/runtime/transport';
 
 
 // Runtime event payload unions, re-exported so a consumer names one import path
@@ -98,4 +98,4 @@ export type {
   ToolEvent,
   TransportEvent,
   TurnEvent,
-} from '@goodvibes-jev/engine/platform/events';
+} from '@goodvibes/engine/platform/events';

@@ -11,11 +11,11 @@
  * every verb. Nothing here is policy: the poller decides what to do with an
  * input, the daemon decides what an input IS, and this shapes two calls.
  */
-import { createSessionInputChangeSubscriber } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import type { DaemonVerbCaller, SessionInputsWireClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import type { SharedSessionInputRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { Page } from '@goodvibes-jev/engine/errors';
-import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
+import { createSessionInputChangeSubscriber } from '@goodvibes/engine/platform/platform/runtime/client';
+import type { DaemonVerbCaller, SessionInputsWireClient } from '@goodvibes/engine/platform/platform/runtime/client';
+import type { SharedSessionInputRecord } from '@goodvibes/engine/platform/platform/control-plane';
+import type { Page } from '@goodvibes/engine/errors';
+import { parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 
 /** What `sessions.inputs.list` answers with, tolerating a bare array. */
 /** One page of `sessions.inputs.list`: its inputs, and the cursor to ask again from when the daemon says more remain. */

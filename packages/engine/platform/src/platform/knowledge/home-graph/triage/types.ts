@@ -1,4 +1,4 @@
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 export interface TriageReadInput {
   readonly reference: string;
   readonly issue: { readonly code: string; readonly message: string; readonly severity: string };

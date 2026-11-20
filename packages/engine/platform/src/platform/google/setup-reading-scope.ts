@@ -1,5 +1,5 @@
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
-import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError } from '@goodvibes/engine/errors';
 /** Original setup request ownership survives every outer await and storage call. */
 import { assertGoogleReadingCurrent, ownGoogleBrowser, ownGoogleManualBrowser, GoogleReadingError } from './browser-readings.js';
 import { GoogleSetupWriteCommittedError, type GoogleMutationOwnership } from './setup-effect.js';

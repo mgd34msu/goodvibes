@@ -1,9 +1,9 @@
-import { routeCardInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
-import { handleAskCardKey, type AskCardResolveExtras } from '@goodvibes-jev/engine/terminal-shell/ask-card-input';
-import type { AskCardState } from '@goodvibes-jev/engine/terminal-shell/renderer/ask-card';
-import type { PermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
-import type { HunkSelectionState } from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
-import { describeCrashRecovery, type CrashRecoveryReport } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
+import { routeCardInput } from '@goodvibes/engine/terminal-shell/blocking-permission-input';
+import { handleAskCardKey, type AskCardResolveExtras } from '@goodvibes/engine/terminal-shell/ask-card-input';
+import type { AskCardState } from '@goodvibes/engine/terminal-shell/renderer/ask-card';
+import type { PermissionRequest } from '@goodvibes/engine/platform/platform/permissions';
+import type { HunkSelectionState } from '@goodvibes/engine/terminal-shell/hunk-selection';
+import { describeCrashRecovery, type CrashRecoveryReport } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 
 export type PendingPermissionState = PermissionRequest & AskCardState & {

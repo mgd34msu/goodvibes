@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+import { HttpStatusError } from '@goodvibes/engine/errors';
 import { Notifier } from '../platform/src/platform/integrations/notifier.ts';
 import { SlackSocketModeClient, type SlackIntegration } from '../platform/src/platform/integrations/slack.ts';
 import { NtfyIntegration, ntfyOutboundDedup } from '../platform/src/platform/integrations/ntfy.ts';

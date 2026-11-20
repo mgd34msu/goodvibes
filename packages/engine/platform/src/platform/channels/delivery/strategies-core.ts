@@ -30,7 +30,7 @@ import {
   success,
   titleFromBody,
 } from './shared.js';
-import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+import { HttpStatusError } from '@goodvibes/engine/errors';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { outcomeOfFailure } from '../../state/operation.js';

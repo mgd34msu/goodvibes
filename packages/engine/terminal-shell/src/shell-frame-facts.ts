@@ -1,5 +1,5 @@
-import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
-import { emitUiPanelClose, emitUiPanelFocus, emitUiPanelOpen, emitUiViewChanged } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
+import type { ContentPart } from '@goodvibes/engine/platform/platform/providers';
+import { emitUiPanelClose, emitUiPanelFocus, emitUiPanelOpen, emitUiViewChanged } from '@goodvibes/engine/platform/platform/runtime/emitters';
 import { captureNativeConversationInput, type ProductInputContext } from './native/native-conversation-input.js';
 import type { SessionTarget } from './session-focus.js';
 import { isTrackedModal, type StackedModal } from './surface-modal-host.js';

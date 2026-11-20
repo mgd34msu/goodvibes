@@ -13,15 +13,15 @@
  * `[unmet]` reads every criterion as failing, `[p=0.1,0.9]` gives each
  * criterion's probability that it fails, anything else reads met.
  */
-import { SqliteDecisionLog } from '@goodvibes-jev/judgment';
+import { SqliteDecisionLog } from '@goodvibes/judgment';
 import type { NativeContractDecisionHost } from '../../platform/src/platform/contract/native-decisions.js';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { withDecisionLog, type DecisionLog } from '@goodvibes-jev/judgment';
-import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { withDecisionLog, type DecisionLog } from '@goodvibes/judgment';
+import { choiceAnswer, noulAnswer } from '@goodvibes/judgment/testing';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import type { ContractEvent } from '../../platform/src/events/contract.js';
 import { AgentMessageBus } from '../../platform/src/platform/agents/message-bus.js';
 import { ConfigManager } from '../../platform/src/platform/config/manager.js';

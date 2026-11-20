@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/process-view';
+export * from '@goodvibes/engine/terminal-shell/process-view';

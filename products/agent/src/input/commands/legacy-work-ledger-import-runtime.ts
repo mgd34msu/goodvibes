@@ -1,12 +1,12 @@
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
+import { OwnedSelectionObservation } from '@goodvibes/engine/platform/platform/runtime/client/selection-observation';
 import { realpathSync } from 'node:fs';
-import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { openLegacyImportOperator, resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner, type LegacyImportOperatorSession } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
+import { resolveConnectedHostDialEnabled } from '@goodvibes/engine/platform/platform/config';
+import { openLegacyImportOperator, resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner, type LegacyImportOperatorSession } from '@goodvibes/engine/terminal-shell/legacy-work-ledger-import';
 import type { CommandContext } from '../command-registry.ts';
-import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
-import { canonicalizePairingHost, readAgentHostPairing } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-pairing-store';
-import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
-import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
+import { connectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { canonicalizePairingHost, readAgentHostPairing } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-pairing-store';
+import { readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
+import { isLoopbackHost } from '@goodvibes/engine/platform/platform/utils/reachable-base-url';
 import { requireShellPaths } from './runtime-services.ts';
 export type OpenLegacyImportCommandSession = (context: CommandContext, projectId: string) => Promise<LegacyImportOperatorSession>;
 /** An import session for `/work import…` (terminal-shell/native/work-command.ts) on the connected host. */

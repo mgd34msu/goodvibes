@@ -5,7 +5,7 @@
  * whole form with these.
  */
 import type { SelectionItem, SelectionResult } from '../selection-modal.js';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { listByName, type ListRow } from './lists.js';
 import { fixedChoices, riskWords } from './typed-line.js';
 import type { ActionDescription, ActionValues, CommandActionContext, CommandDescription, InputDescription } from './types.js';

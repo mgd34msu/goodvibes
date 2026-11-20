@@ -7,11 +7,11 @@ import {
   parseGoodVibesCli,
 } from '../cli/parser.ts';
 import { describeCliCommandPolicy } from './agent-harness-metadata.ts';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
-import { shellSplit } from '@goodvibes-jev/engine/platform/platform/utils';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { captureCatalogData } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
+import { shellSplit } from '@goodvibes/engine/platform/platform/utils';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 export interface AgentHarnessCliArgs {
   readonly query?: unknown;

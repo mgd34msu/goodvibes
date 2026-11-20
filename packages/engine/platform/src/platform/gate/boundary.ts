@@ -1,4 +1,4 @@
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import type { JudgmentPort } from '@goodvibes/judgment';
 /**
  * The gate's boundary: the checks every call passes before explicit owner
  * rules or a preset are consulted. No preset, remembered approval or phrase in

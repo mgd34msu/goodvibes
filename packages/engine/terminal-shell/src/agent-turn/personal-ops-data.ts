@@ -4,8 +4,8 @@
  * are kept, a value is copied once within node and character budgets, and an
  * entry never has a bare number or boolean at its root.
  */
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { EntryType, JsonValue } from '@goodvibes-jev/judgment/decisions';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import type { EntryType, JsonValue } from '@goodvibes/judgment/decisions';
 import { captureCatalogData } from './catalog-data.js';
 
 /** Hidden producer data is still semantic source; serialization cannot omit it. */

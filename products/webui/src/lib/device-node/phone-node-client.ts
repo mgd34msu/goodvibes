@@ -34,7 +34,7 @@
  * live under the daemon's retention rule, and a few bytes per marker never hit
  * the storage quota.
  */
-import { FenceIssuer, type Fence } from '@goodvibes-jev/engine/platform/platform/utils/owner-fence';
+import { FenceIssuer, type Fence } from '@goodvibes/engine/platform/platform/utils/owner-fence';
 import {
   announcedCapabilities,
   readBrowserBindings,

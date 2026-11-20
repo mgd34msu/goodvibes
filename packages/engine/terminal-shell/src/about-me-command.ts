@@ -12,7 +12,7 @@
  * output lands where a later turn composes from, so People are counted and
  * "See what is known about a person" is the way through (§10).
  */
-import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
+import type { OperatorMethodInput } from '@goodvibes/engine/platform/contracts';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';

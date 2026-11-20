@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { getNextAutomationOccurrence, ensureAutomationCronPhase, normalizeCronSchedule, normalizeEverySchedule, validateSchedule, type AutomationScheduleDefinition } from '../automation/schedules.js';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import type { KnowledgeStore } from './store.js';
 import type { KnowledgeJobMode, KnowledgeJobRecord, KnowledgeJobRunRecord, KnowledgeJobStatus, KnowledgeScheduleRecord } from './types.js';
 import { emitKnowledgeJobCompleted, emitKnowledgeJobFailed, emitKnowledgeJobQueued, emitKnowledgeJobStarted } from '../runtime/emitters/index.js';

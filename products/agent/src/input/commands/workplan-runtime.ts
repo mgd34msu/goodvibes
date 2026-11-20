@@ -1,5 +1,5 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { registerTodoCommand } from '@goodvibes-jev/engine/terminal-shell/todo-command';
+import { registerTodoCommand } from '@goodvibes/engine/terminal-shell/todo-command';
 import { commandRefusal } from './confirmation.ts';
 
 /**

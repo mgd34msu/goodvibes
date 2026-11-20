@@ -1,5 +1,5 @@
-import { cycleSettingChoice, adjustedSettingValue, modelPickerLaunchForKey } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
-import { SETTINGS_CHOICE_ACTIONS } from '@goodvibes-jev/engine/terminal-shell/settings-choice-actions';
+import { cycleSettingChoice, adjustedSettingValue, modelPickerLaunchForKey } from '@goodvibes/engine/terminal-shell/settings-behavior';
+import { SETTINGS_CHOICE_ACTIONS } from '@goodvibes/engine/terminal-shell/settings-choice-actions';
 /**
  * settings-modal-adjustment, pure adjustment helpers for SettingsModal.
  *
@@ -11,12 +11,12 @@ import { SETTINGS_CHOICE_ACTIONS } from '@goodvibes-jev/engine/terminal-shell/se
  * settings-modal-reset.ts and settings-modal-mutations.ts.
  */
 
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { FlagEntry, McpEntry, SettingEntry } from './settings-modal-types.ts';
-import { keepMcpTrustModeFromSettings } from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
-import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import { keepMcpTrustModeFromSettings } from '@goodvibes/engine/terminal-shell/settings-mcp-entries';
+import type { McpRegistry } from '@goodvibes/engine/platform/platform/mcp';
 
 // ---------------------------------------------------------------------------
 // adjustSelected

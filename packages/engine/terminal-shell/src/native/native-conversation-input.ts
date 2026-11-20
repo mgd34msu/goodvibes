@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs';
-import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
-import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ContentPart } from '@goodvibes/engine/platform/platform/providers';
+import { resolveAndValidatePath } from '@goodvibes/engine/platform/platform/utils';
 import { isImageFile } from '../input-content.js';
-import type { NativeConversationIntakeUnsupportedSource } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
+import type { NativeConversationIntakeUnsupportedSource } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-intake-client';
 
 /** Source text is captured before trim, expansion, model directives or shell context. */
 export interface NativeConversationInput {

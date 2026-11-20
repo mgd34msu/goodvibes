@@ -5,7 +5,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { fetchWithTimeout } from '../utils/fetch-with-timeout.js';
-import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+import { HttpStatusError } from '@goodvibes/engine/errors';
 
 // ---------------------------------------------------------------------------
 // Types

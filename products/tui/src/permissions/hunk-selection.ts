@@ -1,5 +1,5 @@
-import type { PermissionAttribution, PermissionPromptRequest, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { decodeBase64, resolveEditText, type EditTextFields } from '@goodvibes-jev/engine/platform/platform/control-plane/approval-hunk-apply';
+import type { PermissionAttribution, PermissionPromptRequest, RememberTier } from '@goodvibes/engine/platform/platform/permissions';
+import { decodeBase64, resolveEditText, type EditTextFields } from '@goodvibes/engine/platform/platform/control-plane/approval-hunk-apply';
 import {
   applyHunkKey,
   buildHunkSelectionState,
@@ -9,7 +9,7 @@ import {
   type HunkKeyResult,
   type HunkSelectionAnswer,
   type HunkSelectionState,
-} from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
+} from '@goodvibes/engine/terminal-shell/hunk-selection';
 
 /**
  * Per-hunk accept/reject at the approval card. The selection state and its

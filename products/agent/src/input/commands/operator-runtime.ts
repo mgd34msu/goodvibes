@@ -1,16 +1,16 @@
 import {
   createContextInspectionCommand,
-} from '@goodvibes-jev/engine/terminal-shell/context-inspection-command';
-import { registerInteractionModeCommand } from '@goodvibes-jev/engine/terminal-shell/interaction-mode-command';
-import { settingsTargetNotFoundMessage } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { settingsCommandDescription } from '@goodvibes-jev/engine/terminal-shell/settings-command';
-import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
+} from '@goodvibes/engine/terminal-shell/context-inspection-command';
+import { registerInteractionModeCommand } from '@goodvibes/engine/terminal-shell/interaction-mode-command';
+import { settingsTargetNotFoundMessage } from '@goodvibes/engine/terminal-shell/settings-navigation';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { settingsCommandDescription } from '@goodvibes/engine/terminal-shell/settings-command';
+import { agentResearchSourceOwner } from '@goodvibes/engine/terminal-shell/agent-turn/protected-research-report';
 import { captureTranscriptSource } from './transcript-reading.ts';
 import type { CommandContext, CommandRegistry, SlashCommand } from '../command-registry.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import '@goodvibes-jev/engine/platform/platform/utils';
-import '@goodvibes-jev/engine/platform/platform/utils';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import '@goodvibes/engine/platform/platform/utils';
+import '@goodvibes/engine/platform/platform/utils';
 import { commandRefusal, stripYesFlag } from './confirmation.ts';
 import { handleContextWindowSubcommand } from './context-window.ts';
 import { isAgentHostSettingKey } from '../../config/host-settings.ts';
@@ -24,7 +24,7 @@ import {
   resetHarnessSetting,
   setHarnessSetting,
 } from '../../agent/harness-control.ts';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { readRefusal } from '@goodvibes/engine/errors';
 import { instructionFilesReport, lastTurnsReport } from './agent-context-reports.ts';
 
 function readValuedFlag(args: readonly string[], flag: string): string | undefined {

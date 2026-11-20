@@ -1,8 +1,8 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { handleReplayCommand, replayLedgerOf } from '@goodvibes-jev/engine/platform/platform/core';
-import { defineCommand, defineList, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { handleReplayCommand, replayLedgerOf } from '@goodvibes/engine/platform/platform/core';
+import { defineCommand, defineList, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { requireReplayEngine } from './runtime-services.ts';
 
 const LOCAL = { terminalOnly: 'Recorded runs are kept by the terminal app.' } as const;

@@ -18,9 +18,9 @@
  * underlying detail can read the optional `error` field separately.
  */
 
-import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { createConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
+import type { OperatorMethodInput } from '@goodvibes/engine/platform/contracts';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { createConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
 
 export const UNKNOWN_PRINCIPAL_LABEL = 'unknown principal';
 

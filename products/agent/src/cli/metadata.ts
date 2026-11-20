@@ -1,4 +1,4 @@
-import { parseNativeShellCli, shellMetadataResult } from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
+import { parseNativeShellCli, shellMetadataResult } from '@goodvibes/engine/terminal-shell/cli-entrypoint';
 import { parseGoodVibesCli } from './parser.ts';
 import { renderCompletion } from './completion.ts';
 import { renderGoodVibesCommandHelp, renderGoodVibesHelp, renderGoodVibesVersion } from './help.ts';

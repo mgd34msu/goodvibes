@@ -12,7 +12,7 @@
  * at start-up and a crash found when the session is loaded later are offered
  * the same way.
  */
-import type { SessionCrashSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { SessionCrashSnapshot } from '@goodvibes/engine/platform/platform/runtime/operations';
 
 /**
  * What the app did with a crash snapshot found while opening its session:

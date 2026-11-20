@@ -16,9 +16,9 @@
  * host's own words and the status, `<host message> (HTTP <status>)`, plus the
  * next step.
  */
-import { classifyFailure, httpStatusOf } from '@goodvibes-jev/engine/errors';
-import { createBrowserAgentPlatform, type BrowserAgentPlatform } from '@goodvibes-jev/engine/platform/browser/agent';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { classifyFailure, httpStatusOf } from '@goodvibes/engine/errors';
+import { createBrowserAgentPlatform, type BrowserAgentPlatform } from '@goodvibes/engine/platform/browser/agent';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { normalizeAgentKnowledgeScopeAliases } from './knowledge-scope-alias.js';
 import { fetchConnectedHostStatus, resolveConnectedHost } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';

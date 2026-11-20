@@ -9,7 +9,7 @@
  * own way.
  */
 import { stripDangerousAnsi } from './ansi-sanitize.js';
-import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing/qr-generator';
+import { generateQrMatrix, renderQrToString } from '@goodvibes/engine/platform/platform/pairing/qr-generator';
 import type {
   RotateKeyResult,
   CreateGroupResult,
@@ -19,7 +19,7 @@ import type {
   JoinGroupResult,
   JoinKeyResult,
   NodesResult,
-} from '@goodvibes-jev/engine/platform/platform/cluster';
+} from '@goodvibes/engine/platform/platform/cluster';
 
 /**
  * Text another machine chose, made safe to print: escape sequences and control characters are

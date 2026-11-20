@@ -1,7 +1,7 @@
 /**
  * Create a browser client for GoodVibes web UI integrations.
  */
-import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+import { createBrowserGoodVibesPlatform } from '@goodvibes/engine/platform/browser';
 
 const platformClient = createBrowserGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',

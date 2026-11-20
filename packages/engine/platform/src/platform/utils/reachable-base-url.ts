@@ -52,7 +52,7 @@
  * needs. `0.0.0.0` itself is never emitted, it is a bind address, not a
  * destination.
  */
-import { isLoopbackHost as isLoopbackHostname } from '@goodvibes-jev/engine/transport-http/paths';
+import { isLoopbackHost as isLoopbackHostname } from '@goodvibes/engine/transport-http/paths';
 import { networkInterfaces as osNetworkInterfaces } from 'node:os';
 import {
   deriveControlPlaneBaseUrl,

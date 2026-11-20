@@ -1,12 +1,12 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { AutomationJobStore } from '@goodvibes-jev/engine/platform/platform/automation';
-import type { AutomationJob, AutomationScheduleDefinition } from '@goodvibes-jev/engine/platform/platform/automation';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { formatScheduleTiming, registerScheduleCommand, type ScheduleFields, type ScheduleHost, type ScheduleView } from '@goodvibes-jev/engine/terminal-shell/schedule-command';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { AutomationJobStore } from '@goodvibes/engine/platform/platform/automation';
+import type { AutomationJob, AutomationScheduleDefinition } from '@goodvibes/engine/platform/platform/automation';
+import type { OperatorMethodOutput } from '@goodvibes/engine/platform';
+import { resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
+import { formatScheduleTiming, registerScheduleCommand, type ScheduleFields, type ScheduleHost, type ScheduleView } from '@goodvibes/engine/terminal-shell/schedule-command';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { describeOperatorRpcError, getOperatorRpc, type OperatorRpcAvailable } from './operator-rpc.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import {
   daemonCreateInput,
   daemonScheduleFields,

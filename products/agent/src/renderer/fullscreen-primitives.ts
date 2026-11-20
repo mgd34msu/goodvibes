@@ -1,5 +1,5 @@
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { createEmptyLine, createStyledCell } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
+import { createEmptyLine, createStyledCell } from '@goodvibes/engine/platform/platform/types';
 import { getDisplayWidth } from '../utils/terminal-width.ts';
 import { GLYPHS } from './ui-primitives.ts';
 import { activeUiTones, registerThemeRefresh } from './theme.ts';

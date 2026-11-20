@@ -23,7 +23,7 @@ import { isSecretBearingConfigKey, isSecretReferenceValue } from '../config/secr
 import { CARD_FIELD_NAMES } from '../payments/card-material.js';
 import { findCardNumbersInContext } from '../security/card-shapes.js';
 import { readCredentialEnvName } from '../tools/exec/credential-env.js';
-import type { EntryType, JsonValue } from '@goodvibes-jev/judgment';
+import type { EntryType, JsonValue } from '@goodvibes/judgment';
 import { credentialReferenceText, declaredValueSpan, evidenceCredentialMarker, inlineDeclarations, literalDeclarationValue, secretLiteral } from './inline-declarations.js';
 
 export type JudgmentInputProblem = 'credential-material' | 'card-material' | 'unsupported-input';

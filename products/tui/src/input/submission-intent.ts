@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/submission-intent';
+export * from '@goodvibes/engine/terminal-shell/submission-intent';

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { failedRead, present, toRefusal, type Observed } from '@goodvibes-jev/engine/errors';
+import { failedRead, present, toRefusal, type Observed } from '@goodvibes/engine/errors';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from './client-lifetime';
 import { modelOptionsForProvider, type ModelOption } from './provider-models';
 

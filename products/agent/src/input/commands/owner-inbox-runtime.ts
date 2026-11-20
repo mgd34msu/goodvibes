@@ -1,7 +1,7 @@
-import { registerOwnerInboxCommands as registerSharedOwnerInboxCommands } from '@goodvibes-jev/engine/terminal-shell/owner-inbox-command';
+import { registerOwnerInboxCommands as registerSharedOwnerInboxCommands } from '@goodvibes/engine/terminal-shell/owner-inbox-command';
 import { isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 import { agentOwnerInbox } from '../../runtime/client/owner-questions.ts';
-import { createConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
+import { createConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
 
 /** /questions and /decisions over the connected host's owner inbox, or the Agent's own when it has no host. */
 export function registerOwnerInboxCommands(registry: CommandRegistry): void {

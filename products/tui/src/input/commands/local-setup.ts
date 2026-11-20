@@ -1,10 +1,10 @@
 import { dirname, join } from 'path';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
+import { atomicWriteFileSync } from '@goodvibes/engine/platform/platform/config';
 import type { CommandContext } from '../command-registry.ts';
-import { defineCommand, type ActionDescription, type ActionValues, type InputDescription } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { defineCommand, type ActionDescription, type ActionValues, type InputDescription } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { listHookPointContracts } from '@goodvibes/engine/platform/platform/hooks';
 import type { SetupTransferBundle } from './local-setup-transfer.ts';
 import {
   applySetupTransferChanges,
@@ -17,12 +17,12 @@ import {
   settleSetupTransferChanges,
 } from './local-setup-transfer.ts';
 import { buildSetupReviewSnapshot, exportSetupSupportBundle, inspectSetupSupportBundle, renderSetupSandboxReview } from './local-setup-review.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { setupReviewLines } from '@goodvibes-jev/engine/terminal-shell/setup-review';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { setupReviewLines } from '@goodvibes/engine/terminal-shell/setup-review';
 import { requireShellPaths } from './runtime-services.ts';
 import { DEEP_LINK_SURFACES, buildDeepLink, openDeepLink, parseDeepLink } from './deep-link.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { assertTarget, targetRef, TargetChangedError, type TargetRef } from '@goodvibes-jev/engine/platform/platform/utils/target-ref';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { assertTarget, targetRef, TargetChangedError, type TargetRef } from '@goodvibes/engine/platform/platform/utils/target-ref';
 
 /** The bundle file a setup import shows, by the digest of what it holds: the import applies only that content. */
 function setupImportRef(pathArg: string, parsed: unknown): TargetRef<'setup-import'> {

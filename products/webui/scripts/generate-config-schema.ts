@@ -9,20 +9,20 @@
  *   src/lib/generated/config-schema.ts
  *
  * Why a generator (mirrors scripts/generate-presentation-tokens.ts): the engine's
- * `@goodvibes-jev/engine/platform/platform/config` barrel re-exports CONFIG_SCHEMA but
+ * `@goodvibes/engine/platform/platform/config` barrel re-exports CONFIG_SCHEMA but
  * ALSO pulls SecretsManager, OAuth listeners, google-auth, etc., node-only code
  * that must never enter the browser Vite bundle. Snapshotting the pure data at
  * build time keeps those heavy barrels out of the bundle entirely; the browser
  * imports only the emitted literal.
  *
  * Data sources:
- *   - CONFIG_SCHEMA, from the exported `@goodvibes-jev/engine/platform/platform/config`
+ *   - CONFIG_SCHEMA, from the exported `@goodvibes/engine/platform/platform/config`
  *     subpath (types / enums / defaults / descriptions / validation hints per
  *     key). The `validate` closures are dropped (not serialisable); the daemon's
  *     config.set is the authoritative validator, and `validationHint` carries the
  *     human-readable constraint into the UI.
  *   - FEATURE_SETTINGS, from the engine's public
- *     `@goodvibes-jev/engine/platform/platform/runtime/feature-flags` subpath export:
+ *     `@goodvibes/engine/platform/platform/runtime/feature-flags` subpath export:
  *     every platform capability as a first-class domain setting (name, real
  *     description, domain, enablement shape, owned settings keys, restart
  *     requirement, stock default). There is no separate enablement namespace,
@@ -39,8 +39,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
-import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags';
+import { CONFIG_SCHEMA } from '@goodvibes/engine/platform/platform/config';
+import { FEATURE_SETTINGS } from '@goodvibes/engine/platform/platform/runtime/feature-flags';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -137,7 +137,7 @@ export async function loadSchemaSnapshot(): Promise<ConfigSchemaSnapshot> {
 const GENERATED_BANNER = [
   'GENERATED FILE. DO NOT EDIT BY HAND.',
   'Produced by scripts/generate-config-schema.ts from the installed',
-  "@goodvibes-jev/engine: CONFIG_SCHEMA (platform/config) plus the per-feature",
+  "@goodvibes/engine: CONFIG_SCHEMA (platform/config) plus the per-feature",
   'settings metadata (FEATURE_SETTINGS, platform/runtime/feature-flags).',
   '',
   'This is a build-time snapshot so the browser bundle never imports the engine',

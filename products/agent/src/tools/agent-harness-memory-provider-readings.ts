@@ -1,10 +1,10 @@
-import { decisionOrClassic, isClassicOperation, selectClassicCatalog, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
-import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
-import { routingRegistry, memoryProviderSelect } from '@goodvibes-jev/engine/platform/platform/routing';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { decisionOrClassic, isClassicOperation, selectClassicCatalog, withConfiguredDecisionModelPolicy } from '@goodvibes/engine/platform/platform/runtime';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
+import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes/engine/errors';
+import { prepareJudgmentResult } from '@goodvibes/engine/platform/platform/gate';
+import { routingRegistry, memoryProviderSelect } from '@goodvibes/engine/platform/platform/routing';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { capturePersonalOpsSnapshot, personalOpsJson } from './agent-harness-personal-ops-source.ts';
 

@@ -1,5 +1,5 @@
 import { types as nodeTypes } from 'node:util';
-import { observeJudgmentModel, checkAnswers, type JudgmentResult, type Questions } from '@goodvibes-jev/judgment';
+import { observeJudgmentModel, checkAnswers, type JudgmentResult, type Questions } from '@goodvibes/judgment';
 import { assertJudgmentInput, captureOwnedJson, retainOwnedJson } from './judgment-input.js';
 
 export type JudgmentResultAdmissionProblem = 'malformed' | 'stale';

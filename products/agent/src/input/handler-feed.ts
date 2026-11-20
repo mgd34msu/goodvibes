@@ -7,10 +7,10 @@ import {
   capturePromptKeyState,
   captureMouseFeedState,
   captureShortcutFeedState,
-} from '@goodvibes-jev/engine/terminal-shell/input-feed-adapters';
-import { createFeedInputTokens } from '@goodvibes-jev/engine/terminal-shell/input-feed-pipeline';
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
+} from '@goodvibes/engine/terminal-shell/input-feed-adapters';
+import { createFeedInputTokens } from '@goodvibes/engine/terminal-shell/input-feed-pipeline';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
+import type { InfiniteBuffer } from '@goodvibes/engine/terminal-shell';
 import type { CommandContext, CommandRegistry } from './command-registry.ts';
 import { AutocompleteEngine } from './autocomplete.ts';
 import { FilePickerModal } from './file-picker.ts';
@@ -24,7 +24,7 @@ import { ProcessModal } from '../renderer/process-modal.ts';
 import { LiveTailModal } from '../renderer/live-tail-modal.ts';
 import { BlockActionsMenu } from '../renderer/block-actions.ts';
 import { ContextInspectorModal } from '../renderer/context-inspector.ts';
-import type { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
+import type { SurfaceModalHost } from '@goodvibes/engine/terminal-shell/surface-modal-host';
 import { BookmarkModal } from './bookmark-modal.ts';
 import { SettingsModal } from './settings-modal.ts';
 import type { McpWorkspace } from './mcp-workspace.ts';
@@ -40,7 +40,7 @@ import { handleModalTokenRoutes } from './handler-modal-token-routes.ts';
 import { handleCommandModeToken } from './handler-command-route.ts';
 import { handleGlobalShortcutToken } from './handler-shortcuts.ts';
 import type { PromptEdit } from './handler-shortcuts.ts';
-import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
+import { SelectionManager } from '@goodvibes/engine/terminal-shell';
 import type { KeybindingsManager } from './keybindings.ts';
 import type { ModelPickerTarget } from './model-picker.ts';
 import { guardCommandPaste, type PasteBurstGuardState } from './paste-flood-guard.ts';
@@ -177,7 +177,7 @@ export interface InputFeedContext {
   readonly handleBlockToggle: () => void;
   readonly findMarkerAtPos: (pos: number) => { start: number; end: number } | null;
   readonly cleanupMarkerRegistry: (text: string) => void;
-  readonly expandPrompt: (text: string) => string | import('@goodvibes-jev/engine/platform/platform/providers').ContentPart[];
+  readonly expandPrompt: (text: string) => string | import('@goodvibes/engine/platform/platform/providers').ContentPart[];
   readonly openModelPickerWithTarget: (target: ModelPickerTarget, source?: 'settings') => boolean;
   readonly openProviderModelPickerWithTarget: (target: ModelPickerTarget, source?: 'settings') => boolean;
   readonly onModelPickerCommit: () => boolean;

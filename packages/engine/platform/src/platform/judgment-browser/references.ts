@@ -1,4 +1,4 @@
-import { BrowserJudgmentError, BROWSER_JUDGMENT_LIMITS, type AuthenticatedPrincipal, type BrowserJudgmentBatteryId } from '@goodvibes-jev/engine/daemon-api';
+import { BrowserJudgmentError, BROWSER_JUDGMENT_LIMITS, type AuthenticatedPrincipal, type BrowserJudgmentBatteryId } from '@goodvibes/engine/daemon-api';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { BrowserJudgmentResolvedInput } from './types.js';
 import { consumeRejectedHook, granted, requireSynchronousAssertion } from './guards.js';

@@ -1,4 +1,4 @@
-import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
+import type { OperatorRemoteClient } from '@goodvibes/engine/operator-client';
 import {
   nativeWorkSubmissionRequestSchema,
   nativeWorkSubmissionLookupRequestSchema,

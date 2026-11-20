@@ -36,7 +36,7 @@ import {
 import { companionMessagesFromListResponse } from '../../lib/companion-chat';
 import { asRecord, firstString } from '../../lib/object';
 import { errorCode, formatError, isMethodUnavailableError, isSessionNotLocalError } from '../../lib/errors';
-import { gatePresetLabel, type SettableGatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import { gatePresetLabel, type SettableGatePresetName } from '@goodvibes/engine/platform/platform/gate/presets';
 import { outcomeLabel, type CompactionCheck, type CompactionReceipt } from '../../lib/compaction';
 import { useCompactionReceipts } from '../../hooks/useCompactionReceipts';
 import { PermissionModeSheet } from '../../components/confirm/PermissionModeSheet';

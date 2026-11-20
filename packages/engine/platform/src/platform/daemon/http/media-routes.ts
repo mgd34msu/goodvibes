@@ -1,1 +1,1 @@
-export { createDaemonMediaRouteHandlers } from '@goodvibes-jev/engine/daemon-api';
+export { createDaemonMediaRouteHandlers } from '@goodvibes/engine/daemon-api';

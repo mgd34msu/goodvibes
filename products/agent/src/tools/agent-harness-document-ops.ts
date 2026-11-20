@@ -1,9 +1,9 @@
 import type { CommandContext } from '../input/command-registry.ts';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { buildAgentWorkspaceDocumentOpsPart } from '../input/agent-workspace-snapshot.ts';
 import { AGENT_WORKSPACE_ARTIFACT_LIST_LIMIT } from '../input/agent-workspace-snapshot-builders.ts';
 import type { AgentWorkspaceReviewPacketWizard, AgentWorkspaceReviewPacketWizardStep } from '../input/agent-workspace-types.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
 import { buildReviewerReadinessChecklist, readDocumentOpsSources } from './agent-harness-document-ops-reviewer-readiness.ts';
 import type {
   AgentHarnessDocumentOpsArgs,
@@ -14,7 +14,7 @@ import type {
   ReviewerReadinessCheck,
   ReviewerReadinessChecklist,
 } from './agent-harness-document-ops-types.ts';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 export type {
   DocumentOpsLaneId,
   DocumentOpsLaneResolution,

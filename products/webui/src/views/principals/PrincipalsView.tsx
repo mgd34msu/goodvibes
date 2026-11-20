@@ -35,7 +35,7 @@ import { formatError, isMethodUnavailableError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
 import { Select } from '../../components/ui/Select';
 import '../../styles/components/principals.css';
-import { GATE_PRESETS, SESSION_GATE_PRESET_NAMES } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import { GATE_PRESETS, SESSION_GATE_PRESET_NAMES } from '@goodvibes/engine/platform/platform/gate/presets';
 
 type Principal = OperatorMethodOutput<'principals.list'>['principals'][number];
 type PrincipalKind = Principal['kind'];

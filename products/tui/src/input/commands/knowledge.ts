@@ -2,11 +2,11 @@
  * `/knowledge` in the terminal app (terminal-shell/knowledge-command.ts): the
  * app's own structured knowledge, its knowledge view, and its way of printing.
  */
-import { registerKnowledgeCommand } from '@goodvibes-jev/engine/terminal-shell/knowledge-command';
-import { createKnowledgeAnswerRenderer } from '@goodvibes-jev/engine/terminal-shell/knowledge-answer';
-import { createKnowledgeLabels } from '@goodvibes-jev/engine/terminal-shell/knowledge-labels';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import type { KnowledgeService } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { registerKnowledgeCommand } from '@goodvibes/engine/terminal-shell/knowledge-command';
+import { createKnowledgeAnswerRenderer } from '@goodvibes/engine/terminal-shell/knowledge-answer';
+import { createKnowledgeLabels } from '@goodvibes/engine/terminal-shell/knowledge-labels';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import type { KnowledgeService } from '@goodvibes/engine/platform/platform/knowledge';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 
 const { nodeLabel } = createKnowledgeLabels(' confidence=');

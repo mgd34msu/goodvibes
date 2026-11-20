@@ -14,24 +14,24 @@ export type {
   GatewayMethodInvocation,
   GatewayMethodInvocationContext,
   GatewayMethodHandler,
-} from '@goodvibes-jev/engine/platform/platform/control-plane';
+} from '@goodvibes/engine/platform/platform/control-plane';
 
 // The `payments.*` wire shapes. The engine's payment host is the one registrar;
 // product composition supplies its stores.
-export type { PaymentsGatewayService, PaymentPurchaseView } from '@goodvibes-jev/engine/platform/platform/control-plane';
+export type { PaymentsGatewayService, PaymentPurchaseView } from '@goodvibes/engine/platform/platform/control-plane';
 
 // The browser-checkout seam a daemon composition receives through
 // `onBrowserCheckout` (platform 2.0.19, platform/control-plane's
 // `composeDaemonBrowser`). See daemon/handlers/payments/register.ts for how
 // the checkout pair reads it.
-export type { BrowserCheckoutSeam } from '@goodvibes-jev/engine/platform/platform/control-plane';
+export type { BrowserCheckoutSeam } from '@goodvibes/engine/platform/platform/control-plane';
 
 // Channel domain types reused in handler signatures (read-only platform interfaces; never re-declared).
 export type {
   ChannelIdentity,
   ChannelResolvedTarget,
   ChannelAccountRecord,
-} from '@goodvibes-jev/engine/platform/platform/channels';
+} from '@goodvibes/engine/platform/platform/channels';
 
 /**
  * The two remote-route contracts a host has to name: the per-peer auth
@@ -49,4 +49,4 @@ export type {
  * product keeps naming them the way it already does. The engine now supplies shared remote backends; the product still owns
  * their composition and lifetime.
  */
-export type { DistributedRuntimeRouteService, RemotePeerAuth } from '@goodvibes-jev/engine/daemon-api/remote-routes';
+export type { DistributedRuntimeRouteService, RemotePeerAuth } from '@goodvibes/engine/daemon-api/remote-routes';

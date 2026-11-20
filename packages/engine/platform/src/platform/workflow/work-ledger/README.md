@@ -5,7 +5,7 @@ planning UX. It is persisted, live, in the project's knowledge store: the
 `work_ledgers` and `work_ledger_events` tables, through the KnowledgeStore adapter
 (`knowledge/store-work-ledger.ts`, opened by `KnowledgeStore` for each project),
 never a second database. Import the supported
-narrow `@goodvibes-jev/engine/platform/platform/workflow/work-ledger` subpath. The platform
+narrow `@goodvibes/engine/platform/platform/workflow/work-ledger` subpath. The platform
 root and broad workflow barrel deliberately do not re-export this authority seam.
 
 ## Trusted composition and consumers
@@ -211,7 +211,7 @@ behaviors require their own integration evidence.
 
 
 Remote reads are available through the separate supported
-`@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client`
+`@goodvibes/engine/platform/platform/workflow/work-ledger/operator-read-client`
 subpath. It exports `createOperatorWorkLedgerReadClient` and
 `OperatorWorkLedgerReadOptions`, and consumes an existing authenticated operator
 client. Its return type is the same `WorkLedgerReadClient` used by local bindings.

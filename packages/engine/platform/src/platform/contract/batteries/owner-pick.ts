@@ -13,7 +13,7 @@
  * Band: taking an attempt merges its work, so the pick is read at high
  * stakes; anything below act asks the owner again.
  */
-import { defineSelector, NONE, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineSelector, NONE, STAKES_BANDS } from '@goodvibes/judgment';
 
 const QUESTION = [
   'Contract ctr-1a2b3c4d needs your decision on unit "Date parser".',

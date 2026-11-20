@@ -1,6 +1,6 @@
-import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
-import { createPeerApiClient } from '@goodvibes-jev/engine/peer-client';
-import type { FetchLike } from '@goodvibes-jev/engine/transport-core';
+import { createOperatorApiClient } from '@goodvibes/engine/operator-client';
+import { createPeerApiClient } from '@goodvibes/engine/peer-client';
+import type { FetchLike } from '@goodvibes/engine/transport-core';
 
 export interface ReferenceHttpClientOptions {
   /** The daemon's base URL, for example `http://127.0.0.1:3421`. */

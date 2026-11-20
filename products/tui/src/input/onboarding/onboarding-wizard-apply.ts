@@ -1,9 +1,9 @@
-import { normalizePermissionMode } from '@goodvibes-jev/engine/platform/platform/gate';
-import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config';
+import { normalizePermissionMode } from '@goodvibes/engine/platform/platform/gate';
+import { DEFAULT_CONFIG } from '@goodvibes/engine/platform/platform/config';
 import type { OnboardingAcknowledgementTarget, OnboardingApplyOperation, OnboardingApplyRequest } from '../../runtime/onboarding/index.ts';
-import { formatProviderModel } from '@goodvibes-jev/engine/platform/platform/providers';
-import { getServerSurfaceFeatureFlags } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { featureEnablementWrite } from '@goodvibes-jev/engine/terminal-shell';
+import { formatProviderModel } from '@goodvibes/engine/platform/platform/providers';
+import { getServerSurfaceFeatureFlags } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { featureEnablementWrite } from '@goodvibes/engine/terminal-shell';
 import {
   buildCloudflareApiTokenRef,
   buildCloudflareOperationalTokenRef,

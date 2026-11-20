@@ -7,9 +7,9 @@
  * three providers.
  */
 import { join } from 'node:path';
-import { acquireCrossProcessLock } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
-import type { ClusterClock } from '@goodvibes-jev/engine/platform/platform/cluster';
-import type { InboxPollingControl, InboxSurfaceRegistration, RegisterInboxSurfaceOptions } from '@goodvibes-jev/engine/platform/platform/intake';
+import { acquireCrossProcessLock } from '@goodvibes/engine/platform/platform/state/durable-file-io';
+import type { ClusterClock } from '@goodvibes/engine/platform/platform/cluster';
+import type { InboxPollingControl, InboxSurfaceRegistration, RegisterInboxSurfaceOptions } from '@goodvibes/engine/platform/platform/intake';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
 import { ownInboxEligibility } from './inbox-eligibility.js';

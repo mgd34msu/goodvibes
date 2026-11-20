@@ -5,7 +5,7 @@ import { CodeIntelligence } from '../../intelligence/index.js';
 import type { EditItem, OccurrenceSpec, EditResult, EditResultStatus } from './types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { assertSafeRegexInput, compileSafeRegExp, createSafeRegex, safeRegExpExec } from '../../utils/safe-regex.js';
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { editTarget, editTargetView } from '../batteries/edit-target.js';
 import { judge } from '../../runtime/judge.js';
 import { resolveEditText } from './edit-text.js';

@@ -1,1 +1,1 @@
-export { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
+export { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers/provider-model';

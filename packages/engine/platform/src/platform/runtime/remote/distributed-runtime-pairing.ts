@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { RefusalError, refusal, type Selection } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal, type Selection } from '@goodvibes/engine/errors';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import type {
   DistributedPairRequestStatus,

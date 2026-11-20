@@ -17,7 +17,7 @@
  * Band: low stakes. A recommendation only suggests `/marketplace review`;
  * nothing is installed on the strength of it.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 import type { EcosystemCatalogEntry } from '../catalog.js';
 
 /** Why the project needs something from the catalog, one per trigger condition in recommendations.ts. */

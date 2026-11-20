@@ -13,7 +13,7 @@ import { readFileObservation, type FileObservation } from '../../utils/file-obse
 import { tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
 import { purchaseDisposition, purchaseOutcomeText, readPaymentOperation, type PaymentOperationView } from '../operation-view.js';
 import type { PaymentUnreadableOperation } from '../window-view.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { capturePaymentReconciliation, type PaymentReconciliationCheckpoint } from './reconciliation-checkpoint.js';
 
 export class PaymentOperationStoreError extends Error {

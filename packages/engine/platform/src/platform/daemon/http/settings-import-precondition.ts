@@ -8,7 +8,7 @@
  * second time here. The owner authority is read once, immediately before the
  * write.
  */
-import { createSettingsImportPreconditionHandler, type SettingsImportPreconditionFacts, type SettingsImportPreconditionHandler } from '@goodvibes-jev/engine/daemon-api';
+import { createSettingsImportPreconditionHandler, type SettingsImportPreconditionFacts, type SettingsImportPreconditionHandler } from '@goodvibes/engine/daemon-api';
 import type { ConfigManager, PreparedConfigMutation, PreparedConfigMutationTransition, PreparedConfigMutationReceipt } from '../../config/manager.js';
 import type { SecretsManager, PreparedSecretImport, SecretImportEntry } from '../../config/secrets.js';
 import { isDaemonOwnedConfigKey } from '../../config/config-ownership.js';

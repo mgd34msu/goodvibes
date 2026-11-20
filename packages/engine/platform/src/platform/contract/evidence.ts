@@ -18,7 +18,7 @@
  * Everything here is collection and arithmetic over sizes; no judgment.
  */
 import { isAbsolute, join, relative } from 'node:path';
-import { estimateTokens, type JsonValue } from '@goodvibes-jev/judgment';
+import { estimateTokens, type JsonValue } from '@goodvibes/judgment';
 import { GitService } from '../git/service.js';
 import { lstat, readFile, readlink } from 'node:fs/promises';
 import { readDirtyTreePaths } from '../orchestration/dirty-guard.js';

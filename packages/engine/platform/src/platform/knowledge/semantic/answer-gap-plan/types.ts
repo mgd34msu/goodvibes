@@ -1,4 +1,4 @@
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 export interface AnswerGapMeaning {
   readonly query: string;
   readonly subject?: string | undefined;

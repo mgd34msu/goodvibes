@@ -46,7 +46,7 @@ import { PersonalPage } from '../personal/PersonalPage';
 import { openSettingsSection } from '../personal/openSettings';
 import { MailCompose, type MailComposeHandle } from './MailCompose';
 import { MailMessageBody, useMailMessage, type MailMessageData } from './MailMessagePeek';
-import { replySubjectLine } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
+import { replySubjectLine } from '@goodvibes/engine/platform/platform/judgment-browser/catalogs';
 import { getClientLifetime, isClientLifetimeCurrent, type ClientLifetime } from '../../lib/client-lifetime';
 import { randomUuid } from '../../lib/uuid';
 import '../../styles/components/mail.css';

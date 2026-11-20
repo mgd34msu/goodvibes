@@ -22,9 +22,9 @@
  */
 import { readFileSync } from 'node:fs';
 import { extname } from 'node:path';
-import { encodeWavPcm16 } from '@goodvibes-jev/engine/platform/platform/voice';
-import type { WakeActivationSound } from '@goodvibes-jev/engine/platform/platform/voice';
-import type { VoiceAudioChunk } from '@goodvibes-jev/engine/platform/platform/voice';
+import { encodeWavPcm16 } from '@goodvibes/engine/platform/platform/voice';
+import type { WakeActivationSound } from '@goodvibes/engine/platform/platform/voice';
+import type { VoiceAudioChunk } from '@goodvibes/engine/platform/platform/voice';
 import type { StreamingAudioPlayer } from './player.js';
 /** Sample rate of the synthesised chime. 16 kHz is plenty for two short tones. */
 const CHIME_SAMPLE_RATE = 16000;

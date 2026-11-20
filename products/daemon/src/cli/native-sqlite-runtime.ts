@@ -1,6 +1,6 @@
-import type { DarwinDaemonSqliteOwner } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import { isCompiledBunModuleUrl } from '@goodvibes-jev/engine/platform/platform/runtime/compiled-native-startup';
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import type { DarwinDaemonSqliteOwner } from '@goodvibes/engine/platform/platform/runtime/self-update';
+import { isCompiledBunModuleUrl } from '@goodvibes/engine/platform/platform/runtime/compiled-native-startup';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, type BigIntStats } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -115,7 +115,7 @@ export function initializeDaemonNativeSqlite(options: DaemonSqliteOptions = {}):
   const runtime = daemonSqliteRuntime(platform, arch);
   if (!runtime) throw nativeStartupRefused('SQLITE_RUNTIME_UNDECLARED', 'Native SQLite runtime is undeclared');
   const expected = capturedOwner && Object.freeze({ ...capturedOwner });
-  if (!expected || expected.schema !== 1 || expected.packageName !== '@goodvibes-jev/daemon'
+  if (!expected || expected.schema !== 1 || expected.packageName !== '@goodvibes/daemon'
     || expected.daemonVersion !== version || expected.target !== runtime.target
     || expected.sqliteVersion !== runtime.sqliteVersion || expected.sourceUrl !== runtime.sourceUrl || expected.sourceSha3 !== runtime.sourceSha3
     || !/^[0-9a-f]{64}$/.test(expected.sha256) || !Number.isSafeInteger(expected.size) || expected.size < 32

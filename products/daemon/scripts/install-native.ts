@@ -6,15 +6,15 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   applyVerifiedUpdate, captureUpdateFileIo, realUpdateFileIo, rollbackKeptPrevious, UpdateTransactionError,
   assertDaemonNativePayloadPins, retainDaemonNativeFiles, assertNativeReaderCompatible, resolveDaemonInstallationReaders, type UpdateFileIo, type UpdateFetchLike,
-} from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+} from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { retainVerifiedDaemonCiArtifact } from './ci-artifact.ts';
-import { nativeArtifactPins } from '@goodvibes-jev/engine/toolchain';
+import { nativeArtifactPins } from '@goodvibes/engine/toolchain';
 import { assertNativeInstallHost, assertPath, expectedModes, inspectInstallation, inspectInstallationIdentity, targetPaths, validateOwner, type DaemonInstallOwner, type InstallationReceipt } from '../src/cli/native-installation.ts';
 import { daemonCiMetadataPath, daemonCiPayloads, daemonNativeHost, type DaemonNativeTarget } from '../src/cli/native-artifact.ts';
 
 export { assertNativeInstallHost, type DaemonInstallOwner } from '../src/cli/native-installation.ts';
 
-const PACKAGE = '@goodvibes-jev/daemon';
+const PACKAGE = '@goodvibes/daemon';
 const LOCAL_ORIGIN = 'https://daemon-local-artifacts.invalid';
 /** Version identity belongs to the selected daemon source manifest, not root release tags. */
 export function readDaemonInstallOwner(repoRoot: string, sourceCommit: string, headCommit: string, target: DaemonNativeTarget = daemonNativeHost()): DaemonInstallOwner {

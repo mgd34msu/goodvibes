@@ -35,7 +35,7 @@
 import { OwnerApprovalPendingError } from '../../../lib/owner-approval';
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { isStructuredCredentialReferenceConfigKey } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
+import { isStructuredCredentialReferenceConfigKey } from '@goodvibes/engine/platform/platform/judgment-browser/catalogs';
 import { client as platformClient, type ConfigSetOutcome } from '../../../lib/goodvibes';
 import type { FeaturePendingRestart } from '../../../lib/feature-restart-status';
 import { queryKeys } from '../../../lib/queries';

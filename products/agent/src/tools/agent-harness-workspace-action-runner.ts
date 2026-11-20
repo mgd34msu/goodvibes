@@ -1,13 +1,13 @@
 import { captureStatefulCatalogRequest } from './agent-harness-stateful-catalog-source.ts';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import type { AgentHarnessToolDeps } from './agent-harness-tool-types.ts';
 import { AGENT_WORKSPACE_CATEGORIES, describeWorkspaceAction, describeWorkspaceCategory, readFieldMap, resolveWorkspaceActionDetail, workspaceRowLine } from './agent-harness-workspace-actions.ts';
 import { runTranslatedWorkspaceCommand } from './agent-harness-command-runner.ts';
 import { effectOutput, error, output, readString, requireConfirmedAction } from './agent-harness-tool-utils.ts';
 import { formatHarnessError } from '../agent/harness-control.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
 import { executeAdmittedAgentSettingsImport, isAgentSettingsImportMutation } from './agent-settings-import-admission.ts';
-import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
+import { agentResearchSourceOwner } from '@goodvibes/engine/terminal-shell/agent-turn/protected-research-report';
 import { assertModelReadingInputCurrent, captureModelReadingInput, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { capturedHarnessSettingsImportPreview, harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
 import { getOnboardingCheckMarkerPath, getOnboardingCompletionMarkerPath, writeOnboardingCheckMarker, writeOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';

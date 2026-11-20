@@ -1,4 +1,4 @@
-import type { JudgmentRetryProgress } from '@goodvibes-jev/judgment';
+import type { JudgmentRetryProgress } from '@goodvibes/judgment';
 
 /** Trusted composition input, never a flag accepted from the source being screened. */
 export interface LocalSourceScreeningAuthority {

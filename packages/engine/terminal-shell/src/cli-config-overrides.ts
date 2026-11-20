@@ -3,15 +3,15 @@
  * `--disable`, `--hostname`/`--port`, and a front-end's own launch-time
  * settings defaults onto a live ConfigManager.
  */
-import { describeIngestionNotice, type ConfigKey, type ConfigManager, type SettingsIngestionNotice } from '@goodvibes-jev/engine/platform/platform/config';
-import type { NoticeLevel } from '@goodvibes-jev/engine/platform/platform/core';
+import { describeIngestionNotice, type ConfigKey, type ConfigManager, type SettingsIngestionNotice } from '@goodvibes/engine/platform/platform/config';
+import type { NoticeLevel } from '@goodvibes/engine/platform/platform/core';
 import { featureEnablementWrite, getFeatureSetting } from './cli-feature-settings.js';
-import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/feature-settings';
+import { FEATURE_SETTINGS } from '@goodvibes/engine/platform/platform/runtime/feature-flags/feature-settings';
 import type { GoodVibesCliCommand, GoodVibesCliFlags } from './cli-types.js';
 import { RUNTIME_ENDPOINT_CONFIG_KEYS, hostModeForHostname } from './cli-endpoints.js';
 import type { RuntimeEndpointId } from './cli-endpoints.js';
-import type { ModeManager, PrintLevelRouter } from '@goodvibes-jev/engine/platform/platform/state';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ModeManager, PrintLevelRouter } from '@goodvibes/engine/platform/platform/state';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 /**
  * Read a settings value as a command line writes it.

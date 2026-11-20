@@ -31,7 +31,7 @@
 import type {
   HostedSessionHistoryMessage,
   HostedSessionRecord,
-} from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+} from '@goodvibes/engine/platform/platform/hosted-sessions';
 import type { HostedSessionStreamEvent } from '../runtime/client/hosted-session-stream.ts';
 
 

@@ -12,7 +12,7 @@
  * platform drops `system` messages from the LLM view and does not merge consecutive
  * `user` messages (which would trip a consecutive-user-message API error).
  */
-import { SHELL_CONTEXT_CLOSE, SHELL_CONTEXT_OPEN } from '@goodvibes-jev/engine/platform/platform/core';
+import { SHELL_CONTEXT_CLOSE, SHELL_CONTEXT_OPEN } from '@goodvibes/engine/platform/platform/core';
 
 export const SHELL_USAGE_HINT =
   '[Shell] Usage: !<command>, runs a shell command; its output is shown and added as context for your next message. Esc stops a command that is still running.';

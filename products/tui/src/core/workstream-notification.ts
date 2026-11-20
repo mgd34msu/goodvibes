@@ -28,8 +28,8 @@
  * process-global notifier.
  */
 import { formatTurnBudgetOutcome } from './turn-budget-outcome.ts';
-import type { ContractEvent } from '@goodvibes-jev/engine/platform/events';
-import { NOTIFICATION_TEXT_LIMITS, trimAtWordBoundary, readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { ContractEvent } from '@goodvibes/engine/platform/events';
+import { NOTIFICATION_TEXT_LIMITS, trimAtWordBoundary, readNotificationsMetadataOnly } from '@goodvibes/engine/platform/platform/runtime/operations';
 
 /** Terminal facts from the public contract event vocabulary. */
 export type WorkstreamFailureNarrationInput =

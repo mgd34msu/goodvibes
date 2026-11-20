@@ -2,7 +2,7 @@ import {
   classifyServiceSettingChange,
   type ServiceSettingChange,
   type ServiceSettingResult,
-} from '@goodvibes-jev/engine/terminal-shell/service-setting-change';
+} from '@goodvibes/engine/terminal-shell/service-setting-change';
 
 import type { CliServiceRuntime } from '../cli/service-posture.ts';
 

@@ -24,7 +24,7 @@
  *     underneath it.
  */
 
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { SurfaceLayer } from './renderer/surface-kit.js';
 
 export type SurfaceModalCloseReason = 'escape' | 'done' | 'cleared';

@@ -1,14 +1,14 @@
 /** Public transport consumers accept a wrapped fetch under the actual Bun ambient types. */
 import type {} from 'bun';
-import type { FetchLike } from '@goodvibes-jev/engine/transport-core';
-import { createFetch, createHttpTransport, openRawServerSentEventStream, requestJsonRaw } from '@goodvibes-jev/engine/transport-http';
-import { createEventSourceConnector, type RelayClient } from '@goodvibes-jev/engine/transport-realtime';
-import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
-import { createPeerApiClient } from '@goodvibes-jev/engine/peer-client';
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
-import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
-import { createBrowserKnowledgePlatform } from '@goodvibes-jev/engine/platform/browser/knowledge';
-import { createHttpJsonTransport as createRuntimeHttpTransport, createRealtimeTransport } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
+import type { FetchLike } from '@goodvibes/engine/transport-core';
+import { createFetch, createHttpTransport, openRawServerSentEventStream, requestJsonRaw } from '@goodvibes/engine/transport-http';
+import { createEventSourceConnector, type RelayClient } from '@goodvibes/engine/transport-realtime';
+import { createOperatorApiClient } from '@goodvibes/engine/operator-client';
+import { createPeerApiClient } from '@goodvibes/engine/peer-client';
+import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
+import { createBrowserGoodVibesPlatform } from '@goodvibes/engine/platform/browser';
+import { createBrowserKnowledgePlatform } from '@goodvibes/engine/platform/browser/knowledge';
+import { createHttpJsonTransport as createRuntimeHttpTransport, createRealtimeTransport } from '@goodvibes/engine/platform/platform/runtime/transport';
 
 const callable: FetchLike = async (_input, _init) => new Response('fixture');
 const hostFetch: FetchLike = globalThis.fetch;

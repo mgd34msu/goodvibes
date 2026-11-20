@@ -1,5 +1,5 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import type { TelegramReceiveProgressOwner, TelegramReceiveScope } from './receive-progress.js';
 import type { TelegramPaymentReceiveSelector } from './payment-receive-span.js';
 

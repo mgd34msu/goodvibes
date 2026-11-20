@@ -2,9 +2,9 @@ import {
   createCommandServiceAccessors,
   createCommandPathAccessors,
   requireContextValue,
-} from '@goodvibes-jev/engine/terminal-shell/command-service-access';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
-export { requireShellPaths, requirePluginPathOptions } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+} from '@goodvibes/engine/terminal-shell/command-service-access';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
+export { requireShellPaths, requirePluginPathOptions } from '@goodvibes/engine/terminal-shell/command-service-access';
 export const {
   requireSession,
   requireProvider,
@@ -52,8 +52,8 @@ export const {
 } = createCommandServiceAccessors<CommandContext>();
 export const { requireEcosystemCatalogPaths } = createCommandPathAccessors('tui');
 import type { CommandContext } from '../command-registry.ts';
-import { compactSmallWindow, getLastCompactionEvent, NOTHING_TO_COMPACT_YET, NothingToCompactError, recordSmallWindowCompaction, SMALL_WINDOW_KEEP_RECENT, SMALL_WINDOW_THRESHOLD } from '@goodvibes-jev/engine/platform/platform/core';
-import type { CompactionContext, CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
+import { compactSmallWindow, getLastCompactionEvent, NOTHING_TO_COMPACT_YET, NothingToCompactError, recordSmallWindowCompaction, SMALL_WINDOW_KEEP_RECENT, SMALL_WINDOW_THRESHOLD } from '@goodvibes/engine/platform/platform/core';
+import type { CompactionContext, CompactionEvent } from '@goodvibes/engine/platform/platform/core';
 import { recordCompactionQualityScore } from '../../renderer/compaction-quality.ts';
 import type { CompactionQualityScore } from '../../renderer/compaction-quality.ts';
 
@@ -61,7 +61,7 @@ import type { SessionSurface } from '@/runtime/index.ts';
 
 
 
-import type { KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { KnowledgeApi } from '@goodvibes/engine/platform/platform/knowledge';
 
 
 

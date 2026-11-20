@@ -9,7 +9,7 @@
  * "estimated" is always labeled, and a dollar figure only ever comes from a
  * real priced/estimated costUsd.
  */
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
+import type { OperatorMethodOutput } from '@goodvibes/engine/platform';
 
 export type CostAttributionResult = OperatorMethodOutput<'cost.attribution.get'>;
 export type CostAttributionDimension = CostAttributionResult['dimension'];

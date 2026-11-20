@@ -1,14 +1,14 @@
-import { SETTINGS_CHOICE_ACTIONS, type SettingsChoiceAction } from '@goodvibes-jev/engine/terminal-shell/settings-choice-actions';
-import { selectedSettingsCategoryEntry } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
-import { cycleSettingChoice, adjustedSettingValue } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
-import { TerminalSettingsModalState } from '@goodvibes-jev/engine/terminal-shell/settings-modal-state';
-import { moveSettingsSelection, selectSettingsTarget, type SettingsTargetOutcome } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
+import { SETTINGS_CHOICE_ACTIONS, type SettingsChoiceAction } from '@goodvibes/engine/terminal-shell/settings-choice-actions';
+import { selectedSettingsCategoryEntry } from '@goodvibes/engine/terminal-shell/settings-navigation';
+import { cycleSettingChoice, adjustedSettingValue } from '@goodvibes/engine/terminal-shell/settings-behavior';
+import { TerminalSettingsModalState } from '@goodvibes/engine/terminal-shell/settings-modal-state';
+import { moveSettingsSelection, selectSettingsTarget, type SettingsTargetOutcome } from '@goodvibes/engine/terminal-shell/settings-navigation';
 import { hasActiveExecutionMode, readExecutionMode, refreshExecutionMode, setExecutionMode } from '../permissions/execution-mode.ts';
 /** SettingsModal state for the /settings fullscreen workspace. */
 
 import type { ModelPickerTarget } from './model-picker.ts';
-import type { ConfigManager, ConfigKey, HostManagedSettingLocks } from '@goodvibes-jev/engine/platform/platform/config';
-import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager, ConfigKey, HostManagedSettingLocks } from '@goodvibes/engine/platform/platform/config';
+import type { SubscriptionManager } from '@goodvibes/engine/platform/platform/config';
 import { isAgentHostSettingKey } from '../config/host-settings.ts';
 import { getAgentSettingsSchema, type AgentSettingKey } from '../config/settings-catalog.ts';
 import { readResolvedSettingLookups } from '@/runtime/index.ts';
@@ -17,21 +17,21 @@ import { isSecretConfigKey } from '../config/secret-config.ts';
 import { agentDaemonConfigClient, agentDaemonConfigClientInstalled, isDaemonOwnedConfigKey, openEffectiveConfigView } from '../config/daemon-config-routing.ts';
 import { captureConnectedHostTarget, routeSettingWriteToConnectedHost, type ConnectedHostTarget } from './settings-modal-daemon-writes.ts';
 import { isDeepStrictEqual } from 'node:util';
-import { modelPickerLaunchForKey, parseNumberEditBuffer } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
-import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments';
+import { modelPickerLaunchForKey, parseNumberEditBuffer } from '@goodvibes/engine/terminal-shell/settings-behavior';
+import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes/engine/platform/platform/payments';
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
 import { buildSubscriptionEntries } from './settings-modal-subscriptions.ts';
 import { buildMcpEntries } from './settings-modal-mcp-entries.ts';
-import { keepMcpTrustModeFromSettings, MCP_TOOL_RULE_EDIT_WORDS, mcpGuidedActionFromSettings } from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
+import { keepMcpTrustModeFromSettings, MCP_TOOL_RULE_EDIT_WORDS, mcpGuidedActionFromSettings } from '@goodvibes/engine/terminal-shell/settings-mcp-entries';
 import { buildFlagEntries } from './settings-modal-flag-entries.ts';
 import { buildPaymentsCardsRow, PAYMENTS_CARDS_ROW_KEY } from './payments-config.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { FlagState } from '@/runtime/index.ts';
 import '@/runtime/index.ts';
 import { resolveFeatureEnablementWrite } from '../runtime/feature-enablement.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { McpRegistry } from '@goodvibes/engine/platform/platform/mcp';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import {
   SETTINGS_CATEGORIES,
   SETTINGS_CATEGORY_GROUPS,

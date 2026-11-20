@@ -1,6 +1,6 @@
-import { parseNativeShellCli, shellMetadataResult } from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
-import { parseWithCatalog } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
-import { GOODVIBES_CLI_CATALOG } from '@goodvibes-jev/engine/terminal-shell/cli-command-catalog';
+import { parseNativeShellCli, shellMetadataResult } from '@goodvibes/engine/terminal-shell/cli-entrypoint';
+import { parseWithCatalog } from '@goodvibes/engine/terminal-shell/cli-parser-engine';
+import { GOODVIBES_CLI_CATALOG } from '@goodvibes/engine/terminal-shell/cli-command-catalog';
 import { renderCompletion } from './completion.ts';
 import { renderGoodVibesCommandHelp, renderGoodVibesHelp, renderGoodVibesVersion } from './help.ts';
 

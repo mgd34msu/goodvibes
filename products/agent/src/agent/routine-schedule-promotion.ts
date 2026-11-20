@@ -1,12 +1,12 @@
-import { resolveConnectedHost, type ConnectedHostConnection, type ConnectedHostSource, type ConnectedHostUnavailable } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
+import { resolveConnectedHost, type ConnectedHostConnection, type ConnectedHostSource, type ConnectedHostUnavailable } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 import { createConnectedSchedule } from './connected-schedule.ts';
-import { formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
-import { evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
-import { formatAgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
-import { deliveryModeFromTargets, normalizeProviderModel, toDeliveryTargetInput, type RoutineScheduleDeliveryKind, type RoutineScheduleDeliverySurfaceKind, type RoutineScheduleDeliveryTargetSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+import { formatAgentRecordReviewState } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
+import { evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes/engine/terminal-shell/agent-turn/routine-registry';
+import { formatAgentSkillRequirement } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
+import { deliveryModeFromTargets, normalizeProviderModel, toDeliveryTargetInput, type RoutineScheduleDeliveryKind, type RoutineScheduleDeliverySurfaceKind, type RoutineScheduleDeliveryTargetSpec } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-delivery-targets';
 
-import { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_METHOD, ROUTINE_SCHEDULE_ROUTE, type RoutineScheduleKind, type RoutineScheduleSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+import { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_METHOD, ROUTINE_SCHEDULE_ROUTE, type RoutineScheduleKind, type RoutineScheduleSpec } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-delivery-targets';
 
 // The schedule vocabulary is owned by the shared Agent turn; re-exported for this file's importers.
 export { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_METHOD, ROUTINE_SCHEDULE_ROUTE, type RoutineScheduleKind, type RoutineScheduleSpec };
@@ -31,7 +31,7 @@ export interface AgentConnectedHostConnection {
 
 // The delivery-target vocabulary is owned by schedule-delivery-targets.ts and
 // re-exported here so existing importers keep one import site.
-export type { RoutineScheduleDeliveryKind, RoutineScheduleDeliverySurfaceKind, RoutineScheduleDeliveryTargetSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+export type { RoutineScheduleDeliveryKind, RoutineScheduleDeliverySurfaceKind, RoutineScheduleDeliveryTargetSpec } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-delivery-targets';
 
 export interface RoutineScheduleReceiptDeliveryTarget {
   readonly kind: RoutineScheduleDeliveryKind;

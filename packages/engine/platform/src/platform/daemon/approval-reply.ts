@@ -1,6 +1,6 @@
 /** Channel-owner replies to permission asks, through the shared ApprovalBroker. */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { LIMITS, toJson, type Selection } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import { LIMITS, toJson, type Selection } from '@goodvibes/judgment';
 import type { ChannelIngressPolicyInput, ChannelPolicyDecision, RouteBindingManager } from '../channels/index.js';
 import { channelSenderActor } from '../channels/policy-manager.js';
 import { admitEffects } from '../security/effect-authority.js';

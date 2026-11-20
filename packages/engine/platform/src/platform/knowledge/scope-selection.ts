@@ -1,6 +1,6 @@
 import { isGeneratedProjectionViewEdge } from './store-generated-projection-selector.js';
-import { captureJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { mapLimit, toJson } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort, JudgmentPortMissingError } from '@goodvibes/engine/errors';
+import { mapLimit, toJson } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { knowledgeScopeSelection } from './batteries/scope-selection.js';
 import { knowledgeSourceJudgmentUris } from './source-structural-references.js';

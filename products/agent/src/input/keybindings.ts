@@ -1,5 +1,5 @@
-import { COMMON_ACTION_DESCRIPTIONS, createKeybindingDefaults } from '@goodvibes-jev/engine/terminal-shell/keybinding-catalog';
-import { KeybindingsManager as PlatformKeybindingsManager, type KeyCombo, type KeybindingsManagerOptions } from '@goodvibes-jev/engine/terminal-shell/keybindings';
+import { COMMON_ACTION_DESCRIPTIONS, createKeybindingDefaults } from '@goodvibes/engine/terminal-shell/keybinding-catalog';
+import { KeybindingsManager as PlatformKeybindingsManager, type KeyCombo, type KeybindingsManagerOptions } from '@goodvibes/engine/terminal-shell/keybindings';
 export type { KeyCombo, KeybindingsManagerOptions };
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 

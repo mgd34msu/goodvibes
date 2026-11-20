@@ -1,4 +1,4 @@
-import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 const sample = (query: string, answer: string, text: string) => ({ query, candidate: { id: 'generated', text: answer }, evidence: [{ reference: 'evidence-1', text }] });
 export const answerCandidateQuality = defineBattery({
   name: 'engine.knowledge.answer-candidate-quality', version: 2, accuracyFloor: 0.95,

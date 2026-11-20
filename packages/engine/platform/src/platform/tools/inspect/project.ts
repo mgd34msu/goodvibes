@@ -2,7 +2,7 @@ import { assertCapturedToolAccessCurrent } from '../shared/captured-input-tools.
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { extname, isAbsolute, join, relative } from 'node:path';
 import { safeRead, scanRead, SKIPPED_DIRS } from './shared.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { declaredTestRunner, isDeclaredPackageManager, PACKAGE_MANAGER_LOCKFILES, type DeclaredPackageManager } from '../../utils/project-test-runner.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import { entryPointView, projectTooling } from '../batteries/project-tooling.js';

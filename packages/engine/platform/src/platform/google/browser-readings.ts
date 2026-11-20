@@ -1,7 +1,7 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /** Google setup observations never grant click, credential or storage authority. */
-import { checkAnswers, defineBattery, defineSelector, STAKES_BANDS, yesNo, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { checkAnswers, defineBattery, defineSelector, STAKES_BANDS, yesNo, type JudgmentPort } from '@goodvibes/judgment';
+import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { types as nodeTypes } from 'node:util';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { GoogleBrowserElement, GoogleBrowserPort } from './types.js';

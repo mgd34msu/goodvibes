@@ -1,6 +1,6 @@
 import { homeGraphIdentitySpace } from '../store-homegraph-node-selector.js';
 import type { HomeGraphNodeIdentity } from './node-identity-plan.js';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import { HomeGraphObjectIdentityError } from './identity-errors.js';
 import type {
   KnowledgeEdgeRecord,

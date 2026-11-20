@@ -3,10 +3,10 @@ import {
   ACTIVE_REFINEMENT_STATES,
   type KnowledgeRefinementTaskRecord,
   type KnowledgeSemanticSelfImproveResult,
-} from '@goodvibes-jev/engine/platform/platform/knowledge';
+} from '@goodvibes/engine/platform/platform/knowledge';
 import type { CommandContext } from '../input/command-registry.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 interface AgentHarnessMemoryRefinementArgs {
   readonly query?: unknown;

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Page } from '@goodvibes-jev/engine/errors';
+import type { Page } from '@goodvibes/engine/errors';
 import { logger } from '../utils/logger.js';
 import type { SubmitSharedSessionMessageInput } from './session-types.js';
 import type { SharedSessionInputIntent, SharedSessionInputRecord, SharedSessionInputState, SharedSessionSurfaceReplyBinding } from './session-intents.js';

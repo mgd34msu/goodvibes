@@ -7,7 +7,7 @@
 // instance; all the state->display logic lives in these pure helpers.
 // ---------------------------------------------------------------------------
 
-import type { ProcessNode, ProcessState } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { ProcessNode, ProcessState } from '@goodvibes/engine/platform/platform/runtime/fleet';
 import { fleetStateGlyph, fleetStateTone, isTerminalProcessState, type FleetStateTone, type FleetTreeRow } from './fleet-read-model.ts';
 
 /** How long 'stopping…' lingers after a stop keypress before the true state is shown regardless (never masks a stuck kill). */

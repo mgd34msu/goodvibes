@@ -1,4 +1,4 @@
-import { CONFIDENCE_BIN_FLOORS, type Outcome } from '@goodvibes-jev/judgment';
+import { CONFIDENCE_BIN_FLOORS, type Outcome } from '@goodvibes/judgment';
 import type { LoggedReading } from './log-readings.js';
 import { UNNAMED } from './log-readings.js';
 import { OBSERVE_THRESHOLDS } from './thresholds.js';

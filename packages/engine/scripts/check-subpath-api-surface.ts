@@ -108,7 +108,7 @@ interface TrackedPackage {
 
 function tracked(subpath: string, snapshotName: string): TrackedPackage {
   return {
-    name: `@goodvibes-jev/engine/${subpath}`,
+    name: `@goodvibes/engine/${subpath}`,
     subpath,
     dir: resolve(ENGINE_ROOT, subpath),
     snapshot: resolve(ENGINE_ROOT, 'etc', snapshotName),
@@ -191,7 +191,7 @@ function engineDeclarationPaths(): Record<string, string[]> {
   for (const [key, value] of Object.entries(engine.exports)) {
     const types = exportCondition(value, 'types');
     if (types === undefined) continue;
-    paths[`@goodvibes-jev/engine/${key.slice(2)}`] = [resolve(ENGINE_ROOT, types)];
+    paths[`@goodvibes/engine/${key.slice(2)}`] = [resolve(ENGINE_ROOT, types)];
   }
   return paths;
 }

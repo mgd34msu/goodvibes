@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/peer-client';
+export * from '@goodvibes/engine/peer-client';

@@ -1,12 +1,12 @@
 import { isDeepStrictEqual } from 'node:util';
-import { readFileObservation } from '@goodvibes-jev/engine/platform/platform/utils';
+import { readFileObservation } from '@goodvibes/engine/platform/platform/utils';
 import { lstatSync, realpathSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { retainCliConfig } from '@goodvibes-jev/engine/terminal-shell/cli-config-owner';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
+import { retainCliConfig } from '@goodvibes/engine/terminal-shell/cli-config-owner';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
 import type { CommandContext } from '../input/command-registry.ts';
-import { captureCatalogSnapshot } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { captureCatalogSnapshot } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureCatalogReadRequest } from './agent-harness-catalog-selection.ts';
 
 /**

@@ -10,8 +10,8 @@
  * delivery receipts and sends) comes from that app's host, and the other app
  * refuses those actions saying why.
  */
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import { SESSION_GATE_PRESET_NAMES, gatePresetLabel } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
+import { SESSION_GATE_PRESET_NAMES, gatePresetLabel } from '@goodvibes/engine/platform/platform/gate/presets';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';

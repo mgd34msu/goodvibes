@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/user-message';
+export * from '@goodvibes/engine/terminal-shell/user-message';

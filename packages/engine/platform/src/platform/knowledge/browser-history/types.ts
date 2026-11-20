@@ -1,4 +1,4 @@
-import type { Selection } from '@goodvibes-jev/engine/errors';
+import type { Selection } from '@goodvibes/engine/errors';
 import type { KnowledgeBatchIngestResult, KnowledgeSourceRecord } from '../types.js';
 
 export type BrowserKnowledgeFamily = 'chromium' | 'gecko' | 'webkit';

@@ -1,5 +1,5 @@
-import { persistProviders, scanLocalhost, type DiscoveredServer, type ScanResult } from '@goodvibes-jev/engine/platform/platform/discovery';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { persistProviders, scanLocalhost, type DiscoveredServer, type ScanResult } from '@goodvibes/engine/platform/platform/discovery';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 
 /** Production uses the canonical scanner/cache; tests supply synthetic boundaries. */
 export interface DaemonProviderDiscoveryDependencies {

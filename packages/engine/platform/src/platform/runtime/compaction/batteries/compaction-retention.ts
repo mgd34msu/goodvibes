@@ -13,7 +13,7 @@
  * targets use the high band because accepting their loss changes later work.
  * A refusal re-runs the strategy or keeps the full conversation.
  */
-import { defineBattery, rated, yesNo, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, rated, yesNo, STAKES_BANDS } from '@goodvibes/judgment';
 
 /** The rubric, lowest first; the level index is the score. */
 export const RETENTION_LEVELS = [

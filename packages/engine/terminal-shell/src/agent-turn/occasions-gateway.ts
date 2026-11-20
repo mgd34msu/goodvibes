@@ -32,10 +32,10 @@
  * daemon, most dangerously the rule that a nudge never carries the date.
  */
 
-import { captureOccasionsGatewayTarget } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { captureOccasionsGatewayTarget } from '@goodvibes/engine/platform/platform/control-plane';
 import { dirname } from 'node:path';
-import type { OccasionMutationOptions } from '@goodvibes-jev/engine/platform/platform/occasions';
-import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
+import type { OccasionMutationOptions } from '@goodvibes/engine/platform/platform/occasions';
+import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes/engine/platform/contracts';
 import { OCCASIONS_METHOD_IDS, type OccasionsMethodId } from './occasions-types.js';
 import {
   captureFamilyGatewayRoute,

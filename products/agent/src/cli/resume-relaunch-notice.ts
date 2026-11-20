@@ -1,4 +1,4 @@
-import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { SessionManager } from '@goodvibes/engine/platform/platform/sessions';
 
 /**
  * RESUME-ON-RELAUNCH.

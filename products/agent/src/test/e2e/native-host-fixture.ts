@@ -1,14 +1,14 @@
 /** A real daemon + paired authority; only external Jev/model replies are synthetic. */
 import { dirname, join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
-import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
-import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
-import { startDaemonFixture } from '@goodvibes-jev/daemon/testing';
+import { BenchmarkStore } from '@goodvibes/engine/platform/platform/providers';
+import { registerInboxSurface } from '@goodvibes/engine/platform/platform/intake';
+import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath } from '@goodvibes/engine/platform/platform/workspace';
+import { startDaemonFixture } from '@goodvibes/daemon/testing';
 import { seedProviderMetadataCacheFixture, seedProviderModelListCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { closeE2EFixture, type E2EHome } from './harness.ts';
-import { startScriptedDecisionServer } from '@goodvibes-jev/judgment/testing';
-import type { DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
+import { startScriptedDecisionServer } from '@goodvibes/judgment/testing';
+import type { DecisionModelPolicy } from '@goodvibes/engine/errors';
 
 export async function startE2ENativeHost(home: E2EHome, options: { readonly policy?: DecisionModelPolicy } = {}) {
   // These fixtures prove local permit delivery. Remote-owner coverage uses a

@@ -3,7 +3,7 @@ import {
   modelWorkspaceTargetSummary,
   modelWorkspaceProviderRows,
   modelWorkspaceSignIn,
-} from '@goodvibes-jev/engine/terminal-shell/model-workspace-facts';
+} from '@goodvibes/engine/terminal-shell/model-workspace-facts';
 /**
  * renderModelWorkspace, the model picker drawn with the surface kit.
  *
@@ -30,7 +30,7 @@ import {
  * embedding-provider steps use the same frame.
  */
 
-import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ModelDefinition } from '@goodvibes/engine/platform/platform/providers';
 import type { ModelPickerModal, ModelPickerTargetInfo } from '../input/model-picker.ts';
 import { abbreviateCount } from '../utils/format-number.ts';
 import { activeTokens } from './theme.ts';

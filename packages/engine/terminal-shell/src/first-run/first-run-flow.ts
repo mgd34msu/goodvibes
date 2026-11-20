@@ -12,12 +12,12 @@
  * Nothing is printed into the transcript (a transcript row would retire the
  * splash): step 3's lines are drawn under the splash (splash-additions.ts).
  */
-import type { ConfigManager, OAuthProviderConfig, SecretsManager, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { createOAuthLocalListener, getSubscriptionProviderConfig } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveDefaultModelReadiness, type ModelDefinition, type ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-import { localScanState } from '@goodvibes-jev/engine/platform/platform/discovery';
-import { openExternalUrl, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConfigManager, OAuthProviderConfig, SecretsManager, SubscriptionManager } from '@goodvibes/engine/platform/platform/config';
+import { createOAuthLocalListener, getSubscriptionProviderConfig } from '@goodvibes/engine/platform/platform/config';
+import { resolveDefaultModelReadiness, type ModelDefinition, type ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
+import { localScanState } from '@goodvibes/engine/platform/platform/discovery';
+import { openExternalUrl, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from '../surface-modal-host.js';
 import type { SurfaceLayer } from '../renderer/surface-kit.js';
 import { renderChooseStep, renderSignInStep, type SignInStepView } from '../renderer/first-run.js';

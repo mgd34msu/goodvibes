@@ -1,11 +1,11 @@
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { captureOwnedJson } from '@goodvibes/engine/platform/platform/gate/judgment-input';
 import type { CommandContext } from '../input/command-registry.ts';
-import { AgentResearchRunRegistry, type AgentResearchRunRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-run-registry';
-import { AgentResearchSourceRegistry, researchSourceReportLine, type AgentResearchSourceRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-source-registry';
+import { AgentResearchRunRegistry, type AgentResearchRunRecord } from '@goodvibes/engine/terminal-shell/agent-turn/research-run-registry';
+import { AgentResearchSourceRegistry, researchSourceReportLine, type AgentResearchSourceRecord } from '@goodvibes/engine/terminal-shell/agent-turn/research-source-registry';
 import type { AgentResearchToolArgs } from './agent-research-tool.ts';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
-import { formatJsonStoreWriteReport } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
+import { formatJsonStoreWriteReport } from '@goodvibes/engine/terminal-shell/agent-turn/store-file';
 
 type ToolResult = Awaited<ReturnType<Tool['execute']>>;
 type Dispatch = (child: Tool, args: Record<string, unknown>, assertSource?: () => void) => Promise<ToolResult>;

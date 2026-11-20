@@ -1,1 +1,1 @@
-export { createDaemonIntegrationRouteHandlers } from '@goodvibes-jev/engine/daemon-api';
+export { createDaemonIntegrationRouteHandlers } from '@goodvibes/engine/daemon-api';

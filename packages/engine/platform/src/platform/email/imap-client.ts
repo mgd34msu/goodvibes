@@ -1,4 +1,4 @@
-import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError } from '@goodvibes/engine/errors';
 /**
  * Minimal IMAP4rev1 client over an injected socket.
  *

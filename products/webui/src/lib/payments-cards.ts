@@ -33,7 +33,7 @@
  * A browser adds attack surface a terminal does not, which is exactly why the
  * conditions arrived attached to the ruling rather than after it.
  */
-import { mayEnterCardDetails, mayOfferCardEntryFlow } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import { mayEnterCardDetails, mayOfferCardEntryFlow } from '@goodvibes/engine/platform/platform/payments/browser';
 import { majorTextToMinorUnits, InvalidMoneyInputError } from './money';
 
 /**

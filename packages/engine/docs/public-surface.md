@@ -1,8 +1,8 @@
-# Public surface: @goodvibes-jev/engine/platform
+# Public surface: @goodvibes/engine/platform
 
 > **Runtime surfaces**: See [`docs/surfaces.md`](./surfaces.md) for the full/companion surface split, supported runtimes, and CI enforcement details.
 
-This document describes the explicit public platform entry points exported by the `@goodvibes-jev/engine` package; the entry-point lists in the README, getting-started, packages, exports, and surfaces docs link here rather than re-listing. Consumers should only import from paths listed here. Private repository source layout is not a package contract.
+This document describes the explicit public platform entry points exported by the `@goodvibes/engine` package; the entry-point lists in the README, getting-started, packages, exports, and surfaces docs link here rather than re-listing. Consumers should only import from paths listed here. Private repository source layout is not a package contract.
 
 ## Stability levels
 
@@ -14,7 +14,7 @@ This document describes the explicit public platform entry points exported by th
 
 ## Platform facade entry point
 
-### `./platform`: `@goodvibes-jev/engine/platform`
+### `./platform`: `@goodvibes/engine/platform`
 
 **Status:** stable
 
@@ -30,7 +30,7 @@ key is `./platform/auth`, rather than a separate package.
 
 ## Subsystem entry points
 
-### `./auth`: `@goodvibes-jev/engine/platform/auth`
+### `./auth`: `@goodvibes/engine/platform/auth`
 
 **Status:** stable
 
@@ -38,25 +38,25 @@ Authentication client, token stores, and auth types. Exports `createGoodVibesAut
 
 **Stability contract:** public method signatures are stable. Internal token format may change between major versions.
 
-### `./client-auth`: `@goodvibes-jev/engine/platform/client-auth`
+### `./client-auth`: `@goodvibes/engine/platform/client-auth`
 
 **Status:** beta
 
 Low-level authentication primitives, including `AutoRefreshCoordinator`, platform-specific token stores (browser, iOS keystore, Android keychain, Expo secure store), and auto-refresh options. Use `./auth` for the recommended public authentication surface; import from `./client-auth` only when you need direct access to platform-specific token store implementations or the coordinator.
 
-### `./contracts`: `@goodvibes-jev/engine/platform/contracts`
+### `./contracts`: `@goodvibes/engine/platform/contracts`
 
 **Status:** stable
 
 ACP operator/peer contract types, runtime event domains, and method IDs. Used by both operator and peer clients.
 
-### `./contracts/node`: `@goodvibes-jev/engine/platform/contracts/node`
+### `./contracts/node`: `@goodvibes/engine/platform/contracts/node`
 
 **Status:** stable
 
 Contract extensions for file-based artifact types. Used on the full (Bun) surface.
 
-### `./contracts/operator-contract.json`: `@goodvibes-jev/engine/platform/contracts/operator-contract.json`
+### `./contracts/operator-contract.json`: `@goodvibes/engine/platform/contracts/operator-contract.json`
 
 **Status:** stable
 
@@ -64,7 +64,7 @@ Raw JSON schema for the operator ACP contract. Suitable for tooling and validato
 
 > **Bundle-budget note:** JSON artifacts are static and excluded from gzip bundle-budget tracking. See `bundle-budgets.json` comments.
 
-### `./contracts/peer-contract.json`: `@goodvibes-jev/engine/platform/contracts/peer-contract.json`
+### `./contracts/peer-contract.json`: `@goodvibes/engine/platform/contracts/peer-contract.json`
 
 **Status:** stable
 
@@ -72,7 +72,7 @@ Raw JSON schema for the peer ACP contract.
 
 > **Bundle-budget note:** JSON artifacts are static and excluded from gzip bundle-budget tracking.
 
-### `./contracts/operator-openapi.json`: `@goodvibes-jev/engine/platform/contracts/operator-openapi.json`
+### `./contracts/operator-openapi.json`: `@goodvibes/engine/platform/contracts/operator-openapi.json`
 
 **Status:** stable
 
@@ -80,25 +80,25 @@ Generated OpenAPI document for the operator HTTP surface, derived from the same 
 
 > **Bundle-budget note:** JSON artifacts are static and excluded from gzip bundle-budget tracking.
 
-### `./daemon`: `@goodvibes-jev/engine/platform/daemon`
+### `./daemon`: `@goodvibes/engine/platform/daemon`
 
 **Status:** stable
 
 Daemon HTTP API types, route helpers, and server bootstrap utilities.
 
-### `./embed`: `@goodvibes-jev/engine/platform/embed`
+### `./embed`: `@goodvibes/engine/platform/embed`
 
 **Status:** stable (frozen at 1.0)
 
 platform embedding API: the supported contract for embedding a GoodVibes session in another application. Exports `createEmbeddedSession` and the `EmbeddedSession` shape (`workspace`, `url`, `events`, `approvals`, `sessions`, `submit`, `stop`), `EmbedSessionOptions`, `EmbeddedSessionInput`, the re-exported `bootDaemon` factory with its `BootDaemonOptions`/`BootedDaemon` contract, and the permission-callback contract. It curates existing runtime machinery rather than adding a new engine, so breaking changes to the frozen shape are a semver-major release gated by an API Extractor report.
 
-### `./observer`: `@goodvibes-jev/engine/platform/observer`
+### `./observer`: `@goodvibes/engine/platform/observer`
 
 **Status:** beta
 
-Observability helpers: `createConsoleObserver`, `createOpenTelemetryObserver`, and associated observer types. The root `@goodvibes-jev/engine/platform` entry also re-exports this surface via `export *`; either import path is valid. Prefer `./observer` when you need tree-shaking control.
+Observability helpers: `createConsoleObserver`, `createOpenTelemetryObserver`, and associated observer types. The root `@goodvibes/engine/platform` entry also re-exports this surface via `export *`; either import path is valid. Prefer `./observer` when you need tree-shaking control.
 
-### `./operator`: `@goodvibes-jev/engine/platform/operator`
+### `./operator`: `@goodvibes/engine/platform/operator`
 
 **Status:** stable
 
@@ -107,7 +107,7 @@ The operator surface is intentionally resource-oriented (`sessions`,
 `tasks`, `approvals`) because it is used by human/operator UIs that browse and
 act on daemon resources.
 
-### `./peer`: `@goodvibes-jev/engine/platform/peer`
+### `./peer`: `@goodvibes/engine/platform/peer`
 
 **Status:** stable
 
@@ -117,19 +117,19 @@ The peer surface is intentionally capability-oriented (`pairing`, `peer`,
 available. This differs from the operator client by design; both clients share
 the same generated contract ids underneath.
 
-### `./errors`: `@goodvibes-jev/engine/platform/errors`
+### `./errors`: `@goodvibes/engine/platform/errors`
 
 **Status:** stable
 
 Shared error types and error-contract helpers.
 
-### `./events` and explicit event-domain subpaths: `@goodvibes-jev/engine/platform/events`
+### `./events` and explicit event-domain subpaths: `@goodvibes/engine/platform/events`
 
 **Status:** beta
 
 Runtime event domain types. Use `./events` for the aggregate event-domain
 barrel, or an explicit `./events/<domain>` subpath for a single domain such as
-`@goodvibes-jev/engine/platform/events/agents`.
+`@goodvibes/engine/platform/events/agents`.
 
 Supported event domain subpaths are: `agents`, `automation`, `communication`,
 `compaction`, `control-plane`, `deliveries`, `forensics`, `gate`, `knowledge`, `mcp`,
@@ -142,39 +142,39 @@ modules are not exported as deep package subpaths. What each domain carries is
 documented per event in the generated
 [runtime events reference](./reference-runtime-events.md).
 
-### `./transport-core`: `@goodvibes-jev/engine/platform/transport-core`
+### `./transport-core`: `@goodvibes/engine/platform/transport-core`
 
 **Status:** stable
 
 Abstract transport interfaces, base classes, and shared transport types.
 
-### `./transport-direct`: `@goodvibes-jev/engine/platform/transport-direct`
+### `./transport-direct`: `@goodvibes/engine/platform/transport-direct`
 
 **Status:** stable
 
 In-process direct transport (zero-latency, same-process communication). See
 [Transports](./transports.md) for the canonical facade description.
 
-### `./transport-http`: `@goodvibes-jev/engine/platform/transport-http`
+### `./transport-http`: `@goodvibes/engine/platform/transport-http`
 
 **Status:** stable
 
 HTTP/REST transport implementation.
 
-### `./transport-realtime`: `@goodvibes-jev/engine/platform/transport-realtime`
+### `./transport-realtime`: `@goodvibes/engine/platform/transport-realtime`
 
 **Status:** stable
 
 SSE/WebSocket realtime transport implementation.
 
-### `./browser`: `@goodvibes-jev/engine/platform/browser`
+### `./browser`: `@goodvibes/engine/platform/browser`
 
 **Status:** stable
 
 Browser-optimized full platform entry. Browser-safe entry with browser-appropriate
 reconnect/retry defaults and the complete operator route contract.
 
-### `./browser/knowledge`: `@goodvibes-jev/engine/platform/browser/knowledge`
+### `./browser/knowledge`: `@goodvibes/engine/platform/browser/knowledge`
 
 **Status:** stable
 
@@ -182,7 +182,7 @@ Scoped browser platform entry for the base knowledge/wiki system. It includes ba
 `knowledge.*` routes plus shared auth, provider, session, account, control, and
 SSE helpers without loading Home Assistant Home Graph route metadata.
 
-### `./browser/homeassistant`: `@goodvibes-jev/engine/platform/browser/homeassistant`
+### `./browser/homeassistant`: `@goodvibes/engine/platform/browser/homeassistant`
 
 **Status:** stable
 
@@ -190,7 +190,7 @@ Scoped browser platform entry for Home Assistant panels. It includes
 `homeassistant.homeGraph.*` routes plus shared auth, provider, session, account,
 control, and SSE helpers without loading the base knowledge/wiki route table.
 
-### `./browser/agent`: `@goodvibes-jev/engine/platform/browser/agent`
+### `./browser/agent`: `@goodvibes/engine/platform/browser/agent`
 
 **Status:** stable
 
@@ -199,31 +199,31 @@ Scoped browser platform entry for the Agent-owned knowledge environment. It rout
 provider, session, account, control, and SSE helpers. Exports
 `createBrowserAgentPlatform` and the `BrowserAgentPlatform` type.
 
-### `./web`: `@goodvibes-jev/engine/platform/web`
+### `./web`: `@goodvibes/engine/platform/web`
 
 **Status:** stable
 
 Web (browser + service workers) platform entry.
 
-### `./workers`: `@goodvibes-jev/engine/platform/workers`
+### `./workers`: `@goodvibes/engine/platform/workers`
 
 **Status:** preview
 
 Cloudflare Worker bridge for optional daemon batch integration. Exports `createGoodVibesCloudflareWorker`, the `GoodVibesCoordinator` Durable Object class (the daily queue budget), `buildGoodVibesCloudflareWorkerModule` (the module text platform provisioning uploads, built from the same code) and structural Worker, Queue, KV, R2 and Durable Object types. Use this when manually deploying a Worker that proxies `/batch/*` to the daemon, enqueues batch tick signals, consumes Cloudflare Queue messages, or runs scheduled ticks. Normal Worker-hosted clients that only need operator HTTP calls should keep using `./web`. platform-owned Cloudflare provisioning is exposed through daemon `/api/cloudflare/*` routes rather than this Worker entry point, including token bootstrap, discovery, Workers, Queues, Tunnel, Access, DNS, KV, Durable Objects, Secrets Store, and R2.
 
-### `./react-native`: `@goodvibes-jev/engine/platform/react-native`
+### `./react-native`: `@goodvibes/engine/platform/react-native`
 
 **Status:** stable
 
 React Native platform entry. Excludes Node.js-only transports.
 
-### `./expo`: `@goodvibes-jev/engine/platform/expo`
+### `./expo`: `@goodvibes/engine/platform/expo`
 
 **Status:** stable
 
 Expo-specific platform entry built on top of `react-native`.
 
-### `./sql-js`: `@goodvibes-jev/engine/platform/sql-js`
+### `./sql-js`: `@goodvibes/engine/platform/sql-js`
 
 **Status:** stable
 
@@ -233,7 +233,7 @@ Types-only ambient declaration for the optional `sql.js` dependency, which ships
 
 ## Platform surface (`./platform/...`)
 
-### Explicit platform entrypoints: `@goodvibes-jev/engine/platform/platform...`
+### Explicit platform entrypoints: `@goodvibes/engine/platform/platform...`
 
 **Status:** beta
 
@@ -243,11 +243,11 @@ The `platform/...` surface is the canonical way for downstream consumers (e.g., 
 
 **Stability contract:** exported names and their TypeScript signatures are the current package contract. Pre-1.0 releases may make breaking changes; current behavior is recorded in `CHANGELOG.md`.
 
-There is no root `@goodvibes-jev/engine/platform/platform` entry. Runtime-boundary helpers live at
-`@goodvibes-jev/engine/platform/platform/node/runtime-boundary`; runtime capability metadata lives at
-`@goodvibes-jev/engine/platform/platform/node`; the base knowledge system lives at
-`@goodvibes-jev/engine/platform/platform/knowledge`; Home Assistant Home Graph extends
-that base through `@goodvibes-jev/engine/platform/platform/knowledge/home-graph`.
+There is no root `@goodvibes/engine/platform/platform` entry. Runtime-boundary helpers live at
+`@goodvibes/engine/platform/platform/node/runtime-boundary`; runtime capability metadata lives at
+`@goodvibes/engine/platform/platform/node`; the base knowledge system lives at
+`@goodvibes/engine/platform/platform/knowledge`; Home Assistant Home Graph extends
+that base through `@goodvibes/engine/platform/platform/knowledge/home-graph`.
 
 #### Platform subpaths: exact export map entries
 
@@ -379,7 +379,7 @@ Subsystems without public subpaths are package implementation. They are consumed
 
 The following paths are intentionally NOT exported and will cause a module resolution error if imported:
 
-- Any `@goodvibes-jev/engine/platform/platform/...` path not listed in the export map above.
+- Any `@goodvibes/engine/platform/platform/...` path not listed in the export map above.
 - Any `dist/...` file path reached by bypassing the package export map.
 
 Consumers must use the corresponding documented subpath when one is exported.

@@ -1,7 +1,7 @@
 /**
  * compaction.ts, parse and format the platform's compaction runtime events.
  *
- * GROUNDED: `@goodvibes-jev/engine/platform/events/compaction` ships a real, typed
+ * GROUNDED: `@goodvibes/engine/platform/events/compaction` ships a real, typed
  * `CompactionEvent` discriminated union (COMPACTION_CHECK, _MICROCOMPACT,
  * _COLLAPSE, _AUTOCOMPACT, _REACTIVE, _BOUNDARY_COMMIT, _DONE, _FAILED,
  * _RESUME_REPAIR, _QUALITY_SCORE, _STRATEGY_SWITCH, and the mandatory

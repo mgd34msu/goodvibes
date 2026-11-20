@@ -1,4 +1,4 @@
-import { defineSelector, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineSelector, STAKES_BANDS } from '@goodvibes/judgment';
 import { definePageContent } from '../../tools/batteries/page-content.js';
 
 /** Same named parallel-block pattern as fetch; knowledge callers hold on every unresolved block. */

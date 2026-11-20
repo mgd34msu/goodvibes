@@ -1,4 +1,4 @@
-import { ConfigurationError } from '@goodvibes-jev/engine/errors';
+import { ConfigurationError } from '@goodvibes/engine/errors';
 
 export interface NodeRuntimeBoundaryStatus {
   readonly nodeLike: boolean;

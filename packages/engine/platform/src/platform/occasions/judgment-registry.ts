@@ -1,2 +1,2 @@
-import { BatteryRegistry } from '@goodvibes-jev/judgment';
+import { BatteryRegistry } from '@goodvibes/judgment';
 export const registry = new BatteryRegistry();

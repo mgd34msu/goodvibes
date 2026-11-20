@@ -1,5 +1,5 @@
 /** Explicit compatibility definition; automatic picker groups use published catalog families. */
-import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes/judgment';
 
 export const MODEL_FAMILY_OPTIONS = {
   Claude: 'Anthropic Claude models (Opus, Sonnet, Haiku).',

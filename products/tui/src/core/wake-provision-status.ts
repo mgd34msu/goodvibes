@@ -1,4 +1,4 @@
-import { createWakeProvisionPresentation } from '@goodvibes-jev/engine/terminal-shell/audio/wake-provision-presentation';
+import { createWakeProvisionPresentation } from '@goodvibes/engine/terminal-shell/audio/wake-provision-presentation';
 // ---------------------------------------------------------------------------
 // wake-provision-status.ts, the surface-facing projection of wake-word
 // provisioning and of the rows that are or are not in force.
@@ -20,8 +20,8 @@ import { createWakeProvisionPresentation } from '@goodvibes-jev/engine/terminal-
 // against fixture shapes.
 // ---------------------------------------------------------------------------
 
-import type { WakeProvisionStatus, WakeSurfaceCapabilities } from '@goodvibes-jev/engine/platform/platform/voice';
-import { noiseSuppressionSupport } from '@goodvibes-jev/engine/platform/platform/voice/capture';
+import type { WakeProvisionStatus, WakeSurfaceCapabilities } from '@goodvibes/engine/platform/platform/voice';
+import { noiseSuppressionSupport } from '@goodvibes/engine/platform/platform/voice/capture';
 import { formatVoiceBytes } from './voice-provision-status.ts';
 
 /**

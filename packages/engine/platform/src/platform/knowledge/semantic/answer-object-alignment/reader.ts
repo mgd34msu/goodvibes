@@ -1,6 +1,6 @@
 import { requireSemanticKnowledge } from '../../decision-policy.js';
-import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { toJson, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { judgmentPort, JudgmentPortMissingError } from '@goodvibes/engine/errors';
+import { toJson, type JsonValue, type JudgmentPort } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
 import { snapshotNodeInput } from '../../activation/projection.js';
 import { freezeSupport } from '../verification/projection.js';

@@ -15,10 +15,10 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
+import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes/judgment';
+import { choiceAnswer, fakePort } from '@goodvibes/judgment/testing';
 import { gateReadingsPort } from './_helpers/gate-readings.ts';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import {
   classifyCall, classifyPaths, declaredRecoverable, declaredValues, 
   type CallFacts, type OwnerOnlyKind,
@@ -32,7 +32,7 @@ import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 import { createGoodVibesSettingsTool } from '../platform/src/platform/tools/goodvibes-runtime/index.ts';
 import { executeToolCalls, type ToolExecutionDeps } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 
 const ROOT = '/synthetic/classify';
 const facts = (over: Partial<CallFacts> = {}): CallFacts => ({

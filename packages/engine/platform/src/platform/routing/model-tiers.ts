@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 /**
  * Model capability tiers from published facts: the routing.model-tier
@@ -7,9 +7,9 @@ import { assertJudgmentInput } from '../gate/judgment-input.js';
  */
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { JsonValue, YesNoReading } from '@goodvibes-jev/judgment';
-import { mapLimit } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import type { JsonValue, YesNoReading } from '@goodvibes/judgment';
+import { mapLimit } from '@goodvibes/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
@@ -100,7 +100,7 @@ function fingerprint(facts: ModelFacts): string {
 export class ModelTierStore {
   readonly #path: string | undefined;
   readonly #entries = new Map<string, StoredTier>();
-  #ownerPort: import('@goodvibes-jev/judgment').JudgmentPort | undefined;
+  #ownerPort: import('@goodvibes/judgment').JudgmentPort | undefined;
   #ownerModel: string | undefined;
   /** The model recorded in the loaded file; consumed by the first call, which adopts the entries only when it matches. */
   #loadedModel: string | undefined;
@@ -141,7 +141,7 @@ export class ModelTierStore {
   }
 
   /** Reads one model's tier (once per set of facts). */
-  read(facts: ModelFacts, options: import('@goodvibes-jev/judgment').CallOptions = {}): Promise<TierRecord> {
+  read(facts: ModelFacts, options: import('@goodvibes/judgment').CallOptions = {}): Promise<TierRecord> {
     options.signal?.throwIfAborted();
     assertJudgmentInput(modelFactsState(facts));
     facts = structuredClone(facts);
@@ -183,7 +183,7 @@ export class ModelTierStore {
   /** Reads every model not yet read, a bounded number at a time. */
   async readMany(
     models: readonly ModelFacts[],
-    options: import('@goodvibes-jev/judgment').CallOptions = {},
+    options: import('@goodvibes/judgment').CallOptions = {},
   ): Promise<ReadonlyMap<string, TierRecord>> {
     assertJudgmentInput(models.map(modelFactsState));
     const records = await mapLimit(structuredClone(models), TIER_READ_CONCURRENCY, (facts) => this.read(facts, options));

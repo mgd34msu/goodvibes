@@ -1,4 +1,4 @@
-import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 import { TEST_FRAMEWORK_OPTIONS } from '../../tools/batteries/project-tooling.js';
 
 export const projectTestFramework = defineBattery({

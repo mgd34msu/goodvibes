@@ -4,7 +4,7 @@ The knowledge system is a persistent, structured memory layer for GoodVibes
 agents and clients. The SQLite store is the source of truth; markdown/wiki
 output is a projection generated from structured records.
 
-Accessible via `@goodvibes-jev/engine/platform/platform/knowledge` (daemon embedders). Consumer apps interact through operator methods documented below.
+Accessible via `@goodvibes/engine/platform/platform/knowledge` (daemon embedders). Consumer apps interact through operator methods documented below.
 
 Snapshot generations are opaque SQLite-issued row revisions. Preserve them exactly
 when submitting a conditional write or a selected planning action; do not derive

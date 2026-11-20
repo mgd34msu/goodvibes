@@ -1,4 +1,4 @@
-import { registerHeldCallsCommand } from '@goodvibes-jev/engine/terminal-shell/held-calls-command';
+import { registerHeldCallsCommand } from '@goodvibes/engine/terminal-shell/held-calls-command';
 import { isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 
 /** /held: approve or set aside the calls just-vibes held for the owner in this session. */

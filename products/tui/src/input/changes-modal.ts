@@ -17,11 +17,11 @@
 
 import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, sep } from 'node:path';
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
+import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from '@goodvibes/engine/terminal-shell/surface-modal-host';
 import type { SurfaceLayer, KitHint } from '../renderer/surface-kit.ts';
 import type { KitRow } from '../renderer/surface-kit-list.ts';
-import { formatSemanticDiffSummary, type SemanticDiff } from '@goodvibes-jev/engine/terminal-shell/semantic-diff';
+import { formatSemanticDiffSummary, type SemanticDiff } from '@goodvibes/engine/terminal-shell/semantic-diff';
 import { renderChangesModal, type ChangesFootLine, type ChangesModalView, type ChangesQuestion } from '../renderer/changes-modal.ts';
 import { activeTokens } from '../renderer/theme.ts';
 import { changeTotals, hunkPatch, parseChanges, type ChangeFile, type ChangeHunk } from './changes-model.ts';

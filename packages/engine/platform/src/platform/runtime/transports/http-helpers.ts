@@ -1,4 +1,4 @@
-import type { FetchLike } from '@goodvibes-jev/engine/transport-core';
+import type { FetchLike } from '@goodvibes/engine/transport-core';
 import type {
   ControlPlaneRecentEvent,
   SharedApprovalRecord,

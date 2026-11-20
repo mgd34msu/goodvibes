@@ -1,7 +1,7 @@
 /** Account eligibility owns election membership; content dispositions never do. */
-import { createSystemClusterClock, type ClusterClock } from '@goodvibes-jev/engine/platform/platform/cluster';
-import type { InboxPollingControl } from '@goodvibes-jev/engine/platform/platform/intake';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createSystemClusterClock, type ClusterClock } from '@goodvibes/engine/platform/platform/cluster';
+import type { InboxPollingControl } from '@goodvibes/engine/platform/platform/intake';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 
 interface Eligibility {
   readonly signal: AbortSignal;

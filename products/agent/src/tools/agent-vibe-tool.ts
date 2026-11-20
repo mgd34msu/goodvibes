@@ -1,17 +1,17 @@
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { resolve } from 'node:path';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
-import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from '@goodvibes-jev/engine/terminal-shell/agent-turn/local-state-admission';
-import { AgentPersonaRegistry, personaStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
-import { discoverVibeFiles, initVibeFile, loadVibeImportSource, resolveVibePathReference, type AgentVibeFile } from '@goodvibes-jev/engine/terminal-shell/agent-turn/vibe-file';
+import { captureCatalogData } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
+import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from '@goodvibes/engine/terminal-shell/agent-turn/local-state-admission';
+import { AgentPersonaRegistry, personaStorePath } from '@goodvibes/engine/terminal-shell/agent-turn/persona-registry';
+import { discoverVibeFiles, initVibeFile, loadVibeImportSource, resolveVibePathReference, type AgentVibeFile } from '@goodvibes/engine/terminal-shell/agent-turn/vibe-file';
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { assertActorMayMarkReviewed } from '@goodvibes-jev/engine/terminal-shell/agent-turn/review-authority';
-import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
-import { readFlag, readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { assertActorMayMarkReviewed } from '@goodvibes/engine/terminal-shell/agent-turn/review-authority';
+import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
+import { confirmParameter, requestParameter } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
+import { readFlag, readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 type AgentVibeAction = 'status' | 'show' | 'init' | 'import_persona';
 

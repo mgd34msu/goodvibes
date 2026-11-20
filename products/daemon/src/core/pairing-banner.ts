@@ -21,7 +21,7 @@ import {
   pairingPostureNotice,
   renderQrToString,
   type PairingHandoffOfferKind,
-} from '@goodvibes-jev/engine/platform/platform/pairing';
+} from '@goodvibes/engine/platform/platform/pairing';
 
 export interface PairingBannerInput {
   /** The daemon version, stated so a scanned link is attributable to a build. */

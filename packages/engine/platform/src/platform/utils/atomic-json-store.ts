@@ -96,7 +96,7 @@ import { basename, dirname, isAbsolute, join, parse, sep } from 'node:path';
 import type { BigIntStats, Stats } from 'node:fs';
 import { open as openFileHandle, type FileHandle } from 'node:fs/promises';
 import { logger } from './logger.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 
 /**
  * Hard ceiling on `.corrupt-*` files kept per store directory, oldest reaped

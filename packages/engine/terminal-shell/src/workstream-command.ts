@@ -5,9 +5,9 @@
  * see it, change its steps, approve and launch it). Each app says how a
  * request starts work directly (`start`).
  */
-import { isTerminalContractStatus } from '@goodvibes-jev/engine/platform/platform/contract/types';
-import type { ContractOperatorService, ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
-import type { WorkstreamDraft, WorkstreamDraftService } from '@goodvibes-jev/engine/platform/platform/orchestration';
+import { isTerminalContractStatus } from '@goodvibes/engine/platform/platform/contract/types';
+import type { ContractOperatorService, ContractView } from '@goodvibes/engine/platform/platform/contract';
+import type { WorkstreamDraft, WorkstreamDraftService } from '@goodvibes/engine/platform/platform/orchestration';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';

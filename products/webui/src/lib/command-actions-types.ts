@@ -11,7 +11,7 @@ import type {
   FixedChoice,
   InputDescription,
   ListRowsFromOutput,
-} from '@goodvibes-jev/engine/terminal-shell/command-actions/data';
+} from '@goodvibes/engine/terminal-shell/command-actions/data';
 
 export type { ActionRisk, FixedChoice };
 

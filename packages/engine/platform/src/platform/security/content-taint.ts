@@ -46,8 +46,8 @@
  * caught too.
  */
 
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { JudgmentError, mapLimit, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import { JudgmentError, mapLimit, type JudgmentPort } from '@goodvibes/judgment';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { contentDerivation, derivationField, derivationPieces, derivationSource } from './batteries/content-derivation.js';
 import { askEach } from './batteries/ask-each.js';

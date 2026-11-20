@@ -2,7 +2,7 @@ import { CONTRACT_ID_PATTERN } from '../../contract/types.js';
 /** Saved settlement data is evidence of one publication, never execution authority. */
 import { createHash } from 'node:crypto';
 import { types as nodeTypes } from 'node:util';
-import { canonicalJson, type EntryType } from '@goodvibes-jev/judgment';
+import { canonicalJson, type EntryType } from '@goodvibes/judgment';
 import { literal, number, strictObject, string, union, type z } from 'zod/v4';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
 import type { DurableContractReceipt } from '../../contract/durable-admission.js';

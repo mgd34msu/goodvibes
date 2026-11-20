@@ -1,4 +1,4 @@
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 export type HomeGraphQualityQuestion = 'batteryApplicable' | 'manualApplicable' | 'manufacturerPresent' | 'modelPresent' | 'batteryTypePresent';
 export interface HomeGraphQualityInput {
   readonly reference: string;

@@ -10,7 +10,7 @@
  * yes hides one ordinary field's value, which the model can ask the owner
  * about. Code suppresses the value unless the reading is a confident no.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** What the reading sees about one control: its tag, type and every label a page can give it. */
 export type CardFieldView = {

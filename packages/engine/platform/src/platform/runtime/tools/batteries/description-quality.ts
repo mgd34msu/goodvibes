@@ -6,7 +6,7 @@
  * Band: low stakes. A no only adds a warning to the tool's contract
  * verification; it never blocks registration.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 export const descriptionQuality = defineBattery({
   name: 'engine.tools.description-quality',

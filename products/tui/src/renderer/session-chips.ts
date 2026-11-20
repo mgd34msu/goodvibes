@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/session-chips';
+export * from '@goodvibes/engine/terminal-shell/session-chips';

@@ -17,7 +17,7 @@ import { contentDigest } from '../../utils/target-ref.js';
 import { readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { summarizeError } from '../../utils/error-display.js';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { isAbortError } from '../../contract/run-context.js';
 import type { DeepReadonly } from '../../config/manager.js';
 import type { GoodVibesConfig } from '../../config/schema-types.js';

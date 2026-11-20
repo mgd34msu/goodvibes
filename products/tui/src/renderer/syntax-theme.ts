@@ -1,2 +1,2 @@
 /** Shared terminal behavior belongs to the engine platform. */
-export * from '@goodvibes-jev/engine/terminal-shell/syntax-theme';
+export * from '@goodvibes/engine/terminal-shell/syntax-theme';

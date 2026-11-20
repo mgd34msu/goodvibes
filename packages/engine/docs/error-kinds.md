@@ -194,7 +194,7 @@ Prefer the `EngineErrorCodes` const and the runtime guards over bare string lite
 - `isKnownErrorCode(value)` returns `true` when an arbitrary string is one of the canonical codes, useful for values received over the wire.
 
 ```ts
-import { isErrorCode, EngineErrorCodes, GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { isErrorCode, EngineErrorCodes, GoodVibesError } from '@goodvibes/engine/errors';
 
 try {
   await platformClient.operator.accounts.snapshot();
@@ -320,12 +320,12 @@ Two distinct error types relate to configuration; do not confuse them:
 
 | Type | Code | Import subpath |
 |------|------|----------------|
-| `ConfigurationError` | `ENGINE_CONFIGURATION_ERROR` | `@goodvibes-jev/engine/platform/errors` |
-| `ConfigError` | `CONFIG_ERROR` | `@goodvibes-jev/engine/platform/platform/types` |
+| `ConfigurationError` | `ENGINE_CONFIGURATION_ERROR` | `@goodvibes/engine/platform/errors` |
+| `ConfigError` | `CONFIG_ERROR` | `@goodvibes/engine/platform/platform/types` |
 
 `ConfigurationError` extends `GoodVibesError` directly and is thrown for invalid platform setup (category and kind `config`). `ConfigError` is an `AppError` subclass used by the platform/runtime layer.
 
-`AppError` extends `GoodVibesError` and adds `statusCode`, `guidance`, `detail`, and `rawMessage`; its `code` is widened to plain `string`. The concrete subclasses ship under `@goodvibes-jev/engine/platform/platform/types`:
+`AppError` extends `GoodVibesError` and adds `statusCode`, `guidance`, `detail`, and `rawMessage`; its `code` is widened to plain `string`. The concrete subclasses ship under `@goodvibes/engine/platform/platform/types`:
 
 | Subclass | `code` | Recoverable |
 |----------|--------|-------------|

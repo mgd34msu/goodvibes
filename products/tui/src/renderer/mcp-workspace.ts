@@ -1,4 +1,4 @@
-import { createMcpWorkspaceRenderer } from '@goodvibes-jev/engine/terminal-shell/renderer/mcp-workspace';
+import { createMcpWorkspaceRenderer } from '@goodvibes/engine/terminal-shell/renderer/mcp-workspace';
 export const { renderMcpWorkspace } = createMcpWorkspaceRenderer({
   formWriteHelp: 'Writes a server through the platform MCP config manager, then reloads the live runtime without restarting the TUI.',
   configHelp:

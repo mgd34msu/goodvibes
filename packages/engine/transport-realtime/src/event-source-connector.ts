@@ -29,20 +29,20 @@
  *  `turnScope: 'off'` opts out, `{ turnId }` pins the connection to one turn.
  */
 
-import type { RuntimeEventDomain, RuntimeEventRecord } from '@goodvibes-jev/engine/contracts';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import type { RuntimeEventDomain, RuntimeEventRecord } from '@goodvibes/engine/contracts';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import {
   buildUrl,
   normalizeAuthToken,
   openRawServerSentEventStream as openServerSentEventStream,
-} from '@goodvibes-jev/engine/transport-http';
+} from '@goodvibes/engine/transport-http';
 import {
   type FetchLike,
   createStreamTextAssembler,
   injectTraceparentAsync,
   invokeTransportObserver,
   transportErrorFromUnknown,
-} from '@goodvibes-jev/engine/transport-core';
+} from '@goodvibes/engine/transport-core';
 import type { DomainEventConnector } from './domain-events.js';
 import { readEventEnvelope } from './envelope.js';
 import { createSharedDomainConnector } from './shared-connection.js';

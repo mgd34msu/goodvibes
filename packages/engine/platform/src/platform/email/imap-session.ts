@@ -51,7 +51,7 @@ export class ImapTimeoutError extends Error {}
  * `Buffer.byteLength(payload)`, never `payload.length`.
  */
 
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { assertImapReadingCurrent } from './imap-readings.js';
 import type { Socket } from 'node:net';
 import type { ImapFetchFrame } from './imap-fetch-response.js';

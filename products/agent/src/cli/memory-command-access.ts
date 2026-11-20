@@ -9,14 +9,14 @@
  * When the host is another machine and does not answer, a command that writes is
  * refused: storing it here would start a second store the host never sees.
  */
-import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
-import { resolveCanonicalMemoryDbPath, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
-import type { LocalMemoryStore, MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import { createSessionSpineRestProbe } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
+import { isLoopbackHost } from '@goodvibes/engine/platform/platform/utils/reachable-base-url';
+import { resolveCanonicalMemoryDbPath, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes/engine/platform/platform/state';
+import type { LocalMemoryStore, MemoryAccess } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
+import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
+import { createSessionSpineRestProbe } from '@goodvibes/engine/platform/platform/runtime/session-spine';
 import { createSpineConnectionResolver } from '../runtime/session-spine-rest-transport.ts';
 import { createMemorySpineRestTransport } from '../runtime/memory-spine-rest-transport.ts';
-import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
+import { resolveConnectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import type { CliCommandRuntime } from './management.ts';
 
 /** The label a command prints for the host's store. */

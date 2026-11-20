@@ -130,7 +130,7 @@ of an intentional version change. It never bumps or prepares a release.
 These scripts and `toolchain.config.json` are checkout tooling, intentionally
 absent from the packed Bun script package. Run native commands from this repository.
 
-The `@goodvibes-jev/daemon/cli` export provides the parser/catalog and an inert
+The `@goodvibes/daemon/cli` export provides the parser/catalog and an inert
 `runDaemonCli(argv, options)` dispatcher. An embedding launcher may supply
 `options.runtime.inboxFactory` and explicitly select external-agent observation,
 host power and wake-model provisioning through the same runtime object. Serving
@@ -273,7 +273,7 @@ sources.
 
 Current monorepo releases are documented in [release notes](../../docs/releases/); the current release is [3.3.2](../../docs/releases/3.3.2.md).
 
-Package: `@goodvibes-jev/daemon` · `private: true`.
+Package: `@goodvibes/daemon` · `private: true`.
 The repository root owns the shared release version for all suite products.
 [MIT license](LICENSE),
 Copyright (c) 2026 Mike Davis.

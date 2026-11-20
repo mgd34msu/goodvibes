@@ -1,8 +1,8 @@
-# @goodvibes-jev/engine/daemon-api
+# @goodvibes/engine/daemon-api
 
 Public GoodVibes daemon package for embeddable route contracts, dispatchers, handler builders, and daemon-side helpers.
 
-Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/platform/daemon`. These modules are subpath exports of the engine package.
+Most applications should install `@goodvibes/engine` and import `@goodvibes/engine/platform/daemon`. These modules are subpath exports of the engine package.
 
 Consumer import:
 
@@ -11,7 +11,7 @@ import {
   createDaemonControlRouteHandlers,
   createDaemonTelemetryRouteHandlers,
   dispatchDaemonApiRoutes,
-} from '@goodvibes-jev/engine/platform/daemon';
+} from '@goodvibes/engine/platform/daemon';
 ```
 
 This surface is for:

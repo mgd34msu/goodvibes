@@ -42,7 +42,7 @@
  * source.
  */
 
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { assertImapReadingCurrent, ImapReadingError } from '../imap-readings.js';
 import { beginImapSourceReading } from './imap-source-lifetime.js';
 import { imapMailboxConnectionPort } from './connection.js';

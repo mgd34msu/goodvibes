@@ -27,7 +27,7 @@
  * installed engine at BUILD TIME (this script runs under bun/node, never inside
  * the Vite bundle) and snapshots them as plain literals. The browser only
  * ever imports the emitted literal, so importing
- * `@goodvibes-jev/engine/platform/platform/config` here does not pull SecretsManager /
+ * `@goodvibes/engine/platform/platform/config` here does not pull SecretsManager /
  * OAuth / google-auth into the bundle, same reasoning generate-config-schema.ts
  * already relies on for CONFIG_SCHEMA and FEATURE_SETTINGS.
  *
@@ -44,7 +44,7 @@ import {
   DAEMON_OWNED_CONFIG_KEYS,
   DAEMON_OWNED_CONFIG_PREFIXES,
   DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS,
-} from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/platform/platform/config';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -77,7 +77,7 @@ export function loadOwnershipSnapshot(): ConfigOwnershipSnapshot {
 const GENERATED_BANNER = [
   'GENERATED FILE. DO NOT EDIT BY HAND.',
   'Produced by scripts/generate-config-ownership.ts from the installed',
-  '@goodvibes-jev/engine: DAEMON_OWNED_CONFIG_PREFIXES, DAEMON_OWNED_CONFIG_KEYS',
+  '@goodvibes/engine: DAEMON_OWNED_CONFIG_PREFIXES, DAEMON_OWNED_CONFIG_KEYS',
   'and DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS (platform/config).',
   '',
   'This is a build-time snapshot so the browser bundle never imports the engine',

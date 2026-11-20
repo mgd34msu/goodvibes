@@ -25,10 +25,10 @@ bun packages/engine/scripts/acp-agent.ts
 Environment: `GOODVIBES_HOME` sets the embedded daemon's home directory
 (default `$HOME`).
 
-Programmatic use (exported from `@goodvibes-jev/engine/platform/platform/acp`):
+Programmatic use (exported from `@goodvibes/engine/platform/platform/acp`):
 
 ```ts
-import { serveAcpAgent, GoodVibesAcpAgent } from '@goodvibes-jev/engine/platform/platform/acp';
+import { serveAcpAgent, GoodVibesAcpAgent } from '@goodvibes/engine/platform/platform/acp';
 const { connection, dispose } = await serveAcpAgent({ homeDirectory: process.env.HOME! });
 // Optional second argument: { input: ReadableStream<Uint8Array>, output: WritableStream<Uint8Array> }
 // replaces process stdin/stdout.
@@ -36,7 +36,7 @@ const { connection, dispose } = await serveAcpAgent({ homeDirectory: process.env
 
 ## What it maps
 
-The base is the platform embedding API (`@goodvibes-jev/engine/platform/embed`).
+The base is the platform embedding API (`@goodvibes/engine/platform/embed`).
 Each ACP session is one embedded session with one shared session in it, and
 the embedded sessions of one home directory run on one GoodVibes daemon: the
 first `session/new` boots it, later ones join it, so a new thread starts without

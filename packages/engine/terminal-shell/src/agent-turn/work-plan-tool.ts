@@ -1,5 +1,5 @@
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { captureCatalogData } from './catalog-data.js';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './local-state-admission.js';
 import {
@@ -10,7 +10,7 @@ import {
   type ProjectWorkPlanTask as WorkPlanItem,
   type ProjectWorkPlanTaskStatus as WorkPlanItemStatus,
   type WorkPlanTaskPatch,
-} from '@goodvibes-jev/engine/platform/platform/knowledge';
+} from '@goodvibes/engine/platform/platform/knowledge';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import { readString } from './tool-args.js';
 

@@ -14,7 +14,7 @@
  * each caller says what `unsure` means for it (a conversational reply, an
  * answer left pending, a message not refused).
  */
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import { inboundMessage } from './batteries/inbound-message.js';
 import { judgeSome } from '../runtime/judge.js';
 import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';

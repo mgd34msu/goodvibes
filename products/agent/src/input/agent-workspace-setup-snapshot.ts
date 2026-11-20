@@ -1,4 +1,4 @@
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
 import type { CommandContext } from './command-registry.ts';
 import { listSetupSmokeEvidence } from '../agent/setup-smoke-evidence.ts';
 import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';

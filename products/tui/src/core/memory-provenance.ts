@@ -10,7 +10,7 @@
 // NOTHING is rendered and the metadata is never even read.
 // ---------------------------------------------------------------------------
 
-import type { ConfigKey, ConfigManager, HostBooleanSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager, HostBooleanSetting } from '@goodvibes/engine/platform/platform/config';
 
 /** Setting key: show the per-turn memory-provenance chip. Default OFF. */
 export const MEMORY_SHOW_PROVENANCE_CONFIG_KEY = 'memory.showProvenance';

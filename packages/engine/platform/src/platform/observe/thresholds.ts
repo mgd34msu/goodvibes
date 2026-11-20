@@ -1,4 +1,4 @@
-import { DEFAULT_SWEEP } from '@goodvibes-jev/judgment';
+import { DEFAULT_SWEEP } from '@goodvibes/judgment';
 
 /**
  * Every constant the observe analyses compare against, in one reviewable

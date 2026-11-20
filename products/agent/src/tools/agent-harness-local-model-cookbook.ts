@@ -1,11 +1,11 @@
 import type { CommandContext } from '../input/command-registry.ts';
 import { estimateModelBytes, fitAssessment, fitVerdictLabel, readHardwareProfileSync, REPRESENTATIVE_7B_PARAMS } from '../core/hardware-profile.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
 import { readLocalModelRegistry, localModelDetection, localModelServerFacts, localModelServerHealthMap } from './agent-harness-local-model-endpoints.ts';
 import { deferredModelReadiness, deferredRecipeFit, localHardwareProfile, localRecipeReadinessScore, localRecipeStackId, scoreLocalModelRecipe } from './agent-harness-model-readiness.ts';
 import { localModelBenchmarkHistory, localModelBenchmarkHistoryFrom, localModelBenchmarkPlan, readLocalModelBenchmarkSnapshot, type LocalModelBenchmarkSnapshot, type LocalModelBenchmarkHistory } from './agent-harness-local-model-benchmarks.ts';
 import type { LocalModelDetection, LocalModelHardwareProfile, LocalModelRecipe, LocalModelRecipeFit, LocalModelSetupPlan, LocalModelBenchmarkEvidence, LocalModelServerHealthMap, ModelReadinessScore } from './agent-harness-model-routing-types.ts';
-import { routeReadiness } from '@goodvibes-jev/engine/platform/platform/routing';
+import { routeReadiness } from '@goodvibes/engine/platform/platform/routing';
 import { withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import { readRecord, readString } from './agent-harness-model-routing-utils.ts';
 

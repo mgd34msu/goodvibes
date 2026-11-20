@@ -76,7 +76,7 @@
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { logger, summarizeError } from '../../utils/index.js';
-import type { Page } from '@goodvibes-jev/engine/errors';
+import type { Page } from '@goodvibes/engine/errors';
 import type { SharedSessionInputRecord } from '../../control-plane/index.js';
 import { SURFACE_INSTANCE_METADATA_KEY } from '../../control-plane/session-intents.js';
 import type { SharedSessionContinuationRunner } from '../../control-plane/session-intents.js';

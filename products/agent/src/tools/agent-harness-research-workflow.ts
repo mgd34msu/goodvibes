@@ -1,10 +1,10 @@
 import { withResearchCatalog, rankResearchRecords, researchCheckpointRoute, researchRouteString as quote } from './agent-harness-research-catalog-source.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { AgentResearchRunRegistry, researchRunLogTail, researchRunReportLine, type AgentResearchRunRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-run-registry';
-import { AgentResearchSourceRegistry, researchSourceReportLine, type AgentResearchSourceRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-source-registry';
+import { AgentResearchRunRegistry, researchRunLogTail, researchRunReportLine, type AgentResearchRunRecord } from '@goodvibes/engine/terminal-shell/agent-turn/research-run-registry';
+import { AgentResearchSourceRegistry, researchSourceReportLine, type AgentResearchSourceRecord } from '@goodvibes/engine/terminal-shell/agent-turn/research-source-registry';
 import { browserControlPosture, type BrowserControlPosture } from './agent-harness-browser-control.ts';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import {
   isCertifiedResearchLiveRecord,
@@ -12,8 +12,8 @@ import {
   type ResearchBrowserRunnerRecord,
   type ResearchVisualReportRecord,
 } from './agent-harness-research-live-read-models.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 interface AgentHarnessResearchWorkflowArgs {
   readonly query?: unknown;

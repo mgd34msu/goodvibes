@@ -12,7 +12,7 @@ import type { createBlockContentActions } from './block-content-actions.js';
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import type { InfiniteBuffer } from './conversation-history.js';
 import type { SelectionManager } from './text-selection.js';
-import type { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
+import type { BookmarkManager } from '@goodvibes/engine/platform/platform/bookmarks';
 import type { ConcealedInputRequest } from './concealed-input.js';
 import { pasteIntoConcealed } from './concealed-input-route.js';
 import { activeTokens } from './renderer/theme.js';

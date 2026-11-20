@@ -16,12 +16,12 @@
  *
  * A real round-trip (a test message through the daemon) is `/channels test <surface>`.
  */
-import { getBuiltinSetupSchema } from '@goodvibes-jev/engine/platform/platform/channels';
-import type { ChannelSetupFieldDescriptor, ChannelSetupSchema, ChannelSurface } from '@goodvibes-jev/engine/platform/platform/channels';
+import { getBuiltinSetupSchema } from '@goodvibes/engine/platform/platform/channels';
+import type { ChannelSetupFieldDescriptor, ChannelSetupSchema, ChannelSurface } from '@goodvibes/engine/platform/platform/channels';
 import type { CommandContext } from '../command-registry.ts';
-import type { ConfigManager, ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager, ConfigKey } from '@goodvibes/engine/platform/platform/config';
 import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 
 /**
  * Surfaces pairable through /devices pair channel, every ChannelSurface except the

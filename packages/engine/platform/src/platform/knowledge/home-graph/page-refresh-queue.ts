@@ -1,4 +1,4 @@
-import { captureJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, JudgmentPortMissingError } from '@goodvibes/engine/errors';
 import { isClassicOperation } from '../../runtime/decision-policy.js';
 import type { KnowledgeStore } from '../store.js';
 import { KnowledgeRepairFactUsefulnessHeldError as Held } from '../semantic/repair-usefulness/types.js';

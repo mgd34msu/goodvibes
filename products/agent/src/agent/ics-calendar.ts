@@ -2,7 +2,7 @@
  * ics-calendar.ts, iCalendar (RFC 5545) writing for the local calendar's export.
  *
  * Reading .ics text is the platform's (`parseIcs` and `expandEvent` in
- * `@goodvibes-jev/engine/platform/platform/calendar`), the same reader the feed
+ * `@goodvibes/engine/platform/platform/calendar`), the same reader the feed
  * subscriptions use, so a file imported and a feed subscribed give the same events.
  *
  * Times are written in the form they were stored:
@@ -14,7 +14,7 @@
  *     reads it as the same wall-clock time instead of shifting it by the offset.
  */
 
-import type { EventDateTime } from '@goodvibes-jev/engine/platform/platform/calendar';
+import type { EventDateTime } from '@goodvibes/engine/platform/platform/calendar';
 
 /** One event to write. Start and end use the stored forms named in the module header. */
 export interface IcsEvent {

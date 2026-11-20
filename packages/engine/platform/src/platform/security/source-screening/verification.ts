@@ -1,11 +1,11 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { matchesJudgmentModel } from '@goodvibes-jev/judgment';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
+import { matchesJudgmentModel } from '@goodvibes/judgment';
 import {
   askAs, checkEachFixture, checkReading, concludedAnswer, decisionHeader, fixtureCheck,
   noul, readYesNo, readingSignal, recordReadings,
   type CallOptions, type FixtureCheck, type JudgmentPort, type JudgmentRetryProgress,
   type NamedDecision, type NoulQuestion, type YesNoReading,
-} from '@goodvibes-jev/judgment';
+} from '@goodvibes/judgment';
 import { captureScreeningProposal, captureScreeningSource, type ScreeningSource, type ScreeningSpan } from './proposal.js';
 
 type ScreeningSegment = {

@@ -1,21 +1,21 @@
 import type { DaemonTriagePermissionHost, DaemonTriageTaggingRequest } from './tagged-inbox-composition.js';
-import type { OwnedInboxTagging, OwnerMailObservation } from '@goodvibes-jev/engine/platform/platform/intake';
+import type { OwnedInboxTagging, OwnerMailObservation } from '@goodvibes/engine/platform/platform/intake';
 /** Product host surfaces over canonical engine implementations. */
-import type { MailboxReaders } from '@goodvibes-jev/engine/platform/platform/email';
+import type { MailboxReaders } from '@goodvibes/engine/platform/platform/email';
 import { registerOwnedMailInbox } from './owned-inbox-mail.js';
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
-import { clusterRoleGate, type ClusterCoordinator } from '@goodvibes-jev/engine/platform/platform/cluster';
-import type { GatewayMethodCatalog, NativeMutationHost } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { registerRoutingMethods, registerDraftMethods, type ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
-import type { DistributedRuntimeManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import type { InboxPollingControl, RegisterInboxSurfaceOptions } from '@goodvibes-jev/engine/platform/platform/intake';
+import type { ConfigKey, ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { createDaemonCredentialStore } from '@goodvibes/engine/platform/platform/config';
+import { clusterRoleGate, type ClusterCoordinator } from '@goodvibes/engine/platform/platform/cluster';
+import type { GatewayMethodCatalog, NativeMutationHost } from '@goodvibes/engine/platform/platform/control-plane';
+import { registerRoutingMethods, registerDraftMethods, type ChannelDeliveryRouter } from '@goodvibes/engine/platform/platform/channels';
+import type { DistributedRuntimeManager } from '@goodvibes/engine/platform/platform/runtime/operations';
+import type { InboxPollingControl, RegisterInboxSurfaceOptions } from '@goodvibes/engine/platform/platform/intake';
 import { registerDaemonHandlers, type DaemonHandlerSurfaces, type RoutingRegistration } from '../daemon/handlers/index.js';
 import type { HandlerContext, HandlerLogger, OwnedHandlerSurface } from '../daemon/handlers/context.js';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes-jev/engine/platform/platform/daemon/receipts';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes/engine/platform/platform/daemon/receipts';
 import { createPaymentsServices } from './payments-composition.js';
-import { recordGroupSpend } from '@goodvibes-jev/engine/platform/platform/payments';
+import { recordGroupSpend } from '@goodvibes/engine/platform/platform/payments';
 import { createOwnerMailRelay } from './owner-mail-relay.js';
 import { inboxPollerGate } from './cluster-composition.js';
 import type { ShellPathService } from './index.js';
@@ -61,7 +61,7 @@ export type DaemonInboxFactory = (
 
 export interface DaemonHandlerCompositionOptions {
   readonly paymentContinuationOwner?: import('./payments-composition.js').PaymentsCompositionOptions['paymentContinuationOwner'];
-  readonly nativeDataWriter?: import('@goodvibes-jev/engine/platform/platform/runtime/self-update').NativeDataWriteOwner | undefined;
+  readonly nativeDataWriter?: import('@goodvibes/engine/platform/platform/runtime/self-update').NativeDataWriteOwner | undefined;
   readonly triagePermissionHost?: DaemonTriagePermissionHost;
   readonly nativeMutationHost?: NativeMutationHost | undefined;
   readonly hasProfile?: ((profileId: string) => boolean) | undefined;
@@ -85,7 +85,7 @@ export interface DaemonHandlerCompositionOptions {
   /** Its entries can name where an inbox provider's credential is stored. */
   readonly serviceRegistry?: { get(serviceName: string): object | null } | undefined;
   /** The authority record; in a group the day's payment spend is counted on it. */
-  readonly authorityRecord?: import('@goodvibes-jev/engine/platform/platform/cluster').AuthorityRecordFile | undefined;
+  readonly authorityRecord?: import('@goodvibes/engine/platform/platform/cluster').AuthorityRecordFile | undefined;
   /** A group member's name from the roster, for referring the owner to the machine that runs a role. */
   readonly clusterMemberName?: ((nodeId: string) => string | null) | undefined;
 }

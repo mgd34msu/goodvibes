@@ -7,7 +7,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
-import type { Refusal } from '@goodvibes-jev/engine/errors';
+import type { Refusal } from '@goodvibes/engine/errors';
 import { daemonSecretKeyFor } from './daemon-secret-keys.js';
 import { isSecretBearingConfigKey } from './secret-bearing-config-keys.js';
 import { configKeyScope, describeConfigOwnership } from './config-ownership.js';
@@ -20,7 +20,7 @@ import {
   hasFields, isRecord as record, pickFields, settingsApplyFailure, settingsCaptureRefusal, settingsOwnerBase, settingsOwnerHeaders,
   settingsOwnerRefusal, settingsOwnerTransportFailure, settingsOwnerVersionMismatch,
 } from './settings-owner-wire.js';
-import type { SettingsPreconditionFacts, SettingsPreconditionReceipt, SettingsPreconditionRequest } from '@goodvibes-jev/engine/daemon-api';
+import type { SettingsPreconditionFacts, SettingsPreconditionReceipt, SettingsPreconditionRequest } from '@goodvibes/engine/daemon-api';
 
 export type { SettingsPreconditionRequest, SettingsPreconditionReceipt };
 /**

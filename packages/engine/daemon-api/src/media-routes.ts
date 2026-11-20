@@ -1,8 +1,8 @@
 import type { DaemonMediaRouteHandlers } from './context.js';
 import { resolvePrivateHostFetchOptions } from './http-policy.js';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import { jsonErrorResponse, readJsonErrorResponse, readServiceErrorResponse, summarizeErrorForRecord } from './error-response.js';
-import { refusal } from '@goodvibes-jev/engine/errors';
+import { refusal } from '@goodvibes/engine/errors';
 import { createArtifactFromUploadRequest, isArtifactUploadRequest } from './artifact-upload.js';
 import {
   createRouteBodySchema,

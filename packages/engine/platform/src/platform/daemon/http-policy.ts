@@ -11,7 +11,7 @@ export type {
   PrivateHostFetchConfig,
   RequestContext,
   RequestPrincipal,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';
 export {
   NO_OWNER_USER,
   actorFromChannelSender,
@@ -23,4 +23,4 @@ export {
   principalHasScope,
   resolveAuthenticatedPrincipal,
   resolvePrivateHostFetchOptions,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';

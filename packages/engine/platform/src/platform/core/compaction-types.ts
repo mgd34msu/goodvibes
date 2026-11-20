@@ -10,7 +10,7 @@ import type { AgentRecord } from '../tools/agent/index.js';
 import type { ContractView } from '../contract/types.js';
 import type { ExecutionPlan } from './execution-plan.js';
 import type { CompactionQualityScore } from '../runtime/compaction/quality-score.js';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import type { HelperModel } from '../config/helper-model.js';
 
 /**

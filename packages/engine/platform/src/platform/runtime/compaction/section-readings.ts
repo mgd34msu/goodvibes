@@ -13,7 +13,7 @@
 import {
   estimateTokens as judgmentTokens, mapLimit, noul, readYesNo, recordAction, recordReadings,
   type NoulQuestion, type NoulResponse,
-} from '@goodvibes-jev/judgment';
+} from '@goodvibes/judgment';
 import type { ProviderMessage } from '../../providers/interface.js';
 import type { ToolCall } from '../../types/tools.js';
 import { OwnedJudgmentWork } from '../owned-judgment-work.js';

@@ -6,4 +6,4 @@ export {
   type AgentExecutionResultSummary,
   type AgentExecutionRecord,
   type AgentExecutionLedgerSnapshot,
-} from '@goodvibes-jev/engine/platform/platform/gate/policy';
+} from '@goodvibes/engine/platform/platform/gate/policy';

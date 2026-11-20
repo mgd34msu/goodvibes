@@ -1,10 +1,10 @@
 import { join } from 'node:path';
-import { DRIVER_REQUIRED_FILES } from '@goodvibes-jev/engine/platform/platform/browser';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
+import { DRIVER_REQUIRED_FILES } from '@goodvibes/engine/platform/platform/browser';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes/engine/platform/platform/google';
 import { driverRemediation } from '../runtime/browser-driver-profile.ts';
 import { agentDriverSearchDirectories } from '../runtime/agent-browser.ts';
 import { registerCapability, registerFallbackCapability } from './capability-index.ts';
-import type { CapabilityDeclaration, CapabilityPrerequisite, CapabilityProbe } from '@goodvibes-jev/engine/terminal-shell/agent-turn/capability-types';
+import type { CapabilityDeclaration, CapabilityPrerequisite, CapabilityProbe } from '@goodvibes/engine/terminal-shell/agent-turn/capability-types';
 
 /**
  * The capabilities this build declares for itself.

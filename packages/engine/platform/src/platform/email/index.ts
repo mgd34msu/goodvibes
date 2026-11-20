@@ -1,5 +1,5 @@
 /**
- * @goodvibes-jev/engine/platform/platform/email
+ * @goodvibes/engine/platform/platform/email
  *
  * IMAP and SMTP as platform capability: reading a mailbox and sending a plain
  * text message over the protocols themselves, with no provider API in between.

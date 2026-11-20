@@ -14,7 +14,7 @@
  * weaker guarantees than a plain background command.
  */
 
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { TriggerChildProcesses } from './host-processes.js';
 import { MANAGED_OUTPUT_WINDOW_BYTES, type ProcessManager } from '../tools/shared/process-manager.js';
 import type { LaunchedProcess, ObservedTermination, TriggerProcessHost } from './process-triggers.js';

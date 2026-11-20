@@ -3,18 +3,18 @@
  * the /schedule command: the preview reads the schedule as it is now, and the
  * confirmed edit is bound to the revision that read saw. Parsing the arguments
  * and building the request is the shared Agent turn's
- * (`@goodvibes-jev/engine/terminal-shell/agent-turn`), re-exported here for
+ * (`@goodvibes/engine/terminal-shell/agent-turn`), re-exported here for
  * this file's importers.
  */
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import { formatEveryInterval } from '@goodvibes-jev/engine/platform/platform/automation';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { createConnectedHost, isHostFailure } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
-import { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_ROUTE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
-import { SCHEDULE_EDIT_METHOD, SCHEDULE_EDIT_ROUTE, type ScheduleEditCurrentSchedule, type ScheduleEditFieldDiff, type ScheduleEditPreview, type ScheduleEditResult } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-edit';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
+import { formatEveryInterval } from '@goodvibes/engine/platform/platform/automation';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { createConnectedHost, isHostFailure } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
+import { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_ROUTE } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+import { SCHEDULE_EDIT_METHOD, SCHEDULE_EDIT_ROUTE, type ScheduleEditCurrentSchedule, type ScheduleEditFieldDiff, type ScheduleEditPreview, type ScheduleEditResult } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-edit';
 import { connectedHostOf, connectionUnavailableKind, connectionUnavailableMessage, type AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
-export { SCHEDULE_EDIT_METHOD, SCHEDULE_EDIT_ROUTE, buildScheduleEditPayload, buildScheduleEditPreview, parseScheduleEditArgs, scheduleEditKindFromValue, type ParseScheduleEditOptions, type ParsedScheduleEditArgs, type ScheduleEditCurrentSchedule, type ScheduleEditFailure, type ScheduleEditFieldDiff, type ScheduleEditPreview, type ScheduleEditResult, type ScheduleEditSuccess } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-edit';
+export { SCHEDULE_EDIT_METHOD, SCHEDULE_EDIT_ROUTE, buildScheduleEditPayload, buildScheduleEditPreview, parseScheduleEditArgs, scheduleEditKindFromValue, type ParseScheduleEditOptions, type ParsedScheduleEditArgs, type ScheduleEditCurrentSchedule, type ScheduleEditFailure, type ScheduleEditFieldDiff, type ScheduleEditPreview, type ScheduleEditResult, type ScheduleEditSuccess } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-edit';
 
 type SchedulePatchInput = OperatorMethodInput<'automation.jobs.update'>;
 type ScheduleListOutput = OperatorMethodOutput<'automation.schedules.list'>;

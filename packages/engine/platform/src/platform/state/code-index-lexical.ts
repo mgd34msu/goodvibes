@@ -8,7 +8,7 @@
  */
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync, type Stats } from 'node:fs';
 import { join, relative, isAbsolute, sep } from 'node:path';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
 import { retainStrictJudgmentJson, prepareJudgmentResult } from '../gate/judgment-result.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { codeChunkView, rerankCodeParts } from './batteries/code-search-rerank.js';

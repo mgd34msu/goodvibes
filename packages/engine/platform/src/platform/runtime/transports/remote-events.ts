@@ -6,7 +6,7 @@ export type {
   RemoteRuntimeEvents,
   RemoteRuntimeEventsOptions,
   RuntimeEventConnectorOptions,
-} from '@goodvibes-jev/engine/transport-realtime';
+} from '@goodvibes/engine/transport-realtime';
 export {
   buildEventSourceUrl,
   buildWebSocketUrl,
@@ -14,5 +14,5 @@ export {
   createRemoteDomainEvents,
   createRemoteRuntimeEvents,
   createWebSocketConnector,
-} from '@goodvibes-jev/engine/transport-realtime';
+} from '@goodvibes/engine/transport-realtime';
 export { createRemoteUiRuntimeEvents } from './ui-runtime-events.js';

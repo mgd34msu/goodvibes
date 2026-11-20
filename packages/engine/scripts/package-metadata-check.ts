@@ -128,7 +128,7 @@ function assertNoInternalManifestFields(dir: string, pkg: Record<string, unknown
 
 function engineExportKey(entrypoint: string): string {
   // The engine's entry points are subpaths of the engine package.
-  const packageName = '@goodvibes-jev/engine';
+  const packageName = '@goodvibes/engine';
   if (entrypoint === packageName) return '.';
   if (entrypoint.startsWith(`${packageName}/`)) return `.${entrypoint.slice(packageName.length)}`;
   return entrypoint;
@@ -141,7 +141,7 @@ function assertPlatformCapabilitiesExported(pkg: Record<string, unknown>): void 
     'utf8',
   );
   const entrypoints = new Set(
-    [...source.matchAll(/'@goodvibes-jev\/engine\/platform(?:\/[^']*)?'/g)].map((match) => match[0].slice(1, -1)),
+    [...source.matchAll(/'@goodvibes\/engine\/platform(?:\/[^']*)?'/g)].map((match) => match[0].slice(1, -1)),
   );
   const exports = pkg.exports as Record<string, unknown>;
   const missing = [...entrypoints].map(engineExportKey).filter((key) => !(key in exports));

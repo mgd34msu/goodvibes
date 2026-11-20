@@ -11,7 +11,7 @@ export interface ProductDefinition {
 }
 /** Executable workspace identities; project progress is not a build input. */
 export const PRODUCT_DEFINITIONS: readonly ProductDefinition[] = PRODUCT_NAMES.map((name) => ({
-  name, path: `products/${name}`, packageName: `@goodvibes-jev/${name}`,
+  name, path: `products/${name}`, packageName: `@goodvibes/${name}`,
 }));
 export interface ProductWorkspace {
   readonly definition: ProductDefinition;
@@ -84,8 +84,8 @@ function importFindings(root: string, product: ProductDefinition, files: readonl
   for (const file of files.filter((path) => /\.[cm]?[jt]sx?$/.test(path))) {
     for (const specifier of moduleSpecifiers(file, readFileSync(file, 'utf8'))) {
       if (/^@[^/]+\/goodvibes-/.test(specifier)) findings.push(`${relative(root, file)}: legacy import ${specifier}`);
-      if (specifier === '@goodvibes-jev/engine' || specifier.startsWith('@goodvibes-jev/engine/')) {
-        const subpath = `.${specifier.slice('@goodvibes-jev/engine'.length)}`;
+      if (specifier === '@goodvibes/engine' || specifier.startsWith('@goodvibes/engine/')) {
+        const subpath = `.${specifier.slice('@goodvibes/engine'.length)}`;
         if (!Object.hasOwn(exports, subpath)) findings.push(`${relative(root, file)}: undeclared engine subpath ${specifier}`);
       }
       if (specifier.startsWith('.') && relative(resolve(root, product.path), resolve(dirname(file), specifier)).startsWith('..')) {
@@ -266,7 +266,7 @@ export function inspectProductWorkspaces(root: string, definitions: readonly Pro
       const manifest = json(resolve(directory, 'package.json'));
       if (manifest.name !== definition.packageName) findings.push(`${definition.path}: package name must be ${definition.packageName}`);
       const deps = { ...object(manifest.dependencies), ...object(manifest.devDependencies), ...object(manifest.peerDependencies), ...object(manifest.optionalDependencies) };
-      if (deps['@goodvibes-jev/engine'] !== 'workspace:*') findings.push(`${definition.path}: engine must be a workspace:* dependency`);
+      if (deps['@goodvibes/engine'] !== 'workspace:*') findings.push(`${definition.path}: engine must be a workspace:* dependency`);
       for (const dependency of Object.keys(deps)) if (/^@[^/]+\/goodvibes-/.test(dependency)) findings.push(`${definition.path}: legacy dependency ${dependency}`);
       const scripts = manifestScripts(manifest);
       for (const name of ['build', 'typecheck', 'test']) {

@@ -5,7 +5,7 @@
  * them: a question naming a knowledge space is refused. Every write checks
  * that the session it belongs to is still the one open.
  */
-import { registerKnowledgeCommand, knowledgeIngestLine } from '@goodvibes-jev/engine/terminal-shell/knowledge-command';
+import { registerKnowledgeCommand, knowledgeIngestLine } from '@goodvibes/engine/terminal-shell/knowledge-command';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { commandRefusal } from './confirmation.ts';
 import { parseBrowserImportScope } from './knowledge-browser-flags.ts';

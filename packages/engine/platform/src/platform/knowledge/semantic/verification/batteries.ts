@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo, type JsonValue } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo, type JsonValue } from '@goodvibes/judgment';
 
 /** One request verifies up to this many claims of one source, with the extraction sent once. */
 export const GENERATED_FACT_SUPPORT_SLOTS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10', 'c11', 'c12'] as const;

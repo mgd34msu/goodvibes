@@ -1,6 +1,6 @@
 import type { HostedSessionFeed } from '../../views/hosted-session-feed.ts';
 import type { HostedSessionAttachment, HostedSessionRecord, HostedSessionsClient } from './hosted-sessions.ts';
-import { SessionBindingOwner, type SessionBinding } from '@goodvibes-jev/engine/platform/platform/runtime/client/session-binding';
+import { SessionBindingOwner, type SessionBinding } from '@goodvibes/engine/platform/platform/runtime/client/session-binding';
 
 /**
  * One attachment: the client it was made through, which stays on the daemon

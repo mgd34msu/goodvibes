@@ -1,9 +1,9 @@
-import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
-import { captureJudgmentPort, JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
-import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
-import { modelReasonTheme, MODEL_REASON_THEME_LABELS, type ModelReasonTheme } from '@goodvibes-jev/engine/platform/platform/routing';
-import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import { JudgmentError, matchesJudgmentModel } from '@goodvibes-jev/judgment';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes/engine/platform/platform/runtime/decision-policy';
+import { captureJudgmentPort, JudgmentAuthorityRetiredError } from '@goodvibes/engine/errors';
+import { prepareJudgmentResult } from '@goodvibes/engine/platform/platform/gate';
+import { modelReasonTheme, MODEL_REASON_THEME_LABELS, type ModelReasonTheme } from '@goodvibes/engine/platform/platform/routing';
+import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import { JudgmentError, matchesJudgmentModel } from '@goodvibes/judgment';
 import { withModelReadingSource, type ModelReadingOptions } from './model-reading.js';
 import type { LoadedComparisonJudgment } from './model-compare-types.js';
 

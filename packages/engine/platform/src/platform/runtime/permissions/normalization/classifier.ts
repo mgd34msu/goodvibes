@@ -11,9 +11,9 @@
  * is at stake is the gate's stakes reading, and what host access it needs
  * inside the sandbox is `engine.gate.sandbox-needs`, read here.
  */
-import { JudgmentAuthorityRetiredError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { JudgmentAuthorityRetiredError, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { sandboxNeeds } from '../../../gate/batteries/sandbox-needs.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { forgetProcessJudgments, judge } from '../../judge.js';
 
 export interface CommandNeeds {

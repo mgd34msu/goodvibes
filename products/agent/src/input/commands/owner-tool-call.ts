@@ -6,7 +6,7 @@
  * refuses. A model never gets here: these actions are owner-only, and a model
  * calls the tool itself, which asks before it changes anything.
  */
-import type { ActionDescription } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import type { ActionDescription } from '@goodvibes/engine/terminal-shell/command-actions';
 import type { CommandContext } from '../command-registry.ts';
 import { commandRefusal } from './confirmation.ts';
 

@@ -8,7 +8,7 @@ import { type ConfigSettingDefinition, intRange } from './schema-shared.js';
 import type { JudgmentSettings } from './schema-types-judgment.js';
 import type { ConfigSettingRow } from './schema-types.js';
 import { validJudgmentFallbackSettings, validJudgmentCredentialName } from './judgment-fallback-settings.js';
-import { DEFAULT_DECISION_DEADLINE_MS, MAX_DECISION_DEADLINE_MS, captureJudgmentBackendSettings, validEndpointURL } from '@goodvibes-jev/judgment/decisions';
+import { DEFAULT_DECISION_DEADLINE_MS, MAX_DECISION_DEADLINE_MS, captureJudgmentBackendSettings, validEndpointURL } from '@goodvibes/judgment/decisions';
 import { captureJudgmentVolumeMonitorControl } from '../observe/judgment-volume-monitor.js';
 
 export const judgmentConfigDefaults: { judgment: JudgmentSettings } = {

@@ -1,6 +1,6 @@
 import { IdempotentReplayStore, takesIdempotencyKey } from '../control-plane/idempotent-replay.js';
 import { WebSocketOutbox } from './websocket-outbox.js';
-import { WebSocketMessageAssembler } from '@goodvibes-jev/engine/transport-core';
+import { WebSocketMessageAssembler } from '@goodvibes/engine/transport-core';
 import type { AgentManager } from '../tools/agent/index.js';
 import { startTurnForOwnerRequest } from '../security/turn-boundary.js';
 import { withUntrustedContentScope } from '../security/untrusted-content.js';
@@ -41,7 +41,7 @@ import { redactDiagnosticText } from '../utils/redaction.js';
 import { validateInvocationInput } from '../control-plane/invoke-input-validation.js';
 import { readGatewayVerbRefusal } from '../control-plane/routes/gateway-verb-error.js';
 import { AUTHENTICATION_REQUIRED_GUIDANCE, authenticationRequiredResponse, buildErrorResponseBody, jsonErrorResponse } from './http/error-response.js';
-import { EngineErrorCodes, isRefusal, refusalErrorBody } from '@goodvibes-jev/engine/errors';
+import { EngineErrorCodes, isRefusal, refusalErrorBody } from '@goodvibes/engine/errors';
 import { startsWork, type DaemonWorkAdmission } from './work-admission.js';
 import {
   actorFromPrincipal,

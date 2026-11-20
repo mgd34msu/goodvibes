@@ -1,4 +1,4 @@
-import type { JsonValue, NoulQuestion, YesNoReading } from '@goodvibes-jev/judgment';
+import type { JsonValue, NoulQuestion, YesNoReading } from '@goodvibes/judgment';
 import type { ContractView } from './types.js';
 import { nativeContractSourceData } from './native-source.js';
 

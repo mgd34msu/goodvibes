@@ -1,4 +1,4 @@
-import { BatteryRegistry } from '@goodvibes-jev/judgment';
+import { BatteryRegistry } from '@goodvibes/judgment';
 import { homeGraphTriageApplicability, homeGraphBatteryFacts, homeGraphManualFact } from './batteries.js';
 
 export const registry = new BatteryRegistry();

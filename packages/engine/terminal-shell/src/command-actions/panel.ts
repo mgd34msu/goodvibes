@@ -16,7 +16,7 @@
  * from a live list), tab moves between blanks, left and right change a
  * choice, Esc goes back one step.
  */
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from '../surface-modal-host.js';
 import type { SelectionItem } from '../selection-modal.js';
 import { tokenizeSlashCommand } from '../slash-command-parser.js';

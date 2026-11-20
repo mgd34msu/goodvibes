@@ -581,4 +581,4 @@ export const AGENT_SETUP_TOPIC_ROWS = {
   'store-key': ['secret-set-provider', 'setup-secret-policy'],
   'history': ['setup-save-history'],
   'import-settings': ['import-goodvibes-tui-settings'],
-} as const satisfies Readonly<Partial<Record<import('@goodvibes-jev/engine/terminal-shell/setup-command').SetupTopicId, readonly string[]>>>;
+} as const satisfies Readonly<Partial<Record<import('@goodvibes/engine/terminal-shell/setup-command').SetupTopicId, readonly string[]>>>;

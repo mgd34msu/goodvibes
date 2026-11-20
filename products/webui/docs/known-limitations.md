@@ -100,7 +100,7 @@ mistaken for hidden contracts.
 ## Route shims
 
 - Hand-written per-route shims stay retired. The method-to-route table is
-  generated from `@goodvibes-jev/engine/contracts/generated/webui-facade`,
+  generated from `@goodvibes/engine/contracts/generated/webui-facade`,
   and a drift test pins the derived table against it so a hand-written row
   can never shadow a generated one. Method types remain contract-derived
   (`src/lib/contract-bridge-types.ts`).

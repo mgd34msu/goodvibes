@@ -12,7 +12,7 @@ export {
   CalendarCreateUnconfirmedError,
   CalendarOAuthService,
   daemonScopedSecrets,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn/calendar-oauth-service';
+} from '@goodvibes/engine/terminal-shell/agent-turn/calendar-oauth-service';
 
 export type {
   AccountStatus,
@@ -24,4 +24,4 @@ export type {
   ConnectResult,
   ConnectStage,
   CreateEventOutcome,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn/calendar-oauth-service';
+} from '@goodvibes/engine/terminal-shell/agent-turn/calendar-oauth-service';

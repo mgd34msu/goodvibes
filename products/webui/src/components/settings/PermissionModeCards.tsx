@@ -11,7 +11,7 @@
  * while it is in force no card is checked.
  */
 import { useId } from 'react';
-import { GATE_PRESETS, type SettableGatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import { GATE_PRESETS, type SettableGatePresetName } from '@goodvibes/engine/platform/platform/gate/presets';
 import { formatError } from '../../lib/errors';
 import { OwnerApprovalPendingError } from '../../lib/owner-approval';
 import { useDaemonModeInForce, useSetDaemonMode } from '../../lib/mode-in-force';

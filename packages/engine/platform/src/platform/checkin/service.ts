@@ -18,8 +18,8 @@
  * so do disposal and the caller's own signal. Nothing else re-reads the
  * settings during a run. The scheduled job is compared once, at the send.
  */
-import type { JudgmentRetryProgress } from '@goodvibes-jev/judgment';
-import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import type { JudgmentRetryProgress } from '@goodvibes/judgment';
+import { DecisionModelsDisabledError } from '@goodvibes/engine/errors';
 import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import type { CheckinJudgmentReceipt } from './types.js';
 import type { AutomationManager } from '../automation/index.js';

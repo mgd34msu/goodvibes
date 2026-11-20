@@ -1,10 +1,10 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { discoverSkills } from '../../views/skills-discovery.ts';
-import { loadEcosystemCatalog, removeEcosystemCatalogEntry, upsertEcosystemCatalogEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
+import { loadEcosystemCatalog, removeEcosystemCatalogEntry, upsertEcosystemCatalogEntry } from '@goodvibes/engine/platform/platform/runtime/ecosystem/catalog';
 import { openModalCommand, requireEcosystemCatalogPaths, requireShellPaths } from './runtime-services.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { defineCommand, defineList, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { defineCommand, defineList, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 
 /**
  * `/skills`, described once (command-actions/): the skill packs this app

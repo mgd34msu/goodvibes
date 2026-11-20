@@ -16,7 +16,7 @@ export type { LifecycleMarker } from './lifecycle-marker.js';
 export { HttpListener } from './http-listener.js';
 // Hosted sessions: the composition a product wires, and the option shape it
 // states its trust posture through. The engine itself is
-// `@goodvibes-jev/engine/platform/platform/hosted-sessions`.
+// `@goodvibes/engine/platform/platform/hosted-sessions`.
 export { composeHostedSessions } from './hosted-sessions-composition.js';
 export type {
   DaemonHostedSessionsOptions,
@@ -43,7 +43,7 @@ export { createDaemonKnowledgeRouteHandlers } from './http/knowledge-routes.js';
 export { createDaemonMediaRouteHandlers } from './http/media-routes.js';
 export { createDaemonSystemRouteHandlers } from './http/system-routes.js';
 export { createDaemonTelemetryRouteHandlers } from './http/telemetry-routes.js';
-export { jsonErrorResponse } from '@goodvibes-jev/engine/daemon-api';
+export { jsonErrorResponse } from '@goodvibes/engine/daemon-api';
 export {
   dispatchClusterGroupRoutes,
   type ClusterGroupRouteContext,

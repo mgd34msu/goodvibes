@@ -4,14 +4,14 @@
  * Two transports can answer a request:
  *   - direct: an ordinary `fetch` against GOODVIBES_BASE_URL (the LAN/co-located path,
  *     unchanged from before this file existed).
- *   - relay: `createRelayClient` (@goodvibes-jev/engine/transport-realtime) tunnels unary
+ *   - relay: `createRelayClient` (@goodvibes/engine/transport-realtime) tunnels unary
  *     request/response calls, end-to-end encrypted, through a relay server, for when
  *     this device cannot reach the daemon directly. It requires a stored pairing (see
  *     relay-pairing.ts).
  *
  * STREAMING OVER RELAY: the relay tunnel now carries live event streams. A request whose
  * `Accept` is `text/event-stream` (the SSE opener's header, see
- * @goodvibes-jev/engine/transport-http's sse-stream.js) is opened by the relay client as a
+ * @goodvibes/engine/transport-http's sse-stream.js) is opened by the relay client as a
  * tunnelled stream: the returned `Response` carries a `ReadableStream` body fed by the
  * tunnel's `stream-data` frames, and a dropped-chunk overflow ends the body with a typed
  * `StreamGapError` (never a silent gap, never text written into the body). So `routedFetch`
@@ -37,7 +37,7 @@
  * co-located case.
  */
 
-import { createRelayClient, type RelayClient } from '@goodvibes-jev/engine/transport-realtime';
+import { createRelayClient, type RelayClient } from '@goodvibes/engine/transport-realtime';
 import { clearStoredRelayPairing, getStoredRelayPairing, type RelayPairingPayload } from './relay-pairing';
 import { STEP_UP_ASSERTION_HEADER } from './stepup';
 import { resolveStepUp } from './stepup-prompter';

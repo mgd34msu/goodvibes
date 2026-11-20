@@ -1,6 +1,6 @@
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolExecuteOptions, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { forwardHarnessCatalogCall } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ingress';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import type { ToolExecuteOptions, ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { forwardHarnessCatalogCall } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ingress';
 
 const AGENT_CONTEXT_TOOL_MODES = [
   'summary',

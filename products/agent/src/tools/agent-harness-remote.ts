@@ -1,5 +1,5 @@
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { error, readString, requireConfirmedAction } from './agent-harness-tool-utils.ts';
 
 export interface AgentHarnessRemoteArgs {

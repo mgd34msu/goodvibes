@@ -15,7 +15,7 @@ import {
   wakeProvisionStatus,
   type WakeProvisionStatus,
   type WakeRuntimeSettings,
-} from '@goodvibes-jev/engine/platform/platform/voice';
+} from '@goodvibes/engine/platform/platform/voice';
 import { wakeStatusLines } from './wake-provision-status.ts';
 
 export interface WakeProvisionRunnerDeps {

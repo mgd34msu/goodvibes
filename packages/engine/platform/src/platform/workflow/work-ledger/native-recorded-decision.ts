@@ -1,5 +1,5 @@
 /** Actual saved native admission reading, never a checkpoint's own act flag. */
-import { canonicalJson, type DecisionLog, type EntryType } from '@goodvibes-jev/judgment';
+import { canonicalJson, type DecisionLog, type EntryType } from '@goodvibes/judgment';
 import { NativeWorkExecutionError, type NativeWorkExecutionRecord } from './native-execution-types.js';
 
 export function assertNativeRecordedDecision(record: NativeWorkExecutionRecord, log: Pick<DecisionLog, 'get'>): void {

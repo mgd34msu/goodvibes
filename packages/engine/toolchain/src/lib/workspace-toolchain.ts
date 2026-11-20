@@ -41,7 +41,7 @@ export function isWorkspaceToolchainCommand(command: string): command is Workspa
 export function resolveWorkspaceToolchain(productRoot: string, command: string): string {
   if (!isWorkspaceToolchainCommand(command)) throw new Error(USAGE);
   const require = createRequire(resolve(productRoot, 'package.json'));
-  const manifestPath = require.resolve('@goodvibes-jev/engine/package.json');
+  const manifestPath = require.resolve('@goodvibes/engine/package.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { bin?: Record<string, unknown> };
   const name = WORKSPACE_TOOLCHAIN_COMMANDS[command];
   const entry = manifest.bin?.[name];

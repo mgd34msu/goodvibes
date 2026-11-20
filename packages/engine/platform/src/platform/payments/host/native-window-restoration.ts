@@ -20,7 +20,7 @@ import { recoverInterruptedWindow } from '../windows.js';
 import { daemonNoticeRouter, purchaseInboxKey } from './notifier.js';
 import { prepareRestoredPaymentReplyWindow, type RestoredInboxWindow } from './restored-reply-window.js';
 import type { CheckoutComposition } from './checkout-handlers.js';
-import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
+import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
 
 const telegramNumber = (value: string | undefined, negative = false): boolean => value !== undefined
   && (negative ? /^-?[1-9]\d{0,15}$/ : /^[1-9]\d{0,15}$/).test(value) && Number.isSafeInteger(Number(value));

@@ -2,7 +2,7 @@ import {
   nativeHostedSessionLookupSchema,
   nativeHostedSessionRequestSchema,
   type NativeHostedSessionLookup,
-} from "@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client";
+} from "@goodvibes/engine/platform/platform/hosted-sessions/native-turn-client";
 import { client as platformClient } from "./goodvibes";
 import { isClientLifetimeCurrent, type ClientLifetime } from "./client-lifetime";
 

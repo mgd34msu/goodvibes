@@ -1,8 +1,8 @@
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
+import { snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate/judgment-input';
 import { createHash } from 'node:crypto';
-import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type ProtectedSource, type ProtectedResearchReference, type SourceScreeningHold, type SourceScreeningReceipt } from '@goodvibes-jev/engine/platform/platform/security';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import type { ToolInputProjectionProblem, ToolInputProjector, ToolInputProjectionRequest, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type ProtectedSource, type ProtectedResearchReference, type SourceScreeningHold, type SourceScreeningReceipt } from '@goodvibes/engine/platform/platform/security';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import type { ToolInputProjectionProblem, ToolInputProjector, ToolInputProjectionRequest, ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { prepareAgentResearchReportInput, omittedReferencePattern } from './research-report-input.js';
 import { RESEARCH_SCREENING_UNCONFIGURED_DETAIL } from './research-source-screening.js';
 

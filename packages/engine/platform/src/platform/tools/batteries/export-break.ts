@@ -19,7 +19,7 @@
  * to the person or agent reviewing a change; a wrong no hides a break from
  * that review, a wrong yes costs extra review.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** What the reading sees: the export's name and its declaration before and after. */
 export function exportBreakView(name: string, before: string, after: string): { name: string; before: string; after: string } {

@@ -31,12 +31,12 @@ globalThis.fetch = Object.assign(async (input: string | URL | Request, options?:
   }
   return nativeFetch(input, { ...options, redirect: 'error' });
 }, { preconnect: nativeFetch.preconnect });
-const { startDaemonFixture } = await import('@goodvibes-jev/daemon/testing');
-const { registerInboxSurface } = await import('@goodvibes-jev/engine/platform/platform/intake');
-const { OpenAICompatProvider, BenchmarkStore, getProviderModelsCachePath } = await import('@goodvibes-jev/engine/platform/platform/providers');
-const { createShellPathService } = await import('@goodvibes-jev/engine/platform/platform/runtime/shell');
-const { DEFAULT_DECISION_ROUTER_SETTINGS } = await import('@goodvibes-jev/engine/platform/browser/decision-router');
-const { CONFIG_SCHEMA, isSecretBearingConfigKey } = await import('@goodvibes-jev/engine/platform/platform/config');
+const { startDaemonFixture } = await import('@goodvibes/daemon/testing');
+const { registerInboxSurface } = await import('@goodvibes/engine/platform/platform/intake');
+const { OpenAICompatProvider, BenchmarkStore, getProviderModelsCachePath } = await import('@goodvibes/engine/platform/platform/providers');
+const { createShellPathService } = await import('@goodvibes/engine/platform/platform/runtime/shell');
+const { DEFAULT_DECISION_ROUTER_SETTINGS } = await import('@goodvibes/engine/platform/browser/decision-router');
+const { CONFIG_SCHEMA, isSecretBearingConfigKey } = await import('@goodvibes/engine/platform/platform/config');
 const canonicalSettings = new Map<string, string>(CONFIG_SCHEMA.map(entry => [entry.key, entry.description]));
 // Canonical native defaults omitted from the settings presentation schema.
 // These exact names have empty source descriptions and contain no card material;
@@ -50,7 +50,7 @@ for (const key of ordinarySupplementalSettings) { assert.equal(canonicalSettings
 const nativeCatalogIds = new Set<string>();
 const ancillaryCounts = { providerCatalog: 0, credentialKey: 0, cardMaterialKey: 0 };
 const unknownShapes = new Map<string, number>();
-type ModelDefinition = import('@goodvibes-jev/engine/platform/platform/providers').ModelDefinition;
+type ModelDefinition = import('@goodvibes/engine/platform/platform/providers').ModelDefinition;
 type WireJudgment = { state: { context: { request: { text: string; omittedChars: number }; recent: unknown[] }; candidates: { id: string }[] }; questions: Record<string, { type: string; criteria?: Record<string, unknown> }> };
 type RefusalWireJudgment = { state: { methodId: string; status: number; message: string }; questions: WireJudgment['questions'] };
 type AncillaryWireJudgment = { state: { providerId?: string; key: string; description?: string }; questions: WireJudgment['questions'] };

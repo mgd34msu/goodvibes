@@ -8,13 +8,13 @@
  * in help.ts. A command listed in `goodvibes help` belongs here too.
  */
 
-import type { GoodVibesCliCommand } from '@goodvibes-jev/engine/terminal-shell';
-import { GOODVIBES_CLI_CATALOG } from '@goodvibes-jev/engine/terminal-shell/cli-command-catalog';
+import type { GoodVibesCliCommand } from '@goodvibes/engine/terminal-shell';
+import { GOODVIBES_CLI_CATALOG } from '@goodvibes/engine/terminal-shell/cli-command-catalog';
 import {
   runCompletionCommand,
   type CompletionCommandResult,
   type CompletionTable,
-} from '@goodvibes-jev/engine/terminal-shell/shell-completion';
+} from '@goodvibes/engine/terminal-shell/shell-completion';
 
 // ---------------------------------------------------------------------------
 // Typed completion data surface

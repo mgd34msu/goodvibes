@@ -1,4 +1,4 @@
-import { BatteryRegistry } from '@goodvibes-jev/judgment';
+import { BatteryRegistry } from '@goodvibes/judgment';
 import { answerSourceRerank } from './source-rerank.js';
 import { answerFactRerank, answerQueryIntent } from './fact-rerank.js';
 import { pageSourceQuality } from './source-quality.js';

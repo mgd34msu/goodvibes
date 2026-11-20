@@ -28,9 +28,9 @@
  * TRANSPORT rather than about an occasion.
  */
 
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import type { AuthoritySurface } from '@goodvibes-jev/engine/platform/platform/security';
-import type { OccasionAcknowledgeVocabulary } from '@goodvibes-jev/engine/platform/platform/occasions';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
+import type { AuthoritySurface } from '@goodvibes/engine/platform/platform/security';
+import type { OccasionAcknowledgeVocabulary } from '@goodvibes/engine/platform/platform/occasions';
 
 /**
  * Every write takes one, and the daemon requires it, an absent authority on

@@ -16,7 +16,7 @@
  *
  * Error messages use the format: [what happened] · [why] · [what to do]
  */
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import type { GoodVibesTokenStore } from './types.js';
 import { createNativeTokenPersistence } from './native-token-persistence.js';
 
@@ -140,7 +140,7 @@ export interface ExpoSecureTokenStore extends GoodVibesTokenStore {
  *
  * @example
  * ```ts
- * import { createExpoSecureTokenStore, createExpoGoodVibesPlatform } from '@goodvibes-jev/engine/platform/expo';
+ * import { createExpoSecureTokenStore, createExpoGoodVibesPlatform } from '@goodvibes/engine/platform/expo';
  *
  * const tokenStore = createExpoSecureTokenStore({ key: 'gv-token' });
  * const platform = createExpoGoodVibesPlatform({ baseUrl: 'https://daemon.example.com', tokenStore });

@@ -10,4 +10,4 @@ export type {
   ConversationMessageAttachment,
   ConversationMessageEnvelope,
   ConversationMessageSource as MessageSource,
-} from '@goodvibes-jev/engine/contracts/conversation-message';
+} from '@goodvibes/engine/contracts/conversation-message';

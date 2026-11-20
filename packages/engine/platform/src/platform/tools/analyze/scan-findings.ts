@@ -19,7 +19,7 @@ import { assertCapturedToolAccessCurrent } from '../shared/captured-input-tools.
 import { readdirSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { relative } from 'node:path';
-import type { YesNoReading } from '@goodvibes-jev/judgment';
+import type { YesNoReading } from '@goodvibes/judgment';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import { scanCandidateView, secretFinding } from '../batteries/secret-finding.js';
 import { dangerousCall, type DangerSeverity } from '../batteries/dangerous-call.js';

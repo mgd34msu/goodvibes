@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 const candidate = (reference: string, title: string, summary: string, kind = 'knowledge_entity') => ({ reference, title, summary, kind, aliases: [], content: {}, associations: [] });
 const speaker = candidate('object-1', 'Kitchen speaker', 'A wireless audio device.');
 const bridge = candidate('object-2', 'Sound bridge', 'Software that connects the sound system to the home controller.', 'ha_integration');

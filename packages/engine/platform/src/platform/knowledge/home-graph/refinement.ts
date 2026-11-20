@@ -1,4 +1,4 @@
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import type { KnowledgeSemanticService } from '../semantic/index.js';
 import type { KnowledgeStore } from '../store.js';
 import { knowledgeRefinementTaskLifecycle, type KnowledgeRefinementTaskRecord } from '../types.js';

@@ -340,7 +340,7 @@ export interface RuntimeMetricsSnapshot {
  * metrics.ts), and its REST binding `GET /api/runtime/metrics`. Consumers
  * needing this shape directly (not through the operator client) can import
  * `snapshotMetrics`/`RuntimeMetricsSnapshot` from
- * `@goodvibes-jev/engine/platform/platform/runtime/observability`.
+ * `@goodvibes/engine/platform/platform/runtime/observability`.
  */
 export function snapshotMetrics(): RuntimeMetricsSnapshot {
   const httpRequestsSnapshot = {

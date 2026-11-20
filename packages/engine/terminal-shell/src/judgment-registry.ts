@@ -1,4 +1,4 @@
-import { BatteryRegistry } from '@goodvibes-jev/judgment';
+import { BatteryRegistry } from '@goodvibes/judgment';
 import { clusterJoinGroup } from './batteries/cluster-join-group.js';
 import { processOutputError } from './batteries/process-output.js';
 

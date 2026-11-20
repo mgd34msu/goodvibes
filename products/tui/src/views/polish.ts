@@ -1,7 +1,7 @@
-import { createTerminalPolish } from '@goodvibes-jev/engine/terminal-shell/renderer/polish';
+import { createTerminalPolish } from '@goodvibes/engine/terminal-shell/renderer/polish';
 export * from './polish-core.ts';
 export * from './polish-tables.ts';
-export type * from '@goodvibes-jev/engine/terminal-shell/renderer/polish';
+export type * from '@goodvibes/engine/terminal-shell/renderer/polish';
 export const {
   buildGuidanceLine,
   buildViewTitle,

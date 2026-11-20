@@ -18,7 +18,7 @@
  * that would fail when pressed.
  */
 
-import type { Fence } from '@goodvibes-jev/engine/platform/platform/utils/owner-fence';
+import type { Fence } from '@goodvibes/engine/platform/platform/utils/owner-fence';
 
 /** How long a browser may take to start a captured stream playing and paint its first frame. */
 const FRAME_DEADLINE_MS = 10_000;

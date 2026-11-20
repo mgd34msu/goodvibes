@@ -19,7 +19,7 @@
  * a model on this computer), with one error line when something failed.
  * Pure drawing: the flow (first-run/first-run-flow.ts) holds the state.
  */
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { beginModal, finishModal, standardModalWidth, NARROW_MODAL_BREAKPOINT, wrapLines, type KitHint, type KitStyle, type ModalFrame, type SurfaceCanvas, type SurfaceLayer } from './surface-kit.js';
 import { activeTokens } from './theme.js';
 import type { FirstRunOffers } from '../first-run/offers.js';

@@ -16,11 +16,11 @@
 import { randomBytes } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { SessionMeta, SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
-import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
+import type { SessionMeta, SessionManager } from '@goodvibes/engine/platform/platform/sessions';
+import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes/engine/platform/platform/rewind';
 import type { TerminalConversationManager } from './terminal-conversation.js';
-import type { SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import type { SessionSurface } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 export interface FreshConversationContext {
   readonly session: {
     readonly conversationManager: TerminalConversationManager;
@@ -40,7 +40,7 @@ export interface FreshConversationContext {
 }
 
 import { saveWorkTreeFolds } from './work-tree-fold-store.js';
-import { deleteRecoveryFile } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { deleteRecoveryFile } from '@goodvibes/engine/platform/platform/runtime/operations';
 
 export interface FreshConversationResult {
   /** Session id the previous conversation was saved under, or null when there was nothing to keep. */

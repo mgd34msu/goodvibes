@@ -1,6 +1,6 @@
 /** Fixed private Linux cohorts shared with actual update and rollback publication. */
-import { resolveDaemonNativePayloads, type DaemonNativeTarget } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-export { DAEMON_NATIVE_TARGETS, type DaemonNativeTarget, type DaemonArtifactSource, type DaemonCiArtifact } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { resolveDaemonNativePayloads, type DaemonNativeTarget } from '@goodvibes/engine/platform/platform/runtime/self-update';
+export { DAEMON_NATIVE_TARGETS, type DaemonNativeTarget, type DaemonArtifactSource, type DaemonCiArtifact } from '@goodvibes/engine/platform/platform/runtime/self-update';
 /** Each payload's path and executable flag, as the engine's cohort declares them; never infer either from position. */
 export function daemonCiPayloadSpecs(target: DaemonNativeTarget): readonly { readonly relativePath: string; readonly executable: boolean }[] {
   if (target !== 'linux-x64' && target !== 'linux-arm64') throw new Error('Expected a supported Linux native target');

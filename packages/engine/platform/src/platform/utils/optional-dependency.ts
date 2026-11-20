@@ -17,7 +17,7 @@ export type OptionalDependencyLoad<T> =
 export function optionalDependencyUnavailable(name: string, error: unknown): string {
   return (
     `${name} is not installed, so the feature that needs it is unavailable: ${summarizeError(error)}. `
-    + `It is an optional dependency of @goodvibes-jev/engine, install it to enable this feature.`
+    + `It is an optional dependency of @goodvibes/engine, install it to enable this feature.`
   );
 }
 

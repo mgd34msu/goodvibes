@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/render-file-picker-overlay';
+export * from '@goodvibes/engine/terminal-shell/render-file-picker-overlay';

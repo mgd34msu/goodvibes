@@ -5,8 +5,8 @@
  * back to the same list, so opening a row and pressing Enter never changes it,
  * and an entry with a comma (a brace glob, a command line) stays whole.
  */
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import { formatListEditText, parseListEditText } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
+import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import { formatListEditText, parseListEditText } from '@goodvibes/engine/terminal-shell/settings-behavior';
 import { formatWorktreeSetupEditText, isWorktreeSetupListConfigKey, parseWorktreeSetupEditText } from './worktree-setup-config.ts';
 import { isSandboxExecListConfigKey } from './sandbox-exec-config.ts';
 import { isExecEnvScrubAllowlistConfigKey } from './exec-env-scrub-config.ts';

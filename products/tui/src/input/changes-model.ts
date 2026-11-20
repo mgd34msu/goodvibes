@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/changes-model';
+export * from '@goodvibes/engine/terminal-shell/changes-model';

@@ -1,9 +1,9 @@
-import { projectOrchestratorCoreServices } from '@goodvibes-jev/engine/terminal-shell/bootstrap-orchestrator';
-import type { OrchestratorCoreServices } from '@goodvibes-jev/engine/platform/platform/core';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { projectOrchestratorCoreServices } from '@goodvibes/engine/terminal-shell/bootstrap-orchestrator';
+import type { OrchestratorCoreServices } from '@goodvibes/engine/platform/platform/core';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
 import type { RuntimeServices } from './services.ts';
-import { isCodeInjectionSettingEnabled } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { isCodeInjectionSettingEnabled } from '@goodvibes/engine/platform/platform/runtime/operations';
 
 /** The slice of the runtime services bag the shared orchestrator payload draws from. */
 export type OrchestratorCoreServicesSource = Pick<

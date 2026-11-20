@@ -26,7 +26,7 @@
  * list codec (settings-modal-lists.ts): comma separated, or a JSON list when an
  * entry holds a comma.
  */
-import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes/engine/platform/platform/config';
 import type { SettingEntry, SettingsCategory } from './settings-modal-types.ts';
 
 export const SANDBOX_EGRESS_ALLOWLIST_CONFIG_KEY = 'sandbox.egressAllowlist' as ConfigKey;

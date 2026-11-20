@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { TelegramCursorPreview } from '@goodvibes-jev/engine/platform/platform/channels/telegram-cursor';
+import type { TelegramCursorPreview } from '@goodvibes/engine/platform/platform/channels/telegram-cursor';
 import { client as platformClient } from '../../lib/goodvibes';
 import { subscribeClientLifetime } from '../../lib/client-lifetime';
 import { formatError } from '../../lib/errors';

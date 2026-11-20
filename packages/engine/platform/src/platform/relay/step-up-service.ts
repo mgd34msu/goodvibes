@@ -24,7 +24,7 @@
 // above: each machine refuses a counter that goes backwards from what it saw.
 
 import { revealOrNull, type Secret } from '../security/secret.js';
-import { fromBase64Url, randomBytes, toBase64Url } from '@goodvibes-jev/engine/transport-core/relay';
+import { fromBase64Url, randomBytes, toBase64Url } from '@goodvibes/engine/transport-core/relay';
 import {
   coseP256ToRawPoint,
   verifyStepUpAssertion,

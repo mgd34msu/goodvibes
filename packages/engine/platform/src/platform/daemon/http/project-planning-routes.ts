@@ -10,7 +10,7 @@ import type {
   ProjectWorkPlanTaskStatusInput,
   ProjectWorkPlanTaskUpdateInput,
 } from '../../knowledge/index.js';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { requireParsedBody, routeFailureResponse } from './route-helpers.js';
 
 type JsonRecord = Record<string, unknown>;

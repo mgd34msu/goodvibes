@@ -4,7 +4,7 @@
  *
  * ── What moved to the platform, and what stays here ────────────────────────────
  *
- * The platform's `@goodvibes-jev/engine/platform/platform/runtime/client` now owns WHEN the
+ * The platform's `@goodvibes/engine/platform/platform/runtime/client` now owns WHEN the
  * wire comes up and goes down: idempotent per base URL, torn down on a
  * change, the one-time legacy-store fold. This module owns WHAT the wire is,
  * this terminal's own `createDaemonHttpTransport` + `createSessionsClientSpineTransport` +
@@ -46,12 +46,12 @@
  * handler takes a narrower `{ mode, baseUrl }` signal instead, so the adapting
  * happens inside this module rather than at the call site.
  */
-import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
+import { parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 import { createDaemonHttpTransport, type HostServiceStatus, type DaemonHttpTransportOptions } from '@/runtime/index.ts';
-import { createSessionInputChangeSubscriber, createSpineAdoptionSync as createPlatformSpineAdoptionSync } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import type { SpineAdoptionOptions as PlatformSpineAdoptionOptions } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { createSessionInputChangeSubscriber, createSpineAdoptionSync as createPlatformSpineAdoptionSync } from '@goodvibes/engine/platform/platform/runtime/client';
+import type { SpineAdoptionOptions as PlatformSpineAdoptionOptions } from '@goodvibes/engine/platform/platform/runtime/client';
 
-import { createSessionsClientSpineTransport, type SpineSessionsClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
+import { createSessionsClientSpineTransport, type SpineSessionsClient } from '@goodvibes/engine/platform/platform/runtime/session-spine';
 import { createTuiMemorySpineTransport } from '../memory-spine-transport.ts';
 
 /** This module's own options: the platform's shape minus the two fields it builds itself. */

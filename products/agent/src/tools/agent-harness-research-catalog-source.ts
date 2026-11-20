@@ -1,13 +1,13 @@
 import type { CommandContext } from '../input/command-registry.ts';
-import { observeImportFile, assertImportFileCurrent } from '@goodvibes-jev/engine/platform/platform/config';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import { assertJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
-import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/platform/platform/security';
-import { researchRunStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-run-registry';
-import { researchSourceStorePath, type AgentResearchSourceRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-source-registry';
+import { observeImportFile, assertImportFileCurrent } from '@goodvibes/engine/platform/platform/config';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import { assertJudgmentInput } from '@goodvibes/engine/platform/platform/gate/judgment-input';
+import { SOURCE_SCREENING_LIMITS } from '@goodvibes/engine/platform/platform/security';
+import { researchRunStorePath } from '@goodvibes/engine/terminal-shell/agent-turn/research-run-registry';
+import { researchSourceStorePath, type AgentResearchSourceRecord } from '@goodvibes/engine/terminal-shell/agent-turn/research-source-registry';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
-import { captureCatalogSnapshot } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { captureCatalogSnapshot } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 const parseNativeJson = JSON.parse;
 

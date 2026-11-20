@@ -3,8 +3,8 @@ import { types as nodeTypes } from 'node:util';
 import { closeSync, constants, fsyncSync, lstatSync, mkdirSync, openSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { array, boolean, enum as enumSchema, literal, number, strictObject, string, union } from 'zod/v4';
-import { assertSynchronousJudgmentGuard, drainOwned, parseJevDecision, type JevDecision } from '@goodvibes-jev/judgment/decisions';
-import { ledgerEventSchema, workLedgerCommandSchema, type WorkLedgerCommand, type WorkLedgerResult } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import { assertSynchronousJudgmentGuard, drainOwned, parseJevDecision, type JevDecision } from '@goodvibes/judgment/decisions';
+import { ledgerEventSchema, workLedgerCommandSchema, type WorkLedgerCommand, type WorkLedgerResult } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
 
 export type LegacyImportCommand = Extract<WorkLedgerCommand, { type: 'import_legacy' }>;
 export interface LegacyImportBinding {

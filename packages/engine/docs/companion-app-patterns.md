@@ -25,7 +25,7 @@ This example uses the browser entrypoint; React Native is identical except it
 uses `createReactNativeGoodVibesPlatform` and prefers `platformClient.realtime.viaWebSocket()`.
 
 ```ts
-import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+import { createBrowserGoodVibesPlatform } from '@goodvibes/engine/platform/browser';
 
 // `token` and `render()` are provided by your app; omit `authToken` for
 // same-origin cookie-backed sessions.

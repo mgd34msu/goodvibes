@@ -13,7 +13,7 @@
 //      port's `ask`, or an `askAs` outside a decision definer, bypasses
 //      batteries altogether.
 
-import type { FixtureCheck, JudgmentPort, NamedDecision, Question } from '@goodvibes-jev/judgment';
+import type { FixtureCheck, JudgmentPort, NamedDecision, Question } from '@goodvibes/judgment';
 
 export interface LintFinding {
   readonly rule: 'fixture-coverage' | 'registered-use' | 'model-policy';

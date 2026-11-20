@@ -15,7 +15,7 @@ import { readInvocationParams } from './invocation-params.js';
 import { requireNativeOwner } from './native-owner.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { readRefusal } from '@goodvibes/engine/errors';
 const SCOPES = [WORK_LEDGER_READ_SCOPE, WORK_LEDGER_WRITE_SCOPE] as const;
 function authorize(invocation: GatewayMethodInvocation) {
   return requireNativeOwner(invocation, SCOPES, 'Native intake');

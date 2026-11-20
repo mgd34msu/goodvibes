@@ -1,3 +1,3 @@
 /** Setup presentation shares the engine owner and its runtime evidence. */
-export { ProviderSetupReadings, classifyProviderSetup, describeProviderSetup } from '@goodvibes-jev/engine/platform/platform/providers';
-export type { ProviderSetupClass, ProviderSetupClassification, ProviderSetupFacts, ProviderSetupReadOptions } from '@goodvibes-jev/engine/platform/platform/providers';
+export { ProviderSetupReadings, classifyProviderSetup, describeProviderSetup } from '@goodvibes/engine/platform/platform/providers';
+export type { ProviderSetupClass, ProviderSetupClassification, ProviderSetupFacts, ProviderSetupReadOptions } from '@goodvibes/engine/platform/platform/providers';

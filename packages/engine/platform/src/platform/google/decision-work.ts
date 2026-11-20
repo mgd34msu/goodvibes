@@ -1,6 +1,6 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { JudgmentError } from '@goodvibes-jev/judgment';
-import { DecisionModelsDisabledError, JudgmentPortMissingError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
+import { JudgmentError } from '@goodvibes/judgment';
+import { DecisionModelsDisabledError, JudgmentPortMissingError, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 /** Native lifetime remains binding when a decision endpoint is unavailable. */

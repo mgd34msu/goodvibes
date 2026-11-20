@@ -1,4 +1,4 @@
-import type { CallOptions, ChoiceReading, Fidelity, YesNoReading } from '@goodvibes-jev/judgment';
+import type { CallOptions, ChoiceReading, Fidelity, YesNoReading } from '@goodvibes/judgment';
 /**
  * checkin/types.ts
  *

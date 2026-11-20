@@ -15,7 +15,7 @@ import type { SecretsManager } from '../config/secrets.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { assertDeliveryCurrent, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
 import { isRecord } from '../utils/record-coerce.js';
-import { classifyFailure, RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { classifyFailure, RefusalError, refusal } from '@goodvibes/engine/errors';
 import { fetchFailurePhase } from '../state/operation.js';
 
 /** What the built-in generation providers are given by the product that registers them. */

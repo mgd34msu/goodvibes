@@ -16,7 +16,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+import { HttpStatusError } from '@goodvibes/engine/errors';
 import { Notifier } from '../platform/src/platform/integrations/notifier.ts';
 import type { SlackIntegration } from '../platform/src/platform/integrations/slack.ts';
 

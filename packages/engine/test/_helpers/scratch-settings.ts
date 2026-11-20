@@ -8,7 +8,7 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { ConfigManager } from '../../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../../platform/src/platform/config/schema.ts';
 import { credentialValueRefusal } from '../../platform/src/platform/config/write-admission.ts';

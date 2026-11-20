@@ -1,20 +1,20 @@
-import { createSecretsCommand } from '@goodvibes-jev/engine/terminal-shell/secrets-command';
-import { createLocalCommandActions } from '@goodvibes-jev/engine/terminal-shell/local-command-actions';
+import { createSecretsCommand } from '@goodvibes/engine/terminal-shell/secrets-command';
+import { createLocalCommandActions } from '@goodvibes/engine/terminal-shell/local-command-actions';
 import 'path';
 import 'node:fs';
 import 'node:fs/promises';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 
-import '@goodvibes-jev/engine/platform/platform/utils';
-import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes/engine/platform/platform/utils';
+import '@goodvibes/engine/platform/platform/config';
 import { requireProviderApi, requireServiceRegistry, requireShellPaths } from './runtime-services.ts';
-import { registerServicesCommand } from '@goodvibes-jev/engine/terminal-shell/services-command';
+import { registerServicesCommand } from '@goodvibes/engine/terminal-shell/services-command';
 import {
   credentialWriteScopeWasRelocated,
   resolveCredentialDeleteScope,
   resolveCredentialWriteScope,
 } from '../../config/credential-scope.ts';
-import { createMediaCommand } from '@goodvibes-jev/engine/terminal-shell/media-command';
+import { createMediaCommand } from '@goodvibes/engine/terminal-shell/media-command';
 
 export const localActions = createLocalCommandActions<CommandContext>(requireProviderApi, {
   unpinByModelId: true,

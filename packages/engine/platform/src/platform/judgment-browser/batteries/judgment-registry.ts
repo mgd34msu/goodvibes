@@ -1,4 +1,4 @@
-import { BatteryRegistry } from '@goodvibes-jev/judgment';
+import { BatteryRegistry } from '@goodvibes/judgment';
 import { catalogProviderMatchBattery } from './webui-specs.js';
 
 /** Calibration and lint discovery; HTTP admission remains a separate registry. */

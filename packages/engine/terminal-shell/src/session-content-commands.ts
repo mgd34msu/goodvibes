@@ -1,13 +1,13 @@
 import { mkdirSync, existsSync, statSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { ExportMessage } from '@goodvibes-jev/engine/platform/platform/export';
-import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ExportMessage } from '@goodvibes/engine/platform/platform/export';
+import { redactSensitiveDataAsync } from '@goodvibes/engine/platform/platform/utils';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { createRetryCommand, createTitleCommand } from './everyday-commands.js';
 import type { CommandActionContext } from './command-actions/types.js';
 import { commandRefusal } from './command-confirmation.js';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { readRefusal } from '@goodvibes/engine/errors';
 import { formatTranscript, type TranscriptFormat } from './session-export-format.js';
 interface ContentContext extends CommandActionContext {
   readonly session: {

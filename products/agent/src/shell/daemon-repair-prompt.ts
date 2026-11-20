@@ -12,7 +12,7 @@
  * composer, a paste or a focus report from the terminal is never its answer.
  * The default is "leave it as it is"; Escape declines.
  */
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import {
   DAEMON_ENABLED_KEY,
   runDaemonRepair,
@@ -22,7 +22,7 @@ import {
   type DaemonRepairResult,
   type DaemonRepairSessionMemory,
 } from '../runtime/daemon-repair.ts';
-import type { NoticeLevel } from '@goodvibes-jev/engine/platform/platform/core';
+import type { NoticeLevel } from '@goodvibes/engine/platform/platform/core';
 import type { DaemonCliRunner } from '../runtime/daemon-cli-service.ts';
 import type { SelectionItem } from '../input/selection-modal.ts';
 import type { SelectionOpener } from './workspace-registration-question.ts';

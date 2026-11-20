@@ -24,7 +24,7 @@
 import type {
   ImapConnectionReport,
   ImapIdleSupport,
-} from '@goodvibes-jev/engine/platform/platform/email';
+} from '@goodvibes/engine/platform/platform/email';
 
 declare const report: ImapConnectionReport;
 

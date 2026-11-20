@@ -1,4 +1,4 @@
-import type { GoodVibesExpiringTokenStore } from '@goodvibes-jev/engine/platform/auth';
+import type { GoodVibesExpiringTokenStore } from '@goodvibes/engine/platform/auth';
 
 /**
  * Who this page is signed in as, and the generation every cache, reply and in-flight

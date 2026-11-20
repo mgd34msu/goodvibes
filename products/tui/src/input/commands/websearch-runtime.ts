@@ -1,8 +1,8 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 /**
  * registerWebSearchRuntimeCommands - `/web-search <words> [--limit <n>]`, a

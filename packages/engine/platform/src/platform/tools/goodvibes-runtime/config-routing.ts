@@ -41,7 +41,7 @@ import { isValidConfigKey, type ConfigKey } from '../../config/schema.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { agentSettingsWriteRefusal } from '../../gate/policy/agent-settings-refusals.js';
 import { currentAdmittedToolDecision } from '../../gate/admitted-decision.js';
-import { agentActor, localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { agentActor, localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { currentTurn } from '../../security/turn-boundary.js';
 import { ConfigError } from '../../types/errors.js';
 

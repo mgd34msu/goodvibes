@@ -21,7 +21,7 @@
  *     admission gate refuses the run with an honest logged reason.
  */
 import { logger } from '../../utils/logger.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes/judgment/decisions';
 import { normalizeKnowledgeSpaceId } from '../spaces.js';
 import { uniqueStrings } from './utils.js';
 import type { KnowledgeSemanticSelfImproveInput, KnowledgeSemanticSelfImproveResult } from './types.js';

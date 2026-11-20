@@ -27,7 +27,7 @@
  * window from a storefront nobody vouched for; a wrong recourse kind skips the
  * per-seller check on a marketplace. A wrong no costs the owner one question.
  */
-import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** What one reading sees: the validated registrable domain alone. */
 export function merchantView(registrableDomain: string): { registrable_domain: string } {

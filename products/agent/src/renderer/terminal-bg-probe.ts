@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/terminal-bg-probe';
+export * from '@goodvibes/engine/terminal-shell/terminal-bg-probe';

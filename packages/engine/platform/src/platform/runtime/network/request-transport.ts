@@ -12,7 +12,7 @@
  * Imported by path, not through runtime/network/index.ts: daemon/client-address.ts
  * imports that index.
  */
-import { isTailnetHost } from '@goodvibes-jev/engine/transport-http/paths';
+import { isTailnetHost } from '@goodvibes/engine/transport-http/paths';
 import { clientAddressOf, isLocalOrigin } from '../../daemon/client-address.js';
 
 export type RequestTransport = 'loopback' | 'tls' | 'tailnet' | 'plain-network';

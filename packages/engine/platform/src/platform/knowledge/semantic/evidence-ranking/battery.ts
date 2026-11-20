@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 const state = (query: string, kind: 'source' | 'node', title: string, text: string, nodeKind?: string) => ({
   query, candidate: { reference: 'candidate-1', kind, title, text, ...(nodeKind ? { nodeKind } : {}) },
 });

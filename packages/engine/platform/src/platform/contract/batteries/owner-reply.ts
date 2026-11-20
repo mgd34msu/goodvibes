@@ -11,7 +11,7 @@
  * Band: approve triggers effects (work is accepted, a plan runs), so it is
  * read at high stakes; the other readings at medium.
  */
-import { defineReplyReader, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineReplyReader, STAKES_BANDS } from '@goodvibes/judgment';
 import type { EscalationReason } from '../types.js';
 
 /** An escalation as a reading sees it: its reason code and the question it put. */

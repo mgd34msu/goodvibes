@@ -1,6 +1,6 @@
 # Reference HTTP client
 
-The smallest remote client of a running GoodVibes daemon. It imports only the published client packages, `@goodvibes-jev/engine/operator-client` and `@goodvibes-jev/engine/peer-client`, so `index.ts` can be copied into any Bun or Node project that depends on `@goodvibes-jev/engine`.
+The smallest remote client of a running GoodVibes daemon. It imports only the published client packages, `@goodvibes/engine/operator-client` and `@goodvibes/engine/peer-client`, so `index.ts` can be copied into any Bun or Node project that depends on `@goodvibes/engine`.
 
 It demonstrates:
 

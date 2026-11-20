@@ -6,7 +6,7 @@ import { assertJudgmentInput } from '../../gate/judgment-input.js';
  * Passive injection additionally requires settled outcomes, live source
  * authority, and its caller's shared relevance floor and token budget.
  */
-import { defineRerank, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineRerank, STAKES_BANDS } from '@goodvibes/judgment';
 import type { CodeChunk } from '../code-index-chunking.js';
 
 /** @deprecated Legacy threshold; source is now split into complete overlapping parts. */

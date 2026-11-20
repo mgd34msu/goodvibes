@@ -1,1 +1,1 @@
-export { createDaemonChannelRouteHandlers } from '@goodvibes-jev/engine/daemon-api';
+export { createDaemonChannelRouteHandlers } from '@goodvibes/engine/daemon-api';

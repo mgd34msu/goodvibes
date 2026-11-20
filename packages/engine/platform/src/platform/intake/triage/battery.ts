@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** Historical v1 receipt alias; never overrides the configured port. */
 export const TRIAGE_MODEL = 'jev-latest';

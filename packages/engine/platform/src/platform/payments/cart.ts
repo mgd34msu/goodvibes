@@ -43,8 +43,8 @@ import { decisionOrClassic } from '../runtime/decision-policy.js';
  * purchase to the owner as an explicit approval (silence denies) that names
  * what was not checked, so the owner decides with the facts in front of them.
  */
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { mapLimit } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
+import { mapLimit } from '@goodvibes/judgment';
 import { sanitizeNoticeField } from '../security/notice-text.js';
 import { cartLine, requestedLineId } from './batteries/cart-line.js';
 import { orderSummaryView, recurringCharge } from './batteries/recurring-charge.js';

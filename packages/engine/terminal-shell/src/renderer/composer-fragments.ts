@@ -5,7 +5,7 @@
 // UIFactory static methods are thin wrappers over these.
 // ---------------------------------------------------------------------------
 
-import { type Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { type Line } from '@goodvibes/engine/platform/platform/types';
 import { renderConversationFragment } from './conversation-surface.js';
 import { activeUiTones } from './theme.js';
 import { activeTheme } from './theme.js';

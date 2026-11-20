@@ -1,6 +1,6 @@
 import type { DaemonControlRouteHandlers, GatewayRestVerbInvocation } from './context.js';
-import type { RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
-import { EngineErrorCodes, isOperationKey, OPERATION_KEY_RULE } from '@goodvibes-jev/engine/errors';
+import type { RuntimeEventDomain } from '@goodvibes/engine/contracts';
+import { EngineErrorCodes, isOperationKey, OPERATION_KEY_RULE } from '@goodvibes/engine/errors';
 import { authenticationRequiredResponse, jsonErrorResponse } from './error-response.js';
 import { GATEWAY_METHOD_INVOKE_PATH } from './operator.js';
 import type { AuthenticatedPrincipal, CredentialKind, RequestPrincipal } from './http-policy.js';

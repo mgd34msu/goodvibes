@@ -16,7 +16,7 @@ inspect or select provider state.
   the environment variables that configure them are declared in the platform provider
   registry and catalog. `inferFallbackContextWindow` and
   `FALLBACK_CONTEXT_WINDOW` (a family-aware, pre-catalog context-window
-  fallback) are exported from `@goodvibes-jev/engine/platform/platform/providers`.
+  fallback) are exported from `@goodvibes/engine/platform/platform/providers`.
 - **Model and selection API.** `GET /api/models`, `GET` or `PATCH`
   `/api/models/current`, and the `providers`-domain SSE events. See
   [Provider and model API reference](./provider-model-api.md).

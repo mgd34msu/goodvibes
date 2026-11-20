@@ -1,5 +1,5 @@
-import { getOperatorContract, getPeerContract } from '@goodvibes-jev/engine/contracts';
-import type { Page } from '@goodvibes-jev/engine/errors';
+import { getOperatorContract, getPeerContract } from '@goodvibes/engine/contracts';
+import type { Page } from '@goodvibes/engine/errors';
 import type { AutomationSurfaceKind } from '../../automation/types.js';
 import type {
   ControlPlaneRecentEvent,

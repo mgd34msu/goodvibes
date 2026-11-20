@@ -27,7 +27,7 @@
 
 import { createHash } from 'node:crypto';
 import { readReasoningEffortLevel } from '../providers/reasoning-effort.js';
-import { EngineErrorCodes, isOperationKey, OPERATION_KEY_RULE, readRefusal, refusal, refusalErrorBody, type Refusal } from '@goodvibes-jev/engine/errors';
+import { EngineErrorCodes, isOperationKey, OPERATION_KEY_RULE, readRefusal, refusal, refusalErrorBody, type Refusal } from '@goodvibes/engine/errors';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type {

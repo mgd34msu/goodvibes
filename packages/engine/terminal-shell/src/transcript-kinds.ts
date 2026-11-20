@@ -1,4 +1,4 @@
-import type { TranscriptEventKind } from '@goodvibes-jev/engine/platform/platform/core';
+import type { TranscriptEventKind } from '@goodvibes/engine/platform/platform/core';
 
 // A record keyed by the union, so adding a kind to `TranscriptEventKind` fails to compile until it is listed here.
 const KIND_TABLE: Record<TranscriptEventKind, true> = {

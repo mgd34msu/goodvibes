@@ -12,7 +12,7 @@
  */
 import { useEffect, useSyncExternalStore } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { SettableGatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import type { SettableGatePresetName } from '@goodvibes/engine/platform/platform/gate/presets';
 import { browserDecisionPolicy } from './decision-policy';
 import { client as platformClient } from './goodvibes';
 import { queryKeys } from './queries';

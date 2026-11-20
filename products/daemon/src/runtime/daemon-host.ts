@@ -1,16 +1,16 @@
 /** Owned configured daemon host; native lifecycle requires an installed caller. */
-import { DaemonServer, HttpListener, createSafeHostServeFactory, type DaemonUpdateArtifact } from '@goodvibes-jev/engine/platform/platform/daemon';
-import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
+import { DaemonServer, HttpListener, createSafeHostServeFactory, type DaemonUpdateArtifact } from '@goodvibes/engine/platform/platform/daemon';
+import { createAsyncDisposalScope } from '@goodvibes/engine/platform/platform/runtime/disposal';
 import { createDaemonProviderDiscovery, type DaemonProviderDiscoveryDependencies } from './provider-discovery.js';
 import { createDaemonBootOperations } from './boot-composition.js';
 import type { DaemonBootSnapshot } from './boot-tasks.js';
 import { createHostedSessionOptions } from './hosted-session-composition.js';
 import { createRuntimeServices, type RuntimeServices, type RuntimeServicesOptions } from './services.js';
 import { observeNativeStartupPhase } from './startup-observation.js';
-import { createNativeDataWriteOwner, createInstalledReaderCohort } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { defineLifecycle, logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { createNativeDataWriteOwner, createInstalledReaderCohort } from '@goodvibes/engine/platform/platform/runtime/self-update';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
+import { defineLifecycle, logger } from '@goodvibes/engine/platform/platform/utils';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 
 /** The fewest milliseconds between two local model server scans that a model list read starts. */
 const LOCAL_SCAN_FLOOR_MS = 45_000;

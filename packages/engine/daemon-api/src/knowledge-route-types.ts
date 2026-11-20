@@ -1,4 +1,4 @@
-import type { Selection } from '@goodvibes-jev/engine/errors';
+import type { Selection } from '@goodvibes/engine/errors';
 import type { ArtifactStoreUploadLike } from './artifact-upload.js';
 import type { JsonRecord } from './route-helpers.js';
 

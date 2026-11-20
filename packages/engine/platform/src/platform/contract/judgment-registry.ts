@@ -1,4 +1,4 @@
-import { BatteryRegistry } from '@goodvibes-jev/judgment';
+import { BatteryRegistry } from '@goodvibes/judgment';
 import { bestOfN } from './batteries/best-of-n.js';
 import { criterionShape } from './batteries/criterion-shape.js';
 import { criterionTrace } from './batteries/criterion-trace.js';

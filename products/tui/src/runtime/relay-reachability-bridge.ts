@@ -15,9 +15,9 @@
  * could not be asked travels with it so /devices can say it.
  */
 
-import type { RelayRegistrationStatus } from '@goodvibes-jev/engine/daemon-api';
-import { encodeRelayPairingString, type RelayPairingPayload } from '@goodvibes-jev/engine/transport-core/relay';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { RelayRegistrationStatus } from '@goodvibes/engine/daemon-api';
+import { encodeRelayPairingString, type RelayPairingPayload } from '@goodvibes/engine/transport-core/relay';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 
 /**
  * What /devices relay-status can be told: the daemon-side registration states, plus

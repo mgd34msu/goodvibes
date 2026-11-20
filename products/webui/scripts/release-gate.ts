@@ -2,14 +2,14 @@
 /** Validate the real workspace dependency and its declared public subpaths. */
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
-import { loadToolchainConfig, realFsReader, runEnginePinGate, type FsReader } from '@goodvibes-jev/engine/toolchain';
+import { loadToolchainConfig, realFsReader, runEnginePinGate, type FsReader } from '@goodvibes/engine/toolchain';
 
 const root = resolve(import.meta.dir, '..');
 const require = createRequire(import.meta.url);
-const engineRoot = dirname(require.resolve('@goodvibes-jev/engine/package.json'));
+const engineRoot = dirname(require.resolve('@goodvibes/engine/package.json'));
 const local = realFsReader(root);
 const engine = realFsReader(engineRoot);
-const prefix = 'node_modules/@goodvibes-jev/engine/';
+const prefix = 'node_modules/@goodvibes/engine/';
 function installedPath(path: string): string | null {
   return path.startsWith(prefix) ? path.slice(prefix.length) : null;
 }

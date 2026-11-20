@@ -1,5 +1,5 @@
-import { legacyMigrationPreparationRevision } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
-import { nativeWorkExecutionLines } from '@goodvibes-jev/engine/terminal-shell/native';
+import { legacyMigrationPreparationRevision } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
+import { nativeWorkExecutionLines } from '@goodvibes/engine/terminal-shell/native';
 import type { NativeWorkLedgerState } from '../runtime/native-work-ledger.ts';
 
 /** Plain terminal text only; ledger content never becomes an action or terminal escape. */

@@ -7,10 +7,10 @@
  * sandbox first-contained-run line comes through the shared announcement
  * store (createSandboxContainmentNotice).
  */
-import { FeatureAnnouncementStore, featureAnnouncementsPath, createSandboxContainmentAnnouncer } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
-import { readClientCompatibilityFloor } from '@goodvibes-jev/engine/platform/platform/control-plane/build-compatibility';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { firstShowingOfSettingsNotice } from '@goodvibes-jev/engine/terminal-shell/cli-config-overrides';
+import { FeatureAnnouncementStore, featureAnnouncementsPath, createSandboxContainmentAnnouncer } from '@goodvibes/engine/platform/platform/runtime/feature-announcements';
+import { readClientCompatibilityFloor } from '@goodvibes/engine/platform/platform/control-plane/build-compatibility';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { firstShowingOfSettingsNotice } from '@goodvibes/engine/terminal-shell/cli-config-overrides';
 
 /** A daemon receipt line (already a human one-liner, e.g. "restarted after a crash at 2026-11-15 14:32"). */
 export interface DaemonReceiptLike {

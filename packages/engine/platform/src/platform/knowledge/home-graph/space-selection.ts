@@ -1,4 +1,4 @@
-import { GoodVibesError, RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError, RefusalError, refusal } from '@goodvibes/engine/errors';
 import type { KnowledgeStore } from '../store.js';
 import { getKnowledgeSpaceId } from '../spaces.js';
 import { homeAssistantSpaceComponent, resolveHomeGraphSpace, sameHomeAssistantSpace } from './helpers.js';

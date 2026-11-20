@@ -37,7 +37,7 @@
  * item and discards it; only presence or absence of a failure reaches the UI.
  */
 
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
 
 export type ConnectionSurface = 'mail' | 'calendar';
 

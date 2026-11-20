@@ -6,9 +6,9 @@ const root = join(import.meta.dir, '..');
 const repoRoot = resolve(root, '../..');
 const rootPackage = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as { name?: unknown; version?: unknown };
 const version = rootPackage.version;
-if (rootPackage.name !== 'goodvibes-jev' || typeof version !== 'string'
+if (rootPackage.name !== 'goodvibes' || typeof version !== 'string'
   || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
-  throw new Error('Version synchronization requires the goodvibes-jev root release identity');
+  throw new Error('Version synchronization requires the goodvibes root release identity');
 }
 
 const files = VERSION_FALLBACKS.map(target => {
@@ -26,7 +26,7 @@ for (const workspace of VERSIONED_WORKSPACES) {
   const path = join(repoRoot, workspace, 'package.json');
   const before = readFileSync(path, 'utf8');
   const manifest = JSON.parse(before) as { name?: unknown; version?: unknown };
-  if (typeof manifest.name !== 'string' || !manifest.name.startsWith('@goodvibes-jev/') || typeof manifest.version !== 'string') {
+  if (typeof manifest.name !== 'string' || !manifest.name.startsWith('@goodvibes/') || typeof manifest.version !== 'string') {
     throw new Error(`Version synchronization requires a first-party workspace manifest: ${workspace}`);
   }
   const after = manifest.version === version ? before : `${JSON.stringify({ ...manifest, version }, null, 2)}\n`;

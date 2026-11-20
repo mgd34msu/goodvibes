@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/payments-settings';
+export * from '@goodvibes/engine/terminal-shell/payments-settings';

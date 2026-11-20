@@ -7,7 +7,7 @@ import {
   type DecisionEntry,
   type JsonValue,
   type Outcome,
-} from '@goodvibes-jev/judgment';
+} from '@goodvibes/judgment';
 
 /**
  * One reading a decision took, flattened out of its decision log entry: where

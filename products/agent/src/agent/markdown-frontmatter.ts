@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/markdown-frontmatter';
+export * from '@goodvibes/engine/terminal-shell/markdown-frontmatter';

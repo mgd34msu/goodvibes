@@ -17,7 +17,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { choiceAnswer, startScriptedDecisionServer, type ScriptedDecisionServer } from '@goodvibes-jev/judgment/testing';
+import { choiceAnswer, startScriptedDecisionServer, type ScriptedDecisionServer } from '@goodvibes/judgment/testing';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
@@ -26,7 +26,7 @@ import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions
 import { composeJudgment } from '../platform/src/platform/runtime/judgment-services.ts';
 import { forgetGateReadings, gateReadingAnswers } from './_helpers/gate-readings.ts';
 import { syntheticCredential } from '../platform/src/platform/utils/fixture-credentials.ts';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 
 // Credential-shaped values are assembled at run time (utils/fixture-credentials.ts), so no
 // file holds a whole shape a secret scanner reports.

@@ -1,1 +1,1 @@
-export { sumConversationUsage, hydrateConversationUsage, isConversationContextAvailable, isConversationUsageAvailable } from '@goodvibes-jev/engine/platform/platform/core';
+export { sumConversationUsage, hydrateConversationUsage, isConversationContextAvailable, isConversationUsageAvailable } from '@goodvibes/engine/platform/platform/core';

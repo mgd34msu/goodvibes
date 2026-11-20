@@ -1,8 +1,8 @@
 {
   "//": "Private monorepo product. Build and release qualification are owned by the repository root; engine and toolchain modules resolve from the engine workspace.",
-  "packageName": "@goodvibes-jev/agent",
+  "packageName": "@goodvibes/agent",
   "enginePin": {
-    "enginePackage": "@goodvibes-jev/engine",
+    "enginePackage": "@goodvibes/engine",
     "pinSource": "dependencies",
     "lockfile": "../../bun.lock",
     "sourceRoots": [

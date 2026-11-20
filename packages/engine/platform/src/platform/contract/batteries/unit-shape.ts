@@ -46,7 +46,7 @@ import {
   type Question,
   type YesNoBand,
   type YesNoReading,
-} from '@goodvibes-jev/judgment';
+} from '@goodvibes/judgment';
 import { PROOF_PLANS, type ProofPlan, type ProofUnit } from './plan-coverage.js';
 
 /** The roles Jev can read; read-only variants share the research execution role. */

@@ -1,9 +1,9 @@
-import { executeHeadlessTurn, type HeadlessTurnLimits } from '@goodvibes-jev/engine/terminal-shell/headless-command';
+import { executeHeadlessTurn, type HeadlessTurnLimits } from '@goodvibes/engine/terminal-shell/headless-command';
 import type { BootstrapContext } from '../runtime/bootstrap.ts';
 import type { NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
 import type { NativeHeadlessTurnResult } from './native-headless.ts';
 
-export { headlessSessionSnapshot, settleHeadlessTurn } from '@goodvibes-jev/engine/terminal-shell/headless-command';
+export { headlessSessionSnapshot, settleHeadlessTurn } from '@goodvibes/engine/terminal-shell/headless-command';
 
 /** Every Agent headless prompt is admitted through native intake first; its exact permit enters the ordinary executor. */
 export function executeAdmittedHeadlessTurn(

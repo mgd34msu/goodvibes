@@ -1,6 +1,6 @@
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { NoticeLevel } from '@goodvibes-jev/engine/platform/platform/core';
-import type { HookDispatcher, HookEventPath, HookPhase, HookCategory } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { NoticeLevel } from '@goodvibes/engine/platform/platform/core';
+import type { HookDispatcher, HookEventPath, HookPhase, HookCategory } from '@goodvibes/engine/platform/platform/hooks';
 import {
   checkRecoveryFile,
   createShellPathService,
@@ -10,7 +10,7 @@ import {
   writeRecoveryFile,
 } from '@/runtime/index.ts';
 import type { RecoveryFileInfo, SessionSnapshot, SessionSurface } from '@/runtime/index.ts';
-import { closeSessionHere, crashSnapshotTurn, holdOfferedRecoverySnapshot, openSessionHere, writeCrashSnapshotAtTurnMoments, type CrashSnapshotTurnMoment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { closeSessionHere, crashSnapshotTurn, holdOfferedRecoverySnapshot, openSessionHere, writeCrashSnapshotAtTurnMoments, type CrashSnapshotTurnMoment } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { moveLiveSessionArtifacts } from '../core/session-resume-core.ts';
 import { readOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
 import { deriveOnboardingState } from '../runtime/onboarding/onboarding-state.ts';

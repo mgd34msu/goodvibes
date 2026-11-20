@@ -1,4 +1,4 @@
-import { AGENT_TEMPLATES as ENGINE_AGENT_TEMPLATES } from '@goodvibes-jev/engine/platform/platform/tools';
+import { AGENT_TEMPLATES as ENGINE_AGENT_TEMPLATES } from '@goodvibes/engine/platform/platform/tools';
 
 export const AGENT_TOOL_MODES = [
   'spawn',

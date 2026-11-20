@@ -4,12 +4,12 @@
  * (what `/commit-all` was). Only this app has it.
  */
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { GitService } from '@goodvibes-jev/engine/platform/platform/git';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { readAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { GitService } from '@goodvibes/engine/platform/platform/git';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { readAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { executeCommitAll } from './quit-shared.ts';
 
 const TERMINAL_ONLY = 'It works on the repository this terminal app\'s session runs in.';

@@ -39,7 +39,7 @@ import {
   type DiffToneTokens,
   type ThemeTokens as PaletteTokens,
   type ToneTokens,
-} from '@goodvibes-jev/engine/platform/platform/presentation';
+} from '@goodvibes/engine/platform/platform/presentation';
 import { getTerminalPalette, type TerminalPalette } from '../terminal-palette-store.js';
 
 export type { PaletteTokens, DiffToneTokens };

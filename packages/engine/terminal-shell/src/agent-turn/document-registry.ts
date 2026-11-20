@@ -1,7 +1,7 @@
-import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils/lifecycle-machine';
-import { newIncarnation } from '@goodvibes-jev/engine/platform/platform/utils/target-ref';
-import { openSqliteFile, type SqliteFile } from '@goodvibes-jev/engine/platform/platform/state';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { defineLifecycle } from '@goodvibes/engine/platform/platform/utils/lifecycle-machine';
+import { newIncarnation } from '@goodvibes/engine/platform/platform/utils/target-ref';
+import { openSqliteFile, type SqliteFile } from '@goodvibes/engine/platform/platform/state';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import { assertNoSecretLikeText } from './persona-registry.js';
 import type {

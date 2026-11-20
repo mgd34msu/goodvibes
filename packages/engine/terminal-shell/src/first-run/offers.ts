@@ -6,8 +6,8 @@
  * registry's configured state, the local scan's result, the environment) and
  * starts nothing. `gatherFirstRunFacts` in first-run-flow.ts builds the views.
  */
-import { describeAuthRouteForPerson } from '@goodvibes-jev/engine/platform/platform/providers/auth-route-presentation';
-import type { ProviderDeclaredAuthRoute } from '@goodvibes-jev/engine/platform/platform/providers';
+import { describeAuthRouteForPerson } from '@goodvibes/engine/platform/platform/providers/auth-route-presentation';
+import type { ProviderDeclaredAuthRoute } from '@goodvibes/engine/platform/platform/providers';
 
 export type OfferRoute = 'browser-sign-in' | 'api-key' | 'local' | 'none-needed';
 

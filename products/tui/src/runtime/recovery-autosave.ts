@@ -1,4 +1,4 @@
-import { buildPersistedSessionContextFromFacts, crashSnapshotTurn, type CrashSnapshotTurnMoment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { buildPersistedSessionContextFromFacts, crashSnapshotTurn, type CrashSnapshotTurnMoment } from '@goodvibes/engine/platform/platform/runtime/operations';
 /**
  * recovery-autosave.ts, the minute timer behind crash recovery, extracted out
  * of main.ts to keep it under the architecture line-count gate.
@@ -21,8 +21,8 @@ import { buildPersistedSessionContextFromFacts, crashSnapshotTurn, type CrashSna
  */
 import { writeRecoveryFile } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
-import { openSessionHere } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { openSessionHere } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.ts';
 import {
   conversationChangedSinceDurable,

@@ -16,7 +16,7 @@
  * every tool (`verifyAll`) runs the code checks only.
  */
 
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../decision-policy.js';
 import { PERMISSION_CATEGORIES, toolCategoryOf, type Tool, type ToolDefinition } from '../../types/tools.js';
 import { descriptionQuality } from './batteries/description-quality.js';

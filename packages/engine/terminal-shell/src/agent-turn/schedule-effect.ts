@@ -1,8 +1,8 @@
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertProjectionExecution, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import type { ToolInputProjector, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { assertProjectionExecution, ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import type { ToolInputProjector, ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes/engine/platform/platform/security';
 import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import { captureOperatorConnection } from './operator-connection-owner.js';
 import { captureOperatorAutomationTarget } from './operator-automation-target.js';

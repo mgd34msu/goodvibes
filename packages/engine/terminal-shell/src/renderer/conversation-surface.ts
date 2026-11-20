@@ -1,8 +1,8 @@
-import { createEmptyLine, createStyledCell } from '@goodvibes-jev/engine/platform/platform/types/grid';
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth, truncateDisplay, wrapText, wrapTextRows } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import { createEmptyLine, createStyledCell } from '@goodvibes/engine/platform/platform/types/grid';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
+import { getDisplayWidth, truncateDisplay, wrapText, wrapTextRows } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { LAYOUT } from './layout.js';
-import { GLYPHS } from '@goodvibes-jev/engine/platform/platform/presentation';
+import { GLYPHS } from '@goodvibes/engine/platform/platform/presentation';
 import { foldPreviewText } from '../conversation-fold-policy.js';
 import { activeTokens } from './theme.js';
 /** Column of a transcript event row's marker (the ● of a flush row). */
@@ -226,7 +226,7 @@ export function renderConversationStatusLine(width: number, segments: readonly C
  *
  * Whether a preview may render at all, and what its text flattens to, is the
  * canonical fold policy's call (foldPreviewText in
- * @goodvibes-jev/engine/terminal-shell), including the minimum-column rule. What
+ * @goodvibes/engine/terminal-shell), including the minimum-column rule. What
  * stays here is display-width TRUNCATION, because wide-glyph and ANSI width
  * rules are product-local, and it is truncation, never wrapping: a fold that
  * can wrap is not a fold.

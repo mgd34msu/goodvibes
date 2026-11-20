@@ -1,7 +1,7 @@
-import { legacyMigrationPreparationRevision } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
-import { nativeWorkExecutionLines, type NativeWorkExecutionAction } from '@goodvibes-jev/engine/terminal-shell/native';
+import { legacyMigrationPreparationRevision } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
+import { nativeWorkExecutionLines, type NativeWorkExecutionAction } from '@goodvibes/engine/terminal-shell/native';
 import { nativeWorkIntegrationView } from '../../runtime/native-work-integration.ts';
-import type { NativeWorkLedgerState } from '@goodvibes-jev/engine/terminal-shell/native/bound-work-ledger';
+import type { NativeWorkLedgerState } from '@goodvibes/engine/terminal-shell/native/bound-work-ledger';
 import type { NativeWorkLedgerModalSource } from '../../runtime/native-work-ledger-host.ts';
 import type { ConfigModalSurface, ConfigModalView, ConfigModalRow } from '../../input/config-modal-types.ts';
 

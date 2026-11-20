@@ -4,7 +4,7 @@ import { closeSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readdir
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
 import type { PaymentStoreStop } from '../payment-host-health.js';
 import { encryptStore, decryptStore, SECRETS_STORE_FORMAT_VERSION, type EncryptedStoreEnvelope } from '../../config/secrets-keyfile.js';
@@ -25,7 +25,7 @@ import { captureCheckoutWindowCheckpoint, type CheckoutWindowCheckpoint } from '
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
 import { capturePaymentReplyHistory, capturePaymentReplyHistoryEntry, capturePaymentReplyReceiveCoverage, capturePaymentReplyReceiveSpans, paymentReplyHistoryBinding, historyEntryIdentity,
   type PaymentReplyHistory, type PaymentReplyHistoryBinding, type PaymentReplyHistoryEntry, type PaymentReplyReceiveCoverage, type PaymentReplyReceiveSpan } from '../reply-history.js';
-import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
+import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
 
 export interface PaymentRequestHostFacts {
   readonly authority: NativePairedSnapshot;

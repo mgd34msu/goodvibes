@@ -1,4 +1,4 @@
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 /**
  * Runtime permissions evaluator.
  *

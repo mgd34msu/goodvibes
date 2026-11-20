@@ -1,6 +1,6 @@
 import type { LegacyImportOperatorSession } from './legacy-work-ledger-import-operator.js';
 import type { LegacyImportEntry } from './legacy-work-ledger-import-journal.js';
-import { legacyMigrationPreparationRevision, projectLegacyImportWorks } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import { legacyMigrationPreparationRevision, projectLegacyImportWorks } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
 import { commandRefusal } from './command-confirmation.js';
 
 const quote = (value: string): string => JSON.stringify(value).replace(/[\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);

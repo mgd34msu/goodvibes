@@ -4,15 +4,15 @@ import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-
 import { expect, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes/judgment/testing';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
 import { registerAgentTools } from '../../runtime/bootstrap-agent-tools.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
-import { createEmitterContext, executeToolCalls } from '@goodvibes-jev/engine/platform/platform/core';
+import { createEmitterContext, executeToolCalls } from '@goodvibes/engine/platform/platform/core';
 
 // The Agent's registry built the way bootstrap-core.ts and bootstrap.ts build
 // it, with the local first-party read owner the shipped Agent binds, and a call

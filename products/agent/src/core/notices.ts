@@ -1,6 +1,6 @@
-import { createNoticePublisher, type NoticeOptions } from '@goodvibes-jev/engine/terminal-shell/notice-publication';
-import { runtimeEventOfNotice, runtimeEventKey } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createNoticePublisher, type NoticeOptions } from '@goodvibes/engine/terminal-shell/notice-publication';
+import { runtimeEventOfNotice, runtimeEventKey } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { delegatedTaskEventOfNotice } from './delegated-task-notices.ts';
 import { getSharedNotificationFeed, type NotificationFeed } from './notifications-feed.ts';
 export {
@@ -8,7 +8,7 @@ export {
   type NoticeParts,
   type NoticeOptions,
   type NoticeSink,
-} from '@goodvibes-jev/engine/terminal-shell/notice-publication';
+} from '@goodvibes/engine/terminal-shell/notice-publication';
 const publish = createNoticePublisher({
   resolveEvent(text, provenance) {
     const event = delegatedTaskEventOfNotice(text) ?? runtimeEventOfNotice(text, provenance);

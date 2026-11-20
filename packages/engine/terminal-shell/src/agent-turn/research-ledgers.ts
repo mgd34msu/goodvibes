@@ -1,6 +1,6 @@
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 
 /**
  * Where the research tools of one tool registry keep their records. The run

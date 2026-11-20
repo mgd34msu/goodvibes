@@ -54,8 +54,8 @@ import {
   CONVERSATIONAL_TURN_TOOLS,
   resolveCaptureAuthority,
   type CaptureAuthorityDecision,
-} from '@goodvibes-jev/engine/platform/platform/personal-capture';
-import { occasionAcknowledgementInstruction } from '@goodvibes-jev/engine/platform/platform/occasions';
+} from '@goodvibes/engine/platform/platform/personal-capture';
+import { occasionAcknowledgementInstruction } from '@goodvibes/engine/platform/platform/occasions';
 import { AGENT_OCCASION_ACKNOWLEDGE } from './occasions-types.js';
 
 /**

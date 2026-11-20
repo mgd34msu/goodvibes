@@ -1,4 +1,4 @@
-import type { GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import type { GatePresetName } from '@goodvibes/engine/platform/platform/gate/presets';
 import { createNativeHostFetch } from './native-host-fetch.js';
 import { NativeConversationIntakePreflight } from './native-conversation-intake-preflight.js';
 import { NativeConversationIntakeControls, type NativeConversationIntakePolicy, type NativeConversationIntakeState } from './native-conversation-intake.js';
@@ -10,9 +10,9 @@ import { NativeWorkSubmissionJournal } from './native-work-submission-journal.js
 import { NativeWorkSubmissionControls, type NativeWorkSubmissionBinding } from './native-work-submission.js';
 import { createNativeWorkSubmissionBinding, createNativeSubmissionIdentity, type NativeHostIdentityFormat, type NativeSubmissionHost } from './native-work-submission-host.js';
 import { NativeWorkSourceError, readNativeWorkSourceFile } from './native-work-submission-source.js';
-import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
+import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes/engine/operator-client';
 
-import { getOperatorWorkLedgerProject } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import { getOperatorWorkLedgerProject } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { BoundWorkLedgerModel as NativeWorkLedgerModel } from './bound-work-ledger.js';
 import type { NativeWorkLedgerView } from './work-ledger-view.js';
 import type { NativeWorkLedgerBinding } from './work-ledger-projection.js';

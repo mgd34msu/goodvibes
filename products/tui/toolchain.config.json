@@ -1,8 +1,8 @@
 {
   "//": "Private monorepo product. Build and release qualification are owned by the repository root; engine and toolchain modules resolve from the engine workspace.",
-  "packageName": "@goodvibes-jev/tui",
+  "packageName": "@goodvibes/tui",
   "enginePin": {
-    "enginePackage": "@goodvibes-jev/engine",
+    "enginePackage": "@goodvibes/engine",
     "pinSource": "dependencies",
     "lockfile": "../../bun.lock",
     "sourceRoots": [
@@ -62,7 +62,7 @@
     "binaryDefault": "dist/goodvibes-linux-x64"
   },
   "publish": {
-    "packageName": "@goodvibes-jev/tui",
+    "packageName": "@goodvibes/tui",
     "defaultRegistry": "https://registry.npmjs.org",
     "requiredTarballPaths": [
       "README.md",

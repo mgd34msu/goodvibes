@@ -1,6 +1,6 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { defineSelector, STAKES_BANDS } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
+import { defineSelector, STAKES_BANDS } from '@goodvibes/judgment';
+import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { captureStrictJudgmentJson, prepareJudgmentResult } from '../gate/judgment-result.js';
 import type { ProtectedSourceOwner } from '../security/source-screening/types.js';

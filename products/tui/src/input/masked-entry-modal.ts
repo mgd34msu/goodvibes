@@ -12,10 +12,10 @@
  * a rotation, sign the account out everywhere).
  */
 
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { SurfaceModal, SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
+import type { UserAuthManager } from '@goodvibes/engine/platform/platform/security';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { SurfaceModal, SurfaceModalHost } from '@goodvibes/engine/terminal-shell/surface-modal-host';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';
 import { renderMaskedEntryModal, type MaskedEntryView } from '../renderer/masked-entry-modal.ts';
 import { isTextBackspace } from './delete-key-policy.ts';

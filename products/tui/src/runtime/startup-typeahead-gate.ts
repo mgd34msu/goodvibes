@@ -5,4 +5,4 @@ export {
   createStartupTypeaheadGate,
   type StartupTypeaheadGate,
   type StartupTypeaheadGateOptions,
-} from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
+} from '@goodvibes/engine/terminal-shell/blocking-permission-input';

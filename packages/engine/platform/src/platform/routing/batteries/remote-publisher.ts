@@ -1,4 +1,4 @@
-import { defineBattery, oneOf, STAKES_BANDS, yesNo, type JsonValue } from '@goodvibes-jev/judgment/decisions';
+import { defineBattery, oneOf, STAKES_BANDS, yesNo, type JsonValue } from '@goodvibes/judgment/decisions';
 
 function evidence(record: Readonly<Record<string, string>>) {
   return {

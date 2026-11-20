@@ -20,9 +20,9 @@
 /** OpenTelemetry SpanStatusCode.ERROR. Use in custom observer implementations with `span.setStatus({ code: SPAN_STATUS_ERROR })`. */
 export const SPAN_STATUS_ERROR = 2 as const;
 
-import type { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import type { GoodVibesError } from '@goodvibes/engine/errors';
 import type { AnyRuntimeEvent } from '../events/domain-map.js';
-import type { TransportObserver, TransportActivityInfo } from '@goodvibes-jev/engine/transport-core';
+import type { TransportObserver, TransportActivityInfo } from '@goodvibes/engine/transport-core';
 
 export type { AnyRuntimeEvent };
 
@@ -50,7 +50,7 @@ export type AuthTransitionReason = 'login' | 'logout' | 'replace' | 'refresh' | 
  * Re-export TransportActivityInfo from transport-core so platform consumers
  * don't need to import from an internal package.
  */
-export type { TransportActivityInfo } from '@goodvibes-jev/engine/transport-core';
+export type { TransportActivityInfo } from '@goodvibes/engine/transport-core';
 
 /**
  * Auth transition metadata surfaced to the observer.
@@ -70,7 +70,7 @@ export interface AuthTransitionInfo {
  */
 // PlatformObserver extends TransportObserver which contributes:
 //   onTransportActivity?(info: TransportActivityInfo): void
-// See @goodvibes-jev/engine/transport-core for the inherited member definition.
+// See @goodvibes/engine/transport-core for the inherited member definition.
 export interface PlatformObserver extends TransportObserver {
   /**
    * Called for every event dispatched through the realtime transport

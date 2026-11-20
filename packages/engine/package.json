@@ -1,5 +1,5 @@
 {
-  "name": "@goodvibes-jev/engine",
+  "name": "@goodvibes/engine",
   "version": "3.3.1",
   "description": "Shared platform services, clients, transports, and terminal components for GoodVibes.",
   "keywords": [
@@ -4452,7 +4452,7 @@
     "routing:proof": "bun scripts/routing-proof.ts"
   },
   "dependencies": {
-    "@goodvibes-jev/judgment": "workspace:*",
+    "@goodvibes/judgment": "workspace:*",
     "saxes": "6.0.0",
     "smol-toml": "1.9.1",
     "tar": "7.5.22",

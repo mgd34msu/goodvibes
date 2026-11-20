@@ -19,7 +19,7 @@
  * refused with that reason.
  */
 
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { createDomainDispatch } from '../store/index.js';

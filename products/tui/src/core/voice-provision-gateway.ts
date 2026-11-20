@@ -18,8 +18,8 @@
 // its tests round-trip against a mocked daemon.
 // ---------------------------------------------------------------------------
 
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import { resolveOperatorRpc, describeOperatorRpcError } from '../runtime/client/operator-endpoint.ts';
 import type { VoiceRuntimeStatusResult, VoiceLocalInstallResult } from './voice-provision-status.ts';
 import { voiceStatusLines, voiceInstallReceiptLines, voiceInstallComponentLine } from './voice-provision-status.ts';

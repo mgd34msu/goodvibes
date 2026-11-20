@@ -1,10 +1,10 @@
 /** Explicit Discord account/DM scope over the canonical source and registration owners. */
 import { realpath } from 'node:fs/promises';
-import { createInboxRouteResolver } from '@goodvibes-jev/engine/platform/platform/channels';
-import type { ClusterClock } from '@goodvibes-jev/engine/platform/platform/cluster';
+import { createInboxRouteResolver } from '@goodvibes/engine/platform/platform/channels';
+import type { ClusterClock } from '@goodvibes/engine/platform/platform/cluster';
 import { acquireDiscordInboxIdentity, resolveDiscordInboxElectionScope, acquireDiscordInboxRegistryRevision, createDiscordInboxOwner, createOwnedTriagedInboxSource,
   type DiscordInboxOwnerOptions, type VerifiedDiscordInboxOwner, type OwnedInboxSource, type InboxTriageAuthority,
-} from '@goodvibes-jev/engine/platform/platform/intake';
+} from '@goodvibes/engine/platform/platform/intake';
 import { createMultiOwnerDaemonInboxFactory, type DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
 import { attachDaemonInboxTagging, type DaemonTriageTaggingActivation } from './tagged-inbox-composition.js';
 import { ownAccountInboxStore } from './account-inbox-store.js';

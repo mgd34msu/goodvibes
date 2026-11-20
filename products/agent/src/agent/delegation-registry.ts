@@ -1,4 +1,4 @@
-import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
+import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@goodvibes/engine/terminal-shell/agent-turn/store-file';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 

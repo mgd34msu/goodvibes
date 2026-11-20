@@ -14,7 +14,7 @@ import { completeJudgmentView } from './complete-view.js';
  * Band: low stakes. The summary is a view of a page the caller can fetch in
  * full; a poor pick costs a second fetch. Code uses the pick when it acts.
  */
-import { defineSelector, STAKES_BANDS, type Candidate } from '@goodvibes-jev/judgment';
+import { defineSelector, STAKES_BANDS, type Candidate } from '@goodvibes/judgment';
 
 /** One paragraph as a candidate. */
 export function paragraphCandidate(id: string, text: string): Candidate {

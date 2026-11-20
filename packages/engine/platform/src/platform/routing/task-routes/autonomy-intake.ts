@@ -1,7 +1,7 @@
 import { isClassicOperation } from '../../runtime/decision-policy.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { defineBattery, oneOf, STAKES_BANDS, yesNo, type BatteryRun, type EntryType, type JudgmentPort, type Questions, type JudgmentResult } from '@goodvibes-jev/judgment';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
+import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
+import { defineBattery, oneOf, STAKES_BANDS, yesNo, type BatteryRun, type EntryType, type JudgmentPort, type Questions, type JudgmentResult } from '@goodvibes/judgment';
 import { prepareJudgmentResult, captureStrictJudgmentJson } from '../../gate/judgment-result.js';
 import { assertJudgmentInput, captureOwnedJson } from '../../gate/judgment-input.js';
 import { readNaturalLanguageSchedule, type ScheduleReading } from '../../automation/schedule-reading.js';

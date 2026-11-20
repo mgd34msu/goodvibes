@@ -17,10 +17,10 @@
  */
 
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
-import { registerMailCommand, type MailMessage } from '@goodvibes-jev/engine/terminal-shell/mail-command';
-import type { ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import type { OperatorMethodOutput } from '@goodvibes/engine/platform';
+import { registerMailCommand, type MailMessage } from '@goodvibes/engine/terminal-shell/mail-command';
+import type { ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import {
   EXPLICIT_WRITE_INVOCATION_CONTEXT,
   claimIrreversibleWrite,

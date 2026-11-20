@@ -1,8 +1,8 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /** Email style readings. Code counts settled items and composes a draft; readers never send. */
 import { types as nodeTypes } from 'node:util';
-import { defineBattery, defineSelector, LIMITS, oneOf, STAKES_BANDS, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, DecisionModelsDisabledError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { defineBattery, defineSelector, LIMITS, oneOf, STAKES_BANDS, type JudgmentPort } from '@goodvibes/judgment';
+import { captureJudgmentPort, DecisionModelsDisabledError, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { prepareJudgmentResult, retainStrictJudgmentJson } from '../gate/judgment-result.js';

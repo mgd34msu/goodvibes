@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 const meaning = (query: string, subject?: string) => ({ query, subject: subject ?? '', subjects: [], sources: [] });
 const compare = (query: string, previous: string, subject = 'Living room television') => ({ question: meaning(query, subject),
   candidate: { reference: 'gap-1', title: previous, ...meaning(previous, subject) } });

@@ -4,7 +4,7 @@
  * lookup never installs one; its "no server" answer names this command, so
  * both terminal apps run the same install and print the same result.
  */
-import type { LanguageServerInstallOutcome } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import type { LanguageServerInstallOutcome } from '@goodvibes/engine/platform/platform/intelligence';
 
 export const LANGUAGE_SERVER_INSTALL_USAGE = '/intelligence install <file|language>';
 

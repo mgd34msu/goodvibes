@@ -1,4 +1,4 @@
-import type { DecisionEntry, DecisionVolumeEntry } from '@goodvibes-jev/judgment';
+import type { DecisionEntry, DecisionVolumeEntry } from '@goodvibes/judgment';
 import { array, strictObject, string, number } from 'zod/v4';
 import { UNNAMED } from './unnamed.js';
 

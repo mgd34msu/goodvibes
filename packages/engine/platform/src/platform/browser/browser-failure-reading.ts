@@ -1,5 +1,5 @@
-import { defineBattery, estimateTokens, LIMITS, oneOf, STAKES_BANDS, toJson, yesNo, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, judgmentPort, JudgmentAuthorityRetiredError, DecisionModelsDisabledError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
+import { defineBattery, estimateTokens, LIMITS, oneOf, STAKES_BANDS, toJson, yesNo, type EntryType, type JudgmentPort } from '@goodvibes/judgment';
+import { captureJudgmentPort, judgmentPort, JudgmentAuthorityRetiredError, DecisionModelsDisabledError, type JudgmentPortCapture } from '@goodvibes/engine/errors';
 import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { captureJudgmentFailure } from '../gate/failure-input.js';

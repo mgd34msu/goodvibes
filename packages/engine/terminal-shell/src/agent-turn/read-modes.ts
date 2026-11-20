@@ -10,9 +10,9 @@
  * here refuses a call. The same table answers the Agent's policy explanation,
  * so what the Agent says matches what runs.
  */
-import type { Tool, ToolReadModes } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { wrapReadToolForAdmittedAgentPolicy, wrapSettingsToolForAdmittedAgentPolicy } from '@goodvibes-jev/engine/platform/platform/gate/policy';
+import type { Tool, ToolReadModes } from '@goodvibes/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { wrapReadToolForAdmittedAgentPolicy, wrapSettingsToolForAdmittedAgentPolicy } from '@goodvibes/engine/platform/platform/gate/policy';
 
 const AGENT_READ_MODES: Readonly<Record<string, ToolReadModes>> = Object.freeze({
   remote: { field: 'mode', values: ['pools', 'contracts', 'artifacts', 'review'] },

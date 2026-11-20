@@ -1,4 +1,4 @@
-import { createTerminalPolish } from '@goodvibes-jev/engine/terminal-shell/renderer/polish';
+import { createTerminalPolish } from '@goodvibes/engine/terminal-shell/renderer/polish';
 export {
   DEFAULT_VIEW_PALETTE as DEFAULT_PANEL_PALETTE,
   extendPalette,
@@ -7,14 +7,14 @@ export {
   buildStyledViewLine as buildStyledPanelLine,
   type ViewPalette as PanelPalette,
   type StyledViewSegment as StyledPanelSegment,
-} from '@goodvibes-jev/engine/terminal-shell/renderer/polish-core';
+} from '@goodvibes/engine/terminal-shell/renderer/polish-core';
 export type {
   ViewWorkspaceSection as PanelWorkspaceSection,
   PrimaryScrollableViewSectionConfig as PrimaryScrollablePanelSectionConfig,
   ScrollableViewSectionConfig as ScrollablePanelSectionConfig,
   StackedScrollableViewSectionConfig as StackedScrollablePanelSectionConfig,
   ViewWorkspaceConfig as PanelWorkspaceConfig,
-} from '@goodvibes-jev/engine/terminal-shell/renderer/polish';
+} from '@goodvibes/engine/terminal-shell/renderer/polish';
 export const {
   buildGuidanceLine,
   buildViewTitle: buildPanelTitle,

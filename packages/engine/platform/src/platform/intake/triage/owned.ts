@@ -5,7 +5,7 @@
  * inbox read; a label shows only while the row's content is what was scored.
  */
 import { join } from 'node:path';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import type { JudgmentPort } from '@goodvibes/judgment';
 import { HandlerError } from '../../control-plane/host-handlers.js';
 import { acquireCrossProcessLock } from '../../state/durable-file-io.js';
 import { isClassicOperation } from '../../runtime/decision-policy.js';

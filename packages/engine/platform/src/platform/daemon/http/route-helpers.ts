@@ -5,7 +5,7 @@ export type {
   ChannelConversationKind,
   ChannelLifecycleAction,
   JsonRecord,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';
 export {
   isJsonRecord,
   missingScopes,
@@ -15,7 +15,7 @@ export {
   readChannelLifecycleAction,
   readOptionalBoundedInteger,
   scopeMatches,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';
 
 /** A body the shared parser already answered (400 invalid JSON, 413 too large); it is returned to the client as is. */
 export class RejectedBody extends Error {

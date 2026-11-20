@@ -5,9 +5,9 @@
  * line goes to the daemon over the `devices.*` verbs (DevicesClient); nothing
  * here decides a grant or a retention window.
  */
-import type { DevicesClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { RefusalError, readRefusal, refusal } from '@goodvibes-jev/engine/errors';
+import type { DevicesClient } from '@goodvibes/engine/platform/platform/runtime/client';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { RefusalError, readRefusal, refusal } from '@goodvibes/engine/errors';
 import { commandRefusal } from './command-confirmation.js';
 
 const DEVICE_CAPABILITY_SUBCOMMANDS = ['nodes', 'grants', 'revoke-grant', 'captures', 'delete-capture'] as const;

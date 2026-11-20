@@ -1,4 +1,4 @@
-export * from '@goodvibes-jev/engine/terminal-shell';
+export * from '@goodvibes/engine/terminal-shell';
 export * from './help.ts';
 export * from './status.ts';
 export * from './completion.ts';

@@ -1,7 +1,7 @@
-import { assertCurrentToolEffect } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { assertCurrentToolEffect } from '@goodvibes/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import { lstatSync } from 'node:fs';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { connectedHostOperatorTokenPath } from './connected-host-auth.js';
 import { agentHostPairingStorePath } from './connected-host-pairing-store.js';
 import { resolveConnectedHost, type ConnectedHostConfigReader as AgentConnectedHostConfigReader, type ConnectedHostSource, type ConnectedHostUnavailable } from './connected-host-client.js';

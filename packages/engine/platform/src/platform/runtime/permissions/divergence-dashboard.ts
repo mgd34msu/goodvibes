@@ -17,7 +17,7 @@
  * is exercised only via `DivergencePanel` in the diagnostics layer.
  */
 
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import type {
   DivergenceReport,
   SimulationMode,

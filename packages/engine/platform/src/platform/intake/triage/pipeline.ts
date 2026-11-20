@@ -1,4 +1,4 @@
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import type { JudgmentPort } from '@goodvibes/judgment';
 import type { InboxCursorStore, InboxTriageReceiptRow } from '../cursor-store.js';
 import { captureTriageInputs } from './evidence.js';
 import { scoreCapturedTriage } from './scorer.js';

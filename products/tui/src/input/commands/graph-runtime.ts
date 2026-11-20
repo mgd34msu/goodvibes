@@ -1,9 +1,9 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { getOperatorRpc, describeOperatorRpcError } from './operator-rpc.ts';
 import { renderWorkstreamGraphLines } from '../../views/workstream-graph-render.ts';
-import { defineCommand, defineList, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { listInput, readAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { defineCommand, defineList, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { listInput, readAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 
 // ---------------------------------------------------------------------------
 // /graph, a workstream's task graph (fleet.graph.get) rendered legibly.

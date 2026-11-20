@@ -13,7 +13,7 @@
  * wrong yes loses the cache discount for that prompt, a wrong no costs one
  * more failed creation call), so it takes the low bands.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 const LOW = STAKES_BANDS.low;
 const MEDIUM = STAKES_BANDS.medium;

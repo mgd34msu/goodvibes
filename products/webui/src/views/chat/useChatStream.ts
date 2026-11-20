@@ -2,11 +2,11 @@ import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState, Ref
 import { client as platformClient, DEFAULT_SSE_RECONNECT } from '../../lib/goodvibes';
 import { getClientLifetime, isClientLifetimeCurrent } from '../../lib/client-lifetime';
 import { asRecord, firstString } from '../../lib/object';
-import { RefusalError } from '@goodvibes-jev/engine/errors';
-import { readStreamGapDropped } from '@goodvibes-jev/engine/transport-core/errors';
+import { RefusalError } from '@goodvibes/engine/errors';
+import { readStreamGapDropped } from '@goodvibes/engine/transport-core/errors';
 import { noteRelayOverflow } from '../../lib/relay-stream-overflow';
 import { isSessionNotFoundError, isAuthExpiredError, isMethodUnavailableError, isNoActiveTurnError, isTurnStoppingError } from '../../lib/errors';
-import type { ToolActivityWords } from '@goodvibes-jev/engine/contracts';
+import type { ToolActivityWords } from '@goodvibes/engine/contracts';
 import { LocalCompanionMessage } from '../../lib/companion-chat';
 import {
   ACTIVE_TURN_STATES,

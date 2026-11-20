@@ -10,7 +10,7 @@ import {
   runWorkspaceToolchain as runToolchain,
   WorkspaceToolchainInterrupted,
   type WorkspaceToolchainCommand,
-} from '@goodvibes-jev/engine/toolchain';
+} from '@goodvibes/engine/toolchain';
 import { withBuildPreparationLock } from './build-preparation-lock.ts';
 
 /** The daemon is this product's only build artifact; the shared daemon-only selectors would skip it. The bin checks every other argument. */

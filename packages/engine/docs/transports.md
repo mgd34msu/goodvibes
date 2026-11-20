@@ -19,15 +19,15 @@ explicit platform facade subpaths.
 
 | Subpath | Primary exports |
 |---|---|
-| `@goodvibes-jev/engine/platform/transport-core` | `ClientTransport`, direct in-process helpers, event envelopes, common transport errors |
-| `@goodvibes-jev/engine/platform/transport-direct` | Facade for direct/in-process transport helpers from `transport-core` |
-| `@goodvibes-jev/engine/platform/transport-http` | HTTP client construction, auth token normalization, retry/backoff helpers, SSE transport |
-| `@goodvibes-jev/engine/platform/transport-realtime` | Runtime event SSE/WebSocket connectors and domain event feeds |
+| `@goodvibes/engine/platform/transport-core` | `ClientTransport`, direct in-process helpers, event envelopes, common transport errors |
+| `@goodvibes/engine/platform/transport-direct` | Facade for direct/in-process transport helpers from `transport-core` |
+| `@goodvibes/engine/platform/transport-http` | HTTP client construction, auth token normalization, retry/backoff helpers, SSE transport |
+| `@goodvibes/engine/platform/transport-realtime` | Runtime event SSE/WebSocket connectors and domain event feeds |
 
 ## Retry and errors
 
 HTTP retry behavior is centralized in `transport-http` and uses the canonical
-`RETRYABLE_STATUS_CODES` from `@goodvibes-jev/engine/errors`. Transport errors are
+`RETRYABLE_STATUS_CODES` from `@goodvibes/engine/errors`. Transport errors are
 `GoodVibesError` instances with `source: "transport"` so callers can treat
 network, protocol, timeout, and configuration failures without message parsing.
 
@@ -55,7 +55,7 @@ domain.
 import {
   createRemoteRuntimeEvents,
   createWebSocketConnector,
-} from '@goodvibes-jev/engine/platform/transport-realtime';
+} from '@goodvibes/engine/platform/transport-realtime';
 
 const events = createRemoteRuntimeEvents(
   createWebSocketConnector('https://goodvibes.example.com', token, WebSocket, {
@@ -73,7 +73,7 @@ surface: domain events, outbound-queue backpressure caps, the `ws://` auth
 guard, and the turn lifecycle gate.
 
 Transport errors should preserve useful event fields and use typed platform error
-classes. Retryable HTTP status codes come from `@goodvibes-jev/engine/errors`.
+classes. Retryable HTTP status codes come from `@goodvibes/engine/errors`.
 
 ## See also
 

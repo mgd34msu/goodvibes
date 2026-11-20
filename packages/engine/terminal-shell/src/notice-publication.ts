@@ -6,9 +6,9 @@
  * received the notice, so there is no later point at which it could be stale.
  * Restored notices enter history without another toast.
  */
-import { runtimeEventOfNotice, type RuntimeEventProvenance } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
-import type { NotificationFeed } from '@goodvibes-jev/engine/platform/platform/runtime/notification-feed';
-import type { NoticeMeta } from '@goodvibes-jev/engine/platform/platform/core';
+import { runtimeEventOfNotice, type RuntimeEventProvenance } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
+import type { NotificationFeed } from '@goodvibes/engine/platform/platform/runtime/notification-feed';
+import type { NoticeMeta } from '@goodvibes/engine/platform/platform/core';
 /** Receives every system notice added to (or restored into) the conversation. */
 export type NoticeSink = (
   content: string,

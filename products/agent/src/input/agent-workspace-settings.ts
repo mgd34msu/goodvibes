@@ -1,10 +1,10 @@
-import { observeImportFile, assertImportFileCurrent, configKeyFacts, displaySettingValue, isSecretBearingConfigKey, isSecretReferenceValue, type SubscriptionImportEntry } from '@goodvibes-jev/engine/platform/platform/config';
-import { captureStrictJudgmentJson, judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import { containsIssuerCredential, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
+import { observeImportFile, assertImportFileCurrent, configKeyFacts, displaySettingValue, isSecretBearingConfigKey, isSecretReferenceValue, type SubscriptionImportEntry } from '@goodvibes/engine/platform/platform/config';
+import { captureStrictJudgmentJson, judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import { containsIssuerCredential, writeDocument } from '@goodvibes/engine/platform/platform/utils';
 import { readFileSync } from 'node:fs';
 import { getAgentSettingsSchema, readAgentSettingValue, type AgentConfigSetting } from '../config/settings-catalog.ts';
-import type { PendingSubscriptionLogin, ProviderSubscription, SubscriptionGrant } from '@goodvibes-jev/engine/platform/platform/config';
+import type { PendingSubscriptionLogin, ProviderSubscription, SubscriptionGrant } from '@goodvibes/engine/platform/platform/config';
 import { setHarnessSetting } from '../agent/harness-control.ts';
 import { applyThemeModeSettingChange, applyThemeNameSettingChange, THEME_MODE_CONFIG_KEY, THEME_NAME_CONFIG_KEY } from '../renderer/theme-mode-config.ts';
 import { listThemeChoices, normalizeThemeName } from '../renderer/theme.ts';

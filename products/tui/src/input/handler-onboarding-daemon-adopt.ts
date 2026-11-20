@@ -4,10 +4,10 @@
  * = 'adopt' fields. Extracted from handler-onboarding.ts to keep that file
  * under the architecture line cap.
  */
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { adoptedDaemonUrl } from './onboarding/onboarding-wizard-helpers.ts';
-import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config';
-import { readConnectedDaemonToken, writeConnectedDaemonToken } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-credentials';
+import { parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config';
+import { readConnectedDaemonToken, writeConnectedDaemonToken } from '@goodvibes/engine/platform/platform/runtime/client/daemon-credentials';
 import { beginOnboardingOperation, endOnboardingOperation } from './onboarding-operation.ts';
 import type { InputHandlerLike as InputHandler } from './handler-types.ts';
 import {

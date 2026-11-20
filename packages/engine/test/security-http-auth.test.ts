@@ -9,8 +9,8 @@ import { join } from 'node:path';
 import {
   authenticateOperatorToken,
   isOperatorAdmin,
-} from '@goodvibes-jev/engine/platform/platform/security';
-import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+} from '@goodvibes/engine/platform/platform/security';
+import { UserAuthManager } from '@goodvibes/engine/platform/platform/security';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { credentialKindOf } from '../platform/src/platform/security/http-auth.js';
 import { isDirectLoopbackRequest } from '../platform/src/platform/daemon/client-address.js';

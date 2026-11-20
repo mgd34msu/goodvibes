@@ -7,7 +7,7 @@ import type { CheckoutOperations } from './checkout-operations.js';
 import { PaymentOperationStoreError } from './operation-store.js';
 import { SecurityCodeRequestError, type SecurityCodeRequests } from '../security-code-requests.js';
 import { paymentHostStopView, type PaymentStoreStop } from '../payment-host-health.js';
-import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
+import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
 interface PaymentWindowHandlerDeps { readonly replies?: PaymentReplyInbox | undefined; readonly securityCodes?: SecurityCodeRequests | undefined }
 
 function scope(scopes: readonly string[], required: string): boolean { return missingScopes(scopes, [required]).length === 0; }

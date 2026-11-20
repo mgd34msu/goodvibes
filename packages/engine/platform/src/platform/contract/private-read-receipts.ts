@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { isContractId, type ContractView } from './types.js';
 import type { QualityGateResult } from './gates.js';
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import { ownerEvidenceIdentity } from './owner-evidence.js';
 
 type ArchiveOwner = Pick<ContractView, 'id'> & Partial<Pick<ContractView, 'projectRoot' | 'inputSnapshot' | 'units' | 'groups'>>;

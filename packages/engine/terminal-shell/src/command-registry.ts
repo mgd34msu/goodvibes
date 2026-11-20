@@ -2,11 +2,11 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { SlashCommandRawRest } from './slash-command-parser.js';
 import { captureNativeConversationInput, type NativeConversationInput } from './native/native-conversation-input.js';
-import type { DaemonWriteRefusal } from '@goodvibes-jev/engine/platform/platform/config';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
+import type { DaemonWriteRefusal } from '@goodvibes/engine/platform/platform/config';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import type { CommandDescription } from './command-actions/types.js';
-import { Secret } from '@goodvibes-jev/engine/platform/platform/security';
+import { Secret } from '@goodvibes/engine/platform/platform/security';
 
 /**
  * The `afterCommand` both terminal apps give their registry: a setting a

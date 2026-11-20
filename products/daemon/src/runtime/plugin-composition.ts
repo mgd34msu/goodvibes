@@ -34,11 +34,11 @@
  * run it, naming the plugin, so the same plugin loaded by a surface is visibly
  * where that half happens.
  */
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import type { CommandRegistryLike, HostSlashCommand } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
-import type { PluginLoaderDeps } from '@goodvibes-jev/engine/platform/platform/plugins';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import type { CommandRegistryLike, HostSlashCommand } from '@goodvibes/engine/platform/platform/runtime/ui';
+import type { PluginLoaderDeps } from '@goodvibes/engine/platform/platform/plugins';
 import type { RuntimeServices } from './runtime-services-types.js';
 
 /**

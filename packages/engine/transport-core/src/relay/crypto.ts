@@ -13,7 +13,7 @@
 // This module intentionally holds ZERO relay-protocol knowledge, it only knows
 // bytes and keys. Higher layers (handshake.ts, secure-channel.ts) compose these.
 
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 
 /** Named curve used for all relay key agreement. */
 export const RELAY_CURVE = 'P-256' as const;

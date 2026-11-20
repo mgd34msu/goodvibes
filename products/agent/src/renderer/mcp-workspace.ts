@@ -1,4 +1,4 @@
-import { createMcpWorkspaceRenderer } from '@goodvibes-jev/engine/terminal-shell/renderer/mcp-workspace';
+import { createMcpWorkspaceRenderer } from '@goodvibes/engine/terminal-shell/renderer/mcp-workspace';
 export const { renderMcpWorkspace, renderMcpWorkspacePackageText } = createMcpWorkspaceRenderer({
   formWriteHelp: 'Workspace writes require explicit confirmation. Type yes on the Confirm field, then save from here.',
   configHelp:

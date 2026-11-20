@@ -61,7 +61,7 @@
  */
 import { useCallback, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { describeCardEntryRefusal, describeCardTransportRefusal, mayCrossWithCardDetails } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import { describeCardEntryRefusal, describeCardTransportRefusal, mayCrossWithCardDetails } from '@goodvibes/engine/platform/platform/payments/browser';
 import { cardEntryTransport } from '../../lib/insecure-origin';
 import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';

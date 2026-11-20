@@ -1,7 +1,7 @@
-import { settingCategoryLabel } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
-import { createSettingsRows, settingsNavigationHints } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-rows';
-import { createSettingsLayout, settingsCategoryRows } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-layout';
-import { createSettingsDocumentation } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-documentation';
+import { settingCategoryLabel } from '@goodvibes/engine/terminal-shell/renderer/settings-metadata';
+import { createSettingsRows, settingsNavigationHints } from '@goodvibes/engine/terminal-shell/renderer/settings-rows';
+import { createSettingsLayout, settingsCategoryRows } from '@goodvibes/engine/terminal-shell/renderer/settings-layout';
+import { createSettingsDocumentation } from '@goodvibes/engine/terminal-shell/renderer/settings-documentation';
 /**
  * renderSettingsModal, the settings modal drawn with the surface kit.
  *

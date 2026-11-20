@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { toJson, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
+import { toJson, type JudgmentPort } from '@goodvibes/judgment';
 import { captureDecisionRouterSettings, type DecisionRouterTarget } from '../config/decision-router-settings.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { decisionRouterCategory } from '../routing/batteries/decision-router.js';

@@ -1,6 +1,6 @@
 import type { ApprovalBroker } from '../approval-broker.js';
 import { putToOwner } from '../owner-act.js';
-import { systemActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { systemActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { admitEffects } from '../../security/effect-authority.js';
 import { configKeyFacts } from '../../config/config-key-facts.js';
 import type { TurnCancellationResult } from '../../core/turn-cancellation.js';

@@ -1,7 +1,7 @@
 import {
   BrowserJudgmentError, missingScopes,
   type AuthenticatedPrincipal, type BrowserJudgmentBatteryId,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';
 import type { GatewayMethodDescriptor } from '../control-plane/method-catalog-shared.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { BrowserJudgmentReferences } from './references.js';

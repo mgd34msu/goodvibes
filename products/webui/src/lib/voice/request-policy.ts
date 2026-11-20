@@ -17,7 +17,7 @@
  *
  * This is the browser's own implementation of that policy, unit-tested against all
  * three properties above, and it stays separate from the platform on purpose. The installed
- * @goodvibes-jev/engine/platform also publishes a shared SpokenTurnController
+ * @goodvibes/engine/platform also publishes a shared SpokenTurnController
  * (platform/voice/spoken-turn) that drives the same three properties, but it is a
  * daemon-side engine: it is constructed around a live VoiceService (the provider
  * registry that holds real synthesis credentials and does the actual network call) and
@@ -27,7 +27,7 @@
  * scheduler (coalesce, cap, retry-then-skip over an injected `synth` function) is the
  * correct browser-side counterpart, not a stand-in awaiting removal.
  */
-import { classicSpeechEndOffsets } from '@goodvibes-jev/engine/platform/browser/decision-policy';
+import { classicSpeechEndOffsets } from '@goodvibes/engine/platform/browser/decision-policy';
 
 /** One segment's outcome. `status:'ok'` carries decodable audio bytes; `status:'skipped'`
  * carries the last error that made it give up (transient exhausted, or non-transient). */

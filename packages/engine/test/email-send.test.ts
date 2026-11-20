@@ -35,7 +35,7 @@ import { withSurfaceEmailConfig } from '../platform/src/platform/email/surface-c
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { resolveOwnerAddresses } from '../platform/src/platform/security/owner-identity.ts';
 import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.ts';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 
 const OWNER = 'owner@example.test';
 const cleanups: Array<() => void | Promise<void>> = [];

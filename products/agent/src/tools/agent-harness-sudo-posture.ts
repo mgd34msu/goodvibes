@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { CommandContext } from '../input/command-registry.ts';
-import { homeRelativePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/home-path';
+import { homeRelativePath } from '@goodvibes/engine/terminal-shell/agent-turn/home-path';
 
 export interface AgentHarnessSudoPosture {
   readonly capability: 'sudo';

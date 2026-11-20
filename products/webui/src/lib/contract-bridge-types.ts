@@ -20,7 +20,7 @@
  * platform's `operator-contract.json` artifact, so any future drift (including a later pin
  * bump silently changing a shape) fails the test immediately.
  */
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/contracts';
 
 /** Method ids this module provides a contract-typed bridge for (see file header). */
 export const BRIDGE_TYPED_METHOD_IDS = [
@@ -185,7 +185,7 @@ export type CostAttributionRow = CostAttributionGetResult['rows'][number];
 // ─── Hosted sessions (sessions.hosted.*) ───────────────────────────────────────
 // SWAP applied (2.0.0 pin): sessions.hosted.list/create/attach/detach/kill now carry
 // real OperatorMethodInputMap/OutputMap entries (verified against the installed
-// @goodvibes-jev/engine/contracts's operator-method-ids.ts and operator-contract.json, the
+// @goodvibes/engine/contracts's operator-method-ids.ts and operator-contract.json, the
 // `sessions.hosted.` ids appear in both), so these flow straight from the generated
 // contract the same way sessions.detach's own SWAP applied above. HostedSessionRecord
 // and HostedSessionHistoryMessage are item-level aliases (this file's existing

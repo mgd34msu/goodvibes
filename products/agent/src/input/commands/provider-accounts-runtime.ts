@@ -6,7 +6,7 @@ import {
   type ProviderAuthRoute,
   type ProviderRecommendedAction,
   type ProviderRouteRecord,
-} from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+} from '@goodvibes/engine/platform/platform/runtime/shell';
 import { requireProvider, requireServiceRegistry, requireSubscriptionManager } from './runtime-services.ts';
 import { formatProviderAuthRouteId } from '../../provider-auth-route-display.ts';
 
@@ -33,7 +33,7 @@ async function loadProviderAccountSnapshot(context: CommandContext): Promise<Pro
   });
 }
 
-import { createProviderAccountCommands } from '@goodvibes-jev/engine/terminal-shell/provider-account-commands';
+import { createProviderAccountCommands } from '@goodvibes/engine/terminal-shell/provider-account-commands';
 import { commandRefusal } from './confirmation.ts';
 
 const CONNECTED_HOST_SIGN_IN = 'The Agent keeps no daemon or listener session: it connects to a GoodVibes host that manages its own sign-in. Sign in from the terminal app (goodvibes) or the web app of that host.';

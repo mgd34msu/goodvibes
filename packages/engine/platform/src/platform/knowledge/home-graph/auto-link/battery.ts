@@ -1,4 +1,4 @@
-import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 export const homeGraphDocumentKind = defineBattery({
   name: 'engine.knowledge.homegraph-document-kind', version: 1, accuracyFloor: 0.9,

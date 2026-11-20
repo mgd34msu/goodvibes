@@ -5,9 +5,9 @@
  * comparison, judgment and reviewer handoff. Each action is one call of an
  * Agent tool, run as the owner's own act (owner-tool-call.ts).
  */
-import { AgentDocumentRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/document-registry';
-import { defineCommand, defineList, type ActionDescription, type FixedChoice, type InputDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { choiceInput, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { AgentDocumentRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/document-registry';
+import { defineCommand, defineList, type ActionDescription, type FixedChoice, type InputDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { choiceInput, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { artifactInput } from './artifacts-runtime.ts';

@@ -1,7 +1,7 @@
 import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { admitRepairJson, prepareRepairJudgmentResult } from './admission.js';
-import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
-import { toJson, type Candidate, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes/engine/errors';
+import { toJson, type Candidate, type JsonValue, type JudgmentPort } from '@goodvibes/judgment';
 import { JudgmentInputError } from '../../../gate/judgment-input.js';
 import { webGapQuery, webGapRelevance, webGapCoverage } from './battery.js';
 import { repairSourceAuthority } from '../repair-source-authority/battery.js';

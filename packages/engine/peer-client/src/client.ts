@@ -1,6 +1,6 @@
-import type { PeerEndpointContract, PeerEndpointId } from '@goodvibes-jev/engine/contracts';
-import { getPeerContract } from '@goodvibes-jev/engine/contracts';
-import { createHttpTransport, type HttpTransport, type HttpTransportOptions } from '@goodvibes-jev/engine/transport-http';
+import type { PeerEndpointContract, PeerEndpointId } from '@goodvibes/engine/contracts';
+import { getPeerContract } from '@goodvibes/engine/contracts';
+import { createHttpTransport, type HttpTransport, type HttpTransportOptions } from '@goodvibes/engine/transport-http';
 import {
   createPeerRemoteClient,
   type PeerRemoteClient,
@@ -45,7 +45,7 @@ export interface PeerInvokeOptions extends PeerRemoteClientInvokeOptions {}
  * Obtain via `createGoodVibesPlatform({ ... }).peer` or `createPeerApiClient()`.
  *
  * @example
- * import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+ * import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
  *
  * const platform = createGoodVibesPlatform({ baseUrl: 'https://daemon.example.com', authToken: token });
  * const pairState = await platform.peer.pairing.request({ peerKind: 'node', label: 'build-box' });

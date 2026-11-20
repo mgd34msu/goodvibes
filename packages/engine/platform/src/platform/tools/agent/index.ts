@@ -1,6 +1,6 @@
 import { assertAgentBriefFidelity, DelegationPlanHeldError } from '../../agents/brief-fidelity.js';
 import { classicAgentInput } from './classic-policy.js';
-import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { decisionModelPolicyState } from '@goodvibes/engine/errors';
 import { delegationPlanHolds, delegationPlanKey } from '../../agents/delegation-plan-holds.js';
 import { readAgentSessionHistory } from '../../agents/session-history.js';
 import { readCompletionRepairContext } from '../../core/completion-repair-context.js';

@@ -1,11 +1,11 @@
-import { getPluginDirectories, getUserPluginDirectory } from '@goodvibes-jev/engine/platform/platform/plugins';
+import { getPluginDirectories, getUserPluginDirectory } from '@goodvibes/engine/platform/platform/plugins';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { removeEcosystemCatalogEntry, upsertEcosystemCatalogEntry, loadEcosystemCatalog } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
+import { removeEcosystemCatalogEntry, upsertEcosystemCatalogEntry, loadEcosystemCatalog } from '@goodvibes/engine/platform/platform/runtime/ecosystem/catalog';
 import { openModalCommand, requireEcosystemCatalogPaths, requirePluginPathOptions } from './runtime-services.ts';
-import { pluginActions } from '@goodvibes-jev/engine/terminal-shell/plugin-trust-command';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { defineCommand, defineList, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { pluginActions } from '@goodvibes/engine/terminal-shell/plugin-trust-command';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { defineCommand, defineList, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 
 /**
  * `/plugin`, described once (command-actions/): the plugins this app runs

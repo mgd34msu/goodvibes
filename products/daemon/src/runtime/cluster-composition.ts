@@ -32,10 +32,10 @@ import {
   type ClusterClock,
   type ClusterSecretSource,
   type ClusterTransport,
-} from '@goodvibes-jev/engine/platform/platform/cluster';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/platform/platform/cluster';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { ShellPathService } from './index.js';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import { VERSION } from '../version.js';
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 import { installedDataWriterAdmission } from './runtime/native-data-writer.ts';
-import { installedReaderCommand } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { installedReaderCommand } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { COMPILED_VERSION } from './version.ts';
 import { metadataCliResult } from './cli/metadata.ts';
 import { writeExitingStdoutLine, writeFatalLine } from './utils/fatal-boot-write.ts';
-import { exemptLoopbackFromProxy } from '@goodvibes-jev/engine/transport-http/paths';
+import { exemptLoopbackFromProxy } from '@goodvibes/engine/transport-http/paths';
 
 // Requests to this machine never go through a proxy, from the first one on.
 exemptLoopbackFromProxy();
@@ -36,7 +36,7 @@ if (!installedDataWriterAdmission.ok) {
 // graph loads only when no command took the launch.
 const [{ prepareShellCliRuntime }, { resolveGoodVibesHome }] = await Promise.all([
   import('./cli/entrypoint.ts'),
-  import('@goodvibes-jev/engine/platform/platform/config'),
+  import('@goodvibes/engine/platform/platform/config'),
 ]);
 let prepared: Awaited<ReturnType<typeof prepareShellCliRuntime>>;
 try {
@@ -54,7 +54,7 @@ try {
 } catch (error) {
   const [{ reportFatalStartupError }, { envFlag, logger }] = await Promise.all([
     import('./cli/tui-startup.ts'),
-    import('@goodvibes-jev/engine/platform/platform/utils'),
+    import('@goodvibes/engine/platform/platform/utils'),
   ]);
   reportFatalStartupError(
     error,

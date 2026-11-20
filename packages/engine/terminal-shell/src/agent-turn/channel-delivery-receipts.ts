@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { formatJsonStoreWriteReport, readJsonStore, updateJsonStore, type JsonStoreSpec } from './store-file.js';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import type { AgentChannelDeliveryInput, AgentChannelDeliveryResult } from './channel-delivery.js';
 import { readString } from './tool-args.js';
-import { isSecret } from '@goodvibes-jev/engine/platform/platform/security';
+import { isSecret } from '@goodvibes/engine/platform/platform/security';
 
 export type AgentChannelDeliveryReceiptSource = 'command' | 'model-tool';
 export type AgentChannelDeliveryReceiptStatus = 'sent';

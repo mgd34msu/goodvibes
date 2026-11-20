@@ -1,4 +1,4 @@
-import { judgmentPort, readFailure } from '@goodvibes-jev/engine/errors';
+import { judgmentPort, readFailure } from '@goodvibes/engine/errors';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { requireActingReading } from '../types/judgment-held.js';
 /**

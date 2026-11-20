@@ -31,7 +31,7 @@
  * neither depends on the other being present.
  */
 import { format } from 'node:util';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { terminalOutputState } from './terminal-output-state.js';
 export { allowTerminalWrite } from './terminal-write.js';
 

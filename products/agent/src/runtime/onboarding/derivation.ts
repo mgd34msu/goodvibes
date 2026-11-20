@@ -2,7 +2,7 @@ import {
   onboardingAccessSignals,
   hasOnboardingWebhookIngress,
   onboardingIntegrationSignalCount,
-} from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
+} from '@goodvibes/engine/terminal-shell/onboarding-signals';
 import {
   countPermissionToolOverrides,
   hasCustomizedProviderRouting,
@@ -10,9 +10,9 @@ import {
   hasConfiguredProviderState,
   hasCustomizedWorkspaceDefaults,
   hasExternalIntegrations,
-} from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
-import '@goodvibes-jev/engine/terminal-shell/onboarding-values';
-import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config/schema';
+} from '@goodvibes/engine/terminal-shell/onboarding-signals';
+import '@goodvibes/engine/terminal-shell/onboarding-values';
+import { DEFAULT_CONFIG } from '@goodvibes/engine/platform/platform/config/schema';
 import type {
   OnboardingSnapshotState,
   OnboardingStep1CapabilityFlags,

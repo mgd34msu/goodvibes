@@ -1,5 +1,5 @@
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { setupCommandDescription, type SetupRun, type SetupTopicId } from '@goodvibes-jev/engine/terminal-shell/setup-command';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { setupCommandDescription, type SetupRun, type SetupTopicId } from '@goodvibes/engine/terminal-shell/setup-command';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { OnboardingWizardTopic } from '../onboarding/onboarding-wizard-types.ts';
 import { openOnboardingWizard } from './runtime-services.ts';

@@ -1,13 +1,13 @@
-import { resolveWebSurfaceExposure } from '@goodvibes-jev/engine/terminal-shell/cli-network-posture';
-import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { resolveWebSurfaceExposure } from '@goodvibes/engine/terminal-shell/cli-network-posture';
+import { resolveConnectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { resolveRuntimeEndpointBinding } from '../cli/endpoints.ts';
 import { inspectCliExternalRuntime, type CliExternalRuntimeSnapshot } from '../cli/external-runtime.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
+import { readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import { CONNECTED_HOST_LIFECYCLE_STATEMENT, CONNECTED_HOST_OWNERSHIP, gatedConnectedHostCapabilities } from './agent-harness-connected-host-capabilities.ts';
-import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
+import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
 import {
   blockedConnectedHostCapabilities,
   connectedHostCapabilityMap,

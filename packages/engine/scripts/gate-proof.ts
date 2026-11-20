@@ -11,8 +11,8 @@ import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
  *
  *   TYPESAFE_API_KEY=... bun run --cwd packages/engine gate:proof
  */
-import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes-jev/judgment';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes/judgment';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
 import type { PermissionCheckResult } from '../platform/src/platform/permissions/types.ts';
 import type { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';

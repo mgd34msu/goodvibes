@@ -16,7 +16,7 @@ import { completeJudgmentView } from './complete-view.js';
  * Band: low stakes. The audit is advice; a wrong template lists variables as
  * missing or extra that are not. A pick that acts or confirms is used.
  */
-import { defineSelector, NONE, STAKES_BANDS, type Candidate, type JsonValue } from '@goodvibes-jev/judgment';
+import { defineSelector, NONE, STAKES_BANDS, type Candidate, type JsonValue } from '@goodvibes/judgment';
 
 /** Most variables of one file the reading carries; the rest are counted, not listed (the first names show what the file is). */
 export const MAX_JUDGED_ENV_KEYS = 300;

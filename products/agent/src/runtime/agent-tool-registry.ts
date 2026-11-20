@@ -1,26 +1,26 @@
 import { buildAgentConfigRouting } from '../config/daemon-config-routing.ts';
 import { randomUUID } from 'node:crypto';
-import { ToolRegistry, registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolRegistry, registerAllTools } from '@goodvibes/engine/platform/platform/tools';
 import { controlSurfacesFor } from './control-surfaces.ts';
 import { installAgentToolPolicyGuard } from '../tools/agent-tool-policy-guard.ts';
 import { agentBrowserProfileRoot, agentBrowserScreenshotRoot, agentBrowserToolBackend } from './agent-browser.ts';
-import { connectedHostGoogleCalendar } from '@goodvibes-jev/engine/terminal-shell/agent-turn/google-tool';
-import { getOutwardApprovalStore, OUTWARD_APPROVAL_GESTURE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/outward-approvals';
-import { registerAgentTurnTools } from '@goodvibes-jev/engine/terminal-shell/agent-turn/hosted-turn';
-import { AGENT_PLATFORM_TOOL_ADMISSION, decorateAgentWorkerRegistry as decorateAgentTurnWorkerRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-modes';
-import { type GoogleToolWiringDeps } from '@goodvibes-jev/engine/terminal-shell/agent-turn/google-wiring';
+import { connectedHostGoogleCalendar } from '@goodvibes/engine/terminal-shell/agent-turn/google-tool';
+import { getOutwardApprovalStore, OUTWARD_APPROVAL_GESTURE } from '@goodvibes/engine/terminal-shell/agent-turn/outward-approvals';
+import { registerAgentTurnTools } from '@goodvibes/engine/terminal-shell/agent-turn/hosted-turn';
+import { AGENT_PLATFORM_TOOL_ADMISSION, decorateAgentWorkerRegistry as decorateAgentTurnWorkerRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/read-modes';
+import { type GoogleToolWiringDeps } from '@goodvibes/engine/terminal-shell/agent-turn/google-wiring';
 import { wrapAgentContextToolForAgentPolicy } from '../tools/agent-context-policy.ts';
-import { createDaemonExpectationClient } from '@goodvibes-jev/engine/terminal-shell/agent-turn/session-expectations';
-import { connectedHostFamilyRemote } from '@goodvibes-jev/engine/terminal-shell/agent-turn/family-remote';
+import { createDaemonExpectationClient } from '@goodvibes/engine/terminal-shell/agent-turn/session-expectations';
+import { connectedHostFamilyRemote } from '@goodvibes/engine/terminal-shell/agent-turn/family-remote';
 import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compaction.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { RuntimeServices } from './services.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
 import { agentOwnerQuestions } from './client/owner-questions.ts';
 import { createAgentDaemonVerbCaller } from './client/daemon-verbs.ts';
-import { remoteTriggerOperations } from '@goodvibes-jev/engine/platform/platform/triggers';
-import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
+import { remoteTriggerOperations } from '@goodvibes/engine/platform/platform/triggers';
+import type { ProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security';
 
 /**
  * The main conversation's tool registry, composed exactly once, in one place:

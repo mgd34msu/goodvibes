@@ -1,5 +1,5 @@
-import { createModalTokenPipeline } from '@goodvibes-jev/engine/terminal-shell/modal-token-pipeline';
-import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
+import { createModalTokenPipeline } from '@goodvibes/engine/terminal-shell/modal-token-pipeline';
+import type { InfiniteBuffer } from '@goodvibes/engine/terminal-shell';
 import type { ConversationManager } from '../core/conversation.ts';
 import type { SelectionResult, SelectionModal } from './selection-modal.ts';
 import type { BookmarkModal } from './bookmark-modal.ts';
@@ -17,7 +17,7 @@ import type { ContextInspectorModal } from '../renderer/context-inspector.ts';
 import type { FilePickerModal } from './file-picker.ts';
 import type { BlockActionsMenu, BlockActionId } from '../renderer/block-actions.ts';
 import type { SearchManager } from './search.ts';
-import type { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
+import type { SurfaceModalHost } from '@goodvibes/engine/terminal-shell/surface-modal-host';
 import { handleHistorySearchToken, handleSearchModeToken } from './handler-ui-state.ts';
 import {
   handleBookmarkModalToken,

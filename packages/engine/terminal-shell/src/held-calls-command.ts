@@ -5,7 +5,7 @@
  * exact call, so it runs when the work is carried on. A command the model runs
  * may list them but never approves one: the answer is the owner's.
  */
-import { processHeldForOwner, type HeldForOwnerLedger } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { processHeldForOwner, type HeldForOwnerLedger } from '@goodvibes/engine/platform/platform/permissions';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand } from './command-actions/define.js';

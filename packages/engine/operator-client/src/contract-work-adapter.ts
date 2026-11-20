@@ -21,7 +21,7 @@ import {
   contractWorkSnapshot,
   type ContractExternalWorkAdapter,
   type ContractWorkFields,
-} from '@goodvibes-jev/engine/contracts';
+} from '@goodvibes/engine/contracts';
 import type { OperatorRemoteClient } from './client-core.js';
 
 /** The reason a cancel through the adapter records when the caller gives none. */

@@ -2,8 +2,8 @@
 import { CheckinService, CheckinReceiptStore, createProviderBackedCheckinJudge } from '../../checkin/index.js';
 import { createRuntimeCheckinStateReader, judgeOnlyWhenOwnerNeeded } from '../../checkin/state-reader.js';
 import type { ConfigKey } from '../../config/schema.js';
-import { RefusalError } from '@goodvibes-jev/engine/errors';
-import { systemActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { RefusalError } from '@goodvibes/engine/errors';
+import { systemActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { parseChannelDeliveryTarget } from '../../channels/delivery/types.js';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayVerbGroupDeps } from './register-gateway-verb-groups.js';

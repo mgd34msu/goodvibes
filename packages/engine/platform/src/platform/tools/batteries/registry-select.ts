@@ -1,4 +1,4 @@
-import { defineSelector, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineSelector, STAKES_BANDS } from '@goodvibes/judgment';
 
 export const registrySelect = defineSelector({
   name: 'engine.tools.registry-select',

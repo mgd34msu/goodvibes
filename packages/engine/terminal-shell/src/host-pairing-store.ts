@@ -1,6 +1,6 @@
 import { lstatSync, mkdirSync, readFileSync, type Stats } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { BoundedJsonFile, type BoundedJsonFileIO, type BoundedJsonFileTransaction } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
+import { BoundedJsonFile, type BoundedJsonFileIO, type BoundedJsonFileTransaction } from '@goodvibes/engine/platform/platform/state/durable-file-io';
 export const HOST_PAIRING_MAX_RECORDS = 32;
 export const HOST_PAIRING_MAX_BYTES = 256 * 1024;
 export interface HostPairingAttempt {

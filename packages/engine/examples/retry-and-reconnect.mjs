@@ -1,7 +1,7 @@
 /**
  * Configure HTTP retry and realtime reconnect policies.
  */
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
 
 const authToken = process.env.GOODVIBES_TOKEN;
 if (!authToken) {

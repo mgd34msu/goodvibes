@@ -1,6 +1,6 @@
 import type { CommandContext } from './command-registry.ts';
-import type { PromptContextReceipt } from '@goodvibes-jev/engine/terminal-shell/agent-turn/prompt-context-receipts';
-import { discoverVibeFiles } from '@goodvibes-jev/engine/terminal-shell/agent-turn/vibe-file';
+import type { PromptContextReceipt } from '@goodvibes/engine/terminal-shell/agent-turn/prompt-context-receipts';
+import { discoverVibeFiles } from '@goodvibes/engine/terminal-shell/agent-turn/vibe-file';
 import type { AgentWorkspaceProcessSupervisionSummary, AgentWorkspacePromptContextReceiptSummary, AgentWorkspacePromptContextReceiptTimeline, AgentWorkspaceVibeSummary } from './agent-workspace-types.ts';
 
 const WORKSPACE_PROMPT_CONTEXT_INSPECT_ROUTE = 'context action:"prompt" includeParameters:true' as const;

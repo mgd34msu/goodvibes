@@ -1,7 +1,7 @@
 /** Native review bookkeeping. Public/runtime descriptors contain no filesystem
  * facts; only the explicit checkpoint writer projects them onto local disk. */
 import { isDeepStrictEqual } from 'node:util';
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import type { Contract, ContractUnit, UnitCheck } from './types.js';
 import { currentFileReviewFacts, currentFileMatchesSavedDigest, parseCurrentFileReviewFacts, retainCurrentFileLabels, type CurrentFileReviewFacts } from './current-file-observations.js';
 import { ownedContractCheckpointText, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';

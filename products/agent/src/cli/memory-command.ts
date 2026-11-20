@@ -1,5 +1,5 @@
-import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { commandArgsWithLiteralMarker } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
+import { commandJsonOrText as jsonOrText } from '@goodvibes/engine/terminal-shell/cli-output';
+import { commandArgsWithLiteralMarker } from '@goodvibes/engine/terminal-shell/cli-parser-engine';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import {
@@ -13,9 +13,9 @@ import {
   type MemorySemanticSearchResult,
   type ProvenanceLink,
   type ProvenanceLinkKind,
-} from '@goodvibes-jev/engine/platform/platform/state';
-import { assertNoSecretLikeMemoryText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/memory-safety';
-import { formatAgentRecordReference, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
+} from '@goodvibes/engine/platform/platform/state';
+import { assertNoSecretLikeMemoryText } from '@goodvibes/engine/terminal-shell/agent-turn/memory-safety';
+import { formatAgentRecordReference, formatAgentRecordReviewState } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 // Which store a command uses (the host's over the wire, or this machine's file) is decided once there.

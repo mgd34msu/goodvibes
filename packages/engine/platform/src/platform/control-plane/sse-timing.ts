@@ -13,7 +13,7 @@
  * stream survive indefinitely, and a client that hears nothing for that long
  * knows the path is gone and reconnects.
  */
-import { SSE_HEARTBEAT_INTERVAL_MS, sseIdleDeadlineMs } from '@goodvibes-jev/engine/transport-http';
+import { SSE_HEARTBEAT_INTERVAL_MS, sseIdleDeadlineMs } from '@goodvibes/engine/transport-http';
 
 /** The SSE keep-alive heartbeat interval (ms). The gateway fires one immediately on open, then on this cadence. */
 export { SSE_HEARTBEAT_INTERVAL_MS };

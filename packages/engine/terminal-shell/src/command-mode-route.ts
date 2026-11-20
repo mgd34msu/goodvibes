@@ -1,6 +1,6 @@
-import { loadSkillByTrigger } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
+import { loadSkillByTrigger } from '@goodvibes/engine/platform/platform/tools';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
+import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import { activeTokens } from './renderer/theme.js';
 import { commandHistoryLine, type CommandSecretArgs } from './command-registry.js';
 export interface CommandRouteContext {

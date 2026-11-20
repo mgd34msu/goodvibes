@@ -9,9 +9,9 @@
  * Restore is list-only; users can view what compactions ran but cannot roll back.
  */
 
-import { getCompactionEvents } from '@goodvibes-jev/engine/platform/platform/core';
+import { getCompactionEvents } from '@goodvibes/engine/platform/platform/core';
 import { getCompactionQualityScore } from './compaction-quality.ts';
-import type { CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
+import type { CompactionEvent } from '@goodvibes/engine/platform/platform/core';
 import type { CompactionQualityScore } from './compaction-quality.ts';
 
 // ─── formatCompactionEvent ────────────────────────────────────────────────────

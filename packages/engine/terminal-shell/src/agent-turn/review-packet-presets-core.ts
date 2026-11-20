@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
 export interface AgentReviewPacketPresetsToolArgs {
   readonly mode?: unknown | undefined;
   readonly artifactId?: unknown | undefined;

@@ -1,6 +1,6 @@
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolEffect, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { assertCurrentToolEffect, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { bindResearchLedgers, researchArtifactExists, unknownReportArtifact } from './research-ledgers.js';
 import {
   AgentResearchRunRegistry,

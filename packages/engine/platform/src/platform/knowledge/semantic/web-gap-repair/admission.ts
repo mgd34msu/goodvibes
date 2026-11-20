@@ -1,4 +1,4 @@
-import type { Questions } from '@goodvibes-jev/judgment';
+import type { Questions } from '@goodvibes/judgment';
 import { admitJudgmentJson, captureStrictJudgmentJson, prepareJudgmentResult } from '../../../gate/judgment-result.js';
 import { KnowledgeWebGapRepairHeldError } from './types.js';
 

@@ -21,7 +21,7 @@
  * operator also toasts routed information notifications, balanced (and off)
  * is the rule above.
  */
-import type { NotificationFeedEntry, NotificationFeed } from '@goodvibes-jev/engine/platform/platform/runtime/notification-feed';
+import type { NotificationFeedEntry, NotificationFeed } from '@goodvibes/engine/platform/platform/runtime/notification-feed';
 import type { ToastSpec, ToastTone } from './surface-kit-parts.js';
 /** How long a toast stays up. */
 const TOAST_DURATION_MS = 5000;

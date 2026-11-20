@@ -1,6 +1,6 @@
 import type { JsonRecord } from './route-helpers.js';
 import type { RequestPrincipal } from './http-policy.js';
-import type { RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
+import type { RuntimeEventDomain } from '@goodvibes/engine/contracts';
 
 export type { RuntimeEventDomain };
 

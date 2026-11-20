@@ -1,10 +1,10 @@
 import { closeSync, existsSync, openSync, readFileSync, readSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { basename, relative } from 'node:path';
-import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
-import { logger, summarizeError, resolveAndValidatePath, requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ContentPart } from '@goodvibes/engine/platform/platform/providers';
+import { logger, summarizeError, resolveAndValidatePath, requireDefined } from '@goodvibes/engine/platform/platform/utils';
 import { pasteImageFromClipboard, pasteFromClipboard } from './clipboard.js';
 import { MAX_IMAGE_ATTACH_BYTES } from './modal-input-routes.js';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 const URL_REFERENCE_REGEX = /^https?:\/\/[^\s]+$/i;
 const CONTEXT_REFERENCE_TRAILING_PUNCTUATION = /[),.;:!?]+$/;
 function stripTrailingReferencePunctuation(value: string): {

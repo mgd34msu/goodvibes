@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { actorFromPrincipal, type Actor, type OwnerIdentity } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { actorFromPrincipal, type Actor, type OwnerIdentity } from '@goodvibes/engine/daemon-api/http-policy';
 import type { UserAuthManager } from './user-auth.js';
 import type { AuthenticatedNativePairingToken, SettingsPairingAuthority, NativeContinuationGrant, NativeContinuationAuthority, NativeCredential } from '../pairing/pairing-token-store.js';
 import type { RevisionSource } from '../utils/revision.js';

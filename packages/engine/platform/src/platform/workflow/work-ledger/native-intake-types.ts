@@ -1,9 +1,9 @@
 /** Host-owned conversation input and durable intake progress, never execution authority. */
 import { createHash, randomUUID } from 'node:crypto';
-import { canonicalJson, type EntryType } from '@goodvibes-jev/judgment';
+import { canonicalJson, type EntryType } from '@goodvibes/judgment';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { array, enum as enumSchema, literal, number, strictObject, string } from 'zod/v4';
-import { captureJevDecisionContext, validateJevDecision, type JevDecision, type JevDecisionContext, type JevDecisionBinding } from '@goodvibes-jev/judgment/decisions';
+import { captureJevDecisionContext, validateJevDecision, type JevDecision, type JevDecisionContext, type JevDecisionBinding } from '@goodvibes/judgment/decisions';
 import { captureNativeConversationContinuation, canonicalNativeConversationContinuation, nativeConversationContinuationSchema, type NativeConversationContinuation } from './native-continuation-context.js';
 import type { WorkLedgerStorage, WorkLedgerSubmission } from './types.js';
 import { nativeClassicConversationAdmissionSchema, type NativeClassicConversationAdmission } from './native-intake-policy.js';

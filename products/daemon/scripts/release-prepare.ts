@@ -76,8 +76,8 @@ export function parseArgs(argv: readonly string[]): PrepareArgs {
 export function rewriteManifestVersion(text: string, version: string): string {
   versionParts(version);
   const manifest = JSON.parse(text) as { name?: unknown; private?: unknown; version?: unknown };
-  if (manifest?.name !== '@goodvibes-jev/daemon' || manifest.private !== true || typeof manifest.version !== 'string') {
-    throw new Error('Expected the private @goodvibes-jev/daemon manifest');
+  if (manifest?.name !== '@goodvibes/daemon' || manifest.private !== true || typeof manifest.version !== 'string') {
+    throw new Error('Expected the private @goodvibes/daemon manifest');
   }
   versionParts(manifest.version);
   const tokens = [...text.matchAll(/"(?:\\.|[^"\\])*"|[{}\[\]:,]/g)];
@@ -169,7 +169,7 @@ if (import.meta.main) {
     const requestedVersion = args.bump === null ? sharedVersion
       : typeof args.bump === 'string' ? bumpVersion(productVersion, args.bump) : args.bump.exact;
     if (requestedVersion !== sharedVersion) {
-      throw new Error('Daemon releases use the goodvibes-jev root version; select the root version and run bun run sync:version first');
+      throw new Error('Daemon releases use the goodvibes root version; select the root version and run bun run sync:version first');
     }
     const changed = await prepareRelease(root, ['--version', sharedVersion,
       ...(args.changelog ? ['--date', args.date!] : ['--no-changelog'])]);

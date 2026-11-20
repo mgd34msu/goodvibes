@@ -19,7 +19,7 @@
  * Fixtures: the agent's route tool test phrasings, and at least one request
  * per route in the catalog, plus plain conversation that needs no route.
  */
-import { defineSelector, NONE, STAKES_BANDS, type Candidate } from '@goodvibes-jev/judgment';
+import { defineSelector, NONE, STAKES_BANDS, type Candidate } from '@goodvibes/judgment';
 import { TASK_ROUTES } from './catalog.js';
 
 const LOW = STAKES_BANDS.low;

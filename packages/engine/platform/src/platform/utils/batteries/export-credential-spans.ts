@@ -1,4 +1,4 @@
-import { defineCounter, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineCounter, STAKES_BANDS } from '@goodvibes/judgment';
 
 /**
  * `engine.export.credential-spans`: for a session export, whether each

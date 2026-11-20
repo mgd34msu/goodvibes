@@ -1,7 +1,7 @@
 import { assertCapturedInputPathContext } from '../contract/input-authority.js';
 import { existsSync, lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, resolve, relative, sep } from 'node:path';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 
 function pathOutsideRootError(inputPath: string): GoodVibesError {
   return new GoodVibesError(`Path '${inputPath}' is outside the project root`, {

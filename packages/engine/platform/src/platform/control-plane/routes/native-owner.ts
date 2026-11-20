@@ -5,7 +5,7 @@
 import type { NativeExecutionAuthority } from '../../security/http-auth.js';
 import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
+import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
 
 /** The one refusal code for a caller that is not a current paired owner. */
 export const PAIRED_OWNER_REQUIRED = 'PAIRED_OWNER_REQUIRED';

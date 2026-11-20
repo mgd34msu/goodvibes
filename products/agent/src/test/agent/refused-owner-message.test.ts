@@ -26,7 +26,7 @@ import type { BootstrapContext } from '../../runtime/bootstrap.ts';
 import { ShellContextHold, ShellPassthrough } from '../../input/shell-passthrough.ts';
 import { installRemoteConversationRouting } from '../../shell/remote-conversation-wiring.ts';
 import { createOwnerTurnSender } from '../../shell/owner-turn-sender.ts';
-import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { SessionManager } from '@goodvibes/engine/platform/platform/sessions';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 
 const taken = (n: number): NativeConversationIntakeState => ({ status: 'recorded', message: 'Taken by the host.', request: { requestId: `r-${n}`, inputId: `i-${n}` } });

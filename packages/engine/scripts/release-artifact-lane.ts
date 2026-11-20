@@ -6,7 +6,7 @@
  * exactly as publish would (`npm pack` over the normalized publish manifests,
  * the engine and the judgment package it depends on),
  * install the packed tarballs into a scratch consumer project, and run the
- * SHIPPED conformance kit (@goodvibes-jev/engine/contracts/testing) against a
+ * SHIPPED conformance kit (@goodvibes/engine/contracts/testing) against a
  * catalog/daemon composed FROM THE PACKED ARTIFACTS, never from the workspace
  * source. It proves the tarballs are internally coherent before they are
  * published; consumer repos run their own suites against the pins at release
@@ -19,7 +19,7 @@
  * Checks (all run against the installed tarballs' public API):
  *   - packed catalog vs packed contract parity: the operator contract rebuilt
  *     from the packed engine's GatewayMethodCatalog matches the packed
- *     @goodvibes-jev/engine/contracts artifact (method ids + REST bindings).
+ *     @goodvibes/engine/contracts artifact (method ids + REST bindings).
  *   - descriptors-have-handlers: the shipped conformance kit run against a
  *     catalog with the packed terminal-shell ws-only handlers attached, the
  *     ws-only verb family goes from handler-less (501) to invokable.
@@ -45,15 +45,15 @@ import { acquirePackedReleaseStage, createPlatformTempDir, run } from './release
  * tarballs only. Prints one PASS/FAIL line per check; exits 1 if any fails.
  */
 const CONFORMANCE_SCRIPT = `
-import { OPERATOR_CONTRACT, OPERATOR_METHOD_IDS } from '@goodvibes-jev/engine/contracts';
+import { OPERATOR_CONTRACT, OPERATOR_METHOD_IDS } from '@goodvibes/engine/contracts';
 import {
   createMockDaemon,
   buildMockDaemonResponses,
   findMethodsMissingHandlers,
   assertEveryDescriptorHasHandler,
-} from '@goodvibes-jev/engine/contracts/testing';
-import { GatewayMethodCatalog, buildOperatorContract } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes-jev/engine/terminal-shell';
+} from '@goodvibes/engine/contracts/testing';
+import { GatewayMethodCatalog, buildOperatorContract } from '@goodvibes/engine/platform/platform/control-plane';
+import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes/engine/terminal-shell';
 
 const failures = [];
 function check(name, fn) {

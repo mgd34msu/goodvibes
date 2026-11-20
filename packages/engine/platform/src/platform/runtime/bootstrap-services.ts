@@ -1,6 +1,6 @@
 import type { HookDispatcher } from '../hooks/dispatcher.js';
 import type { RuntimeServices } from './services.js';
-import { ConfigurationError } from '@goodvibes-jev/engine/errors';
+import { ConfigurationError } from '@goodvibes/engine/errors';
 import { logger } from '../utils/logger.js';
 import net from 'node:net';
 import { randomBytes } from 'node:crypto';

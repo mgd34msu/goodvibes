@@ -21,7 +21,7 @@ import type {
   security as Security,
   shell as Shell,
   transport as Transport,
-} from '@goodvibes-jev/engine/platform/platform/runtime';
+} from '@goodvibes/engine/platform/platform/runtime';
 
 // Local runtime entry points. `bootstrapRuntime` is imported from
 // './bootstrap.ts' directly: bootstrap reaches the command and view modules,
@@ -35,12 +35,12 @@ export type { UiRuntimeServices } from './ui-services.ts';
 // platform state seam below: gate states derive from domain settings keys
 // (deriveFeatureStates), so the old TUI wrapper that filtered unknown ids out
 // of persisted `featureFlags` overrides has nothing left to filter.
-export * from '@goodvibes-jev/engine/platform/platform/runtime/state';
-export * from '@goodvibes-jev/engine/platform/platform/runtime/store';
-export * from '@goodvibes-jev/engine/platform/platform/runtime/ui';
-export * from '@goodvibes-jev/engine/platform/platform/runtime/observability';
-export * from '@goodvibes-jev/engine/platform/platform/runtime/settings';
-export * from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
+export * from '@goodvibes/engine/platform/platform/runtime/state';
+export * from '@goodvibes/engine/platform/platform/runtime/store';
+export * from '@goodvibes/engine/platform/platform/runtime/ui';
+export * from '@goodvibes/engine/platform/platform/runtime/observability';
+export * from '@goodvibes/engine/platform/platform/runtime/settings';
+export * from '@goodvibes/engine/platform/platform/runtime/sandbox';
 export {
   CONTROL_PLANE_CLIENT_KINDS,
   CONTROL_PLANE_TRANSPORT_KINDS,
@@ -48,7 +48,7 @@ export {
   SURFACE_KINDS,
   registeredEventTypes,
   validateKnownEvent as validateEvent,
-} from '@goodvibes-jev/engine/platform/events';
+} from '@goodvibes/engine/platform/events';
 export type {
   AgentEvent,
   CommunicationEvent,
@@ -68,7 +68,7 @@ export type {
   ToolEvent,
   TransportEvent,
   TurnEvent,
-} from '@goodvibes-jev/engine/platform/events';
+} from '@goodvibes/engine/platform/events';
 
 // Bootstrap compatibility aliases, grouped live re-exports (see the header
 // comment for why these must not be eager namespace reads).
@@ -102,7 +102,7 @@ export {
   createRuntimeHookApi,
   createRuntimeMcpApi,
   createRuntimeOpsApi,
-} from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+} from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 
 export type BackgroundRuntimeTaskHandle = Bootstrap.BackgroundRuntimeTaskHandle;
 export type BackgroundMcpDiscoveryOptions = Bootstrap.BackgroundMcpDiscoveryOptions;
@@ -169,7 +169,7 @@ export {
   createNetworkFetch,
   GlobalNetworkTransportInstaller,
   inspectOutboundTls,
-} from '@goodvibes-jev/engine/platform/platform/runtime/transport';
+} from '@goodvibes/engine/platform/platform/runtime/transport';
 // Re-exported here because bootstrap.ts, the one place an exit can await
 // anything, sits on the 800-line per-file gate, so it reaches this through the
 // import block it already has rather than a second import line.
@@ -292,7 +292,7 @@ export {
   DistributedRuntimeManager,
   getDistributedNodeHostContract,
   createTaskManager,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+} from '@goodvibes/engine/platform/platform/runtime/operations';
 // Snapshot-retention symbols (SnapshotPruner, RetentionPolicy,
 // DEFAULT_RETENTION_CONFIG) are intentionally NOT re-exported here. No app code
 // consumes them, only the retention unit test does, and it now imports them
@@ -428,7 +428,7 @@ export {
   listPersistedWorktreeMeta,
   getPersistedWorktreeMeta,
   reviewWorktreeAttachments,
-} from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+} from '@goodvibes/engine/platform/platform/runtime/shell';
 
 export type MutableRuntimeState = Shell.MutableRuntimeState;
 export type ProviderAccountRecord = Shell.ProviderAccountRecord;
@@ -493,7 +493,7 @@ export {
   verifyBundle,
   MAX_INPUT_LENGTH,
   MAX_TOKEN_COUNT,
-} from '@goodvibes-jev/engine/platform/platform/runtime/security';
+} from '@goodvibes/engine/platform/platform/runtime/security';
 
 export type AuthInspectionSnapshot = Security.AuthInspectionSnapshot;
 export type ProviderAuthInspection = Security.ProviderAuthInspection;
@@ -521,4 +521,4 @@ export type DivergenceReport = Security.DivergenceReport;
 export type EnforceGateResult = Security.EnforceGateResult;
 export type SignedPolicyBundle<T = unknown> = Security.SignedPolicyBundle<T>;
 
-export { inspectInboundTls, extractForwardedClientIp, type InboundTlsMode, type InboundServerSurface, type InboundTlsSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/inspection';
+export { inspectInboundTls, extractForwardedClientIp, type InboundTlsMode, type InboundServerSurface, type InboundTlsSnapshot } from '@goodvibes/engine/platform/platform/runtime/inspection';

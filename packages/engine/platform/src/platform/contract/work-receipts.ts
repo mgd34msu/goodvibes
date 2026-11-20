@@ -2,7 +2,7 @@ import type { ContractView } from './types.js';
 import type { SourceReadEvidence } from './evidence.js';
 import { findCardNumberShapes } from '../security/card-shapes.js';
 import { readPrivateReceiptArchives, verifyPrivateReceiptPreservation } from './private-read-receipts.js';
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import { ownerEvidenceForModel } from './owner-evidence.js';
 import { commandObservation } from './command-observation.js';
 import { currentFileObservations } from './current-file-observations.js';

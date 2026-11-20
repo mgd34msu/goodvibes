@@ -20,7 +20,7 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { bootDaemon, type BootedDaemon } from '@goodvibes-jev/engine/platform/daemon';
+import { bootDaemon, type BootedDaemon } from '@goodvibes/engine/platform/daemon';
 import { installTestTempRoot, sweepStaleRunRoots } from './test-temp-root';
 import { requireSessionCloseReceipt } from './live-daemon-lifecycle';
 
@@ -92,7 +92,7 @@ function listedSessionIds(value: unknown): string[] {
  * `tsconfig.json`, found the REAL repo's tsconfig sitting above it instead of
  * finding none, and corrupted that test's expectations. Why that cannot happen
  * here:
- *   - ConfigManager (@goodvibes-jev/engine/platform dist/platform/config/manager.js)
+ *   - ConfigManager (@goodvibes/engine/platform dist/platform/config/manager.js)
  *     builds settings.json paths by joining directly under the given
  *     workingDir/homeDirectory. It never walks upward.
  *   - Nothing in bootDaemon's construction/start path (dist/platform/daemon/

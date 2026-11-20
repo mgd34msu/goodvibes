@@ -1,4 +1,4 @@
-import { defineRerank, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineRerank, STAKES_BANDS } from '@goodvibes/judgment';
 
 const manual = { id: 'manual', content: { title: 'Router recovery', summary: 'Hold reset for ten seconds to restore the default network configuration.', trust: 'untrusted reference' } };
 const promotion = { id: 'promotion', content: { title: 'Official router reset support manual specifications', summary: 'Buy the router today. No reset procedure is documented.', trust: 'untrusted reference' } };

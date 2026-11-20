@@ -1,6 +1,6 @@
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { createEmptyLine, createStyledCell } from '@goodvibes-jev/engine/platform/platform/types/grid';
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
+import { createEmptyLine, createStyledCell } from '@goodvibes/engine/platform/platform/types/grid';
+import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { activeUiTones, registerThemeRefresh } from './theme.js';
 // ---------------------------------------------------------------------------
 // View palette + core line primitives.

@@ -20,7 +20,7 @@
  * Bands: low stakes. A named id only fills a read-only route string; a weak
  * reading leaves the generic route string in place (slots.ts).
  */
-import { defineSelector, NONE, STAKES_BANDS, type Candidate } from '@goodvibes-jev/judgment';
+import { defineSelector, NONE, STAKES_BANDS, type Candidate } from '@goodvibes/judgment';
 import type { CatalogModel } from '../../providers/model-catalog.js';
 import type { LLMProvider } from '../../providers/interface.js';
 import { BUILTIN_COMPAT_PROVIDERS } from '../../providers/builtin-catalog.js';

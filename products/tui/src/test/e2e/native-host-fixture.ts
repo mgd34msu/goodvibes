@@ -1,15 +1,15 @@
 /** Owned real daemon, native capture/admission and host-bound paired principal. */
 import { dirname, join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { getProviderModelsCachePath } from '@goodvibes-jev/engine/platform/platform/providers';
-import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
-import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
-import { startDaemonFixture } from '@goodvibes-jev/daemon/testing';
+import { getProviderModelsCachePath } from '@goodvibes/engine/platform/platform/providers';
+import { registerInboxSurface } from '@goodvibes/engine/platform/platform/intake';
+import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath } from '@goodvibes/engine/platform/platform/workspace';
+import { startDaemonFixture } from '@goodvibes/daemon/testing';
 import { TuiConfigManager } from '../../config/host-settings.ts';
 import { beginTuiHostPairing, completeTuiHostPairing } from '../../runtime/tui-host-credential-store.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { seedBenchmarkCacheFixture } from '../helpers/benchmark-cache-fixture.ts';
-import { startScriptedDecisionServer } from '@goodvibes-jev/judgment/testing';
+import { startScriptedDecisionServer } from '@goodvibes/judgment/testing';
 import { closeE2EFixture, type E2EHome } from './harness.ts';
 
 /**

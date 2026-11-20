@@ -5,7 +5,7 @@ import { types as nodeTypes } from 'node:util';
 import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
-import { captureJevDecisionContext, validateJevDecision, type JevDecision, type JevDecisionContext } from '@goodvibes-jev/judgment/decisions';
+import { captureJevDecisionContext, validateJevDecision, type JevDecision, type JevDecisionContext } from '@goodvibes/judgment/decisions';
 import { freezeDurableRequest, parseDurableAdmission, durableKeyHash, durableKeyIdentity, type DurableContractReceipt, type DurableContractRequest } from '../../contract/durable-admission.js';
 import type { WorkLedgerState } from './types.js';
 

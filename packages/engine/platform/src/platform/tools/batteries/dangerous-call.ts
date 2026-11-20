@@ -14,7 +14,7 @@
  * needing review) and reports `severity` only when that reading acts or
  * confirms, else `unrated`.
  */
-import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 export const DANGER_SEVERITY_OPTIONS = {
   high: 'Runs code or shell commands built from input the program does not control, or opens files or permissions to everyone.',

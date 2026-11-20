@@ -45,7 +45,7 @@
  * of the transport itself.
  */
 import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from '../../state/memory-operation.js';
-import { buildUrl, createJsonRequestInit, requestJsonRaw } from '@goodvibes-jev/engine/transport-http';
+import { buildUrl, createJsonRequestInit, requestJsonRaw } from '@goodvibes/engine/transport-http';
 import { newMemoryId } from '../../state/memory-id.js';
 import type {
   MemoryAddOptions,

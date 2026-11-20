@@ -18,7 +18,7 @@ function fixtureArtifact(arch: 'x64' | 'arm64', files: DaemonCiArtifact['files']
   return readers === undefined ? base : { ...base, schema: 2, readers };
 }
 function fixtureReceipt(version: string, artifact: DaemonCiArtifact): Buffer {
-  return Buffer.from(JSON.stringify({ schema: 1, packageName: '@goodvibes-jev/daemon', version, artifact }));
+  return Buffer.from(JSON.stringify({ schema: 1, packageName: '@goodvibes/daemon', version, artifact }));
 }
 
 /** Actual installed bytes/receipt. Five member pins; no release manifest. */

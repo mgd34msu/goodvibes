@@ -1,11 +1,11 @@
-import { joinPromptParts } from '@goodvibes-jev/engine/terminal-shell/prompt-parts';
+import { joinPromptParts } from '@goodvibes/engine/terminal-shell/prompt-parts';
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { runStoreFileUpdateSync, writeStoreFile } from './store-file.js';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { MemoryRecord, MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
-import type { MemoryRecallSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { MemoryRecord, MemoryRegistry } from '@goodvibes/engine/platform/platform/state';
+import type { MemoryRecallSnapshot } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import type { AgentSkillSnapshot } from './skill-registry-types.js';
 import type { CapabilityIndexReport } from './capability-types.js';
 import { buildCapabilitySummaryPrompt } from './capability-summary-prompt.js';

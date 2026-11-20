@@ -12,7 +12,7 @@
  * consolidation's decay, and decay is reversible (a lowered confidence or a
  * stale mark, never a delete).
  */
-import { defineRerank, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineRerank, STAKES_BANDS } from '@goodvibes/judgment';
 
 const K8S_MEMORY = {
   id: 'k8s-rollout',

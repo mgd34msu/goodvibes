@@ -8,10 +8,10 @@ import {
   findSessionCrashSnapshot,
   writeLastSessionPointer,
   type SessionSurface,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+} from '@goodvibes/engine/platform/platform/runtime/operations';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { existsSync } from 'node:fs';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 import { resumeSessionCore, type SessionResumeDeps } from './session-resume.js';
 import { whenCrashSnapshotFound } from './session-crash-offer.js';

@@ -18,7 +18,7 @@
  * a missed one refuses the purchase and the owner buys it by hand. A line is
  * the requested item only when the selection acts.
  */
-import { defineSelector, NONE, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineSelector, NONE, STAKES_BANDS } from '@goodvibes/judgment';
 
 /** The candidate id of the requested item at `index`. */
 export const requestedLineId = (index: number): string => `r${index}`;

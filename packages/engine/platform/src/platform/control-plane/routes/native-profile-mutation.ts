@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { types as nodeTypes } from 'node:util';
-import { canonicalJson } from '@goodvibes-jev/judgment';
+import { canonicalJson } from '@goodvibes/judgment';
 import { captureJsonValue, captureOwnedJson } from '../../gate/judgment-input.js';
 import { isInvocationAdmitted } from '../../gate/execution-context.js';
 import type { AppendProfileProseInput, ForgetProfileInput, SetProfileFieldInput, UndoProfileInput } from '../../owner-profile/store-types.js';

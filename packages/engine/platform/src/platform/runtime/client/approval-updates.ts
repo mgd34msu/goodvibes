@@ -39,7 +39,7 @@
  * caller reads `approvals.list` once, which is the snapshot it reconciles from.
  */
 
-import { RefusalError } from '@goodvibes-jev/engine/errors';
+import { RefusalError } from '@goodvibes/engine/errors';
 import { openRawServerSentEventStream } from '../transports/sse-stream.js';
 import { buildUrl } from '../transports/transport-paths.js';
 import { logger } from '../../utils/logger.js';

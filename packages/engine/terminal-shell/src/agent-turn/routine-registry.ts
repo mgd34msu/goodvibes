@@ -1,5 +1,5 @@
 import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.js';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { readJsonStore, writeJsonStore, type JsonStoreContents, type JsonStoreSpec, type JsonStoreWriteReport, type writeStoreFile } from './store-file.js';
 import { storeFileChangeStamp } from './store-change-stamp.js';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';

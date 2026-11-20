@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import { builtinTriggerOperationMethodDescriptors, builtinTriggerSupervisorMethodDescriptors } from './method-catalog-trigger-supervisor.js';
 import { builtinDelegatedInboundMethodDescriptors } from './method-catalog-delegated-inbound.js';
 import { builtinGatewayNativeHostedTurnMethodDescriptors } from './method-catalog-native-hosted-turn.js';
@@ -121,7 +121,7 @@ import {
   builtinGatewayStepUpMethodDescriptors,
 } from './method-catalog-stepup.js';
 import { GatewayVerbError } from './routes/gateway-verb-error.js';
-import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
+import { EngineErrorCodes } from '@goodvibes/engine/errors';
 
 export type {
   GatewayEventDescriptor,

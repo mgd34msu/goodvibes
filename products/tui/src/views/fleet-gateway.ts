@@ -16,8 +16,8 @@
 // workstream/work-item IDs are refused. Selection comes from recorded views.
 // ---------------------------------------------------------------------------
 
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { OperatorMethodOutput } from '@goodvibes/engine/platform';
 import { resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
 
 /** fleet.attempts.list output, the held-merge groups awaiting a winner pick. */

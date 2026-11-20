@@ -1,4 +1,4 @@
-import { createOrderedShutdown, drainShutdownRegistry } from '@goodvibes-jev/engine/terminal-shell/ordered-shutdown';
+import { createOrderedShutdown, drainShutdownRegistry } from '@goodvibes/engine/terminal-shell/ordered-shutdown';
 /** Ordered teardown owned by bootstrap; the shell owns the exit deadline. */
 import { shutdownRuntime } from '@/runtime/index.ts';
 

@@ -7,7 +7,7 @@ import {
   type KnowledgeInjectionTrustTier,
   type KnowledgeInjectionUseAs,
 } from '../knowledge/shared.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { knowledgeInjectionRerank, rerankContent, rerankShortlistSize } from './batteries/memory-search-rerank.js';
 import type {
   MemoryRecord,

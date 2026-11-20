@@ -6,8 +6,8 @@
  * (page-blocks.ts); listing its headings is too. A failed reading throws, and
  * the fetch reports it as that URL's error.
  */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { JudgmentError, type Candidate } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import { JudgmentError, type Candidate } from '@goodvibes/judgment';
 import { pageContent } from '../batteries/page-content.js';
 import { pageSummary, paragraphCandidate } from '../batteries/page-summary.js';
 import { pageBlocks, pageTitle, pageUnits } from './page-blocks.js';

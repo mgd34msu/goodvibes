@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/notification-history';
+export * from '@goodvibes/engine/terminal-shell/notification-history';

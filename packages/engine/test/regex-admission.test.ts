@@ -12,7 +12,7 @@
  * without any judgment service.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import { firstJsonSchemaFailure, firstJsonSchemaFailureAsync } from '../transport-http/src/client-plumbing.ts';
 import { LayeredPolicyEvaluator } from '../platform/src/platform/runtime/permissions/evaluator.ts';
 

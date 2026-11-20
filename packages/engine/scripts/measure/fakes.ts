@@ -9,9 +9,9 @@
  * routes them. A decision none of them claims gets a neutral answer (first
  * choice, "no", lowest score) and is counted under `unrouted`.
  */
-import { placeSharedContext, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Question, type Questions, type SqliteDecisionLog } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { placeSharedContext, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Question, type Questions, type SqliteDecisionLog } from '@goodvibes/judgment';
+import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes/judgment/testing';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import { toolReadingsPort } from '../../test/_helpers/tool-readings.ts';
 import { coreReadingsPort } from '../../test/_helpers/core-readings.ts';
 import { compactionQualityPort } from '../../test/_helpers/compaction-quality.ts';

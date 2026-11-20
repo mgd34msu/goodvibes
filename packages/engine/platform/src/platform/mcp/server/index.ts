@@ -12,7 +12,7 @@
  * The transport that reaches the daemon is injected (`OperatorMcpInvoker`), so
  * this module is pure protocol plumbing and carries no transport dependency.
  */
-import type { OperatorContractManifest } from '@goodvibes-jev/engine/contracts';
+import type { OperatorContractManifest } from '@goodvibes/engine/contracts';
 import {
   buildOperatorMcpTools,
   type BuildOperatorMcpToolsOptions,

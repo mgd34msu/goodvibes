@@ -10,7 +10,7 @@
  * the review action of /memory, terminal-shell/memory-command.ts) rather than adding a
  * second, parallel review mechanism.
  */
-import type { MemoryConsolidationProposal } from '@goodvibes-jev/engine/platform/platform/state';
+import type { MemoryConsolidationProposal } from '@goodvibes/engine/platform/platform/state';
 
 /** The narrow scheduler slice this module needs. */
 export interface ConsolidationReceiptSource {

@@ -1,11 +1,11 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { getDefaultAcpAgentCommand } from '@goodvibes-jev/engine/platform/platform/acp';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { getDefaultAcpAgentCommand } from '@goodvibes/engine/platform/platform/acp';
+import { resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import type { CommandContext } from '../command-registry.ts';
 import type { PeerClient, RemoteSessionBundle } from '@/runtime/index.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 /**
  * What another machine needs to run this session's remote agents (the setup,

@@ -1,10 +1,10 @@
-import { registerWorkCommand } from '@goodvibes-jev/engine/terminal-shell/native/work-command';
+import { registerWorkCommand } from '@goodvibes/engine/terminal-shell/native/work-command';
 import '../../runtime/native-conversation-intake.ts';
 import { openAgentLegacyImport } from './legacy-work-ledger-import-runtime.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from '../agent-workspace-categories.ts';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { choiceInput, doAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { choiceInput, doAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import { commandRefusal } from './confirmation.ts';
 
 export function registerAgentWorkspaceRuntimeCommands(registry: CommandRegistry): void {

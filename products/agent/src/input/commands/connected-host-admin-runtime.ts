@@ -5,11 +5,11 @@
  * profiles are actions of `/channels` (terminal-shell/channels-command.ts).
  */
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { registerCiCommand } from '@goodvibes-jev/engine/terminal-shell/ci-command';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { registerCiCommand } from '@goodvibes/engine/terminal-shell/ci-command';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { formatOperatorGatewayFailure, invokeOperatorGatewayMethod } from '../../agent/operator-gateway-call.ts';
 import { resolveAgentConnectedHostConnection } from '../../agent/routine-schedule-promotion.ts';
-import { registerPrincipalsCommand } from '@goodvibes-jev/engine/terminal-shell/principals-command';
+import { registerPrincipalsCommand } from '@goodvibes/engine/terminal-shell/principals-command';
 import { requireShellPaths } from './runtime-services.ts';
 
 /** The connected host's routes for the CI methods (the same as `goodvibes-agent ci`). */

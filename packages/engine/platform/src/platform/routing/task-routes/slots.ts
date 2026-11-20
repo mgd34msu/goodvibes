@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /**
  * `routing.task-route.slots`: what a user task asks for, beyond which route
  * handles it. These questions replace the agent's per-route effect word
@@ -25,10 +25,10 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
  * - A named id (routing.task-route.named-id) is used only when the selection
  *   chose it without escalating; otherwise the route keeps its generic string.
  */
-import { defineBattery, oneOf, STAKES_BANDS, yesNo, type JudgmentPort, type Selection, type YesNoReading } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS, yesNo, type JudgmentPort, type Selection, type YesNoReading } from '@goodvibes/judgment';
 import { NAMED_ID_KINDS, namedIdCandidates, taskRouteNamedId, type NamedIdKind, type NamedIdSources } from './named-ids.js';
 import type { ChannelTask, PersonalOpsLaneId, TaskRouteSlots } from './types.js';
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { captureStrictJudgmentJson } from '../../gate/judgment-result.js';
 

@@ -3,8 +3,8 @@
  * each program running its actions with its own settings store. Every setting
  * is named by its plain name (`CONFIG_SCHEMA` `label`), the key shown beside it.
  */
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config/schema';
-import { topicOf } from '@goodvibes-jev/engine/platform/platform/config/setting-topics';
+import { CONFIG_SCHEMA } from '@goodvibes/engine/platform/platform/config/schema';
+import { topicOf } from '@goodvibes/engine/platform/platform/config/setting-topics';
 import { defineList } from './command-actions/lists.js';
 import type { ActionValues, CommandActionContext, CommandDescription } from './command-actions/types.js';
 import { doAction, listInput, readAction, textInput } from './described-command-kit.js';

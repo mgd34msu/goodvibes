@@ -9,8 +9,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 import {
   createConnectedHost,
   EXPLICIT_USER_REQUEST_HEADER,

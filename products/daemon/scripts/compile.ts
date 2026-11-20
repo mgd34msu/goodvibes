@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { compileBunBinary, parseBunCompileArgs } from '@goodvibes-jev/engine/toolchain';
+import { compileBunBinary, parseBunCompileArgs } from '@goodvibes/engine/toolchain';
 import { buildDaemonSqliteRuntime } from './build-sqlite-runtime.ts';
 
 if (import.meta.main) {

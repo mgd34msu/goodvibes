@@ -3,19 +3,19 @@ import { writeSync } from 'node:fs';
 import {
   applyRuntimeConfigOverrides, applyRuntimeConfigValue, applyRuntimeEndpointFlagOverrides,
   applyRuntimeFeatureFlagOverrides, resolveRuntimeEndpointBinding,
-} from '@goodvibes-jev/engine/terminal-shell';
-import { describeDerivedBindMismatch, readControlPlaneBinding } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveHostBinding } from '@goodvibes-jev/engine/platform/platform/daemon';
-import { getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
-import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
-import { getOrCreateCompanionToken, pairingOriginUsesStableHost, refreshStableHostInputs } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { RuntimeEventBus, runtimeEventBusOptionsFrom } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import { publishDaemonRuntimeRecord, type PublishedDaemonRuntimeRecord } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+} from '@goodvibes/engine/terminal-shell';
+import { describeDerivedBindMismatch, readControlPlaneBinding } from '@goodvibes/engine/platform/platform/config';
+import { resolveHostBinding } from '@goodvibes/engine/platform/platform/daemon';
+import { getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers';
+import { createRuntimeStore } from '@goodvibes/engine/platform/platform/runtime/store';
+import { getOrCreateCompanionToken, pairingOriginUsesStableHost, refreshStableHostInputs } from '@goodvibes/engine/platform/platform/pairing';
+import { RuntimeEventBus, runtimeEventBusOptionsFrom } from '@goodvibes/engine/platform/platform/runtime/state';
+import { publishDaemonRuntimeRecord, type PublishedDaemonRuntimeRecord } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { isKnownConfigKey } from '../config/config-key-guard.js';
 import { getPackageVersion, renderDaemonBoundEndpoint, renderDaemonStartupBanner } from './help.js';
 import { createDaemonHost, type DaemonHostSnapshot } from '../runtime/daemon-host.js';
-import { writeDaemonSetting } from '@goodvibes-jev/engine/platform/platform/workspace/daemon-home';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { writeDaemonSetting } from '@goodvibes/engine/platform/platform/workspace/daemon-home';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { resolveInstalledDaemonUpdateArtifact } from '../daemon/lifecycle.js';
 import type { RuntimeServicesOptions } from '../runtime/services.js';
 import { runDaemonProcess, type DaemonProcessHandle, type DaemonProcessOptions } from '../daemon/process-lifecycle.js';

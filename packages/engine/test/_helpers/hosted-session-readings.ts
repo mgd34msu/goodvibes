@@ -7,9 +7,9 @@
  * recorded evidence here just as they do on the live hosted floor. Other decisions
  * fail loudly rather than silently receiving an unrelated fixture answer.
  */
-import { SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes/judgment';
+import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes/judgment/testing';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import { forgetGateReadings, type GateReadingTable } from './gate-readings.ts';
 import { compactionQualityPort } from './compaction-quality.ts';
 import { coreReadingsPort } from './core-readings.ts';

@@ -1,10 +1,10 @@
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { assertProjectionExecution, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import type { ToolInputProjector } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
+import { captureStrictJudgmentJson } from '@goodvibes/engine/platform/platform/gate';
+import { assertProjectionExecution, ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import type { ToolInputProjector } from '@goodvibes/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import { isDeepStrictEqual } from 'node:util';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { operatorMethodIsReadOnly, resolveOperatorContractMethod } from './operator-contract-routes.js';

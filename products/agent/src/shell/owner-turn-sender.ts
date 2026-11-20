@@ -13,10 +13,10 @@
  * It lives beside interactive.ts rather than inside it so this path can be
  * run as the shell runs it.
  */
-import type { NativeConversationInput, ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
-import type { NoticeLevel, OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { createHeldInputs } from '@goodvibes-jev/engine/terminal-shell/held-input';
+import type { NativeConversationInput, ProductInputContext } from '@goodvibes/engine/terminal-shell/native';
+import type { NoticeLevel, OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { createHeldInputs } from '@goodvibes/engine/terminal-shell/held-input';
 import { withShellContext, type ShellContextHold } from '../input/shell-passthrough.ts';
 import { routeNativeConversationInput } from '../runtime/native-conversation-ingress.ts';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';

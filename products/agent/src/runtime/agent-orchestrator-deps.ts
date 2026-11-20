@@ -1,4 +1,4 @@
-import type { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agents';
+import type { AgentOrchestrator } from '@goodvibes/engine/platform/platform/agents';
 
 type OrchestratorDeps = Parameters<AgentOrchestrator['setDependencies']>[0];
 type OrchestratorPermissionManager = NonNullable<OrchestratorDeps['permissionManager']>;

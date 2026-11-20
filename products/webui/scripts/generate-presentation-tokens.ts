@@ -2,7 +2,7 @@
 /**
  * generate-presentation-tokens.ts
  *
- * Bridges the engine presentation contract (@goodvibes-jev/engine/platform/platform/presentation
+ * Bridges the engine presentation contract (@goodvibes/engine/platform/platform/presentation
  *, the status-glyph registry, tone-token table, thinking-phrase pool and
  * waiting-state wording that the TUI and agent already render through) onto
  * two generated, checked-in artifacts:
@@ -38,7 +38,7 @@ import {
   resolveTones,
   SPINNER_FRAMES,
   THINKING_PHRASES,
-} from '@goodvibes-jev/engine/platform/platform/presentation';
+} from '@goodvibes/engine/platform/platform/presentation';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -84,7 +84,7 @@ export interface PresentationContractSnapshot {
   readonly thinkingPhrases: WidenLiterals<typeof THINKING_PHRASES>;
 }
 
-/** Read the real contract from the installed @goodvibes-jev/engine/platform. */
+/** Read the real contract from the installed @goodvibes/engine/platform. */
 export function loadContractSnapshot(): PresentationContractSnapshot {
   return {
     glyphs: GLYPHS,
@@ -112,7 +112,7 @@ function cssStringLiteral(value: string): string {
 const GENERATED_BANNER = [
   'GENERATED FILE. DO NOT EDIT BY HAND.',
   'Produced by scripts/generate-presentation-tokens.ts from',
-  '@goodvibes-jev/engine/platform/platform/presentation, the presentation contract',
+  '@goodvibes/engine/platform/platform/presentation, the presentation contract',
   'the TUI and agent already render through. See that package\'s own',
   'docstring for the parity-audit provenance.',
   '',

@@ -20,10 +20,10 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { flushActivityLogSync, logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { createTerminalLifecycle, ignoreGoneTerminalWrites, TERMINAL_ESCAPES } from '@goodvibes-jev/engine/terminal-shell';
+import { flushActivityLogSync, logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { createTerminalLifecycle, ignoreGoneTerminalWrites, TERMINAL_ESCAPES } from '@goodvibes/engine/terminal-shell';
 import { createErrorNoticeOwner, unavailableErrorLine, userErrorLine } from '../core/format-user-error.ts';
-import { allowTerminalWrite } from '@goodvibes-jev/engine/terminal-shell/terminal-output-guard';
+import { allowTerminalWrite } from '@goodvibes/engine/terminal-shell/terminal-output-guard';
 import { buildPersistedSessionContext, deleteRecoveryFile } from '@/runtime/index.ts';
 import { writeCrashSnapshotIfChanged } from './recovery-autosave.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
@@ -34,8 +34,8 @@ import {
   CRASH_LOG_FILENAME,
   closeSessionHere,
   crashRecordLine,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { writeFatalLine } from '@goodvibes-jev/engine/platform/platform/daemon';
+} from '@goodvibes/engine/platform/platform/runtime/operations';
+import { writeFatalLine } from '@goodvibes/engine/platform/platform/daemon';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { VERSION } from '../version.ts';
 import type { BootstrapContext } from './bootstrap.ts';
@@ -249,7 +249,7 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
   };
 
   // Terminal enter/restore sequencing is the byte-identical seam both daemon
-  // front-ends share, so it lives in @goodvibes-jev/engine/terminal-shell and this
+  // front-ends share, so it lives in @goodvibes/engine/terminal-shell and this
   // wiring delegates startup, editor suspension and final restore to it, so
   // every keyboard-mode push has exactly one pop. The graceful shutdown below
   // (draining services, persisting sessions, exit codes) is TUI-specific and

@@ -41,7 +41,7 @@ import {
   YES_NO_VERDICTS,
 } from '../../events/contract.js';
 import type { Contract, ContractUnit, Criterion, CriterionReading, Escalation } from '../contract/types.js';
-import { OPERATION_KEY_SCHEMA } from '@goodvibes-jev/engine/errors';
+import { OPERATION_KEY_SCHEMA } from '@goodvibes/engine/errors';
 import { BOOLEAN_SCHEMA, JSON_VALUE_SCHEMA, NUMBER_SCHEMA, STRING_SCHEMA, arraySchema, objectSchema } from './method-catalog-shared.js';
 import { STRING_LIST_SCHEMA, enumSchema, recordSchema } from './operator-contract-schemas-shared.js';
 import {

@@ -42,11 +42,11 @@
 
 import { homedir } from 'node:os';
 import { basename } from 'node:path';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { PROFILE_FIELDS, PROSE_ONLY_SECTIONS, captureProfileDelegation } from '@goodvibes-jev/engine/platform/platform/owner-profile';
-import { currentTurn } from '@goodvibes-jev/engine/platform/platform/security';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { PROFILE_FIELDS, PROSE_ONLY_SECTIONS, captureProfileDelegation } from '@goodvibes/engine/platform/platform/owner-profile';
+import { currentTurn } from '@goodvibes/engine/platform/platform/security';
 import { captureProfileGatewayCurrent, captureProfileGatewayLocalState, type ProfileGatewayInvoke } from './profile-gateway.js';
 import { captureCatalogSnapshot } from './catalog-data.js';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './local-state-admission.js';

@@ -1,7 +1,7 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { defineCommand, defineList, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { defineCommand, defineList, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 
 // ---------------------------------------------------------------------------
 // /queue, the mid-turn message queue as an editable list (command-actions/).

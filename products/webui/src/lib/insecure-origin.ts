@@ -18,7 +18,7 @@
  * disagree. A 100.64/10 address is shared with carrier-grade NAT, so a browser (which
  * has no Tailscale probe and no environment) is pointed at the Tailscale name instead.
  */
-import { isLoopbackHost, isPrivateNetworkHost, isTailnetHost } from '@goodvibes-jev/engine/transport-http/paths';
+import { isLoopbackHost, isPrivateNetworkHost, isTailnetHost } from '@goodvibes/engine/transport-http/paths';
 
 export const INSECURE_ORIGIN_TITLE = 'This page needs HTTPS';
 

@@ -1,10 +1,10 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { profileDataToConfigSnapshot } from '@goodvibes-jev/engine/platform/platform/profiles';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config/schema';
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import { CONFIG_KEYS } from '@goodvibes-jev/engine/platform/platform/config/schema';
+import { profileDataToConfigSnapshot } from '@goodvibes/engine/platform/platform/profiles';
+import { CONFIG_SCHEMA } from '@goodvibes/engine/platform/platform/config/schema';
+import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import { CONFIG_KEYS } from '@goodvibes/engine/platform/platform/config/schema';
 import type { ManagedSettingsBundle } from '@/runtime/index.ts';
 import {
   applyStagedManagedBundle,
@@ -19,10 +19,10 @@ import {
   stageManagedSettingsBundle,
 } from '@/runtime/index.ts';
 import { requireProfileManager, requireShellPaths } from './runtime-services.ts';
-import { defineCommand, defineList, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { defineCommand, defineList, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { describeSetupTransferChanges, isSecurityBearingChange } from './local-setup-transfer.ts';
 
 /** The stored settings, never an owner-profile value: a rollback must not pin a profile value as a setting. */

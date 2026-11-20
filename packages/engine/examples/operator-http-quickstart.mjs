@@ -6,7 +6,7 @@
  *
  * Run: bun examples/operator-http-quickstart.mjs
  */
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
 
 const authToken = process.env.GOODVIBES_TOKEN;
 if (!authToken) {

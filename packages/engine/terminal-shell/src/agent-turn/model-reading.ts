@@ -14,10 +14,10 @@
  * checked once by `snapshotJudgmentEvidence` (card data, attached secrets,
  * malformed input).
  */
-import { snapshotJudgmentEvidence, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
-import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { snapshotJudgmentEvidence, snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate/judgment-input';
+import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import type { ProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security';
+import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
 
 /** A reading's restriction callback: absent, or a function that still holds. */
 export function assertModelReadingRestriction(callback: (() => unknown) | undefined): void {

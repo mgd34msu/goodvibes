@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes/judgment/decisions';
 import { type JudgmentReadingOptions } from './judgment-authority.js';
 
 export interface RegexAdmissionOptions extends JudgmentReadingOptions {

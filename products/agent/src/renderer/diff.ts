@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/diff-engine';
+export * from '@goodvibes/engine/terminal-shell/diff-engine';

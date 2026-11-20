@@ -6,9 +6,9 @@ import {
   type NativeWorkSubmissionLookupResult,
   type OperatorNativeWorkSubmissionClient,
   type OperatorNativeWorkSubmissionOptions,
-} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
-import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/contracts/generated/foundation-client-types';
+} from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-submission-client';
+import type { OperatorRemoteClient } from '@goodvibes/engine/operator-client';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/contracts/generated/foundation-client-types';
 
 declare const operator: Pick<OperatorRemoteClient, 'invoke'>;
 declare const request: NativeWorkSubmissionRequest;

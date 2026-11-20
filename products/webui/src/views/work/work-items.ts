@@ -26,7 +26,7 @@ import {
   type WorkBoardNode,
   type WorkBoardSession,
   type WorkBoardTask,
-} from '@goodvibes-jev/engine/contracts';
+} from '@goodvibes/engine/contracts';
 import type { StatusTone } from '../../components/ui/StatusDot';
 import type {
   ApprovalRecord,
@@ -41,7 +41,7 @@ import { attemptGroupRef, isAwaitingApprovalState, isObservedKind, isStalledStat
 import { boardAsk, wirePresentation, type OpenAsk } from '../../lib/asks';
 import { isClosedStatus, type UnionSessionRecord } from '../../lib/sessions-union';
 import { whenLabel } from '../../lib/when-label';
-import type { ProcessKind } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { ProcessKind } from '@goodvibes/engine/platform/platform/runtime/fleet';
 import { attemptGroupProgress } from './attempt-group-progress';
 
 /** Short time label ("5m ago", "Nov 14"); '' for a missing or epoch time. */

@@ -11,9 +11,9 @@
  * model's reading. A test that is about a specific answer overrides it.
  */
 import { afterEach, beforeEach } from 'bun:test';
-import type { EntryType, JudgmentPort, JudgmentRequest, Question, Questions } from '@goodvibes-jev/judgment';
-import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import type { EntryType, JudgmentPort, JudgmentRequest, Question, Questions } from '@goodvibes/judgment';
+import { choiceAnswer, noulAnswer } from '@goodvibes/judgment/testing';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import { securityPort, type FakeVerdict, type SecurityAnswers } from './security-readings.ts';
 
 type RecourseKind = 'retailer' | 'buyer-protection' | 'per-seller' | 'none';

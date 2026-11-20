@@ -5,7 +5,7 @@
  * `agent_reminder_schedule` tool under its own effect admission, or the
  * Agent's /schedule command on its connected host.
  */
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 import {
   deliveryModeFromTargets,
   normalizeProviderModel,

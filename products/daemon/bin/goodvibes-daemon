@@ -27,8 +27,8 @@ function sourceCheckout() {
   const workspace = resolve(root, '../..');
   const product = manifest(join(root, 'package.json'));
   const repo = manifest(join(workspace, 'package.json'));
-  return product?.name === '@goodvibes-jev/daemon' && product.private === true
-    && repo?.name === 'goodvibes-jev' && repo.private === true
+  return product?.name === '@goodvibes/daemon' && product.private === true
+    && repo?.name === 'goodvibes' && repo.private === true
     && Array.isArray(repo.workspaces) && repo.workspaces.some(path => path === 'products/*' || path === 'products/daemon')
     && (existsSync(join(workspace, '.git')) || isFile(join(workspace, 'bun.lock')))
     && isFile(join(root, 'tsconfig.json'));
@@ -44,7 +44,7 @@ if (typeof Bun === 'undefined') {
     if (nativePrefix !== undefined) {
       if (!nativePrefix) throw new Error('GOODVIBES_DAEMON_NATIVE_PREFIX must name an explicit absolute installation prefix');
       const product = manifest(join(root, 'package.json'));
-      if (product?.name !== '@goodvibes-jev/daemon' || product.private !== true || typeof product.version !== 'string') throw new Error('Native launch requires the private daemon product version owner');
+      if (product?.name !== '@goodvibes/daemon' || product.private !== true || typeof product.version !== 'string') throw new Error('Native launch requires the private daemon product version owner');
       const emittedNative = join(root, 'dist/cli/native-launch.js');
       const sourceNative = join(root, 'src/cli/native-launch.ts');
       const support = isFile(emittedNative) ? emittedNative : sourceCheckout() && isFile(sourceNative) ? sourceNative : null;

@@ -1,4 +1,4 @@
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import type { EvidenceCommand } from './evidence.js';
 
 /** Decode a host exec envelope, never parse an assistant claim as execution.

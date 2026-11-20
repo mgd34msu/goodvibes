@@ -1,11 +1,11 @@
-import { assertSynchronousJudgmentGuard, DEFAULT_DECISION_DEADLINE_MS } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, DEFAULT_DECISION_DEADLINE_MS } from '@goodvibes/judgment/decisions';
 import { isDeepStrictEqual } from 'node:util';
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
+import { decisionModelPolicyState } from '@goodvibes/engine/errors';
 import { decisionOrClassic, rememberDecisionRefusal, wasDecisionRefused, type RefusedDecisionAction } from '../runtime/decision-policy.js';
 import { readExternalRequestEvidence, type ExternalRequestEvidence } from './external-request-evidence.js';
-import { JudgmentError, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { JudgmentError, type EntryType, type JudgmentPort } from '@goodvibes/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { captureOwnedJson, captureJsonEntry } from '../gate/judgment-input.js';
 import { getProcessUntrustedContentLedger } from '../security/untrusted-content.js';
 import { assertAutonomousData, captureCurrentAutonomousChoices, captureCurrentAutonomousSourceFrame, type AutonomousToolChoices, type AutonomousToolRevision, type AutonomousToolSource, autonomousSourceEvidence, decideAutonomousTool } from './autonomous.js';

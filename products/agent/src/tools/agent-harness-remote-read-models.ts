@@ -1,14 +1,14 @@
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes/engine/platform/platform/runtime';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
 import { capturePersonalOpsData, capturePersonalOpsSnapshot, assertPersonalOpsDataCurrent } from './agent-harness-personal-ops-source.ts';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate';
+import { type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { readRemotePublisherOutcomeKind, readRemotePublisherSchemaStatus } from './agent-harness-remote-publisher-readings.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { certificationRecords, firstAcross, publishedModelRoute, redactReadModelText, safeNullablePreview, safePreview, stringList } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { certificationRecords, firstAcross, publishedModelRoute, redactReadModelText, safeNullablePreview, safePreview, stringList } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 export interface RemoteCaptureOutcomeRecord {
   readonly operationProvenance?: 'classic';

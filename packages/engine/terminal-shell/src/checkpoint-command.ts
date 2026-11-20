@@ -7,9 +7,9 @@
  * after the preview. What each app can do differently is its policy, read by
  * the actions' `run`; an act an app does not have is refused with the reason.
  */
-import type { WorkspaceCheckpoint, WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
-import { getTurnAnchors } from '@goodvibes-jev/engine/platform/platform/rewind';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import type { WorkspaceCheckpoint, WorkspaceCheckpointManager } from '@goodvibes/engine/platform/platform/workspace';
+import { getTurnAnchors } from '@goodvibes/engine/platform/platform/rewind';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';

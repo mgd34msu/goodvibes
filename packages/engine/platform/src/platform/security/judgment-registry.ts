@@ -1,4 +1,4 @@
-import { BatteryRegistry } from '@goodvibes-jev/judgment';
+import { BatteryRegistry } from '@goodvibes/judgment';
 import { cardField } from './batteries/card-field.js';
 import { cardTalk } from './batteries/card-talk.js';
 import { contentDerivation } from './batteries/content-derivation.js';

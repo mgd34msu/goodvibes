@@ -1,4 +1,4 @@
-import { captureJudgmentBackendSettings, validEndpointURL } from '@goodvibes-jev/judgment/decisions';
+import { captureJudgmentBackendSettings, validEndpointURL } from '@goodvibes/judgment/decisions';
 import type { JudgmentFallbackSettings } from './schema-types-judgment.js';
 
 const FIELDS = ['endpoint', 'model', 'keySource', 'keyName'];

@@ -3,7 +3,7 @@ import { withExternalOperationSource } from '../permissions/external-operation-s
 import type { ConversationManager } from './conversation.js';
 import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
-import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { decisionModelPolicyState } from '@goodvibes/engine/errors';
 import { currentExecutionMode, isYoloExecution, withExecutionMode } from '../gate/execution-context.js';
 import { randomUUID } from 'node:crypto';
 import { captureAutonomousChoices, type AutonomousToolSource } from '../permissions/autonomous.js';
@@ -150,7 +150,7 @@ type EmitterContextFactory = (turnId: string) => import('../runtime/emitters/ind
 
 export type ToolExecutionDeps = {
   /** Trusted native lifecycle decorator over the same shared recorded transport. */
-  autonomousPort?: ((port: import('@goodvibes-jev/judgment').JudgmentPort) => import('@goodvibes-jev/judgment').JudgmentPort) | undefined;
+  autonomousPort?: ((port: import('@goodvibes/judgment').JudgmentPort) => import('@goodvibes/judgment').JudgmentPort) | undefined;
   /** Current source supplied by the real turn/contract owner. Required for autonomous execution. */
   autonomousSource?: (() => AutonomousToolSource) | undefined;
   hookOwner?: TurnHookOwner | undefined;

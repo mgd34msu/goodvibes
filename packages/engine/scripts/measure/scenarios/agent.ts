@@ -8,9 +8,9 @@
  */
 import { join, resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
-import { withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes/judgment';
+import { fakePort, noulAnswer } from '@goodvibes/judgment/testing';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import { ConfigManager } from '../../../platform/src/platform/config/manager.ts';
 import { RuntimeEventBus } from '../../../platform/src/platform/runtime/events/index.ts';
 import { ToolRegistry } from '../../../platform/src/platform/tools/registry.ts';

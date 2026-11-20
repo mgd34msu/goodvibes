@@ -30,7 +30,7 @@ import {
   ROUTE_BINDING_SURFACE_KINDS,
 } from './system-route-types.js';
 import type { WatcherRecord } from './system-route-types.js';
-import { RefusalError } from '@goodvibes-jev/engine/errors';
+import { RefusalError } from '@goodvibes/engine/errors';
 
 async function serviceAction(context: DaemonSystemRouteContext, req: Request, action: PlatformServiceAction): Promise<Response> {
   const admin = context.requireAdmin(req);

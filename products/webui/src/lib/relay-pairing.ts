@@ -5,7 +5,7 @@
  * (see pairing.ts / usePairingHandoff.ts): it signs nobody in. It is
  * transport-level bootstrap, a relay URL, an unguessable rendezvous id, the
  * daemon's pinned public key and this device's own relay code
- * (@goodvibes-jev/engine/transport-core/relay's `RelayPairingPayload`; the relay
+ * (@goodvibes/engine/transport-core/relay's `RelayPairingPayload`; the relay
  * client sends the code on every request, and the daemon owner can revoke it for
  * this device alone), that lets this browser reach the daemon through the
  * zero-knowledge relay when it cannot reach it directly (off the LAN). The daemon
@@ -30,7 +30,7 @@ import {
   decodeRelayPairingString,
   encodeRelayPairingString,
   type RelayPairingPayload,
-} from '@goodvibes-jev/engine/transport-core/relay';
+} from '@goodvibes/engine/transport-core/relay';
 import { noteRelayPairingChanged } from './client-lifetime';
 
 export type { RelayPairingPayload };

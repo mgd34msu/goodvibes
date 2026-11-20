@@ -1,4 +1,4 @@
-import { checkAnswers, matchesJudgmentModel, observeJudgmentModel, type JudgmentPort, type JudgmentResult, type Questions } from '@goodvibes-jev/judgment';
+import { checkAnswers, matchesJudgmentModel, observeJudgmentModel, type JudgmentPort, type JudgmentResult, type Questions } from '@goodvibes/judgment';
 import { types } from 'node:util';
 import { captureTriageData } from './evidence.js';
 

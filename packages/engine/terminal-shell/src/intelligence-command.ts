@@ -8,7 +8,7 @@
  * answer names the install action.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import type { CodeIntelligence, DocumentSymbol, LookupResult, SymbolInfo } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import type { CodeIntelligence, DocumentSymbol, LookupResult, SymbolInfo } from '@goodvibes/engine/platform/platform/intelligence';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';

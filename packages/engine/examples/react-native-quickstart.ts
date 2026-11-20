@@ -1,7 +1,7 @@
 /**
  * Create a React Native client with host-provided token storage.
  */
-import { createReactNativeGoodVibesPlatform } from '@goodvibes-jev/engine/platform/react-native';
+import { createReactNativeGoodVibesPlatform } from '@goodvibes/engine/platform/react-native';
 
 // Read from SecureStore in production: await SecureStore.getItemAsync('gv-token')
 const token = process.env.GOODVIBES_TOKEN ?? (() => { throw new Error('GOODVIBES_TOKEN env var is required'); })() as string;

@@ -1,12 +1,12 @@
-import { retainSuiteUpdateConfiguration, type SuiteUpdateConfigurationSource } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
-import { installedSuiteNeedsRepair, type SuiteUpdateResult } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { retainSuiteUpdateConfiguration, type SuiteUpdateConfigurationSource } from '@goodvibes/engine/terminal-shell/release-update-preflight';
+import { installedSuiteNeedsRepair, type SuiteUpdateResult } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import {
   runLaunchAutoUpdate as runSharedLaunchAutoUpdate,
   type LaunchAutoUpdateInput,
   type LaunchAutoUpdateOutcome,
-} from '@goodvibes-jev/engine/terminal-shell/launch-auto-update';
-import { restartOntoUpdatedBinary as restart, type RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';
-export type { RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';
+} from '@goodvibes/engine/terminal-shell/launch-auto-update';
+import { restartOntoUpdatedBinary as restart, type RestartOntoUpdatedBinaryOptions } from '@goodvibes/engine/terminal-shell/service-io';
+export type { RestartOntoUpdatedBinaryOptions } from '@goodvibes/engine/terminal-shell/service-io';
 import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime/workspace-update-policy.ts';
 /**
  * Launch-time self-update, the agent lands on the newest release at startup
@@ -72,7 +72,7 @@ function launchCheckFile(configManager: Partial<Pick<ConfigManager, 'getControlP
  */
 export const LAUNCH_UPDATED_FROM_ENV = 'GOODVIBES_AGENT_LAUNCH_UPDATED_FROM';
 
-export { LAUNCH_UPDATE_CHECK_TIMEOUT_MS, LAUNCH_APPLY_TIMEOUT_MS, type LaunchAutoUpdateOutcome } from '@goodvibes-jev/engine/terminal-shell/launch-auto-update';
+export { LAUNCH_UPDATE_CHECK_TIMEOUT_MS, LAUNCH_APPLY_TIMEOUT_MS, type LaunchAutoUpdateOutcome } from '@goodvibes/engine/terminal-shell/launch-auto-update';
 
 export class AgentUpdateRecoveryRequiredError extends Error {
   constructor() { super('Agent startup stopped: the suite update requires recovery before this installation can run'); this.name = 'AgentUpdateRecoveryRequiredError'; }
@@ -117,7 +117,7 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
     unswappable: (kind) =>
       kind === 'source'
         ? 'auto-update skipped: running from source (dev checkout)'
-        : 'auto-update skipped: package-managed install, update with: bun add -g @goodvibes-jev/agent',
+        : 'auto-update skipped: package-managed install, update with: bun add -g @goodvibes/agent',
     apply: ({ signal, progress }) => {
       configuration.assertCurrent();
       return (options.apply ?? applyUpdate)({

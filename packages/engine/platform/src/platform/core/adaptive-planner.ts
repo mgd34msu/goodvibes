@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { JudgmentHeldError } from '../types/judgment-held.js';
 /**
  * Adaptive Execution Planner.
@@ -12,8 +12,8 @@ import { JudgmentHeldError } from '../types/judgment-held.js';
  *           /plan override <strategy>
  */
 
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import type { CallOptions, Outcome } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import type { CallOptions, Outcome } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { executionStrategy } from './batteries/planner.js';
 import { logger } from '../utils/logger.js';

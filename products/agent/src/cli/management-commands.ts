@@ -1,21 +1,21 @@
-import { createCliSecretsCommand } from '@goodvibes-jev/engine/terminal-shell/cli-secrets-command';
-import { createCliWorkspaceCommands } from '@goodvibes-jev/engine/terminal-shell/cli-workspace-commands';
-import { createCliSubscriptionView } from '@goodvibes-jev/engine/terminal-shell/cli-subscription-view';
+import { createCliSecretsCommand } from '@goodvibes/engine/terminal-shell/cli-secrets-command';
+import { createCliWorkspaceCommands } from '@goodvibes/engine/terminal-shell/cli-workspace-commands';
+import { createCliSubscriptionView } from '@goodvibes/engine/terminal-shell/cli-subscription-view';
 import { withProviderServices, withSessionServices, type OneShotProviderServices, type OneShotSessionServices } from './one-shot-services.ts';
-import '@goodvibes-jev/engine/platform/platform/sessions';
+import '@goodvibes/engine/platform/platform/sessions';
 import 'node:fs';
 import 'node:path';
-import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { credentialWriteScopeWasRelocated, resolveCredentialDeleteScope, resolveCredentialWriteScope } from '../config/credential-scope.ts';
-import '@goodvibes-jev/engine/platform/platform/config';
-import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes/engine/platform/platform/config';
+import '@goodvibes/engine/platform/platform/config';
 
-import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes/engine/platform/platform/config';
 import '@/runtime/index.ts';
 import { mintAgentDevicePairing } from '../agent/device-pairing.ts';
 import type { CliCommandRuntime } from './management.ts';
-import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
+import { formatAgentRecordSource } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
 import { appendTemporalLabel } from './temporal-label.ts';
 import { createAgentDaemonVerbCaller } from '../runtime/client/daemon-verbs.ts';
 

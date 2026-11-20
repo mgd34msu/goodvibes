@@ -19,7 +19,7 @@ import {
   noul, readChoice, readYesNo, recordReadings, STAKES_BANDS,
   type CallOptions, type ChoiceQuestion, type ChoiceReading, type EntryType, type JsonValue,
   type JudgmentPort, type JudgmentResult, type NamedDecision, type NoulQuestion, type YesNoReading,
-} from '@goodvibes-jev/judgment';
+} from '@goodvibes/judgment';
 
 type DispositionResult = JudgmentResult<{ disposition: ChoiceQuestion }>;
 type RefusalResult = JudgmentResult<{ refuse: NoulQuestion }>;

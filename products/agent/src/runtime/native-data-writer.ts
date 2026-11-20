@@ -1,4 +1,4 @@
-import { admitInstalledClientDataWriter } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { admitInstalledClientDataWriter } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { COMPILED_VERSION } from '../version.ts';
 
 type InstalledClientDataOptions = Parameters<typeof admitInstalledClientDataWriter>[0];

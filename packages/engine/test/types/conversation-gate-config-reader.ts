@@ -25,8 +25,8 @@
  *
  * Checked by `bun run types:check`.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ConversationGateConfigReader } from '@goodvibes-jev/engine/platform/platform/agents';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { ConversationGateConfigReader } from '@goodvibes/engine/platform/platform/agents';
 
 // The assignment under test: a ConfigManager IS a gate config reader.
 declare const configManager: ConfigManager;
@@ -36,7 +36,7 @@ export const reader: ConversationGateConfigReader = configManager;
 // broker's optional `conversationGateConfig`. Typed against the constructor's
 // own parameter so a rename or a narrowing of that field fails here too.
 type SharedSessionBrokerConfig = ConstructorParameters<
-  typeof import('@goodvibes-jev/engine/platform/platform/control-plane').SharedSessionBroker
+  typeof import('@goodvibes/engine/platform/platform/control-plane').SharedSessionBroker
 >[0];
 
 export const brokerGateConfig: SharedSessionBrokerConfig['conversationGateConfig'] = configManager;

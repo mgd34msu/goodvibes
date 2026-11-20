@@ -1,6 +1,6 @@
 import { captureRevisionReadSource } from '../security/read-source.js';
 import type { DeliveryLifetime } from '../utils/delivery-lifetime.js';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 
 export type MediaProviderCapability = 'metadata' | 'understand' | 'transform' | 'generate' | 'attachment-store';
 export type MediaProviderState = 'healthy' | 'degraded' | 'disabled' | 'unconfigured';

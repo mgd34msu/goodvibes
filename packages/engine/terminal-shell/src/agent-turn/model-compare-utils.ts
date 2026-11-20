@@ -1,4 +1,4 @@
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
 
 import { readString } from './tool-args.js';
 

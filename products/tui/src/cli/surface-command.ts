@@ -1,11 +1,11 @@
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { buildGoodVibesSecretKey, buildGoodVibesSecretRef, createRuntimeSecretsManager, resolveDaemonEnabled, resolveGoodVibesDaemonHome, resolveSecretInput } from '@goodvibes-jev/engine/platform/platform/config';
-import { ensureNtfyTopics, resolveGoodVibesNtfyTopics } from '@goodvibes-jev/engine/platform/platform/integrations';
+import type { ConfigKey, ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { buildGoodVibesSecretKey, buildGoodVibesSecretRef, createRuntimeSecretsManager, resolveDaemonEnabled, resolveGoodVibesDaemonHome, resolveSecretInput } from '@goodvibes/engine/platform/platform/config';
+import { ensureNtfyTopics, resolveGoodVibesNtfyTopics } from '@goodvibes/engine/platform/platform/integrations';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
-import { enableFeatureFlags, getMissingSurfaceFeatureFlags, getServerSurfaceFeatureFlags, surfaceFeatureGateSettingsKeys } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
-import { classifyBindPosture, isNetworkFacing } from '@goodvibes-jev/engine/terminal-shell';
-import type { CliCommandRuntime, RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
+import { enableFeatureFlags, getMissingSurfaceFeatureFlags, getServerSurfaceFeatureFlags, surfaceFeatureGateSettingsKeys } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell';
+import { classifyBindPosture, isNetworkFacing } from '@goodvibes/engine/terminal-shell';
+import type { CliCommandRuntime, RuntimeEndpointId } from '@goodvibes/engine/terminal-shell';
 import {
   applyTargetEndpointFlagsOrDefault,
   enableEndpointLanDefault,
@@ -17,7 +17,7 @@ import {
   withDaemonSettingsRoute,
   yesNo,
 } from './management-utils.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 export const SURFACE_CONFIGS = [
   ['slack', 'Slack', ['surfaces.slack.signingSecret', 'surfaces.slack.botToken']],

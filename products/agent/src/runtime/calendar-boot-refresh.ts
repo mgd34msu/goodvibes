@@ -25,8 +25,8 @@
  * last-good cached events, and /calendar subscriptions still shows the honest
  * per-feed health (unreachable / parse-error / stale with age).
  */
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { NoticeLevel } from '@goodvibes-jev/engine/platform/platform/core';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { NoticeLevel } from '@goodvibes/engine/platform/platform/core';
 import type { ShellPathService } from '@/runtime/index.ts';
 import {
   CalendarSubscriptionRegistry,

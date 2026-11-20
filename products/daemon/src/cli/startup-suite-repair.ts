@@ -1,10 +1,10 @@
 /** Repair a daemon-only historical upgrade before configuration can publish a
  * newer data floor that its still-old sibling programs cannot read. */
-import { defaultDownloadBaseUrl } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { defaultDownloadBaseUrl } from '@goodvibes/engine/platform/platform/daemon';
 import { applySuiteUpdate, assertSuiteUpdateCurrent, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration,
-  type UpdateFetchLike } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import { createNetworkFetch } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
-import { restartOntoUpdatedBinaryAsync } from '@goodvibes-jev/engine/terminal-shell/service-io';
+  type UpdateFetchLike } from '@goodvibes/engine/platform/platform/runtime/self-update';
+import { createNetworkFetch } from '@goodvibes/engine/platform/platform/runtime/transport';
+import { restartOntoUpdatedBinaryAsync } from '@goodvibes/engine/terminal-shell/service-io';
 import { resolveInstalledDaemonUpdateArtifact } from '../config/native-installation.js';
 import type { DaemonCliConfiguration } from './configuration.js';
 

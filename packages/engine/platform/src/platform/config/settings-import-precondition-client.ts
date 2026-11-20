@@ -1,5 +1,5 @@
-import type { SettingsImportPreconditionRequest, SettingsImportPreconditionFacts, SettingsImportPreconditionReceipt } from '@goodvibes-jev/engine/daemon-api';
-import type { Refusal } from '@goodvibes-jev/engine/errors';
+import type { SettingsImportPreconditionRequest, SettingsImportPreconditionFacts, SettingsImportPreconditionReceipt } from '@goodvibes/engine/daemon-api';
+import type { Refusal } from '@goodvibes/engine/errors';
 import { SettingsRefusalError, refusalText } from './settings-refusal.js';
 import {
   hasFields, isRecord as record, pickFields, settingsApplyFailure, settingsCaptureRefusal, settingsOwnerBase, settingsOwnerHeaders,
@@ -12,7 +12,7 @@ import { isDaemonOwnedConfigKey } from './config-ownership.js';
 import { isSecretBearingConfigKey } from './secret-bearing-config-keys.js';
 import { isSecretRefInput } from './secret-refs.js';
 import type { DaemonConfigEndpoint, DaemonConfigRouterDeps } from './daemon-config-route.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 
 export type { SettingsImportPreconditionRequest, SettingsImportPreconditionReceipt };
 /** What an import apply reports; `failure` and `receiptUnreadable` as for one change (settings-precondition-client.ts). */

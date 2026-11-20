@@ -1,5 +1,5 @@
 import { BUILTIN_PROVIDER_ENV_KEYS } from '../../config/provider-credential-catalog.js';
-export { WEBUI_CODE_LANGUAGES, type WebuiCodeLanguage } from '@goodvibes-jev/engine/contracts';
+export { WEBUI_CODE_LANGUAGES, type WebuiCodeLanguage } from '@goodvibes/engine/contracts';
 /** Browser-safe structural catalogs. No provider, source resolver, or decision log. */
 export { WEBUI_STATUS_CATALOG, readWebuiStatusCatalog, type WebuiStatusLabelId } from './webui-status-catalog.js';
 export type { StatusValue } from './webui-types.js';

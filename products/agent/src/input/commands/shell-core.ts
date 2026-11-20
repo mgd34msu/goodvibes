@@ -1,15 +1,15 @@
-import { createShellCoreActions } from '@goodvibes-jev/engine/terminal-shell/shell-core-actions';
-import { createBasicShellCommands, createShellNavigationCommands } from '@goodvibes-jev/engine/terminal-shell/basic-shell-commands';
+import { createShellCoreActions } from '@goodvibes/engine/terminal-shell/shell-core-actions';
+import { createBasicShellCommands, createShellNavigationCommands } from '@goodvibes/engine/terminal-shell/basic-shell-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { compactConversation, requireKeybindingsManager, requireProviderApi } from './runtime-services.ts';
 import { startFreshConversation } from './fresh-conversation.ts';
-import '@goodvibes-jev/engine/platform/platform/utils';
-import '@goodvibes-jev/engine/platform/platform/utils';
-import { createCompactCommand, refuseWhileTurnRuns } from '@goodvibes-jev/engine/terminal-shell/everyday-commands';
-import { NOTHING_TO_COMPACT_YET, NothingToCompactError } from '@goodvibes-jev/engine/platform/platform/core';
-import { createHelpCommand } from '@goodvibes-jev/engine/terminal-shell/help-command';
+import '@goodvibes/engine/platform/platform/utils';
+import '@goodvibes/engine/platform/platform/utils';
+import { createCompactCommand, refuseWhileTurnRuns } from '@goodvibes/engine/terminal-shell/everyday-commands';
+import { NOTHING_TO_COMPACT_YET, NothingToCompactError } from '@goodvibes/engine/platform/platform/core';
+import { createHelpCommand } from '@goodvibes/engine/terminal-shell/help-command';
 import { shortcutGroups } from '../../renderer/shortcut-groups.ts';
-import { registerModelCommands } from '@goodvibes-jev/engine/terminal-shell/model-command';
+import { registerModelCommands } from '@goodvibes/engine/terminal-shell/model-command';
 
 const coreActions = createShellCoreActions<CommandContext>(
   { startFreshConversation },

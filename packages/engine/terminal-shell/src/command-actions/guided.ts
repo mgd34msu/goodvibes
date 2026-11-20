@@ -8,8 +8,8 @@
  * the action list leaves.
  */
 import type { SelectionItem } from '../selection-modal.js';
-import { readRefusal, formatRefusal } from '@goodvibes-jev/engine/errors';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { readRefusal, formatRefusal } from '@goodvibes/engine/errors';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { askInput, pickFrom } from './ask-input.js';
 import { runForm } from './form.js';
 import { openGuidedPanel } from './panel.js';

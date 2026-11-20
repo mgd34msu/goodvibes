@@ -2,11 +2,11 @@ import {
   createTerminalUiServices,
   type TerminalUiRuntimeSharedServices,
   type TerminalUiRuntimeServices,
-} from '@goodvibes-jev/engine/terminal-shell/ui-services';
+} from '@goodvibes/engine/terminal-shell/ui-services';
 import type { RuntimeServices } from './services.ts';
 import { createUiReadModels, type UiReadModelOptions } from './ui-read-models.ts';
 import type { ForensicsRegistry } from '@/runtime/index.ts';
-import type { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { SharedSessionBroker } from '@goodvibes/engine/platform/platform/control-plane';
 import type { HostServiceStatus } from '@/runtime/index.ts';
 import type { SecretsManager } from '../config/secrets.ts';
 

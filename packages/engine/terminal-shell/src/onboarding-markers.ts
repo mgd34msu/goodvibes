@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
-import { atomicWriteFileSync, readVersioned, setAsideNewerVersionFile } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { atomicWriteFileSync, readVersioned, setAsideNewerVersionFile } from '@goodvibes/engine/platform/platform/config';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import type { OnboardingCheckMarkerPayload, OnboardingCheckMarkerState, OnboardingStateScope, WriteOnboardingCheckMarkerOptions, } from './onboarding-state-types.js';
 const ONBOARDING_CHECK_MARKER_FILE = 'onboarding-checked.json';
 const ONBOARDING_COMPLETION_MARKER_FILE = 'onboarding-complete.json';

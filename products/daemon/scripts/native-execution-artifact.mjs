@@ -3,9 +3,9 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertNativeArtifactFilesCurrent, inspectTerminalReaderArtifact, retainNativeArtifactFiles } from '@goodvibes-jev/engine/toolchain';
-import { createReleaseStage } from '@goodvibes-jev/engine/toolchain/release-publication';
-import { parseClientReaderArtifact } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { assertNativeArtifactFilesCurrent, inspectTerminalReaderArtifact, retainNativeArtifactFiles } from '@goodvibes/engine/toolchain';
+import { createReleaseStage } from '@goodvibes/engine/toolchain/release-publication';
+import { parseClientReaderArtifact } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { runNativeArchive } from './native-execution-process.mjs';
 
 export const NATIVE_EXECUTION_TARGETS = Object.freeze(['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64']);
@@ -76,7 +76,7 @@ function owner(product, source) {
   assert(NATIVE_EXECUTION_TARGETS.includes(source.target), 'Unsupported native execution target');
   for (const value of [source.runId, source.runAttempt]) assert.match(value, /^[1-9][0-9]*$/, 'Exact native CI run/attempt required');
   const pkg = json(join(product, 'package.json'));
-  assert.equal(pkg.name, '@goodvibes-jev/daemon'); assert.match(pkg.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
+  assert.equal(pkg.name, '@goodvibes/daemon'); assert.match(pkg.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
   return Object.freeze({ schema: 1, kind: 'daemon-native-execution', sourceCommit: source.sourceCommit, sourceTree: source.sourceTree,
     headCommit: source.headCommit, target: source.target, runId: source.runId, runAttempt: source.runAttempt, packageName: pkg.name, version: pkg.version });
 }

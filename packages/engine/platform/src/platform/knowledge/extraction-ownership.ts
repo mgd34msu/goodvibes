@@ -1,7 +1,7 @@
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import { isClassicOperation } from '../runtime/decision-policy.js';
-import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes/engine/errors';
+import type { JudgmentPort } from '@goodvibes/judgment';
 import type { KnowledgeIngestOwnership } from './ingest-context.js';
 import { KnowledgeExtractionJudgmentHoldError } from './extraction-policy.js';
 import { prepareRepairJudgmentResult } from './semantic/web-gap-repair/admission.js';

@@ -1268,7 +1268,7 @@ for policy behavior, limits and qualification requirements.
 ### Changed
 
 - Unify Judgment, Engine, Daemon, TUI, Agent and WebUI at version 3.0.0 under
-  the `@goodvibes-jev` namespace and one root lockfile. Protocol and persisted
+  the `@goodvibes` namespace and one root lockfile. Protocol and persisted
   schema versions remain independent.
 - Support Jev, Clef, Clef-flash, DiffusionGemma Jev, Kev-9B and Laya through
   model-neutral protocol adapters with explicit endpoint, authentication,
@@ -1951,7 +1951,7 @@ separate repository opt-in.
   pins updated.
 
 
-This file tracks breaking changes, additions, fixes, and migration steps for each release of `@goodvibes-jev/engine/platform`. Every release **must** have a corresponding `## [x.y.z] - YYYY-MM-DD` section before it can publish, the changelog gate refuses a release the file does not describe.
+This file tracks breaking changes, additions, fixes, and migration steps for each release of `@goodvibes/engine/platform`. Every release **must** have a corresponding `## [x.y.z] - YYYY-MM-DD` section before it can publish, the changelog gate refuses a release the file does not describe.
 
 ## [2.0.19] - 2026-08-21
 
@@ -2643,7 +2643,7 @@ This file tracks breaking changes, additions, fixes, and migration steps for eac
 
 ### Added
 
-- `@goodvibes-jev/engine/terminal-shell` exports the shared conversation fold
+- `@goodvibes/engine/terminal-shell` exports the shared conversation fold
   policy: `foldedToolResult`, `trailingBlankAfterRow`, `foldPreviewText`, and
   their thresholds. A folded transcript block is exactly one row, the header
   with its `▸ N lines` badge and the content's head riding the same line; no
@@ -3107,30 +3107,30 @@ This file tracks breaking changes, additions, fixes, and migration steps for eac
   consumer that needed the name wrote the name out again, and a hand copy of a
   contract it must stay assignable to is a copy that drifts silently.
   - `RemotePeerAuth` and `DistributedRuntimeRouteService`
-    (`@goodvibes-jev/engine/daemon-api/remote-routes`) were declared without the
+    (`@goodvibes/engine/daemon-api/remote-routes`) were declared without the
     `export` keyword, so the daemon product mirrored the alias and all seventeen
     method signatures by hand to implement the service the facade injects.
-  - `SharedSessionContinuationRunner` (`@goodvibes-jev/engine/platform/platform/control-plane`)
+  - `SharedSessionContinuationRunner` (`@goodvibes/engine/platform/platform/control-plane`)
     was the one member of `session-intents` the barrel did not re-export, beside
     nine of its siblings that were, so a client naming the seam it implements
     declared the runner structurally.
-  - `ManagedServiceActionResult` (`@goodvibes-jev/engine/platform/platform/daemon`) is the
+  - `ManagedServiceActionResult` (`@goodvibes/engine/platform/platform/daemon`) is the
     return type of the injectable `actionRunner`; a host supplying one has to
     name it, and only `ManagedServiceStatus` was on the barrel.
   - `createBrokeredPermissionManager` and `BrokeredPermissionManagerOptions`
-    (`@goodvibes-jev/engine/platform/platform/runtime/client-services`) join the two types
+    (`@goodvibes/engine/platform/platform/runtime/client-services`) join the two types
     that module already published. Three compositions broker their asks and all
     three need the same mapping from a background-agent attribution to the
     raise's `routeId`/`metadata`.
 
-- **`OrchestratorUsageTotals`** (`@goodvibes-jev/engine/platform/platform/core`) and
-  **`TurnInjectionRecord`** (`@goodvibes-jev/engine/platform/platform/agents`). Both were
+- **`OrchestratorUsageTotals`** (`@goodvibes/engine/platform/platform/core`) and
+  **`TurnInjectionRecord`** (`@goodvibes/engine/platform/platform/agents`). Both were
   reachable as shapes and not as names: the usage totals were an inferred object
   literal on `Orchestrator.usage`, and the injection record was only the element
   type of `AgentRecord.turnInjections`. A caller that has to declare the type, folding usage across conversations, rendering one injection row, wrote the
   fields out again or derived them positionally from an array.
 
-- **`resolveWebPort`** (`@goodvibes-jev/engine/platform/platform/daemon`), beside the
+- **`resolveWebPort`** (`@goodvibes/engine/platform/platform/daemon`), beside the
   daemon host/port resolvers the barrel already publishes. Two products
   re-implemented the web endpoint's port coercion inline for their endpoint
   displays, because only the daemon-port half was reachable, so one binding was
@@ -3181,7 +3181,7 @@ This file tracks breaking changes, additions, fixes, and migration steps for eac
   never emits, so this package's copy never reached dist and each consumer kept
   its own. `prepare:sdk` copies it into dist and the `./sql-js` export makes it
   reachable: a consumer writes
-  `/// <reference types="@goodvibes-jev/engine/platform/sql-js" />` once and has no
+  `/// <reference types="@goodvibes/engine/platform/sql-js" />` once and has no
   declaration of its own to keep in step.
 
 - **`DOMAINS`, `DOMAIN_READ_MATRIX`, `getAllowedReadsFor` and `DomainName`
@@ -3270,7 +3270,7 @@ This file tracks breaking changes, additions, fixes, and migration steps for eac
 
   **Who is affected:** anyone reading `isPlaceholder` / `usingBundledDefault`, or
   importing the two placeholder constants, from
-  `@goodvibes-jev/engine/platform/platform/calendar`. **What changes for an operator:**
+  `@goodvibes/engine/platform/platform/calendar`. **What changes for an operator:**
   nothing that was working stops working, the previous default was a
   placeholder string that could never authenticate. Connecting a calendar
   requires registering your own OAuth app with the provider and setting its
@@ -3469,7 +3469,7 @@ daemon no longer dies at startup over an absent optional package.
   `Could not resolve: "jsdom"` and produced no binary at all. The lazy
   resolution never got the chance to govern.
 
-  `@goodvibes-jev/engine/toolchain`'s compile path (`lib/optional-externals.ts`,
+  `@goodvibes/engine/toolchain`'s compile path (`lib/optional-externals.ts`,
   wired into `runBuildBinaries`) now screens every declared dependency of the
   building repo and of the SDK it bundles against what is actually installed:
 
@@ -3583,7 +3583,7 @@ daemon no longer dies at startup over an absent optional package.
 
   When any of these packages is absent the feature throws an error whose
   message is the same stated reason: the package name, that it is an optional
-  dependency of `@goodvibes-jev/engine/platform`, and that installing it enables the
+  dependency of `@goodvibes/engine/platform`, and that installing it enables the
   feature. Nothing returns empty or defaults silently.
 
   Two optional packages are deliberately NOT converted. `zustand` backs
@@ -4010,7 +4010,7 @@ its description says, in every consumer.
   removable through the undo it returns. A second registration is refused unless
   the takeover is explicit, and a push that arrives before the product has
   registered fails saying exactly that instead of looking like an unknown
-  surface. New exports from `@goodvibes-jev/engine/platform/platform/channels`:
+  surface. New exports from `@goodvibes/engine/platform/platform/channels`:
   `AgentDeliveryRegistry`, `createAgentDeliveryStrategy`,
   `AGENT_DELIVERY_STRATEGY_ID`, `CHANNEL_DELIVERY_SURFACE_KINDS`, and the
   `AgentConversationSender` / `AgentConversationMessage` types. Route bindings
@@ -5447,7 +5447,7 @@ defaults.
   so could not run the periodic sweep that release introduced. The class,
   `AppendOnlyRetentionSchedulerOptions` and `APPEND_ONLY_SWEEP_INTERVAL_MS` are
   now exported from the retention barrel, which means they arrive with the rest
-  of `operations` from `@goodvibes-jev/engine/platform/platform/runtime`.
+  of `operations` from `@goodvibes/engine/platform/platform/runtime`.
 
 ## [1.13.0] - 2026-07-25
 
@@ -5592,8 +5592,8 @@ defaults.
 
 ### Added
 
-- **The SDK now carries the toolchain.** `@goodvibes-jev/engine/platform` declares
-  `@goodvibes-jev/engine/toolchain` as a runtime dependency, so installing the SDK
+- **The SDK now carries the toolchain.** `@goodvibes/engine/platform` declares
+  `@goodvibes/engine/toolchain` as a runtime dependency, so installing the SDK
   installs the shared CI/CD toolchain as well. Consumer repos can drop their
   separate toolchain pin and rely on the one the SDK brings.
 - **Zero-touch releases (auto-tag on green).** CI gains a final `auto-release`
@@ -5628,8 +5628,8 @@ defaults.
 
 ### Fixed
 
-- **`@goodvibes-jev/engine/toolchain` gains a dispatcher bin named after the
-  package (`goodvibes-toolchain`).** `bunx @goodvibes-jev/engine/toolchain <tool>`
+- **`@goodvibes/engine/toolchain` gains a dispatcher bin named after the
+  package (`goodvibes-toolchain`).** `bunx @goodvibes/engine/toolchain <tool>`
   resolves the bin whose name matches the package's final path segment; with
   only the eleven `goodvibes-*` tool bins exposed, bunx silently fell back to
   the FIRST bin in the map (engine-pin-gate) and ran it with the intended tool
@@ -5645,7 +5645,7 @@ defaults.
 
 ### Added
 
-- **`@goodvibes-jev/engine/toolchain`, a shared CI/CD toolchain package (the 11th
+- **`@goodvibes/engine/toolchain`, a shared CI/CD toolchain package (the 11th
   workspace package).** The release, publish, and verification scripts that
   previously lived as 2–3 parallel copies across the GoodVibes repos now have one
   published home. Each tool, `engine-pin-gate`, `build-binaries`, `release-cut`,
@@ -5689,14 +5689,14 @@ defaults.
   removed the only public name for the whole thing and forced consumers to
   re-derive it from the position of an argument in a function signature, a
   fragile anchor. The full interface is now exported by name as `RuntimeServices`
-  from the runtime bootstrap surface (`@goodvibes-jev/engine/platform/platform/runtime`,
+  from the runtime bootstrap surface (`@goodvibes/engine/platform/platform/runtime`,
   the `bootstrap` namespace), alongside the existing narrow
   `RuntimeFoundationServicesSlice`.
 - **The managed local-voice setup service is now importable on its own.** The
   daemon composes its local-voice install-and-status service from a single
   factory, but that factory had no import path of its own, so an app composing
   its own runtime had to rebuild it from lower-level pieces. It is now published
-  at `@goodvibes-jev/engine/platform/platform/runtime/voice-setup` (`createVoiceSetupService`),
+  at `@goodvibes/engine/platform/platform/runtime/voice-setup` (`createVoiceSetupService`),
   so a consumer constructs the exact same service the daemon does, with its
   provisioner and status-read seams injected, instead of duplicating the wiring.
 
@@ -6449,7 +6449,7 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
   unsupported server methods (`roots/list`, `sampling/createMessage`).
 - **An agent-side ACP adapter: GoodVibes is now drivable from ACP-capable
   editors (Zed and others) over stdio.** `serveAcpAgent` /
-  `GoodVibesAcpAgent` (exported from `@goodvibes-jev/engine/platform/platform/acp`, run
+  `GoodVibesAcpAgent` (exported from `@goodvibes/engine/platform/platform/acp`, run
   via `bun scripts/acp-agent.ts`) implement the Agent Client Protocol's agent
   interface on top of the new embedding API: `session/new` boots an embedded
   GoodVibes session against the editor's cwd, `session/prompt` submits text and
@@ -6474,12 +6474,12 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
   `x-untyped-client-io-count`, mirrored in the `x-operator-methods` index),
   never omitted; schema-less request/response bodies say so
   (`x-schema-coverage: schema-less`) instead of receiving invented schemas.
-  Fetchable as `@goodvibes-jev/engine/contracts/operator-openapi.json` /
-  `@goodvibes-jev/engine/platform/contracts/operator-openapi.json` and committed at
+  Fetchable as `@goodvibes/engine/contracts/operator-openapi.json` /
+  `@goodvibes/engine/platform/contracts/operator-openapi.json` and committed at
   `docs/operator-openapi.json` (byte-identical copies from one generator).
   Drift in either copy reddens `contracts:check`, the generated-artifact idiom.
 - **SDK Embedding API 1.0, a documented, stability-marked entry point
-  (`@goodvibes-jev/engine/platform/embed`) for embedding a GoodVibes session in another
+  (`@goodvibes/engine/platform/embed`) for embedding a GoodVibes session in another
   application.** `createEmbeddedSession({ workspace, homeDirectory,
   requestPermission })` boots an in-process daemon for the workspace and returns
   an `EmbeddedSession` exposing the minimal stable contract: the runtime event
@@ -6507,7 +6507,7 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
   construction: each entry's pin and capability summary are required by the type,
   so a self-hostable registry built from it cannot represent an unpinned or
   capability-opaque bundle. Shipped under
-  `@goodvibes-jev/engine/platform/platform/runtime/ecosystem` with a `plugin-bundle`
+  `@goodvibes/engine/platform/platform/runtime/ecosystem` with a `plugin-bundle`
   init/validate CLI (`scripts/plugin-bundle.ts`).
 - **A zero-knowledge, self-hostable relay so a daemon is reachable from outside
   the LAN without the relay operator being able to read the traffic.** A daemon
@@ -6521,9 +6521,9 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
   payload, a curious or malicious relay that lacks the daemon's static private
   key cannot derive the session keys and its forged handshake confirmation is
   rejected. Ships the runtime-neutral protocol + crypto as
-  `@goodvibes-jev/engine/transport-core/relay` (handshake, `RelaySecureChannel`,
+  `@goodvibes/engine/transport-core/relay` (handshake, `RelaySecureChannel`,
   daemon identity (de)serialization, and the QR-encodable pairing-payload codec)
-  and the rendezvous server as `@goodvibes-jev/engine/daemon-api` `RelayHub` /
+  and the rendezvous server as `@goodvibes/engine/daemon-api` `RelayHub` /
   `createBunRelayServer`, deployable standalone on a VPS via the
   `goodvibes-relay` bin. No accounts; per-instance caps (max daemons, pipes,
   per-daemon pipes, message size) and per-address handshake rate limiting keep a
@@ -6533,11 +6533,11 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
   works unchanged over the relay.** Because the operator protocol is
   contract-driven REST-over-JSON, the relay tunnels whole HTTP request/response
   pairs inside the E2E channel: the client half is a relay-backed `fetch`
-  (`createRelayClient` in `@goodvibes-jev/engine/transport-realtime`) you hand to the
+  (`createRelayClient` in `@goodvibes/engine/transport-realtime`) you hand to the
   SDK as `fetchImpl`, so `sdk.approvals.list()` and every other typed call just
   works, the operator's auth token rides inside the tunnel, invisible to the
   relay. The daemon half (`createRelayDaemonRegistration` in
-  `@goodvibes-jev/engine/daemon-api`) dials the relay OUTBOUND with reconnect/backoff,
+  `@goodvibes/engine/daemon-api`) dials the relay OUTBOUND with reconnect/backoff,
   terminates the E2E channel INSIDE the daemon, and replays tunneled requests
   through the daemon's own route dispatcher (tagged with an `x-goodvibes-via-relay`
   header). New `relay.*` daemon config (`relay.enabled` default OFF, `relay.url`,
@@ -6577,7 +6577,7 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
   registered root still inherits its main repo's registration. Registering an
   absurdly broad root (`$HOME`, `/`, or the daemon state dir) is refused through
   the same root-guard the checkpoint manager uses. Ships as
-  `@goodvibes-jev/engine/platform/platform/workspace` exports (`WorkspaceRegistrationStore`
+  `@goodvibes/engine/platform/platform/workspace` exports (`WorkspaceRegistrationStore`
   with user-scoped, injectable I/O; the pure `resolveWorkspaceRegistration`; the
   `probeWorktreeLink` link probe) plus four operator verbs with typed IO and REST
   parity: `workspaces.registrations.list` / `.add` / `.remove` and
@@ -6604,9 +6604,9 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
   `decideSandboxedExec`, `detectSandboxAvailability`, and `probeSandboxHost`
   existed but were not exported from any public subpath, so a consumer could not
   wire its approval flow to the sandbox policy. They ship now through
-  `@goodvibes-jev/engine/platform/platform/runtime/permissions/sandbox-policy`
+  `@goodvibes/engine/platform/platform/runtime/permissions/sandbox-policy`
   (`decideSandboxedExec` + its decision/input types) and
-  `@goodvibes-jev/engine/platform/platform/tools/exec/sandbox` (the runner:
+  `@goodvibes/engine/platform/platform/tools/exec/sandbox` (the runner:
   `detectSandboxAvailability`, `probeSandboxHost`, `buildBwrapArgv`, the
   plan-resolution helpers, and their types), the exact paths the exec-sandbox
   entry below names, now real, each with its own bundle budget.
@@ -6618,7 +6618,7 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
   credential-env scrub. Availability is detected honestly: no bwrap, or any
   non-Linux host, reports unavailable with a stated reason and the exec path is
   byte-for-byte unchanged; macOS is unavailable this release (no faked parity).
-  New `@goodvibes-jev/engine/platform/platform/tools/exec/sandbox` provides the pure,
+  New `@goodvibes/engine/platform/platform/tools/exec/sandbox` provides the pure,
   injectable runner (host probe → availability, bwrap-argv construction,
   per-command plan) and `runtime/permissions/sandbox-policy` the sandbox-aware
   permission input: a command that runs entirely inside the boundary with no
@@ -6639,7 +6639,7 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
   a deny to an allow, and never inspects or expands that block.
 
 - **A unified message-anchored rewind service that joins the platform's three
-  history systems.** New `@goodvibes-jev/engine/platform/platform/rewind` is one
+  history systems.** New `@goodvibes/engine/platform/platform/rewind` is one
   coordinator, never a fourth history store, over the workspace checkpoint
   manager (git-backed, sessionId-stamped), the conversation store, and file
   undo. Given a session turn anchor it can restore files (the nearest workspace
@@ -6662,7 +6662,7 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
 - **Feature-flag graduation as a release policy.** The platform ships most
   feature flags default-off and flips them on only once validated, but nothing
   forced a per-release decision about the flags that had earned their way on.
-  New `@goodvibes-jev/engine/platform/platform/runtime/feature-flags` graduation
+  New `@goodvibes/engine/platform/platform/runtime/feature-flags` graduation
   bookkeeping gives every flag an owner-facing graduation state, `dark`
   (default-off, no evidence), `soaking` (accumulating evidence),
   `graduate-candidate` (judged ready, awaiting a decision), `graduated`
@@ -6709,7 +6709,7 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
   (`SESSION_NOT_LOCAL`). Verbs land with typed IO and register together with
   their descriptors, so none is a cataloged-but-unhandled 501.
 - **A local-first MCP (Model Context Protocol) server that exposes the operator
-  surface.** New `@goodvibes-jev/engine/platform/platform/mcp/server` generates MCP tool
+  surface.** New `@goodvibes/engine/platform/platform/mcp/server` generates MCP tool
   definitions from the operator catalog (every cataloged, invokable operator
   method becomes one tool, its dotted method id mapped to an MCP-safe name and
   its operator input schema carried over verbatim) rather than hand-writing
@@ -6724,7 +6724,7 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
   contract, invoke })` builds a ready-to-serve server; `buildOperatorMcpTools`
   exposes the generator on its own.
 - **The single canonical skill service, hoisted into the SDK.** New
-  `@goodvibes-jev/engine/platform/platform/skills` owns one skill model (Markdown with
+  `@goodvibes/engine/platform/platform/skills` owns one skill model (Markdown with
   YAML-style frontmatter), one progressive-disclosure read path (a cheap index
   line, name + description + metadata, no body, loaded for every skill, the
   full body read only for the one skill invoked), and one CRUD surface over an
@@ -6816,7 +6816,7 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
 
 - **`GET /api/runtime/metrics` is consolidated onto the `runtime.metrics.get`
   gateway verb; the daemon-api raw REST handler is removed.** The URL previously
-  had two servers: the `@goodvibes-jev/engine/daemon-api` raw handler
+  had two servers: the `@goodvibes/engine/daemon-api` raw handler
   (`getRuntimeMetrics` in the operator dispatcher, admin-wrapped) and the
   `runtime.metrics.get` gateway method. They are now one. `runtime.metrics.get`
   gains a `GATEWAY_REST_ROUTES` parity entry (`GET /api/runtime/metrics`), which
@@ -6884,7 +6884,7 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
   Stage-B mock fixtures. Fixed both ends: (a) `snapshotMetrics` plus its new
   `RuntimeMetricsSnapshot`/`RuntimeMetricsBucket` types and
   `ToolFormatFailureClass` are exported from
-  `@goodvibes-jev/engine/platform/platform/runtime/observability`; (b) a new
+  `@goodvibes/engine/platform/platform/runtime/observability`; (b) a new
   `runtime.metrics.get` operator method (typed IO, so the coverage ratchet
   holds at 97 untyped) is cataloged with its handler attached at composition
   time (`registerRuntimeMetricsGatewayMethods`, wired from
@@ -7336,7 +7336,7 @@ scaffolding); see **Removed** and **Migration**.
   triple-meaning, memory fragmentation, the agent `/session` orphan).
 - **Consolidated local-SDK overlay tool**, one SDK-shipped `scripts/engine-dev.ts`
   that enumerates the workspace packages (all nine, including
-  `@goodvibes-jev/engine/contracts`); consumers reduce to a one-line alias, closing
+  `@goodvibes/engine/contracts`); consumers reduce to a one-line alias, closing
   the contracts re-sync gap.
 
 ### Changed
@@ -7380,40 +7380,40 @@ every runtime concern, workstream orchestration beyond fixed chains, passive
 knowledge injection for both turn loops, and a repo code index.
 
 ### Added
-- `@goodvibes-jev/engine/platform`: **fleet process registry** (`./platform/runtime/fleet`), `createProcessRegistry` composes the EXISTING managers (agents, WRFC chains,
+- `@goodvibes/engine/platform`: **fleet process registry** (`./platform/runtime/fleet`), `createProcessRegistry` composes the EXISTING managers (agents, WRFC chains,
   orchestration, schedules, triggers, watchers, workflows, background processes,
   automation jobs, code index) into one queryable tree of `ProcessNode`s with
   derived states, per-node usage/cost, coalesced subscription ticks, and verbs:
   `interrupt`, `kill` (cascade), `steer`, `resume`, `dispose`. Zero new store
   state, the registry is a view, not a second source of truth.
-- `@goodvibes-jev/engine/platform`: **conversation snapshot bridge + steer**, `AgentManager.getConversationSnapshot`, `AgentOrchestrator.setConversationSink`,
+- `@goodvibes/engine/platform`: **conversation snapshot bridge + steer**, `AgentManager.getConversationSnapshot`, `AgentOrchestrator.setConversationSink`,
   message-bus `steer` verb (verbatim injection at drain; consumption event emitted
   only AFTER a successful chat), `ProcessState 'interrupted'`,
   `AgentRecord.terminationKind`.
-- `@goodvibes-jev/engine/platform`: **orchestration engine** (`./platform/orchestration`), Workstream/Phase/WorkItem model with float-ordinal phase insertion, capacity-slot
+- `@goodvibes/engine/platform`: **orchestration engine** (`./platform/orchestration`), Workstream/Phase/WorkItem model with float-ordinal phase insertion, capacity-slot
   scheduler, resume-prefix replay keyed (itemId, phaseId) with crash-artifact
   reconciliation (in-phase items re-queue on import), budget refuse-not-kill +
   `updateBudget` recovery, `fromChainSpec` compat, and the planner's
   `PlanProposal` (`assemblePlanProposal` / `singleItemProposal`).
-- `@goodvibes-jev/engine/platform`: additive `Tool.execute(args, opts?: { signal? })`, cooperative cancellation reaches exec/fetch child processes (closing a
+- `@goodvibes/engine/platform`: additive `Tool.execute(args, opts?: { signal? })`, cooperative cancellation reaches exec/fetch child processes (closing a
   previously deferred gap).
-- `@goodvibes-jev/engine/platform`: **passive knowledge injection for BOTH turn loops**, per-turn budgeted retrieval (default 800 tokens, relevance floor 95) composed
+- `@goodvibes/engine/platform`: **passive knowledge injection for BOTH turn loops**, per-turn budgeted retrieval (default 800 tokens, relevance floor 95) composed
   fresh on every LLM roundtrip (including chat retries), gated by the
   `agent-passive-knowledge-injection` flag; honest per-turn records
   (`TurnInjectionRecord`: query, candidates, injected ids, dropped-for-budget,
   token cost) in bounded rings, `AgentRecord.turnInjections` and
   `Orchestrator.getTurnInjections()`; `OrchestratorCoreServices.memoryRegistry`
   seam via `setCoreServices`.
-- `@goodvibes-jev/engine/platform`: **repo code index** (`CodeIndexStore`), tree-sitter chunking, bounded gitignore-aware walk (nested .gitignore honored),
+- `@goodvibes/engine/platform`: **repo code index** (`CodeIndexStore`), tree-sitter chunking, bounded gitignore-aware walk (nested .gitignore honored),
   hash-gated incremental rebuilds, honest lexical/semantic labeling with
   embedding-provider identity pinned per build (mismatch degrades to lexical with
   a rebuild hint), sqlite-vec backend, fleet `code-index` node; auto-start off by
   default.
-- `@goodvibes-jev/engine/platform`: **pause↔resume through the registry**, schedules,
+- `@goodvibes/engine/platform`: **pause↔resume through the registry**, schedules,
   triggers, and automation jobs report `'paused'` (previously mislabeled
   `'killed'`), expose `resumable`, and `ProcessRegistry.resume()` re-enables them;
   `/schedule`-managed AutomationManager jobs now surface in the fleet tree.
-- `@goodvibes-jev/engine/platform`: `ConfigManager.removeCategoryKey`, clearing a
+- `@goodvibes/engine/platform`: `ConfigManager.removeCategoryKey`, clearing a
   category override (e.g. a feature-flag entry back to its default) was a silent
   no-op via merge; explicit removal now persists across reload.
 
@@ -7458,25 +7458,25 @@ knowledge injection for both turn loops, and a repo code index.
 ## [0.37.2] - 2026-07-04
 
 ### Fixed
-- `@goodvibes-jev/engine/platform`: **checkpoint creation no longer aborts in repos whose top-level `.gitignore` lists `.goodvibes/`** (which the goodvibes TUI itself writes at startup), the side-git staging pathspec explicitly named `.goodvibes` in an exclude, triggering git's ignored-path abort and disabling ALL checkpointing in git repos. The redundant pathspec is removed; the checkpoint store's own `.goodvibes/.gitignore` self-ignore (written before any staging can run) is sufficient.
-- `@goodvibes-jev/engine/platform`: **per-hunk approval selections are honored end-to-end**, `ApprovalBroker.requestApproval()` dropped `modifiedArgs` from prompt decisions in both its local-prompt bridge and `resolveApproval()`, so "Apply selected" executed the full unfiltered edit. The field now threads through; regression test drives the real broker→PermissionManager→executeToolCalls pipeline (the pre-existing test bypassed the broker).
+- `@goodvibes/engine/platform`: **checkpoint creation no longer aborts in repos whose top-level `.gitignore` lists `.goodvibes/`** (which the goodvibes TUI itself writes at startup), the side-git staging pathspec explicitly named `.goodvibes` in an exclude, triggering git's ignored-path abort and disabling ALL checkpointing in git repos. The redundant pathspec is removed; the checkpoint store's own `.goodvibes/.gitignore` self-ignore (written before any staging can run) is sufficient.
+- `@goodvibes/engine/platform`: **per-hunk approval selections are honored end-to-end**, `ApprovalBroker.requestApproval()` dropped `modifiedArgs` from prompt decisions in both its local-prompt bridge and `resolveApproval()`, so "Apply selected" executed the full unfiltered edit. The field now threads through; regression test drives the real broker→PermissionManager→executeToolCalls pipeline (the pre-existing test bypassed the broker).
 
 ## [0.37.1] - 2026-07-03
 
 ### Fixed
-- `@goodvibes-jev/engine/platform`: **WorkspaceCheckpointManager operations are now serialized** through an internal mutex, a background agent completing during a restore's read-tree/checkout-index window could previously interleave an auto-snapshot's `git add -A` and silently corrupt the restore (timing-dependent; found by adversarial review, proven with an injected race).
-- `@goodvibes-jev/engine/platform`: **checkpoint retention GC genuinely reclaims disk**, checkpoint commits are now parentless (lineage lives in the manifest), so pruned refs' objects become unreachable and `git gc --prune=now` frees them (measured 64.6% object-store shrink in the test); previously the linear parent chain kept every pruned commit alive and the store grew unbounded.
+- `@goodvibes/engine/platform`: **WorkspaceCheckpointManager operations are now serialized** through an internal mutex, a background agent completing during a restore's read-tree/checkout-index window could previously interleave an auto-snapshot's `git add -A` and silently corrupt the restore (timing-dependent; found by adversarial review, proven with an injected race).
+- `@goodvibes/engine/platform`: **checkpoint retention GC genuinely reclaims disk**, checkpoint commits are now parentless (lineage lives in the manifest), so pruned refs' objects become unreachable and `git gc --prune=now` frees them (measured 64.6% object-store shrink in the test); previously the linear parent chain kept every pruned commit alive and the store grew unbounded.
 
 ## [0.37.0] - 2026-07-03
 
 An early stage of the goodvibes-tui evolution effort, focused on reversibility. The headline is the workspace checkpoint engine, cheap whole-workspace snapshots and rewind, with zero pollution of the user's git state.
 
 ### Added
-- `@goodvibes-jev/engine/platform`: **WorkspaceCheckpointManager** (`./platform/workspace`), a hidden side git repository (isolated `GIT_DIR`, the workspace as work-tree) provides content-addressed whole-workspace checkpoints: automatic snapshots at turn and agent-run boundaries (subscribing to existing TURN_*/AGENT_COMPLETED events), named manual checkpoints, checkpoint-to-checkpoint and checkpoint-to-working-tree diffs, and whole-workspace restore with a default safety checkpoint. Never touches the user repo's HEAD/index/stash (proven byte-identical in tests); works in non-git directories; honors .gitignore; bounded retention via the existing RetentionPolicy with ref-deletion GC. Constructed in `createRuntimeServices` and exposed on `RuntimeServices`.
-- `@goodvibes-jev/engine/platform`: permission prompts can modify tool arguments, `PermissionPromptDecision`/`PermissionCheckResult` gain optional `modifiedArgs`, and the edit tool executes the approved subset, enabling per-edit accept/reject at the approval gate (whole-file `write` stays all-or-nothing for now).
+- `@goodvibes/engine/platform`: **WorkspaceCheckpointManager** (`./platform/workspace`), a hidden side git repository (isolated `GIT_DIR`, the workspace as work-tree) provides content-addressed whole-workspace checkpoints: automatic snapshots at turn and agent-run boundaries (subscribing to existing TURN_*/AGENT_COMPLETED events), named manual checkpoints, checkpoint-to-checkpoint and checkpoint-to-working-tree diffs, and whole-workspace restore with a default safety checkpoint. Never touches the user repo's HEAD/index/stash (proven byte-identical in tests); works in non-git directories; honors .gitignore; bounded retention via the existing RetentionPolicy with ref-deletion GC. Constructed in `createRuntimeServices` and exposed on `RuntimeServices`.
+- `@goodvibes/engine/platform`: permission prompts can modify tool arguments, `PermissionPromptDecision`/`PermissionCheckResult` gain optional `modifiedArgs`, and the edit tool executes the approved subset, enabling per-edit accept/reject at the approval gate (whole-file `write` stays all-or-nothing for now).
 
 ### Fixed
-- `@goodvibes-jev/engine/platform`: **compaction now accounts for completed subagent work**, two build sites filtered agent records with a premature active-only predicate, so a compaction summary after agents built a whole project claimed "no completed tool work". Completed agent runs (task, files touched, outcome) now reach the compaction sections.
+- `@goodvibes/engine/platform`: **compaction now accounts for completed subagent work**, two build sites filtered agent records with a premature active-only predicate, so a compaction summary after agents built a whole project claimed "no completed tool work". Completed agent runs (task, files touched, outcome) now reach the compaction sections.
 
 ### Notes
 - The `wcp_` workspace-checkpoint namespace is deliberately distinct from compaction's `cpt_` conversation snapshots and the generic retention `CheckpointRecord`.
@@ -7486,16 +7486,16 @@ An early stage of the goodvibes-tui evolution effort, focused on reversibility. 
 An early "trust repairs" round from the goodvibes-tui live-dogfooding effort: every fix closes a defect reproduced against v1.0.0 of the TUI where the SDK reported something other than the truth to the model or the user.
 
 ### Added
-- `@goodvibes-jev/engine/platform`: `STREAM_RETRY` TurnEvent, in-flight provider `chat()` retries (the withRetry backoff path) now emit an observable event with attempt/max fields so consumers can render honest "reconnecting" state instead of a frozen spinner.
-- `@goodvibes-jev/engine/platform`: optional `usage` payload on `AGENT_COMPLETED` events, and `AgentRecord.usage`/`toolCallCount` are now populated with real values on completion, including WRFC owner agents, which aggregate usage across every child agent in the chain (previously permanent zeros).
-- `@goodvibes-jev/engine/platform`: WRFC auto-commit policy config (`off | scoped | all`, default `scoped`) and a `paths` parameter on `AgentWorktree.commitWorkingTree`.
-- `@goodvibes-jev/engine/platform`: bounded WRFC transport-failure retry (default 1, configurable) with an observable chain failure state carrying the reason, a chain whose agent transport dies can never again evaporate silently.
+- `@goodvibes/engine/platform`: `STREAM_RETRY` TurnEvent, in-flight provider `chat()` retries (the withRetry backoff path) now emit an observable event with attempt/max fields so consumers can render honest "reconnecting" state instead of a frozen spinner.
+- `@goodvibes/engine/platform`: optional `usage` payload on `AGENT_COMPLETED` events, and `AgentRecord.usage`/`toolCallCount` are now populated with real values on completion, including WRFC owner agents, which aggregate usage across every child agent in the chain (previously permanent zeros).
+- `@goodvibes/engine/platform`: WRFC auto-commit policy config (`off | scoped | all`, default `scoped`) and a `paths` parameter on `AgentWorktree.commitWorkingTree`.
+- `@goodvibes/engine/platform`: bounded WRFC transport-failure retry (default 1, configurable) with an observable chain failure state carrying the reason, a chain whose agent transport dies can never again evaporate silently.
 
 ### Fixed
-- `@goodvibes-jev/engine/platform`: **Tool failures no longer masked as "Unknown error"**, `ConversationManager.addToolResults` discarded `result.output` whenever `success` was false, so a failing test suite's exit code/stdout/stderr (which the exec tool returns faithfully in `output`) never reached the model. Output is now always preserved; the exec tool additionally sets a top-level one-line `error` summary when any command fails.
-- `@goodvibes-jev/engine/platform`: **Output truncation now preserves the tail** (head 20% + tail 80%) instead of keeping only the head, test runners print failures at the end, so head-only truncation kept the progress dots and silently dropped the failing assertion. The honest truncation marker is unchanged.
-- `@goodvibes-jev/engine/platform`: **WRFC auto-commit no longer sweeps the whole dirty working tree**, commits are scoped to the files the chain actually touched (from its own edit ledger), with full untruncated commit messages. Unrelated dirty/untracked files are left alone.
-- `@goodvibes-jev/engine/platform`: the exec phase timeout now honors a caller-supplied `timeout_ms` larger than the phase default, so long full-suite runs are not killed at the generic deadline.
+- `@goodvibes/engine/platform`: **Tool failures no longer masked as "Unknown error"**, `ConversationManager.addToolResults` discarded `result.output` whenever `success` was false, so a failing test suite's exit code/stdout/stderr (which the exec tool returns faithfully in `output`) never reached the model. Output is now always preserved; the exec tool additionally sets a top-level one-line `error` summary when any command fails.
+- `@goodvibes/engine/platform`: **Output truncation now preserves the tail** (head 20% + tail 80%) instead of keeping only the head, test runners print failures at the end, so head-only truncation kept the progress dots and silently dropped the failing assertion. The honest truncation marker is unchanged.
+- `@goodvibes/engine/platform`: **WRFC auto-commit no longer sweeps the whole dirty working tree**, commits are scoped to the files the chain actually touched (from its own edit ledger), with full untruncated commit messages. Unrelated dirty/untracked files are left alone.
+- `@goodvibes/engine/platform`: the exec phase timeout now honors a caller-supplied `timeout_ms` larger than the phase default, so long full-suite runs are not killed at the generic deadline.
 
 ### Notes
 - Known follow-ups (documented, non-blocking): scoped-commit deletion paths must be repo-relative (absolute/'./'-prefixed self-reports are dropped, failing safe); the transport-retry budget is chain-global; `isTransportFailureMessage` deliberately matches broad substrings and can over-retry (bounded). Cooperative cancellation (AbortSignal through `Tool.execute`) remains unwired for all phased tools, an orphaned-child-process risk recorded for that release.
@@ -7505,44 +7505,44 @@ An early "trust repairs" round from the goodvibes-tui live-dogfooding effort: ev
 Full deep-review audit of the SDK: 55 adversarially-verified findings fixed across all 10 subsystem areas (providers, core orchestrator/compaction, agents/WRFC, runtime, channels/operator, tools/mcp/permissions/hooks, transports/contracts, data subsystems, cross-cutting).
 
 ### Added
-- `@goodvibes-jev/engine/platform`: `inferFallbackContextWindow` and `FALLBACK_CONTEXT_WINDOW` are now exported from the public `./platform/providers` entrypoint so consumers can share the family-aware pre-catalog context-window fallback instead of hardcoding their own.
+- `@goodvibes/engine/platform`: `inferFallbackContextWindow` and `FALLBACK_CONTEXT_WINDOW` are now exported from the public `./platform/providers` entrypoint so consumers can share the family-aware pre-catalog context-window fallback instead of hardcoding their own.
 
 ### Fixed
-- `@goodvibes-jev/engine/platform`: **Tool-loop circuit breaker never terminated the loop**, the breaker set `continueLoop = false` which was then unconditionally clobbered by `continueLoop = results.continueLoop` on the next line (orchestrator-turn-loop.ts), so a model repeatedly producing all-failing tool calls looped until the iteration cap instead of tripping the breaker.
-- `@goodvibes-jev/engine/platform`: **Auto-compaction safety buffer is now scaled to the context window** (capped at a window fraction) instead of a flat 15k, which forced near-constant compaction on small/medium windows; the buffer remains an independent backstop on large windows regardless of the percentage threshold.
-- `@goodvibes-jev/engine/platform`: **`getContextWindowForModel` now honors a user `configured_cap` before the OpenRouter fuzzy lookup**, so an explicit cap is no longer silently widened by a fuzzy id match; and the method floors its result so a 0/NaN window can never poison budget math.
-- `@goodvibes-jev/engine/platform`: **McpClient no longer auto-restarts after an intentional disconnect** (which spawned orphan server processes); restart is gated on an intentional-close flag.
-- `@goodvibes-jev/engine/platform`: **Registering a transport middleware no longer silently disables HTTP retries** or reclassifies `HttpStatusError`; the retry policy applies through middleware.
-- `@goodvibes-jev/engine/platform`: **`openContractRouteStream` now threads the dynamic `getAuthToken` resolver**, so operator/telemetry SSE streams refresh auth instead of opening with a stale (or missing) token.
-- `@goodvibes-jev/engine/platform`: Anthropic/Gemini SSE assembly now flushes a trailing un-terminated `data:` line so the final `message_delta`/`usageMetadata` event is not dropped on abrupt close.
-- `@goodvibes-jev/engine/platform`: capability-resolution cache key now includes the provider's self-declared capabilities (no cross-call poisoning); image tokens are counted in both `estimateConversationTokens` and the recent-conversation compaction budget; the daemon HTTP route handlers return the structured `StructuredDaemonErrorBody` contract via `jsonErrorResponse`; the error-category classifier uses word boundaries (no false `authentication` match on "authorization"); and the platform/daemon-api error classifiers were de-drifted. Plus numerous DRY, dead-code, error-handling, and type-safety fixes across the listed areas.
+- `@goodvibes/engine/platform`: **Tool-loop circuit breaker never terminated the loop**, the breaker set `continueLoop = false` which was then unconditionally clobbered by `continueLoop = results.continueLoop` on the next line (orchestrator-turn-loop.ts), so a model repeatedly producing all-failing tool calls looped until the iteration cap instead of tripping the breaker.
+- `@goodvibes/engine/platform`: **Auto-compaction safety buffer is now scaled to the context window** (capped at a window fraction) instead of a flat 15k, which forced near-constant compaction on small/medium windows; the buffer remains an independent backstop on large windows regardless of the percentage threshold.
+- `@goodvibes/engine/platform`: **`getContextWindowForModel` now honors a user `configured_cap` before the OpenRouter fuzzy lookup**, so an explicit cap is no longer silently widened by a fuzzy id match; and the method floors its result so a 0/NaN window can never poison budget math.
+- `@goodvibes/engine/platform`: **McpClient no longer auto-restarts after an intentional disconnect** (which spawned orphan server processes); restart is gated on an intentional-close flag.
+- `@goodvibes/engine/platform`: **Registering a transport middleware no longer silently disables HTTP retries** or reclassifies `HttpStatusError`; the retry policy applies through middleware.
+- `@goodvibes/engine/platform`: **`openContractRouteStream` now threads the dynamic `getAuthToken` resolver**, so operator/telemetry SSE streams refresh auth instead of opening with a stale (or missing) token.
+- `@goodvibes/engine/platform`: Anthropic/Gemini SSE assembly now flushes a trailing un-terminated `data:` line so the final `message_delta`/`usageMetadata` event is not dropped on abrupt close.
+- `@goodvibes/engine/platform`: capability-resolution cache key now includes the provider's self-declared capabilities (no cross-call poisoning); image tokens are counted in both `estimateConversationTokens` and the recent-conversation compaction budget; the daemon HTTP route handlers return the structured `StructuredDaemonErrorBody` contract via `jsonErrorResponse`; the error-category classifier uses word boundaries (no false `authentication` match on "authorization"); and the platform/daemon-api error classifiers were de-drifted. Plus numerous DRY, dead-code, error-handling, and type-safety fixes across the listed areas.
 
 ## [0.34.2] - 2026-06-29
 
 ### Fixed
-- `@goodvibes-jev/engine/platform`: Fixed a tool-loop circuit-breaker infinite loop introduced in 0.34.1. The 0.34.1 DRY consolidation moved the `isActiveAgent` predicate into `compaction-sections` and had the orchestrator turn-loop modules (`orchestrator-context-runtime`, `orchestrator-tool-runtime`) and `context-compaction` import it from there. That pulled the heavy `compaction-sections` module into the turn-loop import graph and created a circular dependency, leaving the circuit-breaker threshold constant in its temporal dead zone (undefined) at runtime, so the breaker never tripped and a model that repeatedly calls a missing/failing tool would loop forever instead of failing with `tool_loop_circuit_breaker`. `isActiveAgent` now lives in the dependency-free leaf `tools/agent/predicates`, and a regression guard (`test/orchestrator-active-agent-cycle.test.ts`) prevents the cyclic import from returning.
+- `@goodvibes/engine/platform`: Fixed a tool-loop circuit-breaker infinite loop introduced in 0.34.1. The 0.34.1 DRY consolidation moved the `isActiveAgent` predicate into `compaction-sections` and had the orchestrator turn-loop modules (`orchestrator-context-runtime`, `orchestrator-tool-runtime`) and `context-compaction` import it from there. That pulled the heavy `compaction-sections` module into the turn-loop import graph and created a circular dependency, leaving the circuit-breaker threshold constant in its temporal dead zone (undefined) at runtime, so the breaker never tripped and a model that repeatedly calls a missing/failing tool would loop forever instead of failing with `tool_loop_circuit_breaker`. `isActiveAgent` now lives in the dependency-free leaf `tools/agent/predicates`, and a regression guard (`test/orchestrator-active-agent-cycle.test.ts`) prevents the cyclic import from returning.
 
 ## [0.34.1] - 2026-06-29
 
 ### Fixed
-- `@goodvibes-jev/engine/platform`: Agent progress no longer firehoses raw model output. The orchestrator stream handler overwrote `record.progress` (surfaced as `RuntimeAgent.latestProgress`) with the last ~100 chars of raw streamed output on every delta, clobbering the concise status strings ("Turn N · <tool>", "Thinking…"). Live output already flows via `record.streamingContent` / `emitStreamDelta`; progress now retains its last meaningful status.
-- `@goodvibes-jev/engine/platform`: Family-aware context-window fallback for unknown/new public models (Gemini 1M, Claude 200k, Grok 256k, GPT-5/4.1 400k, o-series 200k) instead of a flat default, plus a `> 0` guard so a `context: 0` from the live catalog no longer propagates as a zero window (which silently disabled auto-compaction). `capabilities.ts` context-window data corrected (xAI 256k, o-series 200k, gpt-5/4.1 400k) and made consistent with the fallback.
-- `@goodvibes-jev/engine/platform`: WRFC config now validated with `Number.isFinite` (a NaN `maxFixAttempts` previously made the fix loop never terminate); defaults aligned to the schema.
-- `@goodvibes-jev/engine/platform`: WRFC gate-failure handling, a global gate failure now spawns exactly one gate-fixer instead of one per concurrent chain racing the shared project tree (orphan-safety re-check added).
-- `@goodvibes-jev/engine/platform`: Anthropic thinking-budget `max_tokens` bump is now clamp-aware (no longer risks exceeding the model output cap).
-- `@goodvibes-jev/engine/platform`: `isRecord` array-semantics bug fixed, two copies (`mcp/client.ts`, `runtime/transports/http-helpers.ts`) wrongly treated arrays as records; all copies now use one canonical guard.
+- `@goodvibes/engine/platform`: Agent progress no longer firehoses raw model output. The orchestrator stream handler overwrote `record.progress` (surfaced as `RuntimeAgent.latestProgress`) with the last ~100 chars of raw streamed output on every delta, clobbering the concise status strings ("Turn N · <tool>", "Thinking…"). Live output already flows via `record.streamingContent` / `emitStreamDelta`; progress now retains its last meaningful status.
+- `@goodvibes/engine/platform`: Family-aware context-window fallback for unknown/new public models (Gemini 1M, Claude 200k, Grok 256k, GPT-5/4.1 400k, o-series 200k) instead of a flat default, plus a `> 0` guard so a `context: 0` from the live catalog no longer propagates as a zero window (which silently disabled auto-compaction). `capabilities.ts` context-window data corrected (xAI 256k, o-series 200k, gpt-5/4.1 400k) and made consistent with the fallback.
+- `@goodvibes/engine/platform`: WRFC config now validated with `Number.isFinite` (a NaN `maxFixAttempts` previously made the fix loop never terminate); defaults aligned to the schema.
+- `@goodvibes/engine/platform`: WRFC gate-failure handling, a global gate failure now spawns exactly one gate-fixer instead of one per concurrent chain racing the shared project tree (orphan-safety re-check added).
+- `@goodvibes/engine/platform`: Anthropic thinking-budget `max_tokens` bump is now clamp-aware (no longer risks exceeding the model output cap).
+- `@goodvibes/engine/platform`: `isRecord` array-semantics bug fixed, two copies (`mcp/client.ts`, `runtime/transports/http-helpers.ts`) wrongly treated arrays as records; all copies now use one canonical guard.
 
 ### Added
-- `@goodvibes-jev/engine/platform`: `WORKFLOW_SCORE_REGRESSION` workflow event (advisory), distinct from `WORKFLOW_CASCADE_ABORTED`, which was previously overloaded for both a real abort and an advisory score-regression signal.
-- `@goodvibes-jev/engine/platform`: Session lineage now records the original task (`originalTask` was previously always undefined in the compaction handoff).
+- `@goodvibes/engine/platform`: `WORKFLOW_SCORE_REGRESSION` workflow event (advisory), distinct from `WORKFLOW_CASCADE_ABORTED`, which was previously overloaded for both a real abort and an advisory score-regression signal.
+- `@goodvibes/engine/platform`: Session lineage now records the original task (`originalTask` was previously always undefined in the compaction handoff).
 
 ### Changed
-- `@goodvibes-jev/engine/platform`: Large internal DRY consolidation (no public API change): shared SSE line-buffer + Anthropic/OpenAI stream assembly, JSON TTL-cache scaffolding, provider error helpers, context-usage/section-token accounting, config range-validator factories, read-model projection helpers, and `isRecord`/`sleep`/fetch-timeout utilities.
+- `@goodvibes/engine/platform`: Large internal DRY consolidation (no public API change): shared SSE line-buffer + Anthropic/OpenAI stream assembly, JSON TTL-cache scaffolding, provider error helpers, context-usage/section-token accounting, config range-validator factories, read-model projection helpers, and `isRecord`/`sleep`/fetch-timeout utilities.
 
 ## [0.34.0] - 2026-06-20
 
 ### Added
-- `@goodvibes-jev/engine/platform` / `@goodvibes-jev/engine/contracts`: Published 17 new operator method contracts so daemon-connected agents can detect and invoke them through the standard operator method protocol. These are additive, typed contract descriptors (no breaking changes to existing methods).
+- `@goodvibes/engine/platform` / `@goodvibes/engine/contracts`: Published 17 new operator method contracts so daemon-connected agents can detect and invoke them through the standard operator method protocol. These are additive, typed contract descriptors (no breaking changes to existing methods).
   - **Channels** (new methods under the existing `channels.*` namespace): `channels.inbox.list` (provider inbound feed, Slack/Discord DMs, email threads; read-only), `channels.routing.list` / `channels.routing.assign` / `channels.routing.delete` (daemon-persisted channel-to-profile routing), and `channels.drafts.list` / `channels.drafts.get` / `channels.drafts.save` / `channels.drafts.delete` (server-side channel draft sync; webhook values must be transmitted redacted).
   - **Email** (new `email.*` namespace, scopes `read:email` / `write:email`): `email.inbox.list`, `email.inbox.read` (read-only IMAP via BODY.PEEK), `email.draft.create` (IMAP Drafts append), and `email.send` (SMTP send, marked `dangerous`, requires `confirm: true`).
   - **Calendar** (new `calendar.*` namespace, scopes `read:calendar` / `write:calendar`): `calendar.events.list` / `calendar.events.get` / `calendar.events.create` and `calendar.ics.import` / `calendar.ics.export` (CalDAV-backed; writes require confirmation).
@@ -7554,22 +7554,22 @@ Full deep-review audit of the SDK: 55 adversarially-verified findings fixed acro
 ## [0.33.38] - 2026-06-12
 
 ### Added
-- `@goodvibes-jev/engine/daemon-api` / `@goodvibes-jev/engine/platform`: Added cursor-based pagination on 4 list endpoints: `GET /api/automation/jobs`, `GET /api/automation/runs`, `GET /api/knowledge/sources`, `GET /api/knowledge/nodes`. Pass `?limit=N&cursor=<opaque>` to activate; omit both params for the legacy array response (backward compatible). `GET /api/sessions` returns the session broker snapshot only (the integration helper is consumer-supplied and cannot be range-queried in daemon-api). New types: `PaginatedResponse<T>` (exported from `@goodvibes-jev/engine/daemon-api`). New helpers: `encodeCursor`, `decodeCursor`, `paginateItems`, `hasPaginationParams`. Paginated responses return `{ items, hasMore, nextCursor? }`; invalid cursors return HTTP 400 matching the existing error contract. `paginateItems` now accepts an optional `getCreatedAt` extractor: when a cursor's item has been deleted mid-walk, the stable timestamp is used to locate the insertion point instead of restarting from index 0. `paginateItems` also accepts a `PaginateItemsOptions` argument (with `descending` flag) for stores sorted newest-first. Insertion-point recovery is **active** on `GET /api/knowledge/sources` and `GET /api/knowledge/nodes` (via `KnowledgeSourceRecord.updatedAt` / `KnowledgeNodeRecord.updatedAt`, matching the store's `byUpdatedAtDesc` sort order; if an item is updated mid-walk its `updatedAt` increases and its old position vanishes, the insertion-point scan handles this identically to a deletion) and `GET /api/automation/runs` (via `AutomationRunLike.queuedAt`, descending order). `GET /api/automation/jobs` uses restart-from-0 fallback because `AutomationJobLike` exposes no timestamp field at the SDK boundary.
-- `@goodvibes-jev/engine/transport-realtime`: Added `ConnectorTransportEvent` discriminated union and
+- `@goodvibes/engine/daemon-api` / `@goodvibes/engine/platform`: Added cursor-based pagination on 4 list endpoints: `GET /api/automation/jobs`, `GET /api/automation/runs`, `GET /api/knowledge/sources`, `GET /api/knowledge/nodes`. Pass `?limit=N&cursor=<opaque>` to activate; omit both params for the legacy array response (backward compatible). `GET /api/sessions` returns the session broker snapshot only (the integration helper is consumer-supplied and cannot be range-queried in daemon-api). New types: `PaginatedResponse<T>` (exported from `@goodvibes/engine/daemon-api`). New helpers: `encodeCursor`, `decodeCursor`, `paginateItems`, `hasPaginationParams`. Paginated responses return `{ items, hasMore, nextCursor? }`; invalid cursors return HTTP 400 matching the existing error contract. `paginateItems` now accepts an optional `getCreatedAt` extractor: when a cursor's item has been deleted mid-walk, the stable timestamp is used to locate the insertion point instead of restarting from index 0. `paginateItems` also accepts a `PaginateItemsOptions` argument (with `descending` flag) for stores sorted newest-first. Insertion-point recovery is **active** on `GET /api/knowledge/sources` and `GET /api/knowledge/nodes` (via `KnowledgeSourceRecord.updatedAt` / `KnowledgeNodeRecord.updatedAt`, matching the store's `byUpdatedAtDesc` sort order; if an item is updated mid-walk its `updatedAt` increases and its old position vanishes, the insertion-point scan handles this identically to a deletion) and `GET /api/automation/runs` (via `AutomationRunLike.queuedAt`, descending order). `GET /api/automation/jobs` uses restart-from-0 fallback because `AutomationJobLike` exposes no timestamp field at the SDK boundary.
+- `@goodvibes/engine/transport-realtime`: Added `ConnectorTransportEvent` discriminated union and
   `onTransportEvent` callback to `RuntimeEventConnectorOptions`. The connector now dispatches typed
   `TRANSPORT_CONNECTION_STATE`, `TRANSPORT_RECONNECT_ATTEMPT`, and `TRANSPORT_BACKPRESSURE` events
   directly to `onTransportEvent` in addition to the existing dedicated callbacks. Subscribe to
   `onTransportEvent` to receive a unified stream of observability events suitable for forwarding to
   a UI state store or event bus.
-- `@goodvibes-jev/engine/platform` / `events/tasks.ts`: Added `BATCH_JOB_PROGRESS` and `EXPORT_PROGRESS`
+- `@goodvibes/engine/platform` / `events/tasks.ts`: Added `BATCH_JOB_PROGRESS` and `EXPORT_PROGRESS`
   progress event contracts. `operationId` on both is operation-scoped (not task-scoped); see
   `lifecycle.ts` for the guard.
-- `@goodvibes-jev/engine/platform` / `events/knowledge.ts`: Added `KNOWLEDGE_INGEST_PROGRESS` progress event
+- `@goodvibes/engine/platform` / `events/knowledge.ts`: Added `KNOWLEDGE_INGEST_PROGRESS` progress event
   contract. `operationId` is operation-scoped; see `lifecycle.ts` for the guard.
-- `@goodvibes-jev/engine/platform` / `events/transport.ts`: Added `TRANSPORT_BACKPRESSURE`,
+- `@goodvibes/engine/platform` / `events/transport.ts`: Added `TRANSPORT_BACKPRESSURE`,
   `TRANSPORT_CONNECTION_STATE`, and `TRANSPORT_RECONNECT_ATTEMPT` members to the `TransportEvent`
   union.
-- `@goodvibes-jev/engine/errors`: Added `EngineErrorCode` string-literal union, `EngineErrorCodes` const object,
+- `@goodvibes/engine/errors`: Added `EngineErrorCode` string-literal union, `EngineErrorCodes` const object,
   `isErrorCode()` type guard, and `isKnownErrorCode()` helper for exhaustive consumer pattern-matching.
   The `code` field on `GoodVibesError` is now typed as `EngineErrorCode | (string & {})` and is always
   present (never `undefined`), the SDK infers a canonical code from `status` or `category` when none
@@ -7604,7 +7604,7 @@ Full deep-review audit of the SDK: 55 adversarially-verified findings fixed acro
   the three valid enum members returns HTTP 400.
 
 ### Changed
-- `@goodvibes-jev/engine/transport-realtime` `createWebSocketConnector`: Reconnect is now **only**
+- `@goodvibes/engine/transport-realtime` `createWebSocketConnector`: Reconnect is now **only**
   suppressed for genuine clean closes (`wasClean === true && code === 1000`). All other closes, including code 1005 (No Status Received, synthesized by runtimes for abnormal drops with no close
   frame), schedule a reconnect as per RFC 6455 §7.4.1. The connector transitions directly to
   `disconnected` only on deliberate clean server-side closes.
@@ -7683,7 +7683,7 @@ Full deep-review audit of the SDK: 55 adversarially-verified findings fixed acro
 ## [0.33.31] - 2026-05-20
 
 ### Added
-- Added a scoped `@goodvibes-jev/engine/platform/browser/agent` entrypoint whose
+- Added a scoped `@goodvibes/engine/platform/browser/agent` entrypoint whose
   Knowledge/Wiki calls route to an Agent-owned knowledge environment instead of
   the regular Knowledge/Wiki or Home Assistant Home Graph stores.
 - Added a daemon-backed GoodVibes Agent knowledge store using
@@ -8034,7 +8034,7 @@ Full deep-review audit of the SDK: 55 adversarially-verified findings fixed acro
 ### Added
 - Added typed companion-chat message attachments. Browser clients can create
   artifacts through `sdk.artifacts.create(...)` from
-  `@goodvibes-jev/engine/platform/browser/knowledge`, then send them with
+  `@goodvibes/engine/platform/browser/knowledge`, then send them with
   `sdk.chat.messages.create(sessionId, { body, attachments: [...] })`.
 - Persisted companion-chat attachments in message history and included them in
   per-session turn events so WebUI clients can render attachment state without
@@ -8053,7 +8053,7 @@ Full deep-review audit of the SDK: 55 adversarially-verified findings fixed acro
 
 ### Added
 - Added first-class companion-chat session listing and session route updates to
-  `@goodvibes-jev/engine/platform/browser/knowledge` via `sdk.chat.sessions.list()` and
+  `@goodvibes/engine/platform/browser/knowledge` via `sdk.chat.sessions.list()` and
   `sdk.chat.sessions.update(...)`.
 - Added the typed `companion.chat.sessions.list` operator method and
   `GET /api/companion/chat/sessions` daemon route.
@@ -8072,7 +8072,7 @@ Full deep-review audit of the SDK: 55 adversarially-verified findings fixed acro
 
 ### Added
 - Added typed companion-chat browser helpers to
-  `@goodvibes-jev/engine/platform/browser/knowledge`, including scoped JSON methods for
+  `@goodvibes/engine/platform/browser/knowledge`, including scoped JSON methods for
   chat sessions/messages and an explicit SSE helper for per-session turn events.
 
 ### Fixed
@@ -8088,7 +8088,7 @@ Full deep-review audit of the SDK: 55 adversarially-verified findings fixed acro
 
 ### Fixed
 - Reissued the scoped browser entrypoint release after npm published the
-  `0.33.6` metadata for `@goodvibes-jev/engine/transport-realtime` without a
+  `0.33.6` metadata for `@goodvibes/engine/transport-realtime` without a
   retrievable tarball. No source changes from `0.33.6`.
 
 ---
@@ -8097,9 +8097,9 @@ Full deep-review audit of the SDK: 55 adversarially-verified findings fixed acro
 
 ### Added
 - Added scoped browser SDK entrypoints for extension-specific browser apps:
-  `@goodvibes-jev/engine/platform/browser/knowledge` exposes the base knowledge/wiki
+  `@goodvibes/engine/platform/browser/knowledge` exposes the base knowledge/wiki
   browser surface without Home Assistant Home Graph route metadata, and
-  `@goodvibes-jev/engine/platform/browser/homeassistant` exposes the Home Assistant Home
+  `@goodvibes/engine/platform/browser/homeassistant` exposes the Home Assistant Home
   Graph browser surface without the base knowledge/wiki route table.
 - Added regression coverage that scoped browser bundles reject out-of-scope
   operator methods and do not include unrelated route metadata.
@@ -8157,13 +8157,13 @@ Full deep-review audit of the SDK: 55 adversarially-verified findings fixed acro
 ## [0.33.0] - 2026-05-04
 
 ### Breaking
-- Renamed platform error type aliases `ErrorCategory` → `PlatformErrorCategory` and `ErrorSource` → `PlatformErrorSource` in `@goodvibes-jev/engine/platform/platform/types`. The platform-layer error hierarchy (`AppError`, `ProviderError`, etc.) is unchanged; only the type aliases were renamed to eliminate the public-surface name collision with the canonical `ErrorCategory` / `ErrorSource` from `@goodvibes-jev/engine/errors`. Consumers importing these aliases via `@goodvibes-jev/engine/platform/platform/types` must update their imports.
+- Renamed platform error type aliases `ErrorCategory` → `PlatformErrorCategory` and `ErrorSource` → `PlatformErrorSource` in `@goodvibes/engine/platform/platform/types`. The platform-layer error hierarchy (`AppError`, `ProviderError`, etc.) is unchanged; only the type aliases were renamed to eliminate the public-surface name collision with the canonical `ErrorCategory` / `ErrorSource` from `@goodvibes/engine/errors`. Consumers importing these aliases via `@goodvibes/engine/platform/platform/types` must update their imports.
 
 ### Added
 - Removed the `validateEvent` alias from the public event contracts; `validateKnownEvent` is now the single runtime event validator.
 - Tagged `daemon-api` `ExecutionIntent` alias (`type ExecutionIntent = unknown`) with `/** @public */` to align with the existing `AutomationSurfaceKind` widening pattern. Eliminates an api-extractor `ae-incompatible-release-tags` warning at the daemon-api ↔ platform-runtime circular-dep boundary.
 - Documented `SessionManager.#observer` non-emission policy: the field is intentionally retained but observer notification lives in the `createGoodVibesAuthClient` facade (`auth.ts`), which has full priorToken awareness for `anonymous→token` vs `token→token` transitions. Emitting from `SessionManager` would produce duplicate transitions.
-- Added `assertSameOriginAbsoluteUrl` helper in `@goodvibes-jev/engine/transport-http` and wired it into `requestJson` and `openServerSentEventStream` so absolute URLs that diverge from the transport's `baseUrl` origin are rejected with `ConfigurationError SDK_TRANSPORT_CROSS_ORIGIN` instead of silently receiving the bearer Authorization header.
+- Added `assertSameOriginAbsoluteUrl` helper in `@goodvibes/engine/transport-http` and wired it into `requestJson` and `openServerSentEventStream` so absolute URLs that diverge from the transport's `baseUrl` origin are rejected with `ConfigurationError SDK_TRANSPORT_CROSS_ORIGIN` instead of silently receiving the bearer Authorization header.
 - Added `requireAdmin` gates to all twelve state-changing handlers in `daemon-api/media-routes.ts` (voice TTS/STT/realtime, web search, artifact create, media analyze/transform/generate, multimodal analyze/packet/writeback).
 - Extended `scripts/package-metadata-check.ts` to assert `engines.bun === "1.3.10"` and `engines.node === ">=22.0.0"` per workspace package, preventing future regressions where a package drops the engines pin.
 
@@ -8181,7 +8181,7 @@ Full deep-review audit of the SDK: 55 adversarially-verified findings fixed acro
 - `packages/sdk/src/platform/runtime/observability.ts` now carries a header comment documenting why this barrel uses named re-exports only (no `export *`), in contrast to sibling runtime barrels.
 
 ### Migration
-- **Platform error type rename**: if you import `ErrorCategory` or `ErrorSource` from `@goodvibes-jev/engine/platform/platform/types` (or the deeper `platform/types/errors` path), rename to `PlatformErrorCategory` / `PlatformErrorSource`. The canonical `ErrorCategory` / `ErrorSource` from `@goodvibes-jev/engine/errors` are the consumer-facing names and are unchanged.
+- **Platform error type rename**: if you import `ErrorCategory` or `ErrorSource` from `@goodvibes/engine/platform/platform/types` (or the deeper `platform/types/errors` path), rename to `PlatformErrorCategory` / `PlatformErrorSource`. The canonical `ErrorCategory` / `ErrorSource` from `@goodvibes/engine/errors` are the consumer-facing names and are unchanged.
 
 ---
 
@@ -8282,7 +8282,7 @@ Full deep-review audit of the SDK: 55 adversarially-verified findings fixed acro
   diagnostics consumers.
 
 ### Migration
-- Continue using explicit `@goodvibes-jev/engine/platform/platform/...` public seams
+- Continue using explicit `@goodvibes/engine/platform/platform/...` public seams
   listed in the package export map. Private source paths remain unavailable.
 
 ---
@@ -8314,7 +8314,7 @@ Full deep-review audit of the SDK: 55 adversarially-verified findings fixed acro
   stale operator-token pruning through the public pairing seam.
 
 ### Migration
-- Keep using exact `@goodvibes-jev/engine/platform/platform/...` seams from the package
+- Keep using exact `@goodvibes/engine/platform/platform/...` seams from the package
   export map. Do not import private SDK source paths.
 
 ---
@@ -8354,11 +8354,11 @@ Full deep-review audit of the SDK: 55 adversarially-verified findings fixed acro
 
 ### Breaking
 - The SDK source mirror system has been removed. Sibling packages such as
-  `@goodvibes-jev/engine/contracts`, `@goodvibes-jev/engine/transport-http`,
-  `@goodvibes-jev/engine/peer-client`, and `@goodvibes-jev/engine/operator-client` are now
-  the source of truth and `@goodvibes-jev/engine/platform` re-exports them through
+  `@goodvibes/engine/contracts`, `@goodvibes/engine/transport-http`,
+  `@goodvibes/engine/peer-client`, and `@goodvibes/engine/operator-client` are now
+  the source of truth and `@goodvibes/engine/platform` re-exports them through
   deliberate facade entrypoints.
-- Arbitrary `@goodvibes-jev/engine/platform/platform/*` wildcard imports are no longer
+- Arbitrary `@goodvibes/engine/platform/platform/*` wildcard imports are no longer
   public API. Use the explicit package exports documented for v0.30.0.
 
 ### Added
@@ -8385,7 +8385,7 @@ Full deep-review audit of the SDK: 55 adversarially-verified findings fixed acro
 - The HTTP contract response validator now checks common JSON Schema `format`
   constraints.
 - Retryable HTTP status codes now use the canonical
-  `@goodvibes-jev/engine/errors` list everywhere, so SDK platform helpers,
+  `@goodvibes/engine/errors` list everywhere, so SDK platform helpers,
   transport retry policy, and structured HTTP errors agree on 408, 429, 500,
   502, 503, and 504.
 - CI no longer runs dead mirror deletion guards. The mirror-drift job is

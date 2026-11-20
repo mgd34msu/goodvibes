@@ -5,7 +5,7 @@ import {
   isSecretBearingConfigKey,
   isStructuredCredentialReferenceConfigKey,
   captureStructuredCredentialReferenceConfigValue,
-} from "@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs";
+} from "@goodvibes/engine/platform/platform/judgment-browser/catalogs";
 import { CONFIG_SCHEMA_ENTRIES } from "./generated/config-schema";
 
 export const SECRET_CONFIG_KEYS: ReadonlySet<string> = new Set(SECRET_BEARING_CONFIG_PATHS);

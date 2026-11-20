@@ -30,11 +30,11 @@
 
 import { randomUUID } from 'node:crypto';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { readJsonStore, runStoreFileUpdateSync, writeJsonStore, type JsonStoreContents, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
+import { readJsonStore, runStoreFileUpdateSync, writeJsonStore, type JsonStoreContents, type JsonStoreSpec } from '@goodvibes/engine/terminal-shell/agent-turn/store-file';
 import { retainChannelStoreSource, type ChannelStoreEffectOptions } from './channel-store-lifetime.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn/daemon-operator-client';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from '@goodvibes/engine/terminal-shell/agent-turn/daemon-operator-client';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 /** The daemon method that owns the routing table. */
 export const CHANNEL_ROUTING_ASSIGN_METHOD = 'channels.routing.assign';

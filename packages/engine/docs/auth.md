@@ -5,8 +5,8 @@
 Auth is split between client token handling and daemon route enforcement.
 
 Client-facing code uses token stores and transport middleware. Two public subpaths are available:
-- `@goodvibes-jev/engine/platform/auth`: token storage helpers, auth flows, and the `GoodVibesTokenStore` interface. Use this for most application code. It also re-exports the OAuth payload types (`OAuthStartState`, `OAuthTokenPayload`) for typing acquired tokens.
-- `@goodvibes-jev/engine/platform/client-auth`: low-level authentication primitives. Use this only when you need fine-grained control over refresh timing, permission resolution, or session handling. Platform-specific secure token stores are not exposed here. They are available via `@goodvibes-jev/engine/platform/expo` (`createExpoSecureTokenStore`) and `@goodvibes-jev/engine/platform/react-native` (`createIOSKeychainTokenStore`, `createAndroidKeystoreTokenStore`).
+- `@goodvibes/engine/platform/auth`: token storage helpers, auth flows, and the `GoodVibesTokenStore` interface. Use this for most application code. It also re-exports the OAuth payload types (`OAuthStartState`, `OAuthTokenPayload`) for typing acquired tokens.
+- `@goodvibes/engine/platform/client-auth`: low-level authentication primitives. Use this only when you need fine-grained control over refresh timing, permission resolution, or session handling. Platform-specific secure token stores are not exposed here. They are available via `@goodvibes/engine/platform/expo` (`createExpoSecureTokenStore`) and `@goodvibes/engine/platform/react-native` (`createIOSKeychainTokenStore`, `createAndroidKeystoreTokenStore`).
 
 The client-auth primitives each own one slice of the auth lifecycle.
 
@@ -91,7 +91,7 @@ share no file path.
 Every route handler receives a resolved principal. Scopes are checked at the
 handler boundary, not inside business logic. The three scope checks are:
 
-1. `resolveAuthenticatedPrincipal`: authentication gate (unauthenticated → 401) *(public via `@goodvibes-jev/engine/platform/daemon`)*
+1. `resolveAuthenticatedPrincipal`: authentication gate (unauthenticated → 401) *(public via `@goodvibes/engine/platform/daemon`)*
 2. `requireAuthenticatedSession`: session existence gate (no active session → 401) *(internal)*
 3. `requireAdmin`: elevation gate (insufficient rights → 403) *(internal)*
 

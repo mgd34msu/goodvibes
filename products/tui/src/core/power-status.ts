@@ -12,7 +12,7 @@
 // options, the keep-awake toggle is exactly one boolean.
 // ---------------------------------------------------------------------------
 
-import { KEEP_AWAKE_NOT_HELD, LID_SWITCH_HONEST_SPLIT, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
+import { KEEP_AWAKE_NOT_HELD, LID_SWITCH_HONEST_SPLIT, type PowerState } from '@goodvibes/engine/platform/platform/power';
 
 /** The always-visible chip text shown while keep-awake holds (danger-mode idiom). */
 export const SLEEP_DISABLED_CHIP = 'sleep disabled';

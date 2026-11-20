@@ -5,7 +5,7 @@ import { relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { buildGlobMatcher } from '../utils/glob-to-regex.js';
 import type { ContractView, ContractUnitView } from './types.js';
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import { isCurrentNativeFileObservation } from './current-file-observations.js';
 import { hasNativeReviewedFileReference, reviewedFileProvenance, reviewedFileVersionState, type ReviewedFileReference } from './review-file-observations.js';
 

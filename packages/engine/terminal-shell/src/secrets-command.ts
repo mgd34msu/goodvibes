@@ -8,7 +8,7 @@
 import {
   isGoodVibesSecretReferenceValue as isGoodVibesSecretRefInput,
   isMalformedGoodVibesSecretReferenceValue as isMalformedGoodVibesSecretRefInput,
-} from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/platform/platform/config';
 export { isGoodVibesSecretRefInput, isMalformedGoodVibesSecretRefInput };
 import {
   BUILTIN_SECRET_PROVIDER_SOURCES,
@@ -17,8 +17,8 @@ import {
   type SecretsManager,
   type SecretScope,
   type SecretStorageMedium,
-} from '@goodvibes-jev/engine/platform/platform/config';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+} from '@goodvibes/engine/platform/platform/config';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';

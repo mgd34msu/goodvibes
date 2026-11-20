@@ -3,5 +3,5 @@ export type {
   DomainEvents,
   RemoteDomainEventsOptions,
   SerializedEventEnvelope,
-} from '@goodvibes-jev/engine/transport-realtime';
-export { createRemoteDomainEvents } from '@goodvibes-jev/engine/transport-realtime';
+} from '@goodvibes/engine/transport-realtime';
+export { createRemoteDomainEvents } from '@goodvibes/engine/transport-realtime';

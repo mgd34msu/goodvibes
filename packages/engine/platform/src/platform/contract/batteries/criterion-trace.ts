@@ -12,7 +12,7 @@
  * the user never asked for, so the supports side is read at high stakes and
  * the rest at medium.
  */
-import { defineFidelityChecker, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineFidelityChecker, STAKES_BANDS } from '@goodvibes/judgment';
 
 /** The claim a criterion makes about the ask. */
 export function traceClaim(criterionText: string): string {

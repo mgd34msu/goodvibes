@@ -19,14 +19,14 @@
  * terminal does: the daemon session spine moves to the recovered session, so
  * the daemon's live list names the session this surface is actually running.
  */
-import { confirmRecoveryRestore } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { restoreCrashSnapshot } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
+import { confirmRecoveryRestore } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { restoreCrashSnapshot } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
 import { offerRecoverySnapshot, type RecoveryPromptDeps, type RecoveryTypeaheadHooks } from './recovery-prompt.ts';
 import type { ConversationManager } from '../core/conversation.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
-import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
-import type { SessionSpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
+import type { SessionManager } from '@goodvibes/engine/platform/platform/sessions';
+import type { SessionSpineClient } from '@goodvibes/engine/platform/platform/runtime/session-spine';
 
 export interface RecoveryOfferWiringInput {
   readonly surface: SessionSurface;

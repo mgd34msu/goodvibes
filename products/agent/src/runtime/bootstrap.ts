@@ -2,17 +2,17 @@ import {
   createPluginCommandAdapter,
   wireTerminalMcpReload,
   announceTerminalSessionStarted,
-} from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
+} from '@goodvibes/engine/terminal-shell/bootstrap-lifecycle';
 import {
   createTerminalOrchestrator,
   terminalCompanionInputHandler,
   projectOrchestratorCoreServices,
-} from '@goodvibes-jev/engine/terminal-shell/bootstrap-orchestrator';
-import { buildPluginStartupContext } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
-import { ownerInputFor } from '@goodvibes-jev/engine/terminal-shell/companion-input';
-import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
-import { readTierPromptSupplement } from '@goodvibes-jev/engine/platform/platform/providers';
-import { factsFor } from '@goodvibes-jev/engine/platform/platform/routing';
+} from '@goodvibes/engine/terminal-shell/bootstrap-orchestrator';
+import { buildPluginStartupContext } from '@goodvibes/engine/terminal-shell/plugin-startup';
+import { ownerInputFor } from '@goodvibes/engine/terminal-shell/companion-input';
+import { createPluginStartupTask } from '@goodvibes/engine/terminal-shell/plugin-startup';
+import { readTierPromptSupplement } from '@goodvibes/engine/platform/platform/providers';
+import { factsFor } from '@goodvibes/engine/platform/platform/routing';
 /**
  * Bootstrap composition root for GoodVibes Agent.
  *
@@ -24,20 +24,20 @@ import { factsFor } from '@goodvibes-jev/engine/platform/platform/routing';
  *   - main.ts: terminal setup, render loop, stdin/stdout handlers
  *   - lifecycle.ts: save/shutdown helpers
  */
-import '@goodvibes-jev/engine/platform/platform/core';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { collectStartupAnnouncements } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
+import '@goodvibes/engine/platform/platform/core';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { collectStartupAnnouncements } from '@goodvibes/engine/platform/platform/runtime/feature-announcements';
+import type { PermissionRequestHandler } from '@goodvibes/engine/platform/platform/permissions';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHistory } from '../input/input-history.ts';
-import type { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
+import type { SelectionManager } from '@goodvibes/engine/terminal-shell';
 import type { Compositor } from '../renderer/compositor.ts';
 
 import type { RuntimeContext, BootstrapOptions } from './context.ts';
 import '@/runtime/index.ts';
 import { createTaskManager, emitSessionResumed } from '@/runtime/index.ts';
-import { ProcessTaskAdapter } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { emitSessionRecoveryFailed } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
+import { ProcessTaskAdapter } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { emitSessionRecoveryFailed } from '@goodvibes/engine/platform/platform/runtime/emitters';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import '@/runtime/index.ts';
 import { loadLastConversation } from '@/runtime/index.ts';
@@ -53,17 +53,17 @@ import { wireAgentExternalServices } from './bootstrap-external-services.ts';
 import type { DaemonHost } from './daemon-repair.ts';
 import { initializeBootstrapCore } from './bootstrap-core.ts';
 import { ensureBootModelResolvable } from './provider-boot.ts';
-import { bindSessionContextAccounting } from '@goodvibes-jev/engine/platform/platform/tools';
+import { bindSessionContextAccounting } from '@goodvibes/engine/platform/platform/tools';
 import { createBootstrapShell } from './bootstrap-shell.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { formatWorktreeStartupReport } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import '@goodvibes-jev/engine/terminal-shell';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { formatWorktreeStartupReport } from '@goodvibes/engine/platform/platform/runtime/shell';
+import '@goodvibes/engine/terminal-shell';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { registerAgentTools } from './bootstrap-agent-tools.ts';
-import { foldLegacySpineStore } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
+import { foldLegacySpineStore } from '@goodvibes/engine/platform/platform/runtime/session-spine';
 import { reconcileMemorySpineAdoption } from './memory-spine-adoption.ts';
 import { createAgentSessionInputsClient } from './client/session-inputs.ts';
-import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from '@goodvibes-jev/engine/terminal-shell/agent-turn/prompt-context-receipts';
+import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from '@goodvibes/engine/terminal-shell/agent-turn/prompt-context-receipts';
 import { recordCompletedTurnAnchor } from './rewind-anchor-wiring.ts';
 import { extractInjectedMemoryIds } from './memory-usage-wiring.ts';
 import { installOccasionsNudging } from './occasions-boot.ts';
@@ -72,11 +72,11 @@ import { createRuntimeShutdown } from './bootstrap-shutdown.ts';
 import { recordComposedPromptUsage } from './prompt-usage-record.ts';
 import { createMemorySpineRecheck, resolveMemorySpineRecheckMs } from './memory-spine-recheck.ts';
 import { capabilitySnapshot, refreshCapabilityIndex } from '../capabilities/capability-snapshot.ts';
-import { GOODVIBES_AGENT_OPERATOR_POLICY } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-policy';
+import { GOODVIBES_AGENT_OPERATOR_POLICY } from '@goodvibes/engine/terminal-shell/agent-turn/operator-policy';
 import { flushPendingChannelRows } from '../agent/channel-outbox-flush.ts';
 import { formatChannelProfileRouteSyncReport } from '../agent/channel-profile-routing.ts';
-import { createDaemonOperatorInvoke, resolveDaemonOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn/daemon-operator-client';
-import { retryFailedTurn, wireFailedTurnActions } from '@goodvibes-jev/engine/terminal-shell/turn-failure-actions';
+import { createDaemonOperatorInvoke, resolveDaemonOperatorConnection } from '@goodvibes/engine/terminal-shell/agent-turn/daemon-operator-client';
+import { retryFailedTurn, wireFailedTurnActions } from '@goodvibes/engine/terminal-shell/turn-failure-actions';
 
 // ── Bootstrap context type ──────────────────────────────────────────────────
 

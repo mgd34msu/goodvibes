@@ -1,7 +1,7 @@
 import {
   buildSandboxReview,
   type ConfigManagerLike,
-} from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
+} from '@goodvibes/engine/platform/platform/runtime/sandbox';
 
 /** Product presentation only: all sandbox state comes from the public platform. */
 export function renderSandboxDoctor(manager: ConfigManagerLike): string {

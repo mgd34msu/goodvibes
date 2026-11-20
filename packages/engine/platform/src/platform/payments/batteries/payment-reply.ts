@@ -23,7 +23,7 @@
  * reading that stops it (deny, object) at medium, because a wrong stop costs
  * one repeated request and a wrong go spends money.
  */
-import { defineReplyReader, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineReplyReader, STAKES_BANDS } from '@goodvibes/judgment';
 
 const APPROVAL_NOTICE = 'Purchase needs your OK: USB-C hub from bestbuy.com, total 42.78 USD. It is over today\'s item budget. Reply to approve or deny; if I hear nothing in 30 minutes, nothing is bought.';
 const VETO_NOTICE = 'Buying in 10 minutes unless you say stop: wireless mouse from microcenter.com, total 31.49 USD. Reply to stop it; if I hear nothing, it goes ahead.';

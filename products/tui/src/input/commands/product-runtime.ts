@@ -1,13 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { listInstalledEcosystemEntries, loadEcosystemCatalog } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
+import { listInstalledEcosystemEntries, loadEcosystemCatalog } from '@goodvibes/engine/platform/platform/runtime/ecosystem/catalog';
 import { discoverTasks } from '@/runtime/index.ts';
 import { DEFAULT_TASK_SUITE_DIR } from './eval.ts';
 import { requireEcosystemCatalogPaths, requireShellPaths } from './runtime-services.ts';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { choiceInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { choiceInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 
 interface ReleaseBundle {
   readonly version: 1;

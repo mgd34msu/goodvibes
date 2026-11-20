@@ -9,7 +9,7 @@
  * Band: low stakes. The reading only explains a nudge; it never decides whether
  * work passes, and a nudge without it is complete.
  */
-import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes/judgment';
 
 export const UNMET_GAPS = ['not_attempted', 'not_demonstrated', 'partial', 'contradicted'] as const;
 export type UnmetGap = (typeof UNMET_GAPS)[number];

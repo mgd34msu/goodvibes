@@ -1,4 +1,4 @@
-import type { JudgmentPort, JudgmentRequest, JudgmentResult, Questions } from '@goodvibes-jev/judgment';
+import type { JudgmentPort, JudgmentRequest, JudgmentResult, Questions } from '@goodvibes/judgment';
 
 const bound = new WeakSet<JudgmentPort>();
 

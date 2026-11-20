@@ -1,5 +1,5 @@
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { startBackgroundProviderDiscovery, type BackgroundProviderDiscoveryOptions } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { startBackgroundProviderDiscovery, type BackgroundProviderDiscoveryOptions } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 
 /** The options start-up registered with, so first run can look for model servers on this computer. */
 let startupOptions: BackgroundProviderDiscoveryOptions | null = null;

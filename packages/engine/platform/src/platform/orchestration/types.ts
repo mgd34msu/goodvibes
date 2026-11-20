@@ -13,7 +13,7 @@
  * shift or invalidate.
  */
 
-import type { EffectOutcome } from '@goodvibes-jev/engine/errors';
+import type { EffectOutcome } from '@goodvibes/engine/errors';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import type { QualityGateResult } from '../contract/gates.js';
 import type { ContractCommitScope } from '../contract/config.js';

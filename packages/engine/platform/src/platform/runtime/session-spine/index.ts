@@ -1,5 +1,5 @@
 /**
- * @goodvibes-jev/engine/platform/platform/runtime/session-spine
+ * @goodvibes/engine/platform/platform/runtime/session-spine
  *
  * The ONE session-spine surface client extracted from the near-twin TUI and agent
  * implementations, plus the cross-surface session read facade (union cache). Both

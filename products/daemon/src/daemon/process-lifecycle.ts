@@ -1,5 +1,5 @@
-import { RefusalError, readRefusal, refusal } from '@goodvibes-jev/engine/errors';
-import { reportFatalBootFailure } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { RefusalError, readRefusal, refusal } from '@goodvibes/engine/errors';
+import { reportFatalBootFailure } from '@goodvibes/engine/platform/platform/daemon';
 
 export type DaemonProcessExitCode = 0 | 1;
 export type DaemonProcessSignal = 'SIGINT' | 'SIGTERM';

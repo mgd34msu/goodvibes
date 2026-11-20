@@ -14,4 +14,4 @@ export {
   resolveSecretDeleteScope as resolveCredentialDeleteScope,
   resolveSecretWriteScope as resolveCredentialWriteScope,
   secretWriteScopeWasOverridden as credentialWriteScopeWasRelocated,
-} from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/platform/platform/config';

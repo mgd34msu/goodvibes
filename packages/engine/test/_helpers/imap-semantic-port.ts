@@ -1,5 +1,5 @@
 /** Synthetic fixture answers only. No model, provider, account or mailbox writes. */
-import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes/judgment/testing';
 
 const facts: Readonly<Record<string, string>> = {
   'Too many connections for this account, try again later': 'server',

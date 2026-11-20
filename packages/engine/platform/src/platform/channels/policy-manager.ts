@@ -1,4 +1,4 @@
-import { actorFromChannelSender, type Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { actorFromChannelSender, type Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { randomUUID } from 'node:crypto';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';

@@ -18,14 +18,14 @@
  * the caller's check runs once more immediately before the request leaves.
  * A write is never retried.
  */
-import type { OperatorMethodId } from '@goodvibes-jev/engine/platform/contracts';
+import type { OperatorMethodId } from '@goodvibes/engine/platform/contracts';
 import { forgetDelegatedCredential } from './agent-delegation-credential.js';
 import { agentCallConnection, type AgentCallActor, type AgentCallConnection } from './agent-call-credential.js';
 import { createConnectedHost, isHostFailure, type ConnectedHostConfigReader } from './connected-host-client.js';
 import { operatorRouteLabel, type FamilyGatewayRemote, type FamilyGatewayResult } from './family-gateway.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { captureOperatorConnection } from './operator-connection-owner.js';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 export interface ConnectedHostFamilyRemoteOptions {
   /** Settings naming the connected host (`controlPlane.*`), read when the call is made. */

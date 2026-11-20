@@ -4,7 +4,7 @@ import type { WalkDirOptions } from '../../utils/walk-dir.js';
 import { assertCapturedToolAccessCurrent, hasCapturedToolInvocation } from '../shared/captured-input-tools.js';
 import { ripgrepCandidates, ripgrepSupersetPattern } from './ripgrep.js';
 import { isAbsolute, relative } from 'node:path';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { decisionOrClassic } from '../../runtime/decision-policy.js';
 import { contentMatchView, contentRank } from '../batteries/content-rank.js';
 import type { ContentQuery, OutputOptions, ContentMatch } from './shared.js';
@@ -26,7 +26,7 @@ import {
   validateSearchPath,
   withFindWarnings,
 } from './shared.js';
-import type { AdmittedRegex } from '@goodvibes-jev/engine/errors';
+import type { AdmittedRegex } from '@goodvibes/engine/errors';
 import { partitionByReadAccess, accessRestrictedNote, type ReadAccessFilter } from '../shared/read-access.js';
 import type { FindCodeIntelligence } from './references.js';
 

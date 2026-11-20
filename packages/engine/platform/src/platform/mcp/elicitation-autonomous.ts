@@ -2,7 +2,7 @@ import { captureMcpElicitationRequest, readProtocolRequest } from '../permission
 /** Autonomous MCP input resolution over current host facts and the canonical Jev decision owner. */
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { EntryType } from '@goodvibes-jev/judgment';
+import type { EntryType } from '@goodvibes/judgment';
 import { decideAutonomous } from '../gate/autonomous-decision.js';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { autonomousSourceEvidence, captureAutonomousSource, retainAutonomousSource } from '../permissions/autonomous.js';

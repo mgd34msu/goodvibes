@@ -14,7 +14,7 @@
  * Band: low stakes. The order only decides which records a reader sees first;
  * nothing is changed or injected on the strength of it.
  */
-import { defineRerank, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineRerank, STAKES_BANDS } from '@goodvibes/judgment';
 import type { MemoryRecord } from '../memory-store.js';
 
 /** Most records one search sends to the rerank; retrieval order decides which. */

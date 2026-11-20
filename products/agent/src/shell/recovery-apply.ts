@@ -10,10 +10,10 @@
  * the result is saved so `sessions resume` can reach it, and the last-session
  * pointer names it. It never throws; the report says what happened.
  */
-import { checkRecoveryForSession, confirmRecoveryRestore } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { restoreCrashSnapshot, type CrashRecoveryReport } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
+import { checkRecoveryForSession, confirmRecoveryRestore } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { restoreCrashSnapshot, type CrashRecoveryReport } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
 import { writeLastSessionPointer, type SessionSurface } from '@/runtime/index.ts';
-import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { SessionManager } from '@goodvibes/engine/platform/platform/sessions';
 import type { ConversationManager } from '../core/conversation.ts';
 
 export interface AgentRecoveryApplyInput {

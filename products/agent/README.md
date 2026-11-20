@@ -282,7 +282,7 @@ src/
 
 Tests live under `src/test/`, mirroring the source tree, and cover runtime contracts, security boundaries and workspace/tool/CLI behavior. Use the declared workspace scripts above or the root product checks; package publication commands from the upstream product are not part of this private workspace.
 
-The Agent consumes `@goodvibes-jev/engine` and `@goodvibes-jev/daemon` through `workspace:*` dependencies for shared contracts, daemon routes, and transports, and keeps the workspace, local behavior library, and Agent Knowledge boundary here. GoodVibes Agent owns the autonomous assistant harness; the connected GoodVibes host owns the platform capabilities Agent presents.
+The Agent consumes `@goodvibes/engine` and `@goodvibes/daemon` through `workspace:*` dependencies for shared contracts, daemon routes, and transports, and keeps the workspace, local behavior library, and Agent Knowledge boundary here. GoodVibes Agent owns the autonomous assistant harness; the connected GoodVibes host owns the platform capabilities Agent presents.
 
 ---
 

@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/command-palette-types';
+export * from '@goodvibes/engine/terminal-shell/command-palette-types';

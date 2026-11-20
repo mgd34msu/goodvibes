@@ -5,7 +5,7 @@ import {
   resolveSecretRef,
   type SecretsManager,
   type SecretScope,
-} from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/platform/platform/config';
 import { cliCommandDone, cliCommandRefusal, formatJsonOrText, yesNo, type CliCommandOutput } from './cli-output.js';
 const SECRET_WRITE_FLAGS: ReadonlySet<string> = new Set(['--user', '--project', '--secure', '--plaintext', '--stdin']);
 const SECRET_DELETE_FLAGS: ReadonlySet<string> = new Set(['--user', '--project', '--secure', '--plaintext']);

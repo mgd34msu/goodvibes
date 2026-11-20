@@ -1,4 +1,4 @@
-# @goodvibes-jev/engine/toolchain
+# @goodvibes/engine/toolchain
 
 Shared GoodVibes build and packaging toolchain for the products in this
 monorepo. Each product keeps its values in its own `toolchain.config.json`; the
@@ -34,12 +34,12 @@ asked anything.
 
 The `toolchain.config.json` contract is the `ToolchainConfig` type in
 `src/config.ts`; each product's own config is the working example. Import the
-type from `@goodvibes-jev/engine/toolchain` for editor help.
+type from `@goodvibes/engine/toolchain` for editor help.
 
 ## Usage
 
 ```ts
-import { runEnginePinGate, realFsReader, loadToolchainConfig } from '@goodvibes-jev/engine/toolchain';
+import { runEnginePinGate, realFsReader, loadToolchainConfig } from '@goodvibes/engine/toolchain';
 
 const config = loadToolchainConfig();
 const results = runEnginePinGate(realFsReader(process.cwd()), config.enginePin);

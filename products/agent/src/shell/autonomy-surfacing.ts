@@ -11,12 +11,12 @@ import { buildAwayDigest } from '../core/away-digest.ts';
 import type { AwayDigestScheduleItem } from '../core/away-digest.ts';
 import { LastSeenStore } from '../core/last-seen-store.ts';
 import type { AutomationRunsSinceResult } from '../agent/automation-runs-source.ts';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { executeToolCalls, toolBudgetFromConfig } from '@goodvibes-jev/engine/platform/platform/core';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { executeToolCalls, toolBudgetFromConfig } from '@goodvibes/engine/platform/platform/core';
 import type { RuntimeServices } from '../runtime/services.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
 
 interface ApprovalLike {
   readonly status: string;

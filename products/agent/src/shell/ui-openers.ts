@@ -1,22 +1,22 @@
-import { createModelPickerCommandOpeners } from '@goodvibes-jev/engine/terminal-shell/model-picker-open';
+import { createModelPickerCommandOpeners } from '@goodvibes/engine/terminal-shell/model-picker-open';
 import { shortcutGroups } from '../renderer/shortcut-groups.ts';
-import { openCommandPaletteOn, type PaletteShortcut } from '@goodvibes-jev/engine/terminal-shell/command-palette';
+import { openCommandPaletteOn, type PaletteShortcut } from '@goodvibes/engine/terminal-shell/command-palette';
 import type { KeybindingsManager } from '../input/keybindings.ts';
-import { runPickedCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn/provider-model';
-import { createSettingsWorkspaceOpener } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
-import { modelPickerCatalogServices } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
-import { createCommonShellUiOpeners } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
-import { buildConversationModelPickerTargets, selectedModelPickerRoute } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
+import { runPickedCommand } from '@goodvibes/engine/terminal-shell/command-registry';
+import { getProviderIdFromModel } from '@goodvibes/engine/terminal-shell/agent-turn/provider-model';
+import { createSettingsWorkspaceOpener } from '@goodvibes/engine/terminal-shell/shell-ui-openers';
+import { modelPickerCatalogServices } from '@goodvibes/engine/terminal-shell/model-picker-targets';
+import { createCommonShellUiOpeners } from '@goodvibes/engine/terminal-shell/shell-ui-openers';
+import { buildConversationModelPickerTargets, selectedModelPickerRoute } from '@goodvibes/engine/terminal-shell/model-picker-targets';
 import {
   buildConfiguredViaMap,
   resolveSecretProviderIds as readSecretProviders,
-} from '@goodvibes-jev/engine/terminal-shell/model-picker-auth-facts';
+} from '@goodvibes/engine/terminal-shell/model-picker-auth-facts';
 import type { ConfigManager } from '../config/index.ts';
 import type { ConversationManager } from '../core/conversation';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
-import type { ModelDefinition, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ModelDefinition, ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
 import {
   describeServingEffort,
   effortPresentationForModel,
@@ -26,9 +26,9 @@ import {
 } from '../providers/reasoning-effort-surface.ts';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
-import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { McpRegistry } from '@goodvibes/engine/platform/platform/mcp';
+import type { SubscriptionManager } from '@goodvibes/engine/platform/platform/config';
+import type { SecretsManager } from '@goodvibes/engine/platform/platform/config';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import type { ModelPickerTargetInfo } from '../input/model-picker.ts';
 import { type ModelPickerOpenDeps } from '../input/model-picker-open.ts';

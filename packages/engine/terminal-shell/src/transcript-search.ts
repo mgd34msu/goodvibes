@@ -1,4 +1,4 @@
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
 import type { BlockMeta } from './work-tree-types.js';
 export interface SearchHistory {
     getAllLines(): readonly Line[];

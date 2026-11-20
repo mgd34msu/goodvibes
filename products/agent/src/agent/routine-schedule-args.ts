@@ -1,7 +1,7 @@
 import type { ParsedRoutineSchedulePromotionArgs } from './routine-schedule-promotion.ts';
-import { parseChannelDeliveryTarget, parseLinkDeliveryTarget, parseRouteDeliveryTarget, parseWebhookDeliveryTarget, readOptionValue as optionValue, validateDeliveryTargets, type RoutineScheduleDeliveryTargetSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+import { parseChannelDeliveryTarget, parseLinkDeliveryTarget, parseRouteDeliveryTarget, parseWebhookDeliveryTarget, readOptionValue as optionValue, validateDeliveryTargets, type RoutineScheduleDeliveryTargetSpec } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-delivery-targets';
 
-export { isRoutineScheduleDeliverySurfaceKind } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+export { isRoutineScheduleDeliverySurfaceKind } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-delivery-targets';
 
 export function parseRoutineSchedulePromotionArgs(args: readonly string[]): ParsedRoutineSchedulePromotionArgs {
   let routineId: string | null = null;

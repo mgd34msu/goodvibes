@@ -13,7 +13,7 @@
  * key the person types does not open that group, so the join fails and they
  * pick again. Nothing changes on the wrong group.
  */
-import { defineSelector, NONE, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineSelector, NONE, STAKES_BANDS } from '@goodvibes/judgment';
 
 const group = (groupId: string, displayName: string, machines: number, version: string, seen: string) => ({
   id: groupId,

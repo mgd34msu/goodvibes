@@ -1,4 +1,4 @@
-import { configKeyFacts } from '@goodvibes-jev/engine/platform/platform/config';
+import { configKeyFacts } from '@goodvibes/engine/platform/platform/config';
 
 /**
  * Where a `/settings set <key> <value>` line

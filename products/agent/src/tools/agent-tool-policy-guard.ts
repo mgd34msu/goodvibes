@@ -1,9 +1,9 @@
-import { readModeCategory } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { readModeCategory } from '@goodvibes/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { wrapAgentContextToolForAgentPolicy } from './agent-context-policy.ts';
-import { validateAgentSettingsMechanics, type SettingsToolArgs } from '@goodvibes-jev/engine/platform/platform/gate/policy';
+import { validateAgentSettingsMechanics, type SettingsToolArgs } from '@goodvibes/engine/platform/platform/gate/policy';
 import type { AgentToolPolicyInvocationExplanation } from './agent-tool-policy-guard-types.ts';
-import { agentReadModesFor, installAgentToolPolicy } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-modes';
+import { agentReadModesFor, installAgentToolPolicy } from '@goodvibes/engine/terminal-shell/agent-turn/read-modes';
 export type { AgentToolPolicyInvocationExplanation } from './agent-tool-policy-guard-types.ts';
 
 /**

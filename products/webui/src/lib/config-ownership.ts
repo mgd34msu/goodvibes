@@ -28,7 +28,7 @@
  *
  * The fix is a build-time generator, not a better comment:
  * `scripts/generate-config-ownership.ts` imports the three lists from the
- * installed `@goodvibes-jev/engine/platform/platform/config` at build time (a script
+ * installed `@goodvibes/engine/platform/platform/config` at build time (a script
  * that runs under bun, never inside the Vite bundle, the same reason
  * scripts/generate-config-schema.ts snapshots CONFIG_SCHEMA that way instead
  * of importing it live) and snapshots them into

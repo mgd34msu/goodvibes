@@ -21,7 +21,7 @@
  * the TUI's `goodvibes` binary and the daemon repo's `goodvibes-daemon-*`
  * assets, neither of which this repo ships.
  */
-export { CHECKSUM_MANIFEST_NAME, parseChecksumFile } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+export { CHECKSUM_MANIFEST_NAME, parseChecksumFile } from '@goodvibes/engine/platform/platform/runtime/self-update';
 export { extractTarGzEntry } from './tar-archive.ts';
 
 const SUPPORTED_ARCHES = new Set(['x64', 'arm64']);
@@ -74,7 +74,7 @@ export function resolveSqliteVecArchive(platform: string, arch: string): SqliteV
  * plain JavaScript, and the browser binaries it drives are downloaded
  * separately into the managed cache. Extracting it beside the executable
  * produces `<execDir>/playwright-core/…`, the first entry in
- * driverSearchDirectories (see @goodvibes-jev/engine/platform/platform/browser, and
+ * driverSearchDirectories (see @goodvibes/engine/platform/platform/browser, and
  * runtime/agent-browser.ts for this surface's binding of it).
  */
 export const BROWSER_DRIVER_ARCHIVE_NAME = 'browser-driver.tar.gz';

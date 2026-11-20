@@ -1,13 +1,13 @@
-import { createBlockContentActions } from '@goodvibes-jev/engine/terminal-shell/block-content-actions';
-import { describeBlockForReceipt } from '@goodvibes-jev/engine/terminal-shell/block-description';
-export { describeBlockForReceipt } from '@goodvibes-jev/engine/terminal-shell/block-description';
-export * from '@goodvibes-jev/engine/terminal-shell/input-content';
+import { createBlockContentActions } from '@goodvibes/engine/terminal-shell/block-content-actions';
+import { describeBlockForReceipt } from '@goodvibes/engine/terminal-shell/block-description';
+export { describeBlockForReceipt } from '@goodvibes/engine/terminal-shell/block-description';
+export * from '@goodvibes/engine/terminal-shell/input-content';
 import { activeTokens } from '../renderer/theme.ts';
-import { blockAt, isProposedDiff } from '@goodvibes-jev/engine/terminal-shell/conversation-event-navigation';
+import { blockAt, isProposedDiff } from '@goodvibes/engine/terminal-shell/conversation-event-navigation';
 import type { ConversationManager } from '../core/conversation';
-import type { PermissionCategory } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { analyzePermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { PermissionCategory } from '@goodvibes/engine/platform/platform/permissions';
+import { analyzePermissionRequest } from '@goodvibes/engine/platform/platform/permissions';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { CommandContext } from './command-registry.ts';
 
 /**

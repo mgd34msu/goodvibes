@@ -6,7 +6,7 @@
 // including registries added after these scripts were written.
 
 import { resolve } from 'node:path';
-import { BatteryRegistry, type NamedDecision } from '@goodvibes-jev/judgment';
+import { BatteryRegistry, type NamedDecision } from '@goodvibes/judgment';
 
 export const ENGINE_ROOT = resolve(import.meta.dir, '..');
 

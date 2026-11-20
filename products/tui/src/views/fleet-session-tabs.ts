@@ -20,7 +20,7 @@
 // existing i/K "not supported" convention).
 // ---------------------------------------------------------------------------
 
-import type { ProcessKind, ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { ProcessKind, ProcessNode } from '@goodvibes/engine/platform/platform/runtime/fleet';
 import { MessageLineCache } from '../core/conversation-line-cache.ts';
 import { fleetKindTag } from './fleet-read-model.ts';
 

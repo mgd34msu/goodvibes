@@ -1,14 +1,14 @@
 import { existsSync } from 'node:fs';
-import { readCliModelInUse, readCliProviderSignInFacts, readSavedCliModelInUse } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
+import { readCliModelInUse, readCliProviderSignInFacts, readSavedCliModelInUse } from '@goodvibes/engine/terminal-shell/cli-status-facts';
 import { agentTrustsScannedServer } from '../runtime/lan-scan-consent-store.ts';
 import { readConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
-import { canonicalizePairingHost, readAgentHostPairing } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-pairing-store';
-import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
-import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
+import { canonicalizePairingHost, readAgentHostPairing } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-pairing-store';
+import { resolveConnectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
 import { fetchDaemonCredentialAvailability } from '../config/credential-status.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { readOnboardingDoneMarker } from '../runtime/onboarding/completion.ts';
-import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell-paths';
+import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
 import { buildCliStatusSnapshot, renderCliStatus, renderOnboardingCliStatus } from './status.ts';
 import type { GoodVibesCliParseResult } from './types.ts';
 import { resolveDoctorExitCode } from './doctor-exit.ts';
@@ -17,7 +17,7 @@ import { inspectCliExternalRuntime } from './external-runtime.ts';
 import { inspectConnectedHostMetrics } from './connected-host-metrics.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { writeExitingStdoutLine } from '../utils/fatal-boot-write.ts';
-import { readCheckpointRegistrationSetting } from '@goodvibes-jev/engine/platform/platform/config/checkpoint-settings';
+import { readCheckpointRegistrationSetting } from '@goodvibes/engine/platform/platform/config/checkpoint-settings';
 import { resolveCheckpointEligibilitySync } from '../config/workspace-registration.ts';
 
 /** What `status`, `doctor` and `onboarding status` read: the prepared configuration and its roots. */

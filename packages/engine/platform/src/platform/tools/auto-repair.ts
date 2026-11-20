@@ -1,8 +1,8 @@
 import type { ToolDefinition } from '../types/tools.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import { JudgmentError, type JudgmentPort } from '@goodvibes/judgment';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { paramFill, paramFillCandidate, paramFillContext } from './batteries/param-fill.js';
 import { booleanValue, booleanValueView } from './batteries/boolean-value.js';

@@ -6,7 +6,7 @@ import type { AgentRecord } from '../../tools/agent/index.js';
 import type { TrySpawnAgentFn } from '../types.js';
 import { parseJsonRecord, readRecord, readString, readTextBodyWithinLimit } from '../helpers.js';
 import { inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
-import { done, failedOutcome, observe, refusal } from '@goodvibes-jev/engine/errors';
+import { done, failedOutcome, observe, refusal } from '@goodvibes/engine/errors';
 import { effectKey, newOperationId, outcomeOfFailure, type OperationId } from '../../state/operation.js';
 import type { OperationLog } from '../../state/operation-log.js';
 import { isAdmissionRefusal } from '../../daemon/work-admission.js';

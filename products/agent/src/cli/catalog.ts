@@ -1,5 +1,5 @@
-import { inferProviderFromModel } from '@goodvibes-jev/engine/terminal-shell/cli-command-catalog';
-import type { CliCatalog, CommandFlagSpec, CommandOptionSpec, CommandSpec } from '@goodvibes-jev/engine/terminal-shell';
+import { inferProviderFromModel } from '@goodvibes/engine/terminal-shell/cli-command-catalog';
+import type { CliCatalog, CommandFlagSpec, CommandOptionSpec, CommandSpec } from '@goodvibes/engine/terminal-shell';
 import type { GoodVibesCliCommand, GoodVibesCliFlags } from './types.ts';
 export const COMMAND_ALIASES: Readonly<Record<string, GoodVibesCliCommand>> = {
   run: 'run',

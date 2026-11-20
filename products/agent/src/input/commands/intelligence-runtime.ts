@@ -1,5 +1,5 @@
-import { CodeIntelligence } from '@goodvibes-jev/engine/platform/platform/intelligence';
-import { registerIntelligenceCommand } from '@goodvibes-jev/engine/terminal-shell/intelligence-command';
+import { CodeIntelligence } from '@goodvibes/engine/platform/platform/intelligence';
+import { registerIntelligenceCommand } from '@goodvibes/engine/terminal-shell/intelligence-command';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 

@@ -20,7 +20,7 @@
 // local projection is served rather than a fabricated one.
 // ---------------------------------------------------------------------------
 
-import { createDaemonPowerStateSource, type DaemonPowerEventHandlers, type DaemonPowerEventWatch, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
+import { createDaemonPowerStateSource, type DaemonPowerEventHandlers, type DaemonPowerEventWatch, type PowerState } from '@goodvibes/engine/platform/platform/power';
 import { IDLE_POWER_STATE, powerSurfaceFromEvent, powerSurfaceFromState, type PowerStateChangedPayload, type PowerSurfaceState } from './power-status.ts';
 
 export interface PowerChipSourceDeps {

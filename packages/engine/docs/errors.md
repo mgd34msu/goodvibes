@@ -3,7 +3,7 @@
 > Internal source map. For consumer guidance see [Error Handling](./error-handling.md) and [platform Error Kinds](./error-kinds.md).
 
 GoodVibes errors use shared categories and kinds from
-`@goodvibes-jev/engine/errors`. Everything below lives in that package, split
+`@goodvibes/engine/errors`. Everything below lives in that package, split
 across three source files. `daemon-error-contract.ts` holds the daemon wire
 types, `error-codes.ts` holds the canonical `EngineErrorCode` union and its
 runtime helpers, and `index.ts` holds the error classes and everything that

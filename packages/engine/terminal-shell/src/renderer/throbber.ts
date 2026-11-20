@@ -20,10 +20,10 @@
  * Inside an agent or process view the row keeps main in sight the same way,
  * led by "main ·" so it is never read as the view's own activity.
  */
-import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ContractStatus } from '@goodvibes-jev/engine/platform/platform/contract';
-import { getDisplayWidth, interpolateColor, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
+import { type Line, createEmptyLine } from '@goodvibes/engine/platform/platform/types';
+import type { ToolCall } from '@goodvibes/engine/platform/platform/types';
+import type { ContractStatus } from '@goodvibes/engine/platform/platform/contract';
+import { getDisplayWidth, interpolateColor, truncateDisplay } from '@goodvibes/engine/platform/platform/utils';
 import { formatElapsed } from '../format.js';
 import { beadArgument, beadName } from './bead.js';
 import { activeTokens } from './theme.js';

@@ -37,17 +37,17 @@ import type {
   RewindConversationOutcome,
   RewindConversationPort,
   RewindConversationPreview,
-} from '@goodvibes-jev/engine/platform/platform/rewind';
+} from '@goodvibes/engine/platform/platform/rewind';
 import { readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ConversationManager as CoreConversation } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConversationManager as CoreConversation } from '@goodvibes/engine/platform/platform/core';
 export interface RewindConversation extends Pick<CoreConversation, 'getMessageCount' | 'toJSON' | 'fromJSON' | 'removeMessagesAfter'> {
   rebuildHistory(): void;
   /** Saves the changed conversation where its owner keeps it; a rewind awaits it and reports a failure. */
   persist?(): Promise<void>;
 }
-import { resolveTurnAnchor, resolveTurnBoundary, turnBoundaryKey, type BoundaryMessage } from '@goodvibes-jev/engine/platform/platform/rewind';
-import { logger, readDocument, summarizeError, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
+import { resolveTurnAnchor, resolveTurnBoundary, turnBoundaryKey, type BoundaryMessage } from '@goodvibes/engine/platform/platform/rewind';
+import { logger, readDocument, summarizeError, writeDocument } from '@goodvibes/engine/platform/platform/utils';
 
 type ConversationJson = Parameters<CoreConversation['fromJSON']>[0];
 

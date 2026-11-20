@@ -1,20 +1,20 @@
-import { captureCatalogSnapshot } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
-import { type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { captureCatalogSnapshot } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
+import { type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import type { EffectResult } from './agent-harness-tool-utils.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { captureStatefulCatalogRequest, rankStatefulCatalog } from './agent-harness-stateful-catalog-source.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { openTtsProviderPicker, openTtsVoicePicker } from '../input/tts-settings-actions.ts';
-import { openExternalUrl } from '@goodvibes-jev/engine/platform/platform/utils';
-import { captureVoiceListReadSource, captureVoiceProviderReadSource } from '@goodvibes-jev/engine/platform/platform/voice';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { openExternalUrl } from '@goodvibes/engine/platform/platform/utils';
+import { captureVoiceListReadSource, captureVoiceProviderReadSource } from '@goodvibes/engine/platform/platform/voice';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
 import { connectedBrowserCockpitRoute } from './agent-harness-browser-cockpit-route.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';
 import { isKnownAgentWorkspaceCategory } from '../input/agent-workspace-navigation.ts';
 import type { AgentHarnessUiSurfaceArgs, UiSurfaceDefinition, UiSurfaceLookup, UiSurfaceResolution } from './agent-harness-ui-surface-types.ts';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 export type { AgentHarnessUiSurfaceArgs } from './agent-harness-ui-surface-types.ts';
 
 function agentHarnessModes(...modes: readonly string[]): string { return `agent_harness ${modes.map((mode) => `mode:"${mode}"`).join(', ')}`; }

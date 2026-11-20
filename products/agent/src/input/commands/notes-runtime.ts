@@ -5,16 +5,16 @@
  * record, a persona, a skill or a routine, or add its web page to Agent
  * Knowledge, and the note records what was made from it.
  */
-import { AgentNoteRegistry, type AgentNoteRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/note-registry';
-import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
-import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
-import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
-import { formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
-import { assertActorMayEnable } from '@goodvibes-jev/engine/terminal-shell/agent-turn/review-authority';
-import { describedCommandByName, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { createNotesCommand, noteTitleFromText, type NotesActionId } from '@goodvibes-jev/engine/terminal-shell/notes-command';
-import type { MemoryClass, MemoryScope } from '@goodvibes-jev/engine/platform/platform/state';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { AgentNoteRegistry, type AgentNoteRecord } from '@goodvibes/engine/terminal-shell/agent-turn/note-registry';
+import { AgentPersonaRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/persona-registry';
+import { AgentSkillRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
+import { AgentRoutineRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/routine-registry';
+import { formatAgentRecordReviewState } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
+import { assertActorMayEnable } from '@goodvibes/engine/terminal-shell/agent-turn/review-authority';
+import { describedCommandByName, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { createNotesCommand, noteTitleFromText, type NotesActionId } from '@goodvibes/engine/terminal-shell/notes-command';
+import type { MemoryClass, MemoryScope } from '@goodvibes/engine/platform/platform/state';
+import { readRefusal } from '@goodvibes/engine/errors';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { commandRefusal } from './confirmation.ts';

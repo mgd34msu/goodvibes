@@ -15,7 +15,7 @@ import { runCompletionCommand } from './completion.js';
 import { daemonCommandSpec, isRawInterceptCommand } from './command-catalog.js';
 import type { DaemonCliRuntime } from './serve.js';
 import type { ShippedServiceExecutable } from './service-executable.js';
-import type { ChunkSink, ChunkSource } from '@goodvibes-jev/engine/platform/platform/mcp/server';
+import type { ChunkSink, ChunkSource } from '@goodvibes/engine/platform/platform/mcp/server';
 
 export interface DaemonCliOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -99,7 +99,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       const prepared = prepareSendCommand(cli.commandArgs);
       if (prepared.kind === 'result') return result(prepared.result);
       const [{ createDaemonCliConfiguration }, { isDeclaredSecretBearingConfigKey }] = await Promise.all([
-        import('./configuration.js'), import('@goodvibes-jev/engine/platform/platform/config'),
+        import('./configuration.js'), import('@goodvibes/engine/platform/platform/config'),
       ]);
       const configuration = createDaemonCliConfiguration(cli.flags, env, options.cwd, { diagnosticMode: 'structural' });
       const withheld = configuration.config.getIngestionQuarantine()
@@ -158,7 +158,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
     switch (cli.command) {
       case 'config': {
         const [{ runConfigCommand }, { createRuntimeSecretsManager }] = await Promise.all([
-          import('../daemon/config-command.js'), import('@goodvibes-jev/engine/platform/platform/config'),
+          import('../daemon/config-command.js'), import('@goodvibes/engine/platform/platform/config'),
         ]);
         return result(await runConfigCommand(cli.commandArgs, { configManager: config, json: cli.flags.json,
           openSecretStore: () => createRuntimeSecretsManager({ projectRoot: workingDirectory, globalHome: homeDirectory,
@@ -166,7 +166,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       }
       case 'status': {
         const [{ runStatusCommand }, { surfaceCrashLogPath }] = await Promise.all([
-          import('../daemon/status-command.js'), import('@goodvibes-jev/engine/platform/platform/runtime/crash-capture'),
+          import('../daemon/status-command.js'), import('@goodvibes/engine/platform/platform/runtime/crash-capture'),
         ]);
         return result(await runStatusCommand({ ...remote, flags: remoteFlags,
           crashLogPath: surfaceCrashLogPath(homeDirectory, GOODVIBES_DAEMON_SURFACE_ROOT) }));
@@ -182,10 +182,10 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       case 'pair': {
         const [{ runPairCommand }, { readOperatorTokenFile }, { readLegacySharedRevoked, pairingOriginUsesStableHost, refreshStableHostInputs }, { controlPlaneStorePath }, { createShellPathService }] = await Promise.all([
           import('../daemon/pair-command.js'),
-          import('@goodvibes-jev/engine/platform/platform/workspace'),
-          import('@goodvibes-jev/engine/platform/platform/pairing'),
-          import('@goodvibes-jev/engine/platform/platform/control-plane'),
-          import('@goodvibes-jev/engine/platform/platform/runtime/shell'),
+          import('@goodvibes/engine/platform/platform/workspace'),
+          import('@goodvibes/engine/platform/platform/pairing'),
+          import('@goodvibes/engine/platform/platform/control-plane'),
+          import('@goodvibes/engine/platform/platform/runtime/shell'),
         ]);
         // The Tailscale and `.local` rungs are slow facts gathered asynchronously;
         // without them this one-shot command would print the DHCP address while
@@ -205,7 +205,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       }
       case 'webui': {
         const [{ runWebuiCommand }, { controlPlaneOriginUsesStableHost, refreshStableHostInputs }] = await Promise.all([
-          import('../daemon/webui-command.js'), import('@goodvibes-jev/engine/platform/platform/pairing'),
+          import('../daemon/webui-command.js'), import('@goodvibes/engine/platform/platform/pairing'),
         ]);
         // `enable` and `status` print (and `enable` may save) the origin through
         // the stable-name ladder; gather its slow facts first so the Tailscale
@@ -216,7 +216,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         return result(runWebuiCommand(cli.commandArgs, { configManager: config, baseDirectory: workingDirectory }));
       }
       case 'cluster': {
-        const { runClusterCommand } = await import('@goodvibes-jev/engine/terminal-shell/cluster-commands');
+        const { runClusterCommand } = await import('@goodvibes/engine/terminal-shell/cluster-commands');
         const answer = await runClusterCommand({ argv: cli.commandArgs, configManager: config, daemonHomeDir: daemonHomeDirectory, fetchImpl: remote.fetchImpl });
         if (answer.rawOutput) stdout(answer.rawOutput);
         return result(answer);
@@ -227,7 +227,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         if (errors.length) return result({ exitCode: 2, lines: errors });
         const [{ repairDaemonSuiteBeforeStartup }, { installProcessCrashCapture, surfaceCrashLogPath }] = await Promise.all([
           import('./startup-suite-repair.js'),
-          import('@goodvibes-jev/engine/platform/platform/runtime/operations'),
+          import('@goodvibes/engine/platform/platform/runtime/operations'),
         ]);
         const originalArgv = [...argv];
         const releaseCrashCapture = options.captureCrashes === true ? installProcessCrashCapture({
@@ -257,7 +257,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       }
       default: {
         const { isDaemonServiceSubcommand, runDaemonServiceCli, resolveInstalledDaemonBinary } = await import('../daemon/service-commands.js');
-        const { resolveServiceUnitHome } = await import('@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default');
+        const { resolveServiceUnitHome } = await import('@goodvibes/engine/platform/platform/daemon/daemon-service-default');
         if (!isDaemonServiceSubcommand(cli.command)) return refuse('This command has no migrated dispatcher.');
         // A daemon with a moved tree or daemon home needs a service manager whose
         // definition carries GOODVIBES_HOME and --daemon-home: a systemd unit
@@ -265,7 +265,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         // scheduled task created by schtasks has no environment of its own, and
         // the manual platform has no service manager, so there it would start
         // with the default home and serve the wrong tree.
-        const { detectPlatform } = await import('@goodvibes-jev/engine/platform/platform/daemon/service-manager');
+        const { detectPlatform } = await import('@goodvibes/engine/platform/platform/daemon/service-manager');
         const servicePlatform = detectPlatform(String(config.get('service.platform')));
         if (configuration.isOverridden && ['install-service', 'refresh-service', 'start-service', 'restart-service'].includes(cli.command)
           && servicePlatform !== 'systemd' && servicePlatform !== 'launchd') {

@@ -7,8 +7,8 @@ import { retainStrictJudgmentJson, prepareJudgmentResult } from '../gate/judgmen
  * callers as code.
  */
 import { requireActingReading } from '../types/judgment-held.js';
-import type { YesNoReading } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, JudgmentAuthorityRetiredError, judgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { YesNoReading } from '@goodvibes/judgment';
+import { captureJudgmentPort, JudgmentAuthorityRetiredError, judgmentPort, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { captureNormalizationSource } from '../utils/error-display.js';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';

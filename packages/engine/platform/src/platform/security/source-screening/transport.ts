@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { Pool, interceptors } from 'undici/index.js';
 import * as directClient from './direct-client.js';
 import { types as nodeTypes } from 'node:util';

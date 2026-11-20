@@ -1,9 +1,9 @@
-import { createAuthCommand } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
+import { createAuthCommand } from '@goodvibes/engine/terminal-shell/auth-review-command';
 import 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes/engine/platform/platform/config';
 import '@/runtime/index.ts';
-import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
+import { formatAgentRecordSource } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
 
 interface AuthReviewBundle {
   readonly version: 1;

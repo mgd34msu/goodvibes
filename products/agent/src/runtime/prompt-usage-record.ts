@@ -1,4 +1,4 @@
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 /**
  * Counts a composed prompt's injected memories without letting a failure to

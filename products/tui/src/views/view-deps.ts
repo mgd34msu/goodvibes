@@ -7,15 +7,15 @@ import type { NativeWorkLedgerModalSource } from '../runtime/native-work-ledger-
  * (usage, fleet acts and spawn) and registers every config-modal surface.
  */
 
-import type { ConfigManager, ServiceRegistry, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { Orchestrator, SessionMemoryStore } from '@goodvibes-jev/engine/platform/platform/core';
-import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import type { HookActivityTracker, HookDispatcher, HookWorkbench } from '@goodvibes-jev/engine/platform/platform/hooks';
-import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
-import type { ProjectPlanningService, ProjectWorkPlan, KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import type { SessionChangeTracker } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { ConfigManager, ServiceRegistry, SubscriptionManager } from '@goodvibes/engine/platform/platform/config';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
+import type { Orchestrator, SessionMemoryStore } from '@goodvibes/engine/platform/platform/core';
+import type { MemoryAccess } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
+import type { HookActivityTracker, HookDispatcher, HookWorkbench } from '@goodvibes/engine/platform/platform/hooks';
+import type { UserAuthManager } from '@goodvibes/engine/platform/platform/security';
+import type { ProjectPlanningService, ProjectWorkPlan, KnowledgeApi } from '@goodvibes/engine/platform/platform/knowledge';
+import type { SessionChangeTracker } from '@goodvibes/engine/platform/platform/sessions';
 import type { PolicyRuntimeState, SandboxSessionRegistry } from '@/runtime/index.ts';
 import type { UiRuntimeServices } from '../runtime/ui-services.ts';
 import type { PluginsModalManager } from './modals/plugins-modal.ts';

@@ -2,8 +2,8 @@ import { readProtocolRequest, type CapturedProtocolRequest } from './protocol-re
 import { captureExternalRequestEvidence } from './external-request-evidence.js';
 /** ACP/MCP use the same recorded autonomous admission as native tools. No human fallback. */
 import { randomUUID } from 'node:crypto';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { DEFAULT_DECISION_DEADLINE_MS } from '@goodvibes-jev/judgment/decisions';
+import type { JudgmentPort } from '@goodvibes/judgment';
+import { DEFAULT_DECISION_DEADLINE_MS } from '@goodvibes/judgment/decisions';
 import { captureOwnedJson } from '../gate/judgment-input.js';
 import { captureCurrentAutonomousChoices, captureCurrentAutonomousSourceFrame, type AutonomousToolSource } from './autonomous.js';
 import { awaitPermission } from './cancellation.js';

@@ -1,8 +1,8 @@
 /** One-shot delivery owners; no daemon graph, listener, poller or notification queue. */
-import { ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
-import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { ServiceRegistry, SubscriptionManager, createRuntimeSecretsManager, sharedSubscriptionsPath } from '@goodvibes-jev/engine/platform/platform/config';
-import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { ChannelDeliveryRouter } from '@goodvibes/engine/platform/platform/channels';
+import { ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
+import { ServiceRegistry, SubscriptionManager, createRuntimeSecretsManager, sharedSubscriptionsPath } from '@goodvibes/engine/platform/platform/config';
+import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.js';
 import type { DaemonCliConfiguration } from '../../cli/configuration.js';
 import type { SendDeliver } from './command.js';

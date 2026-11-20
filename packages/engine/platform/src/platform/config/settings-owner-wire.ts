@@ -9,7 +9,7 @@
  * refused with its own reason. Responses are read for the fields this build
  * needs; fields a newer daemon adds are ignored.
  */
-import { RefusalError, formatRefusal, readNextSteps, refusal, type Refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, formatRefusal, readNextSteps, refusal, type Refusal } from '@goodvibes/engine/errors';
 import { fetchFailurePhase } from '../state/operation.js';
 import { VERSION } from '../version.js';
 import type { DaemonConfigEndpoint } from './daemon-config-route.js';

@@ -1,20 +1,20 @@
-import type { SessionEvent } from '@goodvibes-jev/engine/platform/events';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { createFeatureFlagManager } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/manager';
-import { deriveFeatureStates, bindFeatureSettingsBridge } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/feature-settings';
+import type { SessionEvent } from '@goodvibes/engine/platform/events';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { createFeatureFlagManager } from '@goodvibes/engine/platform/platform/runtime/feature-flags/manager';
+import { deriveFeatureStates, bindFeatureSettingsBridge } from '@goodvibes/engine/platform/platform/runtime/feature-flags/feature-settings';
 import {
   RuntimeEventBus,
   configureRuntimeEventBusDefaults,
   runtimeEventBusOptionsFrom,
-} from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import { createRuntimeStore, createDomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/store';
-import type { DomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import { attachSessionRecoveryState } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
-import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
-import type { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+} from '@goodvibes/engine/platform/platform/runtime/state';
+import { createRuntimeStore, createDomainDispatch } from '@goodvibes/engine/platform/platform/runtime/store';
+import type { DomainDispatch } from '@goodvibes/engine/platform/platform/runtime/state';
+import { attachSessionRecoveryState } from '@goodvibes/engine/platform/platform/runtime/emitters';
+import type { OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
+import type { Notifier } from '@goodvibes/engine/platform/platform/integrations';
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { holdProcessLock, logger, summarizeError, type HeldProcessLock } from '@goodvibes-jev/engine/platform/platform/utils';
+import { holdProcessLock, logger, summarizeError, type HeldProcessLock } from '@goodvibes/engine/platform/platform/utils';
 import { companionMessageToOrchestratorInputOptions } from './companion-input.js';
 const featureFlagBridgeTeardowns = new WeakMap<object, () => void>();
 export function createTerminalFeatureFlags(config: ConfigManager) {

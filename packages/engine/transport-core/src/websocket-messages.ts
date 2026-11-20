@@ -1,4 +1,4 @@
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 
 /** Logical messages are split into small frames; frame size is not a work limit. */
 export const WEBSOCKET_CHUNK_CHARS = 64 * 1024;

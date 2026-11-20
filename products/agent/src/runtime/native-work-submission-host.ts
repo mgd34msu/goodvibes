@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/native-work-submission-host';
+export * from '@goodvibes/engine/terminal-shell/native-work-submission-host';

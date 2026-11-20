@@ -44,7 +44,7 @@ import { randomUUID } from 'node:crypto';
 import { getProcessUntrustedContentLedger, type UntrustedContentLedger } from './untrusted-content.js';
 import type { TurnInputOrigin } from '../../events/turn.js';
 import { guestSurfaceId, normalizeSurfaceId } from '../gate/surface-authority.js';
-import { actorFromChannelSender, type Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { actorFromChannelSender, type Actor } from '@goodvibes/engine/daemon-api/http-policy';
 
 /**
  * Reset the untrusted-content window if, and only if, this invocation is a

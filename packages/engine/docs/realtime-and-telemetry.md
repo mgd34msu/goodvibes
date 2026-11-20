@@ -9,7 +9,7 @@ Use realtime feeds for live UI updates and operator monitoring.
 ## Runtime events
 
 ```ts
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
 
 const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',
@@ -29,7 +29,7 @@ The realtime layer supports:
 
 ### Realtime connectors
 
-The realtime transport (`@goodvibes-jev/engine/platform/transport-realtime`) exposes two low-level connector factories plus a domain-event layer. Wrap either connector with `createRemoteRuntimeEvents(connector)` for the typed runtime-event feed.
+The realtime transport (`@goodvibes/engine/platform/transport-realtime`) exposes two low-level connector factories plus a domain-event layer. Wrap either connector with `createRemoteRuntimeEvents(connector)` for the typed runtime-event feed.
 
 - `createEventSourceConnector(baseUrl, token, fetch, options?)`: SSE connector. Carries every subscribed domain on one stream (`?domains=a,b,c`); a changed set reopens it from the last event id. Supports `Last-Event-ID` stream resume, reconnect (via the stream reconnect policy), and dynamic auth-token resolution on reconnect.
 - `createWebSocketConnector(baseUrl, token, WebSocket, options?)`: WebSocket connector. Carries every subscribed domain on one socket; a domain added or dropped later is a `subscribe` or `unsubscribe` frame on it. The connection-lifecycle hooks below are passed via the `options` object. Adds connection-lifecycle hooks that the SSE connector does **not** fire:

@@ -4,7 +4,7 @@
  *
  * ── What moved to the platform, and what stays here ────────────────────────────
  *
- * The platform's `@goodvibes-jev/engine/platform/platform/runtime/client` now owns the
+ * The platform's `@goodvibes/engine/platform/platform/runtime/client` now owns the
  * policy every surface needs for this: `createDaemonFleetRowsPoller` (the poll
  * cadence and last-known-rows retention when a poll fails), `mergeFleetNodes`
  * (the local-wins dedupe by node id) and `daemonOnlyFleetActRefusal` (the
@@ -47,8 +47,8 @@ import {
   type DaemonFleetRowsPoller,
   type DaemonFleetRowsPollerOptions,
   type DaemonVerbCaller,
-} from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+} from '@goodvibes/engine/platform/platform/runtime/client';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { buildFleetSnapshot, type FleetReadModel, type FleetSnapshot } from '../../views/fleet-read-model.ts';
 
 /** Re-exported so an importer that only needs the platform's policy has one import site. */

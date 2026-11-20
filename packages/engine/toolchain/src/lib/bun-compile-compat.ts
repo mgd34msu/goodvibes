@@ -31,7 +31,7 @@ function ownedPackage(owner: string, name: string): string | undefined {
  */
 export function bunCompileCompatibilityFiles(root: string): Record<string, string> {
   const product = resolve(root, 'package.json');
-  const engine = ownedPackage(product, '@goodvibes-jev/engine');
+  const engine = ownedPackage(product, '@goodvibes/engine');
   const owners = engine ? [product, engine] : [product];
   const packages = new Map<string, PackageManifest>();
   const visit = (manifest: string): void => {

@@ -1,7 +1,7 @@
 import type { CommandContext } from '../command-registry.ts';
-import type { RelayCode } from '@goodvibes-jev/engine/terminal-shell/devices-command';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing/qr-generator';
+import type { RelayCode } from '@goodvibes/engine/terminal-shell/devices-command';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { generateQrMatrix, renderQrToString } from '@goodvibes/engine/platform/platform/pairing/qr-generator';
 import type { RelayRefusal, RelayStatusReading } from '../../runtime/relay-reachability-bridge.ts';
 
 /**

@@ -1,12 +1,12 @@
-import { openDecisionRouterSettings } from '@goodvibes-jev/engine/terminal-shell/decision-router-settings-actions';
-import { openSettingsChoice, type SettingsChoiceAction } from '@goodvibes-jev/engine/terminal-shell/settings-choice-actions';
-import { sessionPickerDeleteNamedKey } from '@goodvibes-jev/engine/terminal-shell/searchable-modal-route';
+import { openDecisionRouterSettings } from '@goodvibes/engine/terminal-shell/decision-router-settings-actions';
+import { openSettingsChoice, type SettingsChoiceAction } from '@goodvibes/engine/terminal-shell/settings-choice-actions';
+import { sessionPickerDeleteNamedKey } from '@goodvibes/engine/terminal-shell/searchable-modal-route';
 import {
   createSearchableModalTokenRoute,
   createProfilePickerTokenRoute,
-} from '@goodvibes-jev/engine/terminal-shell/searchable-modal-route';
-import { createSettingsModalRoute } from '@goodvibes-jev/engine/terminal-shell/settings-modal-route';
-import { openPaymentsCardsFromSettings } from '@goodvibes-jev/engine/terminal-shell/payments-settings';
+} from '@goodvibes/engine/terminal-shell/searchable-modal-route';
+import { createSettingsModalRoute } from '@goodvibes/engine/terminal-shell/settings-modal-route';
+import { openPaymentsCardsFromSettings } from '@goodvibes/engine/terminal-shell/payments-settings';
 export const { handleSettingsModalToken } = createSettingsModalRoute<
   CommandContext,
   import('./model-picker.ts').ModelPickerTarget,
@@ -46,7 +46,7 @@ export const { handleSettingsModalToken } = createSettingsModalRoute<
     });
   },
 });
-export { handleSelectionModalToken, handleBookmarkModalToken } from '@goodvibes-jev/engine/terminal-shell/modal-input-routes';
+export { handleSelectionModalToken, handleBookmarkModalToken } from '@goodvibes/engine/terminal-shell/modal-input-routes';
 
 import type { CommandContext } from './command-registry.ts';
 import { openTtsProviderPicker, openTtsVoicePicker } from './tts-settings-actions.ts';

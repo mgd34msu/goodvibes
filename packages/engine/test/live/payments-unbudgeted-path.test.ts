@@ -36,9 +36,9 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
+import { fakePort, noulAnswer } from '@goodvibes/judgment/testing';
 import { ConfigManager } from '../../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../../platform/src/platform/config/schema.ts';
 import { composeDaemonBrowser, type BrowserCheckoutSeam, type DaemonBrowserGatewayService } from '../../platform/src/platform/control-plane/routes/browser-composition.ts';

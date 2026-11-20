@@ -1,4 +1,4 @@
-import { runDecisionOrClassic as decisionOrClassic } from '@goodvibes-jev/engine/errors';
+import { runDecisionOrClassic as decisionOrClassic } from '@goodvibes/engine/errors';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 /**
  * `engine.provider.retry-wait`: which number in a provider's error message,
@@ -44,8 +44,8 @@ import {
   type Outcome,
   type Question,
   type YesNoReading,
-} from '@goodvibes-jev/judgment/decisions';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+} from '@goodvibes/judgment/decisions';
+import { judgmentPort } from '@goodvibes/engine/errors';
 
 const LOW = STAKES_BANDS.low;
 

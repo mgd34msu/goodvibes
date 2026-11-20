@@ -20,12 +20,12 @@
  */
 
 import { useSyncExternalStore } from 'react';
-import type { RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
-import { createStreamTextAssembler, type StreamTextAssembler } from '@goodvibes-jev/engine/transport-core/event-envelope';
+import type { RuntimeEventDomain } from '@goodvibes/engine/contracts';
+import { createStreamTextAssembler, type StreamTextAssembler } from '@goodvibes/engine/transport-core/event-envelope';
 import { client as platformClient, DEFAULT_SSE_RECONNECT } from './goodvibes';
 import { getClientLifetime, subscribeClientLifetime, type ClientLifetime } from './client-lifetime';
 import { getActiveRoute, subscribeActiveRoute, type ConnectionRoute } from './relay-connection';
-import { readStreamGapDropped } from '@goodvibes-jev/engine/transport-core/errors';
+import { readStreamGapDropped } from '@goodvibes/engine/transport-core/errors';
 import { noteRelayOverflow } from './relay-stream-overflow';
 
 export type EventLane = 'app' | 'detail';

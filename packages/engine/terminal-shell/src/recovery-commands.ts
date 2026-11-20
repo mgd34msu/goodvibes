@@ -6,9 +6,9 @@
 // the questions and the refusals are the same in both.
 // ---------------------------------------------------------------------------
 
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import type { WorkspaceCheckpoint, WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
-import type { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import type { WorkspaceCheckpoint, WorkspaceCheckpointManager } from '@goodvibes/engine/platform/platform/workspace';
+import type { FileUndoManager } from '@goodvibes/engine/platform/platform/state';
 import { commandRefusal, type ConfirmationHost } from './command-confirmation.js';
 
 /** The file undo stack calls the two lines use; `discard` backs `/undo set-aside` and `/redo set-aside`. */

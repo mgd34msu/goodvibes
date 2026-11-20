@@ -2,12 +2,12 @@ import {
   createTerminalWakeRuntime,
   type TerminalWakeRuntime,
   type TerminalWakeRuntimeDeps,
-} from '@goodvibes-jev/engine/terminal-shell/audio/wake-runtime';
+} from '@goodvibes/engine/terminal-shell/audio/wake-runtime';
 import { agentWakeCapabilities, describeWakeBlockers, describeWakeLimitations } from '../core/wake-provision-status.ts';
 import { describeTranscriptionFailure } from '../core/voice-stt-gateway.ts';
 import { AGENT_WAKE_SURFACE } from './wake-surface.ts';
 export { AGENT_WAKE_SURFACE } from './wake-surface.ts';
-export type { WakeRuntimeTestSeams } from '@goodvibes-jev/engine/terminal-shell/audio/wake-runtime';
+export type { WakeRuntimeTestSeams } from '@goodvibes/engine/terminal-shell/audio/wake-runtime';
 export type WakeRuntimeDeps = TerminalWakeRuntimeDeps;
 export type WakeRuntime = TerminalWakeRuntime;
 /** Agent keeps automatic provisioning: enabling wake fetches and verifies missing models. */

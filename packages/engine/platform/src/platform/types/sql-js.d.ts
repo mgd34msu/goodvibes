@@ -7,7 +7,7 @@
  * A consumer that imports `sql.js` picks this up with one line, anywhere in
  * its own sources:
  *
- *     /// <reference types="@goodvibes-jev/engine/platform/sql-js" />
+ *     /// <reference types="@goodvibes/engine/platform/sql-js" />
  *
  * Editing this file changes the shape for every surface at once; there are no
  * per-repo copies to keep in step.

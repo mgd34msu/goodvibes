@@ -1,4 +1,4 @@
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
 import { isClassicOperation } from '../../runtime/decision-policy.js';
 /** Captured repair: contained candidates, then the existing parser/Jev acceptance. */
 import { existsSync } from 'node:fs';

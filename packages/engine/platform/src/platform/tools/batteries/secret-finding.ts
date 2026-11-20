@@ -14,7 +14,7 @@ import { completeJudgmentView } from './complete-view.js';
  * unless the reading is a no (uncertain candidates are listed as needing
  * review), and counts the dismissed ones.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 import { ALNUM, BASE64, DIGITS, syntheticChars, syntheticCredential, UPPER } from '../../utils/fixture-credentials.js';
 
 /** Lines of context carried on each side of the candidate line. */

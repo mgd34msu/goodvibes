@@ -1,5 +1,5 @@
 /** Host-owned tool controls. Subprocess output is evidence, never authority. */
-import type { EntryType } from '@goodvibes-jev/judgment';
+import type { EntryType } from '@goodvibes/judgment';
 import { randomUUID } from 'node:crypto';
 import { decideAutonomous } from '../../gate/autonomous-decision.js';
 import { snapshotJudgmentInput } from '../../gate/judgment-input.js';

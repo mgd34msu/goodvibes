@@ -14,10 +14,10 @@
  * followed; the first two rows stay. Details (alt+i) go under the cause. Every
  * row wraps to the width; nothing is cut.
  */
-import type { Cell, Line } from '@goodvibes-jev/engine/platform/platform/types';
-import type { TurnFailureAction, TurnFailureReading } from '@goodvibes-jev/engine/platform/platform/core';
-import { createEmptyLine, createStyledCell } from '@goodvibes-jev/engine/platform/platform/types/grid';
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import type { Cell, Line } from '@goodvibes/engine/platform/platform/types';
+import type { TurnFailureAction, TurnFailureReading } from '@goodvibes/engine/platform/platform/core';
+import { createEmptyLine, createStyledCell } from '@goodvibes/engine/platform/platform/types/grid';
+import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { LAYOUT } from './layout.js';
 import { activeTokens } from './theme.js';
 

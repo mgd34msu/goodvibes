@@ -12,8 +12,8 @@
  * setup smoke runs a call names) comes in as a `CatalogIngressContext`; a
  * call made without one is admitted on the research owner and its own checks.
  */
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolExecution, assertCurrentToolInvocation, assertCurrentToolEffect, ToolInputProjectionError, type ToolInputProjector, type ToolRegistry, type ToolExecutionEffect } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { assertCurrentToolExecution, assertCurrentToolInvocation, assertCurrentToolEffect, ToolInputProjectionError, type ToolInputProjector, type ToolRegistry, type ToolExecutionEffect } from '@goodvibes/engine/platform/platform/tools';
 import { agentResearchSourceOwner } from './protected-research-report.js';
 import { captureModelReadingInput, assertModelReadingInputCurrent } from './model-reading.js';
 import { captureCatalogData } from './catalog-data.js';

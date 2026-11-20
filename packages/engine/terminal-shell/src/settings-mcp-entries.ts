@@ -1,5 +1,5 @@
-import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import type { McpRegistry } from '@goodvibes/engine/platform/platform/mcp';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import type { McpEntry } from './settings-model-types.js';
 
 export function buildMcpEntries(mcpRegistry: Pick<McpRegistry, 'listServerSecurity'> | null): McpEntry[] {

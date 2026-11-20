@@ -1,5 +1,5 @@
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import { isTextBackspace } from '@goodvibes-jev/engine/terminal-shell';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
+import { isTextBackspace } from '@goodvibes/engine/terminal-shell';
 import type { AgentWorkspace } from './agent-workspace.ts';
 
 /** Lines per PageUp/PageDown in the action-result block. */

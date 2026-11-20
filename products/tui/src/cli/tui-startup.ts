@@ -1,16 +1,16 @@
-import { reportStartupFailure, applySeededCliPrompt, resumeSessionAndRender } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
+import { reportStartupFailure, applySeededCliPrompt, resumeSessionAndRender } from '@goodvibes/engine/terminal-shell/startup-lifecycle';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { SelectionItem } from '../input/selection-modal.ts';
-import type { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { WorkspaceRegistrationManager } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { readOnboardingCheckMarker, writeOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
-import { FirstRunModal, installSplashAdditions, startFirstRun, type FirstRunDeps } from '@goodvibes-jev/engine/terminal-shell/first-run';
+import { FirstRunModal, installSplashAdditions, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
 import { requireSecretsManager, requireServiceRegistry, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
 import { scanThisComputerNow } from '../runtime/startup-provider-registration.ts';
 import { readLastSessionPointer, type SessionSurface } from '@/runtime/index.ts';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { writeFatalLine } from '@goodvibes-jev/engine/platform/platform/daemon';
-import type { GoodVibesCliParseResult } from '@goodvibes-jev/engine/terminal-shell';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { writeFatalLine } from '@goodvibes/engine/platform/platform/daemon';
+import type { GoodVibesCliParseResult } from '@goodvibes/engine/terminal-shell';
 import { openDeepLink, parseDeepLink } from '../input/commands/deep-link.ts';
 
 export type TuiStartupShellPaths = Parameters<typeof readOnboardingCheckMarker>[0] & {

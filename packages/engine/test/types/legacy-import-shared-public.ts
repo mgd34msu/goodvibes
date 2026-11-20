@@ -1,6 +1,6 @@
 import { openLegacyImportOperator, LegacyImportJournal, resolveLegacyImportJournalLocation,
-  type LegacyImportBinding, type LegacyImportCommand, type LegacyImportEntry, type LegacyImportOperatorSession } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
-import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
+  type LegacyImportBinding, type LegacyImportCommand, type LegacyImportEntry, type LegacyImportOperatorSession } from '@goodvibes/engine/terminal-shell/legacy-work-ledger-import';
+import type { JevDecision } from '@goodvibes/judgment/decisions';
 
 declare const entry: LegacyImportEntry;
 const decisions: readonly JevDecision[] = entry.decisions;

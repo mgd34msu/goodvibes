@@ -1,4 +1,4 @@
-import { WALK_SKIP_DIRS } from '@goodvibes-jev/engine/platform/platform/utils';
+import { WALK_SKIP_DIRS } from '@goodvibes/engine/platform/platform/utils';
 import { readdirSync, type Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';

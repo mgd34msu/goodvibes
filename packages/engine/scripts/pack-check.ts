@@ -44,8 +44,8 @@ function assertBundledBashLspMitigationManifest(manifest: PackageManifestLike, l
   if (manifest.dependencies?.['bash-language-server'] !== undefined) {
     throw new Error(`${label} must not duplicate bash-language-server in dependencies`);
   }
-  if (manifest.optionalDependencies?.['@goodvibes-jev/bash-zod'] !== 'npm:zod@4.6.6' ||
-      manifest.optionalDependencies?.['@goodvibes-jev/bash-web-tree-sitter'] !== 'npm:web-tree-sitter@0.24.5') {
+  if (manifest.optionalDependencies?.['@goodvibes/bash-zod'] !== 'npm:zod@4.6.6' ||
+      manifest.optionalDependencies?.['@goodvibes/bash-web-tree-sitter'] !== 'npm:web-tree-sitter@0.24.5') {
     throw new Error(`${label} must preserve Bash's dependency aliases at the installable engine layer`);
   }
 }
@@ -67,7 +67,7 @@ function assertBundledBashLspPatchManifest(tarball: string): void {
 
 // The engine ships inside the engine package, so the engine carries its mitigations.
 function isEnginePackage(manifest: PackageManifestLike): boolean {
-  return manifest.name === '@goodvibes-jev/engine';
+  return manifest.name === '@goodvibes/engine';
 }
 
 function assertFlatPackageLayout(tarball: string, files: readonly string[]): void {

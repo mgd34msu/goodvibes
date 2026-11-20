@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { detectInstallKind, type InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { compareVersions, normalizeVersion, type UpdateFetchLike } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { detectInstallKind, type InstallKind } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { compareVersions, normalizeVersion, type UpdateFetchLike } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { withTimeout } from './service-io.js';
 export type LaunchUpdateSkipReason = 'just-updated' | 'disabled' | 'not-swappable-install' | 'already-current' | 'check-skipped';
 export interface LaunchUpdateCheck {

@@ -1,8 +1,8 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
+import { drainOwned } from '@goodvibes/judgment/decisions';
 /** Browser page-purpose and same-control readings are observations, never permission to act. */
-import { checkAnswers, defineBattery, STAKES_BANDS, yesNo, toJson, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { checkAnswers, defineBattery, STAKES_BANDS, yesNo, toJson, type EntryType, type JudgmentPort } from '@goodvibes/judgment';
+import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { currentExecutionMode } from '../gate/execution-context.js';

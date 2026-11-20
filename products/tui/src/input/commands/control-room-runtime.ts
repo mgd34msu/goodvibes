@@ -1,11 +1,11 @@
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import '@/runtime/index.ts';
-import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes/engine/platform/platform/config';
 import { requireReadModels } from './runtime-services.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import type { AgentsHost } from '@goodvibes-jev/engine/terminal-shell/agents-command';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import type { AgentsHost } from '@goodvibes/engine/terminal-shell/agents-command';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
 
 /** Work contracts and stopping agents for `/agents` (terminal-shell/agents-command.ts) in this app. */
 export function contractsHost(): Exclude<AgentsHost<CommandContext>['contracts'], { readonly unavailable: string }> {

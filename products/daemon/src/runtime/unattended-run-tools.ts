@@ -22,16 +22,16 @@
  * the run read from mail or a calendar.
  */
 
-import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { UnattendedRuns } from '@goodvibes-jev/engine/platform/platform/automation';
-import { daemonGoogleConnectionOwner, subscribeGoogleCredentialChanges } from '@goodvibes-jev/engine/platform/platform/google';
-import { nodeGoogleFilePort } from '@goodvibes-jev/engine/platform/platform/google/node';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { wireAgentGoogleTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn/google-wiring';
-import type { GoogleCalendarHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/google-tool';
+import type { ConfigManager, SecretsManager } from '@goodvibes/engine/platform/platform/config';
+import type { ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
+import type { UnattendedRuns } from '@goodvibes/engine/platform/platform/automation';
+import { daemonGoogleConnectionOwner, subscribeGoogleCredentialChanges } from '@goodvibes/engine/platform/platform/google';
+import { nodeGoogleFilePort } from '@goodvibes/engine/platform/platform/google/node';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { wireAgentGoogleTool } from '@goodvibes/engine/terminal-shell/agent-turn/google-wiring';
+import type { GoogleCalendarHost } from '@goodvibes/engine/terminal-shell/agent-turn/google-tool';
 
 /** The tool an unattended run gets when mail or a calendar is connected. */
 const MAIL_AND_CALENDAR_TOOL = 'google';

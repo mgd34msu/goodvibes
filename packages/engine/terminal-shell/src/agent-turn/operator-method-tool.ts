@@ -1,10 +1,10 @@
-import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { captureStrictJudgmentJson } from '@goodvibes/engine/platform/platform/gate';
 import { isServiceMethodId, serviceExpectedOutcome, serviceLifecycleDecision, serviceOutcomeCertified, serviceReceiptEvidence } from './service-lifecycle.js';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { logger, redactStructuredDataAsync, type StructuredRedactionOptions } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { logger, redactStructuredDataAsync, type StructuredRedactionOptions } from '@goodvibes/engine/platform/platform/utils';
 import { isDeepStrictEqual } from 'node:util';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { connectedHostRequestDeadline, type ConnectedHostConfigReader as AgentConnectedHostConfigReader, type RequestDeadline } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { assertOperatorEffect, captureOperatorConnection } from './operator-connection-owner.js';
@@ -396,7 +396,7 @@ export function createAgentOperatorMethodTool(
       }
       // Capability-advertisement honesty: the operator contract marks a
       // cataloged-but-not-route-backed method invokable:false (email.inbox.list,
-      // email.send, etc., see @goodvibes-jev/engine/platform's method-catalog-route-reconcile).
+      // email.send, etc., see @goodvibes/engine/platform's method-catalog-route-reconcile).
       // Refuse here, before prepareOperatorRoute/fetch, rather than letting the
       // model discover a bare 404 from a route that was never wired up. The ad
       // must degrade at the source, not rely on the model coping with a 404.

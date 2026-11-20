@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/renderer/polish-tables';
+export * from '@goodvibes/engine/terminal-shell/renderer/polish-tables';

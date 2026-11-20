@@ -1,5 +1,5 @@
 import { judgmentVolume, judgmentVolumeBreaches, type JudgmentVolume, type JudgmentVolumeBudget, type JudgmentVolumeBreach } from './judgment-volume.js';
-import { CALIBRATION_SITE, truthOf, type DecisionEntry, type DecisionLog, type NamedDecision } from '@goodvibes-jev/judgment';
+import { CALIBRATION_SITE, truthOf, type DecisionEntry, type DecisionLog, type NamedDecision } from '@goodvibes/judgment';
 import type { ResolvePricing } from '../runtime/cost/attribution.js';
 import { batteryAccuracy, thresholdSweeps, type BatteryAccuracy, type BatterySweep } from './accuracy.js';
 import { stuckQuestions, unregisteredCalls, type StuckQuestion, type UnregisteredCalls } from './discovery.js';

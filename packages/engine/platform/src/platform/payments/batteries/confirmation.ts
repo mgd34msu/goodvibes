@@ -34,7 +34,7 @@ import { assertJudgmentInput } from '../../gate/judgment-input.js';
  * readings that act are used; an identifier whose reading does not act is
  * left out of the report.
  */
-import { defineBattery, defineDatePartsReader, defineSelector, NONE, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, defineDatePartsReader, defineSelector, NONE, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** Most characters of a mail body one request carries; a longer body is read up to here. */
 export const MAX_MAIL_CHARS = 160_000;

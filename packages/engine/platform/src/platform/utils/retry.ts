@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { structuredTransience } from '@goodvibes-jev/engine/errors';
+import { structuredTransience } from '@goodvibes/engine/errors';
 import { AppError } from '../types/errors.js';
 import { summarizeError } from './error-display.js';
 import { sleep } from './concurrency.js';

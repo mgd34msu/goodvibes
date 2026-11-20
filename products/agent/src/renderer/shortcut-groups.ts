@@ -5,7 +5,7 @@
  */
 
 import type { KeybindingsManager } from '../input/keybindings.ts';
-import type { ShortcutGroup } from '@goodvibes-jev/engine/terminal-shell/command-palette';
+import type { ShortcutGroup } from '@goodvibes/engine/terminal-shell/command-palette';
 /** Keys that are real but are not key-table actions (context chords, literal characters). */
 const FIXED_ROWS: ReadonlyArray<readonly [string, string]> = [
   ['Up / Down', 'Scroll / history recall'],

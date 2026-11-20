@@ -23,17 +23,17 @@ import { readString } from './tool-args.js';
  * signup form cannot cause a signup.
  */
 
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { ACCOUNT_REGISTRY_PATH_SEGMENTS, AgentAccountRegistry, mintAddressFor, type AgentAccountRecord } from '@goodvibes-jev/engine/platform/platform/google';
-import { readSurfaceEmailSettings } from '@goodvibes-jev/engine/platform/platform/email';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { ACCOUNT_REGISTRY_PATH_SEGMENTS, AgentAccountRegistry, mintAddressFor, type AgentAccountRecord } from '@goodvibes/engine/platform/platform/google';
+import { readSurfaceEmailSettings } from '@goodvibes/engine/platform/platform/email';
 import { containsSecretLikeText } from './memory-safety.js';
 import { getSessionExpectationBook, type DaemonExpectationClient } from './session-expectations.js';
 import { ConnectedHostVerbError } from './connected-host-verb-error.js';
 import { isHostFailure } from './connected-host-client.js';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
-import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes/engine/platform/platform/security';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 
 const ACCOUNT_ACTIONS = ['list', 'alias', 'record', 'forget', 'sweep'] as const;
 

@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { beginTuiHostPairing, completeTuiHostPairing, readTuiHostPairing, tuiHostPairingStorePath, type TuiHostPairingSecret } from '../src/runtime/tui-host-credential-store.ts';
 import { readTuiLegacyPairingBootstrap } from '../src/runtime/tui-host-pairing-bootstrap.ts';
 import { PAIRING_DEFERRED_EXIT } from './pairing-exit.ts';
-import { DAEMON_SERVICE_NAME } from '@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default';
+import { DAEMON_SERVICE_NAME } from '@goodvibes/engine/platform/platform/daemon/daemon-service-default';
 
 // The explicitly invoked local installer provisions its own client and daemon.
 // Generic host pairing still requires the owner-terminal confirmation flow.

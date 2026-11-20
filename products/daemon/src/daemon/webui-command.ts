@@ -41,11 +41,11 @@
 
 import { isAbsolute, join, resolve } from 'node:path';
 import { existsSync, statSync } from 'node:fs';
-import type { ConfigManager, DaemonConfigPatch } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
+import type { ConfigManager, DaemonConfigPatch } from '@goodvibes/engine/platform/platform/config';
+import { resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell';
 import { SHIPPED_PUBLIC_BASE_URL } from '../config/webui-bundle.js';
 import { WEBUI_BINDING_RESULT } from '../cli/machine-contracts.js';
-import { isLoopbackHost, probeStableHostInputs, resolveControlPlaneOrigin, type StableHostInputs } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { isLoopbackHost, probeStableHostInputs, resolveControlPlaneOrigin, type StableHostInputs } from '@goodvibes/engine/platform/platform/pairing';
 
 
 export interface WebuiCommandResult {

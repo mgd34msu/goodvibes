@@ -18,10 +18,10 @@
  * recovered (the same turn-moment snapshot the apps write, and the session lock
  * held while the run has its session open).
  */
-import type { SessionBranches, SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
-import type { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import type { ToolEvent, TurnEvent } from '@goodvibes-jev/engine/platform/events';
+import type { SessionBranches, SessionManager } from '@goodvibes/engine/platform/platform/sessions';
+import type { ConversationMessageSnapshot } from '@goodvibes/engine/platform/platform/core';
+import type { RuntimeEventBus } from '@goodvibes/engine/platform/platform/runtime/state';
+import type { ToolEvent, TurnEvent } from '@goodvibes/engine/platform/events';
 import {
   applyRecoverySnapshot,
   closeSessionHere,
@@ -37,8 +37,8 @@ import {
   type RecoveryRestoreConfirmation,
   type SessionSnapshot,
   type SessionSurface,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+} from '@goodvibes/engine/platform/platform/runtime/operations';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import { describeLeftOutBranches, markConversationDurable, moveLiveSessionArtifacts, readSavedBranches } from './session-resume.js';
 

@@ -1,4 +1,4 @@
-import { keepAwakeCondition, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
+import { keepAwakeCondition, type PowerState } from '@goodvibes/engine/platform/platform/power';
 
 /**
  * The composer power chip (see shell-surface.ts): it renders on the

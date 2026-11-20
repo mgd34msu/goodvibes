@@ -9,7 +9,7 @@ The platform exposes retry and reconnect as first-class configuration instead of
 All runtime-specific entrypoints can take a retry policy:
 
 ```ts
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
 
 const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',

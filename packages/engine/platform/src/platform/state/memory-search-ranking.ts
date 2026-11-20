@@ -4,7 +4,7 @@ import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperat
  * SQL filter and the vector index in memory-store.ts) builds a shortlist; the
  * `engine.state.memory-search` rerank orders it here.
  */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { memorySearchRerank, rerankContent, rerankShortlistSize } from './batteries/memory-search-rerank.js';
 import type { MemoryRecord, MemorySearchFilter, MemorySemanticSearchResult } from './memory-store.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';

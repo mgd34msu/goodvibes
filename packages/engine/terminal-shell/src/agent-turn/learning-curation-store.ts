@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readDocument, writeDocument, logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { readDocument, writeDocument, logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import { runStoreFileUpdateSync } from './store-file.js';
 import { storeFileChangeStamp } from './store-change-stamp.js';

@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 export const nodeServingWithoutReview = defineBattery({
   name: 'engine.knowledge.node-serving-without-review', version: 2,

@@ -1,7 +1,7 @@
 /** Semantic membership of structured compaction sections. Source text is data,
  * never instructions to the reader. Rendering and budgets remain code-owned.
  * These are fixture targets, not a claim of live calibration. */
-import { askAs, defineBattery, yesNo, STAKES_BANDS, type BatteryDefinition, type CallOptions, type EntryType, type JudgmentPort, type NoulQuestion, type YesNoItem } from '@goodvibes-jev/judgment';
+import { askAs, defineBattery, yesNo, STAKES_BANDS, type BatteryDefinition, type CallOptions, type EntryType, type JudgmentPort, type NoulQuestion, type YesNoItem } from '@goodvibes/judgment';
 
 
 /** Own both fixture-sized reads and the bounded evidence transport under the

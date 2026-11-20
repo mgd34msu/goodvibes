@@ -8,14 +8,14 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { registerAgentsCommand, type HandOffInput } from '@goodvibes-jev/engine/terminal-shell/agents-command';
-import type { SharedSessionParticipant } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { registerAgentsCommand, type HandOffInput } from '@goodvibes/engine/terminal-shell/agents-command';
+import type { SharedSessionParticipant } from '@goodvibes/engine/platform/platform/control-plane';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { AgentDelegationRegistry, type AgentDelegationRecord } from '../../agent/delegation-registry.ts';
 import { commandRefusal } from './confirmation.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
-import { createVerbSpawnGateway, type AcpSpawnGateway } from '@goodvibes-jev/engine/terminal-shell/fleet-spawn';
+import { createVerbSpawnGateway, type AcpSpawnGateway } from '@goodvibes/engine/terminal-shell/fleet-spawn';
 import { isAbsolute, resolve } from 'node:path';
 
 /** The ACP calls over this Agent's connected host, the same daemon `n` in Your agents hosts on. */

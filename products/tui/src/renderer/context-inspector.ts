@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/context-inspector';
+export * from '@goodvibes/engine/terminal-shell/context-inspector';

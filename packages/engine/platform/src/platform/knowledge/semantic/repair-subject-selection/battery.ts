@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 const device = { reference: 'subject-1', title: 'Living room display', kind: 'ha_device', aliases: [], identity: {} };
 const integration = { reference: 'subject-2', title: 'Display bridge', kind: 'integration', aliases: [], identity: {} };

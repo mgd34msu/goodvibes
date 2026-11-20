@@ -4,7 +4,7 @@ import { closeSync, constants, fstatSync, fsyncSync, linkSync, lstatSync, openSy
 import { dirname, join, resolve } from 'node:path';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { captureOwnedJson } from '../gate/judgment-input.js';
-import type { JevDecisionBinding } from '@goodvibes-jev/judgment/decisions';
+import type { JevDecisionBinding } from '@goodvibes/judgment/decisions';
 import { createAtomicTempPath, writeFileAtomic } from '../utils/atomic-json-store.js';
 import { readFileObservation } from '../utils/file-observation.js';
 import { readOwnedContractCheckpoint, ownedContractCheckpointText, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';

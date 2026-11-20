@@ -1,9 +1,9 @@
 import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.js';
-import {isExecutable as canExecute} from '@goodvibes-jev/engine/terminal-shell/cli-environment';
+import {isExecutable as canExecute} from '@goodvibes/engine/terminal-shell/cli-environment';
 import { delimiter, join } from 'node:path';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { readJsonStore, runStoreFileUpdateSync, writeJsonStore, type JsonStoreContents, type JsonStoreSpec, type JsonStoreWriteReport, type writeStoreFile } from './store-file.js';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import { assertNoSecretLikeText } from './persona-registry.js';
 import { parseSkillStandardMarkdown, writeSkillStandardFile } from './skill-standard.js';

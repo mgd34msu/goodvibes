@@ -9,8 +9,8 @@ import { pinContractInputAdmission } from './input-authority.js';
  * correction and completion steps (R.6) act on a contract through this class.
  */
 import type { NativeContractServices } from './native-decisions.js';
-import { JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { JudgmentError } from '@goodvibes-jev/judgment';
+import { JudgmentPortMissingError } from '@goodvibes/engine/errors';
+import { JudgmentError } from '@goodvibes/judgment';
 import type { ContractEvent } from '../../events/contract.js';
 import type { OrchestrationEngine } from '../orchestration/engine.js';
 import type { AgentRecord } from '../tools/agent/index.js';

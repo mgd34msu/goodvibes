@@ -8,7 +8,7 @@
  * daemon's native cohort carries that its reader evidence does not.
  */
 const table = /* cohort-table:begin */ {
-  "packages": {"goodvibes": "@goodvibes-jev/tui", "goodvibes-agent": "@goodvibes-jev/agent", "goodvibes-daemon": "@goodvibes-jev/daemon"},
+  "packages": {"goodvibes": "@goodvibes/tui", "goodvibes-agent": "@goodvibes/agent", "goodvibes-daemon": "@goodvibes/daemon"},
   "members": [
     {"product": "goodvibes", "target": "linux-x64", "path": "goodvibes-linux-x64", "asset": "goodvibes-linux-x64", "mode": 493, "reader": true},
     {"product": "goodvibes", "target": "linux-x64", "path": "goodvibes-linux-x64.bun", "asset": "goodvibes-linux-x64.bun", "mode": 493, "reader": true},

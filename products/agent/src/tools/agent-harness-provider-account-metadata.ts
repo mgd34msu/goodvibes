@@ -1,14 +1,14 @@
-import { Secret } from '@goodvibes-jev/engine/platform/platform/security';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogSnapshot } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { Secret } from '@goodvibes/engine/platform/platform/security';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import { captureCatalogSnapshot } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { captureServiceReadSource, captureSubscriptionReadSource, listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
+import { captureServiceReadSource, captureSubscriptionReadSource, listBuiltinSubscriptionProviders } from '@goodvibes/engine/platform/platform/config';
 import type { CommandContext } from '../input/command-registry.ts';
 import { buildProviderAccountSnapshot, type ProviderAccountRecord, type ProviderAccountSnapshot } from '@/runtime/index.ts';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 type ProviderCatalogContext = {
   readonly provider: Pick<CommandContext['provider'], 'providerRegistry'>;
@@ -16,7 +16,7 @@ type ProviderCatalogContext = {
   readonly platform: Pick<CommandContext['platform'], 'configManager' | 'serviceRegistry' | 'subscriptionManager'>
     & { readonly secretsManager?: { get(key: string): Promise<Secret | null> } | undefined };
 };
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
 
 export interface AgentHarnessProviderAccountArgs {
   readonly providerId?: unknown;

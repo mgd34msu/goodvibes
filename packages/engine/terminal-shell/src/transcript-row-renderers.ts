@@ -8,7 +8,7 @@
  * carries an event; a kind with no renderer, or a renderer that returns null,
  * is drawn as a plain notice, as before.
  */
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
 
 export interface TranscriptRowInput {
   /** The runtime event the message restates. */

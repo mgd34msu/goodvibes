@@ -1,9 +1,9 @@
-import { registerOwnerInboxCommands as registerSharedOwnerInboxCommands } from '@goodvibes-jev/engine/terminal-shell/owner-inbox-command';
+import { registerOwnerInboxCommands as registerSharedOwnerInboxCommands } from '@goodvibes/engine/terminal-shell/owner-inbox-command';
 import { isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 import { terminalOwnerInbox } from '../../runtime/client/owner-questions.ts';
 import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
 import { requireShellPaths } from './runtime-services.ts';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
+import type { OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 
 /** /questions and /decisions over the daemon's owner inbox, or this terminal's own when no daemon is reachable. */
 export function registerOwnerInboxCommands(registry: CommandRegistry): void {

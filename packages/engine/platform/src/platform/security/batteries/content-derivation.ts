@@ -25,7 +25,7 @@
  * leaves the machine (an injected recipient, a lifted instruction, a copied
  * account number); a wrong finding costs one owner approval.
  */
-import { defineBattery, JudgmentError, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, JudgmentError, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 
 /**

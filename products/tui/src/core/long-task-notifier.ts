@@ -37,10 +37,10 @@
  * unaffected.
  */
 
-import { notifyNow } from '@goodvibes-jev/engine/platform/platform/utils';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { notifyNow } from '@goodvibes/engine/platform/platform/utils';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import type { WebhookNotifier } from '@goodvibes/engine/platform/platform/integrations';
+import type { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
 import {
   buildTurnNotification,
   readNotificationsMetadataOnly,
@@ -48,7 +48,7 @@ import {
   type ConfigGet,
   type TurnOutcome,
   type TurnNotificationFacts,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+} from '@goodvibes/engine/platform/platform/runtime/operations';
 
 /** Default threshold in seconds. Turns shorter than this do not notify. */
 export const NOTIFY_AFTER_SECONDS_DEFAULT = 60;

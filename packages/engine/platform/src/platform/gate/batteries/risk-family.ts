@@ -19,7 +19,7 @@
  * allowance, so it reads at medium stakes. The three facts decide autonomy,
  * so they read at high stakes, and code treats an uncertain fact as true.
  */
-import { type JsonValue, defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { type JsonValue, defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** The risk families, each with what makes a call belong to it. */
 export const RISK_FAMILY_OPTIONS = {

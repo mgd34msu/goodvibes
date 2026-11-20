@@ -20,14 +20,14 @@ import {
   withAnswerDelivery,
   type AnswerDeliveringInbox,
   type OwnerInboxClient,
-} from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { OWNER_ASKER_SESSION_FILE_METADATA, handleOwnerDecisions } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { bridgeContractQuestionsToInbox } from '@goodvibes-jev/engine/platform/platform/contract';
-import { bridgeJevDecisionsToInbox, processJevDecisions } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { watchSessionAnswers, type SessionAnswerWatch } from '@goodvibes-jev/engine/platform/platform/agents';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { whenSessionOpens } from '@goodvibes-jev/engine/terminal-shell/session-resume';
-import { sessionIdentityFile } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+} from '@goodvibes/engine/platform/platform/runtime/client';
+import { OWNER_ASKER_SESSION_FILE_METADATA, handleOwnerDecisions } from '@goodvibes/engine/platform/platform/control-plane';
+import { bridgeContractQuestionsToInbox } from '@goodvibes/engine/platform/platform/contract';
+import { bridgeJevDecisionsToInbox, processJevDecisions } from '@goodvibes/engine/platform/platform/permissions';
+import { watchSessionAnswers, type SessionAnswerWatch } from '@goodvibes/engine/platform/platform/agents';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { whenSessionOpens } from '@goodvibes/engine/terminal-shell/session-resume';
+import { sessionIdentityFile } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { RuntimeServices } from '../services.ts';
 import { findSessionConversation, onSessionConversationChange } from '../conversation-rewind-port.ts';
 import { createDaemonVerbCaller, resolveDaemonEndpoint } from './operator-endpoint.ts';

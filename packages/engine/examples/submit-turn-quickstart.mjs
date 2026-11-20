@@ -9,7 +9,7 @@
  * Run: bun examples/submit-turn-quickstart.mjs
  */
 
-import { createGoodVibesPlatform, forSession } from '@goodvibes-jev/engine/platform';
+import { createGoodVibesPlatform, forSession } from '@goodvibes/engine/platform';
 
 // 1. Construct the platform.
 const authToken = process.env.GOODVIBES_TOKEN;

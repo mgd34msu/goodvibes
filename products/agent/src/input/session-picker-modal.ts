@@ -1,4 +1,4 @@
-import { SavedSessionPickerState } from '@goodvibes-jev/engine/terminal-shell/session-picker-state';
+import { SavedSessionPickerState } from '@goodvibes/engine/terminal-shell/session-picker-state';
 /**
  * SessionPickerModal, state management for the /sessions picker modal.
  *
@@ -6,8 +6,8 @@ import { SavedSessionPickerState } from '@goodvibes-jev/engine/terminal-shell/se
  * and handles load actions.
  */
 
-import type { SessionInfo, SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { SessionInfo, SessionManager } from '@goodvibes/engine/platform/platform/sessions';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { quoteSlashCommandArg } from './slash-command-parser.ts';
 import type { CommandContext } from './command-registry.ts';
 import { loadSavedSessionIntoLive } from './commands/session-load.ts';

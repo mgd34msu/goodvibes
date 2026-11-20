@@ -4,11 +4,11 @@
  * Lists profiles from ProfileManager.list(), tracks selected index,
  * and handles load/delete/save actions.
  */
-import type { ProfileInfo, ProfileData, ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { CONFIG_SCHEMA, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ProfileInfo, ProfileData, ProfileManager } from '@goodvibes/engine/platform/platform/profiles';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { CONFIG_SCHEMA, type ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 /**
  * Approval behaviour (`autoApprove`, `hitlMode`) is never carried: a profile
  * from another host must not change what runs without asking.

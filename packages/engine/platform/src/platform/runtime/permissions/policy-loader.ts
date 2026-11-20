@@ -10,7 +10,7 @@
  * `SignedPolicyBundle` so callers control the loading strategy.
  */
 
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import type { PolicyRule } from './types.js';
 import type {
   PolicyBundleId,

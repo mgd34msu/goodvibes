@@ -604,7 +604,7 @@
   },
   "./platform/version": {
     "gzip_bytes": 368,
-    "rationale": "single-file SDK VERSION constant (cli/acp/mcp compose it), exported for consumer composition roots for SDK consumers; re-anchored when the fallback read moved to the engine manifest (packages/engine/package.json, three levels above sdk/dist/platform): measured 306 B gzip @ goodvibes-jev 1d25e5d; headroom max(ceil(306*1.2)=368, 306+50=356) -> 368 (1.2x dominates). Previously measured 245 B gzip; headroom max(ceil(245*1.2)=294, 245+50=295) -> 295"
+    "rationale": "single-file SDK VERSION constant (cli/acp/mcp compose it), exported for consumer composition roots for SDK consumers; re-anchored when the fallback read moved to the engine manifest (packages/engine/package.json, three levels above sdk/dist/platform): measured 306 B gzip @ goodvibes 1d25e5d; headroom max(ceil(306*1.2)=368, 306+50=356) -> 368 (1.2x dominates). Previously measured 245 B gzip; headroom max(ceil(245*1.2)=294, 245+50=295) -> 295"
   },
   "./platform/voice": {
     "gzip_bytes": 1090,

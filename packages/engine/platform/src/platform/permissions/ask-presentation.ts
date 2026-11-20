@@ -13,7 +13,7 @@
  * Pure: no I/O. Cost per ask: one parse of each command string it carries.
  */
 import { basename, isAbsolute, relative, resolve } from 'node:path';
-import { toolActivityFallback, toolCallActivity } from '@goodvibes-jev/engine/contracts';
+import { toolActivityFallback, toolCallActivity } from '@goodvibes/engine/contracts';
 import { toolActivityOf, toolDescriptionOf } from '../tools/registry.js';
 import { extractHostname } from '../tools/fetch/trust-tiers.js';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';

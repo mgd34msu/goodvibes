@@ -183,7 +183,7 @@ jobs:
       needs.staged-install-acceptance.result == 'success'
     environment:
       name: production
-      url: https://www.npmjs.com/package/@goodvibes-jev/engine
+      url: https://www.npmjs.com/package/@goodvibes/engine
     permissions:
       contents: read
       id-token: write

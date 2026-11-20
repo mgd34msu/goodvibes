@@ -1,9 +1,9 @@
 import { decisionOrClassic } from '../runtime/decision-policy.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { retainStrictJudgmentJson, prepareJudgmentResult } from '../gate/judgment-result.js';
 /** Jev reads schedule meaning; code owns quantities, calendars and validation. */
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { askAs, checkEachFixture, choice, noul, readYesNo, decisionHeader, fixtureCheck, readChoice, recordAction, recordReadings, type CallOptions, type ChoiceCriteria, type ChoiceReading, type EntryType, type JudgmentPort, type NamedDecision, type Questions } from '@goodvibes-jev/judgment/decisions';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
+import { askAs, checkEachFixture, choice, noul, readYesNo, decisionHeader, fixtureCheck, readChoice, recordAction, recordReadings, type CallOptions, type ChoiceCriteria, type ChoiceReading, type EntryType, type JudgmentPort, type NamedDecision, type Questions } from '@goodvibes/judgment/decisions';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { getNextAutomationOccurrence, normalizeAtSchedule, normalizeCronSchedule, normalizeEverySchedule, type AutomationScheduleDefinition } from './schedules.js';
 

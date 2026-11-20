@@ -1,4 +1,4 @@
-import type { CallOptions } from '@goodvibes-jev/judgment';
+import type { CallOptions } from '@goodvibes/judgment';
 // ---------------------------------------------------------------------------
 // gist-uploader, upload export content to a GitHub Gist
 // ---------------------------------------------------------------------------
@@ -17,7 +17,7 @@ import type { CallOptions } from '@goodvibes-jev/judgment';
 // the URL can view it).
 // ---------------------------------------------------------------------------
 
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 export type UploadResult =
   | { ok: true; url: string }

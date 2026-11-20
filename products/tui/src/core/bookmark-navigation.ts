@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/bookmark-navigation';
+export * from '@goodvibes/engine/terminal-shell/bookmark-navigation';

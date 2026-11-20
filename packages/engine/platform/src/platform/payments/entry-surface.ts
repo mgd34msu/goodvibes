@@ -1,5 +1,5 @@
 /** Host-side card scanning and admission. Browser surface policy lives in entry-policy.ts. */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { maskDigits } from '../security/batteries/card-talk.js';
 import { cardShapeKinds, detectCardShapes, type CardShapeKind } from '../security/card-shapes.js';
 import { securityCodeReply } from './batteries/security-code-reply.js';

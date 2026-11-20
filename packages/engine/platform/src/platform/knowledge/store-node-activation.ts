@@ -4,11 +4,11 @@ import { knowledgeDecisionStamp, knowledgeRawRepresentation } from './store-reco
 import type { SqlDatabase, SQLiteStore } from '../state/sqlite-store.js';
 import { readKnowledgeActivationDependencies, writeKnowledgeActivationCache } from './store-node-activation-cache.js';
 import { sameKnowledgeRecord } from './store-record-representation.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { captureKnowledgeSourceReferences, retainKnowledgeNodeActivationReferences } from './source-structural-references.js';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import type { JudgmentPort } from '@goodvibes/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { nodeServingWithoutReview } from './activation/battery.js';
 import { snapshotNodeInput, activationMeaning, activationSubjectIds, type ActivationSubject, activationContent, activationSourceIds, projectNodeActivation, type ActivationEvidence } from './activation/projection.js';
 import { classicNodeActivation, readNodeActivations } from './activation/reader.js';

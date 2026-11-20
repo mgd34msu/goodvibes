@@ -7,4 +7,4 @@ export type {
   DaemonChannelRouteContext,
   InboundMailHealthLike,
   SurfaceRegistryLike,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';

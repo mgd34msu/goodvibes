@@ -17,15 +17,15 @@ import type { CommandRegistry } from '../command-registry.ts';
 import { getSessionUntrustedContentLedger } from '../../trust/untrusted-content.ts';
 import { describeSenderClaim, type DisplayedSenderConfidence } from '../../agent/untrusted-content.ts';
 import type { CommandContext } from '../command-registry.ts';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { readRefusal } from '@goodvibes/engine/errors';
 import { commandRefusal } from './confirmation.ts';
-import { registerMailCommand, type MailMessage } from '@goodvibes-jev/engine/terminal-shell/mail-command';
-import type { ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
-import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
+import { registerMailCommand, type MailMessage } from '@goodvibes/engine/terminal-shell/mail-command';
+import type { ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { EmailService } from '@goodvibes/engine/platform/platform/email';
+import { nodeEmailTransport } from '@goodvibes/engine/platform/platform/email/node';
 import { requireSecretsManager, requireShellPaths } from './runtime-services.ts';
 import { openEffectiveConfigView, routeConfigWrite } from '../../config/daemon-config-routing.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import {
   MAILBOX_FIELDS,
   mailboxServiceDeps,

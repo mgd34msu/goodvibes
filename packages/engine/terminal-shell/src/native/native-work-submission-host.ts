@@ -1,9 +1,9 @@
 import { isNativeOwnerPrincipal } from './native-paired-principal.js';
 import { createNativeHostFetch } from './native-host-fetch.js';
 import { realpathSync } from 'node:fs';
-import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
-import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client';
-import { createOperatorNativeWorkSubmissionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
+import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes/engine/operator-client';
+import { createOperatorWorkLedgerReadClient } from '@goodvibes/engine/platform/platform/workflow/work-ledger/operator-read-client';
+import { createOperatorNativeWorkSubmissionClient } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-submission-client';
 import type { NativeWorkSubmissionBinding } from './native-work-submission.js';
 export type NativeHostIdentityFormat = 'credential' | 'paired';
 export interface NativeSubmissionHost {

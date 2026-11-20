@@ -2,7 +2,7 @@ import { assertDeliveryCurrent, runDeliveryPublication, type DeliveryLifetime } 
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+import { HttpStatusError } from '@goodvibes/engine/errors';
 
 const DEFAULT_HOME_ASSISTANT_TIMEOUT_MS = 15_000;
 const DEFAULT_HOME_ASSISTANT_RESPONSE_BYTES = 2_000_000;

@@ -1,8 +1,8 @@
 import { discoverRoutines, type DiscoveredRoutineRecord } from '../../agent/routine-discovery.ts';
-import { AgentRoutineRegistry, evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
-import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
-import { assertActorMayEnable, assertActorMayMarkReviewed, type RegistryActor } from '@goodvibes-jev/engine/terminal-shell/agent-turn/review-authority';
-import { buildAgentSkillRequirements, formatAgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
+import { AgentRoutineRegistry, evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes/engine/terminal-shell/agent-turn/routine-registry';
+import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
+import { assertActorMayEnable, assertActorMayMarkReviewed, type RegistryActor } from '@goodvibes/engine/terminal-shell/agent-turn/review-authority';
+import { buildAgentSkillRequirements, formatAgentSkillRequirement } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
 import {
   buildRoutineSchedulePreview,
   promoteRoutineToConnectedSchedule,
@@ -11,7 +11,7 @@ import {
   routineScheduleName,
   type RoutineSchedulePromotionPreview,
 } from '../../agent/routine-schedule-promotion.ts';
-import { parseChannelDeliveryTarget, parseLinkDeliveryTarget, parseRouteDeliveryTarget, parseWebhookDeliveryTarget, validateDeliveryTargets, type RoutineScheduleDeliveryTargetSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+import { parseChannelDeliveryTarget, parseLinkDeliveryTarget, parseRouteDeliveryTarget, parseWebhookDeliveryTarget, validateDeliveryTargets, type RoutineScheduleDeliveryTargetSpec } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-delivery-targets';
 import type { ParsedRoutineSchedulePromotionArgs } from '../../agent/routine-schedule-promotion.ts';
 import {
   formatRoutineScheduleCorrelation,
@@ -27,11 +27,11 @@ import {
   RoutineScheduleReceiptStore,
 } from '../../agent/routine-schedule-receipts.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { defineCommand, defineList, type ActionDescription, type ActionValues, type InputDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { choiceInput, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { defineCommand, defineList, type ActionDescription, type ActionValues, type InputDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { choiceInput, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import { requireShellPaths } from './runtime-services.ts';
 import { commandRefusal } from './confirmation.ts';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { readRefusal } from '@goodvibes/engine/errors';
 
 function splitList(value: string | undefined): readonly string[] {
   if (!value) return [];

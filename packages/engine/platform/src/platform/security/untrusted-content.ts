@@ -44,8 +44,8 @@
  * outward-effect guard as ONE composition rather than two unrelated acts.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { failedRead, present, refusal, type Observed } from '@goodvibes-jev/engine/errors';
-import { JudgmentError } from '@goodvibes-jev/judgment';
+import { failedRead, present, refusal, type Observed } from '@goodvibes/engine/errors';
+import { JudgmentError } from '@goodvibes/judgment';
 import { findContentTaint, describeContentTaint, markLedgerTaintSource, type TaintFinding, type TaintOptions, type TaintSource } from './content-taint.js';
 import { captureOwnedJson, judgmentInputProblem } from '../gate/judgment-input.js';
 import { isYoloExecution } from '../gate/execution-context.js';

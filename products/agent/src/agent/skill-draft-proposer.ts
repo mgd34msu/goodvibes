@@ -1,7 +1,7 @@
-import { learningPromotionReference } from '@goodvibes-jev/engine/terminal-shell/agent-turn/learning-curator-common';
-import { assertNoSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
-import type { LearningCandidate } from '@goodvibes-jev/engine/terminal-shell/agent-turn/learning-curator-types';
-import type { AgentSkillCreateInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry-types';
+import { learningPromotionReference } from '@goodvibes/engine/terminal-shell/agent-turn/learning-curator-common';
+import { assertNoSecretLikeText } from '@goodvibes/engine/terminal-shell/agent-turn/persona-registry';
+import type { LearningCandidate } from '@goodvibes/engine/terminal-shell/agent-turn/learning-curator-types';
+import type { AgentSkillCreateInput } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry-types';
 
 /**
  * The create-input payload produced for each proposed skill draft.

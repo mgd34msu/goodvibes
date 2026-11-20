@@ -1,7 +1,7 @@
 /** Same-owner refusal reuse compares complete inputs directly. No private
  * comparison body is serialized or retained beyond the active run/unit owner. */
 import { isDeepStrictEqual } from 'node:util';
-import type { JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
+import type { JudgmentPortCapture } from '@goodvibes/engine/errors';
 import { captureStrictJudgmentJson } from '../gate/judgment-result.js';
 import { UNIT_JUDGES, UNIT_JUDGE_BANDS } from './batteries/unit-judge.js';
 import { unitQuality } from './batteries/unit-quality.js';

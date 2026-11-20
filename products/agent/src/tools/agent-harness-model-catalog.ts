@@ -1,4 +1,4 @@
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireProviderApi } from '../input/commands/runtime-services.ts';
 import type { ArtifactListLike, ModelCandidate, ProviderApiLike } from './agent-harness-model-routing-types.ts';

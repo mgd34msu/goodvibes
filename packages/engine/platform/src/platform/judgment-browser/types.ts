@@ -1,7 +1,7 @@
-import type { JudgmentPort, Questions, Reading } from '@goodvibes-jev/judgment/decisions';
+import type { JudgmentPort, Questions, Reading } from '@goodvibes/judgment/decisions';
 import type {
   AuthenticatedPrincipal, BrowserJudgmentBatteryVersion, BrowserJudgmentBatteryId, BrowserJudgmentInputMap, BrowserJudgmentValueMap,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';
 import type { BrowserJudgmentReferences } from './references.js';
 
 export type BrowserJudgmentProjection<V> =

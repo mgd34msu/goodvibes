@@ -4,9 +4,9 @@ import { createProtectedSourceOwner, createFramedResearchReferenceProjector, res
   type ProtectedSource, type SourceScreeningReceipt,
   type ProtectedResearchReference, type ResearchReferenceScreeningReceipt, type ResearchReferenceScreeningResult,
   type ResearchReferenceProjection, type ResearchReferenceOperation,
-} from '@goodvibes-jev/engine/platform/platform/security';
-import { ToolRegistry, type ToolInputProjector, type ProjectedToolCall } from '@goodvibes-jev/engine/platform/platform/tools';
-import { createProtectedInboxMapper, type ProtectedInboxPreviewInput, type ProtectedInboxPreviewFields } from '@goodvibes-jev/engine/platform/platform/intake';
+} from '@goodvibes/engine/platform/platform/security';
+import { ToolRegistry, type ToolInputProjector, type ProjectedToolCall } from '@goodvibes/engine/platform/platform/tools';
+import { createProtectedInboxMapper, type ProtectedInboxPreviewInput, type ProtectedInboxPreviewFields } from '@goodvibes/engine/platform/platform/intake';
 declare const options: ProtectedSourceOwnerOptions;
 declare const hostedAuthority: HostedSourceScreeningAuthority;
 const hostedOptions: HostedProtectedSourceOwnerOptions = { kind: 'hosted', authority: hostedAuthority,

@@ -1,7 +1,7 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 
 /**
  * `/editor`, described once (command-actions/): open the current composer

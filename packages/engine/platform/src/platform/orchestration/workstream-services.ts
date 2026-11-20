@@ -58,7 +58,7 @@ import { validateAttempts } from './workstream-attempts-validation.js';
 import { logger } from '../utils/logger.js';
 import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { requestRisk } from '../routing/batteries/request.js';
 import { requestState } from '../routing/request-reading.js';
 import type { RemoteSupervisor } from '../runtime/remote/supervisor.js';

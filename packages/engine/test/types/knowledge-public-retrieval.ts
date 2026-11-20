@@ -1,7 +1,7 @@
 import {
   type KnowledgeApi, type KnowledgeService, type KnowledgeSearchResult,
   type KnowledgePacket, type PreparedKnowledgePromptPacket,
-} from '@goodvibes-jev/engine/platform/platform/knowledge';
+} from '@goodvibes/engine/platform/platform/knowledge';
 
 declare const service: KnowledgeService;
 declare const api: KnowledgeApi;

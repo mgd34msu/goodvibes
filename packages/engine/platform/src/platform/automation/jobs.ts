@@ -8,7 +8,7 @@ import type { AutomationScheduleDefinition } from './schedules.js';
 import type { AutomationExecutionPolicy } from './session-targets.js';
 import type { AutomationEntityBase, AutomationJobStatus } from './types.js';
 import type { AutomationSourceRecord } from './sources.js';
-import type { ScheduleRunOutcome } from '@goodvibes-jev/engine/contracts';
+import type { ScheduleRunOutcome } from '@goodvibes/engine/contracts';
 
 /**
  * The job type discriminator on the shared automation scheduler. `standard`

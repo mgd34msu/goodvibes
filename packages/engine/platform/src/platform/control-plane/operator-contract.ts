@@ -1,5 +1,5 @@
 import type { GatewayEventDescriptor, GatewayMethodCatalog, GatewayMethodDescriptor } from './method-catalog.js';
-import { getOperatorContract } from '@goodvibes-jev/engine/contracts';
+import { getOperatorContract } from '@goodvibes/engine/contracts';
 import type { OperatorEventContract, OperatorMethodContract } from '../types/foundation-contract.js';
 import {
   BOOLEAN_SCHEMA,

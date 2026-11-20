@@ -1,6 +1,6 @@
-import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveWebUiListener } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { isLoopbackHost } from '@goodvibes/engine/platform/platform/utils/reachable-base-url';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { resolveWebUiListener } from '@goodvibes/engine/platform/platform/pairing';
 import { resolveRuntimeEndpointBinding, type RuntimeEndpointBinding } from './cli-endpoints.js';
 
 export type BindPostureKind = 'local' | 'local-network' | 'custom-network';

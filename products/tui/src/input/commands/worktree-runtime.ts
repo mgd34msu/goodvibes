@@ -1,12 +1,12 @@
 import { getPersistedWorktreeMeta, reviewWorktreeAttachments, summarizeWorktreeOwnership } from '@/runtime/index.ts';
 import type { ManagedWorktreeMeta, WorktreeRegistry } from '@/runtime/index.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { defineCommand, defineList, type ActionDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { defineCommand, defineList, type ActionDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { openCommandView, requireShellPaths } from './runtime-services.ts';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 /** Compact per-row setup-state tag for /worktree review, absent when setup has never run; failure stands out. */
 export function formatSetupTag(setup: ManagedWorktreeMeta['setup']): string {

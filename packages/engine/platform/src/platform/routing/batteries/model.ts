@@ -6,7 +6,7 @@
  * whole catalog. Model names appear only in the fixtures, as the data a
  * question is asked about.
  */
-import { defineBattery, defineSelector, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, defineSelector, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 const MEDIUM = STAKES_BANDS.medium;
 const LOW = STAKES_BANDS.low;

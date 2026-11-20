@@ -1,4 +1,4 @@
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { MODAL_TONES } from './modal-theme.ts';
 import { infoRow } from './modal-surface-helpers.ts';
 import type {
@@ -8,7 +8,7 @@ import type {
   ProjectPlanningService,
   ProjectPlanningState,
   ProjectPlanningStatus,
-} from '@goodvibes-jev/engine/platform/platform/knowledge';
+} from '@goodvibes/engine/platform/platform/knowledge';
 import type {
   ConfigModalActionContext,
   ConfigModalRow,

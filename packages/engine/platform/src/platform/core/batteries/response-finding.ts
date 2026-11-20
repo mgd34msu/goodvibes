@@ -1,4 +1,4 @@
-import { defineSelector, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineSelector, STAKES_BANDS } from '@goodvibes/judgment';
 
 /** Localizes a held check in source text; never grants publication permission. */
 export const responseFinding = defineSelector({

@@ -1,5 +1,5 @@
 import { requireSemanticKnowledge } from '../decision-policy.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import type { KnowledgeNodeRecord, KnowledgeEdgeRecord } from '../types.js';
 import type { KnowledgeStore } from '../store.js';
 import { getKnowledgeSpaceId } from '../spaces.js';

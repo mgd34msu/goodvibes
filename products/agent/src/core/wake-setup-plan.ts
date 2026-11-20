@@ -6,7 +6,7 @@
  * `voice.wake.enabled` on anywhere (settings, /settings, a model's settings
  * call) both go through here, so they print the same plan.
  */
-import type { VoiceSetupOutcome, VoiceSetupService } from '@goodvibes-jev/engine/platform/platform/runtime/voice-setup';
+import type { VoiceSetupOutcome, VoiceSetupService } from '@goodvibes/engine/platform/platform/runtime/voice-setup';
 
 let running = 0;
 

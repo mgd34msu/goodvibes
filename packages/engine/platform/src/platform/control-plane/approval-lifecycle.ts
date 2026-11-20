@@ -29,7 +29,7 @@
  *
  * Cost: none of this does I/O; a reading is O(1) per record.
  */
-import { refusal, type Refusal } from '@goodvibes-jev/engine/errors';
+import { refusal, type Refusal } from '@goodvibes/engine/errors';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import type { SharedApprovalRecord, SharedApprovalStatus } from './approval-broker.js';
 import type { SharedApprovalDecision, SharedApprovalDisposition } from './approval-disposition.js';

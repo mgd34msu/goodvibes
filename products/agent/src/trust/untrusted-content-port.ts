@@ -22,8 +22,8 @@
  * wrong provenance in front of the reader.
  */
 
-import type { UntrustedContentPort } from '@goodvibes-jev/engine/platform/platform/browser';
-import { createUntrustedContentPort } from '@goodvibes-jev/engine/platform/platform/security';
+import type { UntrustedContentPort } from '@goodvibes/engine/platform/platform/browser';
+import { createUntrustedContentPort } from '@goodvibes/engine/platform/platform/security';
 import type { UntrustedContentLedger } from './untrusted-content.ts';
 
 export interface AgentUntrustedContentPortOptions {

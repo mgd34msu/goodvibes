@@ -1,17 +1,17 @@
 import { isDeepStrictEqual } from 'node:util';
-import { readFileObservation, type FileObservation } from '@goodvibes-jev/engine/platform/platform/utils';
+import { readFileObservation, type FileObservation } from '@goodvibes/engine/platform/platform/utils';
 import { dirname } from 'node:path';
-import { assertProjectionExecution, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import type { ToolInputProjector, ToolNativeReferencesCapture } from '@goodvibes-jev/engine/platform/platform/tools';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
-import { channelDraftWireReference, historicalChannelDraftWireReference, matchesHistoricalDraftWireReference } from '@goodvibes-jev/engine/platform/platform/channels';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { assertProjectionExecution, ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import type { ToolInputProjector, ToolNativeReferencesCapture } from '@goodvibes/engine/platform/platform/tools';
+import { snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate/judgment-input';
+import { channelDraftWireReference, historicalChannelDraftWireReference, matchesHistoricalDraftWireReference } from '@goodvibes/engine/platform/platform/channels';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import type { CommandContext } from '../input/command-registry.ts';
 import { channelDraftFilePath, getDraft, readChannelDrafts } from '../agent/channel-draft.ts';
-import { captureAgentExportPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/artifact-effect';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
+import { captureAgentExportPath } from '@goodvibes/engine/terminal-shell/agent-turn/artifact-effect';
+import { captureCatalogData } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
 import { captureModelReadingSnapshotGuard } from './agent-harness-model-reading-source.ts';
-import { harnessCatalogInvocationAuthority } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ingress';
+import { harnessCatalogInvocationAuthority } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ingress';
 
 type ExecutionOptions = Parameters<Tool['execute']>[1];
 interface FileSource extends FileObservation { readonly contents: string; }

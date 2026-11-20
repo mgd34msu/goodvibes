@@ -2,7 +2,7 @@
  * Shared channel and route-binding contracts for omnichannel control surfaces.
  */
 
-import type { Refusal } from '@goodvibes-jev/engine/errors';
+import type { Refusal } from '@goodvibes/engine/errors';
 import type { ChannelRenderAudience } from './render-audience.js';
 
 export type ChannelSurface =

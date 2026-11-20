@@ -1,4 +1,4 @@
-import { ConfigurationError, ContractError, GoodVibesError, HttpStatusError, createHttpStatusError } from '@goodvibes-jev/engine/errors';
+import { ConfigurationError, ContractError, GoodVibesError, HttpStatusError, createHttpStatusError } from '@goodvibes/engine/errors';
 import { sleepWithSignal } from './backoff.js';
 import { mergeHeaderRecord, normalizeAuthToken, resolveHeaders, type AuthTokenResolver, type HeaderResolver } from './auth.js';
 import {
@@ -24,15 +24,15 @@ import {
   type TransportContext,
   type TransportMiddleware,
   type TransportObserver,
-} from '@goodvibes-jev/engine/transport-core';
+} from '@goodvibes/engine/transport-core';
 
 export type { HttpRetryPolicy, PerMethodRetryPolicy } from './retry.js';
-export type { TransportContext, TransportMiddleware } from '@goodvibes-jev/engine/transport-core';
+export type { TransportContext, TransportMiddleware } from '@goodvibes/engine/transport-core';
 
 // Re-export canonical JsonValue from contracts root index, single identity across all bundled packages.
 // Using the root import ensures the same JsonValue identity as inline uses in foundation-client-types.
-export type { JsonValue } from '@goodvibes-jev/engine/contracts';
-import type { JsonValue } from '@goodvibes-jev/engine/contracts';
+export type { JsonValue } from '@goodvibes/engine/contracts';
+import type { JsonValue } from '@goodvibes/engine/contracts';
 export type JsonObject = { readonly [key: string]: JsonValue };
 
 /**

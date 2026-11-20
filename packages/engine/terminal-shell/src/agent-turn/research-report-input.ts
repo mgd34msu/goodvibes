@@ -1,4 +1,4 @@
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
+import { snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate/judgment-input';
 import { sanitizeResearchSourceUrl } from './research-source-registry.js';
 
 export interface AgentResearchReportSource {

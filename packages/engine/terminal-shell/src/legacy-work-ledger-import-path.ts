@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { LegacyImportJournal, type LegacyImportJournalOptions } from './legacy-work-ledger-import-journal.js';
 
 const hasHistoricalJournals = (directory: string): boolean => {

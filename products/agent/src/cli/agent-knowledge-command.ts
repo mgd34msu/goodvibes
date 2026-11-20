@@ -13,13 +13,13 @@ import {
   stripCommandFlag,
 } from './agent-knowledge-args.ts';
 import { parseBrowserImportScope, selectionWireValue } from '../input/commands/knowledge-browser-flags.ts';
-import { formatAsk, formatAgentKnowledgeFailureKind, formatBatchIngest, formatConnector, formatConnectorDoctor, formatConnectors, formatEntityList, formatFailure, formatIngest, formatItem, formatMap, formatReindex, reindexFailures, formatSearch, formatStatus, isRecord, tallyBatchIngest } from '@goodvibes-jev/engine/terminal-shell/agent-turn/knowledge-format';
-import { exitCodeOfTally } from '@goodvibes-jev/engine/errors';
-import { AGENT_KNOWLEDGE_METHODS, DELEGATION_METHOD } from '@goodvibes-jev/engine/terminal-shell/agent-turn/knowledge-methods';
-import { createAgentPlatform, findDisallowedKnowledgeScopeFlag, formatScopeFlagRejection, getAgentKnowledgeJson, postAgentKnowledgeJson, runKnowledgeCall } from '@goodvibes-jev/engine/terminal-shell/agent-turn/knowledge-runtime';
+import { formatAsk, formatAgentKnowledgeFailureKind, formatBatchIngest, formatConnector, formatConnectorDoctor, formatConnectors, formatEntityList, formatFailure, formatIngest, formatItem, formatMap, formatReindex, reindexFailures, formatSearch, formatStatus, isRecord, tallyBatchIngest } from '@goodvibes/engine/terminal-shell/agent-turn/knowledge-format';
+import { exitCodeOfTally } from '@goodvibes/engine/errors';
+import { AGENT_KNOWLEDGE_METHODS, DELEGATION_METHOD } from '@goodvibes/engine/terminal-shell/agent-turn/knowledge-methods';
+import { createAgentPlatform, findDisallowedKnowledgeScopeFlag, formatScopeFlagRejection, getAgentKnowledgeJson, postAgentKnowledgeJson, runKnowledgeCall } from '@goodvibes/engine/terminal-shell/agent-turn/knowledge-runtime';
 import { inspectCliExternalRuntime } from './external-runtime.ts';
 import { VERSION } from '../version.ts';
-import { formatJsonOrText, yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+import { formatJsonOrText, yesNo } from '@goodvibes/engine/terminal-shell/cli-output';
 
 interface DelegationResult {
   readonly sessionId: string;

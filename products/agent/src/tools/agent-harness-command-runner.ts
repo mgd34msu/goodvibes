@@ -1,7 +1,7 @@
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { formatRefusal, readRefusal, refusal, RefusalError, type Refusal } from '@goodvibes-jev/engine/errors';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import { formatRefusal, readRefusal, refusal, RefusalError, type Refusal } from '@goodvibes/engine/errors';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import type { CommandContext } from '../input/command-registry.ts';
 import { nativeSettingsCommandMutation } from '../input/commands/operator-runtime.ts';
 import { resolveHarnessCommandDetail, type CommandDetailLookup } from './agent-harness-command-catalog.ts';

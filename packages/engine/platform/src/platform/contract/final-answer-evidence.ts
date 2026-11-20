@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import type { ContractView } from './types.js';
 import type { FileChange } from './evidence.js';
 import { commandObservation } from './command-observation.js';

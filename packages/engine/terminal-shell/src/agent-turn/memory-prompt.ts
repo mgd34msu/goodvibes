@@ -1,4 +1,4 @@
-import type { MemoryRecord, MemoryRegistry, MemoryVectorStats } from '@goodvibes-jev/engine/platform/platform/state';
+import type { MemoryRecord, MemoryRegistry, MemoryVectorStats } from '@goodvibes/engine/platform/platform/state';
 // The recall-honesty floor + eligibility receipt now live in the platform as
 // the ONE cross-surface contract (memory-recall-contract.ts) instead of being defined
 // per surface. This file re-exports them unchanged so every existing agent consumer
@@ -10,8 +10,8 @@ import {
   MIN_PROMPT_MEMORY_CONFIDENCE,
   describeMemoryPromptEligibility,
   isPromptActiveMemory,
-} from '@goodvibes-jev/engine/platform/platform/state';
-import type { MemoryPromptEligibility } from '@goodvibes-jev/engine/platform/platform/state';
+} from '@goodvibes/engine/platform/platform/state';
+import type { MemoryPromptEligibility } from '@goodvibes/engine/platform/platform/state';
 
 export { MIN_PROMPT_MEMORY_CONFIDENCE, describeMemoryPromptEligibility, isPromptActiveMemory };
 export type { MemoryPromptEligibility };

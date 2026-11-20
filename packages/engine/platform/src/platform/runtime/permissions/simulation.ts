@@ -20,7 +20,7 @@
  * Capability gate: `permissions-simulation` (permissions.simulation) must be on to use this module.
  */
 
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import type {
   CommandClassification,
   DivergenceRecord,

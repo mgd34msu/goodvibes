@@ -19,7 +19,7 @@
  * but a confident no (cart.ts) and records which it was: a confident yes is a
  * recurring charge, anything else a charge it could not confirm as one-off.
  */
-import { defineBattery, JudgmentError, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, JudgmentError, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 
 /** Maximum complete order summary. Terms after a cutoff cannot be ignored. */

@@ -1,4 +1,4 @@
-import { defineBattery, defineSelector, NONE, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, defineSelector, NONE, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 export const webGapQuery = defineSelector({
   name: 'engine.knowledge.web-gap-query', version: 1, accuracyFloor: 0.95,
   description: 'Selects a grounded web query from complete original questions and explicit subject context, without keyword inference.',

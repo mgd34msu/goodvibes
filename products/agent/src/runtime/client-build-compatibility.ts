@@ -27,8 +27,8 @@
  * could hold on its behalf.
  */
 
-import { CLIENT_COMPATIBILITY_FLOOR_HEADER, evaluateClientCompatibility, readClientCompatibilityFloor } from '@goodvibes-jev/engine/platform/platform/control-plane/build-compatibility';
-import type { ClientCompatibilityVerdict } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { CLIENT_COMPATIBILITY_FLOOR_HEADER, evaluateClientCompatibility, readClientCompatibilityFloor } from '@goodvibes/engine/platform/platform/control-plane/build-compatibility';
+import type { ClientCompatibilityVerdict } from '@goodvibes/engine/platform/platform/control-plane';
 
 export { CLIENT_COMPATIBILITY_FLOOR_HEADER, evaluateClientCompatibility, readClientCompatibilityFloor };
 export type { ClientCompatibilityVerdict };

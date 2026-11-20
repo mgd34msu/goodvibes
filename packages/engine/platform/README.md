@@ -1,4 +1,4 @@
-# @goodvibes-jev/engine/platform
+# @goodvibes/engine/platform
 
 TypeScript platform for building GoodVibes operator, peer, web, mobile, and daemon-connected apps with typed contracts, auth, realtime events, and transport layers.
 
@@ -8,14 +8,14 @@ TypeScript platform for building GoodVibes operator, peer, web, mobile, and daem
 Install:
 
 ```bash
-npm install @goodvibes-jev/engine
+npm install @goodvibes/engine
 ```
 
 Quick example (Bun):
 
 ```ts
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
-import { createMemoryTokenStore } from '@goodvibes-jev/engine/platform/auth';
+import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
+import { createMemoryTokenStore } from '@goodvibes/engine/platform/auth';
 
 const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',
@@ -31,7 +31,7 @@ table below covers the primary ones; the complete, stability-leveled list is
 
 | Entry point | Use it for |
 | --- | --- |
-| `@goodvibes-jev/engine/platform` | The Bun client factory plus re-exported contracts, auth, operator, peer, and transport pieces |
+| `@goodvibes/engine/platform` | The Bun client factory plus re-exported contracts, auth, operator, peer, and transport pieces |
 | `/auth` | Token stores, login, and OAuth helpers for every surface |
 | `/client-auth` | Session and permission management with auto-refresh middleware |
 | `/operator`, `/peer` | The typed operator and peer clients on their own |
@@ -50,13 +50,13 @@ Cloudflare batch provisioning is exposed through daemon `/api/cloudflare/*`
 routes. The `/workers` entry is for manual Worker deployments.
 
 Advanced server/runtime consumers can use explicit `platform/...` subpaths such
-as `@goodvibes-jev/engine/platform/platform/node`,
-`@goodvibes-jev/engine/platform/platform/runtime`, and
-`@goodvibes-jev/engine/platform/platform/knowledge`. The package does not expose a
+as `@goodvibes/engine/platform/platform/node`,
+`@goodvibes/engine/platform/platform/runtime`, and
+`@goodvibes/engine/platform/platform/knowledge`. The package does not expose a
 `platform/*` wildcard contract; only listed subpaths are supported.
 
 The platform is a directory and public import namespace inside the
-`@goodvibes-jev/engine` package. Its client facade composes the contract, error,
+`@goodvibes/engine` package. Its client facade composes the contract, error,
 transport, daemon API, operator-client and peer-client modules maintained in
 that same package. Install the engine package and select the explicit import
 subpath for your runtime.

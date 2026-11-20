@@ -11,7 +11,7 @@
  * Band: low stakes. The reading only orders the queue a person works through;
  * it changes no record.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 import type { MemoryRecord } from '../memory-store.js';
 
 /** What the reading sees of a record: its review status and its words, never its ids or timestamps. */

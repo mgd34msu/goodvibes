@@ -138,11 +138,11 @@ exists in the legacy flow described below.
 ### Step 1: Host mints a hand-off
 
 The host surface calls the `pairing.handoff.create` gateway verb (or, for host code composing
-the platform directly, `mintPairingHandoff()` from `@goodvibes-jev/engine/platform/platform/pairing`) with a
+the platform directly, `mintPairingHandoff()` from `@goodvibes/engine/platform/platform/pairing`) with a
 device name and the offer set it wants to present:
 
 ```ts
-import { mintPairingHandoff, availablePairingOffers, defaultPairingTokenName } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { mintPairingHandoff, availablePairingOffers, defaultPairingTokenName } from '@goodvibes/engine/platform/platform/pairing';
 
 const offers = availablePairingOffers({
   relayEnabled: true,       // relay.enabled + relay.url configured
@@ -169,7 +169,7 @@ than reprinting the last one.
 ### Step 2: Host renders the QR
 
 ```ts
-import { generateQrMatrix, renderQrToString, pairingQrContent } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { generateQrMatrix, renderQrToString, pairingQrContent } from '@goodvibes/engine/platform/platform/pairing';
 
 const matrix = generateQrMatrix(pairingQrContent(handoff));
 // matrix is a QrMatrix object: { size: number; modules: readonly boolean[][] }; modules[row][col] === true means a dark module
@@ -275,7 +275,7 @@ The host surface calls `getOrCreateCompanionToken(options)` to get the existing 
 ```ts
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { getOrCreateCompanionToken } from '@goodvibes/engine/platform/platform/pairing';
 
 const daemonHomeDir = join(homedir(), '.goodvibes', 'daemon');
 const record = getOrCreateCompanionToken({ daemonHomeDir });
@@ -289,7 +289,7 @@ called. Token storage is daemon-home scoped (see [Storage](#storage)).
 ### Encoding and rendering
 
 ```ts
-import { generateQrMatrix, pairingQrContent, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { generateQrMatrix, pairingQrContent, renderQrToString } from '@goodvibes/engine/platform/platform/pairing';
 
 const matrix = generateQrMatrix(pairingQrContent(handoff)); // handoff from mintPairingHandoff
 const qrString = renderQrToString(matrix); // block-character QR for terminal output
@@ -335,8 +335,8 @@ Authorization: Bearer <token>
 Use the platform's standard auth helpers to handle this automatically:
 
 ```ts
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
-import { createMemoryTokenStore } from '@goodvibes-jev/engine/platform/auth';
+import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
+import { createMemoryTokenStore } from '@goodvibes/engine/platform/auth';
 
 const tokenStore = createMemoryTokenStore();
 await tokenStore.setToken(token);
@@ -352,12 +352,12 @@ const status = await platformClient.operator.control.status();
 
 For React Native or Expo, prefer the built-in secure token stores rather than rolling a custom adapter:
 
-- **Expo**: `createExpoSecureTokenStore` from `@goodvibes-jev/engine/platform/expo`, backed by `expo-secure-store`
-- **iOS**: `createIOSKeychainTokenStore` from `@goodvibes-jev/engine/platform/react-native`, backed by iOS Keychain
-- **Android**: `createAndroidKeystoreTokenStore` from `@goodvibes-jev/engine/platform/react-native`, backed by Android Keystore
+- **Expo**: `createExpoSecureTokenStore` from `@goodvibes/engine/platform/expo`, backed by `expo-secure-store`
+- **iOS**: `createIOSKeychainTokenStore` from `@goodvibes/engine/platform/react-native`, backed by iOS Keychain
+- **Android**: `createAndroidKeystoreTokenStore` from `@goodvibes/engine/platform/react-native`, backed by Android Keystore
 
 ```ts
-import { createReactNativeGoodVibesPlatform, createIOSKeychainTokenStore } from '@goodvibes-jev/engine/platform/react-native';
+import { createReactNativeGoodVibesPlatform, createIOSKeychainTokenStore } from '@goodvibes/engine/platform/react-native';
 
 const tokenStore = createIOSKeychainTokenStore({ service: 'com.example.gv' });
 const platformClient = createReactNativeGoodVibesPlatform({
@@ -366,7 +366,7 @@ const platformClient = createReactNativeGoodVibesPlatform({
 });
 ```
 
-For `createMemoryTokenStore` (non-persistent, suitable only for ephemeral use or development), import from `@goodvibes-jev/engine/platform/auth`.
+For `createMemoryTokenStore` (non-persistent, suitable only for ephemeral use or development), import from `@goodvibes/engine/platform/auth`.
 
 ---
 
@@ -381,7 +381,7 @@ For `createMemoryTokenStore` (non-persistent, suitable only for ephemeral use or
 Calling `regenerateCompanionToken({ daemonHomeDir })` (equivalent to `getOrCreateCompanionToken` with `regenerate: true`) issues a new token and replaces the stored record. Any companion app holding the previous token will receive `401 Unauthorized` on its next API call and must re-pair.
 
 ```ts
-import { regenerateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { regenerateCompanionToken } from '@goodvibes/engine/platform/platform/pairing';
 
 const newRecord = regenerateCompanionToken({ daemonHomeDir });
 ```
@@ -567,7 +567,7 @@ each refused by name.
 > are host-application wrappers, not platform exports. The primitives they compose,
 > `mintPairingHandoff`, `pairingQrContent`, `generateQrMatrix`, `renderQrToString`, and
 > `getOrCreateCompanionToken`, are all
-> exported from `@goodvibes-jev/engine/platform/platform/pairing` and can be composed directly by any
+> exported from `@goodvibes/engine/platform/platform/pairing` and can be composed directly by any
 > embedder.
 
 ---
@@ -578,7 +578,7 @@ each refused by name.
 
 A companion app requires:
 
-1. **A QR scanner, or a deep-link handler.** To capture the pairing code displayed by the host surface, either a camera scan (native camera APIs or libraries like `expo-barcode-scanner`) or, for a web/PWA companion, handling its own app being opened at a `#pair=<token>` URL. Either way, parse the result with `parsePairingHandoffLink()` from `@goodvibes-jev/engine/platform/platform/pairing` (current flow) or `JSON.parse()` (legacy payload; see [Legacy: the shared token](#legacy-the-shared-token)).
+1. **A QR scanner, or a deep-link handler.** To capture the pairing code displayed by the host surface, either a camera scan (native camera APIs or libraries like `expo-barcode-scanner`) or, for a web/PWA companion, handling its own app being opened at a `#pair=<token>` URL. Either way, parse the result with `parsePairingHandoffLink()` from `@goodvibes/engine/platform/platform/pairing` (current flow) or `JSON.parse()` (legacy payload; see [Legacy: the shared token](#legacy-the-shared-token)).
 
 2. **Persistent, secure token storage.** To retain the companion token across app restarts. See the token storage guidance above.
 
@@ -591,11 +591,11 @@ A companion app requires:
 ### Minimal integration pattern (React Native / Expo)
 
 ```ts
-import { createReactNativeGoodVibesPlatform, createIOSKeychainTokenStore } from '@goodvibes-jev/engine/platform/react-native';
+import { createReactNativeGoodVibesPlatform, createIOSKeychainTokenStore } from '@goodvibes/engine/platform/react-native';
 
 // createIOSKeychainTokenStore and createAndroidKeystoreTokenStore are available from
-// @goodvibes-jev/engine/platform/react-native. For Expo, use createExpoSecureTokenStore
-// from @goodvibes-jev/engine/platform/expo.
+// @goodvibes/engine/platform/react-native. For Expo, use createExpoSecureTokenStore
+// from @goodvibes/engine/platform/expo.
 const tokenStore = createIOSKeychainTokenStore({ service: 'com.example.goodvibes' });
 
 export function usePairedPlatform(baseUrl: string) {
@@ -607,7 +607,7 @@ export function usePairedPlatform(baseUrl: string) {
 }
 
 // After scanning the QR code (or opening the deep link):
-import { parsePairingHandoffLink } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { parsePairingHandoffLink } from '@goodvibes/engine/platform/platform/pairing';
 
 async function onPairingLinkReceived(scannedOrOpenedUrl: string) {
   const parsed = parsePairingHandoffLink(scannedOrOpenedUrl);
@@ -637,7 +637,7 @@ ws://<daemon-host>:<port>/api/control-plane/ws
 
 with the same `Authorization: Bearer <token>` header (or as a query parameter if the WebSocket client library does not support custom headers).
 
-Event envelopes arrive as JSON-serialized `SerializedEventEnvelope` objects. The schema is exported as `SerializedEventEnvelopeSchema` from `@goodvibes-jev/engine/platform/contracts`.
+Event envelopes arrive as JSON-serialized `SerializedEventEnvelope` objects. The schema is exported as `SerializedEventEnvelopeSchema` from `@goodvibes/engine/platform/contracts`.
 
 ### Handling token invalidation
 

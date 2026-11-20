@@ -9,7 +9,7 @@
  * `contract.acceptanceStakes` (a false pass accepts failing work), and its
  * mapping from readings to verdicts ({@link groupVerdict}).
  */
-import { defineJudge, type Judge, type JudgeFixture, type YesNoBand, type YesNoReading } from '@goodvibes-jev/judgment';
+import { defineJudge, type Judge, type JudgeFixture, type YesNoBand, type YesNoReading } from '@goodvibes/judgment';
 import type { ContractAcceptanceStakes } from '../config.js';
 import type { CriterionVerdict } from '../types.js';
 import { criterionVerdict, UNIT_JUDGE_BANDS } from './unit-judge.js';

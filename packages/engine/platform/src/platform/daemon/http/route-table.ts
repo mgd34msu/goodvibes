@@ -6,7 +6,7 @@
  * once and kept: a handler that remembers something between requests keeps
  * remembering it for as long as the daemon runs.
  */
-import { createBrowserJudgmentHttpHandler } from '@goodvibes-jev/engine/daemon-api';
+import { createBrowserJudgmentHttpHandler } from '@goodvibes/engine/daemon-api';
 import { dispatchDaemonApiRoutes } from '../../control-plane/routes/index.js';
 import { bindRequestContext, requestContextOf } from '../request-context.js';
 import { createDaemonChannelRouteHandlers } from './channel-routes.js';

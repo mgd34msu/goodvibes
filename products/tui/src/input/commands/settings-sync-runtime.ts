@@ -12,14 +12,14 @@ import {
   recordSettingsSyncFailure,
   type SettingsSyncBundle,
 } from '@/runtime/index.ts';
-import { type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import { CONFIG_KEYS } from '@goodvibes-jev/engine/platform/platform/config/schema';
+import { type ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import { CONFIG_KEYS } from '@goodvibes/engine/platform/platform/config/schema';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { defineCommand, defineList, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { defineCommand, defineList, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { describeSetupTransferChanges, isSecurityBearingChange } from './local-setup-transfer.ts';
 
 /** Read a settings sync bundle, refusing in words (never a stack) a file that is unreadable, not JSON, or not shaped like a bundle. */

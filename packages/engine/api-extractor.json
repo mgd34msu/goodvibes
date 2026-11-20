@@ -6,14 +6,14 @@
   "mainEntryPointFilePath": "<projectFolder>/platform/dist/index.d.ts",
 
   "bundledPackages": [
-    "@goodvibes-jev/engine/contracts",
-    "@goodvibes-jev/engine/daemon-api",
-    "@goodvibes-jev/engine/errors",
-    "@goodvibes-jev/engine/operator-client",
-    "@goodvibes-jev/engine/peer-client",
-    "@goodvibes-jev/engine/transport-core",
-    "@goodvibes-jev/engine/transport-http",
-    "@goodvibes-jev/engine/transport-realtime"
+    "@goodvibes/engine/contracts",
+    "@goodvibes/engine/daemon-api",
+    "@goodvibes/engine/errors",
+    "@goodvibes/engine/operator-client",
+    "@goodvibes/engine/peer-client",
+    "@goodvibes/engine/transport-core",
+    "@goodvibes/engine/transport-http",
+    "@goodvibes/engine/transport-realtime"
   ],
 
   "compiler": {
@@ -31,98 +31,98 @@
         // one package whose exports name source files, so the same declaration
         // files are named here.
         "paths": {
-          "@goodvibes-jev/engine/platform/browser/agent": [
+          "@goodvibes/engine/platform/browser/agent": [
             "./platform/dist/browser-agent.d.ts"
           ],
-          "@goodvibes-jev/engine/platform/browser/homeassistant": [
+          "@goodvibes/engine/platform/browser/homeassistant": [
             "./platform/dist/browser-homeassistant.d.ts"
           ],
-          "@goodvibes-jev/engine/platform/browser/knowledge": [
+          "@goodvibes/engine/platform/browser/knowledge": [
             "./platform/dist/browser-knowledge.d.ts"
           ],
-          "@goodvibes-jev/engine/platform/contracts/node": [
+          "@goodvibes/engine/platform/contracts/node": [
             "./platform/dist/contracts-node.d.ts"
           ],
-          "@goodvibes-jev/engine/platform/platform/runtime/fleet/observed": [
+          "@goodvibes/engine/platform/platform/runtime/fleet/observed": [
             "./platform/dist/platform/runtime/fleet/observed/source.d.ts"
           ],
-          "@goodvibes-jev/engine/platform/sql-js": [
+          "@goodvibes/engine/platform/sql-js": [
             "./platform/dist/platform/types/sql-js.d.ts"
           ],
-          "@goodvibes-jev/engine/contracts": [
+          "@goodvibes/engine/contracts": [
             "./contracts/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/contracts/*": [
+          "@goodvibes/engine/contracts/*": [
             "./contracts/dist/*.d.ts",
             "./contracts/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/daemon-api": [
+          "@goodvibes/engine/daemon-api": [
             "./daemon-api/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/daemon-api/*": [
+          "@goodvibes/engine/daemon-api/*": [
             "./daemon-api/dist/*.d.ts",
             "./daemon-api/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/errors": [
+          "@goodvibes/engine/errors": [
             "./errors/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/errors/*": [
+          "@goodvibes/engine/errors/*": [
             "./errors/dist/*.d.ts",
             "./errors/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/operator-client": [
+          "@goodvibes/engine/operator-client": [
             "./operator-client/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/operator-client/*": [
+          "@goodvibes/engine/operator-client/*": [
             "./operator-client/dist/*.d.ts",
             "./operator-client/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/peer-client": [
+          "@goodvibes/engine/peer-client": [
             "./peer-client/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/peer-client/*": [
+          "@goodvibes/engine/peer-client/*": [
             "./peer-client/dist/*.d.ts",
             "./peer-client/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/platform": [
+          "@goodvibes/engine/platform": [
             "./platform/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/platform/*": [
+          "@goodvibes/engine/platform/*": [
             "./platform/dist/*.d.ts",
             "./platform/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/terminal-shell": [
+          "@goodvibes/engine/terminal-shell": [
             "./terminal-shell/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/terminal-shell/*": [
+          "@goodvibes/engine/terminal-shell/*": [
             "./terminal-shell/dist/*.d.ts",
             "./terminal-shell/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/toolchain": [
+          "@goodvibes/engine/toolchain": [
             "./toolchain/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/toolchain/*": [
+          "@goodvibes/engine/toolchain/*": [
             "./toolchain/dist/*.d.ts",
             "./toolchain/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/transport-core": [
+          "@goodvibes/engine/transport-core": [
             "./transport-core/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/transport-core/*": [
+          "@goodvibes/engine/transport-core/*": [
             "./transport-core/dist/*.d.ts",
             "./transport-core/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/transport-http": [
+          "@goodvibes/engine/transport-http": [
             "./transport-http/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/transport-http/*": [
+          "@goodvibes/engine/transport-http/*": [
             "./transport-http/dist/*.d.ts",
             "./transport-http/dist/*/index.d.ts"
           ],
-          "@goodvibes-jev/engine/transport-realtime": [
+          "@goodvibes/engine/transport-realtime": [
             "./transport-realtime/dist/index.d.ts"
           ],
-          "@goodvibes-jev/engine/transport-realtime/*": [
+          "@goodvibes/engine/transport-realtime/*": [
             "./transport-realtime/dist/*.d.ts",
             "./transport-realtime/dist/*/index.d.ts"
           ]
@@ -158,11 +158,11 @@
       // TS1259: Module can only be default-imported using 'esModuleInterop'.
       // Triggered by: type-only star-re-exports in platform/src/transport-core.ts,
       // transport-http.ts, and transport-realtime.ts that re-export from bundledPackages
-      // without a default import reference (e.g. `export * from '@goodvibes-jev/engine/transport-core'`).
+      // without a default import reference (e.g. `export * from '@goodvibes/engine/transport-core'`).
       // Re-evaluate when api-extractor upgrades to a TS6+ bundled compiler.
       "TS1259": { "logLevel": "none" },
       // TS2305: Module has no exported member.
-      // Triggered by: @goodvibes-jev/engine/transport-core `observer` export, api-extractor
+      // Triggered by: @goodvibes/engine/transport-core `observer` export, api-extractor
       // resolves the dist snapshot which may pre-date the current build; the `observer`
       // export exists in transport-core/dist/observer.d.ts at runtime.
       // Re-evaluate when the transport-core dist is rebuilt and a clean api-extractor pass succeeds.

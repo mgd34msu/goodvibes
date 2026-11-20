@@ -29,7 +29,7 @@
  * silently null on an ambiguous 404.
  */
 
-import { MEMORY_RECORD_NOT_FOUND_CODE } from '@goodvibes-jev/engine/errors';
+import { MEMORY_RECORD_NOT_FOUND_CODE } from '@goodvibes/engine/errors';
 
 /** How a caught wire error should be treated by an extended-verb call site. */
 export type MemoryWire404Disposition = 'record-missing' | 'method-unavailable' | 'other';

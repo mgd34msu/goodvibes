@@ -1,5 +1,5 @@
 import { buildHooksValidation } from './hooks-report.ts';
-import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
+import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes/engine/terminal-shell';
 
 // ---------------------------------------------------------------------------
 // `goodvibes hooks validate`, validate the user's hooks.json against the

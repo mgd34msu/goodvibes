@@ -28,9 +28,9 @@
  * `OperatorMethodInput<'…'>`, which isolates the contract type from the
  * overload resolution around it.
  */
-import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
-import type { OperatorRemoteClient } from '@goodvibes-jev/engine/platform/operator';
-import { createBrowserKnowledgePlatform } from '@goodvibes-jev/engine/platform/browser/knowledge';
+import type { OperatorMethodInput } from '@goodvibes/engine/platform/contracts';
+import type { OperatorRemoteClient } from '@goodvibes/engine/platform/operator';
+import { createBrowserKnowledgePlatform } from '@goodvibes/engine/platform/browser/knowledge';
 
 // ── Plain required fields ───────────────────────────────────────────────────
 

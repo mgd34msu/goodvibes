@@ -79,13 +79,13 @@ export type RuntimeEventPayload<T extends AnyRuntimeEvent['type']> = Extract<
 >;
 
 // RUNTIME_EVENT_DOMAINS, RuntimeEventDomain, and isRuntimeEventDomain re-exported
-// from @goodvibes-jev/engine/contracts (the canonical source-of-truth). This eliminates
+// from @goodvibes/engine/contracts (the canonical source-of-truth). This eliminates
 // the RUNTIME_EVENT_DOMAINS_2 duplicate identity in the api-extractor report.
 export {
   RUNTIME_EVENT_DOMAINS,
   isRuntimeEventDomain,
-} from '@goodvibes-jev/engine/contracts';
-export type { RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
+} from '@goodvibes/engine/contracts';
+export type { RuntimeEventDomain } from '@goodvibes/engine/contracts';
 
 /** Map from domain label to its event union type. */
 export type DomainEventMap = {
@@ -123,4 +123,4 @@ export type DomainEventMap = {
 // Re-export from contracts so transport-layer packages use the same identity.
 // Consumers who need the full runtime event union should import AnyRuntimeEvent directly;
 // RuntimeEventRecord is now the structural constraint { readonly type: string }.
-export type { RuntimeEventRecord } from '@goodvibes-jev/engine/contracts';
+export type { RuntimeEventRecord } from '@goodvibes/engine/contracts';

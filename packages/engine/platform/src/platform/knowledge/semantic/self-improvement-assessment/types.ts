@@ -1,4 +1,4 @@
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import { REPAIR_READER_DEFAULT_TIMEOUT_MS } from '../self-improvement-budget.js';
 
 export interface SelfImprovementAssessmentInput {

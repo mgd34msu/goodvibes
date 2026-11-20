@@ -12,7 +12,7 @@ import { Button } from './components/ui/Button';
 import { useUrlState } from './hooks/useUrlState';
 import type { ViewId } from './lib/router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { OperatorMethodInput } from '@goodvibes-jev/engine/contracts';
+import type { OperatorMethodInput } from '@goodvibes/engine/contracts';
 import { useDaemonHealth } from './hooks/useDaemonHealth';
 import { usePairingHandoff } from './hooks/usePairingHandoff';
 import { usePreloadErrorReload } from './hooks/usePreloadErrorReload';

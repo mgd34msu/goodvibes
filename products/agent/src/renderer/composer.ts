@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/composer';
+export * from '@goodvibes/engine/terminal-shell/composer';

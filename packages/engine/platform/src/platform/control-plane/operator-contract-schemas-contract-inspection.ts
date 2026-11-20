@@ -5,8 +5,8 @@
  * in contract/{types,native-decisions,durable-admission,input-snapshot}.ts and
  * agents/completion-report.ts aligned with this closed wire representation.
  */
-import { JEV_DECISION_BINDING_KEYS, JEV_DECISION_SCHEMA } from '@goodvibes-jev/judgment/decisions';
-import type { JudgmentAttempt } from '@goodvibes-jev/judgment';
+import { JEV_DECISION_BINDING_KEYS, JEV_DECISION_SCHEMA } from '@goodvibes/judgment/decisions';
+import type { JudgmentAttempt } from '@goodvibes/judgment';
 import type { NativeContractStage } from '../contract/native-decisions.js';
 import { CONTRACT_ORIGINS } from '../../events/contract.js';
 import { BOOLEAN_SCHEMA, NUMBER_SCHEMA, STRING_SCHEMA, arraySchema, objectSchema } from './method-catalog-shared.js';

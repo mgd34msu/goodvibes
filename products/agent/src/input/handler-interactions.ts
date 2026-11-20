@@ -1,5 +1,5 @@
-import { createHandlerContentBindings } from '@goodvibes-jev/engine/terminal-shell/handler-content-bindings';
-import '@goodvibes-jev/engine/terminal-shell/input-content';
+import { createHandlerContentBindings } from '@goodvibes/engine/terminal-shell/handler-content-bindings';
+import '@goodvibes/engine/terminal-shell/input-content';
 import {
   expandPrompt,
   handleBlockCopy,

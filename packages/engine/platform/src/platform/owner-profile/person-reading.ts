@@ -1,10 +1,10 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /** Named People-line attribution is a reading, never permission to disclose a profile. */
 import {
   askAs, checkAnswers, defineBattery, estimateTokens, LIMITS, mapLimit, noul, readYesNo, recordAction, recordReadings,
   STAKES_BANDS, toJson, yesNo, type CallOptions, type EntryType, type JudgmentPort, type NoulQuestion, type NoulResponse,
-} from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+} from '@goodvibes/judgment';
+import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { ProfileLine } from './types.js';

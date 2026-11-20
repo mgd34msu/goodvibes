@@ -544,7 +544,7 @@ prepare_daemon_receipt() {
           || JSON.stringify(profile(candidate.readers)) !== JSON.stringify(profile(compiled))) throw new Error();
         artifact = candidate;
       }
-      await Bun.write(output, JSON.stringify({schema:1,packageName:"@goodvibes-jev/daemon",version,artifact},null,2)+"\n");
+      await Bun.write(output, JSON.stringify({schema:1,packageName:"@goodvibes/daemon",version,artifact},null,2)+"\n");
     } catch { process.exitCode = 1; }
   ' "$WORKDIR/$_receipt_asset.ci-artifact.json" "$_reader_source" "$_compiled_readers" "${VERSION#v}" "$WORKDIR/daemon-installation.json" || fail INSTALL_E017 'The verified daemon release metadata could not be confirmed. No installed program was replaced.'
 }
@@ -1105,7 +1105,7 @@ require_client_reader_evidence() {
   _evidence_asset="$_evidence_product-$PLATFORM_SUFFIX"
   _evidence_file="$WORKDIR/$_evidence_asset.reader-ci-artifact.json"
   [ -f "$_evidence_file" ] && [ ! -L "$_evidence_file" ] || fail INSTALL_E051 "The selected $_evidence_product release has no reader evidence. The installed programs were kept."
-  case "$_evidence_product" in goodvibes) _evidence_package='@goodvibes-jev/tui' ;; goodvibes-agent) _evidence_package='@goodvibes-jev/agent' ;; goodvibes-daemon) _evidence_package='@goodvibes-jev/daemon' ;; *) fail INSTALL_E052 'Unsupported native reader evidence.' ;; esac
+  case "$_evidence_product" in goodvibes) _evidence_package='@goodvibes/tui' ;; goodvibes-agent) _evidence_package='@goodvibes/agent' ;; goodvibes-daemon) _evidence_package='@goodvibes/daemon' ;; *) fail INSTALL_E052 'Unsupported native reader evidence.' ;; esac
   _evidence_target="$VEC_OS-$arch_tag"
   awk -v package="$_evidence_package" -v version="${VERSION#v}" -v target="$_evidence_target" '
     /^  "schema": 1,$/ { schema++ }
@@ -2536,7 +2536,7 @@ shadow_package_owner() {
 }
 
 # Exact historical product/command pairs, used only to clean up an identified
-# existing package install. Current @goodvibes-jev products are private workspace
+# existing package install. Current @goodvibes products are private workspace
 # packages; the published-shaped engine exposes other toolchain/contract bins.
 # No currently supported published product package is inferred from that scope.
 shadow_owning_package() {

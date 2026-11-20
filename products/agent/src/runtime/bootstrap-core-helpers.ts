@@ -1,5 +1,5 @@
-import {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload} from '@goodvibes-jev/engine/terminal-shell/companion-input';
-export {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload} from '@goodvibes-jev/engine/terminal-shell/companion-input';
+import {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload} from '@goodvibes/engine/terminal-shell/companion-input';
+export {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload} from '@goodvibes/engine/terminal-shell/companion-input';
 /**
  * bootstrap-core-helpers.ts, the pure parts of the interactive bootstrap.
  *
@@ -12,7 +12,7 @@ export {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload}
  * bootstrap-core.ts re-exports all four names, so every existing importer is
  * unaffected.
  */
-import { WebhookNotifier, type RuntimeNotificationOptions } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { WebhookNotifier, type RuntimeNotificationOptions } from '@goodvibes/engine/platform/platform/integrations';
 
 import { RuntimeEventBus } from '@/runtime/index.ts';
 

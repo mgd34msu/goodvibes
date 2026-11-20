@@ -1,7 +1,7 @@
 import { declaredFieldKind, FieldKindReader, withheldFieldKind, type FieldKind } from './field-kind-reading.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 import { assertRedactionCurrent, ProfileDistinctiveReader, type ProfileRedactionRole } from './redaction-reading.js';
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { assertJudgmentInput, captureOwnedJson, retainOwnedJson, judgmentInputProblem, snapshotJudgmentEvidence } from '../gate/judgment-input.js';
 import { captureStructuredCredentialReferenceConfigValue } from '../config/structured-credential-config.js';
 import { exportCredentialSpans } from './batteries/export-credential-spans.js';

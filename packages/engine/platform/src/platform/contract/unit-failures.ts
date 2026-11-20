@@ -30,7 +30,7 @@
  * A retry is not a stall and not a fix round: the unit keeps its checks, and
  * the fresh agent's brief carries a "Previous checks" section.
  */
-import { classifyFailure, judgmentPort, readFailure, transienceFromReading, type FailureEvidence } from '@goodvibes-jev/engine/errors';
+import { classifyFailure, judgmentPort, readFailure, transienceFromReading, type FailureEvidence } from '@goodvibes/engine/errors';
 import type { AgentEvent } from '../../events/agents.js';
 import type { CommunicationEvent } from '../../events/communication.js';
 import { TURN_BUDGET_EXHAUSTED } from '../agents/turn-budget.js';

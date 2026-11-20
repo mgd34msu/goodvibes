@@ -1,4 +1,4 @@
-import type { CallOptions, JudgmentPort } from '@goodvibes-jev/judgment';
+import type { CallOptions, JudgmentPort } from '@goodvibes/judgment';
 import { responseFinding } from './batteries/response-finding.js';
 
 /** Quoted text plus a repair instruction, rather than a vague failed boolean. */

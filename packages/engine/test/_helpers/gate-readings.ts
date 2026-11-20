@@ -15,9 +15,9 @@
  * so every band acts on them.
  */
 import { afterEach, beforeEach } from 'bun:test';
-import type { Question } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import type { Question } from '@goodvibes/judgment';
+import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes/judgment/testing';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import { forgetReadSecrets } from '../../platform/src/platform/permissions/credential-read-defaults.ts';
 import { forgetCommandNeeds } from '../../platform/src/platform/runtime/permissions/normalization/classifier.ts';
 import { forgetLedgerArgRoles } from '../../platform/src/platform/gate/policy/execution-ledger.ts';

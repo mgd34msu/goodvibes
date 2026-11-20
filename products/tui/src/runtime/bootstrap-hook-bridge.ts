@@ -1,17 +1,17 @@
-import { publishResumedSession } from '@goodvibes-jev/engine/terminal-shell/session-resume-publication';
+import { publishResumedSession } from '@goodvibes/engine/terminal-shell/session-resume-publication';
 import { activeTokens } from '../renderer/theme.ts';
 import type { ConversationManager } from '../core/conversation';
-import type { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
+import type { HookDispatcher } from '@goodvibes/engine/platform/platform/hooks';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { emitSessionResumed } from '@/runtime/index.ts';
-import { emitSessionRecoveryFailed } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
-import type { ConfigManager, HelperModel } from '@goodvibes-jev/engine/platform/platform/config';
-import type { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { SessionSpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
-import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { emitSessionRecoveryFailed } from '@goodvibes/engine/platform/platform/runtime/emitters';
+import type { ConfigManager, HelperModel } from '@goodvibes/engine/platform/platform/config';
+import type { SharedSessionBroker } from '@goodvibes/engine/platform/platform/control-plane';
+import type { SessionSpineClient } from '@goodvibes/engine/platform/platform/runtime/session-spine';
+import type { SessionManager } from '@goodvibes/engine/platform/platform/sessions';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { describeResumeShortfalls, resumeSessionCore, type SessionAgentRecordSink, type SessionResumeOutcome } from '../core/session-resume-core.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 

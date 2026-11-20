@@ -1,6 +1,6 @@
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
+import type { ContentPart } from '@goodvibes/engine/platform/platform/providers';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { BlockMeta, TerminalConversationManager } from './terminal-conversation.js';
 import type { InputHistory } from './input-history.js';
 import type { TerminalCommandRegistry, TerminalSlashCommand } from './command-registry.js';
@@ -14,7 +14,7 @@ import {
 } from './prompt-buffer.js';
 import { captureNativeConversationInput } from './native/native-conversation-input.js';
 import { commandHistoryLine } from './command-registry.js';
-import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
+import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import { splitSlashCommand } from './slash-command-parser.js';
 import type { NativeConversationInput } from './native/native-conversation-input.js';
 import { fillComposerWithStarterPrompt, starterPromptAtRow, takeNextStarterPrompt } from './first-run/splash-state.js';

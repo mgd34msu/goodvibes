@@ -6,9 +6,9 @@
  * definition. Letting triggers run a command is the owner's own act: it
  * loosens a protection, so a model's line is refused and the owner is asked.
  */
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
-import { watchDefinitionFromValues, WatchValuesError } from '@goodvibes-jev/engine/platform/platform/triggers';
-import { readTriggerOperatorStatus, TRIGGER_OPERATOR_MESSAGES, type TriggerOperatorFailureKind } from '@goodvibes-jev/engine/platform/platform/triggers/browser';
+import { GoodVibesError } from '@goodvibes/engine/errors';
+import { watchDefinitionFromValues, WatchValuesError } from '@goodvibes/engine/platform/platform/triggers';
+import { readTriggerOperatorStatus, TRIGGER_OPERATOR_MESSAGES, type TriggerOperatorFailureKind } from '@goodvibes/engine/platform/platform/triggers/browser';
 import { describeRetainedConnectionFailure, RetainedOperatorConnection } from './retained-operator-connection.js';
 import { isOwnerOperatorPrincipal } from './native/native-paired-principal.js';
 import type { PaymentWindowCommandContext, PaymentWindowCommandPolicy } from './payment-window-command.js';

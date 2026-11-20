@@ -1,10 +1,10 @@
 import { isDeepStrictEqual } from 'node:util';
-import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { captureStrictJudgmentJson } from '@goodvibes/engine/platform/platform/gate';
 import { randomUUID } from 'node:crypto';
-import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { ChatRequest, ChatResponse, LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolEffect, ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
+import type { ChatRequest, ChatResponse, LLMProvider } from '@goodvibes/engine/platform/platform/providers';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { assertCurrentToolEffect, ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { registerComparisonCandidate, runAdmittedComparisonCandidate } from './model-compare-candidate.js';
 import { COMPARISON_TEXT_LIMIT, comparisonSharedText, screenComparisonRequest } from './model-compare-candidate-input.js';
 import { createComparisonOperation } from './model-compare-operation.js';

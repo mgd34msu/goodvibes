@@ -13,7 +13,7 @@
  * Band: low stakes. riskLevel is a display label ("risk low" or "risk medium")
  * shown beside the note text itself; nothing is installed or refused on it.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 import type { EcosystemEntryKind } from '../catalog.js';
 
 const note = (name: string, kind: EcosystemEntryKind, trustNotes: string) => ({ name, kind, trustNotes });

@@ -14,7 +14,7 @@
  * Everything resolves through the package NAME so the exports map is exercised
  * exactly as a consumer install would (checked by `bun run types:check`).
  */
-import type { ui } from '@goodvibes-jev/engine/platform/platform/runtime';
+import type { ui } from '@goodvibes/engine/platform/platform/runtime';
 
 declare function stub<T>(): T;
 

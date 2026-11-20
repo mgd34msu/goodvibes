@@ -5,7 +5,7 @@ import type { KitInset } from './surface-kit-parts.js';
 import { highlightCodeLines, syntaxHighlightGeneration, syntaxHighlightMisses } from './code-block.js';
 import { diffRowTints } from './diff-tint.js';
 import type { SemanticDiff } from '../semantic-diff.js';
-import { expandTabs, getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import { expandTabs, getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { languageForPath, type ChangeFile, type ChangeHunk, type ChangeLine } from '../changes-model.js';
 /** Width of the line-number gutter inside the diff inset. */
 export const DIFF_GUTTER = 5;

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { isRedactedValue } from './cli-redaction.js';
 
 /** A partially redacted object cannot restore a configuration setting faithfully. */

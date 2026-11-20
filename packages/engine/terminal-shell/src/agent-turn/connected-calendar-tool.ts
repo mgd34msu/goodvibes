@@ -15,16 +15,16 @@
  * clock; one with `Z` or an offset is that instant; `timeZone` names a zone.
  */
 
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import {
   CalendarApiError,
   NewEventTimeError,
   type CalendarProviderId,
   type EventDateTime,
   type NewCalendarEvent,
-} from '@goodvibes-jev/engine/platform/platform/calendar';
-import { evaluateOutwardEffect, getProcessUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+} from '@goodvibes/engine/platform/platform/calendar';
+import { evaluateOutwardEffect, getProcessUntrustedContentLedger } from '@goodvibes/engine/platform/platform/security';
 import {
   CalendarCreateUnconfirmedError,
   CalendarOAuthService,

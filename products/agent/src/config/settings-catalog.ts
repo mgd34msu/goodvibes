@@ -1,5 +1,5 @@
 import { readExecutionMode } from '../permissions/execution-mode.ts';
-import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes/engine/platform/platform/config';
 import { isAgentHostSettingKey, type AgentHostSettingKey } from './host-settings.ts';
 
 export type AgentHostSetting = Omit<ConfigSetting, 'key' | 'type' | 'default'> & {

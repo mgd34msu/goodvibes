@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/delete-key-policy';
+export * from '@goodvibes/engine/terminal-shell/delete-key-policy';

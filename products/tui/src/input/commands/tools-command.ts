@@ -6,9 +6,9 @@
 import type { CommandContext } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
 import { ToolContractVerifier } from '@/runtime/index.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { defineCommand, defineList, type InputDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction, listInput, readAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { defineCommand, defineList, type InputDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction, listInput, readAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import { openCommandView } from './runtime-services.ts';
 
 const TOOLS = defineList<CommandContext>({

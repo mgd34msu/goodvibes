@@ -13,9 +13,9 @@ import { KnowledgeRepairProfileHeldError } from './semantic/repair-profile/types
 import { KnowledgeNodeMutationHeldError } from './store-node-authority.js';
 import { KnowledgeNodeActivationHeldError } from './activation/types.js';
 import { KnowledgeGeneratedFactSupportHeldError } from './semantic/verification/types.js';
-import { judgmentPort, JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import { judgmentPort, JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes/engine/errors';
 import { isClassicOperation } from '../runtime/decision-policy.js';
-import { mapLimit, JudgmentError } from '@goodvibes-jev/judgment';
+import { mapLimit, JudgmentError } from '@goodvibes/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { sourceRankingContent } from './semantic/answer-source-ranking.js';
 import { pageSourceQuality } from './semantic/ranking/source-quality.js';

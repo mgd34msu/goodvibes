@@ -10,8 +10,8 @@ import {
   NETWORK_SCAN_ENABLE_COMMAND,
 } from '../../runtime/lan-scan-consent.ts';
 import type { CommandContext } from '../command-registry.ts';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { readAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { readAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
 
 function statusText(storePath: string, decision: ReturnType<typeof loadLanScanConsent>): string {
   if (!decision || decision.decision === 'declined') {

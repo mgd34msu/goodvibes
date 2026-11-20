@@ -4,8 +4,8 @@
  * secret-bearing-config-keys.ts is checked first and exactly; only a key it
  * does not name is read.
  */
-import type { YesNoReading } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { YesNoReading } from '@goodvibes/judgment';
+import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { admitJudgmentJson } from '../gate/judgment-result.js';
 import { credentialKey, type CredentialKeyState } from './batteries/credential-key.js';
 import { isSecretBearingConfigKey } from './secret-bearing-config-keys.js';

@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/transcript-scroll';
+export * from '@goodvibes/engine/terminal-shell/transcript-scroll';

@@ -8,7 +8,7 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 import { requireNativeOwner } from './native-owner.js';
 import { LEGACY_IMPORT_MAX_BYTES, prepareLegacyWorkLedgerMigration, workLedgerCommandSchema } from '../../workflow/work-ledger/index.js';
-import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
+import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
 
 /** Trusted selected-host composition only. No path, authority or actor from request data. */
 export function registerWorkLedgerImportGatewayMethods(catalog: GatewayMethodCatalog, host: NativeLegacyImportDependencies): { close(): Promise<void> } {

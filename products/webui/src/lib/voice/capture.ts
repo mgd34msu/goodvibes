@@ -2,7 +2,7 @@
  * capture.ts, the ONE browser microphone path, shared by both voice consumers.
  *
  * This is the web UI's implementation of the platform's `AudioCaptureOpener`
- * (@goodvibes-jev/engine/platform/platform/voice/capture): the platform owns the frame
+ * (@goodvibes/engine/platform/platform/voice/capture): the platform owns the frame
  * contract, the utterance policy and the WAV encoding; the surface owns opening
  * a device. Two consumers sit on this one opener and they must not each open
  * their own stream:
@@ -49,7 +49,7 @@ import {
   type AudioCaptureOpener,
   type AudioCaptureRequest,
   type AudioCaptureStream,
-} from '@goodvibes-jev/engine/platform/platform/voice/capture';
+} from '@goodvibes/engine/platform/platform/voice/capture';
 
 /**
  * Whether the microphone can be used here at all, decided before any capture is

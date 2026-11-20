@@ -1,7 +1,7 @@
 /** Private default-project bindings. Exact local workspace tuples are not wire
  * identifiers or permissions; the configured native owner still decides scope.
  */
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { randomUUID } from 'node:crypto';
 import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, unlinkSync, writeFileSync, type BigIntStats } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -9,7 +9,7 @@ import { captureExistingDirectory, confirmFileDurable } from '../../utils/atomic
 import { readFileObservation, fileObservationIdentity } from '../../utils/file-observation.js';
 import { assertCrossProcessLockCurrent, tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
 import type { NativeDataWriteOwner } from '../../runtime/native-reader-compatibility.js';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 const MAX_PROJECT_BINDINGS = 4096;
 const nativeApply = Reflect.apply, weakGet = WeakMap.prototype.get, weakSet = WeakMap.prototype.set;
 const confirmations = new WeakMap<RegisteredProjectIdentity, () => void>();

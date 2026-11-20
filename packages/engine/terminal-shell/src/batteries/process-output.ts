@@ -1,4 +1,4 @@
-import { askAs, checkAnswers, defineBattery, noul, readYesNo, recordAction, recordReadings, STAKES_BANDS, yesNo, type BatteryDefinition, type CallOptions, type EntryType, type JudgmentPort, type YesNoItem } from '@goodvibes-jev/judgment';
+import { askAs, checkAnswers, defineBattery, noul, readYesNo, recordAction, recordReadings, STAKES_BANDS, yesNo, type BatteryDefinition, type CallOptions, type EntryType, type JudgmentPort, type YesNoItem } from '@goodvibes/judgment';
 
 /** The registered definition owns both fixture and bounded production questions. */
 function defineProcessOutputBattery<Items extends Readonly<Record<string, YesNoItem>>>(spec: BatteryDefinition<Items>, itemKey: keyof Items & string, targetKey: 'targetLineId') {

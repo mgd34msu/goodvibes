@@ -27,9 +27,9 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { SharedApprovalRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { watchApprovalUpdates } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { SharedApprovalRecord } from '@goodvibes/engine/platform/platform/control-plane';
+import { watchApprovalUpdates } from '@goodvibes/engine/platform/platform/runtime/client';
 import { createAgentDaemonVerbCaller, resolveConnectedHostConnection } from '../src/runtime/client/daemon-verbs.ts';
 import { createHostedConversationHandoff } from '../src/runtime/client/hosted-handoff.ts';
 import { createApprovalsView } from '../src/runtime/client/approvals-view.ts';

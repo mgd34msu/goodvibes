@@ -3,9 +3,9 @@
  * its runtime bus. Extracted from bootstrap-core so the privacy wiring has a
  * test of its own.
  */
-import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import { readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/notification-privacy';
+import type { ConfigManager, SecretsManager } from '@goodvibes/engine/platform/platform/config';
+import { Notifier } from '@goodvibes/engine/platform/platform/integrations';
+import { readNotificationsMetadataOnly } from '@goodvibes/engine/platform/platform/runtime/notification-privacy';
 
 /**
  * The Slack and Discord notifier, built from the configured services. Its

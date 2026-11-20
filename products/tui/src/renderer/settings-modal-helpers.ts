@@ -1,8 +1,8 @@
-import { createSettingsValueHelpers } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-value-helpers';
-import { SHARED_CATEGORY_INFO } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
-import { SHARED_SETTING_LABELS } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
-import { SHARED_CATEGORY_LABELS } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
-export { inferSubscriptionRouteReason } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';
+import { createSettingsValueHelpers } from '@goodvibes/engine/terminal-shell/renderer/settings-value-helpers';
+import { SHARED_CATEGORY_INFO } from '@goodvibes/engine/terminal-shell/renderer/settings-metadata';
+import { SHARED_SETTING_LABELS } from '@goodvibes/engine/terminal-shell/renderer/settings-metadata';
+import { SHARED_CATEGORY_LABELS } from '@goodvibes/engine/terminal-shell/renderer/settings-metadata';
+export { inferSubscriptionRouteReason } from '@goodvibes/engine/terminal-shell/settings-subscriptions';
 /**
  * Pure formatting, label, and color helpers for renderSettingsModal.
  * Extracted from settings-modal.ts to keep the renderer under the 800-line

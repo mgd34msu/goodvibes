@@ -1,15 +1,15 @@
 import { join } from 'path';
-import { createUndoCommands, refuseWhileTurnRuns } from '@goodvibes-jev/engine/terminal-shell/everyday-commands';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { createUndoCommands, refuseWhileTurnRuns } from '@goodvibes/engine/terminal-shell/everyday-commands';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireSessionMemoryStore, requireShellPaths } from './runtime-services.ts';
-import { createNotesCommand } from '@goodvibes-jev/engine/terminal-shell/notes-command';
-import type { MemoryClass, MemoryScope } from '@goodvibes-jev/engine/platform/platform/state';
+import { createNotesCommand } from '@goodvibes/engine/terminal-shell/notes-command';
+import type { MemoryClass, MemoryScope } from '@goodvibes/engine/platform/platform/state';
 import { buildPinSuccessText } from '../../renderer/compaction-preview.ts';
 import { templateCommand } from './template-command.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { undoLastRewind, redoLastRewind } from './rewind-runtime.ts';
-import { dropFileChange, redoLastFileChange, undoLastFileChange } from '@goodvibes-jev/engine/terminal-shell/recovery-commands';
+import { dropFileChange, redoLastFileChange, undoLastFileChange } from '@goodvibes/engine/terminal-shell/recovery-commands';
 
 export function registerSessionContentCommands(registry: CommandRegistry): void {
   registry.register(contentCommands.titleCommand);
@@ -27,7 +27,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
   registry.register(notesCommand);
 }
 
-import { createSessionContentCommands } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
+import { createSessionContentCommands } from '@goodvibes/engine/terminal-shell/session-content-commands';
 export const contentCommands = createSessionContentCommands<CommandContext, Record<string, unknown>>({
   paths: requireShellPaths,
   capture: (ctx) => (ctx.session.conversationManager.toJSON() as { messages?: Record<string, unknown>[] }).messages ?? [],
@@ -35,9 +35,9 @@ export const contentCommands = createSessionContentCommands<CommandContext, Reco
     return messages.map((m) => ({
       role: String(m.role ?? 'user') as 'user' | 'assistant' | 'system' | 'tool',
       content: Array.isArray(m.content)
-        ? (m.content as import('@goodvibes-jev/engine/platform/platform/providers').ContentPart[])
+        ? (m.content as import('@goodvibes/engine/platform/platform/providers').ContentPart[])
         : String(m.content ?? ''),
-      toolCalls: m.toolCalls as import('@goodvibes-jev/engine/platform/platform/types').ToolCall[] | undefined,
+      toolCalls: m.toolCalls as import('@goodvibes/engine/platform/platform/types').ToolCall[] | undefined,
       callId: m.callId as string | undefined,
       toolName: m.toolName as string | undefined,
       reasoningContent: m.reasoningContent as string | undefined,

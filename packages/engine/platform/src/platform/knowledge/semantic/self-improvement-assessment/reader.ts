@@ -1,7 +1,7 @@
 import { requireSemanticKnowledge } from '../../decision-policy.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { captureJudgmentPort, judgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { toJson } from '@goodvibes-jev/judgment';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
+import { captureJudgmentPort, judgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError } from '@goodvibes/engine/errors';
+import { toJson } from '@goodvibes/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../../../gate/judgment-input.js';
 import { prepareJudgmentResult, retainStrictJudgmentJson } from '../../../gate/judgment-result.js';
 import { freezeSupport } from '../verification/projection.js';

@@ -18,7 +18,7 @@
 
 import { fromBase64Url, toBase64Url, decodeUtf8, encodeUtf8 } from './crypto.js';
 import { RELAY_PROTOCOL_VERSION, type RendezvousId } from './protocol.js';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 
 /** Self-describing prefix so a scanner can recognize a relay pairing string. */
 export const PAIRING_SCHEME = 'gvrelay1';

@@ -1,7 +1,7 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
-import type { CallOptions } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import type { CallOptions } from '@goodvibes/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { credentialHeader } from './batteries/credential-header.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { judge } from '../runtime/judge.js';

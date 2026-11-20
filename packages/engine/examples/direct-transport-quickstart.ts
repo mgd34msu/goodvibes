@@ -1,7 +1,7 @@
 /**
  * Use the direct in-process transport for embedded operator/peer clients.
  */
-import { createDirectClientTransport } from '@goodvibes-jev/engine/platform/transport-direct';
+import { createDirectClientTransport } from '@goodvibes/engine/platform/transport-direct';
 
 const operator = {
   async status() {

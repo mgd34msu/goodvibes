@@ -1,7 +1,7 @@
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { fitDisplay, getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
+import { fitDisplay, getDisplayWidth } from '@goodvibes/engine/platform/platform/utils';
 import type { HistorySearch } from '../input-history.js';
-import { createBottomBarLine, writeBottomBarText } from '@goodvibes-jev/engine/terminal-shell';
+import { createBottomBarLine, writeBottomBarText } from '@goodvibes/engine/terminal-shell';
 import { keycapHintsWidth, paintKeycapHints } from './surface-kit-parts.js';
 import type { KitHint } from './surface-kit.js';
 import { activeTokens } from './theme.js';

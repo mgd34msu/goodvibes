@@ -9,7 +9,7 @@ import { capturePurchaseRecord } from '../purchase-record-codec.js';
 import type { PurchaseLedger } from '../payment-ports.js';
 import type { PurchaseRecord } from '../purchase-record.js';
 import { samePaymentEvidence } from '../evidence-equality.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import type { PaymentReconciliationCheckpoint } from './reconciliation-checkpoint.js';
 import { ORDER_MAIL_KINDS, type OrderMailKind } from '../message.js';
 

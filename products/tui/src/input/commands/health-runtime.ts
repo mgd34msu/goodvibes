@@ -4,27 +4,27 @@ import {
   collectRemoteRecoveryIssues,
   collectMcpLifecycleIssues,
   collectContinuityIssues,
-} from '@goodvibes-jev/engine/terminal-shell/health-findings';
+} from '@goodvibes/engine/terminal-shell/health-findings';
 import { renderSandboxDoctor } from '../../runtime/sandbox-public-gaps.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { probeTermCaps } from '../../renderer/term-caps.ts';
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '@/runtime/index.ts';
-import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
-import { formatDoctorReport } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/core';
+import { formatDoctorReport } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { dirname } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { createHealthCommand, type HealthArea, type FailureReportView } from '@goodvibes-jev/engine/terminal-shell/health-command';
-import type { CommandReport } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { isSetupIssue } from '@goodvibes-jev/engine/terminal-shell/setup-review';
-import { buildIncidentMemoryAddOptions } from '@goodvibes-jev/engine/platform/platform/state';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { createHealthCommand, type HealthArea, type FailureReportView } from '@goodvibes/engine/terminal-shell/health-command';
+import type { CommandReport } from '@goodvibes/engine/terminal-shell/command-actions';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { isSetupIssue } from '@goodvibes/engine/terminal-shell/setup-review';
+import { buildIncidentMemoryAddOptions } from '@goodvibes/engine/platform/platform/state';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { formatRuntimeStateSnapshot, snapshotRuntimeState } from '@/runtime/index.ts';
 import type { ReplaySnapshotInput } from '@/runtime/index.ts';
 import { getMemorySpine } from './memory.ts';
 import { buildSetupReviewSnapshot } from './local-setup-review.ts';
-import { setupReviewLines } from '@goodvibes-jev/engine/terminal-shell/setup-review';
+import { setupReviewLines } from '@goodvibes/engine/terminal-shell/setup-review';
 import { getSettingsControlPlaneSnapshot } from '@/runtime/index.ts';
 import {
   requireOpsApi,
@@ -37,7 +37,7 @@ import {
 import { getOperatorRpc, describeOperatorRpcError } from './operator-rpc.ts';
 import { formatQuotaSnapshotLine, renderMetricMap, telemetryScopeRefusalLine } from './health-metrics-format.ts';
 import { createMemoryDiagnosticsGateway, renderMemoryDiagnostics } from '../../core/memory-diagnostics-gateway.ts';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
 
 
 function renderSandboxHealthSummary(configManager: ConfigManager): string[] {

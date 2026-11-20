@@ -3,14 +3,14 @@ import {
   createMemoryTokenStore,
   type GoodVibesCurrentAuth,
   type GoodVibesLoginOutput,
-} from '@goodvibes-jev/engine/platform';
+} from '@goodvibes/engine/platform';
 import type {
   OperatorMethodInput,
   OperatorMethodOutput,
   OperatorTypedMethodId,
-} from '@goodvibes-jev/engine/platform/contracts';
-import { createOperatorApiClient } from '@goodvibes-jev/engine/platform/operator';
-import { createPeerApiClient } from '@goodvibes-jev/engine/platform/peer';
+} from '@goodvibes/engine/platform/contracts';
+import { createOperatorApiClient } from '@goodvibes/engine/platform/operator';
+import { createPeerApiClient } from '@goodvibes/engine/platform/peer';
 
 async function verifyTypedPlatformSurface(): Promise<void> {
   const platformClient = createGoodVibesPlatform({

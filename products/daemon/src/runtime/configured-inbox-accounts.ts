@@ -1,9 +1,9 @@
 /** Native account selectors remain independent of permission to screen message text. */
 import { randomUUID } from 'node:crypto';
-import { configReaderWithOrigins, createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
-import { triageAuthorityFromScreening, type EmailInboxAccount, type EmailInboxScreening, type SlackInboxAccount, type OwnedInboxSource, type OwnedInboxRead, type ProviderStatus } from '@goodvibes-jev/engine/platform/platform/intake';
-import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
-import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
+import { configReaderWithOrigins, createSurfaceEmailInboxConfigReader } from '@goodvibes/engine/platform/platform/email';
+import { triageAuthorityFromScreening, type EmailInboxAccount, type EmailInboxScreening, type SlackInboxAccount, type OwnedInboxSource, type OwnedInboxRead, type ProviderStatus } from '@goodvibes/engine/platform/platform/intake';
+import { isLoopbackHost } from '@goodvibes/engine/platform/platform/utils/reachable-base-url';
+import type { ProtectedSourceOwnerOptions } from '@goodvibes/engine/platform/platform/security';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
 import type { DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
 import { createSlackDaemonInboxSourceFactory, type SlackDaemonInboxSourceFactories } from './slack-inbox-composition.js';

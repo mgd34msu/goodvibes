@@ -39,11 +39,11 @@ import type {
   RewindAnchor,
   RewindConversationOutcome,
   RewindConversationPreview,
-} from '@goodvibes-jev/engine/platform/platform/rewind';
-import { captureTurnAnchor, clearTurnAnchors, persistTurnAnchors, recordTurnAnchor, restoreTurnAnchors } from '@goodvibes-jev/engine/platform/platform/rewind';
-import type { HostedSessionConversations, HostedSessionRuntime } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
-import { createSessionSurface, type SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+} from '@goodvibes/engine/platform/platform/rewind';
+import { captureTurnAnchor, clearTurnAnchors, persistTurnAnchors, recordTurnAnchor, restoreTurnAnchors } from '@goodvibes/engine/platform/platform/rewind';
+import type { HostedSessionConversations, HostedSessionRuntime } from '@goodvibes/engine/platform/platform/hosted-sessions';
+import { createSessionSurface, type SessionSurface } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import {
   createConversationRewindPort as createSharedConversationRewindPort,
@@ -51,7 +51,7 @@ import {
   type ConversationRewindPort,
   type ConversationRewindPortOptions,
   type RewindConversation,
-} from '@goodvibes-jev/engine/terminal-shell/conversation-rewind-port';
+} from '@goodvibes/engine/terminal-shell/conversation-rewind-port';
 
 export type { ConversationRewindPort };
 

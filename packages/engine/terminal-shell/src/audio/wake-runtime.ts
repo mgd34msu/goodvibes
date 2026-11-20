@@ -16,7 +16,7 @@ import {
   type WakeListenerState,
   type WakeRuntimeSettings,
   type WakeSurfaceCapabilities,
-} from '@goodvibes-jev/engine/platform/platform/voice';
+} from '@goodvibes/engine/platform/platform/voice';
 import type { VoiceCaptureIndicatorKind, VoiceCaptureIndicatorState } from '../voice-capture-status.js';
 import { createWakeEngineFactory } from './wake-inference.js';
 import { retainWakeClip } from './retained-wake-clip.js';

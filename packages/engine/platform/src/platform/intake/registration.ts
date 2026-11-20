@@ -15,7 +15,7 @@ import type { InboundProviderAdapter } from './provider-adapter.js';
 import type { TriagePreview, TriageReceipt, TriageReceiptScope } from './triage/types.js';
 import type { IntakeLogger } from './context.js';
 import { composeInboxReads, type InboxReadSource } from './composite.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 
 export const INBOX_LIST_METHOD_ID = 'channels.inbox.list';
 export const INBOX_TRIAGE_METHOD_ID = 'channels.inbox.triage';

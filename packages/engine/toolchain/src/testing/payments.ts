@@ -4,8 +4,8 @@
  * consumers must independently establish their normal owner/provenance guards.
  */
 import { readPaymentsServiceConfig, parseCurrencyCode, type ProtectedPaymentRequest,
-  type CheckoutWindowCheckpoint, type OwnerSuppliedText } from '@goodvibes-jev/engine/platform/platform/payments';
-import { retainTaintEvidence, UntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+  type CheckoutWindowCheckpoint, type OwnerSuppliedText } from '@goodvibes/engine/platform/platform/payments';
+import { retainTaintEvidence, UntrustedContentLedger } from '@goodvibes/engine/platform/platform/security';
 
 export function protectedPaymentRequest(purchaseId = 'original-owner-request'): ProtectedPaymentRequest {
   const ledger = new UntrustedContentLedger();

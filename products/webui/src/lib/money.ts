@@ -41,7 +41,7 @@
  * intended amount, since JPY has no minor unit at all.
  */
 
-import { minorUnitExponent as engineMinorUnitExponent } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import { minorUnitExponent as engineMinorUnitExponent } from '@goodvibes/engine/platform/platform/payments/browser';
 
 export class InvalidMoneyInputError extends Error {}
 

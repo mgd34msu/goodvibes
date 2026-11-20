@@ -53,7 +53,7 @@
  * simplest form there is: **refuse if the finding list is non-empty**. See
  * `hasRefusableCardShapes`.
  */
-import { judgmentPort, runDecisionOrClassic as decisionOrClassic } from '@goodvibes-jev/engine/errors';
+import { judgmentPort, runDecisionOrClassic as decisionOrClassic } from '@goodvibes/engine/errors';
 import { createHash } from 'node:crypto';
 import { cardTalk, maskDigits } from './batteries/card-talk.js';
 

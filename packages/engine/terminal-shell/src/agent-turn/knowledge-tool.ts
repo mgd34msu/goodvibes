@@ -1,6 +1,6 @@
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolInvocation, assertProjectionExecution, ToolInputProjectionError, type ToolRegistry, type ToolInputProjector } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { assertCurrentToolInvocation, assertProjectionExecution, ToolInputProjectionError, type ToolRegistry, type ToolInputProjector } from '@goodvibes/engine/platform/platform/tools';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { captureOperatorConnection } from './operator-connection-owner.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { captureCatalogSnapshot } from './catalog-data.js';

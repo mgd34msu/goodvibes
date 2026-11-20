@@ -1,5 +1,5 @@
-import type { PaymentWindowCommandPolicy } from '@goodvibes-jev/engine/terminal-shell/payment-window-command';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import type { PaymentWindowCommandPolicy } from '@goodvibes/engine/terminal-shell/payment-window-command';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
 import type { CommandContext } from '../command-registry.ts';
 import { localOperatorTokenPath, resolveNativeHostCredential } from '../../runtime/client/native-host-credential.ts';
 import { tuiHostPairingStorePath } from '../../runtime/tui-host-credential-store.ts';

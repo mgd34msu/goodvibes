@@ -7,7 +7,7 @@
  * (readTierPromptSupplement); the supplement texts are fixed.
  */
 
-import { JudgmentError } from '@goodvibes-jev/judgment';
+import { JudgmentError } from '@goodvibes/judgment';
 import type { ModelTier } from './registry.js';
 import type { ModelFacts, ModelTierStore } from '../routing/model-tiers.js';
 import { GUIDANCE_TIER_WHEN_UNSETTLED } from '../routing/policy.js';

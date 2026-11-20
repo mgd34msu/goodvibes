@@ -1,11 +1,11 @@
 import {
   BoundedJsonFile,
   type BoundedJsonFileIO,
-} from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
+} from '@goodvibes/engine/platform/platform/state/durable-file-io';
 import {
   nativeWorkSubmissionRequestSchema,
   type NativeWorkSubmissionRequest,
-} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
+} from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-submission-client';
 
 export const NATIVE_SUBMISSION_JOURNAL_MAX_BYTES = 2 * 1024 * 1024;
 

@@ -11,7 +11,7 @@ This guide covers the tuning knobs, runtime contracts, and internal subsystems t
 The platform uses deterministic exponential backoff (no jitter) for all retryable HTTP failures. The top-level `retry` config is an `HttpRetryPolicy` resolved by the transport-http retry layer (`resolveHttpRetryPolicy`) and applied via `computeBackoffDelay` in the HTTP transport loop; it is not handled by the `platform/utils` `withRetry` helper, which has a different config shape and is not wired to this config.
 
 ```ts
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
 
 const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',
@@ -47,7 +47,7 @@ The `AdaptivePlanner` selects an execution strategy each turn based on risk, lat
 Each decision lists its `candidates` with a 0-100 weight taken from the reading's probabilities. These weights describe the reading; they are not a score table the planner applies.
 
 ```ts
-import { AdaptivePlanner, PlannerJudgmentError } from '@goodvibes-jev/engine/platform/platform/core';
+import { AdaptivePlanner, PlannerJudgmentError } from '@goodvibes/engine/platform/platform/core';
 
 const planner = new AdaptivePlanner();
 
@@ -83,7 +83,7 @@ planner.clearOverride();      // return to automatic selection
 `ConsecutiveErrorBreaker` guards against runaway error loops. It tracks consecutive all-failed turns and returns graduated signals:
 
 ```ts
-import { ConsecutiveErrorBreaker } from '@goodvibes-jev/engine/platform/platform/core';
+import { ConsecutiveErrorBreaker } from '@goodvibes/engine/platform/platform/core';
 
 const breaker = new ConsecutiveErrorBreaker();
 
@@ -183,7 +183,7 @@ held and refuses new messages; the next connection hands over a new sender.
 For long-lived clients where tokens expire, use `tokenStore` or `getAuthToken` instead of a static `authToken`. Reconnects automatically pick up the latest token:
 
 ```ts
-import { createMemoryTokenStore } from '@goodvibes-jev/engine/platform/auth';
+import { createMemoryTokenStore } from '@goodvibes/engine/platform/auth';
 
 const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',
@@ -239,7 +239,7 @@ percentage threshold or the safety buffer:
 import {
   checkAndCompact,
   getAutoCompactDecision,
-} from '@goodvibes-jev/engine/platform/platform/core';
+} from '@goodvibes/engine/platform/platform/core';
 
 const decision = getAutoCompactDecision({
   currentTokens,
@@ -269,7 +269,7 @@ if (result) {
 **Manual compaction** bypasses the threshold check:
 
 ```ts
-import { compactMessages } from '@goodvibes-jev/engine/platform/platform/core';
+import { compactMessages } from '@goodvibes/engine/platform/platform/core';
 
 const result = await compactMessages(ctx, providerRegistry);
 ```
@@ -298,7 +298,7 @@ Which messages fill the recent-conversation, tool-results and resolved-problems 
 `estimateConversationTokens` scans the current message list and uses a 4-chars-per-token heuristic. It is fast and non-blocking, designed to be called every turn.
 
 ```ts
-import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
+import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/core';
 
 const estimate = estimateConversationTokens(messages); // number
 ```
@@ -364,7 +364,7 @@ The health read model (`models.health` below) composes the overall status from t
 Use read models for derived UI state rather than subscribing to raw domain state. Read models are pre-computed projections that compose multiple selectors and expose stable surface contracts:
 
 ```ts
-import { createObservabilityReadModels } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+import { createObservabilityReadModels } from '@goodvibes/engine/platform/platform/runtime/ui';
 
 const models = createObservabilityReadModels(runtimeServices);
 // Each property is a UiReadModel<TSnapshot>: { getSnapshot(), subscribe(listener) }.

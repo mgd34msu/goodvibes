@@ -1,6 +1,6 @@
-import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { WorkspaceCheckpointManager } from '@goodvibes/engine/platform/platform/workspace';
 import { withCheckpointGuardSettings } from '../config/tui-extension-settings.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { RuntimeEventBus, SessionSurface } from '@/runtime/index.ts';
 
 /**

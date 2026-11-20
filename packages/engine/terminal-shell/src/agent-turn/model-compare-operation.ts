@@ -1,7 +1,7 @@
-import { assertCurrentToolEffect, assertCurrentToolExecution } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
+import { assertCurrentToolEffect, assertCurrentToolExecution } from '@goodvibes/engine/platform/platform/tools';
+import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
+import type { ToolExecuteOptions } from '@goodvibes/engine/platform/platform/tools';
+import type { ProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security';
 import type { AgentModelCompareArtifactStore, AgentModelCompareToolDeps } from './model-compare-types.js';
 import { agentResearchSourceOwner } from './protected-research-report.js';
 

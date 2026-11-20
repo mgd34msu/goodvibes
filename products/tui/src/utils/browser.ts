@@ -1,1 +1,1 @@
-export {openBrowser} from '@goodvibes-jev/engine/terminal-shell/cli-environment';
+export {openBrowser} from '@goodvibes/engine/terminal-shell/cli-environment';

@@ -16,7 +16,7 @@
  * lets the call fail on its parameter type, as it would have without repair.
  * Only a reading that acts on `true` or `false` is applied.
  */
-import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes/judgment';
 
 export const BOOLEAN_VALUE_OPTIONS = {
   true: 'The value says yes, on, enabled or true for this parameter.',

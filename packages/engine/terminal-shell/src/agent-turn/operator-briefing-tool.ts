@@ -1,9 +1,9 @@
-import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
-import { getOperatorWorkLedgerProject } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
-import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { createBrowserGoodVibesPlatform } from '@goodvibes/engine/platform/browser';
+import { getOperatorWorkLedgerProject } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import { createOperatorWorkLedgerReadClient } from '@goodvibes/engine/platform/platform/workflow/work-ledger/operator-read-client';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { requestDeadline, resolveConnectedHost, type ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { requireOperatorHttpBinding } from './operator-contract-routes.js';

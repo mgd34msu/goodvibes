@@ -26,10 +26,10 @@
  * (isReleased(), the same restore gate the render scheduler honors). No cursor
  * positioning is involved, so an OSC 9 emitted between frames is safe.
  */
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { allowTerminalWrite } from '@goodvibes-jev/engine/terminal-shell/terminal-output-guard';
-import { readBooleanConfig, type ConfigGet } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { allowTerminalWrite } from '@goodvibes/engine/terminal-shell/terminal-output-guard';
+import { readBooleanConfig, type ConfigGet } from '@goodvibes/engine/platform/platform/runtime/operations';
+import type { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
 
 export type TerminalNotifySignal = 'approval-wait' | 'turn-end' | 'agent-blocked';
 

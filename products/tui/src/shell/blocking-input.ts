@@ -1,6 +1,6 @@
-import { routeCardInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
-import { handleAskCardKey } from '@goodvibes-jev/engine/terminal-shell/ask-card-input';
-import type { PermissionRequest, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { routeCardInput } from '@goodvibes/engine/terminal-shell/blocking-permission-input';
+import { handleAskCardKey } from '@goodvibes/engine/terminal-shell/ask-card-input';
+import type { PermissionRequest, RememberTier } from '@goodvibes/engine/platform/platform/permissions';
 import type { HunkSelectionState } from '../permissions/hunk-selection.ts';
 
 export type PendingPermissionState = PermissionRequest & {

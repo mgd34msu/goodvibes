@@ -21,7 +21,7 @@ import { completeJudgmentView } from './complete-view.js';
  * costs extra review. Code counts a fact that is not a confident no (an
  * uncertain reading) toward the higher tier, so doubt is shown as risk.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** What the reading sees: the refs, the changed files, and the (bounded) unified diff. */
 export function semanticDiffView(range: string, changedFiles: readonly string[], diff: string): { range: string; changedFiles: string[]; diff: string } {

@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/render-bookmark-modal';
+export * from '@goodvibes/engine/terminal-shell/render-bookmark-modal';

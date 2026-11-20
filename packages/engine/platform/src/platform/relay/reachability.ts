@@ -23,7 +23,7 @@ import {
   type RelayRegistrationLogger,
   type RelayRegistrationRefusal,
   type RelayRegistrationStatus,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';
 import {
   deserializeRelayIdentity,
   generateRelayIdentity,
@@ -32,7 +32,7 @@ import {
   type RelayKeyPair,
   type RelayPairingPayload,
   type SerializedRelayIdentity,
-} from '@goodvibes-jev/engine/transport-core/relay';
+} from '@goodvibes/engine/transport-core/relay';
 
 /** Durable custody of the daemon's relay identity (adapter over SecretsManager). */
 export interface RelayIdentityStore {

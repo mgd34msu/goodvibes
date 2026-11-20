@@ -1,8 +1,8 @@
 /** Reconcile a final semantic reading across the decision-log/capture publication boundary. */
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { canonicalJson, type DecisionLog, type EntryType } from '@goodvibes-jev/judgment';
-import { captureJevDecisionContext, validateJevDecision, type JevDecision } from '@goodvibes-jev/judgment/decisions';
+import { canonicalJson, type DecisionLog, type EntryType } from '@goodvibes/judgment';
+import { captureJevDecisionContext, validateJevDecision, type JevDecision } from '@goodvibes/judgment/decisions';
 import type { AutonomousContinuation } from '../../gate/autonomous-decision.js';
 import { nativeConversationDecisionBinding, NATIVE_CONVERSATION_MAX_PROPOSALS, type NativeConversationCapture, type NativeConversationDecision } from './native-intake-types.js';
 import { NATIVE_INTAKE_DECISION_SITE } from './native-intake-decisions.js';

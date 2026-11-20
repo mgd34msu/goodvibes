@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import type { Contract } from './types.js';
 import type { ReadAccessFilter } from '../tools/shared/read-access.js';
 import { assertContractInputAdmission, authorizeContractInputPath, createContractInputAuthority, revokeContractInputAuthority } from './input-authority.js';

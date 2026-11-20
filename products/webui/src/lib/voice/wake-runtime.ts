@@ -40,7 +40,7 @@
  * `crossOriginIsolated`, rather than left at the library default of "as many as
  * the system has", which on a non-isolated origin means a failed initialisation.
  */
-import type { WakeInferenceSession, WakeTensor } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
+import type { WakeInferenceSession, WakeTensor } from '@goodvibes/engine/platform/platform/voice/wake/runtime';
 
 export type WakeBrowserBackend = 'wasm' | 'webgpu';
 

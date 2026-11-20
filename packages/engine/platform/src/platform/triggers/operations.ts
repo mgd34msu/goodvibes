@@ -11,7 +11,7 @@
  * daemon's coded refusal (remotely).
  */
 
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import type { TriggerManager } from './manager.js';
 import type { RegisterGrantInput } from './grants.js';
 import type { TriggerActionGrant, TriggerRecord, TriggerRunRecord } from './types.js';

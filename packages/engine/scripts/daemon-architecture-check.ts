@@ -57,7 +57,7 @@ export function daemonArchitecture(root: string): RuntimeArchitecture {
   };
 }
 
-const TERMINAL_SHELL_SPECIFIER = '@goodvibes-jev/engine/terminal-shell';
+const TERMINAL_SHELL_SPECIFIER = '@goodvibes/engine/terminal-shell';
 
 /** Names a source file exports as runtime values (types are erased and cannot be a dependency). */
 function runtimeExportNames(file: string): Set<string> {
@@ -134,7 +134,7 @@ export function agentTuiSourceImportProblems(root: string): string[] {
     for (const specifier of runtimeImportSpecifiers(readFileSync(file, 'utf8'))) {
       const reachesTui = specifier.startsWith('.')
         ? resolve(dirname(file), specifier).startsWith(tuiRoot)
-        : specifier === '@goodvibes-jev/tui' || specifier.startsWith('@goodvibes-jev/tui/');
+        : specifier === '@goodvibes/tui' || specifier.startsWith('@goodvibes/tui/');
       if (reachesTui) problems.push(`agent imports TUI source: ${file} -> ${specifier}; move the shared code to packages/engine/terminal-shell/src`);
     }
   }

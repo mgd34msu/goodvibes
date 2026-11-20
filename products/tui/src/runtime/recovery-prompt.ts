@@ -56,8 +56,8 @@
  */
 import { statSync } from 'node:fs';
 import { checkRecoveryFile, checkRecoveryForSession, removeRecoveryPoint } from '@/runtime/index.ts';
-import { holdOfferedRecoverySnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { describeCrashRecovery, type CrashRecoveryReport } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
+import { holdOfferedRecoverySnapshot } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { describeCrashRecovery, type CrashRecoveryReport } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
 import type { RecoveryFileInfo, SessionSurface } from '@/runtime/index.ts';
 import type { SelectionItem, SelectionResult } from '../input/selection-modal.ts';
 

@@ -1,7 +1,7 @@
 import type {
   OperatorMethodInput,
   OperatorMethodOutput,
-} from '@goodvibes-jev/engine/contracts';
+} from '@goodvibes/engine/contracts';
 
 /** Response shape returned by `platform.auth.current()`, the daemon's view of the current principal. */
 export type GoodVibesCurrentAuth = OperatorMethodOutput<'control.auth.current'>;

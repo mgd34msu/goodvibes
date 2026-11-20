@@ -1,9 +1,9 @@
-import { createCloudflareCommand } from '@goodvibes-jev/engine/terminal-shell/cloudflare-command';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import { createCloudflareCommand } from '@goodvibes/engine/terminal-shell/cloudflare-command';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
 import { createCloudflareDaemonClient } from '../../runtime/cloudflare-control-plane.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 
-export { readCloudflareLine } from '@goodvibes-jev/engine/terminal-shell/cloudflare-command';
+export { readCloudflareLine } from '@goodvibes/engine/terminal-shell/cloudflare-command';
 
 /** /cloudflare over the daemon this terminal dials; `setup` opens the onboarding wizard's Cloudflare step. */
 export function registerCloudflareRuntimeCommands(registry: CommandRegistry): void {

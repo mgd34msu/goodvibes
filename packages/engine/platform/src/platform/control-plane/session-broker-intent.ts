@@ -1,4 +1,4 @@
-import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
+import { EngineErrorCodes } from '@goodvibes/engine/errors';
 import type { AutomationRouteBinding } from '../automation/routes.js';
 import type {
   SharedSessionInputIntent,

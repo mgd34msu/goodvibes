@@ -1,6 +1,6 @@
 # Semver policy
 
-This document defines what constitutes a breaking change, a minor addition, or a patch fix for the `@goodvibes-jev/engine` package and its explicit public subpaths. It is the authoritative reference used when tagging releases and reviewing CHANGELOG entries.
+This document defines what constitutes a breaking change, a minor addition, or a patch fix for the `@goodvibes/engine` package and its explicit public subpaths. It is the authoritative reference used when tagging releases and reviewing CHANGELOG entries.
 
 Violations of this policy are a release gate failure. A version bump that misclassifies a breaking change as minor or patch must be corrected before publish.
 
@@ -10,7 +10,7 @@ Violations of this policy are a release gate failure. A version bump that miscla
 
 The following changes require a major version bump:
 
-- **Removing a public export** from any subpath export entry (e.g. removing `createGoodVibesPlatform` from `@goodvibes-jev/engine/platform` or any equivalent factory from a named subpath)
+- **Removing a public export** from any subpath export entry (e.g. removing `createGoodVibesPlatform` from `@goodvibes/engine/platform` or any equivalent factory from a named subpath)
 - **Changing a public export's type signature in a narrowing direction**: removing a property from a public interface or type, narrowing an accepted parameter type, making an optional field required, or removing a union member from a parameter type
 - **Renaming or changing the value of an `EngineErrorKind` union member** (e.g. renaming `'auth'` to `'authentication'`, or `'not-found'` to `'notFound'`). The full current union has 12 values: `'auth' | 'config' | 'contract' | 'network' | 'not-found' | 'protocol' | 'rate-limit' | 'service' | 'internal' | 'tool' | 'validation' | 'unknown'`
 - **Renaming a platform factory function** (e.g. renaming `createGoodVibesPlatform`, `createBrowserGoodVibesPlatform`, `createWebGoodVibesPlatform`, `createReactNativeGoodVibesPlatform`, `createExpoGoodVibesPlatform`, `createPeerApiClient`, or `createGoodVibesAuthClient`)
@@ -52,7 +52,7 @@ The following changes are patch-level:
 The following are explicitly out of scope and may change at any time without a major or minor bump:
 
 - **Repository source file paths.** These are not part of the public surface and are subject to change without notice. Do not bypass the package export map.
-- **`dist/` internal file paths.** Consume the platform via the package exports map (e.g. `@goodvibes-jev/engine/platform`, `@goodvibes-jev/engine/platform/browser`), not by importing from `dist/` file paths directly.
+- **`dist/` internal file paths.** Consume the platform via the package exports map (e.g. `@goodvibes/engine/platform`, `@goodvibes/engine/platform/browser`), not by importing from `dist/` file paths directly.
 - **Error `.message` strings.** These are human-readable and may be improved across releases. Use `err.kind` (an `EngineErrorKind` value) and `err.code` for programmatic handling, not `err.message`.
 - **`GoodVibesError` subclass identity.** Do not use `instanceof ConfigurationError`, `instanceof ContractError`, etc. for control flow. Use `err.kind` instead. Subclass structure is internal.
 
@@ -72,7 +72,7 @@ Example:
 
 ```ts
 /**
- * Use `createBrowserGoodVibesPlatform` from `@goodvibes-jev/engine/platform/browser` for browser/web clients.
+ * Use `createBrowserGoodVibesPlatform` from `@goodvibes/engine/platform/browser` for browser/web clients.
  * (`createWebGoodVibesPlatform` from `./web` is an equivalent alias.)
  */
 export function createBrowserGoodVibesPlatform(/* ... */) { /* ... */ }

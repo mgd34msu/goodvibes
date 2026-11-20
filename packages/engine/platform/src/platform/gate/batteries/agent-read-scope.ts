@@ -1,5 +1,5 @@
 /** Whether platform-source work was requested (agents/platform-work-reading.ts). The observation grants no capability. */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 export const agentReadScope = defineBattery({
   name: 'engine.gate.agent-read-scope', version: 2, accuracyFloor: 0.9,

@@ -1,4 +1,4 @@
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { assertRedactionCurrent } from './redaction-reading.js';
 
 /** The role of a structured field name: credential material, owner-profile data, free text, or an ordinary fact. */

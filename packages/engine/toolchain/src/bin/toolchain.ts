@@ -7,7 +7,7 @@
  * toolchain was its own package: bunx resolves the bin named after the
  * package's final path segment, and without this dispatcher it silently fell
  * back to the FIRST bin in the map (engine-pin-gate) with the intended tool name
- * as a stray argument. The toolchain now ships inside @goodvibes-jev/engine,
+ * as a stray argument. The toolchain now ships inside @goodvibes/engine,
  * whose bins include this one; every tool also stays directly invocable by
  * its own `goodvibes-*` bin name.
  *

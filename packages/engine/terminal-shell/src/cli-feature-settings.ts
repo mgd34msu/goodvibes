@@ -21,11 +21,11 @@
  *               fetch.sanitizeMode) has no off position at all.
  */
 
-import { CONFIG_SCHEMA, type ConfigKey, type ConfigManager, type ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
-import { FEATURE_SETTINGS, deriveFeatureState } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/feature-settings';
-import type { FeatureSetting } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { CONFIG_SCHEMA, type ConfigKey, type ConfigManager, type ConfigSetting } from '@goodvibes/engine/platform/platform/config';
+import { FEATURE_SETTINGS, deriveFeatureState } from '@goodvibes/engine/platform/platform/runtime/feature-flags/feature-settings';
+import type { FeatureSetting } from '@goodvibes/engine/platform/platform/runtime/state';
 
-export type { FeatureSetting } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+export type { FeatureSetting } from '@goodvibes/engine/platform/platform/runtime/state';
 
 /** Every capability by id, in platform declaration order. */
 export const FEATURE_SETTINGS_BY_ID: ReadonlyMap<string, FeatureSetting> = new Map(

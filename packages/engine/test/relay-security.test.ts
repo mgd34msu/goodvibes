@@ -19,7 +19,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { toBase64Url } from '@goodvibes-jev/engine/transport-core/relay';
+import { toBase64Url } from '@goodvibes/engine/transport-core/relay';
 import { RELAY_VIA_HEADER } from '../daemon-api/src/relay-registration.js';
 import { STEP_UP_ASSERTION_HEADER, type StepUpAssertionVerifier } from '../platform/src/platform/relay/step-up-policy.js';
 import { relayRequestFactsFrom, wrapDispatchWithStepUp } from '../platform/src/platform/relay/daemon-wiring.js';

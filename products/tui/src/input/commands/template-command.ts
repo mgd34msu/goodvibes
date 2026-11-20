@@ -5,12 +5,12 @@
  */
 import type { CommandContext } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
-import { TemplateManager, parseTemplateArgs, type TemplateScope } from '@goodvibes-jev/engine/platform/platform/templates';
-import { RefusalError, formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { defineCommand, defineList, type InputDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { choiceInput, doAction, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { TemplateManager, parseTemplateArgs, type TemplateScope } from '@goodvibes/engine/platform/platform/templates';
+import { RefusalError, formatRefusal, readRefusal } from '@goodvibes/engine/errors';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { defineCommand, defineList, type InputDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { choiceInput, doAction, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { requireShellPaths } from './runtime-services.ts';
 
 function managerOf(ctx: CommandContext): TemplateManager {

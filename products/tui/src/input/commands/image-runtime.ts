@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { externalUrlLaunchers } from '@goodvibes-jev/engine/platform/platform/utils';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
-import { createMediaCommand } from '@goodvibes-jev/engine/terminal-shell/media-command';
+import { externalUrlLaunchers } from '@goodvibes/engine/platform/platform/utils';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
+import { createMediaCommand } from '@goodvibes/engine/terminal-shell/media-command';
 
 /** Ask the system viewer to open a file; false where there is no desktop to show it on. */
 function openInViewer(path: string): Promise<boolean> {

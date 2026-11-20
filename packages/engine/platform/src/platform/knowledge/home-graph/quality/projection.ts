@@ -1,4 +1,4 @@
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../../../gate/judgment-input.js';
 import type { KnowledgeNodeRecord } from '../../types.js';
 import { HomeGraphQualityHeldError as Held, type HomeGraphQualityInput, type HomeGraphQualityQuestion } from './types.js';

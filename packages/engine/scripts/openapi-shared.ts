@@ -87,7 +87,7 @@ export function replayKey(method: OperatorMethodContract): { readonly extension:
 
 /**
  * The error body every daemon route answers with (`StructuredDaemonErrorBody`
- * in @goodvibes-jev/engine/errors), for both documents. `knownCodes` lists the
+ * in @goodvibes/engine/errors), for both documents. `knownCodes` lists the
  * codes a client may switch on; any other code is opaque.
  */
 export function errorBodySchema(knownCodes: readonly string[]): JsonSchema {

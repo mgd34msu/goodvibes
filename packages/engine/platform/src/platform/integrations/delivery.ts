@@ -8,7 +8,7 @@ import {
   type FailureTransience,
   type TransienceBasis,
   type TransienceOptions,
-} from '@goodvibes-jev/engine/errors';
+} from '@goodvibes/engine/errors';
 import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
 import type { ConfigManager } from '../config/manager.js';
 import { readDocument, writeDocument } from '../utils/atomic-json-store.js';
@@ -46,7 +46,7 @@ export type { FailureTransience, TransienceBasis, TransienceOptions };
 
 // One retry decision for every site: a DeliveryError states its class through
 // `recoverable`, which the shared decision honours first.
-export { readFailureTransience, structuredTransience } from '@goodvibes-jev/engine/errors';
+export { readFailureTransience, structuredTransience } from '@goodvibes/engine/errors';
 
 /**
  * Whether a delivery failure is worth another attempt, decided from the

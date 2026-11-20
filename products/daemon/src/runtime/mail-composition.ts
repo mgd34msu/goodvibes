@@ -24,10 +24,10 @@ import {
   EmailReplySubjectSourceOwner,
   type EmailServiceDeps,
   type SurfaceEmailConfigProblem,
-} from '@goodvibes-jev/engine/platform/platform/email';
-import type { Secret } from '@goodvibes-jev/engine/platform/platform/security';
-import { currentUntrustedContentScope, getProcessUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
-import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
+} from '@goodvibes/engine/platform/platform/email';
+import type { Secret } from '@goodvibes/engine/platform/platform/security';
+import { currentUntrustedContentScope, getProcessUntrustedContentLedger } from '@goodvibes/engine/platform/platform/security';
+import { nodeEmailTransport } from '@goodvibes/engine/platform/platform/email/node';
 
 /** The untrusted-content window of mail read by background work, which no session's turn sees. */
 const BACKGROUND_MAIL_SCOPE = 'mail:background';

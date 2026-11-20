@@ -15,15 +15,15 @@
  * admission and drains preflight, browser operations, interrupted recovery and
  * accepted reply readings before the stores/catalog can be reused.
  */
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { controlPlaneStorePath } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { createJevMerchantJudge, readCvvHandling, PaymentReplyInbox, reportOrderConfirmation, mailboxAddress, SecurityCodeRequests } from '@goodvibes-jev/engine/platform/platform/payments';
-import type { BudgetLedger, PaymentsConfigReader } from '@goodvibes-jev/engine/platform/platform/payments';
-import { getProcessUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { controlPlaneStorePath } from '@goodvibes/engine/platform/platform/control-plane';
+import type { GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
+import { createJevMerchantJudge, readCvvHandling, PaymentReplyInbox, reportOrderConfirmation, mailboxAddress, SecurityCodeRequests } from '@goodvibes/engine/platform/platform/payments';
+import type { BudgetLedger, PaymentsConfigReader } from '@goodvibes/engine/platform/platform/payments';
+import { getProcessUntrustedContentLedger } from '@goodvibes/engine/platform/platform/security';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { SecretsManager } from '../config/secrets.js';
-import type { ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
+import type { ChannelDeliveryRouter } from '@goodvibes/engine/platform/platform/channels';
 import type { ShellPathService } from './index.js';
 import {
   DaemonApprovalStore,
@@ -49,14 +49,14 @@ import {
   type PaymentNotifier,
   type RestoredInboxWindow,
   type PaymentsSecretStore,
-} from '@goodvibes-jev/engine/platform/platform/payments';
+} from '@goodvibes/engine/platform/platform/payments';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { BrowserCheckoutSeamHolder } from './browser-checkout-seam-holder.js';
 import type { OwnerMailHandler, OwnerMailRelay } from './owner-mail-relay.js';
 
 export interface PaymentsCompositionOptions {
-  readonly paymentContinuationOwner?: Pick<import('@goodvibes-jev/engine/platform/platform/payments').NativeCheckoutWindowRestorationOptions, 'pairing' | 'scopes'> | undefined;
-  readonly nativeDataWriter?: import('@goodvibes-jev/engine/platform/platform/runtime/self-update').NativeDataWriteOwner | undefined;
+  readonly paymentContinuationOwner?: Pick<import('@goodvibes/engine/platform/platform/payments').NativeCheckoutWindowRestorationOptions, 'pairing' | 'scopes'> | undefined;
+  readonly nativeDataWriter?: import('@goodvibes/engine/platform/platform/runtime/self-update').NativeDataWriteOwner | undefined;
   /** `set` writes the owner's answer to a spending-limit offer; absent, no offer is made. */
   readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'preparePostalAddress' | 'resolveForConsumer' | 'set'>>;
   readonly shellPaths: ShellPathService;
@@ -74,7 +74,7 @@ export interface PaymentsCompositionOptions {
    * In a group: where the other machines' spend is read and this machine's is
    * told (the authority record), so the daily budget is spent once in the group.
    */
-  readonly groupSpend?: import('@goodvibes-jev/engine/platform/platform/payments').GroupSpendSource | undefined;
+  readonly groupSpend?: import('@goodvibes/engine/platform/platform/payments').GroupSpendSource | undefined;
   /** The name of the machine that runs payments when this one does not; named in the refusal. */
   readonly paymentsHolder?: (() => string | null) | undefined;
   /** Where the checkout pair reads the browser-checkout seam; see this file's header. */

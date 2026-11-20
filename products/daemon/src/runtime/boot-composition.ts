@@ -1,13 +1,13 @@
 /** Explicit production boot operations. The executable opts in separately. */
-import type { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
-import { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import { controlPlaneStorePath, registerNotificationDeadLetterGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { synchronizeConfiguredServices } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
-import { NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { describeFatalFailure } from '@goodvibes-jev/engine/platform/platform/daemon/fatal-boot-report';
-import { checkDaemonGoogleAtBoot } from '@goodvibes-jev/engine/platform/platform/google';
-import { nodeGoogleFilePort } from '@goodvibes-jev/engine/platform/platform/google/node';
+import type { ServiceRegistry } from '@goodvibes/engine/platform/platform/config';
+import { Notifier } from '@goodvibes/engine/platform/platform/integrations';
+import { controlPlaneStorePath, registerNotificationDeadLetterGatewayMethods } from '@goodvibes/engine/platform/platform/control-plane';
+import { synchronizeConfiguredServices } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
+import { NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { describeFatalFailure } from '@goodvibes/engine/platform/platform/daemon/fatal-boot-report';
+import { checkDaemonGoogleAtBoot } from '@goodvibes/engine/platform/platform/google';
+import { nodeGoogleFilePort } from '@goodvibes/engine/platform/platform/google/node';
 import type { DaemonBootOperations } from './boot-tasks.js';
 import { createDaemonPluginLoaderDeps } from './plugin-composition.js';
 import type { RuntimeServices } from './runtime-services-types.js';

@@ -1,10 +1,10 @@
 import { isDeepStrictEqual } from 'node:util';
-import { readFileObservation } from '@goodvibes-jev/engine/platform/platform/utils';
+import { readFileObservation } from '@goodvibes/engine/platform/platform/utils';
 import { lstatSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { assertCurrentToolEffect, assertCurrentToolExecution, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/types';
-import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
+import { assertCurrentToolEffect, assertCurrentToolExecution, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector } from '@goodvibes/engine/platform/platform/tools';
+import type { ToolExecuteOptions } from '@goodvibes/engine/platform/platform/types';
+import { resolveAndValidatePath } from '@goodvibes/engine/platform/platform/utils';
 import { containsSecretLikeText } from './memory-safety.js';
 
 export interface AgentLocalStateTarget {

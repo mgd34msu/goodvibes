@@ -13,4 +13,4 @@ export type {
   WebSearchServiceLike,
   WebSearchTimeRange,
   WebSearchVerbosity,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';

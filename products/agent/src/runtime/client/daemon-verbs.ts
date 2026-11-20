@@ -6,7 +6,7 @@
  * The POLICY for every seam this agent crosses, raising an approval, writing a
  * daemon-owned setting, storing a credential, receiving inbound session work,
  * answering a conversation-rewind question, reaching a paired phone, lives in
- * `@goodvibes-jev/engine/platform/platform/runtime/client`. Each of those modules takes
+ * `@goodvibes/engine/platform/platform/runtime/client`. Each of those modules takes
  * one thing: a `DaemonVerbCaller`, two methods.
  *
  * This file is that one thing, for this product. Resolving WHICH host this
@@ -38,19 +38,19 @@
  * and must never be laundered into an empty result.
  */
 import { statSync } from 'node:fs';
-import { getOperatorMethod } from '@goodvibes-jev/engine/contracts';
-import { validateOperatorResponse } from '@goodvibes-jev/engine/operator-client/client-core';
-import { OwnedSelectionObservation, captureRemoteSettingsPrecondition } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import { agentHostPairingStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-pairing-store';
-import { connectedHostOperatorTokenPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
+import { getOperatorMethod } from '@goodvibes/engine/contracts';
+import { validateOperatorResponse } from '@goodvibes/engine/operator-client/client-core';
+import { OwnedSelectionObservation, captureRemoteSettingsPrecondition } from '@goodvibes/engine/platform/platform/runtime/client';
+import { assertProjectionCurrent } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import { agentHostPairingStorePath } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-pairing-store';
+import { connectedHostOperatorTokenPath } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
 import { resolveConnectedHostDialEnabled, captureRemoteSettingsImportPrecondition, observeImportFile,
-  assertImportFileCurrent } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { readConnectedHostOperatorToken, connectedHostTokenRequiredMessage, type ConnectedHostCredentialSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
-import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
-import { ConnectedHostVerbError } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-verb-error';
+  assertImportFileCurrent } from '@goodvibes/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
+import { readConnectedHostOperatorToken, connectedHostTokenRequiredMessage, type ConnectedHostCredentialSource } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
+import { resolveConnectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { ConnectedHostVerbError } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-verb-error';
 
 export interface AgentDaemonVerbCallerOptions {
   readonly configManager: ConfigManager;

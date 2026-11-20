@@ -1,6 +1,6 @@
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { assertSynchronousCurrent } from './reading-lifetime.js';
-import type { CallOptions } from '@goodvibes-jev/judgment/decisions';
+import type { CallOptions } from '@goodvibes/judgment/decisions';
 import { readInboundMessage, type InboundReading } from './inbound-reading.js';
 /**
  * Channel-reply resolution of pending work proposals.

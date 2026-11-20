@@ -4,8 +4,8 @@
  * research run, a source in the queue and a saved report are each one call of
  * an Agent research tool, run as the owner's own act (owner-tool-call.ts).
  */
-import { defineCommand, type ActionDescription, type InputDescription } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { choiceInput, doAction as doNow, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { defineCommand, type ActionDescription, type InputDescription } from '@goodvibes/engine/terminal-shell/command-actions';
+import { choiceInput, doAction as doNow, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { commandRefusal } from './confirmation.ts';
 import { given, ownerToolCall, runOwnerToolCall, splitLines, splitWords } from './owner-tool-call.ts';

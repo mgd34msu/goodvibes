@@ -21,7 +21,7 @@
  * `secrets` as yes (gate/reading.ts), so doubt costs a question, never an
  * unasked side effect.
  */
-import { type JsonValue, defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { type JsonValue, defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 import { placeholderTelegramBotToken } from '../../utils/fixture-credentials.js';
 
 /** What kind of action a call is, in the execution ledger's vocabulary. */

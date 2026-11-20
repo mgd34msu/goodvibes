@@ -10,7 +10,7 @@ import { createSimpleGit } from '../git/optional-simple-git.js';
 import { GitService, readGitWorktreeCreation, type GitWorktreeCreationObservation } from '../git/service.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { done, failedOutcome, observe, refusal, type EffectOutcome } from '@goodvibes-jev/engine/errors';
+import { done, failedOutcome, observe, refusal, type EffectOutcome } from '@goodvibes/engine/errors';
 
 
 /**

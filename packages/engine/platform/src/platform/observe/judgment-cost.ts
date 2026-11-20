@@ -1,4 +1,4 @@
-import type { DecisionEntry } from '@goodvibes-jev/judgment';
+import type { DecisionEntry } from '@goodvibes/judgment';
 import { CostAttributionService, type CostAttributionState, type CostUsageRecord, type ResolvePricing } from '../runtime/cost/attribution.js';
 import { UNNAMED } from './log-readings.js';
 

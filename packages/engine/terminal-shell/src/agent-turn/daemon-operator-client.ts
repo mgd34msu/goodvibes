@@ -20,7 +20,7 @@
  * the unreachable path without a network, a port, or a live daemon.
  */
 
-import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
+import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes/engine/platform/contracts';
 import {
   createConnectedHost,
   isHostFailure,

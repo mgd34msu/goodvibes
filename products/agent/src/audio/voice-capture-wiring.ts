@@ -1,4 +1,4 @@
-import { createVoiceCapturePorts, wireTerminalWakeCapture } from '@goodvibes-jev/engine/terminal-shell/audio/voice-capture-composition';
+import { createVoiceCapturePorts, wireTerminalWakeCapture } from '@goodvibes/engine/terminal-shell/audio/voice-capture-composition';
 /**
  * voice-capture-wiring.ts, composes this surface's microphone path.
  *
@@ -15,10 +15,10 @@ import { createVoiceCapturePorts, wireTerminalWakeCapture } from '@goodvibes-jev
  * which is what keeps this file out of the shell-UI layers.
  */
 
-import '@goodvibes-jev/engine/platform/platform/utils';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
-import type { AudioInputDeviceEnumerator } from '@goodvibes-jev/engine/platform/platform/voice/capture';
+import '@goodvibes/engine/platform/platform/utils';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { VoiceProviderRegistry, VoiceService } from '@goodvibes/engine/platform/platform/voice';
+import type { AudioInputDeviceEnumerator } from '@goodvibes/engine/platform/platform/voice/capture';
 import type { VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { createAgentCaptureOpener } from './capture.ts';
 import { playActivationSound } from './activation-sound.ts';
@@ -27,7 +27,7 @@ import type { StreamingAudioPlayer } from './player.ts';
 import { createVoiceSttGateway } from '../core/voice-stt-gateway.ts';
 import { startWakeRuntime, wireWakeRuntime } from './wake-runtime.ts';
 import { createInputDeviceEnumerator } from './input-devices.ts';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 
 export interface VoiceCaptureWiringDeps {
   readonly configManager: ConfigManager;

@@ -1,4 +1,4 @@
-import { defineBattery, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, yesNo } from '@goodvibes/judgment';
 import { UNIT_JUDGE_BANDS } from './unit-judge.js';
 
 /** Compatibility is semantic; owner identity, permission, patch applicability,

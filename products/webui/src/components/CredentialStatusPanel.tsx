@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { readDeclaredProviderCredential } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
+import { readDeclaredProviderCredential } from '@goodvibes/engine/platform/platform/judgment-browser/catalogs';
 /**
  * CredentialStatusPanel, the display-site adoption of the cross-surface
  * credential-status facade (src/lib/provider-status.ts: deriveCredentialAvailability

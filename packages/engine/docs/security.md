@@ -88,7 +88,7 @@ The web UI signs in on its direct route with `POST /api/browser-session`: it pre
 
 A browser attaches the cookie whatever page made the request, and `SameSite` does not stop a page on the same host at another port. So a state-changing request (anything but GET, HEAD and OPTIONS) that carries no `Authorization: Bearer` credential, and so rides the cookie, is served only when its `Origin` is the daemon's own or one listed in `controlPlane.cors.allowedOrigins`; otherwise it is refused with 403 `ORIGIN_NOT_ALLOWED`. The control-plane socket applies the same rule to its upgrade (`daemon/http/browser-origin.ts`).
 
-The session cookie is set on login and cleared on logout by the daemon's internal cookie builders (`buildOperatorSessionCookie()` / `buildExpiredOperatorSessionCookie()`). These builders are daemon-host HTTP wiring and are **not** exported from the `@goodvibes-jev/engine/platform/platform/security` barrel.
+The session cookie is set on login and cleared on logout by the daemon's internal cookie builders (`buildOperatorSessionCookie()` / `buildExpiredOperatorSessionCookie()`). These builders are daemon-host HTTP wiring and are **not** exported from the `@goodvibes/engine/platform/platform/security` barrel.
 
 **Role model:**
 - Users may have any combination of string roles
@@ -99,7 +99,7 @@ The session cookie is set on login and cleared on logout by the daemon's interna
 
 ## Token management
 
-**Public subpath:** `@goodvibes-jev/engine/platform/platform/security`: exports `ApiTokenAuditor`, the `TokenScopePolicy` type, `UserAuthManager`, `isOperatorAdmin`, and `authenticateOperatorToken`. (The operator session cookie builders referenced above are internal daemon wiring and are not part of this barrel.)
+**Public subpath:** `@goodvibes/engine/platform/platform/security`: exports `ApiTokenAuditor`, the `TokenScopePolicy` type, `UserAuthManager`, `isOperatorAdmin`, and `authenticateOperatorToken`. (The operator session cookie builders referenced above are internal daemon wiring and are not part of this barrel.)
 
 ### Sub-agent spawning limits
 
@@ -156,7 +156,7 @@ On rotation: call `deregisterToken(oldId)` then `registerToken(newMetadata)` to 
 
 ## Companion app pairing
 
-**Public subpath:** `@goodvibes-jev/engine/platform/platform/pairing` (daemon embedders).
+**Public subpath:** `@goodvibes/engine/platform/platform/pairing` (daemon embedders).
 
 Pairing connects a companion app or browser to the daemon without requiring the user to
 manually enter credentials, by scanning a QR code or opening a deep link. For the full
@@ -277,7 +277,7 @@ The `fetch` tool sanitizes responses by default (`fetch.sanitizeMode`, default `
 
 ## Secret management
 
-**Public subpath:** `@goodvibes-jev/engine/platform/platform/config` (daemon embedders).
+**Public subpath:** `@goodvibes/engine/platform/platform/config` (daemon embedders).
 
 ### SecretsManager
 
@@ -316,7 +316,7 @@ Slack setup uses this same URI mechanism. Direct setup writes Slack token values
 
 ## The gate
 
-**Public subpaths:** `@goodvibes-jev/engine/platform/platform/gate` (the boundary, the presets, the stakes reading and surface authority) and `@goodvibes-jev/engine/platform/platform/gate/policy` (the policy and posture runtimes the TUI and agent call). `@goodvibes-jev/engine/platform/platform/runtime` keeps the `security.*` namespace for policy simulation and signed policy bundles.
+**Public subpaths:** `@goodvibes/engine/platform/platform/gate` (the boundary, the presets, the stakes reading and surface authority) and `@goodvibes/engine/platform/platform/gate/policy` (the policy and posture runtimes the TUI and agent call). `@goodvibes/engine/platform/platform/runtime` keeps the `security.*` namespace for policy simulation and signed policy bundles.
 
 The gate replaces the old permission layer. It is the one path every tool call takes before it runs, and `PermissionManager` (`platform/permissions/manager.ts`) runs it. Code first settles who decides the call; only a call left to judgment passes the boundary and graduated autonomy: Jev reads what the call does, code composes the reading into the call's stakes, and the active preset maps the stakes to allow, ask or deny.
 
@@ -448,7 +448,7 @@ The `AuthenticatedPrincipal` type carries a `principalKind` (`user` | `bot` | `s
 
 ### Bootstrap credential file
 
-**Note:** The bootstrap credential file is written internally during first-boot bootstrap only (`rotatePassword()` deletes it); the only public `UserAuthManager` method that touches it directly is `clearBootstrapCredentialFile()` (accessed as `authManager.clearBootstrapCredentialFile()`). The `UserAuthManager` class is importable from `@goodvibes-jev/engine/platform/platform/security`; host code reaches the configured, operational instance through daemon/runtime composition rather than instantiating it ad hoc.
+**Note:** The bootstrap credential file is written internally during first-boot bootstrap only (`rotatePassword()` deletes it); the only public `UserAuthManager` method that touches it directly is `clearBootstrapCredentialFile()` (accessed as `authManager.clearBootstrapCredentialFile()`). The `UserAuthManager` class is importable from `@goodvibes/engine/platform/platform/security`; host code reaches the configured, operational instance through daemon/runtime composition rather than instantiating it ad hoc.
 
 #### What it is and when it is created
 

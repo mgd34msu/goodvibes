@@ -1,5 +1,5 @@
 /** Shared rendered transcript metadata; execution authority stays in platform core. */
-import type { BlockMeta as PlatformBlockMeta } from '@goodvibes-jev/engine/platform/platform/core';
+import type { BlockMeta as PlatformBlockMeta } from '@goodvibes/engine/platform/platform/core';
 /**
  * TUI extends the platform BlockMeta with rendering position fields, plus a
  * TUI-only block type: 'tool_group' is the synthetic header block that folds

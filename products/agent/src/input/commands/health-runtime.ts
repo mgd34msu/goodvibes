@@ -5,15 +5,15 @@ import {
   collectMcpLifecycleIssues,
   collectContinuityIssues,
   formatHealthStatusValue,
-} from '@goodvibes-jev/engine/terminal-shell/health-findings';
-import '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/terminal-shell/health-findings';
+import '@goodvibes/engine/platform/platform/config';
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '@/runtime/index.ts';
-import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
-import { formatDoctorReport } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/core';
+import { formatDoctorReport } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { createHealthCommand, type HealthArea } from '@goodvibes-jev/engine/terminal-shell/health-command';
-import type { CommandReport } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { isSetupIssue } from '@goodvibes-jev/engine/terminal-shell/setup-review';
+import { createHealthCommand, type HealthArea } from '@goodvibes/engine/terminal-shell/health-command';
+import type { CommandReport } from '@goodvibes/engine/terminal-shell/command-actions';
+import { isSetupIssue } from '@goodvibes/engine/terminal-shell/setup-review';
 import { formatRuntimeStateSnapshot, snapshotRuntimeState } from '@/runtime/index.ts';
 import type { CliCommandRuntime } from '../../cli/management.ts';
 import { handleCompatCommand } from '../../cli/agent-knowledge-command.ts';
@@ -21,7 +21,7 @@ import { parseGoodVibesCli } from '../../cli/parser.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { refuseCliParseErrors } from './cli-command-output.ts';
 import { buildSetupReviewSnapshot } from './local-setup-review.ts';
-import { setupReviewLines } from '@goodvibes-jev/engine/terminal-shell/setup-review';
+import { setupReviewLines } from '@goodvibes/engine/terminal-shell/setup-review';
 import { describeApprovalsUnavailable } from '../../runtime/client/approvals-view.ts';
 import { buildProviderAccountSnapshot } from '@/runtime/index.ts';
 import {

@@ -27,7 +27,7 @@ There are four ways to call a method:
 | The method's REST route | The method has one (`GET /api/sessions`, `POST /api/sessions/{sessionId}/follow-up`). |
 | `POST /api/control-plane/methods/<id>/invoke` | The method has no REST route (all `sessions.hosted.*`, `pairing.*`, `fleet.*`, `inbox.*`, `relay.*`, `tailscale.*`, and others), or you want one route for everything. |
 | A `call` frame on the WebSocket `/api/control-plane/ws` | You already hold a WebSocket open for events. |
-| The SDK (`@goodvibes-jev/engine`) | You write TypeScript or JavaScript. See "SDK entry points". |
+| The SDK (`@goodvibes/engine`) | You write TypeScript or JavaScript. See "SDK entry points". |
 
 The daemon describes itself:
 
@@ -441,7 +441,7 @@ Every code with its HTTP status, meaning and whether to retry is in the referenc
 
 ### SDK kinds
 
-The SDK (`@goodvibes-jev/engine/errors`) turns every error into a `GoodVibesError` with a `kind`, computed from the wire `category` (for example `bad_request` becomes `validation`, `rate_limit` becomes `rate-limit`). The full mapping is "Categories and kinds" in the reference. The kind `contract` exists only in the client: the SDK raises it itself, for example when `operator.invoke()` is asked for an invoke-only method (`CONTRACT_MISMATCH`) or a response does not match the contract (`ContractError`). A daemon never sends `category` `contract`.
+The SDK (`@goodvibes/engine/errors`) turns every error into a `GoodVibesError` with a `kind`, computed from the wire `category` (for example `bad_request` becomes `validation`, `rate_limit` becomes `rate-limit`). The full mapping is "Categories and kinds" in the reference. The kind `contract` exists only in the client: the SDK raises it itself, for example when `operator.invoke()` is asked for an invoke-only method (`CONTRACT_MISMATCH`) or a response does not match the contract (`ContractError`). A daemon never sends `category` `contract`.
 
 ### Deciding whether to retry
 
@@ -666,7 +666,7 @@ How to read it:
 - To tie your input to its turn: `TURN_SUBMITTED` carries `payload.origin.metadata.correlationId` = `session-input:<input.id>`, the `input.id` the follow-up answered with. Take the `turnId` from that frame; every later turn frame carries it.
 - `STREAM_DELTA` carries text as it arrives; `provisional: true` text may still be revised.
 - A turn ends with exactly one of `TURN_COMPLETED` (with the final `response` and `stopReason`), `TURN_ERROR`, `TURN_CANCEL` or `PREFLIGHT_FAIL`. Wait for one of these with your `turnId`. The `hosted-session-turn-ended` update can arrive before `TURN_COMPLETED` (it did in the capture above); no order between them is promised, so do not stop on it.
-- `TURN_ERROR` carries the facts the terminal programs word their failure row from: `status` and `code` when the provider failure had them, `attempts` and `attemptTimes` (requests to the provider that failed last), `provider`, `providerName` and `model`, `changes` (what the turn's successful tool calls changed before it stopped: `files` written, `commands` run, `messages` sent, `unknown` tools of undeclared effect; absent when not recorded), `fallbackOrderSet` and `fallbackNote`, and `refusal` (`no-provider` or `no-model`, with `stopReason` `preflight_failed`) when the turn was refused before any request. `readTurnFailure` from `@goodvibes-jev/engine/platform/platform/core/turn-failure` (no Node imports) turns them into the same headline, cause, next steps, tip and details, and keeps the facts beside the words (`attempts.count` and `attempts.times`; `changed.known`, `files`, `commands`, `messages`, `unknown`), so `Nothing was changed.` is said only when the record shows it. A failed companion reply stores that reading as its `failureReason`, with the same attempts and changes counted by the companion turn. The web UI draws the same row from it on the failed reply (Try again, Use another model, Details, and the backup-model tip as a link to Settings, Models and providers), so it reads the same after a reload.
+- `TURN_ERROR` carries the facts the terminal programs word their failure row from: `status` and `code` when the provider failure had them, `attempts` and `attemptTimes` (requests to the provider that failed last), `provider`, `providerName` and `model`, `changes` (what the turn's successful tool calls changed before it stopped: `files` written, `commands` run, `messages` sent, `unknown` tools of undeclared effect; absent when not recorded), `fallbackOrderSet` and `fallbackNote`, and `refusal` (`no-provider` or `no-model`, with `stopReason` `preflight_failed`) when the turn was refused before any request. `readTurnFailure` from `@goodvibes/engine/platform/platform/core/turn-failure` (no Node imports) turns them into the same headline, cause, next steps, tip and details, and keeps the facts beside the words (`attempts.count` and `attempts.times`; `changed.known`, `files`, `commands`, `messages`, `unknown`), so `Nothing was changed.` is said only when the record shows it. A failed companion reply stores that reading as its `failureReason`, with the same attempts and changes counted by the companion turn. The web UI draws the same row from it on the failed reply (Try again, Use another model, Details, and the backup-model tip as a link to Settings, Models and providers), so it reads the same after a reload.
 - Tool activity arrives on the `tools` domain as `TOOL_RECEIVED`, `TOOL_EXECUTING`, `TOOL_SUCCEEDED` and `TOOL_FAILED`.
 - The input's final state arrives as `session-input-completed` (or failed).
 - Payload fields of every event are in "Events" in the reference.
@@ -1119,19 +1119,19 @@ The client sends the token as `Authorization: Bearer <token>`, which is what the
 
 ## SDK entry points
 
-The package `@goodvibes-jev/engine` (version 3.3.1) contains typed clients for this API. It does not call model providers itself; the daemon does.
+The package `@goodvibes/engine` (version 3.3.1) contains typed clients for this API. It does not call model providers itself; the daemon does.
 
-How it is published: two packages of the repository are publishable, `@goodvibes-jev/engine` (`packages/engine`) and `@goodvibes-jev/judgment` (`packages/judgment`); the products (`goodvibes`, `goodvibes-agent`, the daemon, the web UI) are private and never published. The release workflow publishes the two packages to `https://registry.npmjs.org` with provenance only when a release runs from a version tag and the repository variable `PUBLISH_NPM` is `true`; otherwise a release produces the native GitHub release and its installer assets and publishes nothing to npm. The repository does not record that variable's value, so whether a given version is on npm is answered by the registry, not by the source:
+How it is published: two packages of the repository are publishable, `@goodvibes/engine` (`packages/engine`) and `@goodvibes/judgment` (`packages/judgment`); the products (`goodvibes`, `goodvibes-agent`, the daemon, the web UI) are private and never published. The release workflow publishes the two packages to `https://registry.npmjs.org` with provenance only when a release runs from a version tag and the repository variable `PUBLISH_NPM` is `true`; otherwise a release produces the native GitHub release and its installer assets and publishes nothing to npm. The repository does not record that variable's value, so whether a given version is on npm is answered by the registry, not by the source:
 
 ```sh
-npm view @goodvibes-jev/engine versions --json
+npm view @goodvibes/engine versions --json
 ```
 
 When the version you need is there, install it like any package:
 
 ```sh
-bun add @goodvibes-jev/engine@3.3.1
-npm install @goodvibes-jev/engine@3.3.1
+bun add @goodvibes/engine@3.3.1
+npm install @goodvibes/engine@3.3.1
 ```
 
 When it is not, use it from a source checkout of the same version, inside that checkout's workspace:
@@ -1145,36 +1145,36 @@ bun run build                 # produces the dist/ directories the package's exp
 mkdir -p products/my-client
 cat > products/my-client/package.json <<'JSON'
 { "name": "my-client", "private": true, "type": "module",
-  "dependencies": { "@goodvibes-jev/engine": "workspace:*" } }
+  "dependencies": { "@goodvibes/engine": "workspace:*" } }
 JSON
 bun install                   # links the new workspace
 bun products/my-client/main.ts
 ```
 
-Every folder under `packages/` and `products/` is a workspace, and a script must live inside the checkout for `@goodvibes-jev/engine` to resolve; a script elsewhere fails with `Cannot find module '@goodvibes-jev/engine/...'`. Under Bun the package's `bun` export condition loads the TypeScript sources directly.
+Every folder under `packages/` and `products/` is a workspace, and a script must live inside the checkout for `@goodvibes/engine` to resolve; a script elsewhere fails with `Cannot find module '@goodvibes/engine/...'`. Under Bun the package's `bun` export condition loads the TypeScript sources directly.
 
 Do not make a tarball of the package by hand from a checkout (`npm pack` or `bun pm pack` in `packages/engine`): the tarball keeps the `bun` export condition, which names `src/` files the tarball does not contain, so imports under Bun fail. The release removes that condition when it stages the packages; only a registry release or the checkout's workspace gives a working package.
 
 | Import | Use |
 | --- | --- |
-| `@goodvibes-jev/engine/platform` | `createGoodVibesPlatform({ baseUrl, authToken })` for Bun and Node: `operator` (typed methods), `realtime` (events), `auth`, `peer`. Also `createMemoryTokenStore`. |
-| `@goodvibes-jev/engine/platform/browser` | `createBrowserGoodVibesPlatform`, for web pages. |
-| `@goodvibes-jev/engine/platform/react-native`, `@goodvibes-jev/engine/platform/expo` | `createReactNativeGoodVibesPlatform`, `createExpoGoodVibesPlatform`. |
-| `@goodvibes-jev/engine/platform/auth` | `createMemoryTokenStore`, `createBrowserTokenStore`. |
-| `@goodvibes-jev/engine/operator-client` | `createOperatorApiClient({ baseUrl, authToken })`: the operator client alone. |
-| `@goodvibes-jev/engine/transport-http` | The HTTP transport, retry, Server-Sent Events reader, private-network checks. |
-| `@goodvibes-jev/engine/transport-realtime` | Event buses and `forSession(events, sessionId)`. |
-| `@goodvibes-jev/engine/peer-client` | The peer API client for remote nodes. |
-| `@goodvibes-jev/engine/contracts` | The operator and peer contracts, method ids, event domains. |
-| `@goodvibes-jev/engine/errors` | `GoodVibesError`, `HttpStatusError`, `ContractError` and the error codes. |
-| `@goodvibes-jev/engine/platform/daemon` | `dispatchDaemonApiRoutes` and the pieces for embedding a daemon in your own Bun server. |
-| `@goodvibes-jev/engine/daemon-api/relay-server-entry` | The relay server program. |
+| `@goodvibes/engine/platform` | `createGoodVibesPlatform({ baseUrl, authToken })` for Bun and Node: `operator` (typed methods), `realtime` (events), `auth`, `peer`. Also `createMemoryTokenStore`. |
+| `@goodvibes/engine/platform/browser` | `createBrowserGoodVibesPlatform`, for web pages. |
+| `@goodvibes/engine/platform/react-native`, `@goodvibes/engine/platform/expo` | `createReactNativeGoodVibesPlatform`, `createExpoGoodVibesPlatform`. |
+| `@goodvibes/engine/platform/auth` | `createMemoryTokenStore`, `createBrowserTokenStore`. |
+| `@goodvibes/engine/operator-client` | `createOperatorApiClient({ baseUrl, authToken })`: the operator client alone. |
+| `@goodvibes/engine/transport-http` | The HTTP transport, retry, Server-Sent Events reader, private-network checks. |
+| `@goodvibes/engine/transport-realtime` | Event buses and `forSession(events, sessionId)`. |
+| `@goodvibes/engine/peer-client` | The peer API client for remote nodes. |
+| `@goodvibes/engine/contracts` | The operator and peer contracts, method ids, event domains. |
+| `@goodvibes/engine/errors` | `GoodVibesError`, `HttpStatusError`, `ContractError` and the error codes. |
+| `@goodvibes/engine/platform/daemon` | `dispatchDaemonApiRoutes` and the pieces for embedding a daemon in your own Bun server. |
+| `@goodvibes/engine/daemon-api/relay-server-entry` | The relay server program. |
 
 Example, verified against a 3.3.1 daemon:
 
 ```ts
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
-import { forSession } from '@goodvibes-jev/engine/transport-realtime';
+import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
+import { forSession } from '@goodvibes/engine/transport-realtime';
 
 const baseUrl = 'http://127.0.0.1:3421';
 const token = process.env.GV_TOKEN!;

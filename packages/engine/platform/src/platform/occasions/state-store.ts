@@ -41,7 +41,7 @@
  * built to
  * stop.
  */
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { captureFileMutation } from '../utils/file-mutation.js';
 import { occasionStateReceipts } from './operation.js';
 import { PersistentStore } from '../state/persistent-store.js';

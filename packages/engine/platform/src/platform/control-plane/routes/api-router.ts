@@ -1,1 +1,1 @@
-export { dispatchDaemonApiRoutes } from '@goodvibes-jev/engine/daemon-api';
+export { dispatchDaemonApiRoutes } from '@goodvibes/engine/daemon-api';

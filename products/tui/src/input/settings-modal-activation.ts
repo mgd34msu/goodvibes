@@ -1,4 +1,4 @@
-import { SETTINGS_CHOICE_ACTIONS, type SettingsChoiceAction } from '@goodvibes-jev/engine/terminal-shell/settings-choice-actions';
+import { SETTINGS_CHOICE_ACTIONS, type SettingsChoiceAction } from '@goodvibes/engine/terminal-shell/settings-choice-actions';
 /**
  * settings-modal-activation, pure action helpers for SettingsModal.
  *
@@ -14,12 +14,12 @@ import { SETTINGS_CHOICE_ACTIONS, type SettingsChoiceAction } from '@goodvibes-j
 import { handleConfirmInput } from '../views/confirm-state.ts';
 import type { FlagEntry, McpEntry, SettingEntry, SubscriptionEntry } from './settings-modal-types.ts';
 import { buildMcpEntries, buildSubscriptionEntries } from './settings-modal-data.ts';
-import { modelPickerLaunchForKey } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
-import { PAYMENTS_CARDS_ROW_KEY } from '@goodvibes-jev/engine/terminal-shell/payments-settings';
+import { modelPickerLaunchForKey } from '@goodvibes/engine/terminal-shell/settings-behavior';
+import { PAYMENTS_CARDS_ROW_KEY } from '@goodvibes/engine/terminal-shell/payments-settings';
 import { listSettingEditText } from './settings-modal-lists.ts';
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import type { SubscriptionManager } from '@goodvibes/engine/platform/platform/config';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import type { ModelPickerTarget } from './model-picker.ts';
 

@@ -42,7 +42,7 @@ import {
   type RelayPairingPayload,
   type TunnelHeader,
   RELAY_CODE_HEADER,
-} from '@goodvibes-jev/engine/transport-core/relay';
+} from '@goodvibes/engine/transport-core/relay';
 
 /** Structural client WebSocket the daemon uses to dial the relay. */
 export interface RelayClientWebSocket {

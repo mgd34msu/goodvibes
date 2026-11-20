@@ -1,4 +1,4 @@
-import { refusal, refusalErrorBody } from '@goodvibes-jev/engine/errors';
+import { refusal, refusalErrorBody } from '@goodvibes/engine/errors';
 import type { DaemonBatchManager } from '../../batch/index.js';
 import { DaemonBatchError } from '../../batch/index.js';
 import type { CreateDaemonBatchJobInput } from '../../batch/types.js';

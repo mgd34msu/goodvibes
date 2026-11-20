@@ -7,7 +7,7 @@ import { classifyHostTrustTier, extractHostname, emitSsrfDeny } from '../tools/f
 import { sanitizeUrlForLog } from '../utils/fetch-with-timeout.js';
 import { ownerDeliveryTargetProblem, postToPublicWebhook } from '../utils/url-safety.js';
 import { isNotifySuppressed } from '../utils/notify.js';
-import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+import { HttpStatusError } from '@goodvibes/engine/errors';
 import { assertDeliveryCurrent, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
 import { DeliveryError, DeliveryQueue, type DeliveryOutcome, type DeliveryQueueConfig } from './delivery.js';
 import { attachRuntimeNotifications, type RuntimeNotificationOptions } from './notification-dispatcher.js';

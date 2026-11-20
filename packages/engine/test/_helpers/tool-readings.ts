@@ -21,9 +21,9 @@
  * `gateTable`.
  */
 import { afterEach, beforeEach } from 'bun:test';
-import type { JudgmentPort, Question, Questions } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import type { JudgmentPort, Question, Questions } from '@goodvibes/judgment';
+import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes/judgment/testing';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import { forgetGateReadings, gateReadingsPort, type GateReadingTable } from './gate-readings.ts';
 import type { ExecFailureCategory } from '../../platform/src/platform/tools/batteries/exec-retry.ts';
 import type { ChildFailureReading } from '../../platform/src/platform/tools/batteries/child-failure-reason.ts';

@@ -12,7 +12,7 @@
  * them into one 400 is how a caller ends up retrying the one thing that will
  * never work.
  */
-import { systemActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { systemActor } from '@goodvibes/engine/daemon-api/http-policy';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { admitEffects, type EffectId } from '../../security/effect-authority.js';

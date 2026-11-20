@@ -1,4 +1,4 @@
-import { ContractError, GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { ContractError, GoodVibesError } from '@goodvibes/engine/errors';
 import type { ZodType } from 'zod/v4';
 import type { HttpTransport } from './http.js';
 import { openRawServerSentEventStream, type ServerSentEventHandlers } from './sse-stream.js';

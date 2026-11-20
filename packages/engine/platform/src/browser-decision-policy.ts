@@ -1,7 +1,7 @@
 /** Browser-safe decision-policy observations and presentation helpers. No model port is imported. */
-import { readDecisionModelPolicyHeader, type DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-export { DecisionModelsDisabledError, decisionModelUse, type DecisionModelUse } from '@goodvibes-jev/engine/errors';
-export type { DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { readDecisionModelPolicyHeader, type DecisionModelPolicyState } from '@goodvibes/engine/errors';
+export { DecisionModelsDisabledError, decisionModelUse, type DecisionModelUse } from '@goodvibes/engine/errors';
+export type { DecisionModelPolicyState } from '@goodvibes/engine/errors';
 
 /** One selected host/account owns an observation. Reset on identity or transport changes. */
 export class BrowserDecisionPolicy {

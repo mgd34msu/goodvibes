@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /** Restrictive lifecycle checks for one memory operation, never permission. */
 export interface MemoryOperationOptions {
   readonly signal?: AbortSignal | undefined;

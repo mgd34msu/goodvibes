@@ -1,20 +1,20 @@
-import { captureCliStatusFacts, describeCliPermissionMode, describeCliSignIns, secretPolicyLabel, type CliModelInUse, type CliProviderSignInFacts } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
-import type { PermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { presetForMode } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import { captureCliStatusFacts, describeCliPermissionMode, describeCliSignIns, secretPolicyLabel, type CliModelInUse, type CliProviderSignInFacts } from '@goodvibes/engine/terminal-shell/cli-status-facts';
+import type { PermissionModeInForce } from '@goodvibes/engine/platform/platform/permissions';
+import { yesNo } from '@goodvibes/engine/terminal-shell/cli-output';
+import { presetForMode } from '@goodvibes/engine/platform/platform/gate/presets';
 import { describeConfiguredPermissions } from '../permissions/configured-posture.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
 import type { OnboardingCheckMarkerState } from '../runtime/onboarding/index.ts';
-import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell/cli-endpoints';
-import type { RuntimeEndpointBinding, RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
-import { classifyBindPosture, isNetworkFacing, resolveWebSurfaceExposure } from '@goodvibes-jev/engine/terminal-shell/cli-network-posture';
-import type { GoodVibesCliOutputFormat } from '@goodvibes-jev/engine/terminal-shell';
+import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell/cli-endpoints';
+import type { RuntimeEndpointBinding, RuntimeEndpointId } from '@goodvibes/engine/terminal-shell';
+import { classifyBindPosture, isNetworkFacing, resolveWebSurfaceExposure } from '@goodvibes/engine/terminal-shell/cli-network-posture';
+import type { GoodVibesCliOutputFormat } from '@goodvibes/engine/terminal-shell';
 import type { CliServicePosture } from './service-posture.ts';
 import type { InstallSelfCheckFinding } from '../runtime/install-self-check.ts';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
+import { getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers/provider-model';
 import { describeConfiguredEffort } from '../providers/reasoning-effort-surface.ts';
-import { describeCrashLog, summarizeCrashLog, surfaceCrashLogPath, type CrashLogSummary } from '@goodvibes-jev/engine/platform/platform/runtime/crash-capture';
+import { describeCrashLog, summarizeCrashLog, surfaceCrashLogPath, type CrashLogSummary } from '@goodvibes/engine/platform/platform/runtime/crash-capture';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 
 /** The marker that decides first-run state: the user's marker when its file exists. */

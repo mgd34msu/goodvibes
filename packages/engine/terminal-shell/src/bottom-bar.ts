@@ -1,5 +1,5 @@
-import { createEmptyLine, createStyledCell, type Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import { createEmptyLine, createStyledCell, type Line } from '@goodvibes/engine/platform/platform/types';
+import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 
 export interface BottomBarStyle {
   readonly fg: string;

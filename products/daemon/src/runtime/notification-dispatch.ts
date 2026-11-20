@@ -30,9 +30,9 @@
  * destination is configured. Sent, or written down; never dropped.
  */
 
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 import type { RuntimeEventBus } from './index.js';
-import { memoryPressureLine, memoryPressureLevel, type MemoryPressurePayload } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
+import { memoryPressureLine, memoryPressureLevel, type MemoryPressurePayload } from '@goodvibes/engine/platform/platform/runtime/memory';
 
 /**
  * Where a channel-shaped notice leaves the daemon.

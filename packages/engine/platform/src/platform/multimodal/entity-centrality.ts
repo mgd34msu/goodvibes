@@ -1,5 +1,5 @@
-import { defineRerank, LIMITS, STAKES_BANDS } from '@goodvibes-jev/judgment';
-import { DecisionModelsDisabledError, judgmentPort } from '@goodvibes-jev/engine/errors';
+import { defineRerank, LIMITS, STAKES_BANDS } from '@goodvibes/judgment';
+import { DecisionModelsDisabledError, judgmentPort } from '@goodvibes/engine/errors';
 import { logger } from '../utils/logger.js';
 import { activateClassicFallback, isClassicOperation } from '../runtime/decision-policy.js';
 

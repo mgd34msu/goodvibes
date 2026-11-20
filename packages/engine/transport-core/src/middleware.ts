@@ -1,4 +1,4 @@
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 
 /**
  * Transport middleware (Koa-style) for the HTTP transport layer.

@@ -1,8 +1,8 @@
-import { captureCliStatusFacts, describeCliPermissionMode, describeCliSignIns, secretPolicyLabel, type CliModelInUse, type CliProviderSignInFacts } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
-import type { PermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+import { captureCliStatusFacts, describeCliPermissionMode, describeCliSignIns, secretPolicyLabel, type CliModelInUse, type CliProviderSignInFacts } from '@goodvibes/engine/terminal-shell/cli-status-facts';
+import type { PermissionModeInForce } from '@goodvibes/engine/platform/platform/permissions';
+import { yesNo } from '@goodvibes/engine/terminal-shell/cli-output';
 import type { ConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { OnboardingCheckMarkerState } from '../runtime/onboarding/index.ts';
 import { resolveRuntimeEndpointBinding } from './endpoints.ts';
 import type { GoodVibesCliOutputFormat } from './types.ts';
@@ -10,12 +10,12 @@ import type { CliServicePosture } from './service-posture.ts';
 import type { CliExternalRuntimeSnapshot } from './external-runtime.ts';
 import type { CliConnectedHostMetricsSnapshot } from './connected-host-metrics.ts';
 import type { CredentialAvailability } from '../config/credential-status.ts';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn/provider-model';
-import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
-import { formatAgentKnowledgeFailureKind } from '@goodvibes-jev/engine/terminal-shell/agent-turn/knowledge-format';
+import { getProviderIdFromModel } from '@goodvibes/engine/terminal-shell/agent-turn/provider-model';
+import { formatAgentRecordSource } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
+import { formatAgentKnowledgeFailureKind } from '@goodvibes/engine/terminal-shell/agent-turn/knowledge-format';
 import { readApprovalPostureFromConfig, type ApprovalPosture } from '../permissions/approval-posture.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
-import { describeCrashLog, summarizeCrashLog, surfaceCrashLogPath, type CrashLogSummary } from '@goodvibes-jev/engine/platform/platform/runtime/crash-capture';
+import { describeCrashLog, summarizeCrashLog, surfaceCrashLogPath, type CrashLogSummary } from '@goodvibes/engine/platform/platform/runtime/crash-capture';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 
 /**

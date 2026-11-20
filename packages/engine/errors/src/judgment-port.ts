@@ -1,4 +1,4 @@
-import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
+import type { JudgmentPort } from '@goodvibes/judgment/decisions';
 import { assertDecisionModelsEnabled } from './decision-policy.js';
 
 /** One installation lifetime; restoring the same port never restores old readers. */

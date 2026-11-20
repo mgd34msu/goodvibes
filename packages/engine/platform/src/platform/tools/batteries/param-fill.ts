@@ -17,7 +17,7 @@ import { assertJudgmentInput } from '../../gate/judgment-input.js';
  * query); a missed pick only lets the call fail on its missing parameter, as
  * it would have without repair. Only a pick that acts is applied.
  */
-import { defineSelector, STAKES_BANDS, type Candidate, type JsonValue } from '@goodvibes-jev/judgment';
+import { defineSelector, STAKES_BANDS, type Candidate, type JsonValue } from '@goodvibes/judgment';
 
 function clip(text: string): string {
   assertJudgmentInput(text);

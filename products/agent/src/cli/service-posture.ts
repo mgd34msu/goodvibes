@@ -8,22 +8,22 @@ import {
   type CliServiceRuntime,
   type CliServiceEndpointPosture,
   type CliServiceLogPosture,
-} from '@goodvibes-jev/engine/terminal-shell/service-posture';
+} from '@goodvibes/engine/terminal-shell/service-posture';
 export type {
   CliServiceRuntime,
   CliServiceEndpointPosture,
   CliServiceLogPosture,
-} from '@goodvibes-jev/engine/terminal-shell/service-posture';
-import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { probeTcp as probe } from '@goodvibes-jev/engine/terminal-shell/service-io';
+} from '@goodvibes/engine/terminal-shell/service-posture';
+import { yesNo } from '@goodvibes/engine/terminal-shell/cli-output';
+import { probeTcp as probe } from '@goodvibes/engine/terminal-shell/service-io';
 import { isAbsolute, join } from 'node:path';
-import { resolveConnectedHostDialEnabled, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveConnectedHostDialEnabled, resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
 import type { ConfigKey } from '../config/index.ts';
 import type { RuntimeEndpointId } from './endpoints.ts';
-import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { retainCliConfig } from '@goodvibes-jev/engine/terminal-shell/cli-config-owner';
-import { dialHostForConfiguredHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
-import { isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
+import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
+import { retainCliConfig } from '@goodvibes/engine/terminal-shell/cli-config-owner';
+import { dialHostForConfiguredHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { isClassicOperation } from '@goodvibes/engine/platform/platform/runtime/decision-policy';
 
 export interface CliServicePosture {
   readonly config: {

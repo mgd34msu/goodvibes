@@ -15,8 +15,8 @@ import {
   isHunkSelectableRequest,
   readApprovalEditHunks,
   type EditHunkLike,
-} from '@goodvibes-jev/engine/platform/platform/control-plane/approval-hunk-apply';
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+} from '@goodvibes/engine/platform/platform/control-plane/approval-hunk-apply';
+import type { PermissionPromptRequest } from '@goodvibes/engine/platform/platform/permissions';
 
 export interface HunkSelectionState {
   readonly hunks: readonly EditHunkLike[];

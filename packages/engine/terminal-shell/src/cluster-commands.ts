@@ -16,7 +16,7 @@
  */
 import { Writable } from 'node:stream';
 import { createInterface } from 'node:readline/promises';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type {
   RotateKeyResult,
   CreateGroupResult,
@@ -27,7 +27,7 @@ import type {
   JoinKeyResult,
   NodesResult,
   SettingDecisionResult,
-} from '@goodvibes-jev/engine/platform/platform/cluster';
+} from '@goodvibes/engine/platform/platform/cluster';
 import {
   callDaemonVerb,
   resolveRemoteDaemonTarget,
@@ -35,9 +35,9 @@ import {
   type DaemonFetch,
   type DaemonVerbOutcome,
 } from './cluster-remote-daemon-target.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { clusterJoinGroup } from './batteries/cluster-join-group.js';
-import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
+import { decisionOrClassic } from '@goodvibes/engine/platform/platform/runtime/decision-policy';
 import {
   describeAge,
   printableName,

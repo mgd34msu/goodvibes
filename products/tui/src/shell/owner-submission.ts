@@ -12,12 +12,12 @@
  * as ports; interactive.ts keeps the turn itself (sendOwnerTurn) and the model
  * switch.
  */
-import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { NoticeLevel, OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { captureNativeConversationInput, type ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
-import { readComposerMarker } from '@goodvibes-jev/engine/terminal-shell/submission-router';
-import { SHELL_USAGE_HINT, type ShellPassthrough, type ShellRunResult } from '@goodvibes-jev/engine/terminal-shell/shell-passthrough';
+import type { ContentPart } from '@goodvibes/engine/platform/platform/providers';
+import type { NoticeLevel, OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { captureNativeConversationInput, type ProductInputContext } from '@goodvibes/engine/terminal-shell/native';
+import { readComposerMarker } from '@goodvibes/engine/terminal-shell/submission-router';
+import { SHELL_USAGE_HINT, type ShellPassthrough, type ShellRunResult } from '@goodvibes/engine/terminal-shell/shell-passthrough';
 import { applyComposerCapture, shouldSendAfterCapture, splitAtModelDirectives, type ComposerCaptureDeps } from '../input/composer-capture.ts';
 import { createSpokenTurnInputOptions } from '../audio/spoken-turn-model-routing.ts';
 

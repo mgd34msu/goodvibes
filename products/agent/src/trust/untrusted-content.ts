@@ -43,7 +43,7 @@ export {
   originOf,
   resetProcessUntrustedContentLedgerForTests as resetSessionUntrustedContentLedgerForTests,
   surfaceHasCommandAuthority,
-} from '@goodvibes-jev/engine/platform/platform/security';
+} from '@goodvibes/engine/platform/platform/security';
 
 export type {
   AuthoritySurface,
@@ -53,4 +53,4 @@ export type {
   UntrustedContentEnvelope,
   UntrustedIngest,
   UntrustedSurface,
-} from '@goodvibes-jev/engine/platform/platform/security';
+} from '@goodvibes/engine/platform/platform/security';

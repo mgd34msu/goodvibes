@@ -1,7 +1,7 @@
 import { requireSemanticKnowledge } from '../decision-policy.js';
 import { knowledgeSourceJudgmentUris } from '../source-structural-references.js';
 import { assertAnswerVerificationActive } from './answer-verification/budget.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { answerSourceRerank } from './ranking/source-rerank.js';
 import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../types.js';

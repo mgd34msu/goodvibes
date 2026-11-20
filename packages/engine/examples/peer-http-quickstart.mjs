@@ -18,8 +18,8 @@
  *
  * Run: bun examples/peer-http-quickstart.mjs
  */
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
-import { createPeerApiClient } from '@goodvibes-jev/engine/platform/peer';
+import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
+import { createPeerApiClient } from '@goodvibes/engine/platform/peer';
 
 const baseUrl = process.env.GOODVIBES_BASE_URL ?? 'http://127.0.0.1:3421';
 const operatorToken = process.env.GOODVIBES_TOKEN;

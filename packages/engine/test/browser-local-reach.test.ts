@@ -24,7 +24,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { BrowserEngine } from '../platform/src/platform/browser/browser-engine.ts';
 import { BrowserSessionManager } from '../platform/src/platform/browser/browser-sessions.ts';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';

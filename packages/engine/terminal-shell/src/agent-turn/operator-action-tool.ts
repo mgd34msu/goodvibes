@@ -1,9 +1,9 @@
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { captureStrictJudgmentJson } from '@goodvibes/engine/platform/platform/gate';
+import { redactSensitiveDataAsync } from '@goodvibes/engine/platform/platform/utils';
 import { isDeepStrictEqual } from 'node:util';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { assertOperatorEffect } from './operator-connection-owner.js';

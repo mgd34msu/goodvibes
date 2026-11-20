@@ -1,13 +1,13 @@
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { operatorContractMethods as contractMethodIndex, operatorMethodIsReadOnly, type OperatorContractMethodEntry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-contract-routes';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate';
+import { operatorContractMethods as contractMethodIndex, operatorMethodIsReadOnly, type OperatorContractMethodEntry } from '@goodvibes/engine/terminal-shell/agent-turn/operator-contract-routes';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { CATALOG_QUERIES } from './agent-harness-catalog-filters.ts';
 import { CATALOG_PAGE_MAX, CATALOG_PAGE_SIZE, catalogEnvelope, catalogFilters, readOffset } from './agent-harness-tool-utils.ts';
-import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
-import { operatorMethodIsOutward } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-input-projector';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
+import { operatorMethodIsOutward } from '@goodvibes/engine/terminal-shell/agent-turn/operator-input-projector';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 export interface AgentHarnessOperatorMethodArgs {
   readonly methodId?: unknown;
@@ -60,7 +60,7 @@ interface OperatorMethodDescriptor {
 /**
  * Capability-advertisement honesty: the platform operator contract marks
  * a method `invokable: false` when it is cataloged but not backed by a real
- * daemon route (see @goodvibes-jev/engine/platform's method-catalog-route-reconcile,
+ * daemon route (see @goodvibes/engine/platform's method-catalog-route-reconcile,
  * email.inbox.list/read, email.draft.create, email.send are the dogfood
  * case: they advertise /api/email/* paths no router dispatch chain serves).
  * Before this, `invokable` was declared on the local contract-method shape

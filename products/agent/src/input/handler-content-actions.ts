@@ -1,6 +1,6 @@
-import { createBlockContentActions } from '@goodvibes-jev/engine/terminal-shell/block-content-actions';
-export * from '@goodvibes-jev/engine/terminal-shell/input-content';
-import { expandPrompt as expand } from '@goodvibes-jev/engine/terminal-shell/input-content';
+import { createBlockContentActions } from '@goodvibes/engine/terminal-shell/block-content-actions';
+export * from '@goodvibes/engine/terminal-shell/input-content';
+import { expandPrompt as expand } from '@goodvibes/engine/terminal-shell/input-content';
 export const expandPrompt = (...args: Parameters<typeof expand>) => expand(args[0], args[1], args[2], args[3], true);
 
 import '../utils/clipboard.ts';

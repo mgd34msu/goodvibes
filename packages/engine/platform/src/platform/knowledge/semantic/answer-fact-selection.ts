@@ -1,6 +1,6 @@
 import { requireSemanticKnowledge } from '../decision-policy.js';
 import { assertAnswerVerificationActive } from './answer-verification/budget.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import type { AnswerUnsettledTally } from './answer-source-ranking.js';
 import { answerFactRerank, answerQueryIntent } from './ranking/fact-rerank.js';

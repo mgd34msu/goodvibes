@@ -8,7 +8,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const executable = resolveWorkspaceBinary(root);
 if (!executable) {
   console.error('goodvibes: this private Jev workspace has no built TUI binary.');
-  console.error('Build the workspace engine, then run bun run --filter @goodvibes-jev/tui build from the workspace root.');
+  console.error('Build the workspace engine, then run bun run --filter @goodvibes/tui build from the workspace root.');
   process.exit(1);
 }
 const child = spawnSync(executable, process.argv.slice(2), { stdio: 'inherit' });

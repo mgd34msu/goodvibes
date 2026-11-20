@@ -1,9 +1,9 @@
-import { createSetupReviewCollector, type TerminalSetupReviewSnapshot } from '@goodvibes-jev/engine/terminal-shell/setup-review';
+import { createSetupReviewCollector, type TerminalSetupReviewSnapshot } from '@goodvibes/engine/terminal-shell/setup-review';
 import 'node:fs';
 import type { CommandContext } from '../command-registry.ts';
 import { discoverSkills } from '../../agent/skill-discovery.ts';
-import '@goodvibes-jev/engine/platform/platform/plugins';
-import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes/engine/platform/platform/plugins';
+import '@goodvibes/engine/platform/platform/config';
 import {
   requireProviderApi,
   requireReadModels,

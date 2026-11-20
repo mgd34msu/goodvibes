@@ -1,9 +1,9 @@
-import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
+import { readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
 import { basename } from 'node:path';
 import type { CommandContext } from './command-registry.ts';
-import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
-import { memoryRecordTemporalStatus } from '@goodvibes-jev/engine/platform/platform/state';
-import { describeMemoryPromptEligibility, isPromptActiveMemory } from '@goodvibes-jev/engine/terminal-shell/agent-turn/memory-prompt';
+import { AgentRoutineRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/routine-registry';
+import { memoryRecordTemporalStatus } from '@goodvibes/engine/platform/platform/state';
+import { describeMemoryPromptEligibility, isPromptActiveMemory } from '@goodvibes/engine/terminal-shell/agent-turn/memory-prompt';
 import { summarizeAgentBehaviorDiscovery } from '../agent/behavior-discovery-summary.ts';
 import { agentRuntimeProfileBaseHome } from '../agent/runtime-profile.ts';
 import { buildAgentWorkspaceChannels } from './agent-workspace-channels.ts';
@@ -34,7 +34,7 @@ import {
   type AgentWorkspaceReadFailures,
 } from './agent-workspace-snapshot-builders.ts';
 import type { AgentWorkspaceLocalLibraryItem, AgentWorkspaceRuntimeSnapshot, AgentWorkspaceSetupPart } from './agent-workspace-types.ts';
-import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
+import { connectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 
 const READ_FAILURE_LABELS: Readonly<Record<string, string>> = {
   personas: 'personas',

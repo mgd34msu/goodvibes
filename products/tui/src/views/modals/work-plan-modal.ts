@@ -4,11 +4,11 @@ import type {
   ConfigModalSurface,
   ConfigModalView,
 } from '../../input/config-modal-types.ts';
-import type { ProjectWorkPlan, ProjectWorkPlanTask, ProjectWorkPlanTaskStatus } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { ProjectWorkPlan, ProjectWorkPlanTask, ProjectWorkPlanTaskStatus } from '@goodvibes/engine/platform/platform/knowledge';
 import { runModalCommand } from './modal-surface-helpers.ts';
-import { contractNodeId } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
+import { contractNodeId } from '@goodvibes/engine/platform/platform/runtime/fleet';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 
 // ---------------------------------------------------------------------------
 // To-do list modal. Lists the project work plan's tasks (the planning service's

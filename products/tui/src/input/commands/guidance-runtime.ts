@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
+import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/core';
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines, getGuidanceMode } from '@/runtime/index.ts';
 import { dismissGuidance, evaluateContextualGuidance, formatGuidanceItems, resetGuidance } from '@/runtime/index.ts';
 import type { GuidancePersistenceOptions, Notification } from '@/runtime/index.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { defineCommand, defineList, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { defineCommand, defineList, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import { requireReadModels, requireSessionMemoryStore, requireShellPaths } from './runtime-services.ts';
 
 /** Where this app keeps its guidance dismissals. */

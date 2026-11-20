@@ -24,9 +24,9 @@
  *   same delegation store under this daemon's address, so the daemon judges it
  *   as the Agent's.
  */
-import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
-import type { HostedDaemonRequestPath } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes/engine/platform/contracts';
+import type { HostedDaemonRequestPath } from '@goodvibes/engine/platform/platform/hosted-sessions';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 import { readConnectedHostPairing } from './connected-host-auth.js';
 import { describeUnreadableAgentHostPairing } from './connected-host-pairing-store.js';
 import { createConnectedHost, type ConnectedHostConnection } from './connected-host-client.js';

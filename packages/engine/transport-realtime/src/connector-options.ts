@@ -8,14 +8,14 @@
  * caller imports these from has changed.
  */
 
-import type { AuthTokenResolver, StreamReconnectPolicy } from '@goodvibes-jev/engine/transport-http';
-import type { TransportObserver } from '@goodvibes-jev/engine/transport-core';
+import type { AuthTokenResolver, StreamReconnectPolicy } from '@goodvibes/engine/transport-http';
+import type { TransportObserver } from '@goodvibes/engine/transport-core';
 
 /**
  * Typed transport observability events emitted by the WebSocket connector.
  *
  * A structural subset of the platform-level `TransportEvent` union, the platform
- * (`@goodvibes-jev/engine/platform`) extends this with additional server-side event
+ * (`@goodvibes/engine/platform`) extends this with additional server-side event
  * types. Client code that holds a reference to the full `TransportEvent` union
  * can use this type without narrowing since the shapes are structurally
  * compatible.

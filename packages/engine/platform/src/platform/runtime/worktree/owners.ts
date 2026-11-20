@@ -1,4 +1,4 @@
-import type { Observed } from '@goodvibes-jev/engine/errors';
+import type { Observed } from '@goodvibes/engine/errors';
 import { readdirSync, readFileSync, realpathSync, type Dirent } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { isContractId, isTerminalContractStatus, type Contract } from '../../contract/types.js';

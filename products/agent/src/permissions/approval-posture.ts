@@ -1,8 +1,8 @@
 import { hasActiveExecutionMode, readExecutionMode } from './execution-mode.ts';
-import { type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { effectivePermissionMode, presetForMode } from '@goodvibes-jev/engine/platform/platform/gate/presets';
-import { describePermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
-import type { GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate';
+import { type ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { effectivePermissionMode, presetForMode } from '@goodvibes/engine/platform/platform/gate/presets';
+import { describePermissionModeInForce } from '@goodvibes/engine/platform/platform/permissions';
+import type { GatePresetName } from '@goodvibes/engine/platform/platform/gate';
 
 export type ApprovalPostureKind = GatePresetName | 'unavailable';
 

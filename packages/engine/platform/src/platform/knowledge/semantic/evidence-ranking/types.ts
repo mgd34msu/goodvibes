@@ -1,4 +1,4 @@
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 /** Bookkeeping references are created by the caller; store identities stay in its local map. */
 export interface AnswerEvidenceCandidate {
   readonly reference: string;

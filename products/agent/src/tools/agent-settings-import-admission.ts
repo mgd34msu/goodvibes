@@ -1,15 +1,15 @@
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import { settingsOutcomeError } from './agent-settings-outcome.ts';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
+import { snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate/judgment-input';
 import { assertCurrentToolInvocation, assertProjectionExecution, commitCurrentToolSettingsPlan, ToolInputProjectionError,
-  type ToolInputProjector, type ToolPreparedSettingsMutation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+  type ToolInputProjector, type ToolPreparedSettingsMutation, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { assertPreparedConfigWriteRoute, resolvePreparedConfigWriteRoute, type ConfigKey, type PreparedConfigMutationRequest,
   type PreparedConfigMutationFacts, type ConfigWriteRoute, type SecretImportEntry, isSecretBearingConfigKey,
   captureRemoteSettingsImportPrecondition, assertRemoteSettingsImportPrecondition, inspectRemoteSettingsImportPrecondition,
-  assertCompletedRemoteSettingsImportPrecondition, describeSettingsReceiptFailure, type RemoteSettingsImportPrecondition } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveWakeEnablementCompanion } from '@goodvibes-jev/engine/platform/platform/voice';
+  assertCompletedRemoteSettingsImportPrecondition, describeSettingsReceiptFailure, type RemoteSettingsImportPrecondition } from '@goodvibes/engine/platform/platform/config';
+import { resolveWakeEnablementCompanion } from '@goodvibes/engine/platform/platform/voice';
 import { AGENT_WAKE_SURFACE } from '../audio/wake-surface.ts';
-import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
+import { agentResearchSourceOwner } from '@goodvibes/engine/terminal-shell/agent-turn/protected-research-report';
 import { coerceHarnessSettingValue } from '../agent/harness-control.ts';
 import { getAgentSettingsSchema } from '../config/settings-catalog.ts';
 import { agentDaemonConfigClient, agentDaemonConfigClientRevision, buildAgentConfigRouting, configKeyScope } from '../config/daemon-config-routing.ts';

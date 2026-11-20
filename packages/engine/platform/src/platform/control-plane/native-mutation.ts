@@ -14,7 +14,7 @@ import type { MutationPublication } from '../utils/file-mutation.js';
 import type { ToolExecutionEffect } from '../tools/registry.js';
 import type { RetainedAutomationJobTarget } from '../automation/job-mutations.js';
 import { projectAutomationTargetRequest } from '../automation/job-mutations.js';
-import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
+import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
 
 export type NativeMutationHost = ExternalPermissionHost;
 export interface NativeMutationAdmission { readonly kind: 'native-recorded-mutation'; }

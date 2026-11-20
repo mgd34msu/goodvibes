@@ -1,5 +1,5 @@
 /** SETTINGS preconditions bind the real serving config, credential and auth owners. */
-import { createSettingsPreconditionHandler, type SettingsPreconditionFacts, type SettingsPreconditionHandler, type SettingsPreconditionRequest } from '@goodvibes-jev/engine/daemon-api';
+import { createSettingsPreconditionHandler, type SettingsPreconditionFacts, type SettingsPreconditionHandler, type SettingsPreconditionRequest } from '@goodvibes/engine/daemon-api';
 import { preparedReceiptWrites, type ConfigManager, type PreparedConfigMutation, type PreparedConfigMutationReceipt } from '../../config/manager.js';
 import type { PreparedScopedSecretDeletion, SecretsManager } from '../../config/secrets.js';
 import { isDaemonOwnedConfigKey } from '../../config/config-ownership.js';

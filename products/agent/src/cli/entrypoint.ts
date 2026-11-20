@@ -6,18 +6,18 @@ import {
   resolveShellRoots,
   type ShellEntrypointOwnership,
   type ShellEntrypointRoots,
-} from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
-export type { ShellEntrypointRoots } from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
+} from '@goodvibes/engine/terminal-shell/cli-entrypoint';
+export type { ShellEntrypointRoots } from '@goodvibes/engine/terminal-shell/cli-entrypoint';
 // Only what every command shares loads here: parsing, the configuration and
 // its overrides. Each command's own module graph loads when it is chosen, so
 // `status` never loads the headless turn and neither loads the terminal UI.
-import { headlessRunFlagErrors } from '@goodvibes-jev/engine/terminal-shell/headless-turn-events';
+import { headlessRunFlagErrors } from '@goodvibes/engine/terminal-shell/headless-turn-events';
 import { join } from 'node:path';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { AgentConfigManager } from '../config/host-settings.ts';
-import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
-import { GlobalNetworkTransportInstaller } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
-import { configureActivityLogger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers/provider-model';
+import { GlobalNetworkTransportInstaller } from '@goodvibes/engine/platform/platform/runtime/transport';
+import { configureActivityLogger } from '@goodvibes/engine/platform/platform/utils';
 import {
   applyRuntimeCommandEndpointFlagOverrides,
   applyRuntimeConfigOverrides,
@@ -31,7 +31,7 @@ import { renderGoodVibesCommandHelp, renderGoodVibesHelp, renderGoodVibesVersion
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { writeExitingStdoutLine, writeFatalLine } from '../utils/fatal-boot-write.ts';
 import { AgentProfileUsageError, resolveAgentRuntimeProfileHome, resolveSelectedAgentRuntimeProfileHome } from '../agent/runtime-profile.ts';
-import { deferIngestionNoticesToApp } from '@goodvibes-jev/engine/platform/platform/config';
+import { deferIngestionNoticesToApp } from '@goodvibes/engine/platform/platform/config';
 
 function readEnvRuntimeUrl(): { readonly source: string; readonly value: string } | null {
   const runtimeUrl = process.env['GOODVIBES_AGENT_RUNTIME_URL'];

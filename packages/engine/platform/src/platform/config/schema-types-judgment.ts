@@ -7,9 +7,9 @@
 
 /** Where the judgment API key is read from. */
 export type JudgmentKeySource = 'env' | 'secret' | 'none';
-import type { DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
+import type { DecisionModelPolicy } from '@goodvibes/engine/errors';
 
-import type { JudgmentBackendSettings } from '@goodvibes-jev/judgment/decisions';
+import type { JudgmentBackendSettings } from '@goodvibes/judgment/decisions';
 
 /** A compatible endpoint and a credential name, never a credential value. */
 export interface JudgmentFallbackSettings {

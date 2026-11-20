@@ -4,7 +4,7 @@
  * secret store, the settings list holding its reference), a test, a send, the
  * notifications that failed and resending them; and the history view.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import {
   forgetNotificationWebhook,
   resolveNotificationWebhook,
@@ -14,7 +14,7 @@ import {
   type NotificationDeadLetterSource,
   type NotificationWebhookSecretStore,
   type WebhookNotifier,
-} from '@goodvibes-jev/engine/platform/platform/integrations';
+} from '@goodvibes/engine/platform/platform/integrations';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand } from './command-actions/define.js';

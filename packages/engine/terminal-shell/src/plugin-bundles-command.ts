@@ -15,8 +15,8 @@ import {
   type PinnedMarketplaceIndexEntry,
   type BundleActivationPlan,
   type EcosystemInstallReceipt,
-} from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+} from '@goodvibes/engine/platform/platform/runtime/ecosystem';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 // ---------------------------------------------------------------------------
 // `<binary> plugin bundles browse|install|uninstall|list`, the capability-bundle

@@ -45,10 +45,10 @@ import { decisionOrClassic } from '../runtime/decision-policy.js';
  * buying something on their behalf to make a number look better. `assertCartMatchesRequest`
  * in cart.ts is the enforcement; its absence here is the design.
  */
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { mapLimit } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
+import { mapLimit } from '@goodvibes/judgment';
 import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './checkout-ownership.js';
-import type { JsonValue, Selection, Selector } from '@goodvibes-jev/judgment';
+import type { JsonValue, Selection, Selector } from '@goodvibes/judgment';
 import { CHECKOUT_CONTEXT, fastContext, shippingCandidates, shippingFast, shippingFastest, shippingOptionId, shippingStandard } from './batteries/shipping-tier.js';
 import type { MinorUnits, ShippingOption, ShippingStepDown, ShippingTier } from './types.js';
 import { SHIPPING_TIERS } from './types.js';

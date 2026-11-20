@@ -1,4 +1,4 @@
-import type { Ranked } from '@goodvibes-jev/judgment';
+import type { Ranked } from '@goodvibes/judgment';
 export type PersonalOpsLaneId =
   | 'inbox'
   | 'calendar'

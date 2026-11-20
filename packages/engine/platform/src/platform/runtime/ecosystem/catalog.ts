@@ -4,10 +4,10 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { VERSION } from '../../version.js';
 import { logger } from '../../utils/logger.js';
 import { publishReplacement, recoverReplacements, stageReplacement } from '../../state/commit-point.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { decisionOrClassic, isClassicOperation } from '../decision-policy.js';
 import { rankClassicCatalog } from '../classic-catalog.js';
-import { fanOut, toJson, type EntryType } from '@goodvibes-jev/judgment';
+import { fanOut, toJson, type EntryType } from '@goodvibes/judgment';
 import { catalogSearch, catalogSearchAt, catalogSearchEntryView } from './batteries/catalog-search.js';
 import { trustNoteCaution } from './batteries/trust-note-caution.js';
 

@@ -54,7 +54,7 @@ import type {
   KNOWLEDGE_CANDIDATE_STATUSES,
   KNOWLEDGE_SOURCE_TYPES,
   KNOWLEDGE_USAGE_KINDS,
-} from '@goodvibes-jev/engine/daemon-api/knowledge-route-types';
+} from '@goodvibes/engine/daemon-api/knowledge-route-types';
 
 type SameValues<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 /**

@@ -1,5 +1,5 @@
 import { projectKnowledgeSourceReferences } from '../source-structural-references.js';
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import { assertJudgmentInput, captureOwnedJson } from '../../gate/judgment-input.js';
 import { getKnowledgeSpaceId } from '../spaces.js';
 import { isGeneratedKnowledgeSource } from '../generated-projections.js';

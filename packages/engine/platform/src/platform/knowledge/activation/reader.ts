@@ -1,6 +1,6 @@
-import { judgmentPort, JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
-import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { judgmentPort, JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes/engine/errors';
+import { JudgmentError, type JudgmentPort } from '@goodvibes/judgment';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { activateClassicFallback, decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { freezeSupport } from '../semantic/verification/projection.js';
 import { nodeServingWithoutReview } from './battery.js';

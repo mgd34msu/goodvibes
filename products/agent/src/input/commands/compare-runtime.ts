@@ -6,8 +6,8 @@
  * Each action is one call of the `agent_model_compare` tool, run as the
  * owner's own act (owner-tool-call.ts).
  */
-import { defineCommand, type ActionDescription, type InputDescription } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { choiceInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { defineCommand, type ActionDescription, type InputDescription } from '@goodvibes/engine/terminal-shell/command-actions';
+import { choiceInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { artifactInput } from './artifacts-runtime.ts';
 import { given, ownerRead, ownerToolCall, positiveNumber, runOwnerToolCall, splitWords } from './owner-tool-call.ts';

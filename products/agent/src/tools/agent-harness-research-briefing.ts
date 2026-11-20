@@ -1,21 +1,21 @@
 import { captureModelArtifactClockSource } from './agent-harness-model-reading-source.ts';
 import { captureCatalogPath, withCapturedResearchCatalog, rankResearchRecords, researchCheckpointRoute, researchRouteString as routeString, researchSourcePriority } from './agent-harness-research-catalog-source.ts';
-import { captureCatalogSnapshot } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
-import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { observeImportFile, assertImportFileCurrent } from '@goodvibes-jev/engine/platform/platform/config';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { captureCatalogSnapshot } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
+import { ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
+import { observeImportFile, assertImportFileCurrent } from '@goodvibes/engine/platform/platform/config';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { AgentResearchRunRegistry, researchRunLogTail, type AgentResearchRunRecord, type AgentResearchRunStatus } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-run-registry';
-import { AgentResearchSourceRegistry, researchSourceReportLine, type AgentResearchSourceRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-source-registry';
+import { AgentResearchRunRegistry, researchRunLogTail, type AgentResearchRunRecord, type AgentResearchRunStatus } from '@goodvibes/engine/terminal-shell/agent-turn/research-run-registry';
+import { AgentResearchSourceRegistry, researchSourceReportLine, type AgentResearchSourceRecord } from '@goodvibes/engine/terminal-shell/agent-turn/research-source-registry';
 import { browserControlPosture, type BrowserControlPosture } from './agent-harness-browser-control.ts';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { isCertifiedResearchLiveRecord, researchLiveReadModelSnapshot } from './agent-harness-research-live-read-models.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
-import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
+import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 interface AgentHarnessResearchBriefingArgs {
   readonly query?: unknown;

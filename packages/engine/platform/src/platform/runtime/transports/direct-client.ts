@@ -1,2 +1,2 @@
-export type { DirectClientTransport } from '@goodvibes-jev/engine/transport-core';
-export { createDirectClientTransport } from '@goodvibes-jev/engine/transport-core';
+export type { DirectClientTransport } from '@goodvibes/engine/transport-core';
+export { createDirectClientTransport } from '@goodvibes/engine/transport-core';

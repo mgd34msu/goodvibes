@@ -1,12 +1,12 @@
-import { SETTINGS_CHOICE_ACTIONS, type SettingsChoiceAction } from '@goodvibes-jev/engine/terminal-shell/settings-choice-actions';
-import { selectedSettingsCategoryEntry } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
+import { SETTINGS_CHOICE_ACTIONS, type SettingsChoiceAction } from '@goodvibes/engine/terminal-shell/settings-choice-actions';
+import { selectedSettingsCategoryEntry } from '@goodvibes/engine/terminal-shell/settings-navigation';
 import type {
   SettingsModalChange as PlatformSettingsModalChange,
   SettingsModalChangeResult as PlatformSettingsModalChangeResult,
   SettingsModalChangeHandler as PlatformSettingsModalChangeHandler,
-} from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
-import { TerminalSettingsModalState } from '@goodvibes-jev/engine/terminal-shell/settings-modal-state';
-import { moveSettingsSelection, selectSettingsTarget, type SettingsTargetOutcome } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
+} from '@goodvibes/engine/terminal-shell/settings-model-types';
+import { TerminalSettingsModalState } from '@goodvibes/engine/terminal-shell/settings-modal-state';
+import { moveSettingsSelection, selectSettingsTarget, type SettingsTargetOutcome } from '@goodvibes/engine/terminal-shell/settings-navigation';
 /**
  * SettingsModal, state management for the /settings fullscreen workspace.
  *
@@ -26,17 +26,17 @@ import { moveSettingsSelection, selectSettingsTarget, type SettingsTargetOutcome
  * Mutation logic delegates to settings-modal-mutations.ts (applySettingValue, etc.).
  */
 
-import { type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { type ConfigKey } from '@goodvibes/engine/platform/platform/config';
 import type { ModelPickerTarget } from './model-picker.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { SubscriptionManager } from '@goodvibes/engine/platform/platform/config';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import { setSecretBackedSettingValue, type SettingsDaemonCredentialWriter, type SettingsSecretsManager } from './settings-modal-secrets.ts';
-import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments';
+import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes/engine/platform/platform/payments';
 import { PAYMENTS_CVV_HANDLING_CONFIG_KEY } from './payments-config.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { McpRegistry } from '@goodvibes/engine/platform/platform/mcp';
+import type { GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
 import type { ConnectionStatus } from './commands/connection-status.ts';
 import { initialConnectionEntries, refreshConnectionEntries } from './settings-modal-connections.ts';
 
@@ -69,7 +69,7 @@ import {
   type DaemonOwnedConfigWriter,
   type SettingAppliedCallback,
 } from './settings-modal-mutations.ts';
-import { featureEnablementWrite, isFeatureValueEnabled } from '@goodvibes-jev/engine/terminal-shell';
+import { featureEnablementWrite, isFeatureValueEnabled } from '@goodvibes/engine/terminal-shell';
 import {
   activateSelected as _activateSelected,
   handleSubscriptionLogoutKey as _handleSubscriptionLogoutKey,

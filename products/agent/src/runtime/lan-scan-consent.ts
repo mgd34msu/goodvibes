@@ -2,7 +2,7 @@
  * LAN-scan consent gate.
  *
  * The platform's provider start-up pass (`startBackgroundProviderDiscovery` in
- * `@goodvibes-jev/engine/platform/platform/runtime`) does three things: it registers
+ * `@goodvibes/engine/platform/platform/runtime`) does three things: it registers
  * the providers whose API key is in the environment, restores the model
  * servers an earlier session found, and scans for model servers. The consent
  * here covers only the part that reaches other machines: probing the local
@@ -24,7 +24,7 @@ import {
   type BackgroundRuntimeTaskHandle,
   type HostSystemMessageSink,
 } from '@/runtime/index.ts';
-import type { ProviderDiscoveryReporter } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import type { ProviderDiscoveryReporter } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 import {
   discoveredProvidersFilePath,
   loadLanScanConsent,

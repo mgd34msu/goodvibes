@@ -1,1 +1,1 @@
-export { spawnRecorderProcess, isExecutableOnPath, createTerminalCaptureOpener as createAgentCaptureOpener, type TerminalCaptureOpenerOptions as AgentCaptureOpenerOptions } from '@goodvibes-jev/engine/terminal-shell/audio-capture';
+export { spawnRecorderProcess, isExecutableOnPath, createTerminalCaptureOpener as createAgentCaptureOpener, type TerminalCaptureOpenerOptions as AgentCaptureOpenerOptions } from '@goodvibes/engine/terminal-shell/audio-capture';

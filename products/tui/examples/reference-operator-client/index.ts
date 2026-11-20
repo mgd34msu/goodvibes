@@ -1,8 +1,8 @@
-import { MOCK_DAEMON_FIXTURES } from '@goodvibes-jev/engine/contracts/generated/mock-daemon-fixtures';
-import type { MockDaemonResponse } from '@goodvibes-jev/engine/contracts/testing';
-import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
-import { createPeerApiClient } from '@goodvibes-jev/engine/peer-client';
-import type { FetchLike } from '@goodvibes-jev/engine/transport-core';
+import { MOCK_DAEMON_FIXTURES } from '@goodvibes/engine/contracts/generated/mock-daemon-fixtures';
+import type { MockDaemonResponse } from '@goodvibes/engine/contracts/testing';
+import { createOperatorApiClient } from '@goodvibes/engine/operator-client';
+import { createPeerApiClient } from '@goodvibes/engine/peer-client';
+import type { FetchLike } from '@goodvibes/engine/transport-core';
 
 /** One request the fixture daemon answered, kept so a test can check what was sent. */
 export interface FixtureDaemonRequest {

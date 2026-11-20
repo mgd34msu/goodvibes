@@ -1,7 +1,7 @@
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { lstat, readdir, realpath, stat } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
-import type { CallOptions } from '@goodvibes-jev/judgment/decisions';
+import type { CallOptions } from '@goodvibes/judgment/decisions';
 import type { WalkDirectoryCandidate } from './directory-reading.js';
 import { logger } from './logger.js';
 import { summarizeError } from './error-display.js';

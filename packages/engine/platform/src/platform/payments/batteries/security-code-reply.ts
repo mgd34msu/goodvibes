@@ -14,7 +14,7 @@
  * without telling the owner to delete it; a wrong yes sends one refusal
  * about a harmless number. Code treats anything but a confident no as yes.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 import { maskDigits } from '../../security/batteries/card-talk.js';
 
 export const securityCodeReply = defineBattery({

@@ -8,11 +8,11 @@ import {
   type CalendarEvent,
   type EventDateTime,
   type RecurrenceInfo,
-} from '@goodvibes-jev/engine/platform/platform/calendar';
-import { readJsonStore, updateJsonStore, type JsonStoreSpec, type JsonStoreWriteReport } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
+} from '@goodvibes/engine/platform/platform/calendar';
+import { readJsonStore, updateJsonStore, type JsonStoreSpec, type JsonStoreWriteReport } from '@goodvibes/engine/terminal-shell/agent-turn/store-file';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
+import { assertNoSecretLikeText } from '@goodvibes/engine/terminal-shell/agent-turn/persona-registry';
 import { renderIcs } from './ics-calendar.ts';
 
 // ──────────────────────────────────────────────────────────────────

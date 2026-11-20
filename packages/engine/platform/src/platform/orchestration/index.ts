@@ -1,7 +1,7 @@
 // ── Orchestration engine (see CHANGELOG 0.38.0) ─────────────────────────────
 // Curated named-export barrel (no `export *`), mirroring runtime/fleet/
 // index.ts's allowlist convention. TUI import path:
-// '@goodvibes-jev/engine/platform/platform/orchestration'.
+// '@goodvibes/engine/platform/platform/orchestration'.
 export type {
   BudgetCeiling,
   CommitExclusion,

@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/confirm-dialog-types';
+export * from '@goodvibes/engine/terminal-shell/confirm-dialog-types';

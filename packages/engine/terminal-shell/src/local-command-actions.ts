@@ -1,7 +1,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import type { ContentPart, ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
-import { resolveAndValidatePath, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ContentPart, ProviderApi } from '@goodvibes/engine/platform/platform/providers';
+import { resolveAndValidatePath, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import { MAX_IMAGE_ATTACH_BYTES } from './modal-input-routes.js';
 import { commandRefusal } from './command-confirmation.js';

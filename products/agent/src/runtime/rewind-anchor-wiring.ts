@@ -16,8 +16,8 @@
  * Every path is best-effort. A missed anchor must never break the turn that
  * produced it.
  */
-import { captureTurnAnchor, persistTurnAnchors, recordTurnAnchor, type TurnAnchorSource } from '@goodvibes-jev/engine/platform/platform/rewind';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { captureTurnAnchor, persistTurnAnchors, recordTurnAnchor, type TurnAnchorSource } from '@goodvibes/engine/platform/platform/rewind';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { SessionSurface } from '@/runtime/index.ts';
 
 /**

@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /** Host-process capabilities only. No wire registration and no serialized grant. */
 import { sameNativeInboundSourceRef, type NativeInboundSourceRef } from './native-inbound-source.js';
 import { SHARED_SESSION_DELEGATED_INPUT_METADATA_KEY, isDelegatedSessionInput, type SharedSessionInputRecord } from './session-intents.js';

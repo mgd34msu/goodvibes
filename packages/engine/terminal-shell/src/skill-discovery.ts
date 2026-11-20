@@ -1,14 +1,14 @@
 import { sep } from 'node:path';
-import { listInstalledEcosystemEntries } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
-import type { EcosystemCatalogPathOptions, ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { listInstalledEcosystemEntries } from '@goodvibes/engine/platform/platform/runtime/ecosystem/catalog';
+import type { EcosystemCatalogPathOptions, ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import {
   compareSkillsByOrigin,
   listSkills,
   resolveSkillRoots,
   type LocatedSkill,
   type SkillOrigin,
-} from '@goodvibes-jev/engine/platform/platform/skills';
-export type { SkillOrigin } from '@goodvibes-jev/engine/platform/platform/skills';
+} from '@goodvibes/engine/platform/platform/skills';
+export type { SkillOrigin } from '@goodvibes/engine/platform/platform/skills';
 export interface TerminalSkillRecord {
   name: string;
   description: string;

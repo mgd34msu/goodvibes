@@ -10,7 +10,7 @@
  * or the gate fails.
  */
 import type { SlashCommand } from './command-registry.ts';
-import { actionSentence, linePattern, riskWords } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { actionSentence, linePattern, riskWords } from '@goodvibes/engine/terminal-shell/command-actions';
 
 export interface CategorizedCommand {
   readonly command: SlashCommand;

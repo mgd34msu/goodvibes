@@ -10,7 +10,7 @@ import {
   type CompleteHostPairingResult,
   type RemoveHostPairingResult,
   type HostPairingIO,
-} from '@goodvibes-jev/engine/terminal-shell/host-pairing-store';
+} from '@goodvibes/engine/terminal-shell/host-pairing-store';
 export const TUI_HOST_PAIRING_MAX_RECORDS = HOST_PAIRING_MAX_RECORDS;
 export const TUI_HOST_PAIRING_MAX_BYTES = HOST_PAIRING_MAX_BYTES;
 export const TUI_HOST_PAIRING_UNAVAILABLE_REASON = 'TUI host credential store is unavailable.';

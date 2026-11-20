@@ -12,7 +12,7 @@
  * Bands: high stakes. The chosen attempt becomes the unit's work with no
  * further unit check, so anything short of act goes to the owner.
  */
-import { defineSelector, STAKES_BANDS, type Candidate, type JsonValue } from '@goodvibes-jev/judgment';
+import { defineSelector, STAKES_BANDS, type Candidate, type JsonValue } from '@goodvibes/judgment';
 
 
 export const BEST_OF_N_INSTRUCTIONS = "Which candidate best achieves the unit's goal and criteria in `context`?";

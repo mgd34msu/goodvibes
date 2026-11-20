@@ -60,7 +60,7 @@
  * caught here and replaced with a sentence this module wrote.
  */
 import { checkLinkTarget } from '../security/link-validation.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { cardFieldValue, type CardFieldName, type CardMaterialStore } from './card-material.js';
 import type { CardFieldKind, CardMaterialRedactor } from './card-redaction.js';
 import type { CheckoutPageDriver } from './checkout-page.js';

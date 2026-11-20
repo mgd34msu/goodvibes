@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** Code nominates up to six candidate names from the passages that mention the entity; one request reads them all. */
 export const ENTITY_ALIAS_SLOTS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'] as const;

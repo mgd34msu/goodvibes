@@ -9,7 +9,7 @@
  * current", and where the lines are printed.
  */
 
-import { announceReachability, boundedLatestRelease } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { announceReachability, boundedLatestRelease } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { UpdateFetchLike } from './update-check.ts';
 import { checkForUpdate } from '../input/commands/update-runtime.ts';
 import { VERSION } from '../version.ts';
@@ -17,7 +17,7 @@ import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import { IS_WORKSPACE_DISTRIBUTION } from './workspace-update-policy.ts';
 
 /** The package a package-managed install of this terminal is upgraded through. */
-const TERMINAL_PACKAGE_NAME = '@goodvibes-jev/tui';
+const TERMINAL_PACKAGE_NAME = '@goodvibes/tui';
 
 /** The command name the shell resolves this terminal by. */
 const TERMINAL_COMMAND_NAME = 'goodvibes';

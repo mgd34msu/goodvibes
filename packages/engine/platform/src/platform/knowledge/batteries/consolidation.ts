@@ -1,5 +1,5 @@
 /** Durable-memory worth and class are read from content, with usage as evidence. */
-import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 export const consolidationReading = defineBattery({
   name: 'engine.knowledge.consolidation', version: 1,

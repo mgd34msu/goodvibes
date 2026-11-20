@@ -1,2 +1,2 @@
 /** Shared terminal behavior belongs to the engine platform. */
-export * from '@goodvibes-jev/engine/terminal-shell/lane-graph';
+export * from '@goodvibes/engine/terminal-shell/lane-graph';

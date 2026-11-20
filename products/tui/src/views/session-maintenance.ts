@@ -7,7 +7,7 @@
  * View* type surface used across TUI views and tests; it intentionally does
  * not re-implement the evaluator.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 
 export type ViewGuidanceMode = 'off' | 'minimal' | 'guided';
 export type ViewSessionMaintenanceLevel = 'stable' | 'watch' | 'suggest-compact' | 'compacting' | 'needs-repair' | 'unknown';

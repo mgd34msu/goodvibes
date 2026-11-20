@@ -2,7 +2,7 @@
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { isPrivateWorkspaceSource } from '../src/cli/workspace-source.ts';
-import { resolveGoodVibesHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveGoodVibesHome } from '@goodvibes/engine/platform/platform/config';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CHECKSUM_MANIFEST_NAME, parseChecksumFile, requireChecksum, resolveArtifactNames, sha256, verifyChecksum } from '../src/runtime/release-artifacts.ts';
@@ -10,10 +10,10 @@ import { CHECKSUM_MANIFEST_NAME, parseChecksumFile, requireChecksum, resolveArti
 // Platform package names, mirrored from scripts/platform-packages.ts, keyed by
 // `${process.platform}-${node-arch}`.
 const PLATFORM_PACKAGE_NAMES = {
-  'linux-x64': '@goodvibes-jev/tui-linux-x64',
-  'linux-arm64': '@goodvibes-jev/tui-linux-arm64',
-  'darwin-x64': '@goodvibes-jev/tui-darwin-x64',
-  'darwin-arm64': '@goodvibes-jev/tui-darwin-arm64',
+  'linux-x64': '@goodvibes/tui-linux-x64',
+  'linux-arm64': '@goodvibes/tui-linux-arm64',
+  'darwin-x64': '@goodvibes/tui-darwin-x64',
+  'darwin-arm64': '@goodvibes/tui-darwin-arm64',
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -154,7 +154,7 @@ async function installPlatformBinaries() {
     return;
   }
 
-  // Prefer the platform package (@goodvibes-jev/tui-<os>-<arch>): the package
+  // Prefer the platform package (@goodvibes/tui-<os>-<arch>): the package
   // manager installed it with registry integrity and no lifecycle script, so its
   // binaries need no checksum download here. Copy them into vendor/ so the bin/
   // launchers find them on the fast path.
@@ -290,7 +290,7 @@ async function installWakeWordModel() {
   }
   try {
     const { provisionWakeWordModelsAtInstall, resolveManagedVoiceRoot } =
-      await import('@goodvibes-jev/engine/platform/platform/voice');
+      await import('@goodvibes/engine/platform/platform/voice');
     const outcome = await provisionWakeWordModelsAtInstall({
       managedRoot: resolveManagedVoiceRoot(home),
     });

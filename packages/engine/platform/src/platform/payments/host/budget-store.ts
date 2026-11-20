@@ -13,8 +13,8 @@
  * its on-disk checkout hold remains protected if the process dies first.
  */
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
-import { drainOwned } from '@goodvibes-jev/judgment';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes/judgment';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { fileObservationIdentity, readFileObservation, type FileObservation } from '../../utils/file-observation.js';
 import { lstatSync } from 'node:fs';
 import { logger } from '../../utils/logger.js';

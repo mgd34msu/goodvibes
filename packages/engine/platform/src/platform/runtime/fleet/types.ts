@@ -11,7 +11,7 @@
  * and lets each surface reorder/filter independently.
  */
 import type { FleetAttentionReason, FleetNodeKind, FleetNodeState } from '../../../events/fleet.js';
-import type { ScheduleCadence, ScheduleRunOutcome } from '@goodvibes-jev/engine/contracts';
+import type { ScheduleCadence, ScheduleRunOutcome } from '@goodvibes/engine/contracts';
 
 /** The source family a ProcessNode was adapted from. */
 export type ProcessKind = FleetNodeKind;

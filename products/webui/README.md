@@ -41,7 +41,7 @@ their own receipts for the tested source and configuration.
 ## Development
 
 Install dependencies from the monorepo root and build the workspace with
-`bun run build`. This product uses only declared `@goodvibes-jev/engine` exports;
+`bun run build`. This product uses only declared `@goodvibes/engine` exports;
 its production browser build consumes compiled engine artifacts. Standalone platform
 overlays and independent package pins are not supported.
 

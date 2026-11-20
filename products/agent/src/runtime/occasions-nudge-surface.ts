@@ -94,15 +94,15 @@
  * a debug line.
  */
 
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { ConversationManager } from '../core/conversation.ts';
 import {
   decideOccasionsRaises,
   occasionsRaiseLines,
   type OccasionsRaiseLedger,
 } from '../agent/occasions-nudge.ts';
-import type { OccasionsGatewayInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn/occasions-gateway';
-import { OCCASIONS_METHOD_IDS, narrowOccasionsPending } from '@goodvibes-jev/engine/terminal-shell/agent-turn/occasions-types';
+import type { OccasionsGatewayInvoke } from '@goodvibes/engine/terminal-shell/agent-turn/occasions-gateway';
+import { OCCASIONS_METHOD_IDS, narrowOccasionsPending } from '@goodvibes/engine/terminal-shell/agent-turn/occasions-types';
 
 export interface OccasionsNudgeSurfaceDeps {
   /** The relay to the sixteen verbs. In-process when this build carries them. */

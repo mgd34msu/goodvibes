@@ -1,13 +1,13 @@
 import type { CommandContext } from '../input/command-registry.ts';
 import type { EffectResult } from './agent-harness-tool-utils.ts';
 import type { AgentHarnessModelRoutingArgs, LocalModelServerDefaultEndpoint, LocalModelServerEndpoint, LocalModelSmokeTarget } from './agent-harness-model-routing-types.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { requestDeadline } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { requestDeadline } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
 import { readLimit, readRecord, readString } from './agent-harness-model-routing-utils.ts';
 import { readLocalServerEndpointCandidates, describeLocalServerEndpoint, isPrivateOrLocalUrl, localEndpointSmokeRoute, localModelServerDefaults, parseUrlCandidate, recordLocalModelSmoke } from './agent-harness-local-model-endpoints.ts';
 import type { LocalModelLastSmoke } from './agent-harness-model-routing-types.ts';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
-import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
+import { assertProjectionCurrent } from '@goodvibes/engine/platform/platform/tools/input-projection';
 
 function localModelSmokeTargetFromEndpoint(endpoint: LocalModelServerEndpoint): LocalModelSmokeTarget {
   return {

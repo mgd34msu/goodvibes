@@ -11,11 +11,11 @@
  * behavior is visible.
  */
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { readAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { readAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
+import type { OperatorMethodOutput } from '@goodvibes/engine/platform';
 
 type CheckinConfig = OperatorMethodOutput<'checkin.config.get'>['config'];
 type CheckinReceipt = OperatorMethodOutput<'checkin.receipts.list'>['receipts'][number];

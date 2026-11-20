@@ -1,10 +1,10 @@
-import type { CommonSettingsCategory, CommonSettingEntryState } from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
-import type { ConfigSetting, HostBooleanSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import type { CommonSettingsCategory, CommonSettingEntryState } from '@goodvibes/engine/terminal-shell/settings-model-types';
+import type { ConfigSetting, HostBooleanSetting } from '@goodvibes/engine/platform/platform/config';
 import type { FeatureFlag, FeatureSetting, FlagState } from '@/runtime/index.ts';
 
 export type SettingsCategory = CommonSettingsCategory | 'wrfc' | 'connections';
 
-export type { SettingsFocusRegion } from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
+export type { SettingsFocusRegion } from '@goodvibes/engine/terminal-shell/settings-model-types';
 
 export const SETTINGS_CATEGORY_GROUPS: ReadonlyArray<{
   readonly label: string;
@@ -112,6 +112,6 @@ export interface FlagEntry {
   pendingRestart: boolean;
 }
 
-export type { McpEntry } from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
+export type { McpEntry } from '@goodvibes/engine/terminal-shell/settings-model-types';
 
-export type { SubscriptionEntry } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';
+export type { SubscriptionEntry } from '@goodvibes/engine/terminal-shell/settings-subscriptions';

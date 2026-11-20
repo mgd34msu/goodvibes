@@ -1,4 +1,4 @@
-import { jsonErrorResponse } from '@goodvibes-jev/engine/daemon-api';
+import { jsonErrorResponse } from '@goodvibes/engine/daemon-api';
 import { logger } from '../../utils/logger.js';
 import { SlackIntegration } from '../../integrations/index.js';
 import { slackMentionedUserIds } from '../../integrations/slack.js';

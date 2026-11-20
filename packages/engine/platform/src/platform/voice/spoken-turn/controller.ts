@@ -1,4 +1,4 @@
-import { classifyFailure } from '@goodvibes-jev/engine/errors';
+import { classifyFailure } from '@goodvibes/engine/errors';
 import type { ConfigKey, ConfigManager } from '../../config/index.js';
 import type { TurnEvent } from '../../../events/turn.js';
 import type { VoiceService } from '../service.js';

@@ -29,8 +29,8 @@ import {
   type WakeRuntimeSettings,
   type WakeSettingReader,
   type WakeSurfaceCapabilities,
-} from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
-import { noiseSuppressionSupport } from '@goodvibes-jev/engine/platform/platform/voice/capture';
+} from '@goodvibes/engine/platform/platform/voice/wake/runtime';
+import { noiseSuppressionSupport } from '@goodvibes/engine/platform/platform/voice/capture';
 import { asRecord } from '../object';
 
 /** The surface id this tab resolves `voice.wake.surfaces.*` under. */

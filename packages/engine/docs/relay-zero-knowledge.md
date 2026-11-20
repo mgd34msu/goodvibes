@@ -259,7 +259,7 @@ or turn relay access back on) until the daemon is restarted.
 Run your own relay with the bundled server:
 
 ```
-GOODVIBES_RELAY_PORT=8787 bun node_modules/@goodvibes-jev/engine/daemon-api/dist/relay-server-entry.js
+GOODVIBES_RELAY_PORT=8787 bun node_modules/@goodvibes/engine/daemon-api/dist/relay-server-entry.js
 ```
 
 `GOODVIBES_RELAY_PORT` sets the port (default 8787). `GOODVIBES_RELAY_HOST` sets

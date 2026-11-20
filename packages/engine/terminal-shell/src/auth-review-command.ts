@@ -9,9 +9,9 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { commandRefusal } from './command-confirmation.js';
-import { buildAuthInspectionSnapshot, inspectProviderAuth } from '@goodvibes-jev/engine/platform/platform/runtime/security';
-import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { buildAuthInspectionSnapshot, inspectProviderAuth } from '@goodvibes/engine/platform/platform/runtime/security';
+import { listBuiltinSubscriptionProviders } from '@goodvibes/engine/platform/platform/config';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
 import type { CommandActionContext, CommandDescription, InputDescription } from './command-actions/types.js';

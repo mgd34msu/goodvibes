@@ -13,8 +13,8 @@
  * Only `body` and `query` cross to the daemon. The daemon derives who is asking
  * from the authenticated connection, so the caller's `context` is not sent.
  */
-import type { GatewayMethodCatalog, GatewayMethodHandler } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { GatewayMethodCatalog, GatewayMethodHandler } from '@goodvibes/engine/platform/platform/control-plane';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

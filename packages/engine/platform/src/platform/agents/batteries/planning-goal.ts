@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 export const planningGoal = defineBattery({
   name: 'engine.agents.planning-goal', version: 2, accuracyFloor: .9,

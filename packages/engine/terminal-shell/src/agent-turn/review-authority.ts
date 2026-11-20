@@ -1,4 +1,4 @@
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 
 /**
  * Who may mark a persona, skill, skill bundle or routine reviewed, and who may

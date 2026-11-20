@@ -31,20 +31,20 @@
  * daemon's address.
  */
 import { statSync } from 'node:fs';
-import { createGoodVibesPlatform, getOperatorMethod, isOperatorMethodId } from '@goodvibes-jev/engine/platform';
-import type { GoodVibesPlatform } from '@goodvibes-jev/engine/platform';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
-import { validateOperatorResponse } from '@goodvibes-jev/engine/operator-client/client-core';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { formatRefusal } from '@goodvibes-jev/engine/errors';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
-import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { connectedDaemonCredentialsPath, connectedDaemonCredentialsRevision } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-credentials';
-import { bearerFor, type DaemonTarget } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
-import { configuredDaemonOrigin, resolveDaemonTarget, resolveDaemonTargetProven, type DaemonTargetResolution } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target-resolver';
-import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
-import { readDaemonOperatorBearer } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { createGoodVibesPlatform, getOperatorMethod, isOperatorMethodId } from '@goodvibes/engine/platform';
+import type { GoodVibesPlatform } from '@goodvibes/engine/platform';
+import { GoodVibesError } from '@goodvibes/engine/errors';
+import { validateOperatorResponse } from '@goodvibes/engine/operator-client/client-core';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { formatRefusal } from '@goodvibes/engine/errors';
+import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
+import { getOrCreateCompanionToken } from '@goodvibes/engine/platform/platform/pairing';
+import { connectedDaemonCredentialsPath, connectedDaemonCredentialsRevision } from '@goodvibes/engine/platform/platform/runtime/client/daemon-credentials';
+import { bearerFor, type DaemonTarget } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target';
+import { configuredDaemonOrigin, resolveDaemonTarget, resolveDaemonTargetProven, type DaemonTargetResolution } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
+import { operatorTokenPath } from '@goodvibes/engine/platform/platform/pairing/companion-token';
+import { readDaemonOperatorBearer } from '@goodvibes/engine/platform/platform/runtime/operations';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 
 /** Re-exported so this repo's importers keep one import site for the shape
  * every client seam takes. See the doc comment further down for why

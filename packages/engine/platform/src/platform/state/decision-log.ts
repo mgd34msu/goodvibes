@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
-import { SqliteDecisionLog } from '@goodvibes-jev/judgment';
+import { SqliteDecisionLog } from '@goodvibes/judgment';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 

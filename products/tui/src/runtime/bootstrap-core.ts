@@ -1,6 +1,6 @@
-import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { initialTerminalRuntimeFields, keepTerminalDeadLetters } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
-import { projectAgentToolDependencies } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
+import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes/engine/platform/platform/knowledge';
+import { initialTerminalRuntimeFields, keepTerminalDeadLetters } from '@goodvibes/engine/terminal-shell/bootstrap-primitives';
+import { projectAgentToolDependencies } from '@goodvibes/engine/terminal-shell/bootstrap-command-context';
 import {
   createTerminalFeatureFlags,
   disposeTerminalFeatureFlags,
@@ -8,21 +8,21 @@ import {
   initializeTerminalMemory,
   attachTerminalCompanionInput,
   seedTerminalSession,
-} from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
+} from '@goodvibes/engine/terminal-shell/bootstrap-primitives';
 import {
   initializeTerminalCatalog,
   seedTerminalControlPlane,
   attachTerminalRuntimeBindings,
-} from '@goodvibes-jev/engine/terminal-shell/bootstrap-runtime-bindings';
-import { createTerminalRenderScheduler } from '@goodvibes-jev/engine/terminal-shell/render-scheduler';
+} from '@goodvibes/engine/terminal-shell/bootstrap-runtime-bindings';
+import { createTerminalRenderScheduler } from '@goodvibes/engine/terminal-shell/render-scheduler';
 import {
   companionMessageToOrchestratorInputOptions,
   type CompanionMessagePayload,
-} from '@goodvibes-jev/engine/terminal-shell/companion-input';
+} from '@goodvibes/engine/terminal-shell/companion-input';
 export {
   companionMessageToOrchestratorInputOptions,
   type CompanionMessagePayload,
-} from '@goodvibes-jev/engine/terminal-shell/companion-input';
+} from '@goodvibes/engine/terminal-shell/companion-input';
 import { createTuiTurnPermissionManager, registerTuiTurnTools } from './turn-tool-composition.ts';
 import { terminalOwnerQuestions, wireOwnerQuestionSessions } from './client/owner-questions.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
@@ -32,23 +32,23 @@ import { createShellNoticeSink } from './notification-dispatch.ts';
 import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
 import { bridgeNotificationFeedToToasts, getSharedToastCenter } from '../renderer/toast-center.ts';
 import { registerSessionConversation, unregisterSessionConversation } from './conversation-rewind-port.ts';
-import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { getConfiguredSystemPrompt } from '@goodvibes-jev/engine/platform/platform/config';
-import { installCloudflareAccessFetch } from '@goodvibes-jev/engine/platform/platform/cloudflare';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
-import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
+import { SelectionManager } from '@goodvibes/engine/terminal-shell';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { getConfiguredSystemPrompt } from '@goodvibes/engine/platform/platform/config';
+import { installCloudflareAccessFetch } from '@goodvibes/engine/platform/platform/cloudflare';
+import { getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers/provider-model';
+import { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { registerAllTools } from '@goodvibes/engine/platform/platform/tools';
 import { createSandboxContainmentNotice } from './daemon-attach-notices.ts';
-import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { PermissionManager } from '@goodvibes/engine/platform/platform/permissions';
 import { Compositor } from '../renderer/compositor.ts';
 import { activeTokens } from '../renderer/theme.ts';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { PermissionRequestHandler } from '@goodvibes/engine/platform/platform/permissions';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
-import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/platform/platform/core';
-import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConversationFollowUpItem } from '@goodvibes/engine/platform/platform/core';
+import type { OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
 import type { BootstrapOptions } from './context.ts';
-import { type RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { type RuntimeStore } from '@goodvibes/engine/platform/platform/runtime/state';
 import {
   type MutableRuntimeState,
   RuntimeEventBus,
@@ -61,16 +61,16 @@ import {
   registerBootstrapRuntimeEvents,
 } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from './services.ts';
-import { registerClientPhoneTool } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { createHostPowerSeam } from '@goodvibes-jev/engine/platform/platform/power';
-import { wireCostPricing } from '@goodvibes-jev/engine/platform/platform/providers';
+import { registerClientPhoneTool } from '@goodvibes/engine/platform/platform/runtime/client';
+import { createHostPowerSeam } from '@goodvibes/engine/platform/platform/power';
+import { wireCostPricing } from '@goodvibes/engine/platform/platform/providers';
 import { createUiRuntimeServices, type UiRuntimeServices } from './ui-services.ts';
 import { join } from 'node:path';
 import type { SystemMessagePriority } from '../core/system-message-router.ts';
-import { SessionSpineClient, SessionUnionCache, TUI_SPINE_PARTICIPANT } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
+import { SessionSpineClient, SessionUnionCache, TUI_SPINE_PARTICIPANT } from '@goodvibes/engine/platform/platform/runtime/session-spine';
 import { SessionInboundInputPoller, createBootstrapInboundInputPoller } from './session-inbound-inputs.ts';
-import { repositoryTrustNotice, type WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { HooksFileAwaitingTrustError } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { repositoryTrustNotice, type WorkspaceTrustLevel } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { HooksFileAwaitingTrustError } from '@goodvibes/engine/platform/platform/hooks';
 import { createRuntimeNotifier, syncNotifierQueueIntegrations } from './bootstrap-notifier-sync.ts';
 
 // --- Pre-router buffer ---

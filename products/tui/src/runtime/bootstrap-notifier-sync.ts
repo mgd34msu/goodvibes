@@ -1,9 +1,9 @@
-import { syncTerminalNotifierQueues } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
-import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { Notifier, type RuntimeNotificationOptions } from '@goodvibes-jev/engine/platform/platform/integrations';
-import { readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/notification-privacy';
+import { syncTerminalNotifierQueues } from '@goodvibes/engine/terminal-shell/bootstrap-primitives';
+import type { ConfigManager, SecretsManager } from '@goodvibes/engine/platform/platform/config';
+import { Notifier, type RuntimeNotificationOptions } from '@goodvibes/engine/platform/platform/integrations';
+import { readNotificationsMetadataOnly } from '@goodvibes/engine/platform/platform/runtime/notification-privacy';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
-import type { createDomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import type { createDomainDispatch } from '@goodvibes/engine/platform/platform/runtime/state';
 
 type DomainDispatch = ReturnType<typeof createDomainDispatch>;
 

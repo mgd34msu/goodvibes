@@ -10,7 +10,7 @@ import type { ConversationManager } from './conversation.js';
 import { collectResponseDelegates, ResponseCompletionGuard, waitForResponseDelegates } from './response-completion.js';
 import { COMPLETION_CHECK_DEADLINE_MS, MAX_REJECTED_DRAFTS, TURN_RETRY_DELAYS_MS, TurnEnded, runTurn, type TurnModelResponse, type TurnRequest } from './turn-loop.js';
 import { readRepeatStuck } from '../agents/orchestrator-observations.js';
-import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { decisionModelPolicyState } from '@goodvibes/engine/errors';
 import { createVerificationWriter, reportVerificationUsage } from './verification/writer.js';
 import { VerificationStore } from './verification/store.js';
 import type { CacheHitTracker } from '../providers/cache-strategy.js';

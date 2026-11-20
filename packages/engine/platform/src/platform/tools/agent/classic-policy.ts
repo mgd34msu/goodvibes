@@ -1,4 +1,4 @@
-import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { decisionModelPolicyState } from '@goodvibes/engine/errors';
 import type { AgentInput } from './schema.js';
 
 /** Classic delegates run as ordinary owner-authorized workers, without semantic

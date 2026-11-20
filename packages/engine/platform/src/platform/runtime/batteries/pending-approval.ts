@@ -8,8 +8,8 @@
  * Band: low stakes. The count is one line of a resume summary; nothing is
  * allowed, denied or blocked because of it.
  */
-import { defineBattery, STAKES_BANDS, yesNo, type YesNoReading } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { defineBattery, STAKES_BANDS, yesNo, type YesNoReading } from '@goodvibes/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
 
 export const pendingApproval = defineBattery({
   name: 'engine.runtime.pending-approval',

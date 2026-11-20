@@ -2,7 +2,7 @@ import type {
   OperatorMethodInput,
   OperatorMethodOutput,
   OperatorTypedMethodId,
-} from '@goodvibes-jev/engine/contracts/generated/foundation-client-types';
+} from '@goodvibes/engine/contracts/generated/foundation-client-types';
 import {
   createScopedBrowserPlatform,
   forScopedBrowserSession,

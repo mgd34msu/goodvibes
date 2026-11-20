@@ -5,7 +5,7 @@
  * selected index, scroll offset, and pending action.
  */
 
-import type { BookmarkEntry, BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
+import type { BookmarkEntry, BookmarkManager } from '@goodvibes/engine/platform/platform/bookmarks';
 
 // ---------------------------------------------------------------------------
 // BookmarkModal

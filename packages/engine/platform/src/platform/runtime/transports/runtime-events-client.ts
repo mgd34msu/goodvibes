@@ -3,11 +3,11 @@ export type {
   RemoteRuntimeEventsOptions,
   RuntimeEventConnectorOptions,
   SerializedRuntimeEnvelope,
-} from '@goodvibes-jev/engine/transport-realtime';
+} from '@goodvibes/engine/transport-realtime';
 export {
   buildEventSourceUrl,
   buildWebSocketUrl,
   createEventSourceConnector,
   createRemoteRuntimeEvents,
   createWebSocketConnector,
-} from '@goodvibes-jev/engine/transport-realtime';
+} from '@goodvibes/engine/transport-realtime';

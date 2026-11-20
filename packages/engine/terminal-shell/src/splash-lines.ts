@@ -1,4 +1,4 @@
-import { center, getDisplayWidth, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import { center, getDisplayWidth, truncateDisplay } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 const ART_LINES = [
     ' ██████╗    ██████╗    ██████╗   ██████╗   ██╗   ██╗  ██╗  ██████╗   ███████╗  ███████╗',
     '██╔════╝   ██╔═══██╗  ██╔═══██╗  ██╔══██╗  ██║   ██║  ██║  ██╔══██╗  ██╔════╝  ██╔════╝',

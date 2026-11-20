@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/prompt-buffer';
+export * from '@goodvibes/engine/terminal-shell/prompt-buffer';

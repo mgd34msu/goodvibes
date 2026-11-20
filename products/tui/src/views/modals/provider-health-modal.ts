@@ -1,10 +1,10 @@
 import type { ConfigModalActionContext, ConfigModalRow, ConfigModalSurface, ConfigModalView } from '../../input/config-modal-types.ts';
 import type { UiReadModel, UiProvidersSnapshot } from '../../runtime/ui-read-models.ts';
-import type { ProviderRuntimeSnapshot } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ProviderRuntimeSnapshot } from '@goodvibes/engine/platform/platform/providers';
 import { buildAccountPosture, isRouteUsable } from '../provider-health-routes.ts';
 import { buildProviderHealthDomainSummaries, type ProviderHealthDomainInputs } from '../provider-health-domains.ts';
 import { toneStyle, statusGlyph, pad, postureLine, kv, runModalCommand } from './modal-surface-helpers.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 /** The slice of ProviderRuntimeInspectionQuery this surface consumes. */
 export interface ProviderRuntimeInspect {

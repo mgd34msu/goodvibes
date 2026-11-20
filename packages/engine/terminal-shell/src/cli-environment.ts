@@ -1,6 +1,6 @@
 import { accessSync, constants } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 export function openBrowser(
   url: string,
   seams: { readonly platform?: NodeJS.Platform | undefined; readonly spawn?: typeof spawn | undefined; readonly allowFile?: boolean | undefined } = {},

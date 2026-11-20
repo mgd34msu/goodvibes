@@ -19,7 +19,7 @@ import {
   toBase64Url,
   type RelayKeyPair,
 } from './crypto.js';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 
 /** Serializable form of a relay identity, safe to hand to a secret store. */
 export interface SerializedRelayIdentity {

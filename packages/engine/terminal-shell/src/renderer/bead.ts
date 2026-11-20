@@ -12,9 +12,9 @@
  * which the web UI reads too; this file binds it to the tool registry's display
  * words and keeps what only the terminal draws. paint.ts draws it.
  */
-import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
-import { beadName as summaryName } from '@goodvibes-jev/engine/contracts';
-import { toolActivityOf } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ToolCall } from '@goodvibes/engine/platform/platform/types';
+import { beadName as summaryName } from '@goodvibes/engine/contracts';
+import { toolActivityOf } from '@goodvibes/engine/platform/platform/tools';
 
 export {
     beadArgument,
@@ -27,7 +27,7 @@ export {
     isBackgroundCall,
     needsAttention,
     toolFamily,
-} from '@goodvibes-jev/engine/contracts';
+} from '@goodvibes/engine/contracts';
 export type {
     BeadBody,
     BeadStatus,
@@ -37,7 +37,7 @@ export type {
     CallOutcome,
     ReadBodyFile,
     SummaryTone,
-} from '@goodvibes-jev/engine/contracts';
+} from '@goodvibes/engine/contracts';
 
 /**
  * The name drawn on the bead row: the running phrase from the tool's own

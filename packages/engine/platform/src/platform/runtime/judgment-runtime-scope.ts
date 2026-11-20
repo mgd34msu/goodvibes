@@ -12,8 +12,8 @@
  * gets the process-current port, as before.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
-import { installJudgmentRuntimeScope } from '@goodvibes-jev/engine/errors';
+import type { JudgmentPort } from '@goodvibes/judgment/decisions';
+import { installJudgmentRuntimeScope } from '@goodvibes/engine/errors';
 
 /** One runtime's scope; `port` is set by that runtime's judgment composition. */
 export interface JudgmentRuntimeScope {

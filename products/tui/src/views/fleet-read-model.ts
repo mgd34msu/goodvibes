@@ -2,7 +2,7 @@
 // fleet-read-model.ts
 //
 // (Agents modal tree), pure, testable read-model over the platform's live
-// process registry (@goodvibes-jev/engine/platform/platform/runtime/fleet, landed on
+// process registry (@goodvibes/engine/platform/platform/runtime/fleet, landed on
 // platform main as). No rendering dependency: this module owns the
 // flat ProcessNode[] -> tree transformation, the honest cost/token
 // aggregates, and the state->glyph/tone mapping that the Agents modal renders.
@@ -38,7 +38,7 @@ import type {
   ProcessState,
   ProcessUsage,
   SteerResult,
-} from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+} from '@goodvibes/engine/platform/platform/runtime/fleet';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 
 // ---------------------------------------------------------------------------
@@ -84,7 +84,7 @@ export interface FleetSnapshot {
 export type FleetStateTone = 'active' | 'success' | 'failure' | 'warn' | 'muted';
 
 // Design ruling: this is a DIFFERENT table from the platform presentation
-// contract's STATE_GLYPHS (@goodvibes-jev/engine/platform/platform/presentation), that
+// contract's STATE_GLYPHS (@goodvibes/engine/platform/platform/presentation), that
 // one is a 4-state semantic alias (good/warn/bad/info) shared by the TUI and
 // agent renderers; this one is a 12-state ProcessNode taxonomy specific to the
 // Agents modal tree (thinking/executing-tool/awaiting-approval/streaming/

@@ -9,7 +9,7 @@
  * one (`/triggers allow-command`); a trigger may then name it.
  */
 
-import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
+import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import type { Tool, ToolDefinition } from '../types/tools.js';
 import { summarizeError } from '../utils/error-display.js';
 import { TriggerDefinitionError } from './validation.js';

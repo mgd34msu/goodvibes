@@ -24,7 +24,7 @@
  * themselves. Code refuses unless the reading is a confident no.
  */
 import { toUnicode } from 'node:punycode';
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 export type LinkHostView = {
   /** The host as the link encodes it (punycode labels stay `xn--`). */

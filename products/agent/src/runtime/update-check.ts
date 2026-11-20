@@ -23,12 +23,12 @@ export {
   parseReleaseTagFromLocation,
   resolveLatestReleaseTag,
   type UpdateFetchLike,
-} from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+} from '@goodvibes/engine/platform/platform/runtime/self-update';
 
-export type { InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-export { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/install-kind';
+export type { InstallKind } from '@goodvibes/engine/platform/platform/runtime/operations';
+export { detectInstallKind } from '@goodvibes/engine/platform/platform/runtime/install-kind';
 
-import type { InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { InstallKind } from '@goodvibes/engine/platform/platform/runtime/operations';
 
 /**
  * The exact command to tell the user to run instead of an in-place swap.
@@ -41,5 +41,5 @@ import type { InstallKind } from '@goodvibes-jev/engine/platform/platform/runtim
 export function fallbackUpdateCommand(kind: Exclude<InstallKind, 'binary'>): string {
   if (IS_WORKSPACE_DISTRIBUTION) return WORKSPACE_REBUILD_COMMAND;
   void kind;
-  return 'bun add -g @goodvibes-jev/agent';
+  return 'bun add -g @goodvibes/agent';
 }

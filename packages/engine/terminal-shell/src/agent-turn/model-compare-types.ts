@@ -1,7 +1,7 @@
-import type { ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { ChatResponse, LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ToolExecuteOptions } from '@goodvibes/engine/platform/platform/tools';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
+import type { ChatResponse, LLMProvider } from '@goodvibes/engine/platform/platform/providers';
 
 export interface AgentModelCompareToolArgs {
   readonly mode?: unknown;
@@ -181,4 +181,4 @@ export const MAX_SIDE_BY_SIDE_PREVIEW_BYTES = 10_000;
 export const COMPARISON_STORE_LIMIT = 25;
 export const BLIND_LABELS = ['A', 'B', 'C', 'D'] as const;
 
-export { MODEL_REASON_THEME_LABELS } from '@goodvibes-jev/engine/platform/platform/routing';
+export { MODEL_REASON_THEME_LABELS } from '@goodvibes/engine/platform/platform/routing';

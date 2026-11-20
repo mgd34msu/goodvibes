@@ -1,10 +1,10 @@
-import type { SessionManager, SessionMeta } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { SessionManager, SessionMeta } from '@goodvibes/engine/platform/platform/sessions';
 import {
   describeResumeShortfalls,
   loadSavedSessionIntoLive as loadSavedSession,
   type LoadSavedSessionOptions,
-} from '@goodvibes-jev/engine/terminal-shell/session-resume';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+} from '@goodvibes/engine/terminal-shell/session-resume';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import type { CommandContext } from '../command-registry.ts';
 
 export interface LoadedSavedSession {

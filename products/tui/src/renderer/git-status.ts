@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/git-status';
+export * from '@goodvibes/engine/terminal-shell/git-status';

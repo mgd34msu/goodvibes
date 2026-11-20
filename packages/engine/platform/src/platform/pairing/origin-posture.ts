@@ -13,7 +13,7 @@
  *    supported way to get it (tailscale ⇒ https without minting certificates,
  *    the daemon NEVER provisions a CA or mints certificates).
  */
-import { isPrivateNetworkHost, isTailnetHost } from '@goodvibes-jev/engine/transport-http/paths';
+import { isPrivateNetworkHost, isTailnetHost } from '@goodvibes/engine/transport-http/paths';
 import { isLoopbackHost } from '../utils/reachable-base-url.js';
 
 /** The browser-gated capabilities a surface renders availability for. */

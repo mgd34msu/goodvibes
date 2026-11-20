@@ -1,4 +1,4 @@
-import { hashState, type EntryType, type JsonValue } from '@goodvibes-jev/judgment';
+import { hashState, type EntryType, type JsonValue } from '@goodvibes/judgment';
 
 /** Saved native rejection bindings include the complete
  * original prepared records, even when the model view replaces old bodies with

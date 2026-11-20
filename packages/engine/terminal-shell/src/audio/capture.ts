@@ -9,7 +9,7 @@
  * system for a device that is already held.
  *
  * The framing arithmetic, the recorder argv, the probe order and the utterance
- * policy all live in the platform (`@goodvibes-jev/engine/platform/platform/voice/capture`),
+ * policy all live in the platform (`@goodvibes/engine/platform/platform/voice/capture`),
  * because getting any of them subtly wrong is SILENT: a container header out of
  * byte alignment, or a frame at 62.5 fps against a 100 fps model, still "works"
  * and simply never detects. The terminal platform supplies the host process adapter, shared by both
@@ -18,7 +18,7 @@
  * reported state rather than an exception.
  */
 import { spawn } from 'node:child_process';
-import { createRecorderCaptureOpener, type AudioCaptureOpener, type AudioCaptureWarn, type CaptureChildProcess, type CaptureSpawn, } from '@goodvibes-jev/engine/platform/platform/voice/capture';
+import { createRecorderCaptureOpener, type AudioCaptureOpener, type AudioCaptureWarn, type CaptureChildProcess, type CaptureSpawn, } from '@goodvibes/engine/platform/platform/voice/capture';
 import { findExecutable } from './player.js';
 /**
  * WHERE NOISE SUPPRESSION HAPPENS, AND WHY NOT HERE

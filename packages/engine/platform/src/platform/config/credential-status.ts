@@ -32,7 +32,7 @@
 import type {
   CredentialStatusProviderLike,
   CredentialStatusRecord,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';
 import { BUILTIN_PROVIDER_ENV_KEYS } from './provider-credential-catalog.js';
 import { isCommandBackedSecretSource, type SecretRecord, type SecretsManager } from './secrets.js';
 

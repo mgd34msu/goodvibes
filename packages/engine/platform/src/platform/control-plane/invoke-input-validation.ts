@@ -28,7 +28,7 @@
  */
 
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
-import { canonicalJson, type EntryType } from '@goodvibes-jev/judgment';
+import { canonicalJson, type EntryType } from '@goodvibes/judgment';
 
 /** Structured result of a rejected invocation, same 400 shape the router uses. */
 export interface InvokeValidationError {

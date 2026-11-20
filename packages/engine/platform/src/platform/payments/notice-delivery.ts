@@ -47,7 +47,7 @@ import { decisionOrClassic } from '../runtime/decision-policy.js';
  * the rule to live and drift; the assertion instead is that nothing
  * markup-shaped survives into the rendered notice at all.
  */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { sanitizeNoticeField } from '../security/notice-text.js';
 import { approvalReply, vetoReply } from './batteries/payment-reply.js';
 import type { ChannelDelivery } from './windows.js';

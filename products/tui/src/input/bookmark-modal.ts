@@ -1,1 +1,1 @@
-export { BookmarkModal } from '@goodvibes-jev/engine/terminal-shell/bookmark-modal';
+export { BookmarkModal } from '@goodvibes/engine/terminal-shell/bookmark-modal';

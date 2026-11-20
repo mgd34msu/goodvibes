@@ -18,7 +18,7 @@
  * work, which is then checked like any other; a wrong owner route costs the
  * owner a question.
  */
-import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes/judgment';
 import type { StallRoute } from '../../../events/contract.js';
 
 export const STALL_ROUTE_OPTIONS = {

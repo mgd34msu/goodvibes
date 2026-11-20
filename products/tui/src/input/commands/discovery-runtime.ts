@@ -1,8 +1,8 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { scan, persistProviders } from '@goodvibes-jev/engine/platform/platform/discovery';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { scan, persistProviders } from '@goodvibes/engine/platform/platform/discovery';
 import { requireProviderApi, requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 /**
  * `/scan`, described once (command-actions/): one action that looks for

@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config';
+import { DEFAULT_CONFIG } from '@goodvibes/engine/platform/platform/config';
 import { CLOUDFLARE_COMPONENT_IDS } from '../../runtime/cloudflare-control-plane.ts';
 import { normalizeText } from './onboarding-wizard-helpers.ts';
 import type { OnboardingWizardControllerLike } from './onboarding-wizard-types.ts';

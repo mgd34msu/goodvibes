@@ -1,6 +1,6 @@
 /** Public host aggregation stays assignable to the authoritative wire maps. */
-import type { OperatorMethodInputMap, OperatorMethodOutputMap } from '@goodvibes-jev/engine/contracts';
-import { aggregateInbox, normalizeInboxQuery, type InboxAggregatorSources, type InboxListInput } from '@goodvibes-jev/engine/platform/platform/intake';
+import type { OperatorMethodInputMap, OperatorMethodOutputMap } from '@goodvibes/engine/contracts';
+import { aggregateInbox, normalizeInboxQuery, type InboxAggregatorSources, type InboxListInput } from '@goodvibes/engine/platform/platform/intake';
 
 declare const sources: InboxAggregatorSources;
 declare const input: InboxListInput;

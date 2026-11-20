@@ -9,7 +9,7 @@
  * key again, in place.
  */
 
-import type { SharedSessionRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { SharedSessionRecord } from '@goodvibes/engine/platform/platform/control-plane';
 import { activeTokens } from './theme.ts';
 import type { SessionPickerModal } from '../input/session-picker-modal.ts';
 import './modal-utils.ts';
@@ -36,7 +36,7 @@ function isClosedStatus(status: string): boolean {
 /**
  * Closed sessions carry an optional, honest reason for WHY they
  * closed under `metadata.closeReason` (platform's `SharedSessionCloseReason`,
- * 'closeReason' key, see `@goodvibes-jev/engine/platform` platform/control-plane
+ * 'closeReason' key, see `@goodvibes/engine/platform` platform/control-plane
  * session-broker-sessions.ts's `readSessionCloseReason`). `metadata` is an
  * open record so old readers and records from a build that predates this
  * field ignore it safely, read it duck-typed here rather than importing the
@@ -202,7 +202,7 @@ function crossSurfaceRows(modal: SessionPickerModal): KitRow[] {
  * @param now           Clock for the recency groups (tests pass a fixed value).
  */
 
-import { createSessionPickerRenderer } from '@goodvibes-jev/engine/terminal-shell/renderer/session-picker';
+import { createSessionPickerRenderer } from '@goodvibes/engine/terminal-shell/renderer/session-picker';
 export const { renderSessionPickerModal } = createSessionPickerRenderer<SessionPickerModal>({
   allowDelete: true,
   mouseNavigation: true,

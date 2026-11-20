@@ -1,5 +1,5 @@
-import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
-import type { DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import type { JevDecision } from '@goodvibes/judgment/decisions';
+import type { DecisionModelPolicyState } from '@goodvibes/engine/errors';
 /**
  * Types of the gate's per-call decision (the gate replaces the old permission
  * layer; the type names keep their permission prefix so every surface that

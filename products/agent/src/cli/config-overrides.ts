@@ -1,5 +1,5 @@
 import type { ConfigKey, ConfigManager } from '../config/index.ts';
-import { ConfigError } from '@goodvibes-jev/engine/platform/platform/types/errors';
+import { ConfigError } from '@goodvibes/engine/platform/platform/types/errors';
 import { resolveFeatureEnablementWrite } from '../runtime/feature-enablement.ts';
 import type { GoodVibesCliCommand, GoodVibesCliFlags } from './types.ts';
 import { RUNTIME_ENDPOINT_CONFIG_KEYS, hostModeForHostname } from './endpoints.ts';

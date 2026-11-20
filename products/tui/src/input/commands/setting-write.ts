@@ -1,10 +1,10 @@
 // The same text reader `--config key=value` and the daemon's `config set` use, so one line stores one value everywhere.
-import { parseConfigValueText } from '@goodvibes-jev/engine/terminal-shell/cli-config-overrides';
+import { parseConfigValueText } from '@goodvibes/engine/terminal-shell/cli-config-overrides';
 import { TUI_NOTIFICATIONS_METADATA_ONLY_KEY } from '../../config/host-settings.ts';
 import type { CommandContext } from '../command-registry.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { readRefusal } from '@goodvibes/engine/errors';
+import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
 import { setActiveThemeMode, setActiveThemeName, type ThemeMode } from '../../renderer/theme.ts';
 import {
   buildGoodVibesSecretKey,
@@ -12,7 +12,7 @@ import {
   isSecretConfigKey,
   persistSecretBackedConfigValue,
 } from '../../config/secret-config.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 
 /**

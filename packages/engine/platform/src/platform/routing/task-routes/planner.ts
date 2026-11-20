@@ -1,6 +1,6 @@
 import { isClassicOperation } from '../../runtime/decision-policy.js';
 import { rankClassicCatalog } from '../../runtime/classic-catalog.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /**
  * The task route planner: the agent's planAgentTaskRoute, with the keyword
  * ladder replaced by Jev readings. One planning pass asks, concurrently, the
@@ -21,13 +21,13 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
  * (then the main conversation) at low confidence, every effect keeping its
  * confirmation boundary, for the calling model or the user to choose.
  */
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { isDeepStrictEqual } from 'node:util';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { captureStrictJudgmentJson, prepareJudgmentResult } from '../../gate/judgment-result.js';
 import { SOURCE_SCREENING_LIMITS, type SourceScreeningReceipt } from '../../security/source-screening/types.js';
 import { ToolInputProjectionError } from '../../tools/input-projection.js';
-import { NONE, type Outcome, type Selection } from '@goodvibes-jev/judgment';
+import { NONE, type Outcome, type Selection } from '@goodvibes/judgment';
 import { mainConversationRoute, TASK_ROUTES } from './catalog.js';
 import { routeCandidates, taskRoutePick } from './route-selector.js';
 import { readSlots } from './slots.js';

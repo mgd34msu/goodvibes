@@ -1,11 +1,11 @@
 import { dirname, join, resolve } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { CommandContext } from '../command-registry.ts';
-import type { TerminalSetupReviewSnapshot } from '@goodvibes-jev/engine/terminal-shell/setup-review';
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import { CONFIG_SCHEMA, CONFIG_KEYS, configKeyFacts, isProtectedConfigValue, isSecretReferenceValue } from '@goodvibes-jev/engine/platform/platform/config';
-import { redactDiagnosticValue } from '@goodvibes-jev/engine/platform/platform/utils';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import type { TerminalSetupReviewSnapshot } from '@goodvibes/engine/terminal-shell/setup-review';
+import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import { CONFIG_SCHEMA, CONFIG_KEYS, configKeyFacts, isProtectedConfigValue, isSecretReferenceValue } from '@goodvibes/engine/platform/platform/config';
+import { redactDiagnosticValue } from '@goodvibes/engine/platform/platform/utils';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
 
 /** What a masked literal credential reads as in an exported file. */
 export const MASKED_VALUE = '[REDACTED]';

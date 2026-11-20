@@ -1,5 +1,5 @@
-export {buildMcpEntries} from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
-import { isValidConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+export {buildMcpEntries} from '@goodvibes/engine/terminal-shell/settings-mcp-entries';
+import { isValidConfigKey } from '@goodvibes/engine/platform/platform/config';
 /**
  * settings-modal-data, pure data-assembly helpers for SettingsModal.
  *
@@ -8,15 +8,15 @@ import { isValidConfigKey } from '@goodvibes-jev/engine/platform/platform/config
  * to these during open() and tab-switch operations.
  */
 
-import { type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ConfigManager, ConfigSetting, HostManagedSettingLocks } from '@goodvibes-jev/engine/platform/platform/config';
+import { type ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import type { ConfigManager, ConfigSetting, HostManagedSettingLocks } from '@goodvibes/engine/platform/platform/config';
 import { readResolvedSettingLookups } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 
-import { buildSubscriptionEntries } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';
-import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { buildSubscriptionEntries } from '@goodvibes/engine/terminal-shell/settings-subscriptions';
+import type { SubscriptionManager } from '@goodvibes/engine/platform/platform/config';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
-import { CODE_INDEX_ENABLED_CONFIG_KEY, NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { CODE_INDEX_ENABLED_CONFIG_KEY, NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes/engine/platform/platform/runtime/operations';
 import {
   WORKTREE_SETUP_CARRY_OVER_GLOBS_CONFIG_KEY,
   WORKTREE_SETUP_COMMANDS_CONFIG_KEY,
@@ -26,8 +26,8 @@ import {
   isWorktreeSetupListConfigKey,
   readWorktreeSetupSetting,
 } from './worktree-setup-config.ts';
-import { worktreeSetupSettingValue } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { BUDGET_ALERT_USD_CONFIG_KEY, BUDGET_ALERT_USD_DEFAULT, readBudgetAlertUsd } from '@goodvibes-jev/engine/platform/platform/providers';
+import { worktreeSetupSettingValue } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { BUDGET_ALERT_USD_CONFIG_KEY, BUDGET_ALERT_USD_DEFAULT, readBudgetAlertUsd } from '@goodvibes/engine/platform/platform/providers';
 import { MEMORY_PROJECTION_DIR_CONFIG_KEY, buildMemoryProjectionDirSyntheticEntry } from './commands/recall-files-config.ts';
 import {
   injectSandboxExecSyntheticEntries,
@@ -43,7 +43,7 @@ import { SETTINGS_CATEGORIES, type BuiltinSettingEntry, type FlagEntry, type Hos
 import { enrichRelaySettingDescriptions } from './relay-settings-descriptions.ts';
 import { enrichDaemonOwnedSettingDescriptions } from './daemon-owned-settings-descriptions.ts';
 import { applyFeatureUnitLayout } from './feature-unit-layout.ts';
-import { FEATURE_SETTINGS_BY_ID } from '@goodvibes-jev/engine/terminal-shell';
+import { FEATURE_SETTINGS_BY_ID } from '@goodvibes/engine/terminal-shell';
 import {
   buildPaymentsCardsRow,
   PAYMENTS_CARDS_ROW_KEY,

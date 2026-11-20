@@ -4,7 +4,7 @@
  *
  * ── The gap this closes ───────────────────────────────────────────────────
  *
- * `@goodvibes-jev/engine` declares thirty packages under
+ * `@goodvibes/engine` declares thirty packages under
  * `optionalDependencies`. The engine now reaches every one of them through a
  * dynamic import, so a RUNNING process without them reports the affected
  * feature unavailable and carries on. Measured against the real daemon binary
@@ -43,7 +43,7 @@ import type { FsReader } from './effects.js';
 
 /** One manifest's dependency declarations, as the compile path needs them. */
 export interface DependencyManifest {
-  /** Package the declarations came from, e.g. `@goodvibes-jev/engine`. */
+  /** Package the declarations came from, e.g. `@goodvibes/engine`. */
   readonly name: string;
   /** Where it was read from, quoted in failure messages so the fix is locatable. */
   readonly path: string;

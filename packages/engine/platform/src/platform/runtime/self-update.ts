@@ -16,7 +16,7 @@ export type { ClientReaderArtifact, ClientReaderPackage, ClientReaderTarget } fr
 export { assertStagedClientReaderCompatible } from './client-reader-update.js';
 export { admitInstalledClientDataWriter, installedReaderCommand } from './installed-client-data-writer.js';
 export type { InstalledClientDataOptions } from './installed-client-data-writer.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /**
  * Verified binary updates with owned staging and compensating cohort renames.
  * Individual same-filesystem renames are atomic; the cohort and the brief gap
@@ -795,7 +795,7 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       // stage-byte checks as every native member. It was never downloaded and
       // has no independently expected checksum to compute or verify.
       verified.push({ target, buffer: Buffer.from(JSON.stringify({ schema: 1,
-        packageName: '@goodvibes-jev/daemon', version, artifact }, null, 2) + '\n') });
+        packageName: '@goodvibes/daemon', version, artifact }, null, 2) + '\n') });
     }
     if (native) {
       const descriptorIndex = verified.findIndex(member => member.target.path === daemonTargets[daemonTargets.length - 1]?.path);
@@ -832,7 +832,7 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       // source artifact's bytes. Do not expose its former release pin as proof.
       verifiedMembers.delete(descriptor.target.path);
       verified[descriptorIndex] = { target: descriptor.target, buffer: Buffer.from(JSON.stringify({ schema: 1,
-        packageName: '@goodvibes-jev/daemon', version: normalizeVersion(native.version), artifact,
+        packageName: '@goodvibes/daemon', version: normalizeVersion(native.version), artifact,
         ...(previousReader === undefined ? {} : { previousReader }) }, null, 2) + '\n') };
     }
     signal.throwIfAborted();

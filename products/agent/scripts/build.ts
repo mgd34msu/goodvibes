@@ -2,7 +2,7 @@
 /** `bun run build:binary`: the engine toolchain's one workspace launcher, running the build for this product. */
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runWorkspaceToolchain, WorkspaceToolchainInterrupted } from '@goodvibes-jev/engine/toolchain';
+import { runWorkspaceToolchain, WorkspaceToolchainInterrupted } from '@goodvibes/engine/toolchain';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 try {

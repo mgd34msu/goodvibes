@@ -1,4 +1,4 @@
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { currentToolAutonomySource } from '../tools/registry.js';
 import type { ToolExecuteOptions } from '../types/tools.js';
 import { readNativeMutationAdmission, type NativeMutationAdmission } from '../control-plane/native-mutation.js';

@@ -1,5 +1,5 @@
 /**
- * @goodvibes-jev/engine/platform/platform/runtime/client
+ * @goodvibes/engine/platform/platform/runtime/client
  *
  * The client SEAMS: what a surface product does at each place its own process
  * stops and the daemon's begins.

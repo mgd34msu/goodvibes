@@ -1,6 +1,6 @@
-import { revealOrNull, type Secret } from '@goodvibes-jev/engine/platform/platform/security';
-import { isGoodVibesSecretReferenceValue, type SecretScope } from '@goodvibes-jev/engine/platform/platform/config';
-import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { revealOrNull, type Secret } from '@goodvibes/engine/platform/platform/security';
+import { isGoodVibesSecretReferenceValue, type SecretScope } from '@goodvibes/engine/platform/platform/config';
+import type { UserAuthManager } from '@goodvibes/engine/platform/platform/security';
 import type { OnboardingAcknowledgementTarget, OnboardingShellPaths, OnboardingStateScope } from './onboarding-state-types.js';
 import type { OnboardingRuntimeStateRecord } from './onboarding-state.js';
 import { isDeepEqual } from './onboarding-values.js';

@@ -1,11 +1,11 @@
 import type { UiRuntimeEvents } from '@/runtime/index.ts';
-import type { NoticeLevel } from '@goodvibes-jev/engine/platform/platform/core';
+import type { NoticeLevel } from '@goodvibes/engine/platform/platform/core';
 import type { StreamMetrics } from './stream-metrics.ts';
 import { createStreamStallWatchdog, type StallTimers } from './stream-stall-watchdog.ts';
 import { buildRoutingChip } from './model-routing-chip.ts';
 import { createUserTurnOwner, type UserTurnOwner } from './user-turn.ts';
 import { ProviderSetupReadings, describeProviderSetup, type ProviderSetupClassification } from '../providers/provider-classification.ts';
-import type { ProviderRuntimeMetadata } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ProviderRuntimeMetadata } from '@goodvibes/engine/platform/platform/providers';
 
 // Preserve the existing wiring API while shared-state consumers use the leaf.
 export { createStreamMetrics, type StreamMetrics } from './stream-metrics.ts';

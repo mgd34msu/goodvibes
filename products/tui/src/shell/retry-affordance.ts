@@ -11,7 +11,7 @@
  * session (actionHint). An offer stays until it is used, replaced by a newer
  * one, or (for retry) a new prompt is sent.
  */
-import { offerFailedTurnRetry } from '@goodvibes-jev/engine/terminal-shell/turn-failure-actions';
+import { offerFailedTurnRetry } from '@goodvibes/engine/terminal-shell/turn-failure-actions';
 
 /** Alt+<letter> in both encodings a terminal sends: ESC-prefixed, or CSI-u with the Alt modifier (kitty keyboard protocol). */
 function isAltChord(data: string, letter: string): boolean {

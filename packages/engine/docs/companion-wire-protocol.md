@@ -2,13 +2,13 @@
 
 Native Kotlin (Android) and Swift (iOS) companion apps talk to the GoodVibes daemon directly over the same HTTP and WebSocket contract the TypeScript platform uses. This page is the shared wire reference for both platforms; the platform guides ([Android](./android-integration.md), [iOS](./ios-integration.md)) cover only what differs (secure storage and HTTP client).
 
-If your app is React Native or Expo based, do not implement this protocol yourself. Use [`@goodvibes-jev/engine/platform/react-native`](./react-native-integration.md) or [`@goodvibes-jev/engine/platform/expo`](./expo-integration.md), which implement it for you.
+If your app is React Native or Expo based, do not implement this protocol yourself. Use [`@goodvibes/engine/platform/react-native`](./react-native-integration.md) or [`@goodvibes/engine/platform/expo`](./expo-integration.md), which implement it for you.
 
 ## Source of truth
 
 - Surface and export references: [Runtime surfaces](./surfaces.md), [Exports](./exports.md), [Public surface](./public-surface.md), [Entry point guide](./packages.md)
 - Contract artifacts in this repo: `packages/engine/contracts/artifacts/operator-contract.json` and `packages/engine/contracts/artifacts/peer-contract.json`
-- The same artifacts ship on the `@goodvibes-jev/engine/platform/contracts/operator-contract.json` and `@goodvibes-jev/engine/platform/contracts/peer-contract.json` subpaths.
+- The same artifacts ship on the `@goodvibes/engine/platform/contracts/operator-contract.json` and `@goodvibes/engine/platform/contracts/peer-contract.json` subpaths.
 
 ## Auth
 

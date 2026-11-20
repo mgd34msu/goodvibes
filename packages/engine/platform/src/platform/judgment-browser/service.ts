@@ -1,11 +1,11 @@
-import { JudgmentError } from '@goodvibes-jev/judgment';
-import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import { JudgmentError } from '@goodvibes/judgment';
+import { DecisionModelsDisabledError } from '@goodvibes/engine/errors';
 import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
-import type { JudgmentPort, JudgmentResult, Questions } from '@goodvibes-jev/judgment/decisions';
+import type { JudgmentPort, JudgmentResult, Questions } from '@goodvibes/judgment/decisions';
 import {
   BrowserJudgmentError, BROWSER_JUDGMENT_LIMITS as LIMIT, parseBrowserJudgmentRequest, captureBrowserJudgmentJson, missingScopes,
   type AuthenticatedPrincipal, type BrowserJudgmentRequest,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { BrowserJudgmentReferences } from './references.js';
 import { BrowserJudgmentRegistry, type RegisteredBrowserJudgmentBattery } from './registry.js';

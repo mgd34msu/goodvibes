@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 export const catalogProviderMatchBattery = defineBattery({
   name: 'webui.models.catalog-provider-match', version: 1, accuracyFloor: 0.95,

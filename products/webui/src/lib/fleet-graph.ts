@@ -13,7 +13,7 @@
  * fleet.graph.get) rather than generated, so a daemon newer than this client
  * may report a state it has never seen, render it verbatim, never drop it.
  */
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
+import type { OperatorMethodOutput } from '@goodvibes/engine/contracts';
 import type { BadgeTone } from './presentation-bridge';
 
 export type FleetGraphResult = OperatorMethodOutput<'fleet.graph.get'>;

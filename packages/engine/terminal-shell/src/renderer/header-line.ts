@@ -17,8 +17,8 @@
  * falls back to its short form, then is dropped whole (a half-cut marker
  * reads worse than none); the title goes before it.
  */
-import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth, interpolateColor, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
+import { type Line, createEmptyLine } from '@goodvibes/engine/platform/platform/types';
+import { getDisplayWidth, interpolateColor, truncateDisplay } from '@goodvibes/engine/platform/platform/utils';
 export interface GitHeaderInfo {
     readonly branch: string;
     readonly dirty: boolean;

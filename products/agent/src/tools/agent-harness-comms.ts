@@ -1,18 +1,18 @@
 import type { CommandContext } from '../input/command-registry.ts';
-import { isSecret } from '@goodvibes-jev/engine/platform/platform/security';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
+import { isSecret } from '@goodvibes/engine/platform/platform/security';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import { captureCatalogData } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
 import { dirname } from 'node:path';
 import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
-import { captureAgentExportPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/artifact-effect';
+import { captureAgentExportPath } from '@goodvibes/engine/terminal-shell/agent-turn/artifact-effect';
 import { harnessCatalogInvocationAuthority, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
 import { resolveChannelDraftNativeReference } from './agent-channel-draft-reference.ts';
-import { captureOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-connection-owner';
-import { agentCallConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn/agent-call-credential';
-import { forgetDelegatedCredential } from '@goodvibes-jev/engine/terminal-shell/agent-turn/agent-delegation-credential';
+import { captureOperatorConnection } from '@goodvibes/engine/terminal-shell/agent-turn/operator-connection-owner';
+import { agentCallConnection } from '@goodvibes/engine/terminal-shell/agent-turn/agent-call-credential';
+import { forgetDelegatedCredential } from '@goodvibes/engine/terminal-shell/agent-turn/agent-delegation-credential';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger, labelUntrustedContent } from '../trust/untrusted-content.ts';
-import { screenOutboundForCardMaterial, CardMaterialRefusedError } from '@goodvibes-jev/engine/terminal-shell/agent-turn/payments-channel-guard';
+import { screenOutboundForCardMaterial, CardMaterialRefusedError } from '@goodvibes/engine/terminal-shell/agent-turn/payments-channel-guard';
 import {
   aggregateUnifiedInbox,
   fetchInboundChannelFeed,
@@ -48,12 +48,12 @@ import {
   channelProfileRouteFilePath,
 } from '../agent/channel-profile-routing.ts';
 import { buildAgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
-import { deliverAgentChannelMessage } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery';
+import { deliverAgentChannelMessage } from '@goodvibes/engine/terminal-shell/agent-turn/channel-delivery';
 import { requireConfirmedAction, type EffectResult } from './agent-harness-tool-utils.ts';
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
-import { createDaemonOperatorInvoke, resolveDaemonOperatorConnection, type DaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn/daemon-operator-client';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { createDaemonOperatorInvoke, resolveDaemonOperatorConnection, type DaemonOperatorInvoke } from '@goodvibes/engine/terminal-shell/agent-turn/daemon-operator-client';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 /**
  * The connected-host caller for the comms modes, or null when this shell has

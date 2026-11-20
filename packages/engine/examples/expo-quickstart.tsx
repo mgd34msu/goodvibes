@@ -3,7 +3,7 @@
  */
 import { useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { createExpoGoodVibesPlatform } from '@goodvibes-jev/engine/platform/expo';
+import { createExpoGoodVibesPlatform } from '@goodvibes/engine/platform/expo';
 
 // DOM lib types declare only (url, protocols); the Expo/React Native runtime
 // accepts a third { headers } options argument, so the constructor is reached

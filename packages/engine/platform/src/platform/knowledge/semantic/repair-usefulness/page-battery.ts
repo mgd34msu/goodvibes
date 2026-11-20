@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** Separate page rubric; the answer field shares the canonical typed transport only. */
 export const knowledgePageFactUsefulness = defineBattery({

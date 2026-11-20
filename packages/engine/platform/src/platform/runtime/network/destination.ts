@@ -21,7 +21,7 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { checkServerIdentity } from 'node:tls';
-import { exemptLoopbackFromProxy, isLoopbackHost } from '@goodvibes-jev/engine/transport-http/paths';
+import { exemptLoopbackFromProxy, isLoopbackHost } from '@goodvibes/engine/transport-http/paths';
 import { currentExecutionMode } from '../../gate/execution-context.js';
 import { assertDeliveryCurrent, runDeliveryPublication, type DeliveryLifetime } from '../../utils/delivery-lifetime.js';
 import { instrumentedFetch } from '../../utils/fetch-with-timeout.js';

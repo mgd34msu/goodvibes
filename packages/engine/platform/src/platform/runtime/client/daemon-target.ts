@@ -14,7 +14,7 @@
  * side). This file is browser-safe: no `node:` import, so the web UI and the
  * browser SDK entry use the same check.
  */
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { parseDaemonOrigin, type DaemonOrigin } from '../../config/control-plane-base-url.js';
 import { sha256Base64Url } from '../../utils/sha256.js';
 

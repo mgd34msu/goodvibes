@@ -1,11 +1,11 @@
-import type { DaemonRuntimeRouteHandlers } from '@goodvibes-jev/engine/daemon-api';
-import type { DaemonRuntimeRouteContext as PlatformDaemonRuntimeRouteContext, JsonBody } from '@goodvibes-jev/engine/daemon-api';
+import type { DaemonRuntimeRouteHandlers } from '@goodvibes/engine/daemon-api';
+import type { DaemonRuntimeRouteContext as PlatformDaemonRuntimeRouteContext, JsonBody } from '@goodvibes/engine/daemon-api';
 import type {
   AutomationScheduleDefinition,
   CreateAutomationJobInput,
   UpdateAutomationJobInput,
 } from '../../automation/index.js';
-import type { AgentRecordLike as DaemonApiAgentRecordLike } from '@goodvibes-jev/engine/daemon-api/runtime-route-types';
+import type { AgentRecordLike as DaemonApiAgentRecordLike } from '@goodvibes/engine/daemon-api/runtime-route-types';
 import type { AgentManager } from '../../tools/agent/index.js';
 // The local Like-view types below describe the minimal route handler inputs
 // accepted by daemon-api handlers. They stay narrow so callers can provide

@@ -3,7 +3,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getOperatorMethod } from '@goodvibes-jev/engine/contracts';
+import { getOperatorMethod } from '@goodvibes/engine/contracts';
 
 const GENERATED = resolve(dirname(fileURLToPath(import.meta.url)), '../src/lib/generated');
 export const CONTRACT_SCHEMA_PATH = resolve(GENERATED, 'contract-inspection-schema.json');

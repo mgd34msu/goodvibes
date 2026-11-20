@@ -7,7 +7,7 @@
  * is total now: every call ends in exactly one of these, and only `ok` is a
  * success.
  */
-import { RefusalError, refusal, type Refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal, type Refusal } from '@goodvibes/engine/errors';
 import type { ChannelSurface } from './types.js';
 
 export type ChannelActionOutcome =

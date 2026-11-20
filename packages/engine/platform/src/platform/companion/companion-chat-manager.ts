@@ -1,5 +1,5 @@
 import { captureOwnedJson } from '../gate/judgment-input.js';
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import { readReasoningEffortLevel } from '../providers/reasoning-effort.js';
 import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 /**
@@ -31,7 +31,7 @@ import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibilit
  */
 
 import { randomUUID } from 'node:crypto';
-import { EngineErrorCodes, RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { EngineErrorCodes, RefusalError, refusal } from '@goodvibes/engine/errors';
 import type { ConversationManager } from '../core/conversation.js';
 import { startTurnForOwnerInput } from '../security/turn-boundary.js';
 import { withUntrustedContentScope } from '../security/untrusted-content.js';
@@ -83,7 +83,7 @@ import { CompanionChatRateLimiter } from './companion-chat-rate-limiter.js';
 import type { CompanionChatRateLimiterOptions } from './companion-chat-rate-limiter.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
-import { toolCallActivity } from '@goodvibes-jev/engine/contracts';
+import { toolCallActivity } from '@goodvibes/engine/contracts';
 import { runTurn, type TurnModelResponse, type TurnRequest } from '../core/turn-loop.js';
 import { readTurnFailure, turnFailureText, type TurnChanges } from '../core/turn-failure.js';
 import { TurnAttemptRecord, TurnChangeRecord } from '../core/turn-changes.js';

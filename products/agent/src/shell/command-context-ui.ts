@@ -12,12 +12,12 @@
  * unrelated closures that only share the fact that they were convenient there.
  */
 
-import { allowTerminalWrite } from '@goodvibes-jev/engine/terminal-shell';
+import { allowTerminalWrite } from '@goodvibes/engine/terminal-shell';
 import { CLEAR_VIEWPORT_HOME } from '../renderer/terminal-escapes.ts';
-import type { PermissionExecutionOptions, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
-import type { AskCardResolveExtras } from '@goodvibes-jev/engine/terminal-shell/ask-card-input';
+import type { PermissionExecutionOptions, RememberTier } from '@goodvibes/engine/platform/platform/permissions';
+import type { AskCardResolveExtras } from '@goodvibes/engine/terminal-shell/ask-card-input';
 import type { PendingPermissionState } from './blocking-input.ts';
-import { buildHunkSelectionState, isHunkSelectable } from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
+import { buildHunkSelectionState, isHunkSelectable } from '@goodvibes/engine/terminal-shell/hunk-selection';
 
 /** What a permission ask resolves with once the person answers it. */
 export interface PermissionAnswer {

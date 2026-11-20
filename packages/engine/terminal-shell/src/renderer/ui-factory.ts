@@ -1,11 +1,11 @@
 import { stringToLine } from './string-to-line.js';
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
+import { truncateDisplay } from '@goodvibes/engine/platform/platform/utils';
 import { renderConversationFragment } from './conversation-surface.js';
 import { activeTheme, activeTokens, activeUiTones } from './theme.js';
 import { renderQueuedMessageList, renderMemoryProvenanceChip, type MemoryProvenanceEntry } from './composer-fragments.js';
 import { renderUserMessage } from './user-message.js';
-import { waitingPhrase, type WaitingState } from '@goodvibes-jev/engine/platform/platform/presentation';
+import { waitingPhrase, type WaitingState } from '@goodvibes/engine/platform/platform/presentation';
 /** Silence after the last delta, in milliseconds, at which the thinking line starts reporting a stall. */
 export const THINKING_STALL_FREEZE_MS = 2500;
 export interface ThinkingStallInfo {

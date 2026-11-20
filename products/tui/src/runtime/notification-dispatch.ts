@@ -11,13 +11,13 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { createNotificationRouter, type NotificationRouter } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+import { createNotificationRouter, type NotificationRouter } from '@goodvibes/engine/platform/platform/runtime/ui';
 import type { Notification, RoutingDecision, RuntimeEventBus, RuntimeEventDomain } from '@/runtime/index.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { getSharedNotificationFeed, type NotificationFeed } from '../views/notifications-feed.ts';
 import { publishNotice, type NoticeSink } from '../core/notices.ts';
-import { memoryPressureLine, memoryPressureLevel, type MemoryPressurePayload } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
-import { runtimeEventKey } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { memoryPressureLine, memoryPressureLevel, type MemoryPressurePayload } from '@goodvibes/engine/platform/platform/runtime/memory';
+import { runtimeEventKey } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 
 export interface NotificationDispatcher {
   /**

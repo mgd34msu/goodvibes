@@ -4,7 +4,7 @@
  * the last turns were given (`/context given`), and the commands running in
  * the background (`/tasks processes`). Each reads this machine only.
  */
-import { discoverProjectContextFiles } from '@goodvibes-jev/engine/terminal-shell/agent-turn/project-context-files';
+import { discoverProjectContextFiles } from '@goodvibes/engine/terminal-shell/agent-turn/project-context-files';
 import type { CommandContext } from '../command-registry.ts';
 import { buildProcessSupervisionSummary, buildPromptContextReceiptTimeline } from '../agent-workspace-context-snapshot.ts';
 import { requireShellPaths } from './runtime-services.ts';

@@ -1,25 +1,25 @@
 import { describeConfiguredPermissions, describePermissionMode } from '../permissions/configured-posture.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { PermissionManager, createPermissionConfigReader, describePermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
-import { composeJudgment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
-import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell-paths';
-import { resolveAndValidatePath, resolveWritablePath } from '@goodvibes-jev/engine/platform/platform/utils';
-import { decisionModelUse } from '@goodvibes-jev/engine/errors';
-import { JudgmentError } from '@goodvibes-jev/judgment';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { PermissionManager, createPermissionConfigReader, describePermissionModeInForce } from '@goodvibes/engine/platform/platform/permissions';
+import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config';
+import { composeJudgment } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { createAsyncDisposalScope } from '@goodvibes/engine/platform/platform/runtime/disposal';
+import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
+import { resolveAndValidatePath, resolveWritablePath } from '@goodvibes/engine/platform/platform/utils';
+import { decisionModelUse } from '@goodvibes/engine/errors';
+import { JudgmentError } from '@goodvibes/judgment';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
-import type { PermissionCheckResult } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { PermissionCheckResult } from '@goodvibes/engine/platform/platform/permissions';
 import { createFeatureFlagManager, deriveFeatureStates } from '@/runtime/index.ts';
-import { createPolicyRuntimeState, createUserPermissionRuleStore } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
+import { createPolicyRuntimeState, createUserPermissionRuleStore } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
+import { getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers';
 import { describeConfiguredEffort } from '../providers/reasoning-effort-surface.ts';
-import type { CliCommandOutput } from '@goodvibes-jev/engine/terminal-shell';
-import type { GoodVibesCliOutputFormat } from '@goodvibes-jev/engine/terminal-shell';
+import type { CliCommandOutput } from '@goodvibes/engine/terminal-shell';
+import type { GoodVibesCliOutputFormat } from '@goodvibes/engine/terminal-shell';
 import { buildHooksValidation } from './hooks-report.ts';
-import { createEditTool, createWriteTool } from '@goodvibes-jev/engine/platform/platform/tools';
-import { FileStateCache, FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
-import type { ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
+import { createEditTool, createWriteTool } from '@goodvibes/engine/platform/platform/tools';
+import { FileStateCache, FileUndoManager } from '@goodvibes/engine/platform/platform/state';
+import type { ToolDefinition } from '@goodvibes/engine/platform/platform/types';
 
 // ---------------------------------------------------------------------------
 // `goodvibes doctor <explain|routing|hooks>`, the diagnostician subcommands.

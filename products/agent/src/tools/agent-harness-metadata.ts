@@ -1,6 +1,6 @@
 import { agentHarnessModes, hostActions, settingsActions } from './agent-harness-route-format.ts';
-import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
-import type { TerminalCommandEffect } from '@goodvibes-jev/engine/terminal-shell/command-registry';
+import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
+import type { TerminalCommandEffect } from '@goodvibes/engine/terminal-shell/command-registry';
 import type { SlashCommand } from '../input/command-registry.ts';
 export { describeCliCommandPolicy } from './agent-harness-cli-command-policy.ts';
 // Re-exported so this module stays the one import site for harness metadata,

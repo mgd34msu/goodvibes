@@ -1,5 +1,5 @@
 import { captureStrictJudgmentJson } from '../../../gate/judgment-result.js';
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import type { KnowledgeIssueRecord, KnowledgeNodeRecord } from '../../types.js';
 import { hasKnowledgeNodeOperatorReview } from '../../store-node-authority.js';
 import { readRecord } from '../helpers.js';

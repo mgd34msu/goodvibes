@@ -22,8 +22,8 @@ import { decisionOrClassic, isClassicOperation } from '../runtime/decision-polic
  * deliverable of such a contract is put to the owner as a code-answered
  * "accept" or "cancel" question instead of being judged.
  */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import type { Outcome } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import type { Outcome } from '@goodvibes/judgment';
 import type { OwnerReplyAction, OwnerReplyReading } from '../../events/contract.js';
 import { ownerPick } from './batteries/owner-pick.js';
 import { ownerReply } from './batteries/owner-reply.js';

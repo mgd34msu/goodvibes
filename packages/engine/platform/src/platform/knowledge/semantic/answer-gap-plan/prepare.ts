@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { toJson, type JsonValue } from '@goodvibes-jev/judgment';
+import { toJson, type JsonValue } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
 import { knowledgeTerms } from '../../passages.js';
 import { isActiveKnowledgeEdge } from '../../projection-utils.js';

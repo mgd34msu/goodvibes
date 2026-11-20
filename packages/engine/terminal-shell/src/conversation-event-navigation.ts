@@ -13,7 +13,7 @@
  * backward falls back to the last. -1 means there is nowhere to go.
  */
 
-import type { TranscriptEventKind } from '@goodvibes-jev/engine/platform/platform/core';
+import type { TranscriptEventKind } from '@goodvibes/engine/platform/platform/core';
 
 /** The subset of a transcript-event-index entry this module reads. */
 export interface TranscriptEventLike {

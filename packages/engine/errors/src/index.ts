@@ -241,7 +241,7 @@ function inferCategoryFromCause(cause: unknown, seen = new Set<object>(), depth 
  *
  * ### Narrowing by code
  * ```ts
- * import { GoodVibesError, isErrorCode, EngineErrorCodes } from '@goodvibes-jev/engine/errors';
+ * import { GoodVibesError, isErrorCode, EngineErrorCodes } from '@goodvibes/engine/errors';
  *
  * catch (err) {
  *   if (err instanceof GoodVibesError) {
@@ -256,7 +256,7 @@ function inferCategoryFromCause(cause: unknown, seen = new Set<object>(), depth 
  *
  * ### Narrowing by kind
  * ```ts
- * import { GoodVibesError, HttpStatusError, ConfigurationError } from '@goodvibes-jev/engine/errors';
+ * import { GoodVibesError, HttpStatusError, ConfigurationError } from '@goodvibes/engine/errors';
  *
  * try {
  *   await platform.operator.agents.list();
@@ -426,7 +426,7 @@ function omitUndefined(record: Record<string, unknown>): Record<string, unknown>
  * Category: `'config'`. Kind: `'config'`. Code: `'ENGINE_CONFIGURATION_ERROR'`.
  *
  * @example
- * import { ConfigurationError } from '@goodvibes-jev/engine/errors';
+ * import { ConfigurationError } from '@goodvibes/engine/errors';
  *
  * try {
  *   await platform.auth.setToken('x');
@@ -475,7 +475,7 @@ export class ConfigurationError extends GoodVibesError {
  * Category: `'contract'`. Kind: `'contract'`. Code: `'ENGINE_CONTRACT_ERROR'`.
  *
  * @example
- * import { ContractError } from '@goodvibes-jev/engine/errors';
+ * import { ContractError } from '@goodvibes/engine/errors';
  *
  * try {
  *   const result = await platform.operator.agents.get({ id: agentId });
@@ -549,7 +549,7 @@ export class ContractError extends GoodVibesError {
  * hint on rate-limit responses.
  *
  * @example
- * import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+ * import { HttpStatusError } from '@goodvibes/engine/errors';
  *
  * try {
  *   await platform.operator.agents.list();

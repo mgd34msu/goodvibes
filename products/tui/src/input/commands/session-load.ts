@@ -1,12 +1,12 @@
-import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { SessionManager } from '@goodvibes/engine/platform/platform/sessions';
 import {
   loadSavedSessionIntoLive as loadSavedSession,
   type LoadedSavedSession,
   type SessionAgentRecordSink,
-} from '@goodvibes-jev/engine/terminal-shell/session-resume';
+} from '@goodvibes/engine/terminal-shell/session-resume';
 import type { CommandContext } from '../command-registry.ts';
 
-export type { LoadedSavedSession } from '@goodvibes-jev/engine/terminal-shell/session-resume';
+export type { LoadedSavedSession } from '@goodvibes/engine/terminal-shell/session-resume';
 
 /**
  * The shared resume routine for a context that has no terminal resume handler

@@ -936,8 +936,8 @@ The lines each outcome prints (`<new>` and `<current>` are versions such as `v3.
 | Time limit reached while files were being replaced | `update still finishing in background; restart to use <new> once it completes`, later `background update finished: <new without v> is installed; restart to use it`, or `background update failed: <reason>; the installed version may be unchanged, check with `goodvibes status``, or `background update requires recovery: <reason>; restart `goodvibes` to run the recovery before using this install` | not applicable |
 | Failed, nothing changed | `auto-update failed: <reason>; starting the current version <current>`; the current version starts | `auto-update failed: <reason>, starting the current version <current>` |
 | Failed part way, files need recovery | `auto-update requires recovery: <reason>; startup stopped before loading installed companions`; the program stops | `auto-update requires recovery: <reason>; startup stopped`; the program stops |
-| Run from a package (`node_modules`) installation | nothing | `auto-update skipped: package-managed install, update with: bun add -g @goodvibes-jev/agent` |
-| Run from the repository's source workspace | `This TUI is built from a private Jev workspace. Update the workspace and build the engine, then run bun run --filter @goodvibes-jev/tui build from the workspace root.` (shown in the conversation) | the same with `Agent` and `@goodvibes-jev/agent` |
+| Run from a package (`node_modules`) installation | nothing | `auto-update skipped: package-managed install, update with: bun add -g @goodvibes/agent` |
+| Run from the repository's source workspace | `This TUI is built from a private Jev workspace. Update the workspace and build the engine, then run bun run --filter @goodvibes/tui build from the workspace root.` (shown in the conversation) | the same with `Agent` and `@goodvibes/agent` |
 
 After `requires recovery`, run the install command again: it recovers a transaction whose process is gone, or stops with `INSTALL_E120` and names the files to put back (see [Installer errors and their fixes](#installer-errors-and-their-fixes)).
 
@@ -1009,7 +1009,7 @@ How to set an update setting for each program:
 | `/update save-review <file> [--replace]` | yes | no | Saves that review as JSON to a file. An existing file is kept unless `--replace` (which asks first). It is a record for support, not an update. |
 | `/update read-review <file>` | yes | no | Reads a saved review back. |
 
-On an installation that cannot update itself, `/update apply` prints `This install is not a self-updatable binary install (detected: running from source).` (or `bun/npm package install`) and `Update with: curl -fsSL https://goodvibes.sh/install.sh | sh`. A terminal program run from a source checkout prints instead: `This TUI is built from a private Jev workspace. Update the workspace and build the engine, then run bun run --filter @goodvibes-jev/tui build from the workspace root.` (`Agent` and `@goodvibes-jev/agent` for the Agent).
+On an installation that cannot update itself, `/update apply` prints `This install is not a self-updatable binary install (detected: running from source).` (or `bun/npm package install`) and `Update with: curl -fsSL https://goodvibes.sh/install.sh | sh`. A terminal program run from a source checkout prints instead: `This TUI is built from a private Jev workspace. Update the workspace and build the engine, then run bun run --filter @goodvibes/tui build from the workspace root.` (`Agent` and `@goodvibes/agent` for the Agent).
 
 ### Upgrading with the installer
 
@@ -1502,7 +1502,7 @@ From a clone, after `bun install --frozen-lockfile`:
 
 - `bun products/agent/bin/goodvibes-agent.ts` runs the Agent from source.
 - `bun products/daemon/bin/goodvibes-daemon` runs the daemon. The launcher prefers a built `products/daemon/dist/cli/entrypoint.js` whenever that file exists, and only otherwise runs the source (`src/cli/entrypoint.ts`); after source changes without `bun run build`, it runs the older build. To run the current source regardless, use `bun products/daemon/src/cli/entrypoint.ts <arguments>`. Either way it is a run from source. A daemon run from source never updates itself, never promotes itself to a service, and refuses `install-service`, `refresh-service`, `start-service` and `restart-service` with exit `2` (`Serving requires an explicit production inbox composition. Configured providers require trusted local account admission. Service activation requires an explicitly composed executable.`).
-- `products/tui/bin/goodvibes` runs the terminal app's built program from the workspace. Without a build it prints `goodvibes: this private Jev workspace has no built TUI binary.` and `Build the workspace engine, then run bun run --filter @goodvibes-jev/tui build from the workspace root.`
+- `products/tui/bin/goodvibes` runs the terminal app's built program from the workspace. Without a build it prints `goodvibes: this private Jev workspace has no built TUI binary.` and `Build the workspace engine, then run bun run --filter @goodvibes/tui build from the workspace root.`
 
 `bun run build` at the repository root builds the engine and every product. Programs run from a workspace print workspace rebuild guidance for `/update` instead of updating themselves.
 

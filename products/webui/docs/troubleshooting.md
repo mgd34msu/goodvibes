@@ -227,5 +227,5 @@ curl -sS --max-time 3 http://127.0.0.1:3423/ | rg "$(node -p "require('./package
 Verify the engine version the dev server runs against (the workspace link to `packages/engine`):
 
 ```bash
-node -p "require('./node_modules/@goodvibes-jev/engine/package.json').version"
+node -p "require('./node_modules/@goodvibes/engine/package.json').version"
 ```

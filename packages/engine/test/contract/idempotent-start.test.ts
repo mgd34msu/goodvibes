@@ -2,7 +2,7 @@
 // Red when: The idempotency record is not consulted or not durable, a reused key with a different request is accepted, or one caller's key answers another caller.
 import { afterEach, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
-import { RefusalError } from '@goodvibes-jev/engine/errors';
+import { RefusalError } from '@goodvibes/engine/errors';
 import { makeHarness, makeRepo, oneUnitPlan, type Harness } from './runner-support.js';
 
 const roots: string[] = [];

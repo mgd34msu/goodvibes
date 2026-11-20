@@ -1,4 +1,4 @@
-import { toJson, type JsonValue } from '@goodvibes-jev/judgment';
+import { toJson, type JsonValue } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
 import { judge } from '../../../runtime/judge.js';
 import { answerGapAdmission, answerGapEquivalence } from './battery.js';

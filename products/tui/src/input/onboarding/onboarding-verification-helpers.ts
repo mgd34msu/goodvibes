@@ -1,4 +1,4 @@
-import { isLoopbackHost } from '@goodvibes-jev/engine/terminal-shell';
+import { isLoopbackHost } from '@goodvibes/engine/terminal-shell';
 import type { OnboardingVerificationItem } from '../../runtime/onboarding/index.ts';
 
 /**

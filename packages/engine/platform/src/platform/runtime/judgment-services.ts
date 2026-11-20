@@ -1,8 +1,8 @@
 import { revealOrNull, type Secret } from '../security/secret.js';
 import { composeJudgmentVolumeMonitor, type JudgmentVolumeMonitorHandle } from './judgment-volume-monitor.js';
 import { activateClassicFallback, configureDecisionModelPolicy, noteDecisionModelAnswered, noteDecisionModelFailure, resetDecisionModelEpisode } from './decision-policy.js';
-import { assertDecisionModelsEnabled } from '@goodvibes-jev/engine/errors';
-import { bindJudgmentPortAuthority, installJudgmentPort, restoreJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { assertDecisionModelsEnabled } from '@goodvibes/engine/errors';
+import { bindJudgmentPortAuthority, installJudgmentPort, restoreJudgmentPort } from '@goodvibes/engine/errors';
 import { createJudgmentSourceLifetime } from './judgment-source-lifetime.js';
 import { claimJudgmentRuntimeScope } from './judgment-runtime-scope.js';
 import {
@@ -21,7 +21,7 @@ import {
   type JudgmentResult,
   type Questions,
   type SqliteDecisionLog,
-} from '@goodvibes-jev/judgment';
+} from '@goodvibes/judgment';
 import type { JudgmentKeySource } from '../config/schema-types-judgment.js';
 import type { SecretsManager } from '../config/secrets.js';
 import { captureJudgmentFallbackSettings } from '../config/judgment-fallback-settings.js';

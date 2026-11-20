@@ -6,4 +6,4 @@ export {
   handleRemotePeerWorkComplete,
   handleRemotePeerWorkPull,
   matchPeerRoute,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';

@@ -1,4 +1,4 @@
-import { BatteryRegistry } from '@goodvibes-jev/judgment';
+import { BatteryRegistry } from '@goodvibes/judgment';
 import { executionStrategy } from './batteries/planner.js';
 import { responseCompletion, completionApplicability } from './batteries/response-completion.js';
 import { agentBriefFidelity, agentBriefRequirement, agentDelegationAuthorization } from '../agents/brief-fidelity.js';

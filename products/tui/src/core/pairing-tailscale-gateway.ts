@@ -12,7 +12,7 @@
 // than throwing into a render path. Absence is never a nag.
 // ---------------------------------------------------------------------------
 
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
 import type {
   PairingTailscaleServeReceipt,

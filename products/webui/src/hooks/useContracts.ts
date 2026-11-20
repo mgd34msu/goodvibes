@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../lib/client-lifetime';
-import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';
+import { firstJsonSchemaFailure } from '@goodvibes/engine/transport-http';
 import contractSchema from '../lib/generated/contract-inspection-schema.json';
 import summarySchema from '../lib/generated/contract-summary-schema.json';
 import type { ContractRecord, ContractsSummariesResult } from '../lib/contract-bridge-types';

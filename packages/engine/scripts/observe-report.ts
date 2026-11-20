@@ -24,7 +24,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { SqliteDecisionLog } from '@goodvibes-jev/judgment';
+import { SqliteDecisionLog } from '@goodvibes/judgment';
 import {
   analyzeDecisionLog, captureJudgmentVolumeBudgets,
   formatObserveReport,

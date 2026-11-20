@@ -1,6 +1,6 @@
-import { declaredProviderCatalogId } from '@goodvibes-jev/engine/contracts';
-import type { BatteryRun, Outcome, Reading } from '@goodvibes-jev/judgment/decisions';
-import { BrowserJudgmentError, type BrowserJudgmentInputMap } from '@goodvibes-jev/engine/daemon-api';
+import { declaredProviderCatalogId } from '@goodvibes/engine/contracts';
+import type { BatteryRun, Outcome, Reading } from '@goodvibes/judgment/decisions';
+import { BrowserJudgmentError, type BrowserJudgmentInputMap } from '@goodvibes/engine/daemon-api';
 import type { BrowserJudgmentBattery, BrowserJudgmentProjection } from '../types.js';
 import { catalogProviderMatchBattery, WEBUI_BATTERY_QUESTIONS } from './webui-specs.js';
 import { snapshotWebuiCredentialNames } from './webui-readers.js';

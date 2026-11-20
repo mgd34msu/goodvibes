@@ -40,9 +40,9 @@
  * pretending otherwise would put text in the transcript that no tool returned.
  */
 
-import type { ToolCall, ToolResult } from '@goodvibes-jev/engine/platform/platform/types';
-import { readTurnFailure, type TokenUsage, type TurnChanges, type TurnFailureReading, type TurnRefusalReason } from '@goodvibes-jev/engine/platform/platform/core';
-import { readTurnSettlement, stopReasonOfSettlement, type TurnSettlement } from '@goodvibes-jev/engine/transport-core/turn-settlement';
+import type { ToolCall, ToolResult } from '@goodvibes/engine/platform/platform/types';
+import { readTurnFailure, type TokenUsage, type TurnChanges, type TurnFailureReading, type TurnRefusalReason } from '@goodvibes/engine/platform/platform/core';
+import { readTurnSettlement, stopReasonOfSettlement, type TurnSettlement } from '@goodvibes/engine/transport-core/turn-settlement';
 
 /**
  * The part of the conversation model this mapping writes to.

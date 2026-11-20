@@ -24,9 +24,9 @@
  * (a new agent, a winner to pick).
  */
 
-import type { BoardRow } from '@goodvibes-jev/engine/contracts';
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import type { BoardRow } from '@goodvibes/engine/contracts';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
+import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { activeTokens } from './theme.js';
 import { beginModal, clipText, finishModal, scrollCountText, searchRow, wrapLines, type KitHint, type ModalFrame, type SurfaceCanvas, type SurfaceLayer } from './surface-kit.js';
 import { drawList, rememberedStart, rememberStart, type KitRow } from './surface-kit-list.js';

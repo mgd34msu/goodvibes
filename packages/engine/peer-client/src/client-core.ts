@@ -1,11 +1,11 @@
-import { ContractError } from '@goodvibes-jev/engine/errors';
-import type { PeerContractManifest, PeerEndpointContract } from '@goodvibes-jev/engine/contracts';
+import { ContractError } from '@goodvibes/engine/errors';
+import type { PeerContractManifest, PeerEndpointContract } from '@goodvibes/engine/contracts';
 import type {
   PeerEndpointInput,
   PeerEndpointOutput,
   PeerTypedEndpointId,
-} from '@goodvibes-jev/engine/contracts';
-import type { HttpTransport } from '@goodvibes-jev/engine/transport-http';
+} from '@goodvibes/engine/contracts';
+import type { HttpTransport } from '@goodvibes/engine/transport-http';
 import {
   firstJsonSchemaFailureAsync,
   invokeContractRoute,
@@ -17,7 +17,7 @@ import {
   splitClientArgs,
   type MethodArgs,
   type WithoutKeys,
-} from '@goodvibes-jev/engine/transport-http';
+} from '@goodvibes/engine/transport-http';
 
 /** Per-call options forwarded to the transport's `invokeContractRoute`. */
 export interface PeerRemoteClientInvokeOptions extends ContractInvokeOptions {}

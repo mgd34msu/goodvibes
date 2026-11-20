@@ -9,7 +9,7 @@ All public client packages normalize transport failures into structured platform
 Consumers should switch on `err.kind` rather than `instanceof` chains or message parsing. Every error thrown from the public API surface is a `GoodVibesError` with a stable `kind` discriminant.
 
 ```ts
-import { GoodVibesError } from '@goodvibes-jev/engine/platform/errors';
+import { GoodVibesError } from '@goodvibes/engine/platform/errors';
 
 try {
   await platformClient.operator.control.snapshot();
@@ -53,9 +53,9 @@ See [error-kinds.md](./error-kinds.md) for the full reference on each kind.
 ## TUI and consumer example
 
 ```ts
-import type { GoodVibesPlatform } from '@goodvibes-jev/engine/platform';
-import { GoodVibesError } from '@goodvibes-jev/engine/platform/errors';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
+import type { GoodVibesPlatform } from '@goodvibes/engine/platform';
+import { GoodVibesError } from '@goodvibes/engine/platform/errors';
+import type { OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 
 async function safeSnapshot(platformClient: GoodVibesPlatform): Promise<OperatorMethodOutput<'control.snapshot'> | null> {
   try {
@@ -80,7 +80,7 @@ async function safeSnapshot(platformClient: GoodVibesPlatform): Promise<Operator
 The `HttpStatusError`, `ConfigurationError`, and `ContractError` subclasses remain available when callers need class-specific handling. Prefer `err.kind` for broad control flow.
 
 ```ts
-import { HttpStatusError } from '@goodvibes-jev/engine/platform/errors';
+import { HttpStatusError } from '@goodvibes/engine/platform/errors';
 
 try {
   await platformClient.operator.accounts.snapshot();

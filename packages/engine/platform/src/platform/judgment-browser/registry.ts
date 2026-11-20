@@ -1,8 +1,8 @@
-import type { JudgmentPort, Questions } from '@goodvibes-jev/judgment/decisions';
+import type { JudgmentPort, Questions } from '@goodvibes/judgment/decisions';
 import {
   BROWSER_JUDGMENT_BATTERY_IDS, BROWSER_JUDGMENT_BATTERY_VERSIONS, BROWSER_JUDGMENT_LIMITS, BrowserJudgmentError, captureBrowserJudgmentJson,
   type BrowserJudgmentBatteryId, type BrowserJudgmentBatteryVersion, type BrowserJudgmentInputMap, type BrowserJudgmentValueMap,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';
 import type { BrowserJudgmentBattery, BrowserJudgmentProjection, BrowserJudgmentResolveContext, BrowserJudgmentResolvedInput } from './types.js';
 
 export interface RegisteredBrowserJudgmentBattery {

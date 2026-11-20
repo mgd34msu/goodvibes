@@ -15,10 +15,10 @@ async function loadProviderAccountSnapshot(context: CommandContext): Promise<Pro
  * stay as plain (non-executing) rows. When there is no interactive selection
  * surface, each action is printed honestly instead.
  */
-export { presentRecommendedActions } from '@goodvibes-jev/engine/terminal-shell/provider-account-actions';
+export { presentRecommendedActions } from '@goodvibes/engine/terminal-shell/provider-account-actions';
 
-import { createProviderAccountCommands } from '@goodvibes-jev/engine/terminal-shell/provider-account-commands';
-import { presentRecommendedActions } from '@goodvibes-jev/engine/terminal-shell/provider-account-actions';
+import { createProviderAccountCommands } from '@goodvibes/engine/terminal-shell/provider-account-commands';
+import { presentRecommendedActions } from '@goodvibes/engine/terminal-shell/provider-account-actions';
 import { signInToService, signOutOfService } from './platform-access-runtime.ts';
 export const { registerProviderAccountsRuntimeCommands } = createProviderAccountCommands<
   CommandContext,

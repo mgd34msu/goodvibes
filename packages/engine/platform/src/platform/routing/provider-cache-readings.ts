@@ -3,8 +3,8 @@
  * (batteries/provider-cache.ts). Each remembers what it read, so a model id or
  * an error text is read once per process.
  */
-import type { YesNoReading } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import type { YesNoReading } from '@goodvibes/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { cacheMinimum, copilotClaudeModel } from './batteries/provider-cache.js';
 import { ReadingMemo } from './provider-readings.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';

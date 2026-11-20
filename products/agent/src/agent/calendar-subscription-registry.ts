@@ -1,7 +1,7 @@
-import { revealOrNull, type Secret } from '@goodvibes-jev/engine/platform/platform/security';
-import { postToPublicWebhook } from '@goodvibes-jev/engine/platform/platform/utils';
+import { revealOrNull, type Secret } from '@goodvibes/engine/platform/platform/security';
+import { postToPublicWebhook } from '@goodvibes/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { readJsonStore, runStoreFileUpdate, writeJsonStore, type JsonStoreContents, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
+import { readJsonStore, runStoreFileUpdate, writeJsonStore, type JsonStoreContents, type JsonStoreSpec } from '@goodvibes/engine/terminal-shell/agent-turn/store-file';
 import {
   SubscriptionStore,
   expandEvents,
@@ -12,7 +12,7 @@ import {
   type CalendarUntrustedIngestRecorder,
   type FeedFetcher,
   type SubscriptionHealth,
-} from '@goodvibes-jev/engine/platform/platform/calendar';
+} from '@goodvibes/engine/platform/platform/calendar';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { resolveCredentialWriteScope } from '../config/credential-scope.ts';
 import type { SecretScope } from '../config/secrets.ts';

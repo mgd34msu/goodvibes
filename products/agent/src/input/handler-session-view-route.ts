@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/session-view-input';
+export * from '@goodvibes/engine/terminal-shell/session-view-input';

@@ -33,7 +33,7 @@
  * approval of the deed.
  */
 
-import { OwnerApprovalStore } from '@goodvibes-jev/engine/platform/platform/security';
+import { OwnerApprovalStore } from '@goodvibes/engine/platform/platform/security';
 
 /**
  * One store per process, shared by the tool that asks and the command that

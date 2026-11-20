@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /**
  * browser-checkout-driver.ts, the page driver a real browser can answer.
  *
@@ -100,8 +100,8 @@ import type { CardFieldKind } from './card-redaction.js';
 import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './checkout-ownership.js';
 import { CheckoutQuoteChanged, CheckoutSubmitRefused, type CheckoutChallenge, type CheckoutPageDriver, type CheckoutTerms, type PageIdentity } from './checkout-page.js';
 import { captureOwnedJson, JudgmentInputError } from '../gate/judgment-input.js';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { checkAnswers, toJson, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
+import { checkAnswers, toJson, type EntryType, type JudgmentPort } from '@goodvibes/judgment';
 import { checkoutTerms, checkoutTermsView } from './batteries/checkout-terms.js';
 import { registrableDomain } from '../security/public-suffix.js';
 import type { RawCheckoutReading } from './checkout-extraction.js';

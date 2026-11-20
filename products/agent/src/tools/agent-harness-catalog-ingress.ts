@@ -7,17 +7,17 @@
  */
 import { agentDaemonConfigClientRevision } from '../config/daemon-config-routing.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import type { ToolInputProjector, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { capturedCatalogPreview, createCatalogInputProjector, isHarnessCatalogQuery, protectCatalogTool, type CatalogIngressContext } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ingress';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import type { ToolInputProjector, ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { capturedCatalogPreview, createCatalogInputProjector, isHarnessCatalogQuery, protectCatalogTool, type CatalogIngressContext } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ingress';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { isAgentWorkspaceSettingsImportPreview } from './agent-settings-import-admission.ts';
 import { createChannelDraftReferenceCapture } from './agent-channel-draft-reference.ts';
 import { createSetupSmokeReferenceCapture } from './agent-setup-smoke-reference.ts';
 import { captureAgentWorkspaceTuiSettingsImportPreview } from '../input/agent-workspace-settings.ts';
 
-export { catalogRoutingInput, forwardHarnessCatalogCall, harnessCatalogExecutionGuard, harnessCatalogInvocationAuthority, isHarnessCatalogQuery, retainHarnessCatalogCurrent } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ingress';
+export { catalogRoutingInput, forwardHarnessCatalogCall, harnessCatalogExecutionGuard, harnessCatalogInvocationAuthority, isHarnessCatalogQuery, retainHarnessCatalogCurrent } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ingress';
 
 type ToolExecuteOptions = NonNullable<Parameters<Tool['execute']>[1]>;
 

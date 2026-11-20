@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline/promises';
 import { TuiConfigManager } from '../config/host-settings.ts';
-import { applyRuntimeConfigValue } from '@goodvibes-jev/engine/terminal-shell';
+import { applyRuntimeConfigValue } from '@goodvibes/engine/terminal-shell';
 import { canonicalizePairingHost } from '../runtime/tui-host-credential-store.ts';
 import { formatTuiHostPairing, previewTuiHostPairing, unpairTuiHost } from '../runtime/tui-host-pairing.ts';
 

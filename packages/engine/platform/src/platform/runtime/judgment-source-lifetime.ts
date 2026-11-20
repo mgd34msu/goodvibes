@@ -1,7 +1,7 @@
-import { JudgmentAuthorityRetiredError, type JudgmentAuthorityFrame } from '@goodvibes-jev/engine/errors';
+import { JudgmentAuthorityRetiredError, type JudgmentAuthorityFrame } from '@goodvibes/engine/errors';
 import type { JudgmentSettingsSource } from './judgment-services.js';
 import { captureJudgmentFallbackSettings } from '../config/judgment-fallback-settings.js';
-import { captureJudgmentBackendSettings } from '@goodvibes-jev/judgment/decisions';
+import { captureJudgmentBackendSettings } from '@goodvibes/judgment/decisions';
 
 /**
  * The real composition owns this observation. Credential values are compared

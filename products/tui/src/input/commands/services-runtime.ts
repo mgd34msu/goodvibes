@@ -1,4 +1,4 @@
-import { registerServicesCommand } from '@goodvibes-jev/engine/terminal-shell/services-command';
+import { registerServicesCommand } from '@goodvibes/engine/terminal-shell/services-command';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireServiceRegistry, requireShellPaths } from './runtime-services.ts';
 

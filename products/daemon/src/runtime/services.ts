@@ -1,12 +1,12 @@
-import { completeGatewayScopePolicyBootstrap, handleOwnerDecisions } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { completeGatewayScopePolicyBootstrap, handleOwnerDecisions } from '@goodvibes/engine/platform/platform/control-plane';
 /** The product's async composition boundary over its real runtime graph. */
 import { createDisposalScope } from './disposal-wiring.js';
 import { createRuntimeBaseServices } from './service-graph.js';
 import { createDaemonHandlerComposition } from './daemon-handler-composition.js';
-import { resumeContracts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes-jev/engine/platform/platform/daemon/receipts';
-import { bridgeHeldForOwnerToInbox, bridgeJevDecisionsToInbox, processHeldForOwner, processJevDecisions } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { bridgeContractQuestionsToInbox, contractQuestionEventsOf } from '@goodvibes-jev/engine/platform/platform/contract';
+import { resumeContracts } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes/engine/platform/platform/daemon/receipts';
+import { bridgeHeldForOwnerToInbox, bridgeJevDecisionsToInbox, processHeldForOwner, processJevDecisions } from '@goodvibes/engine/platform/platform/permissions';
+import { bridgeContractQuestionsToInbox, contractQuestionEventsOf } from '@goodvibes/engine/platform/platform/contract';
 import { createDaemonBootController, type DaemonBootController } from './boot-tasks.js';
 import type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.js';
 import { observeNativeStartupPhase } from './startup-observation.js';

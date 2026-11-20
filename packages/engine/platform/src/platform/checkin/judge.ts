@@ -1,7 +1,7 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /** Typed Jev contact decision, separate content-only draft, then Jev fidelity verification. */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import { JudgmentError, type JudgmentPort } from '@goodvibes/judgment';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { callWithFailover, type FailoverTarget } from '../providers/failover.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';

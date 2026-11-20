@@ -1,4 +1,4 @@
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { normalizeThemeName, setActiveThemeMode, setActiveThemeName } from './theme.js';
 import type { ThemeMode, ThemeModeSetting } from './theme.js';
 import { getTerminalPalette } from '../terminal-palette-store.js';

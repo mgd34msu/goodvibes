@@ -7,10 +7,10 @@
 import { join } from 'node:path';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { unlink, writeFile } from 'node:fs/promises';
-import { fetchModelContextWindows } from '@goodvibes-jev/engine/platform/platform/discovery';
-import type { CustomProviderConfig } from '@goodvibes-jev/engine/platform/platform/providers';
-import { findCredentialScopeDeclaration, listDaemonOwnedSecretKeys, type SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { fetchModelContextWindows } from '@goodvibes/engine/platform/platform/discovery';
+import type { CustomProviderConfig } from '@goodvibes/engine/platform/platform/providers';
+import { findCredentialScopeDeclaration, listDaemonOwnedSecretKeys, type SecretsManager } from '@goodvibes/engine/platform/platform/config';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { commandRefusal } from './command-confirmation.js';
 
 export function customProviderKeyName(providerName: string): string {

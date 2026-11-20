@@ -9,7 +9,7 @@ import { fetchWithTimeout } from '../utils/fetch-with-timeout.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+import { HttpStatusError } from '@goodvibes/engine/errors';
 
 export const GOODVIBES_NTFY_ORIGIN = 'goodvibes-platform';
 export const GOODVIBES_NTFY_ORIGIN_HEADER = 'X-Goodvibes-Origin';

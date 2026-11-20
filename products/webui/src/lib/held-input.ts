@@ -13,7 +13,7 @@
  * account, and is mirrored to sessionStorage under that daemon and account:
  * it survives a reload of the tab, never crosses accounts, and is cleared on
  * sign-out ({@link clearHeldInputs}). The terminal products keep the same
- * contract in memory (`@goodvibes-jev/engine/terminal-shell/held-input`).
+ * contract in memory (`@goodvibes/engine/terminal-shell/held-input`).
  *
  * Cost: memory and one sessionStorage write per change; no request.
  */

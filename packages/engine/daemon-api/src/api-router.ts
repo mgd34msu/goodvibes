@@ -30,7 +30,7 @@ export type DaemonApiRouteExtension = (req: Request) => Promise<Response | null>
  *
  * @example
  * ```ts
- * import { dispatchDaemonApiRoutes } from '@goodvibes-jev/engine/daemon-api';
+ * import { dispatchDaemonApiRoutes } from '@goodvibes/engine/daemon-api';
  *
  * const response = await dispatchDaemonApiRoutes(req, myHandlers);
  * if (response) return response;

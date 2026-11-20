@@ -16,11 +16,11 @@
  *  - Pinned session memories that survive are mentioned by count.
  */
 
-import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
+import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/core';
 import { computeContextUsage } from '../core/context-usage.ts';
 import { formatQualityScoreLine } from './compaction-quality.ts';
-import { DEFAULT_COMPACTION_CONFIG, type CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
-import type { ProviderMessage } from '@goodvibes-jev/engine/platform/platform/providers';
+import { DEFAULT_COMPACTION_CONFIG, type CompactionEvent } from '@goodvibes/engine/platform/platform/core';
+import type { ProviderMessage } from '@goodvibes/engine/platform/platform/providers';
 import type { CompactionQualityScore } from './compaction-quality.ts';
 
 /** The engine's default compaction ceiling. Used only for the pre-compact ESTIMATE; the real figure comes from CompactionEvent. */

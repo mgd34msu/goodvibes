@@ -15,7 +15,7 @@ import * as fsp from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { readTarGzEntries, type TarEntry } from '../browser/browser-driver-archive.js';
 import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { retainNativeUpdateDirectory } from './update-file-io.js';
 import { mapWithConcurrency } from '../utils/concurrency.js';
 

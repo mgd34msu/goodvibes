@@ -1,6 +1,6 @@
-import { formatEveryInterval } from '@goodvibes-jev/engine/platform/platform/automation';
-import type { ScheduleEditFailure, ScheduleEditPreview, ScheduleEditSuccess } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-edit';
-import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-next-routes';
+import { formatEveryInterval } from '@goodvibes/engine/platform/platform/automation';
+import type { ScheduleEditFailure, ScheduleEditPreview, ScheduleEditSuccess } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-edit';
+import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-next-routes';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);

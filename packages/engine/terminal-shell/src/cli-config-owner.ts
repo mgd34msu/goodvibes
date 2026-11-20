@@ -1,4 +1,4 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 
 /**
  * The settings as read now, and a check that they have not changed since. The

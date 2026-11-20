@@ -2,8 +2,8 @@ import type { DaemonTelemetryRouteHandlers } from './context.js';
 import { jsonErrorResponse, missingScopeRefusal } from './error-response.js';
 import type { AuthenticatedPrincipal } from './http-policy.js';
 import { decodeOtlpProtobuf } from './otlp-protobuf.js';
-import type { RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
-import { DaemonErrorCategory } from '@goodvibes-jev/engine/errors';
+import type { RuntimeEventDomain } from '@goodvibes/engine/contracts';
+import { DaemonErrorCategory } from '@goodvibes/engine/errors';
 import { readBoundedPositiveInteger, readOptionalBoundedInteger, type JsonRecord } from './route-helpers.js';
 
 type TelemetrySeverity = 'debug' | 'info' | 'warn' | 'error';

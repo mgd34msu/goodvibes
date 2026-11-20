@@ -1,6 +1,6 @@
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import { randomUUID } from 'node:crypto';
 import { confirmParameter, requestParameter } from './effect-admission.js';

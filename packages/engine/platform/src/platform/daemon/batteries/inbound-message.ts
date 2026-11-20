@@ -10,7 +10,7 @@
  * When a card question is asked, every digit in the message is replaced by `#`
  * before any question sees it, so a card value never leaves the machine.
  */
-import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 const PROPOSAL = { task: 'Fix the login bug', summary: 'Fix the login bug' };
 const DEPLOY = { approvalId: 'deploy', tool: 'run_command', summary: 'Deploy the production application', arguments: { command: 'deploy production' } };

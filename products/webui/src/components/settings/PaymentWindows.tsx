@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { describeCardTransportRefusal, isLivePaymentOperation, canReconcilePaymentOperation, mayCrossWithCardDetails, paymentOperationDescription, type PaymentWindowView, type PaymentOperationView, type PaymentSecurityCodeRequestView } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import { describeCardTransportRefusal, isLivePaymentOperation, canReconcilePaymentOperation, mayCrossWithCardDetails, paymentOperationDescription, type PaymentWindowView, type PaymentOperationView, type PaymentSecurityCodeRequestView } from '@goodvibes/engine/platform/platform/payments/browser';
 import { cardEntryTransport } from '../../lib/insecure-origin';
 import { client as platformClient } from '../../lib/goodvibes';
 import { errorCode, formatError } from '../../lib/errors';

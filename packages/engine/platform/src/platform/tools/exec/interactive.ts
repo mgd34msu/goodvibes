@@ -48,7 +48,7 @@ import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { sleep } from '../../utils/concurrency.js';
 import { killProcessTree } from './process-tree.js';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
 import { prepareJudgmentResult } from '../../gate/judgment-result.js';
 import { execPrompt, pendingPromptView } from '../batteries/exec-prompt.js';
 import type { ExecCommandInput, ExecCommandResult } from './schema.js';

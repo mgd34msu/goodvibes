@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { SOURCE_SCREENING_LIMITS, type ProtectedSource, type ProtectedSourceOwner, type SourceScreeningHold, type SourceScreeningReceipt } from '@goodvibes-jev/engine/platform/platform/security';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import type { ToolInputProjectionRequest, ToolInputProjector, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { SOURCE_SCREENING_LIMITS, type ProtectedSource, type ProtectedSourceOwner, type SourceScreeningHold, type SourceScreeningReceipt } from '@goodvibes/engine/platform/platform/security';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import type { ToolInputProjectionRequest, ToolInputProjector, ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { captureModelReadingInput } from './model-reading.js';
 import { createComparisonOperation } from './model-compare-operation.js';
 import type { AgentModelCompareToolDeps } from './model-compare-types.js';

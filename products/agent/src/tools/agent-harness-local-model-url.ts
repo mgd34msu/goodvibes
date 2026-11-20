@@ -1,5 +1,5 @@
-import type { ClassicModelStack as LocalModelStack } from '@goodvibes-jev/engine/platform/platform/routing';
-export type { ClassicModelStack as LocalModelStack } from '@goodvibes-jev/engine/platform/platform/routing';
+import type { ClassicModelStack as LocalModelStack } from '@goodvibes/engine/platform/platform/routing';
+export type { ClassicModelStack as LocalModelStack } from '@goodvibes/engine/platform/platform/routing';
 
 /** Serving stacks by provider id: the built-in local adapters and the usual names of local servers. */
 const PROVIDER_STACKS: Readonly<Record<string, LocalModelStack>> = {

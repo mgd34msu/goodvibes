@@ -23,7 +23,7 @@
  * Cost per request: none of these does I/O. `durableAfter` waits for a sync the
  * caller already started; it adds no write and no fsync.
  */
-import { failedOutcome, httpStatusOf, isOperationKey, OPERATION_KEY_RULE, refusal, RefusalError, toRefusal, unknownOutcome, type EffectOutcome } from '@goodvibes-jev/engine/errors';
+import { failedOutcome, httpStatusOf, isOperationKey, OPERATION_KEY_RULE, refusal, RefusalError, toRefusal, unknownOutcome, type EffectOutcome } from '@goodvibes/engine/errors';
 
 declare const opBrand: unique symbol;
 declare const effectBrand: unique symbol;

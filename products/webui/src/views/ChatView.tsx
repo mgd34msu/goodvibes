@@ -4,7 +4,7 @@ import { BookOpen, CalendarDays, LayoutGrid, Mail } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getClientLifetime, isClientLifetimeCurrent } from '../lib/client-lifetime';
 import { client as platformClient } from '../lib/goodvibes';
-import { REASONING_EFFORT_SEVERITY } from '@goodvibes-jev/engine/platform/browser/reasoning-effort';
+import { REASONING_EFFORT_SEVERITY } from '@goodvibes/engine/platform/browser/reasoning-effort';
 import { asRecord, bestId, bestTitle, firstString } from '../lib/object';
 import { queryKeys } from '../lib/queries';
 import { modelOptionsSourceOf, useProviderModelOptions } from '../lib/use-provider-model-options';

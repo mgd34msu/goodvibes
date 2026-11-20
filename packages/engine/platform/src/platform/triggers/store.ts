@@ -27,7 +27,7 @@
 import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import type { Database } from 'bun:sqlite';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { openSqliteFile, type SqliteFile } from '../state/sqlite-file.js';
 import { holdProcessLock, type HeldProcessLock } from '../utils/process-lock.js';
 import { summarizeError } from '../utils/error-display.js';

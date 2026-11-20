@@ -21,8 +21,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { structuredTransience, type FailureTransience } from '@goodvibes-jev/engine/errors';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { structuredTransience, type FailureTransience } from '@goodvibes/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { summarizeError } from '../utils/error-display.js';
 import { newIncarnation } from '../utils/target-ref.js';
 import { logger } from '../utils/logger.js';

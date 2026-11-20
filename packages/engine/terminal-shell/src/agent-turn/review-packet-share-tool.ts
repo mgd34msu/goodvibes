@@ -1,10 +1,10 @@
-import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { ChannelDeliveryRequest, ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
+import type { ChannelDeliveryRequest, ChannelDeliveryRouter } from '@goodvibes/engine/platform/platform/channels';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { agentArtifactEffectGuard, captureAgentArtifactSource } from './artifact-effect.js';
-import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes/engine/platform/platform/security';
 import {
   buildAgentChannelDeliveryPreview,
   deliverAgentChannelMessage,

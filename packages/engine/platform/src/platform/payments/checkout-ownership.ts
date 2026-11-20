@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 
 /** Restricts already authorized checkout work; it cannot grant a purchase. */
 export interface CheckoutOperationOwnership {

@@ -10,7 +10,7 @@
  * stopped after repeated failures is recovered.
  */
 import { useState } from 'react';
-import { readTriggerOperatorStatus } from '@goodvibes-jev/engine/platform/platform/triggers/browser';
+import { readTriggerOperatorStatus } from '@goodvibes/engine/platform/platform/triggers/browser';
 import { asArray, asRecord } from '../../../lib/object';
 import { Button } from '../../ui/Button';
 import { Row, RowList } from '../../ui/Row';

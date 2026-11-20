@@ -15,16 +15,16 @@
  * still checked once by `snapshotJudgmentEvidence` (card data, attached
  * secrets, malformed input).
  */
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
-import { assertModelReadingRestriction as assertReadingRestriction, captureModelArtifactClockSources, captureModelReadingInput, type ModelReadingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/model-reading';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { agentResearchSourceOwner } from '@goodvibes/engine/terminal-shell/agent-turn/protected-research-report';
+import { assertModelReadingRestriction as assertReadingRestriction, captureModelArtifactClockSources, captureModelReadingInput, type ModelReadingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/model-reading';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { ProviderApiLike, ArtifactListLike } from './agent-harness-model-routing-types.ts';
 import { contextWindowFor, modelRegistryKey } from './agent-harness-model-catalog.ts';
 
 // The plain-data capture is shared with the Agent tools a daemon-hosted turn runs.
-export { assertModelReadingInputCurrent, captureModelArtifactClockSource, captureModelArtifactClockSources, captureModelReadingInput, captureModelReadingSnapshotGuard, withModelReadingSource, type ModelReadingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/model-reading';
+export { assertModelReadingInputCurrent, captureModelArtifactClockSource, captureModelArtifactClockSources, captureModelReadingInput, captureModelReadingSnapshotGuard, withModelReadingSource, type ModelReadingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/model-reading';
 
 /** A service slot of the program's own objects, read as an ordinary property. */
 function slot(source: unknown, key: string): unknown {

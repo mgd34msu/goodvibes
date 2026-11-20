@@ -15,7 +15,7 @@ import {
   type ActionDescription,
   type ActionValues,
   type CommandDescription,
-} from '@goodvibes-jev/engine/terminal-shell/command-actions';
+} from '@goodvibes/engine/terminal-shell/command-actions';
 import type { CommandContext } from './command-registry.ts';
 
 /** What a row runs: a command, one of its actions (by id or typed word), and any values the row fills in. */

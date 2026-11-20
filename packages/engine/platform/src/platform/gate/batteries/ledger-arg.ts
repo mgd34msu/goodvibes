@@ -21,7 +21,7 @@
  * a panel); code redacts unless the reading is a no that acts. Low stakes for
  * the target (it only picks what a preview line shows).
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 const arg = (tool: string, argument: string) => ({ tool, argument });
 

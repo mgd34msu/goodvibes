@@ -8,7 +8,7 @@
  * Band: low stakes. The severity only orders and labels what a nudge or an
  * escalation already lists; it never decides whether work passes.
  */
-import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes/judgment';
 import type { CriterionSeverity } from '../types.js';
 
 const SEVERITY_OPTIONS = {

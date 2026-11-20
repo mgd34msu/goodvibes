@@ -1,4 +1,4 @@
-import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
+import type { Orchestrator } from '@goodvibes/engine/platform/platform/core';
 import type { SpokenTurnRuntime } from '../audio/spoken-turn-wiring.ts';
 
 /**

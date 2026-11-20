@@ -1,5 +1,5 @@
-import type { RememberedRuleStore } from '@goodvibes-jev/engine/platform/platform/gate/policy';
-import { registerPermissionsCommand } from '@goodvibes-jev/engine/terminal-shell/permissions-command';
+import type { RememberedRuleStore } from '@goodvibes/engine/platform/platform/gate/policy';
+import { registerPermissionsCommand } from '@goodvibes/engine/terminal-shell/permissions-command';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { readExecutionModeInForce } from '../../permissions/execution-mode.ts';
 

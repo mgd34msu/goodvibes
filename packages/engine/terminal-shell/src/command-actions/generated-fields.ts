@@ -4,7 +4,7 @@
  * effect and read words, which typed words are secret, and the confirmation
  * question.
  */
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import type { CommandSecretArgs, TerminalCommandEffect } from '../command-registry.js';
 import type { CommandConfirmation } from '../command-confirmation.js';
 import {

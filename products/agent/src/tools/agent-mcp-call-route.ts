@@ -1,4 +1,4 @@
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 
 /**
  * The engine's `mcp` tool carries the call mode itself (`mode: "call"`, run

@@ -12,7 +12,7 @@ import { prioritySubject } from './pages.js';
 import { knowledgeClockIso } from '../store-record-representation.js';
 import { withDevicePageRefresh } from './page-refresh-queue.js';
 import { prepareObservedKnowledgeNodeInput } from '../store-node-observation.js';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import type { ArtifactStore } from '../../artifacts/index.js';
 import type { ArtifactDescriptor } from '../../artifacts/types.js';
 import {

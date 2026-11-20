@@ -1,6 +1,6 @@
 /** Recovery filenames are labels. The existing JSONL header binds a saved label
  * to its session; arbitrary session identifiers never become reversible paths. */
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import type { NativeDataWriteOwner } from './native-reader-compatibility.js';
 import { chmodSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';

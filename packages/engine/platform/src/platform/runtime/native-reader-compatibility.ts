@@ -4,8 +4,8 @@
  * it does not authorize reading data or executing any saved operation. */
 import { lstatSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { drainOwned } from '@goodvibes-jev/judgment';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes/judgment';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { atomicWriteFileSync } from '../config/atomic-write.js';
 import { readFileObservation, type FileObservation } from '../utils/file-observation.js';
 import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';

@@ -1,8 +1,8 @@
-import { createOAuthLocalListener, readConnectedDaemonOrigin, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { getBuiltinSubscriptionProvider, type OAuthProviderConfig } from '@goodvibes-jev/engine/platform/platform/config';
-import { summarizeError, openExternalUrl } from '@goodvibes-jev/engine/platform/platform/utils';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
-import { readAuthorizationInput } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';
+import { createOAuthLocalListener, readConnectedDaemonOrigin, resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
+import { getBuiltinSubscriptionProvider, type OAuthProviderConfig } from '@goodvibes/engine/platform/platform/config';
+import { summarizeError, openExternalUrl } from '@goodvibes/engine/platform/platform/utils';
+import { getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers';
+import { readAuthorizationInput } from '@goodvibes/engine/terminal-shell/settings-subscriptions';
 import { collectOnboardingSnapshotForHandler } from './handler-interactions.ts';
 import { recordFeatureEnablement } from './onboarding/onboarding-feature-units.ts';
 import { handleConnectExistingDaemonForHandler } from './handler-onboarding-daemon-adopt.ts';

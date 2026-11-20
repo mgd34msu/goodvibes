@@ -12,11 +12,11 @@
  * as ports; the turn itself is owner-turn-sender.ts (sendTurn), and
  * interactive.ts keeps the model switch and the refusal of what a turn cannot carry.
  */
-import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { NoticeLevel, OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { captureNativeConversationInput, type NativeConversationInput, type ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
-import { applyComposerCapture, readComposerMarker, shouldSendAfterCapture, type ComposerCaptureDeps } from '@goodvibes-jev/engine/terminal-shell/submission-router';
+import type { ContentPart } from '@goodvibes/engine/platform/platform/providers';
+import type { NoticeLevel, OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { captureNativeConversationInput, type NativeConversationInput, type ProductInputContext } from '@goodvibes/engine/terminal-shell/native';
+import { applyComposerCapture, readComposerMarker, shouldSendAfterCapture, type ComposerCaptureDeps } from '@goodvibes/engine/terminal-shell/submission-router';
 import { SHELL_USAGE_HINT, type ShellPassthrough, type ShellRunResult } from '../input/shell-passthrough.ts';
 
 /** How a message is sent: given back to the composer when refused, with the held `!` output in front. */

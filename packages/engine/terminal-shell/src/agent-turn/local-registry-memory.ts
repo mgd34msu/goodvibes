@@ -33,8 +33,8 @@ import {
   type MemoryScope,
   type MemorySemanticSearchResult,
   type MemoryVectorStats,
-} from '@goodvibes-jev/engine/platform/platform/state';
-import type { MemoryAccess, MemoryOperationOptions } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+} from '@goodvibes/engine/platform/platform/state';
+import type { MemoryAccess, MemoryOperationOptions } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
 import { assertNoSecretLikeMemoryText } from './memory-safety.js';
 import { formatAgentRecordReference, formatAgentRecordReviewState } from './record-labels.js';
 import {

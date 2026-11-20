@@ -1,46 +1,46 @@
-import { createModelPickerCommandOpeners } from '@goodvibes-jev/engine/terminal-shell/model-picker-open';
+import { createModelPickerCommandOpeners } from '@goodvibes/engine/terminal-shell/model-picker-open';
 import { shortcutGroups } from '../renderer/shortcut-groups.ts';
-import { createSettingsWorkspaceOpener } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
-import { modelPickerCatalogServices } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
-import { createCommonShellUiOpeners } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
-import { runPickedCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
-import { buildConversationModelPickerTargets, selectedModelPickerRoute } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
+import { createSettingsWorkspaceOpener } from '@goodvibes/engine/terminal-shell/shell-ui-openers';
+import { modelPickerCatalogServices } from '@goodvibes/engine/terminal-shell/model-picker-targets';
+import { createCommonShellUiOpeners } from '@goodvibes/engine/terminal-shell/shell-ui-openers';
+import { runPickedCommand } from '@goodvibes/engine/terminal-shell/command-registry';
+import { buildConversationModelPickerTargets, selectedModelPickerRoute } from '@goodvibes/engine/terminal-shell/model-picker-targets';
 import {
   buildConfiguredViaMap,
   resolveSecretProviderIds as readSecretProviders,
-} from '@goodvibes-jev/engine/terminal-shell/model-picker-auth-facts';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/terminal-shell/model-picker-auth-facts';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { type ModelPickerOpenDeps } from '../input/model-picker-open.ts';
-import '@goodvibes-jev/engine/platform/platform/providers';
+import '@goodvibes/engine/platform/platform/providers';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { ShellViews } from '../views/builtin-views.ts';
 import type { ViewPanelAdapter } from '../views/view-panel-adapter.ts';
 import { wireViewOpeners } from './view-openers.ts';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
-import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
+import type { McpRegistry } from '@goodvibes/engine/platform/platform/mcp';
+import type { SubscriptionManager } from '@goodvibes/engine/platform/platform/config';
+import type { SecretsManager } from '@goodvibes/engine/platform/platform/config';
+import type { MemoryEmbeddingProviderRegistry } from '@goodvibes/engine/platform/platform/state';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import type { EmbeddingProviderPickerEntry, ModelPickerTargetInfo } from '../input/model-picker.ts';
-import { openCommandPaletteOn, type PaletteShortcut } from '@goodvibes-jev/engine/terminal-shell/command-palette';
+import { openCommandPaletteOn, type PaletteShortcut } from '@goodvibes/engine/terminal-shell/command-palette';
 import type { KeybindingsManager } from '../input/keybindings.ts';
 import { AGENT_VIEW_NAMES, CHANGES_VIEW_NAMES, USAGE_VIEW_NAMES } from '../input/views.ts';
 import { confirmThrough } from '../input/confirm-dialog.ts';
 import { getSharedToastCenter } from '../renderer/toast-center.ts';
 import { categorizeBuiltinCommands } from '../input/commands.ts';
 import { syncServiceSettingToPlatform } from './service-settings-sync.ts';
-import { classifyServiceSettingChange } from '@goodvibes-jev/engine/terminal-shell/service-setting-change';
+import { classifyServiceSettingChange } from '@goodvibes/engine/terminal-shell/service-setting-change';
 import { setActiveThemeMode, setActiveThemeName } from '../renderer/theme.ts';
 import { THEME_MODE_CONFIG_KEY, THEME_NAME_CONFIG_KEY, coerceThemeModeSetting } from '../renderer/theme-mode-config.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { buildFirstOpenItems, decodeFirstOpenChoice, selfRecordWorkspaceRegistration } from '../cli/tui-startup.ts';
 import type { SettingsDaemonCredentialWriter } from '../input/settings-modal-secrets.ts';
 import type { DaemonOwnedConfigWriter } from '../input/settings-modal-mutations.ts';
-import type { WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { WorkspaceTrustLevel } from '@goodvibes/engine/platform/platform/runtime/operations';
 
 /** Longer than one frame of the render coalescer (16 ms), so the "applying" message is on screen first. */
 const SERVICE_APPLY_AFTER_PAINT_MS = 20;

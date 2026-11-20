@@ -25,14 +25,14 @@
  * Nothing here reads or writes the terminal.
  */
 import net from 'node:net';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { ConfigManager, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { ConfigManager, resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
 import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
   type DaemonServiceControl,
-} from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { connectedHostPort, dialHostForConfiguredHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
+} from '@goodvibes/engine/platform/platform/runtime/client';
+import { connectedHostPort, dialHostForConfiguredHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import {
   createDaemonCliRunner,
   installDaemonService,

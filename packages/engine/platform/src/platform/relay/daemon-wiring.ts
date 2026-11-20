@@ -10,12 +10,12 @@ import type { ConfigManager } from '../config/manager.js';
 import type { SecretsManager } from '../config/secrets.js';
 import { isFeatureGateEnabled, type FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import type { GatewayMethodCatalog } from '../control-plane/method-catalog.js';
-import type { SerializedRelayIdentity } from '@goodvibes-jev/engine/transport-core/relay';
-import { isRelayTunneledRequest } from '@goodvibes-jev/engine/daemon-api';
-import { refusal, refusalErrorBody } from '@goodvibes-jev/engine/errors';
+import type { SerializedRelayIdentity } from '@goodvibes/engine/transport-core/relay';
+import { isRelayTunneledRequest } from '@goodvibes/engine/daemon-api';
+import { refusal, refusalErrorBody } from '@goodvibes/engine/errors';
 import { createRelayReachability, type RelayReachability } from './reachability.js';
 import type { RelayCodeStore } from './relay-codes.js';
-import { RELAY_CODE_HEADER } from '@goodvibes-jev/engine/transport-core/relay';
+import { RELAY_CODE_HEADER } from '@goodvibes/engine/transport-core/relay';
 import type { StepUpService } from './step-up-service.js';
 import {
   STEP_UP_ASSERTION_HEADER,

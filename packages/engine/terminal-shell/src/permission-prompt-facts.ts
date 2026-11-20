@@ -21,7 +21,7 @@ import {
   type ModeInForceWords,
   type PermissionPromptRequest,
   type SandboxFact,
-} from '@goodvibes-jev/engine/platform/platform/permissions';
+} from '@goodvibes/engine/platform/platform/permissions';
 
 /** What a terminal program holds when it draws an ask. */
 export interface TerminalAskContext {

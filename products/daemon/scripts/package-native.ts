@@ -10,7 +10,7 @@ import { stageDaemonCiArchive } from './acquire-native.ts';
 import { installDaemonNative, readDaemonInstallOwner, type DaemonInstallOwner } from './install-native.ts';
 import { assertPath, expectedModes, targetPaths, validateOwner } from '../src/cli/native-installation.ts';
 import { assertNativeInstallationIdle, verifiedDaemonNativePath } from '../src/cli/native-launch.ts';
-import { captureUpdateFileIo, realUpdateFileIo, retainDaemonNativeFiles } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { captureUpdateFileIo, realUpdateFileIo, retainDaemonNativeFiles } from '@goodvibes/engine/platform/platform/runtime/self-update';
 
 /** Pack only admitted captured bytes, then re-admit the actual tarball before returning it. */
 export async function packDaemonNative(artifactRoot: string, owner: DaemonInstallOwner): Promise<Buffer> {

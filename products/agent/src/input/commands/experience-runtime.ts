@@ -1,21 +1,21 @@
 import {
   createApprovalCommand,
   createVoiceExperienceCommand,
-} from '@goodvibes-jev/engine/terminal-shell/experience-commands';
-import '@goodvibes-jev/engine/terminal-shell/voice-settings-review';
+} from '@goodvibes/engine/terminal-shell/experience-commands';
+import '@goodvibes/engine/terminal-shell/voice-settings-review';
 import 'node:fs';
 import 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths, requireVoiceSetup } from './runtime-services.ts';
 import { commandRefusal } from './confirmation.ts';
-import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
+import { resolveWakeRuntimeSettings } from '@goodvibes/engine/platform/platform/voice/wake/runtime';
 import {
   agentWakeCapabilities,
   wakeStatusLines,
   WAKE_SETUP_ANNOUNCEMENT,
 } from '../../core/wake-provision-status.ts';
 import { proposesSpeechToText, runWakeSetupPlan } from '../../core/wake-setup-plan.ts';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { readRefusal } from '@goodvibes/engine/errors';
 
 function formatVoiceComponentState(state: string): string {
   return state.replace(/[_-]+/g, ' ');

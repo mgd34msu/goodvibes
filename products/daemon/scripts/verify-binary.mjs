@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { proveNativeMemoryRoundTrip } from './boot-smoke-reading.mjs';
 import { syntheticSystemOneAnswers } from './hosted-session-protocol.mjs';
 import { runHostedSessionProof } from './hosted-session-proof.mjs';
-import { runPostBuildSmoke } from '@goodvibes-jev/engine/toolchain';
+import { runPostBuildSmoke } from '@goodvibes/engine/toolchain';
 import { assertLocalPayloadEqual } from './local-payload-comparison.mjs';
 
 // Explicit local Linux artifact proof. This consumes the production binary;

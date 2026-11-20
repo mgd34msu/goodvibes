@@ -15,7 +15,7 @@
  *
  * Band: high stakes, since an act on yes skips the human.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 const escalation = (command: string, escalations: string[], policyReasons: string[]) => ({
   command,

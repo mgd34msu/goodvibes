@@ -1,29 +1,29 @@
-import type { FetchLike } from '@goodvibes-jev/engine/transport-core';
-import { ConfigurationError, GoodVibesError } from '@goodvibes-jev/engine/errors';
+import type { FetchLike } from '@goodvibes/engine/transport-core';
+import { ConfigurationError, GoodVibesError } from '@goodvibes/engine/errors';
 import {
   createOperatorApiClient,
   type OperatorApiClient,
   type OperatorApiClientOptions,
-} from '@goodvibes-jev/engine/operator-client';
+} from '@goodvibes/engine/operator-client';
 import {
   createPeerApiClient,
   type PeerApiClient,
   type PeerApiClientOptions,
-} from '@goodvibes-jev/engine/peer-client';
+} from '@goodvibes/engine/peer-client';
 import type {
   AuthTokenResolver,
   HeaderResolver,
   HttpRetryPolicy,
   StreamReconnectPolicy,
   TransportMiddleware,
-} from '@goodvibes-jev/engine/transport-http';
-import { normalizeAuthToken } from '@goodvibes-jev/engine/transport-http';
+} from '@goodvibes/engine/transport-http';
+import { normalizeAuthToken } from '@goodvibes/engine/transport-http';
 import {
   createEventSourceConnector,
   createRemoteRuntimeEvents,
   createWebSocketConnector,
   type RemoteRuntimeEvents,
-} from '@goodvibes-jev/engine/transport-realtime';
+} from '@goodvibes/engine/transport-realtime';
 import type { AnyRuntimeEvent, RuntimeEventRecord } from './events/index.js';
 import {
   createGoodVibesAuthClient,
@@ -234,7 +234,7 @@ export interface GoodVibesRealtimeOptions {
  * manually guarding every callback with `if (e.sessionId !== mine) return`.
  *
  * @example
- * import { createGoodVibesPlatform, forSession } from '@goodvibes-jev/engine/platform';
+ * import { createGoodVibesPlatform, forSession } from '@goodvibes/engine/platform';
  *
  * const platform = createGoodVibesPlatform({ baseUrl: 'http://127.0.0.1:3421' });
  * const session = await platform.operator.sessions.create({ title: 'demo' });
@@ -414,7 +414,7 @@ function createClientOptions<T extends OperatorApiClientOptions | PeerApiClientO
  *
  * @example
  * // Example only: replace baseUrl and authToken with your own values.
- * import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+ * import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
  *
  * const platform = createGoodVibesPlatform({
  *   baseUrl: 'https://daemon.example.com',

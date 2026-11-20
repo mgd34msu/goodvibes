@@ -1,4 +1,4 @@
-import { formatRefusal, type CommandResult } from '@goodvibes-jev/engine/errors';
+import { formatRefusal, type CommandResult } from '@goodvibes/engine/errors';
 import { formatJsonOrText as formatOutput } from './support-bundle-inspection.js';
 export function yesNo(value: unknown): string {
   return value === true ? 'yes' : 'no';

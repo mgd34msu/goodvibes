@@ -13,7 +13,7 @@
  * event id). Dispatch stays per domain.
  */
 
-import type { EventLike } from '@goodvibes-jev/engine/transport-core';
+import type { EventLike } from '@goodvibes/engine/transport-core';
 import type {
   DomainEventConnectionEnd,
   DomainEventConnector,

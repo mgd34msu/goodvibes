@@ -1,4 +1,4 @@
-import { BatteryRegistry } from '@goodvibes-jev/judgment';
+import { BatteryRegistry } from '@goodvibes/judgment';
 import { riskFamily } from './batteries/risk-family.js';
 import { sandboxAdvisory } from './batteries/sandbox-advisory.js';
 import { sideEffect } from './batteries/side-effect.js';

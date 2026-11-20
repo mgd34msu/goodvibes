@@ -11,8 +11,8 @@
  * add to that line: the engine failure reading (engine.failure-reading) fanned
  * out with routing.user-error, which asks whether a subscription session has ended.
  */
-import { categoryForCode, failureReading, failureState, judgmentPort, type FailureEvidence } from '@goodvibes-jev/engine/errors';
-import { defineBattery, fanOut, STAKES_BANDS, yesNo, type YesNoReading } from '@goodvibes-jev/judgment';
+import { categoryForCode, failureReading, failureState, judgmentPort, type FailureEvidence } from '@goodvibes/engine/errors';
+import { defineBattery, fanOut, STAKES_BANDS, yesNo, type YesNoReading } from '@goodvibes/judgment';
 import { summarizeError } from '../utils/error-display.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 

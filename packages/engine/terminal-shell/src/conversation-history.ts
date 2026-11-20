@@ -1,5 +1,5 @@
-import { createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types/grid';
-import type { Cell, Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { createEmptyLine } from '@goodvibes/engine/platform/platform/types/grid';
+import type { Cell, Line } from '@goodvibes/engine/platform/platform/types';
 
 /** Everything a cell carries except its character; one shared object per distinct style. */
 type CellStyle = Readonly<Omit<Cell, 'char'>>;

@@ -9,9 +9,9 @@
  * one description; what each app does differently is its policy, read by the
  * actions' `run`.
  */
-import type { SessionManager, CancellationScope, CrossSessionTaskRef } from '@goodvibes-jev/engine/platform/platform/sessions';
-import { VALID_SCOPES } from '@goodvibes-jev/engine/platform/platform/sessions';
-import type { ShellSessionOrchestrationService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { SessionManager, CancellationScope, CrossSessionTaskRef } from '@goodvibes/engine/platform/platform/sessions';
+import { VALID_SCOPES } from '@goodvibes/engine/platform/platform/sessions';
+import type { ShellSessionOrchestrationService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';

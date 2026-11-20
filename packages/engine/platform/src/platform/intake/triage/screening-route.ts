@@ -4,7 +4,7 @@
  * same revocation. Only screened previews (the text the inbox stores and
  * shows) are sent, never the raw message.
  */
-import { createSystemOnePort, DEFAULT_MODEL, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { createSystemOnePort, DEFAULT_MODEL, type JudgmentPort } from '@goodvibes/judgment';
 import { captureLoopbackEndpoint, createScreeningTransport } from '../../security/source-screening/transport.js';
 import type { HostedProtectedSourceOwnerOptions, ProtectedSourceOwnerOptions } from '../../security/source-screening/types.js';
 import type { InboxTriageAuthority } from './owned.js';

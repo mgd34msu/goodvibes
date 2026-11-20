@@ -4,7 +4,7 @@
  * The TUI memory-spine cutover: a thin wrapper over the platform's own canonical
  * memory-spine REST transport
  * (`createMemorySpineRestTransport` from
- * `@goodvibes-jev/engine/platform/platform/runtime/memory-spine`).
+ * `@goodvibes/engine/platform/platform/runtime/memory-spine`).
  *
  * ── Hoist provenance (2026-07-30 daemon/TUI split) ──────────────────────────
  *
@@ -39,7 +39,7 @@
 import {
   createMemorySpineRestTransport as createPlatformMemorySpineRestTransport,
   type MemoryTransport,
-} from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+} from '@goodvibes/engine/platform/platform/runtime/memory-spine';
 
 export interface MemorySpineWireOptions {
   readonly baseUrl: string;

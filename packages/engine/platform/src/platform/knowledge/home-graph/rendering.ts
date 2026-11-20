@@ -1,6 +1,6 @@
 import type { KnowledgeScopeSelection } from '../scope-selection.js';
 import { sameKnowledgeRecord } from '../store-record-representation.js';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import type {
   KnowledgeEdgeRecord,
   KnowledgeIssueRecord,

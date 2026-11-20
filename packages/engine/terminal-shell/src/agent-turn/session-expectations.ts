@@ -20,9 +20,9 @@
  * mail, exactly like the untrusted-content ledger.
  */
 
-import { VerificationExpectationBook } from '@goodvibes-jev/engine/platform/platform/google';
-import { surfaceHasCommandAuthority } from '@goodvibes-jev/engine/platform/platform/security';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { VerificationExpectationBook } from '@goodvibes/engine/platform/platform/google';
+import { surfaceHasCommandAuthority } from '@goodvibes/engine/platform/platform/security';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 
 let book: VerificationExpectationBook | null = null;
 

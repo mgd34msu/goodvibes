@@ -1,7 +1,7 @@
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
-import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/platform/platform/security';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import type { ToolInputProjector, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate/judgment-input';
+import { SOURCE_SCREENING_LIMITS } from '@goodvibes/engine/platform/platform/security';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import type { ToolInputProjector, ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { agentResearchSourceOwner } from './protected-research-report.js';
 
 const MODES = new Set(['personal_ops_queue', 'personal_ops_intake', 'personal_ops_lane', 'run_personal_ops_read']);

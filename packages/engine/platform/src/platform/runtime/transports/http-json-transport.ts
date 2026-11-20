@@ -13,7 +13,7 @@ import {
   type JsonValue,
   type ResolvedContractRequest,
   type TransportJsonError,
-} from '@goodvibes-jev/engine/transport-http';
+} from '@goodvibes/engine/transport-http';
 
 export type {
   HttpJsonRequestOptions,

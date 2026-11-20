@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, type BigIntStats } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
-import { captureExistingDirectory, fileObservationIdentity, readFileObservation } from '@goodvibes-jev/engine/platform/platform/utils';
+import { captureExistingDirectory, fileObservationIdentity, readFileObservation } from '@goodvibes/engine/platform/platform/utils';
 
 export interface NativeArtifactMember {
   readonly path: string;

@@ -1,8 +1,8 @@
-import { createNoticePublisher } from '@goodvibes-jev/engine/terminal-shell/notice-publication';
+import { createNoticePublisher } from '@goodvibes/engine/terminal-shell/notice-publication';
 export {
   noticeParts,
   type NoticeParts,
   type NoticeOptions,
   type NoticeSink,
-} from '@goodvibes-jev/engine/terminal-shell/notice-publication';
+} from '@goodvibes/engine/terminal-shell/notice-publication';
 export const publishNotice = createNoticePublisher({});

@@ -7,8 +7,8 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { choiceInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { choiceInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { CliCommandRuntime } from '../../cli/management.ts';
 import { handleBundleCommand } from '../../cli/bundle-command.ts';

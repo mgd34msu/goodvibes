@@ -22,7 +22,7 @@
 // no record of who owns which id, and someone who learned the id from a pairing
 // code cannot register it.
 
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import { concatBytes, encodeUtf8, fromBase64Url, randomBytes, RELAY_CURVE, RELAY_PUBLIC_KEY_BYTES, sha256, toBase64Url, type RelayKeyPair } from './crypto.js';
 
 /** Wire protocol version. Bumped only on incompatible control-frame changes. */

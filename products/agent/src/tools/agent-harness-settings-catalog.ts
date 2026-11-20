@@ -1,8 +1,8 @@
 import { getAgentSettingsSchema, type AgentSettingsCatalog } from '../config/settings-catalog.ts';
-import { catalogRoutingInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ingress';
+import { catalogRoutingInput } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ingress';
 import { isAgentWorkspaceSettingsImportPreview } from './agent-settings-import-admission.ts';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { listEffectiveHarnessSettingsPage } from '../agent/harness-control.ts';
 import { settingDomainRelatedCommand } from '../config/settings-search-vocabulary.ts';
 import { settingsPolicySummary } from './agent-harness-metadata.ts';

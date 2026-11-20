@@ -18,8 +18,8 @@ import { readExternalRequestEvidence, type ExternalRequestEvidence } from '../pe
 import { snapshotJudgmentInput } from './judgment-input.js';
 import { executePolicyCheck } from './execute-policy-check.js';
 import { execShellCommands } from '../runtime/permissions/exec-command-text.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { fanOut, type JsonValue, type Stakes, type YesNoReading, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import { fanOut, type JsonValue, type Stakes, type YesNoReading, type JudgmentPort } from '@goodvibes/judgment';
 import { riskFamily, type GateRiskFamily } from './batteries/risk-family.js';
 import { sideEffect, type SideEffectKind } from './batteries/side-effect.js';
 import { boundaryReading } from './batteries/boundary.js';

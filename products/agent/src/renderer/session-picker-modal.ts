@@ -1,4 +1,4 @@
-import { createSessionPickerRenderer } from '@goodvibes-jev/engine/terminal-shell/renderer/session-picker';
+import { createSessionPickerRenderer } from '@goodvibes/engine/terminal-shell/renderer/session-picker';
 /**
  * renderSessionPickerModal, the /sessions picker drawn with the modal surface kit.
  *

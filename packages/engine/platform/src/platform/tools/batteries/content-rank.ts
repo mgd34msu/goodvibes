@@ -10,7 +10,7 @@ import { completeJudgmentView } from './complete-view.js';
  *
  * Band: low stakes. Nothing is changed or dropped on the strength of it.
  */
-import { defineRerank, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineRerank, STAKES_BANDS } from '@goodvibes/judgment';
 
 
 /** What the rerank sees of a matched file: its path and its matching lines, each prefixed with its line number. */

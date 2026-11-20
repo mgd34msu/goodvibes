@@ -258,7 +258,7 @@ export function isMethodNotInvokableError(error: unknown): boolean {
  *
  * GROUNDING NOTE, deliberately explicit because it differs from most helpers here:
  * the installed platform defines no EMAIL_, IMAP_ or SMTP_ prefixed error-code literals at
- * all (verified by sweeping @goodvibes-jev/engine/platform/dist, only the three
+ * all (verified by sweeping @goodvibes/engine/platform/dist, only the three
  * EMAIL_..._SCHEMA shape names appear). The named codes below are ANTICIPATED, as
  * `isCalendarUnconfiguredError`'s CALENDAR_NOT_CONFIGURED is anticipated, that
  * literal is likewise absent from the platform. So correctness here does not rest on

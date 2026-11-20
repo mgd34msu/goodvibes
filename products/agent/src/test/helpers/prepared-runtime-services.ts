@@ -1,4 +1,4 @@
-import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { prepareConfiguredProjectContext } from '@goodvibes/engine/platform/platform/knowledge';
 import { createRuntimeServices, type RuntimeServices, type RuntimeServicesOptions } from '../../runtime/services.ts';
 
 /** Perform the same explicit project activation as Agent bootstrap, on the fixture's real owner. */

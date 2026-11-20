@@ -6,7 +6,7 @@
  * component, then the one terms verification of the quote assembled from
  * those amounts in code. */
 import { askAs, checkEachFixture, choice, decisionHeader, fixtureCheck, noul, readChoice, readYesNo, recordAction, recordReadings,
-  NONE, STAKES_BANDS, toJson, type CallOptions, type ChoiceReading, type EntryType, type JudgmentPort, type NamedDecision, type Outcome, type Question, type YesNoReading } from '@goodvibes-jev/judgment';
+  NONE, STAKES_BANDS, toJson, type CallOptions, type ChoiceReading, type EntryType, type JudgmentPort, type NamedDecision, type Outcome, type Question, type YesNoReading } from '@goodvibes/judgment';
 import { assertJudgmentInput, captureOwnedJson } from '../gate/judgment-input.js';
 import { sanitizeNoticeField } from '../security/notice-text.js';
 import { extractCheckout, readingDecimalMark, type RawCheckoutReading } from './checkout-extraction.js';

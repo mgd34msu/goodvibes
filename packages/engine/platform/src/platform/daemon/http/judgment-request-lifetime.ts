@@ -1,4 +1,4 @@
-import { BROWSER_JUDGMENT_PATH } from '@goodvibes-jev/engine/daemon-api';
+import { BROWSER_JUDGMENT_PATH } from '@goodvibes/engine/daemon-api';
 
 /** Preserve caller-owned waits without changing other HTTP request budgets. */
 export function configureJudgmentRequestLifetime(request: Request, server: { timeout?(request: Request, seconds: number): void }): void {

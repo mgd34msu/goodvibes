@@ -1,5 +1,5 @@
-import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
+import type { JudgmentPort } from '@goodvibes/judgment';
 import { isClassicOperation } from './decision-policy.js';
 
 /** A reader may borrow one operation's captured port without recapturing its source. */

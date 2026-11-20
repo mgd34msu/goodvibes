@@ -1,6 +1,6 @@
-import { contractNodeId, type ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import { isTerminalContractStatus } from '@goodvibes-jev/engine/platform/platform/contract/types';
-import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
+import { contractNodeId, type ProcessNode } from '@goodvibes/engine/platform/platform/runtime/fleet';
+import { isTerminalContractStatus } from '@goodvibes/engine/platform/platform/contract/types';
+import type { ContractView } from '@goodvibes/engine/platform/platform/contract';
 
 /** Only the root adapter records ownership of the contract's working tree. */
 export function rootContractFromNode(node: ProcessNode): ContractView | null {

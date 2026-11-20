@@ -22,8 +22,8 @@ import { decisionOrClassic } from '../runtime/decision-policy.js';
  * not ranked: the owner picks one (the attempts-undecided question names every
  * passing attempt), and a native contract takes the first passing attempt.
  */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { estimateTokens, NONE, type Candidate, type JsonValue, type Selection, type Selector } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import { estimateTokens, NONE, type Candidate, type JsonValue, type Selection, type Selector } from '@goodvibes/judgment';
 import { attemptItemId } from '../orchestration/attempts.js';
 import { emptyWorkItemUsage, type AttemptCandidateDiff, type AttemptJudge, type AttemptJudgeInput, type AttemptJudgeVerdict } from '../orchestration/types.js';
 import { bestOfN } from './batteries/best-of-n.js';
@@ -439,7 +439,7 @@ export async function selectAttempts(run: ContractRun, engineGroupId: string, de
           action: `Select the exact passing attempt ${selected} for integration; this does not mark unmet or unshown work as met`,
           allowAct: record.candidateIds.includes(selected) && run.unit(selected)?.status === 'held-merge',
           state: () => ({ goal: unit.goal, criteria: unit.criteria.map(c => ({ id: c.id, text: c.text })), selected,
-            candidates: nativeCandidates, current: record.candidateIds.map(id => ({ id, status: run.unit(id)?.status ?? 'missing', output: run.unit(id)?.answer ?? '' })) }) as unknown as import('@goodvibes-jev/judgment').EntryType,
+            candidates: nativeCandidates, current: record.candidateIds.map(id => ({ id, status: run.unit(id)?.status ?? 'missing', output: run.unit(id)?.answer ?? '' })) }) as unknown as import('@goodvibes/judgment').EntryType,
           continuations: alternatives.map(id => ({ id: `select:${id}`, kind: 'revise-action' as const, description: `Prepare passing attempt ${id} as the exact alternative and freshly judge it before selection.` })),
           decisionIds, signal: run.abort.signal });
         if (decision.decision.outcome === 'reject') { deps.failContract(run, 'other', decidedWithoutModel(decision) ? `no passing attempt of unit ${unit.id} can be taken` : 'Jev refused the native attempt selection'); return; }

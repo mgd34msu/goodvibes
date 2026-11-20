@@ -21,7 +21,7 @@
  * matching the key's NAME, the name-suffix scheme this replaces is exactly
  * what tied every consumer of these keys to one spelling.
  */
-import type { ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigSetting } from '@goodvibes/engine/platform/platform/config';
 
 /** True when the schema marks `setting` as holding an amount of `payments.currency`. */
 export function isMoneyConfigKey(setting: ConfigSetting): boolean {

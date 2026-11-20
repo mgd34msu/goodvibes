@@ -16,7 +16,7 @@
 // hands them here, so these builders are unit-testable against fixture shapes.
 // ---------------------------------------------------------------------------
 
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
+import type { OperatorMethodOutput } from '@goodvibes/engine/platform';
 
 /** voice.local.status output, the no-network installed/available snapshot. */
 export type VoiceRuntimeStatusResult = OperatorMethodOutput<'voice.local.status'>;

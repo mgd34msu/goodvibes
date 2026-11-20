@@ -1,4 +1,4 @@
-import { isGatePresetName, type GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import { isGatePresetName, type GatePresetName } from '@goodvibes/engine/platform/platform/gate/presets';
 /**
  * remote-conversation.ts, observing this surface's own conversation turns
  * running inside the connected host.
@@ -28,14 +28,14 @@ import { isGatePresetName, type GatePresetName } from '@goodvibes-jev/engine/pla
  *     input merely because it is the first stream frame.
  */
 
-import { buildUrl } from '@goodvibes-jev/engine/transport-http';
-import { createStreamTextAssembler } from '@goodvibes-jev/engine/transport-core';
-import { nativeHostedTurnSnapshotSchema, type NativeHostedTurnSnapshot } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
-import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
-import { transport } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { TERMINAL_TURN_EVENT_TYPES, createTurnLifecycleGate, readTurnLifecycleFrame } from '@goodvibes-jev/engine/platform/transport-realtime';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { buildUrl } from '@goodvibes/engine/transport-http';
+import { createStreamTextAssembler } from '@goodvibes/engine/transport-core';
+import { nativeHostedTurnSnapshotSchema, type NativeHostedTurnSnapshot } from '@goodvibes/engine/platform/platform/hosted-sessions/native-turn-client';
+import { createOperatorApiClient } from '@goodvibes/engine/operator-client';
+import { transport } from '@goodvibes/engine/platform/platform/runtime';
+import { TERMINAL_TURN_EVENT_TYPES, createTurnLifecycleGate, readTurnLifecycleFrame } from '@goodvibes/engine/platform/transport-realtime';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 import {
   createHostedFrameRenderer,
   type HostedFrameConversation,

@@ -1,9 +1,9 @@
 /** Shared keyboard mechanics over host-owned picker/control ports. */
 import { readFileSync, statSync } from 'node:fs';
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { SelectionResult, SelectionAction } from './selection-modal.js';
 import { isTextBackspace } from './delete-key-policy.js';
-import { resolveAndValidatePath, logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { resolveAndValidatePath, logger } from '@goodvibes/engine/platform/platform/utils';
 /** Largest image either attach path (the file picker or /image) will read into memory. */
 export const MAX_IMAGE_ATTACH_BYTES = 20 * 1024 * 1024;
 class ImageTooLargeError extends Error {}

@@ -19,7 +19,7 @@ function writeChecksums() {
 }
 function terminalReaderArtifact(command: 'goodvibes' | 'goodvibes-agent') {
   const asset = `${command}-linux-x64`;
-  return { schema: 1, packageName: command === 'goodvibes' ? '@goodvibes-jev/tui' : '@goodvibes-jev/agent', version, target: 'linux-x64',
+  return { schema: 1, packageName: command === 'goodvibes' ? '@goodvibes/tui' : '@goodvibes/agent', version, target: 'linux-x64',
     sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'a'.repeat(40),
     files: ['', '.bun', '.bun.LICENSE.md', '.bun.json'].map(ending => ({ path: asset + ending, sha256: digest(join(assets, asset + ending)),
       mode: ending === '' || ending === '.bun' ? 0o755 : 0o644, size: statSync(join(assets, asset + ending)).size })),

@@ -13,7 +13,7 @@
  * ping), and keeping it in-tree preserves the repo's dependency and audit
  * discipline.
  */
-import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
+import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import type { McpToolDefinition, OperatorMcpToolSet } from './tool-definitions.js';
 
 /** The default MCP protocol version this server advertises when the client sends none. */

@@ -29,9 +29,9 @@ import { join } from 'node:path';
 import * as ort from 'onnxruntime-web/wasm';
 import glueAssetPath from 'onnxruntime-web/ort-wasm-simd-threaded.mjs' with { type: 'file' };
 import wasmAssetPath from 'onnxruntime-web/ort-wasm-simd-threaded.wasm' with { type: 'file' };
-import type { WakeInferenceSession, WakeModelHandle, WakeRuntimeSettings, WakeTensor, WakeVadGate, } from '@goodvibes-jev/engine/platform/platform/voice';
-import { WakeWordEngine } from '@goodvibes-jev/engine/platform/platform/voice';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
+import type { WakeInferenceSession, WakeModelHandle, WakeRuntimeSettings, WakeTensor, WakeVadGate, } from '@goodvibes/engine/platform/platform/voice';
+import { WakeWordEngine } from '@goodvibes/engine/platform/platform/voice';
+import { atomicWriteFileSync } from '@goodvibes/engine/platform/platform/config';
 /**
  * The runtime asks for its glue and its wasm by these exact names, relative to
  * `ort.env.wasm.wasmPaths`, so the extracted copies must keep them.

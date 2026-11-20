@@ -1,4 +1,4 @@
-import { isDaemonOwnedConfigKey, isProtectedConfigValue } from '@goodvibes-jev/engine/platform/platform/config';
+import { isDaemonOwnedConfigKey, isProtectedConfigValue } from '@goodvibes/engine/platform/platform/config';
 
 /**
  * A portable copy of this machine's voice settings: always-speak

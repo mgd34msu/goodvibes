@@ -4,7 +4,7 @@
  */
 
 import { writeSync } from 'node:fs';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { readRefusal } from '@goodvibes/engine/errors';
 import { flushActivityLogSync, logger } from '../utils/logger.js';
 import { redactDiagnosticText } from '../utils/redaction.js';
 

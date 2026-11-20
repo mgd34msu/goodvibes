@@ -10,7 +10,7 @@
  * turns the tags into screen rows each frame and the mouse route reads them.
  */
 
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
 import type { StatusTarget } from './status-line.js';
 
 /** What a clickable footer row opens. */

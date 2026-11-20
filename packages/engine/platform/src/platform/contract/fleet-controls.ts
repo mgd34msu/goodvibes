@@ -14,7 +14,7 @@
  * escalation step, which closes the unit's `attempts-undecided` escalation, so
  * the unit takes the attempt exactly as an owner's pick would.
  */
-import { pending } from '@goodvibes-jev/engine/errors';
+import { pending } from '@goodvibes/engine/errors';
 import { AttemptError } from '../orchestration/attempts.js';
 import type { WorkstreamGraphSnapshot } from '../orchestration/graph-dynamics.js';
 import type { AttemptCandidate, AttemptJudgment, AttemptPickResult, HeldMergeGroup, WorkItem } from '../orchestration/types.js';

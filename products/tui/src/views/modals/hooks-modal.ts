@@ -1,12 +1,12 @@
 import { MODAL_TONES } from './modal-theme.ts';
 import { infoRow, headerRow, runModalCommand } from './modal-surface-helpers.ts';
-import { listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { listHookPointContracts } from '@goodvibes/engine/platform/platform/hooks';
 import type {
   HookActivityTracker,
   HookDefinition,
   HookDispatcher,
   HookWorkbench,
-} from '@goodvibes-jev/engine/platform/platform/hooks';
+} from '@goodvibes/engine/platform/platform/hooks';
 import type {
   ConfigModalActionContext,
   ConfigModalRow,

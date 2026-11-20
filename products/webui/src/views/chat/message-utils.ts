@@ -1,4 +1,4 @@
-import { toolActivityFallback, toolActivityPhrase, type ToolActivityWords } from '@goodvibes-jev/engine/contracts';
+import { toolActivityFallback, toolActivityPhrase, type ToolActivityWords } from '@goodvibes/engine/contracts';
 import { asRecord, bestId, compactJson, firstArray, firstString } from '../../lib/object';
 
 export function messageText(message: unknown): string {

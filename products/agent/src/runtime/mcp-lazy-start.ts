@@ -43,8 +43,8 @@
  * it starts nothing either.
  */
 
-import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { McpRegistry } from '@goodvibes/engine/platform/platform/mcp';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 /** The config roots `connectAll` reads `mcp.json` from. */
 export type McpConfigRoots = Parameters<McpRegistry['connectAll']>[0];

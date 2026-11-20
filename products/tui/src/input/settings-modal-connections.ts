@@ -23,7 +23,7 @@
  * for one item and keeps only whether it failed and why.
  */
 
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
 import {
   connectionSurfaceLabel,
   probeConnection,

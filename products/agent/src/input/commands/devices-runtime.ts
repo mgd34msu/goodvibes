@@ -1,8 +1,8 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import type { PublicPairingToken } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { registerDevicesCommand } from '@goodvibes-jev/engine/terminal-shell/devices-command';
-import { CHANNELS_LIST } from '@goodvibes-jev/engine/terminal-shell/channels-command';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import type { PublicPairingToken } from '@goodvibes/engine/platform/platform/pairing';
+import { registerDevicesCommand } from '@goodvibes/engine/terminal-shell/devices-command';
+import { CHANNELS_LIST } from '@goodvibes/engine/terminal-shell/channels-command';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { mintAgentDevicePairing } from '../../agent/device-pairing.ts';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
 import { invokeConnectedHostMethod } from '../connected-host-routes.ts';

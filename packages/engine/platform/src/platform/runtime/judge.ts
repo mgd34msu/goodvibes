@@ -13,8 +13,8 @@ import {
   type JudgeSomeOptions,
   type JudgeOutcome,
   type JudgmentPort,
-} from '@goodvibes-jev/judgment';
-import { DecisionModelsDisabledError, JudgmentPortMissingError, judgmentPort } from '@goodvibes-jev/engine/errors';
+} from '@goodvibes/judgment';
+import { DecisionModelsDisabledError, JudgmentPortMissingError, judgmentPort } from '@goodvibes/engine/errors';
 import { isClassicOperation } from './decision-policy.js';
 
 export {
@@ -27,7 +27,7 @@ export {
   type JudgeCacheScope,
   type JudgeFallbackReason,
   type JudgeOutcome,
-} from '@goodvibes-jev/judgment';
+} from '@goodvibes/judgment';
 
 export interface EngineJudgeOptions<Items extends BatteryItems, R> extends Omit<JudgeOptions<Items, R>, 'port' | 'off'> {
   /** A port to ask instead of the installed one (a composition that owns its own). */

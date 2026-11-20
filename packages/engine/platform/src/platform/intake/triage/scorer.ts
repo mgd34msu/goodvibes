@@ -1,5 +1,5 @@
-import { fanOut, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { fanOut, type JudgmentPort } from '@goodvibes/judgment';
+import { drainOwned } from '@goodvibes/judgment/decisions';
 import { logger } from '../../utils/logger.js';
 import { inboxTriage } from './battery.js';
 import { captureTriageInputs, triageConclusion, triageBinding, type CapturedTriageInput } from './evidence.js';

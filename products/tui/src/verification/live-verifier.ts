@@ -1,19 +1,19 @@
-import { createVerificationCompactor } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
-import { resolveVerificationHostUrl, verificationHostTarget } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
-import { writeVerificationReportFiles } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
+import { createVerificationCompactor } from '@goodvibes/engine/terminal-shell/verification-primitives';
+import { resolveVerificationHostUrl, verificationHostTarget } from '@goodvibes/engine/terminal-shell/verification-primitives';
+import { writeVerificationReportFiles } from '@goodvibes/engine/terminal-shell/verification-primitives';
 import {
   createVerificationPrimitives,
   renderVerificationTables,
   validateDaemonHealth,
   type LiveVerificationStatus,
   type LiveVerificationCheck,
-} from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
-export type { LiveVerificationStatus, LiveVerificationCheck } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
+} from '@goodvibes/engine/terminal-shell/verification-primitives';
+export type { LiveVerificationStatus, LiveVerificationCheck } from '@goodvibes/engine/terminal-shell/verification-primitives';
 
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { auditGoodVibesHome } from '../config/goodvibes-home-audit.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 export interface LiveVerificationOptions {
   homeDir: string;

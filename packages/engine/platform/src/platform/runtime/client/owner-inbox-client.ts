@@ -7,7 +7,7 @@
  * before anything is sent. An answer the daemon refused (already answered,
  * withdrawn, expired) comes back as `applied: false` with its refusal.
  */
-import { refusal } from '@goodvibes-jev/engine/errors';
+import { refusal } from '@goodvibes/engine/errors';
 import type {
   NewOwnerItem,
   OwnerAnswer,

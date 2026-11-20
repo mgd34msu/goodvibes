@@ -279,10 +279,10 @@ When enabled, the optional components do the following:
 - `secretsStore`: creates or reuses a Cloudflare Secrets Store for future Cloudflare-native secret placement.
 - `r2`: creates or reuses a Standard storage class bucket and binds it to the Worker as `GOODVIBES_ARTIFACTS`.
 
-The platform exports `@goodvibes-jev/engine/platform/workers` for Worker deployments:
+The platform exports `@goodvibes/engine/platform/workers` for Worker deployments:
 
 ```ts
-import { createGoodVibesCloudflareWorker, GoodVibesCoordinator } from '@goodvibes-jev/engine/platform/workers';
+import { createGoodVibesCloudflareWorker, GoodVibesCoordinator } from '@goodvibes/engine/platform/workers';
 
 // Reads GOODVIBES_DAEMON_URL, GOODVIBES_OPERATOR_TOKEN, GOODVIBES_WORKER_TOKEN
 // and the other GOODVIBES_* bindings from the Worker environment.

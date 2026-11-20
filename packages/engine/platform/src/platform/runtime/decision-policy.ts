@@ -1,14 +1,14 @@
 import { captureOwnedJson } from '../gate/judgment-input.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { isDecisionModelFailure, type DecisionModelFailure } from '@goodvibes-jev/judgment';
+import { isDecisionModelFailure, type DecisionModelFailure } from '@goodvibes/judgment';
 import {
   DecisionModelsDisabledError, JudgmentPortMissingError, decisionModelPolicyState,
   decisionModelFailingLine, installDecisionModelPolicyObserver, type NoDecisionModelReason, type DecisionModelFailureState, type DecisionModelPolicy, type DecisionModelPolicyState,
   parseDecisionModelPolicy, runDecisionOrClassic,
-} from '@goodvibes-jev/engine/errors';
+} from '@goodvibes/engine/errors';
 
-export type { NoDecisionModelReason, DecisionModelFailureState, DecisionModelPolicy, DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-export { DECISION_MODEL_POLICIES, DEFAULT_DECISION_MODEL_POLICY, decisionModelFailingLine, decisionModelPolicyLabel, decisionModelUse, parseDecisionModelPolicy, type DecisionModelUse } from '@goodvibes-jev/engine/errors';
+export type { NoDecisionModelReason, DecisionModelFailureState, DecisionModelPolicy, DecisionModelPolicyState } from '@goodvibes/engine/errors';
+export { DECISION_MODEL_POLICIES, DEFAULT_DECISION_MODEL_POLICY, decisionModelFailingLine, decisionModelPolicyLabel, decisionModelUse, parseDecisionModelPolicy, type DecisionModelUse } from '@goodvibes/engine/errors';
 
 export class DecisionModelPolicyChangedError extends Error {
   constructor() {
@@ -102,7 +102,7 @@ interface PolicyHostState {
 // Source and published entrypoints may coexist in an embedding process. They
 // must share operation ownership, configuration lifetime and refusal memory;
 // installing a second observer cannot erase the first entrypoint's scope.
-const hostStateKey = Symbol.for('goodvibes-jev.engine.decision-policy.host.v1');
+const hostStateKey = Symbol.for('goodvibes.engine.decision-policy.host.v1');
 function sharedPolicyHostState(): PolicyHostState {
   const existing = Object.getOwnPropertyDescriptor(globalThis, hostStateKey);
   if (existing) {

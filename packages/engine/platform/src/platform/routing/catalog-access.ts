@@ -8,8 +8,8 @@
  */
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { YesNoReading } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import type { YesNoReading } from '@goodvibes/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';

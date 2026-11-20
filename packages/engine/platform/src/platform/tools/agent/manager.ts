@@ -1,8 +1,8 @@
 import { bindContractInputAuthority } from '../../contract/input-authority.js';
 import { classicAgentInput } from './classic-policy.js';
-import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { decisionModelPolicyState } from '@goodvibes/engine/errors';
 import { currentTurn, withAgentTurn, type TurnContext } from '../../security/turn-boundary.js';
-import type { Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { currentExecutionModeOwner, detachedFromInvocation, type ExecutionModeOwner } from '../../gate/execution-context.js';
 import { AgentCapacityError } from './capacity-error.js';
 import { bindContractActionSource, bindContractActionSignal, bindContractPlanConsumer } from './contract-binding.js';

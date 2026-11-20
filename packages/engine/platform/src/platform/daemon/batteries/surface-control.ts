@@ -1,5 +1,5 @@
 /** One semantic owner for remote surface controls; IDs and authority stay host-owned. */
-import { askAs, checkEachFixture, choice, decisionHeader, fixtureCheck, LIMITS, readChoice, recordAction, recordReadings, type CallOptions, type JudgmentPort, type NamedDecision, type Outcome } from '@goodvibes-jev/judgment/decisions';
+import { askAs, checkEachFixture, choice, decisionHeader, fixtureCheck, LIMITS, readChoice, recordAction, recordReadings, type CallOptions, type JudgmentPort, type NamedDecision, type Outcome } from '@goodvibes/judgment/decisions';
 import { assertSynchronousCurrent } from '../reading-lifetime.js';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { assertSynchronousCurrent, daemonReadingPort } from './reading-lifetime.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
-import type { CallOptions } from '@goodvibes-jev/judgment/decisions';
+import type { CallOptions } from '@goodvibes/judgment/decisions';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { surfaceControl, type SurfaceControlTarget, type SurfaceControlReading } from './batteries/surface-control.js';
 import type { ConfigManager } from '../config/manager.js';
@@ -14,7 +14,7 @@ import type { ConversationMessageEnvelope } from '../control-plane/conversation-
 import type { RouteBindingManager, ChannelPolicyManager } from '../channels/index.js';
 import { channelSenderActor } from '../channels/policy-manager.js';
 import { admitEffects, type EffectId } from '../security/effect-authority.js';
-import type { Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import type { GenericWebhookAdapterContext, SurfaceAdapterContext, SurfaceControlCommand, SurfaceControlOrigin, SurfaceIngressDecision } from '../adapters/index.js';
 import type { AutomationManager } from '../automation/index.js';
 import type { ChannelPolicyDecision, ChannelIngressPolicyInput } from '../channels/index.js';
@@ -31,7 +31,7 @@ import type { CompanionChatManager } from '../companion/companion-chat-manager.j
 import { resolveSecretInput } from '../config/secret-refs.js';
 import { logger } from '../utils/logger.js';
 import { holdCompanionTurn, type HeldCompanionTurn } from './held-companion-turn.js';
-import { agentRetrySpawnInput } from '@goodvibes-jev/engine/daemon-api/tasks';
+import { agentRetrySpawnInput } from '@goodvibes/engine/daemon-api/tasks';
 import { toAgentSpawnInput } from './http/runtime-routes.js';
 import { summarizeError } from '../utils/error-display.js';
 import { approvalProposal, approvalReplyCandidates, tryResolveApprovalReplyFromChannel, type ApprovalReplyBroker } from './approval-reply.js';

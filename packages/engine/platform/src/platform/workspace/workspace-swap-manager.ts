@@ -44,7 +44,7 @@ import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { createEventEnvelope } from '../runtime/events/index.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { failedRead, present, refusal, type Observed } from '@goodvibes-jev/engine/errors';
+import { failedRead, present, refusal, type Observed } from '@goodvibes/engine/errors';
 
 /** The services bound to the working directory, in product terms; all of them move together. */
 export const WORKSPACE_ROOT_BOUND_SERVICES: readonly string[] = Object.freeze([

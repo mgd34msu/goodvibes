@@ -1,4 +1,4 @@
-import { estimateTokens, LIMITS, mapLimit, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { estimateTokens, LIMITS, mapLimit, type JudgmentPort } from '@goodvibes/judgment';
 import type { UnitEvidence } from './evidence.js';
 import { retainOwnedJson } from '../gate/judgment-input.js';
 import { sourceCitationBatch } from './batteries/source-citation-purpose.js';

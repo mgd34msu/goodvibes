@@ -1,7 +1,7 @@
 import { activateClassicFallback, isClassicOperation } from '../../../runtime/decision-policy.js';
 import { prepareJudgmentResult } from '../../../gate/judgment-result.js';
-import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
-import { fanOut, toJson, type JudgmentPort, type JsonValue, type YesNoReading } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes/engine/errors';
+import { fanOut, toJson, type JudgmentPort, type JsonValue, type YesNoReading } from '@goodvibes/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../../../gate/judgment-input.js';
 import { freezeSupport } from '../../semantic/verification/projection.js';
 import { homeGraphQualityBatteries } from './batteries.js';

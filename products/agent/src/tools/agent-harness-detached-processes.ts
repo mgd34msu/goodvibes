@@ -19,9 +19,9 @@ import { appendFileSync, closeSync, fstatSync, openSync, readdirSync, readFileSy
 import { uptime } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
+import { redactSensitiveData } from '@goodvibes/engine/platform/platform/utils';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { runStoreFileUpdateSync, writeStoreJson } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
+import { runStoreFileUpdateSync, writeStoreJson } from '@goodvibes/engine/terminal-shell/agent-turn/store-file';
 
 export interface DetachedProcessRecord {
   readonly processId: string;

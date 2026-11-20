@@ -11,7 +11,7 @@ import type { SettingsModal } from '../input/settings-modal.ts';
 import { selectedConnectionEntry } from '../input/settings-modal-connections.ts';
 import { connectionSurfaceLabel } from '../input/commands/connection-status.ts';
 import type { KitRow } from './surface-kit-list.ts';
-import { helpFact, helpHeading, helpText, type HelpLine } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-documentation';
+import { helpFact, helpHeading, helpText, type HelpLine } from '@goodvibes/engine/terminal-shell/renderer/settings-documentation';
 
 /**
  * The Connections rows: one row per surface, saying what it actually is.

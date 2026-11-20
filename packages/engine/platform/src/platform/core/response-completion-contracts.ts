@@ -3,7 +3,7 @@ import { captureOwnedJson, retainOwnedJson, type RetainedOwnedJson } from '../ga
 import type { ContractRunner } from '../contract/runner.js';
 import { isTerminalContractStatus } from '../contract/types.js';
 import type { ContractView } from '../contract/types.js';
-import { hashState } from '@goodvibes-jev/judgment';
+import { hashState } from '@goodvibes/judgment';
 import { goalObligationSource } from '../contract/goal-obligation-proof.js';
 import { originalObligationSource } from '../contract/batteries/original-obligation-coverage.js';
 

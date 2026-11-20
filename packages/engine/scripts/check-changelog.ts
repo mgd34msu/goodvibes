@@ -1,6 +1,6 @@
 /**
  * Changelog gate: verifies that CHANGELOG.md contains a section header
- * matching the current @goodvibes-jev/engine/platform version before release.
+ * matching the current @goodvibes/engine/platform version before release.
  *
  * Usage:
  *   bun scripts/check-changelog.ts

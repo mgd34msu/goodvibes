@@ -1,11 +1,11 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
 import {
   describeServingEffort,
   resolveRequestedEffortForServingModel,
   type EffortModelLike,
-} from '@goodvibes-jev/engine/platform/platform/providers/reasoning-effort-surface';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+} from '@goodvibes/engine/platform/platform/providers/reasoning-effort-surface';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { activeTokens } from './renderer/theme.js';
 import { firstRunOpen } from './first-run/splash-state.js';
 /** Keys a model selection writes that hold text. */

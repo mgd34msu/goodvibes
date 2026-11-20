@@ -1,4 +1,4 @@
-import { normalizePermissionMode } from '@goodvibes-jev/engine/platform/platform/gate';
+import { normalizePermissionMode } from '@goodvibes/engine/platform/platform/gate';
 import { NETWORK_MODE_OPTIONS, REASONING_OPTIONS, HITL_MODE_OPTIONS, GUIDANCE_MODE_OPTIONS, PERMISSION_MODE_OPTIONS, SECRET_POLICY_OPTIONS } from './onboarding-wizard-constants.ts';
 import { shouldShowCloudflareStep } from './onboarding-wizard-cloudflare.ts';
 import { buildCloudflareStep } from './onboarding-wizard-cloudflare-step.ts';
@@ -18,7 +18,7 @@ import { buildProviderKeyInventoryField, buildProviderKeyMaskedFields, buildSubs
 import { getDaemonSource, pushDaemonAdoptionFields } from './onboarding-wizard-network-adopt.ts';
 import type { OnboardingWizardControllerLike, OnboardingWizardTopic } from './onboarding-wizard-types.ts';
 import type { OnboardingStep1CapabilityId } from '../../runtime/onboarding/index.ts';
-import { SETUP_TOPICS } from '@goodvibes-jev/engine/terminal-shell/setup-command';
+import { SETUP_TOPICS } from '@goodvibes/engine/terminal-shell/setup-command';
 import type { OnboardingWizardAcknowledgementFieldDefinition, OnboardingWizardActionFieldDefinition, OnboardingWizardChecklistFieldDefinition, OnboardingWizardExternalSurfaceStepId, OnboardingWizardFieldDefinition, OnboardingWizardModelPickerFieldDefinition, OnboardingWizardRadioFieldDefinition, OnboardingWizardRadioOption, OnboardingWizardStepDefinition } from './onboarding-wizard-types.ts';
 
 /** The capability a topic switches on, shown as that topic's first row. */

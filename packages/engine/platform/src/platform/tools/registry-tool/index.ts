@@ -1,6 +1,6 @@
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { logger } from '../../utils/logger.js';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
 import { retainStrictJudgmentJson, prepareJudgmentResult } from '../../gate/judgment-result.js';
 import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
 import { registryCandidateView, registryRank } from '../batteries/registry-rank.js';

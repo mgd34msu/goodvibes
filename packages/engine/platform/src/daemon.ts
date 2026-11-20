@@ -1,7 +1,7 @@
-export * from '@goodvibes-jev/engine/daemon-api';
+export * from '@goodvibes/engine/daemon-api';
 
 // One-call daemon boot factory (thin composition over DaemonServer). Exposed on
-// the public `@goodvibes-jev/engine/platform/daemon` entry so embedders and tests can
+// the public `@goodvibes/engine/platform/daemon` entry so embedders and tests can
 // stand up a real daemon without hand-mirroring the construction graph.
 export { bootDaemon, DaemonServer } from './platform/daemon/index.js';
 export type { BootDaemonOptions, BootedDaemon } from './platform/daemon/index.js';

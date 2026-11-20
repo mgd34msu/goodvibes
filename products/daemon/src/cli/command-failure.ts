@@ -1,5 +1,5 @@
-import { readRefusal } from '@goodvibes-jev/engine/errors';
-import { describeFatalFailure } from '@goodvibes-jev/engine/platform/platform/daemon/fatal-boot-report';
+import { readRefusal } from '@goodvibes/engine/errors';
+import { describeFatalFailure } from '@goodvibes/engine/platform/platform/daemon/fatal-boot-report';
 
 /**
  * Lines printed when a command throws: its reason through the same masking

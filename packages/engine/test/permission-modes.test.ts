@@ -24,10 +24,10 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
+import { JudgmentError, type JudgmentPort } from '@goodvibes/judgment';
+import { choiceAnswer, fakePort } from '@goodvibes/judgment/testing';
 import { gateReadingsPort } from './_helpers/gate-readings.ts';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { createPermissionConfigReader, PermissionManager } from '../platform/src/platform/permissions/manager.ts';
@@ -41,7 +41,7 @@ import { UserPermissionRuleStore } from '../platform/src/platform/permissions/us
 import { configureDecisionModelPolicy, withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { withExecutionModeOwner } from '../platform/src/platform/gate/execution-context.ts';
 import type { GatePresetName } from '../platform/src/platform/gate/presets.ts';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 
 let dir: string;
 let jevQuestions = 0;

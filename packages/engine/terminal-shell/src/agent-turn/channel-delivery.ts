@@ -3,8 +3,8 @@ import type {
   ChannelDeliveryRouter,
   ChannelDeliverySurfaceKind,
   ChannelDeliveryTarget,
-} from '@goodvibes-jev/engine/platform/platform/channels';
-import type { ArtifactReference } from '@goodvibes-jev/engine/platform/platform/artifacts';
+} from '@goodvibes/engine/platform/platform/channels';
+import type { ArtifactReference } from '@goodvibes/engine/platform/platform/artifacts';
 import {
   CardMaterialRefusedError,
   resolveDeliverySurfaceName,
@@ -12,7 +12,7 @@ import {
 } from './payments-channel-guard.js';
 import { parseChannelDeliveryTarget, parseLinkDeliveryTarget, parseRouteDeliveryTarget, type RoutineScheduleDeliveryTargetSpec } from './schedule-delivery-targets.js';
 import { randomUUID } from 'node:crypto';
-import { Secret, isSecret } from '@goodvibes-jev/engine/platform/platform/security';
+import { Secret, isSecret } from '@goodvibes/engine/platform/platform/security';
 
 type AgentChannelDeliveryRouter = Pick<ChannelDeliveryRouter, 'deliver' | 'listStrategies'>;
 type AgentChannelDeliverySurfaceKind = ChannelDeliverySurfaceKind | 'telephony';

@@ -21,7 +21,7 @@
  *
  * ### Consumer pattern
  * ```ts
- * import { isErrorCode, EngineErrorCodes } from '@goodvibes-jev/engine/errors';
+ * import { isErrorCode, EngineErrorCodes } from '@goodvibes/engine/errors';
  *
  * catch (err) {
  *   if (err instanceof GoodVibesError) {
@@ -83,7 +83,7 @@ export type EngineErrorCode =
  * Prefer referencing these constants over raw string literals for refactor safety.
  *
  * @example
- * import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
+ * import { EngineErrorCodes } from '@goodvibes/engine/errors';
  *
  * if (err.code === EngineErrorCodes.RATE_LIMITED) {
  *   await delay(err.retryAfterMs ?? 1000);
@@ -134,7 +134,7 @@ const ENGINE_ERROR_CODE_SET = new Set<string>(Object.values(EngineErrorCodes));
  * {@link GoodVibesError} subclasses.
  *
  * @example
- * import { isErrorCode, EngineErrorCodes, GoodVibesError } from '@goodvibes-jev/engine/errors';
+ * import { isErrorCode, EngineErrorCodes, GoodVibesError } from '@goodvibes/engine/errors';
  *
  * if (err instanceof GoodVibesError && isErrorCode(err, EngineErrorCodes.RATE_LIMITED)) {
  *   console.log('retry after', err.retryAfterMs);

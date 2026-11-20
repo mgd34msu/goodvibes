@@ -3,8 +3,8 @@
 // what `/personas vibe` and the prompt receipt report is what the prompt carries.
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { atomicWriteFileSync, type AtomicWriteOptions } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { atomicWriteFileSync, type AtomicWriteOptions } from '@goodvibes/engine/platform/platform/config';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import { assertNoSecretLikeText } from './persona-registry.js';
 import { parseMarkdownFrontmatter, stripMarkdownFrontmatter } from '../markdown-frontmatter.js';

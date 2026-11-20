@@ -56,7 +56,7 @@
  * for a stream that only ever carries one session.
  */
 
-import { TURN_SETTLING_EVENTS } from '@goodvibes-jev/engine/transport-core/turn-settlement';
+import { TURN_SETTLING_EVENTS } from '@goodvibes/engine/transport-core/turn-settlement';
 
 /** Turn frames that END a turn, the ones a replay must never be allowed to deliver (the one settling set). */
 export const TERMINAL_TURN_EVENT_TYPES: readonly string[] = TURN_SETTLING_EVENTS;

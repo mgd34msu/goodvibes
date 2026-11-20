@@ -1,4 +1,4 @@
-import { BROWSER_JUDGMENT_PATH, BROWSER_JUDGMENT_BATTERY_VERSIONS, type BrowserJudgmentBatteryId } from '@goodvibes-jev/engine/daemon-api';
+import { BROWSER_JUDGMENT_PATH, BROWSER_JUDGMENT_BATTERY_VERSIONS, type BrowserJudgmentBatteryId } from '@goodvibes/engine/daemon-api';
 import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import { methodDescriptor, objectSchema, arraySchema, STRING_SCHEMA, NUMBER_SCHEMA, BOOLEAN_SCHEMA } from './method-catalog-shared.js';
 

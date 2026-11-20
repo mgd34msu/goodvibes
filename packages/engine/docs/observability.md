@@ -13,7 +13,7 @@ This guide covers the platform's observability stack: structured logging, runtim
 The platform ships a persistent, buffered activity logger that writes structured entries to `.goodvibes/logs/activity.md`. It is the primary debug trail for production diagnosis.
 
 ```ts
-import { configureActivityLogger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { configureActivityLogger } from '@goodvibes/engine/platform/platform/utils';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -27,7 +27,7 @@ configureActivityLogger(join(homedir(), '.goodvibes', 'logs'));
 The logger is a singleton (`logger`) used throughout the platform. It exposes four levels:
 
 ```ts
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 
 logger.info('session started', { sessionId });
 logger.warn('retry triggered', { attempt, delayMs });
@@ -92,7 +92,7 @@ interface EventEnvelope<TType, TPayload> {
 Create an envelope. `createEventEnvelope` requires `sessionId` and `source` in the context; `traceId` is taken from the context when supplied (it is not generated automatically). Pass a shared `traceId` to correlate fan-out envelopes under one trace:
 
 ```ts
-import { createEventEnvelope } from '@goodvibes-jev/engine/platform/transport-core';
+import { createEventEnvelope } from '@goodvibes/engine/platform/transport-core';
 
 const envelope = createEventEnvelope(
   'TURN_SUBMITTED',
@@ -361,7 +361,7 @@ Each phase is named for what happens in it: `PREFLIGHT` (local checks before the
 `ForensicsRegistry` stores and indexes failure reports. It holds at most 100 reports by default (configurable). Oldest reports are evicted when the limit is reached.
 
 ```ts
-import { ForensicsRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
+import { ForensicsRegistry } from '@goodvibes/engine/platform/platform/runtime/observability';
 
 const registry = new ForensicsRegistry(200); // custom limit
 
@@ -480,7 +480,7 @@ The `PlatformObserver` interface lets you attach custom telemetry through the pu
 ### Interface
 
 ```ts
-import type { PlatformObserver } from '@goodvibes-jev/engine/platform';
+import type { PlatformObserver } from '@goodvibes/engine/platform';
 
 export interface PlatformObserver {
   /** Called for every event dispatched through the RuntimeEventBus. */
@@ -524,8 +524,8 @@ export interface PlatformObserver {
 Pass an observer in `GoodVibesPlatformOptions` when constructing the platform:
 
 ```ts
-import { createMemoryTokenStore } from '@goodvibes-jev/engine/platform/auth';
-import { createGoodVibesPlatform, createConsoleObserver } from '@goodvibes-jev/engine/platform';
+import { createMemoryTokenStore } from '@goodvibes/engine/platform/auth';
+import { createGoodVibesPlatform, createConsoleObserver } from '@goodvibes/engine/platform';
 
 const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',
@@ -551,7 +551,7 @@ invokeObserver(() => observer?.onAuthTransition?.(transition), { label: 'onAuthT
 `createConsoleObserver` is the built-in development adapter. It logs auth transitions and errors at `info` level, and transport activity + runtime events at `debug` level.
 
 ```ts
-import { createConsoleObserver } from '@goodvibes-jev/engine/platform';
+import { createConsoleObserver } from '@goodvibes/engine/platform';
 
 const observer = createConsoleObserver({ level: 'debug' });
 ```
@@ -568,7 +568,7 @@ Output example:
 
 ```ts
 import { trace, metrics } from '@opentelemetry/api';
-import { createOpenTelemetryObserver } from '@goodvibes-jev/engine/platform';
+import { createOpenTelemetryObserver } from '@goodvibes/engine/platform';
 
 const observer = createOpenTelemetryObserver(
   trace.getTracer('goodvibes-platform'),
@@ -615,13 +615,13 @@ The following table shows which `PlatformObserver` callbacks each transport seam
 
 The transport layer can inject W3C Trace Context headers (`traceparent`, `tracestate`) into outgoing HTTP and realtime requests when an active OpenTelemetry span is available.
 
-Two helpers are exported from `@goodvibes-jev/engine/platform/transport-core`:
+Two helpers are exported from `@goodvibes/engine/platform/transport-core`:
 
 ```ts
 import {
   injectTraceparent,
   injectTraceparentAsync,
-} from '@goodvibes-jev/engine/platform/transport-core';
+} from '@goodvibes/engine/platform/transport-core';
 
 // Async: uses dynamic import on first call, then caches. Use this for HTTP, SSE and WebSocket requests.
 const headers: Record<string, string> = {};
@@ -665,7 +665,7 @@ A unit passes only when every judged criterion reads met. `CONTRACT_PASSED`, `CO
 
 ## Judgment analytics
 
-Every Jev reading the engine takes is recorded in the state layer's decision log (`<workspace>/.goodvibes/<surface>/decisions.sqlite`): the call, what the decision concluded (a `readings` note), what code did with it (an `action` note) and, once known, what was right (a `truth` note from a calibration fixture, an owner correction or an observed outcome). The observe subsystem (`@goodvibes-jev/engine/platform/platform/observe`) reads it without making new calls:
+Every Jev reading the engine takes is recorded in the state layer's decision log (`<workspace>/.goodvibes/<surface>/decisions.sqlite`): the call, what the decision concluded (a `readings` note), what code did with it (an `action` note) and, once known, what was right (a `truth` note from a calibration fixture, an owner correction or an observed outcome). The observe subsystem (`@goodvibes/engine/platform/platform/observe`) reads it without making new calls:
 
 A decision log written by a build this one does not recognise (a newer schema version) or a file that is not a database is never deleted and never stops start-up: it is moved to `decisions.sqlite.unrecognized-<n>` beside the log, a new log starts, and the composition's `decisionLogNotice` and the activity log say where the old one went.
 

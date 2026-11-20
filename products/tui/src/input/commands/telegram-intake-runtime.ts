@@ -1,4 +1,4 @@
-import { registerTelegramIntakeCommand } from '@goodvibes-jev/engine/terminal-shell/telegram-intake-command';
+import { registerTelegramIntakeCommand } from '@goodvibes/engine/terminal-shell/telegram-intake-command';
 import { isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
 

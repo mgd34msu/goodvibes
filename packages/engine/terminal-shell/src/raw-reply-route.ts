@@ -1,7 +1,7 @@
 /**
  * raw-reply-route.ts, invoking a route that answers with its payload itself.
  *
- * `callDaemonVerb` in @goodvibes-jev/engine/terminal-shell reads the wrapped
+ * `callDaemonVerb` in @goodvibes/engine/terminal-shell reads the wrapped
  * convention every `/api/cluster/*` route follows: `{ ok: true, data }` on
  * success, `{ ok: false, error, fix }` on a refusal. Three routes this daemon
  * serves do not, `/status`, `/api/health` and `/api/channels/status` answer

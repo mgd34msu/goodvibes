@@ -1,7 +1,7 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { prepareJudgmentResult } from '../gate/judgment-result.js';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
+import type { JudgmentPort } from '@goodvibes/judgment/decisions';
 
 /** Do not hide a thenable from the foundation's synchronous authority contract. */
 export function assertSynchronousCurrent(check?: () => void): void {

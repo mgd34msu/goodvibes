@@ -45,9 +45,9 @@ import { requireActingReading } from '../../types/judgment-held.js';
  * false, and the description says so. It never claims the substance was kept.
  */
 
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
 import type { OwnedJudgmentOptions } from '../owned-judgment-work.js';
-import type { Fidelity } from '@goodvibes-jev/judgment';
+import type { Fidelity } from '@goodvibes/judgment';
 import type { StrategyInput, StrategyOutput, CompactionStrategy } from './types.js';
 import { compactionViews } from './judged-views.js';
 import { compactionFidelity } from './batteries/compaction-fidelity.js';

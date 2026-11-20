@@ -5,7 +5,7 @@
  *
  * BOUND TO THE GENERATED CONTRACT
  * Every shape below is derived from `OperatorMethodOutput<'profile.*'>` in the installed
- * @goodvibes-jev/engine/contracts, not from prose. The `Wire*` aliases at the top ARE the
+ * @goodvibes/engine/contracts, not from prose. The `Wire*` aliases at the top ARE the
  * generated types, so a future contract change that alters a field name breaks this file
  * at compile time instead of silently reading `undefined`. The named view types exist for
  * the same reason memory-governance.ts's MemoryGovernanceSnapshot does: the hook, the
@@ -33,7 +33,7 @@
  * bundle, and this reader does not reintroduce one. `sectionHoldsThirdPartyData` marks the
  * `People` section so the rendering surface can keep it out of copy/export affordances.
  */
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
+import type { OperatorMethodOutput } from '@goodvibes/engine/contracts';
 
 // The generated output shapes, named once. profile.set / .append / .forget / .undo all
 // answer the same write result, so one alias covers the four.

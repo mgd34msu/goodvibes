@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 
 type JsonObject = { [key: string]: JsonValue };
 const object = (value: JsonValue | undefined): value is JsonObject => value !== undefined && value !== null && typeof value === 'object' && !Array.isArray(value);

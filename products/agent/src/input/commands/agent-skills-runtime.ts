@@ -1,16 +1,16 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { AgentSkillRegistry, buildAgentSkillRequirements, evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness, formatAgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
-import { type AgentSkillBundleRecord, type AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry-types';
+import { AgentSkillRegistry, buildAgentSkillRequirements, evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness, formatAgentSkillRequirement } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
+import { type AgentSkillBundleRecord, type AgentSkillRecord } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry-types';
 import { discoverSkills, type SkillRecord } from '../../agent/skill-discovery.ts';
-import { parseSkillStandardMarkdown, skillStandardFilePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-standard';
-import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
+import { parseSkillStandardMarkdown, skillStandardFilePath } from '@goodvibes/engine/terminal-shell/agent-turn/skill-standard';
+import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { resolveCommandFilePath } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
-import { assertActorMayEnable, assertActorMayMarkReviewed, type RegistryActor } from '@goodvibes-jev/engine/terminal-shell/agent-turn/review-authority';
+import { assertActorMayEnable, assertActorMayMarkReviewed, type RegistryActor } from '@goodvibes/engine/terminal-shell/agent-turn/review-authority';
 import { commandRefusal } from './confirmation.ts';
-import { defineCommand, defineList, type ActionDescription, type ActionValues, type InputDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { defineCommand, defineList, type ActionDescription, type ActionValues, type InputDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 
 function splitList(value: string | undefined): readonly string[] {
   if (!value) return [];

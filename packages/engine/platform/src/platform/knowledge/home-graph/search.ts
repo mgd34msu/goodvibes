@@ -1,4 +1,4 @@
-import { mapLimit } from '@goodvibes-jev/judgment';
+import { mapLimit } from '@goodvibes/judgment';
 import type { KnowledgeStore } from '../store.js';
 import type { KnowledgeEdgeRecord, KnowledgeExtractionRecord, KnowledgeNodeRecord, KnowledgeSourceRecord } from '../types.js';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';

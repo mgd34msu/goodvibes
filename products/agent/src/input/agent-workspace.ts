@@ -1,6 +1,6 @@
 import { openWorkspaceAction, type WorkspaceActionTarget } from './workspace-actions.ts';
-import { describedCommandByName, isCommandReport, renderCommandReport, type ActionDescription } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
+import { describedCommandByName, isCommandReport, renderCommandReport, type ActionDescription } from '@goodvibes/engine/terminal-shell/command-actions';
+import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import { captureCommandPrint } from './workspace-command-output.ts';
 import type { AgentConfigSetting } from '../config/settings-catalog.ts';
 import type { CommandContext } from './command-registry.ts';

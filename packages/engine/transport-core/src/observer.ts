@@ -9,7 +9,7 @@
  * All methods are optional. Observer callback errors are reported through
  * `onObserverError` when supplied (otherwise warned once on the console) and never propagate into transport control flow.
  */
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import { transportErrorFromUnknown } from './errors.js';
 
 /**

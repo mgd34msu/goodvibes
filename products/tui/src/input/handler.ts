@@ -1,15 +1,15 @@
-import { openHandlerMcpWorkspace } from '@goodvibes-jev/engine/terminal-shell/input-handler-state';
-import { createFeedRenderBuffer, syncFeedContextLiveReferences } from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
-import { TerminalInputHandlerState } from '@goodvibes-jev/engine/terminal-shell/input-handler-state';
+import { openHandlerMcpWorkspace } from '@goodvibes/engine/terminal-shell/input-handler-state';
+import { createFeedRenderBuffer, syncFeedContextLiveReferences } from '@goodvibes/engine/terminal-shell/input-feed-context';
+import { TerminalInputHandlerState } from '@goodvibes/engine/terminal-shell/input-handler-state';
 import {
   projectFeedContextStable,
   projectFeedContextClosures,
-} from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
+} from '@goodvibes/engine/terminal-shell/input-feed-context';
 import { resolveFooterTarget } from '../renderer/footer-targets.ts';
 import { SurfacePointer } from './surface-pointer.ts';
-import { InputTokenizer, type InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import { reportDroppedPaste } from '@goodvibes-jev/engine/terminal-shell/input-content';
-import { createOAuthLocalListener } from '@goodvibes-jev/engine/platform/platform/config';
+import { InputTokenizer, type InputToken } from '@goodvibes/engine/platform/platform/core';
+import { reportDroppedPaste } from '@goodvibes/engine/terminal-shell/input-content';
+import { createOAuthLocalListener } from '@goodvibes/engine/platform/platform/config';
 import {
   cleanupMarkerRegistryForHandler,
   executeBlockActionForHandler,
@@ -49,8 +49,8 @@ import {
   verifyOnboardingRuntimePostureForHandler,
 } from './handler-onboarding.ts';
 import type { OnboardingRuntimePosture } from './handler-types.ts';
-import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
-import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
+import { SelectionManager } from '@goodvibes/engine/terminal-shell';
+import type { InfiniteBuffer } from '@goodvibes/engine/terminal-shell';
 import type { CommandRegistry, CommandContext } from './command-registry.ts';
 import { AutocompleteEngine } from './autocomplete.ts';
 import { FilePickerModal } from './file-picker.ts';
@@ -67,7 +67,7 @@ import { SettingsModal } from './settings-modal.ts';
 import { McpWorkspace } from './mcp-workspace.ts';
 import { SessionPickerModal, getSharedHostedSessionRoster } from './session-picker-modal.ts';
 import { ConfigModal } from './config-modal.ts';
-import { ProfilePickerModal } from '@goodvibes-jev/engine/terminal-shell/profile-picker-state';
+import { ProfilePickerModal } from '@goodvibes/engine/terminal-shell/profile-picker-state';
 import { OnboardingWizardController, type OnboardingWizardAction, type OnboardingWizardMode } from './onboarding/onboarding-wizard.ts';
 import type { OnboardingApplyRequest, OnboardingVerificationItem } from '../runtime/onboarding/index.ts';
 import { handleClipboardPaste, type ClipboardPasteSource } from './handler-content-actions.ts';
@@ -83,7 +83,7 @@ import type { InputHandlerLike } from './handler-types.ts';
 import { buildInitialFeedContext } from './feed-context-factory.ts';
 import type { UiRuntimeServices } from '../runtime/ui-services.ts';
 import type { ModelPickerTarget } from './model-picker.ts';
-import { SurfaceModalHost, isTrackedModal } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
+import { SurfaceModalHost, isTrackedModal } from '@goodvibes/engine/terminal-shell/surface-modal-host';
 
 type SelectionModalCallback = (result: SelectionResult | null) => void;
 

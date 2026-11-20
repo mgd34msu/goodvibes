@@ -4,7 +4,7 @@
  * browser surfaces load, because the defaults come from the full judgment
  * package.
  */
-import { DEFAULT_MODEL, HOSTED_BASE_URL } from '@goodvibes-jev/judgment';
+import { DEFAULT_MODEL, HOSTED_BASE_URL } from '@goodvibes/judgment';
 
 const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 

@@ -4,11 +4,11 @@ import { AgentResearchRunRegistry } from './research-run-registry.js';
 import { AgentResearchSourceRegistry, resolveResearchSource, type AgentResearchSourceRecord } from './research-source-registry.js';
 import { bindResearchArtifacts, researchLedgers } from './research-ledgers.js';
 import { formatJsonStoreWriteReport } from './store-file.js';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
-import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolEffect, assertCurrentToolInvocation, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import type { ProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security';
+import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { assertCurrentToolEffect, assertCurrentToolInvocation, ToolInputProjectionError, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import { readFlag, readString } from './tool-args.js';
 

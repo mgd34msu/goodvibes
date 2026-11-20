@@ -1,20 +1,20 @@
-# @goodvibes-jev/judgment
+# @goodvibes/judgment
 
 The level 0 Jev foundation for GoodVibes. Every decision the engine and the products hand to Jev goes through this package: the judgment port that talks to the TypeSafe System One models, the typed readings those models return, named batteries of questions with fixtures and accuracy floors, reusable patterns and compound patterns, the decision log, and live calibration.
 
 ## Install
 
 ```sh
-npm install @goodvibes-jev/judgment
+npm install @goodvibes/judgment
 ```
 
-`@goodvibes-jev/engine` depends on this package and installs it with the engine.
+`@goodvibes/engine` depends on this package and installs it with the engine.
 
 ## Entry points
 
-- `@goodvibes-jev/judgment`: the full foundation. It loads under Node and Bun; the SQLite decision log (`SqliteDecisionLog`) opens its database with `bun:sqlite`, so logging to SQLite runs under Bun.
-- `@goodvibes-jev/judgment/decisions`: the runtime-neutral part (batteries, readings, bands, port types and the autonomous `JevDecision` schema/validation) with no transport, decision log, Node or Bun module. Code that runs in browsers and Workers imports this subpath.
-- `@goodvibes-jev/judgment/testing`: a fake port and answer builders for tests that must not call a model.
+- `@goodvibes/judgment`: the full foundation. It loads under Node and Bun; the SQLite decision log (`SqliteDecisionLog`) opens its database with `bun:sqlite`, so logging to SQLite runs under Bun.
+- `@goodvibes/judgment/decisions`: the runtime-neutral part (batteries, readings, bands, port types and the autonomous `JevDecision` schema/validation) with no transport, decision log, Node or Bun module. Code that runs in browsers and Workers imports this subpath.
+- `@goodvibes/judgment/testing`: a fake port and answer builders for tests that must not call a model.
 
 ## Decision receipts and compatibility
 
@@ -42,8 +42,8 @@ yes/no, Choice and Score readers apply validation to injected answers as well.
 Confidence remains separate from the selected option or score.
 
 ```ts
-import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes-jev/judgment';
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment/decisions';
+import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment/decisions';
 
 const owner = new AbortController(); // Abort when this operation or service stops.
 const port = createSystemOnePort(judgmentConfigFromEnv(process.env, { signal: owner.signal }));
@@ -72,7 +72,7 @@ request. The answer, its readings and the action are written to the decision log
 in one write.
 
 ```ts
-import { judge } from '@goodvibes-jev/judgment/decisions';
+import { judge } from '@goodvibes/judgment/decisions';
 
 const { value, source, why } = await judge({
   port, site: 'example.reply', battery, state: 'Question: ...\nReply: ...',

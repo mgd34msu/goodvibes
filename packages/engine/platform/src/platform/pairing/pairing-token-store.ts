@@ -68,7 +68,7 @@ import { AtomicWriteDurabilityError, confirmFileDurable, readJsonFileOrQuarantin
 import { logger } from '../utils/logger.js';
 import { SettingsAuthorityUnavailableError, runSynchronousSettingsOperation } from '../security/settings-authority.js';
 import { NativeContinuationOwner, nativeContinuationParents, type NativeContinuationParents } from './native-continuation-owner.js';
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 import { describeOwnerLock, reclaimDeadOwnerLock, recordOwnerLockHolder, removeOwnerLockDirectory, waitWhileLockIsBeingTaken } from '../config/durable-policy-epoch.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';

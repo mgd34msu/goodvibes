@@ -1,5 +1,5 @@
 /** Anthropic output-cap fallback when the provider has not reported a limit. */
-import { defineDispatch, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineDispatch, STAKES_BANDS } from '@goodvibes/judgment';
 
 const MEDIUM = STAKES_BANDS.medium;
 

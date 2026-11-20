@@ -1,17 +1,17 @@
 import { stringToLine } from './renderer/string-to-line.js';
 import { renderUserMessage } from './renderer/user-message.js';
 import { activeTheme, activeTokens } from './renderer/theme.js';
-import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ToolCall } from '@goodvibes/engine/platform/platform/types';
 import { renderSystemMessage } from './renderer/system-message.js';
-import { createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types/grid';
-import type { Line, Cell } from '@goodvibes-jev/engine/platform/platform/types';
+import { createEmptyLine } from '@goodvibes/engine/platform/platform/types/grid';
+import type { Line, Cell } from '@goodvibes/engine/platform/platform/types';
 import { SPLASH_GRADIENT, type SplashOptions } from './splash-lines.js';
-import { interpolateColor, getDisplayWidth, wrapTextRows } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import { interpolateColor, getDisplayWidth, wrapTextRows } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { LAYOUT } from './renderer/layout.js';
 import type { ConversationRenderContext } from './conversation-render-context.js';
 import { renderCompactionContinuationMessage } from './conversation-compaction-render.js';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
-import { extractUserDisplayText, COMPACTION_HANDOFF_HEADER, isTranscriptNotice } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConversationMessageSnapshot } from '@goodvibes/engine/platform/platform/core';
+import { extractUserDisplayText, COMPACTION_HANDOFF_HEADER, isTranscriptNotice } from '@goodvibes/engine/platform/platform/core';
 import { laneGlyphs } from './renderer/lane-graph-glyphs.js';
 import { beadArgument, beadName, cellText, formatBeadTime } from './renderer/bead.js';
 import { paintBeadRow } from './renderer/lane-graph-paint.js';
@@ -20,7 +20,7 @@ import { renderRegisteredTranscriptRow } from './transcript-row-renderers.js';
 import { renderSingleBead, renderTurn, type TurnRender, type WorkTreePresentation as RowPresentation } from './work-tree-render.js';
 // SystemMessageKind imported from runtime directly to avoid cycle:
 //   conversation-rendering.ts → system-message-router.ts → conversation.ts → conversation-rendering.ts
-import type { SystemMessageKind } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { SystemMessageKind } from '@goodvibes/engine/platform/platform/runtime/shell';
 // Transcript tokens are read live per render (const T = activeTheme() at the top
 // of each render function that styles content) so a dark→light repaint
 // re-resolves with no module reload. See theme.ts's active-mode runtime note.

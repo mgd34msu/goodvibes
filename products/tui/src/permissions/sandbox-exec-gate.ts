@@ -33,15 +33,15 @@
  * security-loosening call) always reaches him. An approval made here carries
  * `settledBy: 'sandbox'`, so it is recorded as this layer's, never as the owner's.
  */
-import { decideSandboxedExec, readCommandNeeds, type SandboxPolicyDecision } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/sandbox-policy';
-import { execCommandText, hostSandboxAvailability, type SandboxAvailability } from '@goodvibes-jev/engine/platform/platform/tools/exec/sandbox';
-import type { ApprovalRaise } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { JudgmentAuthorityRetiredError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { decideSandboxedExec, readCommandNeeds, type SandboxPolicyDecision } from '@goodvibes/engine/platform/platform/runtime/permissions/sandbox-policy';
+import { execCommandText, hostSandboxAvailability, type SandboxAvailability } from '@goodvibes/engine/platform/platform/tools/exec/sandbox';
+import type { ApprovalRaise } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { JudgmentAuthorityRetiredError, decisionModelPolicyState } from '@goodvibes/engine/errors';
 import type {
   PermissionPromptRequest,
   PermissionRequestHandler,
-} from '@goodvibes-jev/engine/platform/platform/permissions';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/platform/platform/permissions';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import { readSandboxExecList, SANDBOX_EGRESS_ALLOWLIST_CONFIG_KEY } from '../input/sandbox-exec-config.ts';
 

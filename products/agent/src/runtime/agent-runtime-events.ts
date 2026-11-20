@@ -1,10 +1,10 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ContractRunner } from '@goodvibes-jev/engine/platform/platform/contract';
-import { registerHostRuntimeEvents, type HostRuntimeMessageRouter } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
-import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/platform/platform/core';
-import type { AgentManager, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { ContractRunner } from '@goodvibes/engine/platform/platform/contract';
+import { registerHostRuntimeEvents, type HostRuntimeMessageRouter } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
+import type { ConversationFollowUpItem } from '@goodvibes/engine/platform/platform/core';
+import type { AgentManager, ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
-import type { createDomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import type { createDomainDispatch } from '@goodvibes/engine/platform/platform/runtime/state';
 
 export type AgentRuntimeMessageRouter = HostRuntimeMessageRouter;
 

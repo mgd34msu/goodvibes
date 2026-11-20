@@ -1,7 +1,7 @@
 import type { GatewayMethodCatalog, GatewayMethodDescriptor } from '../../control-plane/method-catalog.js';
 import { grantedGatewayScopes } from '../../control-plane/method-catalog.js';
-import { missingScopeRefusal } from '@goodvibes-jev/engine/daemon-api/error-response';
-import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
+import { missingScopeRefusal } from '@goodvibes/engine/daemon-api/error-response';
+import { EngineErrorCodes } from '@goodvibes/engine/errors';
 import { actorHoldsScope, type Actor } from '../http-policy.js';
 import { EFFECTS, admitRules, declaredAccessRules, type EffectAdmission, type EffectRule } from '../../security/effect-authority.js';
 import { declaredRouteDescriptor } from './route-manifest.js';

@@ -1,8 +1,8 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { isHostPairingBootstrapPrincipal, isNativePairedPrincipal, parseMintedPairingToken, readHostPairingResponse } from '@goodvibes-jev/engine/terminal-shell/native-paired-principal';
-import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { isHostPairingBootstrapPrincipal, isNativePairedPrincipal, parseMintedPairingToken, readHostPairingResponse } from '@goodvibes/engine/terminal-shell/native-paired-principal';
+import { createOperatorApiClient } from '@goodvibes/engine/operator-client';
+import { GoodVibesError } from '@goodvibes/engine/errors';
+import { resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
 import { resolveNativeHostCredential, resolveTuiHostOrigin, type NativeHostCredentialOptions } from './client/native-host-credential.ts';
 import { readTuiLegacyPairingBootstrap } from './tui-host-pairing-bootstrap.ts';
 import { beginTuiHostPairing, clearTuiHostPairingAttempt, completeTuiHostPairing, readTuiHostPairing, removeTuiHostPairing, type RemoveTuiHostPairingResult } from './tui-host-credential-store.ts';

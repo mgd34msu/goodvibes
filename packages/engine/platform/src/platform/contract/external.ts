@@ -16,7 +16,7 @@ export {
   contractWorkProgress,
   contractWorkResult,
   contractWorkSnapshot,
-} from '@goodvibes-jev/engine/contracts';
+} from '@goodvibes/engine/contracts';
 export type {
   ContractExternalWorkAdapter,
   ContractExternalWorkHandle,
@@ -25,4 +25,4 @@ export type {
   ContractExternalWorkSnapshot,
   ContractExternalWorkStatus,
   ContractWorkFields,
-} from '@goodvibes-jev/engine/contracts';
+} from '@goodvibes/engine/contracts';

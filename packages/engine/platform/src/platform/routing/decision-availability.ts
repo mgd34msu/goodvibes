@@ -1,5 +1,5 @@
-import { JudgmentError } from '@goodvibes-jev/judgment';
-import { JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { JudgmentError } from '@goodvibes/judgment';
+import { JudgmentPortMissingError } from '@goodvibes/engine/errors';
 
 /** A transport outage may be wrapped by a tool, but never becomes a request to try more tools. */
 export function assertDecisionAvailable(error: unknown): void {

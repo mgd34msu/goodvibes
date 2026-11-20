@@ -13,8 +13,8 @@
  * Writes of anything else (a theme, a model choice, another provider's token)
  * leave the source, its store, its poller and its screening alone.
  */
-import { CONFIG_KEYS, daemonSecretKeyFor, normalizeSecretRef, type ConfigKey, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { getBuiltinSetupSchema } from '@goodvibes-jev/engine/platform/platform/channels';
+import { CONFIG_KEYS, daemonSecretKeyFor, normalizeSecretRef, type ConfigKey, type ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { getBuiltinSetupSchema } from '@goodvibes/engine/platform/platform/channels';
 
 export type InboxProvider = 'slack' | 'email' | 'discord';
 

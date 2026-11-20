@@ -3,7 +3,7 @@ import {
   modelWorkspaceTargetSummary,
   modelWorkspaceProviderRows,
   modelWorkspaceSignIn,
-} from '@goodvibes-jev/engine/terminal-shell/model-workspace-facts';
+} from '@goodvibes/engine/terminal-shell/model-workspace-facts';
 /**
  * The provider/model picker, drawn with the modal surface kit.
  *
@@ -24,7 +24,7 @@ import {
  * Effort and context-cap steps are sub-levels (Esc goes back one).
  */
 
-import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ModelDefinition } from '@goodvibes/engine/platform/platform/providers';
 import type { ModelPickerModal } from '../input/model-picker.ts';
 import type { ModelPickerTargetInfo } from '../input/model-picker.ts';
 import { isLocalFitRecommendation, isProviderSignInRow, LOCAL_REC_PROVIDER } from '../input/model-picker-local-fit.ts';

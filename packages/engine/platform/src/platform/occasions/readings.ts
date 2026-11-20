@@ -1,7 +1,7 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /** Occasion meaning is an observation, never delivery or closed-date authority. */
-import { checkAnswers, oneOf, defineBattery, defineSelector, STAKES_BANDS, toJson, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, decisionModelPolicyState, JudgmentPortMissingError, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { checkAnswers, oneOf, defineBattery, defineSelector, STAKES_BANDS, toJson, type EntryType, type JudgmentPort } from '@goodvibes/judgment';
+import { captureJudgmentPort, decisionModelPolicyState, JudgmentPortMissingError, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { activateClassicFallback, isClassicOperation } from '../runtime/decision-policy.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';

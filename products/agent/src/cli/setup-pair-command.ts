@@ -1,5 +1,5 @@
 import { createInterface } from 'node:readline/promises';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { CliCommandRuntime } from './management.ts';
 import { previewAgentHostPairing, unpairAgentHost } from '../runtime/agent-host-pairing.ts';
 

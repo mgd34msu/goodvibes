@@ -1,8 +1,8 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { GitService } from '@goodvibes-jev/engine/platform/platform/git';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { GitService } from '@goodvibes/engine/platform/platform/git';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 /** Git state shown on the status bar (`branch main, changed`); shared by both terminal programs. */
 export interface GitHeaderInfo {

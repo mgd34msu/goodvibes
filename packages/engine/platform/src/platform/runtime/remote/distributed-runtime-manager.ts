@@ -1,4 +1,4 @@
-import type { Selection } from '@goodvibes-jev/engine/errors';
+import type { Selection } from '@goodvibes/engine/errors';
 import { logger } from '../../utils/logger.js';
 import { PersistentStore } from '../../state/persistent-store.js';
 import { StoreWriteQueue } from '../../state/store-write-queue.js';

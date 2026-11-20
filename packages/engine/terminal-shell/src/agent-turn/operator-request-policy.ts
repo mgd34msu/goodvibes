@@ -1,13 +1,13 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { captureStrictJudgmentJson, judgmentInputBoundary } from '@goodvibes-jev/engine/platform/platform/gate';
-import { CONTENT_DERIVATION_SITE } from '@goodvibes-jev/engine/platform/platform/security';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import { captureStrictJudgmentJson, judgmentInputBoundary } from '@goodvibes/engine/platform/platform/gate';
+import { CONTENT_DERIVATION_SITE } from '@goodvibes/engine/platform/platform/security';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
 import { isDeepStrictEqual } from 'node:util';
-import { evaluateOutwardEffect, getProcessUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+import { evaluateOutwardEffect, getProcessUntrustedContentLedger } from '@goodvibes/engine/platform/platform/security';
 import { screenOutboundForCardMaterial } from './payments-channel-guard.js';
-import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
-import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
+import { decisionOrClassic } from '@goodvibes/engine/platform/platform/runtime/decision-policy';
+import type { JudgmentPort } from '@goodvibes/judgment/decisions';
 
 /** Operator effects whose host judges this turn's untrusted content against the effect itself. */
 const HOST_JUDGED_METHODS: ReadonlySet<string> = new Set(['payments.checkout.begin', 'payments.purchase.cancel']);

@@ -9,7 +9,7 @@ import {
   operatorRequestActor,
   type PairingTokenAuthenticator,
 } from '../security/http-auth.js';
-import { NO_OWNER_USER, type Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { NO_OWNER_USER, type Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { admitEffects } from '../security/effect-authority.js';
 import { UserAuthManager } from '../security/user-auth.js';
 import { ConfigManager } from '../config/manager.js';
@@ -19,7 +19,7 @@ import { isLoopbackHost } from '../utils/reachable-base-url.js';
 import { requirePortAvailable } from './port-check.js';
 import { resolveHostBinding } from './host-resolver.js';
 import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
-import { AddressRateLimiter } from '@goodvibes-jev/engine/daemon-api';
+import { AddressRateLimiter } from '@goodvibes/engine/daemon-api';
 import { resolveClientAddress } from './client-address.js';
 import { handleOperatorLogin, handleOperatorLogout, SIGN_IN_ATTEMPTS_PER_MINUTE } from './operator-login.js';
 import { parseDaemonJsonBody } from './http/router-request-body.js';

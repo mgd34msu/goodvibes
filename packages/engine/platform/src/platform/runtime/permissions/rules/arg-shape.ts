@@ -1,4 +1,4 @@
-import { createSharedRegexTester, RegexAdmissionError, type JudgmentReadingOptions, type SharedRegexTester } from '@goodvibes-jev/engine/errors';
+import { createSharedRegexTester, RegexAdmissionError, type JudgmentReadingOptions, type SharedRegexTester } from '@goodvibes/engine/errors';
 /**
  * Argument shape/content policy rule evaluator.
  *

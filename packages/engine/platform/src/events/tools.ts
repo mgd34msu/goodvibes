@@ -1,4 +1,4 @@
-import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
+import type { JevDecision } from '@goodvibes/judgment/decisions';
 
 /**
  * ToolEvent, discriminated union covering all tool execution lifecycle events.

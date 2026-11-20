@@ -48,8 +48,8 @@
  * floor costs every operator on an older daemon that notice and a forced update.
  */
 
-import { evaluateDaemonStatusCompatibility } from '@goodvibes-jev/engine/platform/platform/control-plane/daemon-compatibility';
-import type { DaemonCompatibilityVerdict } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { evaluateDaemonStatusCompatibility } from '@goodvibes/engine/platform/platform/control-plane/daemon-compatibility';
+import type { DaemonCompatibilityVerdict } from '@goodvibes/engine/platform/platform/control-plane';
 
 export type { DaemonCompatibilityVerdict };
 export { evaluateDaemonStatusCompatibility };

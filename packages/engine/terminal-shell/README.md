@@ -1,11 +1,11 @@
-# @goodvibes-jev/engine/terminal-shell
+# @goodvibes/engine/terminal-shell
 
 Shared terminal-shell plumbing for GoodVibes daemon front-ends. Two front-ends drive a full-screen terminal UI over the same daemon runtime, and they must keep a specific slice of that runtime wiring **identical**. When copies of it drift, real defects ship. This package is the single home for that slice, so each front-end consumes one implementation instead of maintaining a parallel copy.
 
 ## Install
 
 ```sh
-npm install @goodvibes-jev/engine
+npm install @goodvibes/engine
 ```
 
 ## What belongs here
@@ -46,7 +46,7 @@ gateway and fleet graph on its startup path.
 The exact regression this package exists to prevent, a registered descriptor with no handler, is catchable in your own CI. Compose your daemon/gateway catalog exactly as production does, then assert every descriptor is invokable:
 
 ```ts
-import { assertEveryDescriptorHasHandler } from '@goodvibes-jev/engine/terminal-shell/conformance';
+import { assertEveryDescriptorHasHandler } from '@goodvibes/engine/terminal-shell/conformance';
 
 test('every registered gateway descriptor has a handler', () => {
   const catalog = composeMyDaemonCatalog();

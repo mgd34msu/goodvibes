@@ -5,7 +5,7 @@
  */
 
 import type { KeybindingsManager } from '../input/keybindings.ts';
-import type { ShortcutGroup } from '@goodvibes-jev/engine/terminal-shell/command-palette';
+import type { ShortcutGroup } from '@goodvibes/engine/terminal-shell/command-palette';
 /** Keys that are real but are not KeyAction entries (context chords, literal characters). */
 const HARDCODED_ROWS: ReadonlyArray<readonly [string, string]> = [
   ['Up / Down', 'Recall input history; Down at bottom focuses the process indicator'],

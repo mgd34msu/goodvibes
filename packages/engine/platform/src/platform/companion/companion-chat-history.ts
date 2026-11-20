@@ -16,7 +16,7 @@
 import { turnFailureText } from '../core/turn-failure.js';
 import { ConversationManager } from '../core/conversation.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
-import type { ToolActivityWords } from '@goodvibes-jev/engine/contracts';
+import type { ToolActivityWords } from '@goodvibes/engine/contracts';
 import { buildProviderUserContent, type CompanionChatArtifactStore } from './companion-chat-attachments.js';
 import { activeMessages } from './companion-chat-branching.js';
 import { TURN_INTERRUPTION_NOTE } from './companion-chat-turn-control.js';

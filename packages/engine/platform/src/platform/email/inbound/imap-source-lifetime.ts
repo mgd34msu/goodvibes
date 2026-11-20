@@ -1,5 +1,5 @@
 /** Bind each connection attempt to the actual configured account and credential generation. */
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { assertImapReadingCurrent, ImapReadingError } from '../imap-readings.js';
 import { readSurfaceEmailSettings } from '../surface-config.js';
 import type { InboundMailSourceFactoryDeps } from './source-factory.js';

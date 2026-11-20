@@ -11,7 +11,7 @@
  * {@link criterionVerdict}; the group and deliverable judges use the same
  * bands and the same mapping.
  */
-import { defineJudge, STAKES_BANDS, type Judge, type JudgeFixture, type YesNoBand, type YesNoReading } from '@goodvibes-jev/judgment';
+import { defineJudge, STAKES_BANDS, type Judge, type JudgeFixture, type YesNoBand, type YesNoReading } from '@goodvibes/judgment';
 import type { ContractAcceptanceStakes } from '../config.js';
 import type { CriterionVerdict } from '../types.js';
 

@@ -20,7 +20,7 @@
  * round. All three questions are medium stakes: a wrong reading costs one
  * planner repair, or leaves a criterion judged that structure already meets.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 const MEDIUM = STAKES_BANDS.medium.yesNo;
 

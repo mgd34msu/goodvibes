@@ -4,10 +4,10 @@ This is the **companion surface** for Expo (Hermes runtime). See [Published Surf
 
 Expo apps cannot run the full agentic surface (tool execution, LSP, MCP, workflows, daemon HTTP). Those require Bun. This guide covers auth, transport, realtime events, and error handling for the companion surface.
 
-Use `@goodvibes-jev/engine/platform/expo` for Expo-managed React Native apps.
+Use `@goodvibes/engine/platform/expo` for Expo-managed React Native apps.
 
 ```ts
-import { createExpoGoodVibesPlatform } from '@goodvibes-jev/engine/platform/expo';
+import { createExpoGoodVibesPlatform } from '@goodvibes/engine/platform/expo';
 
 const platformClient = createExpoGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',
@@ -18,7 +18,7 @@ const platformClient = createExpoGoodVibesPlatform({
 ## Installation
 
 ```bash
-npm install @goodvibes-jev/engine
+npm install @goodvibes/engine
 ```
 
 See [Getting started](./getting-started.md#install) for the canonical install command and version. Token persistence uses the optional peer dependency [`expo-secure-store`](https://docs.expo.dev/versions/latest/sdk/securestore/) (`>=13.0.0`); install it only when you use `createExpoSecureTokenStore`.
@@ -44,10 +44,10 @@ builds every socket with the current bearer token as an `Authorization` header,
 as described in [React Native integration](./react-native-integration.md#realtime);
 the Expo runtime's `WebSocket` supports the same headers option.
 
-Scope a feed to a single session with `forSession` (re-exported from `@goodvibes-jev/engine/platform/expo`):
+Scope a feed to a single session with `forSession` (re-exported from `@goodvibes/engine/platform/expo`):
 
 ```ts
-import { createExpoGoodVibesPlatform, forSession } from '@goodvibes-jev/engine/platform/expo';
+import { createExpoGoodVibesPlatform, forSession } from '@goodvibes/engine/platform/expo';
 
 const sessionEvents = forSession(platformClient.realtime.runtime(), sessionId);
 sessionEvents.agents.on('AGENT_COMPLETED', (event) => console.log(event));
@@ -55,13 +55,13 @@ sessionEvents.agents.on('AGENT_COMPLETED', (event) => console.log(event));
 
 ## Token storage
 
-Pass a `tokenStore` to persist and rotate the bearer token. `tokenStore` is the highest-precedence auth option. It overrides both `getAuthToken` and the static `authToken`. Use `createExpoSecureTokenStore` (backed by `expo-secure-store`), exported from `@goodvibes-jev/engine/platform/expo`:
+Pass a `tokenStore` to persist and rotate the bearer token. `tokenStore` is the highest-precedence auth option. It overrides both `getAuthToken` and the static `authToken`. Use `createExpoSecureTokenStore` (backed by `expo-secure-store`), exported from `@goodvibes/engine/platform/expo`:
 
 ```ts
 import {
   createExpoGoodVibesPlatform,
   createExpoSecureTokenStore,
-} from '@goodvibes-jev/engine/platform/expo';
+} from '@goodvibes/engine/platform/expo';
 
 const platformClient = createExpoGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',

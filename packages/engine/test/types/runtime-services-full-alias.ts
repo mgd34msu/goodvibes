@@ -14,7 +14,7 @@
  * Everything resolves through the package NAME so the exports map is exercised
  * exactly as a consumer install would (checked by `bun run types:check`).
  */
-import type { bootstrap } from '@goodvibes-jev/engine/platform/platform/runtime';
+import type { bootstrap } from '@goodvibes/engine/platform/platform/runtime';
 
 // Mutual assignability == the alias IS the exact runtimeServices parameter type
 // (index 2 of startHostServices), no re-anchoring through the positional tuple.

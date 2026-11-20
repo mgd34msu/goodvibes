@@ -11,8 +11,8 @@
  * credential, and closes the connection when it is done. No amount, card or
  * shop is read by a model: the owner types or picks each one.
  */
-import { mayOfferCardEntryFlow, describeCardEntryRefusal } from '@goodvibes-jev/engine/platform/platform/payments';
-import type { OperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import { mayOfferCardEntryFlow, describeCardEntryRefusal } from '@goodvibes/engine/platform/platform/payments';
+import type { OperatorApiClient } from '@goodvibes/engine/operator-client';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';

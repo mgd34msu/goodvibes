@@ -6,11 +6,11 @@
  * servers its files name start), the policy bundles and the sandbox setting.
  * Sandbox sessions and the screens are the terminal app's.
  */
-import { createSecurityCommand } from '@goodvibes-jev/engine/terminal-shell/security-command';
-import { createTrustReviewTools } from '@goodvibes-jev/engine/terminal-shell/trust-review';
-import { registerPluginTrustCommand } from '@goodvibes-jev/engine/terminal-shell/plugin-trust-command';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
-import type { PolicyCommandContext } from '@goodvibes-jev/engine/platform/platform/gate/policy';
+import { createSecurityCommand } from '@goodvibes/engine/terminal-shell/security-command';
+import { createTrustReviewTools } from '@goodvibes/engine/terminal-shell/trust-review';
+import { registerPluginTrustCommand } from '@goodvibes/engine/terminal-shell/plugin-trust-command';
+import { atomicWriteFileSync } from '@goodvibes/engine/platform/platform/config';
+import type { PolicyCommandContext } from '@goodvibes/engine/platform/platform/gate/policy';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import {
   requireReadModels,

@@ -9,7 +9,7 @@
  * reading the type sees them.
  */
 
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import type { Socket } from 'node:net';
 import type { DeliveryEvidence } from './imap-headers.js';
 

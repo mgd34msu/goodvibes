@@ -1,11 +1,11 @@
-import type { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import type { AgentEvent, ContractEvent, GateEvent, ToolEvent, TurnEvent } from '@goodvibes-jev/engine/platform/events';
-import type { PermissionExecutionOptions, PermissionPromptDecision, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { redactDiagnosticText } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { RuntimeEventBus } from '@goodvibes/engine/platform/platform/runtime/state';
+import type { AgentEvent, ContractEvent, GateEvent, ToolEvent, TurnEvent } from '@goodvibes/engine/platform/events';
+import type { PermissionExecutionOptions, PermissionPromptDecision, PermissionPromptRequest } from '@goodvibes/engine/platform/platform/permissions';
+import { redactDiagnosticText } from '@goodvibes/engine/platform/platform/utils';
 import {
   exitCodeOfSettlement, readTurnSettlement, stopReasonOfSettlement, TURN_SETTLING_EVENTS,
   type TurnSettlement, type TurnSettlingEvent,
-} from '@goodvibes-jev/engine/transport-core/turn-settlement';
+} from '@goodvibes/engine/transport-core/turn-settlement';
 import type { NativeHeadlessTurnResult } from './native-headless.js';
 
 /**

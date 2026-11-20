@@ -1,8 +1,8 @@
 import type { CommandContext } from '../input/command-registry.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
-import { resolveNotificationWebhookLocally } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
+import { resolveNotificationWebhookLocally } from '@goodvibes/engine/platform/platform/integrations';
 
 export interface AgentHarnessNotificationArgs {
   readonly notificationTargetId?: unknown;

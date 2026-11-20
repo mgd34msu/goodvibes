@@ -1,6 +1,6 @@
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { createKnowledgeExtractionOwner, type KnowledgeExtractionOwner } from './extraction-ownership.js';
-import { readYesNo, type Candidate } from '@goodvibes-jev/judgment';
+import { readYesNo, type Candidate } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { PAGE_CONTENT_BAND } from '../tools/batteries/page-content.js';
 import { pageBlocks, pageUnits } from '../tools/fetch/page-blocks.js';

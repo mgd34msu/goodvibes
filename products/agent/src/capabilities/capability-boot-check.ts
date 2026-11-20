@@ -1,10 +1,10 @@
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { registerBuiltinCapabilities } from './builtin-capabilities.ts';
 import { resolveCapabilityIndex } from './capability-index.ts';
 import { installCapabilityResolver, refreshCapabilityIndex } from './capability-snapshot.ts';
 import type { McpServerPosture, ProbeContext } from './capability-probe-runner.ts';
-import type { CapabilityIndexReport } from '@goodvibes-jev/engine/terminal-shell/agent-turn/capability-types';
+import type { CapabilityIndexReport } from '@goodvibes/engine/terminal-shell/agent-turn/capability-types';
 
 /**
  * The boot-time capability check.

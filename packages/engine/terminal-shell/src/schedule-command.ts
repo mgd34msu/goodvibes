@@ -16,8 +16,8 @@ import {
   ScheduleValuesError,
   type AutomationScheduleDefinition,
   type ScheduleFields,
-} from '@goodvibes-jev/engine/platform/platform/automation';
-import { REASONING_EFFORT_SEVERITY } from '@goodvibes-jev/engine/platform/platform/providers';
+} from '@goodvibes/engine/platform/platform/automation';
+import { REASONING_EFFORT_SEVERITY } from '@goodvibes/engine/platform/platform/providers';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';

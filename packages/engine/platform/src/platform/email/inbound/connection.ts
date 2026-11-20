@@ -23,7 +23,7 @@
  * plain loopback socket.
  */
 
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { assertImapReadingCurrent } from '../imap-readings.js';
 import type { Socket } from 'node:net';
 import { ImapClient, imapConnection } from '../imap-client.js';

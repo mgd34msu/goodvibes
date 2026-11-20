@@ -1,1 +1,1 @@
-export { createAgentScheduleTool, registerAgentScheduleTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-tool';
+export { createAgentScheduleTool, registerAgentScheduleTool } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-tool';

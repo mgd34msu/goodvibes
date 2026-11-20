@@ -1,8 +1,8 @@
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolInputProjector, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { agentResearchReportSourceOwner, captureResearchInput, hasPreparedResearchReport, inheritPreparedResearchReport, prepareProtectedResearchReport } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import type { ToolInputProjector, ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { agentResearchReportSourceOwner, captureResearchInput, hasPreparedResearchReport, inheritPreparedResearchReport, prepareProtectedResearchReport } from '@goodvibes/engine/terminal-shell/agent-turn/protected-research-report';
 import { resolveWorkspaceActionIdentity } from './agent-harness-workspace-actions.ts';
-import { forwardHarnessCatalogCall, harnessCatalogExecutionGuard } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ingress';
+import { forwardHarnessCatalogCall, harnessCatalogExecutionGuard } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ingress';
 
 export function isResearchReportEditor(args: Record<string, unknown>): boolean {
   if (args.mode === 'run_workspace_action') {

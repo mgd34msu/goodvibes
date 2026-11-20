@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/transport-realtime';
+export * from '@goodvibes/engine/transport-realtime';

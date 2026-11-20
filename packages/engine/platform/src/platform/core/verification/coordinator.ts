@@ -1,4 +1,4 @@
-import { JudgmentContextLimitError, JudgmentError, mapLimit } from '@goodvibes-jev/judgment';
+import { JudgmentContextLimitError, JudgmentError, mapLimit } from '@goodvibes/judgment';
 import { isDeepStrictEqual } from 'node:util';
 import { captureOwnedJson, snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
 import { captureStrictJudgmentJson } from '../../gate/judgment-result.js';

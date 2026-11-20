@@ -1,16 +1,16 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import { findOperatorContractMethod, operatorContractMethods as contractMethodIndex } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-contract-routes';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import { findOperatorContractMethod, operatorContractMethods as contractMethodIndex } from '@goodvibes/engine/terminal-shell/agent-turn/operator-contract-routes';
 import type { CommandContext } from '../input/command-registry.ts';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
-import { type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
-import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
+import { captureCatalogData } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
+import { type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
+import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { mcpSchemaRoute } from './agent-harness-personal-ops-routes.ts';
 import type { McpSchemaSummary, McpToolRecord, McpToolSchema, OperatorContractMethod, PersonalOpsConnectorSignal, PersonalOpsConnectorTool, PersonalOpsWorkflow, PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
 
-export { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+export { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 export function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 12);

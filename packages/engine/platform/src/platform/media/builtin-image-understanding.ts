@@ -10,7 +10,7 @@ import type {
 } from './provider-registry.js';
 import { toRecord } from '../utils/record-coerce.js';
 import { resolveModelReference } from '../providers/model-id-resolution.js';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 
 interface StructuredImageAnalysis {
   description?: string | undefined;

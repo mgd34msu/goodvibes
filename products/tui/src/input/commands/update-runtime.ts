@@ -1,14 +1,14 @@
-import { DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { applySuiteUpdate, installedSuiteNeedsRepair, rollbackSuiteUpdate, type SuiteUpdateResult } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import { createSelfUpdateCommand, retainSuiteUpdateConfiguration, formatSuiteUpdateReport } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
+import { DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '@goodvibes/engine/platform/platform/runtime/client';
+import { applySuiteUpdate, installedSuiteNeedsRepair, rollbackSuiteUpdate, type SuiteUpdateResult } from '@goodvibes/engine/platform/platform/runtime/self-update';
+import { createSelfUpdateCommand, retainSuiteUpdateConfiguration, formatSuiteUpdateReport } from '@goodvibes/engine/terminal-shell/release-update-preflight';
 import {
   checkReleaseUpdate,
   prepareReleaseUpdate,
   requireBinaryUpdateInstall,
   type ReleaseUpdateCheck,
-} from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
+} from '@goodvibes/engine/terminal-shell/release-update-preflight';
 import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../../runtime/workspace-update-policy.ts';
-import { recordSwapFailure, type UpdateSwapProgress } from '@goodvibes-jev/engine/terminal-shell/launch-auto-update';
+import { recordSwapFailure, type UpdateSwapProgress } from '@goodvibes/engine/terminal-shell/launch-auto-update';
 /** `/update` uses the platform's shared suite transaction. Every installed
  * sibling product and its native/browser companions comes from the same
  * release; an explicitly configured installer-owned WebUI keeps its served
@@ -25,15 +25,15 @@ import {
   PREVIOUS_FILE_SUFFIX,
   realUpdateFileIo,
   type UpdateFileIo,
-} from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+} from '@goodvibes/engine/platform/platform/runtime/self-update';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { VERSION } from '../../version.ts';
-import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
+import { listBuiltinSubscriptionProviders } from '@goodvibes/engine/platform/platform/config';
 import { resolveArtifactNames } from '../../runtime/release-artifacts.ts';
 import { detectInstallKind, fallbackUpdateCommand, type InstallKind, type UpdateFetchLike } from '../../runtime/update-check.ts';
 import { resolveCliServiceName, type CliServiceNameSource } from '../../cli/service-posture.ts';
 import { requireProfileManager, requireSecretsManager, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
 
 const REPO_RELEASES_LATEST_URL = DAEMON_REPO_RELEASES_LATEST_URL;
@@ -43,7 +43,7 @@ function releaseDownloadBaseUrl(tag: string): string {
 }
 
 /** External progress for launch-time budgets: one record, shared with the Agent (terminal-shell/launch-auto-update.ts). */
-export { createUpdateSwapProgress, type UpdateSwapProgress } from '@goodvibes-jev/engine/terminal-shell/launch-auto-update';
+export { createUpdateSwapProgress, type UpdateSwapProgress } from '@goodvibes/engine/terminal-shell/launch-auto-update';
 
 /** The failure an aborted update ends with, raised only while nothing has been written yet. */
 export const UPDATE_ABORTED_MESSAGE = 'update cancelled before any file was replaced';
@@ -71,7 +71,7 @@ function abortableFetch(fetchImpl: UpdateFetchLike, signal: AbortSignal | undefi
  * from the platform's canonical update policy module so rollback and swap share
  * one definition everywhere.
  */
-export { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+export { PREVIOUS_FILE_SUFFIX } from '@goodvibes/engine/platform/platform/runtime/self-update';
 
 export interface DaemonServiceRestartInfo {
   readonly managed: boolean;

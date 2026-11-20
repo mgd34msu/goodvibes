@@ -1,12 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { localOwnerActor } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ConfigKey, ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { localOwnerActor } from '@goodvibes/engine/platform/platform/config';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import type { ActionValues, CommandActionContext, FixedChoice } from './command-actions/types.js';
 import { choiceInput, doAction, readAction, textInput } from './described-command-kit.js';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { readRefusal } from '@goodvibes/engine/errors';
 import { commandRefusal } from './command-confirmation.js';
 import { switchAlwaysSpeak } from './tts-runtime-commands.js';
 import { inspectVoiceBundle, isVoiceBundleKey, readVoiceBundle, type VoiceBundle } from './voice-settings-review.js';

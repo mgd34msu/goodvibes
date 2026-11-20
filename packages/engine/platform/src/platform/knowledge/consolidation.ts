@@ -1,4 +1,4 @@
-import { DecisionModelsDisabledError, judgmentPort } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError, judgmentPort } from '@goodvibes/engine/errors';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { consolidationReading } from './batteries/consolidation.js';

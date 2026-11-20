@@ -1,4 +1,4 @@
-import type { DecisionEntry } from '@goodvibes-jev/judgment';
+import type { DecisionEntry } from '@goodvibes/judgment';
 import type { LoggedReading } from './log-readings.js';
 import { UNNAMED } from './log-readings.js';
 import { OBSERVE_THRESHOLDS } from './thresholds.js';

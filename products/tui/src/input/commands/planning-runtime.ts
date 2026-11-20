@@ -1,12 +1,12 @@
 import { directOwnerPlanningInput, isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
-import { captureNativeConversationInput } from '@goodvibes-jev/engine/terminal-shell/native';
-import type { WorkHost } from '@goodvibes-jev/engine/terminal-shell/native/work-command';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { readAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { captureNativeConversationInput } from '@goodvibes/engine/terminal-shell/native';
+import type { WorkHost } from '@goodvibes/engine/terminal-shell/native/work-command';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { readAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import { openModalCommand, requirePlanManager } from './runtime-services.ts';
-import { isPlanMode, togglePlanMode, permissionModeLabel } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import { isPlanMode, togglePlanMode, permissionModeLabel } from '@goodvibes/engine/platform/platform/gate/presets';
 import type { PermissionModeValue } from '../../core/permission-mode.ts';
 
 /**

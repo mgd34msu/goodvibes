@@ -1,4 +1,4 @@
-import { absent, failedRead, present, refusal, type Observed, type Refusal } from '@goodvibes-jev/engine/errors';
+import { absent, failedRead, present, refusal, type Observed, type Refusal } from '@goodvibes/engine/errors';
 import { retainOwnedJson } from '../gate/judgment-input.js';
 import { contractCreationPathAbsent, publishInitialContractCheckpoint } from './creation-claim.js';
 /**
@@ -51,7 +51,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { captureQuarantineSource, QuarantineEncodingError, quarantineCorruptFile, reapOwnedQuarantineDirectories, reapOwnedAtomicTempFile, writeFileAtomic, type QuarantineSource } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { contractWithStoredReviewObservations, hydrateStoredReviewObservations } from './review-file-observations.js';
 import { ownedContractCheckpointText, readOwnedAssembledCheckpoint, readOwnedContractCheckpoint, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 import { storedCurrentFileLabels, restoreCurrentFileLabels } from './current-file-observations.js';

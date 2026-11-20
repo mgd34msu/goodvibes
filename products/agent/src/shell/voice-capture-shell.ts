@@ -1,4 +1,4 @@
-import { writeVoiceDraft } from '@goodvibes-jev/engine/terminal-shell/audio/voice-capture-composition';
+import { writeVoiceDraft } from '@goodvibes/engine/terminal-shell/audio/voice-capture-composition';
 /**
  * voice-capture-shell.ts, the shell's side of microphone capture.
  *
@@ -14,13 +14,13 @@ import { writeVoiceDraft } from '@goodvibes-jev/engine/terminal-shell/audio/voic
  * shell UI.
  */
 
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { VoiceProviderRegistry, VoiceService } from '@goodvibes/engine/platform/platform/voice';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { wireVoiceCapture } from '../audio/voice-capture-wiring.ts';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 
 export interface VoiceCaptureShellDeps {
   readonly configManager: ConfigManager;

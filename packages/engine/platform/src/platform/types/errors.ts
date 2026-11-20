@@ -11,7 +11,7 @@ import {
   structuralFailureConclusions,
   type FailureConclusions,
   type FailureEvidence,
-} from '@goodvibes-jev/engine/errors';
+} from '@goodvibes/engine/errors';
 import { readRetryWaitMs } from './batteries/retry-wait.js';
 
 export { RETRYABLE_STATUS_CODES };

@@ -26,9 +26,9 @@
  * buttons and default from this file so the two never disagree.
  */
 import { homedir } from 'node:os';
-import type { AskChoice, AskPresentation, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { decodeBase64, resolveEditText } from '@goodvibes-jev/engine/platform/platform/control-plane/approval-hunk-apply';
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import type { AskChoice, AskPresentation, PermissionPromptRequest } from '@goodvibes/engine/platform/platform/permissions';
+import { decodeBase64, resolveEditText } from '@goodvibes/engine/platform/platform/control-plane/approval-hunk-apply';
+import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { enterAnswer } from '../blocking-permission-input.js';
 import type { HunkSelectionState } from '../hunk-selection.js';
 import { activeTokens } from './theme.js';

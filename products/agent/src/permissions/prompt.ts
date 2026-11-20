@@ -1,5 +1,5 @@
-import { askPresentationFor, type TerminalAskContext } from '@goodvibes-jev/engine/terminal-shell/permission-prompt-facts';
-import { renderAskCard, type AskCardState } from '@goodvibes-jev/engine/terminal-shell/renderer/ask-card';
+import { askPresentationFor, type TerminalAskContext } from '@goodvibes/engine/terminal-shell/permission-prompt-facts';
+import { renderAskCard, type AskCardState } from '@goodvibes/engine/terminal-shell/renderer/ask-card';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';
 
 import type {
@@ -7,7 +7,7 @@ import type {
   PermissionPromptDecision,
   PermissionRequestHandler,
   PermissionRequest,
-} from '@goodvibes-jev/engine/platform/platform/permissions';
+} from '@goodvibes/engine/platform/platform/permissions';
 export type { PermissionPromptRequest, PermissionPromptDecision, PermissionRequestHandler, PermissionRequest };
 
 /**

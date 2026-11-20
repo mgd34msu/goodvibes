@@ -1,6 +1,6 @@
-import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { initialTerminalRuntimeFields, keepTerminalDeadLetters } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
-import { projectAgentToolDependencies } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
+import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes/engine/platform/platform/knowledge';
+import { initialTerminalRuntimeFields, keepTerminalDeadLetters } from '@goodvibes/engine/terminal-shell/bootstrap-primitives';
+import { projectAgentToolDependencies } from '@goodvibes/engine/terminal-shell/bootstrap-command-context';
 import {
   createTerminalFeatureFlags,
   disposeTerminalFeatureFlags,
@@ -9,54 +9,54 @@ import {
   attachTerminalCompanionInput,
   seedTerminalSession,
   syncTerminalNotifierQueues,
-} from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
+} from '@goodvibes/engine/terminal-shell/bootstrap-primitives';
 import {
   initializeTerminalCatalog,
   seedTerminalControlPlane,
   attachTerminalRuntimeBindings,
-} from '@goodvibes-jev/engine/terminal-shell/bootstrap-runtime-bindings';
-import { createTerminalRenderScheduler } from '@goodvibes-jev/engine/terminal-shell/render-scheduler';
+} from '@goodvibes/engine/terminal-shell/bootstrap-runtime-bindings';
+import { createTerminalRenderScheduler } from '@goodvibes/engine/terminal-shell/render-scheduler';
 import { ConversationManager } from '../core/conversation';
 import { publishToSharedFeed } from '../core/notices.ts';
 import { getSharedNotificationFeed } from '../core/notifications-feed.ts';
 import { bridgeNotificationFeedToToasts, getSharedToastCenter } from '../renderer/toast-center.ts';
 import { registerSessionConversation, unregisterSessionConversation } from './conversation-rewind-port.ts';
-import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { repositoryTrustNotice } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { HooksFileAwaitingTrustError } from '@goodvibes-jev/engine/platform/platform/hooks';
-import { existingGoogleConnectionOwner } from '@goodvibes-jev/engine/platform/platform/google';
-import { installCloudflareAccessFetch } from '@goodvibes-jev/engine/platform/platform/cloudflare';
+import { SelectionManager } from '@goodvibes/engine/terminal-shell';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { repositoryTrustNotice } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { HooksFileAwaitingTrustError } from '@goodvibes/engine/platform/platform/hooks';
+import { existingGoogleConnectionOwner } from '@goodvibes/engine/platform/platform/google';
+import { installCloudflareAccessFetch } from '@goodvibes/engine/platform/platform/cloudflare';
 import { getConfiguredSystemPrompt } from '../config/index.ts';
 import { buildAgentConfigRouting, installAgentDaemonConfigClient } from '../config/daemon-config-routing.ts';
 import { installAgentDaemonCredentialsClient } from '../config/daemon-credential-routing.ts';
-import { AGENT_PLATFORM_TOOL_ADMISSION } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-modes';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn/provider-model';
-import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { AGENT_PLATFORM_TOOL_ADMISSION } from '@goodvibes/engine/terminal-shell/agent-turn/read-modes';
+import { getProviderIdFromModel } from '@goodvibes/engine/terminal-shell/agent-turn/provider-model';
+import { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { registerAllTools } from '@goodvibes/engine/platform/platform/tools';
+import type { PermissionManager } from '@goodvibes/engine/platform/platform/permissions';
 import { createRuntimeNotifier } from './bootstrap-notifier.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
 import { readAgentHostSetting } from '../config/host-settings.ts';
 
 import { Compositor } from '../renderer/compositor.ts';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { PermissionRequestHandler } from '@goodvibes/engine/platform/platform/permissions';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
-import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/platform/platform/core';
-import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConversationFollowUpItem } from '@goodvibes/engine/platform/platform/core';
+import type { OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { BootstrapOptions } from './context.ts';
 import '@/runtime/index.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 
-import { type RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { type RuntimeStore } from '@goodvibes/engine/platform/platform/runtime/state';
 import { ForensicsCollector, ForensicsRegistry } from '@/runtime/index.ts';
 import { generateUserSessionId } from '@/runtime/index.ts';
 import { loadBootstrapSystemPrompt, syncConfiguredServices } from '@/runtime/index.ts';
 import { registerBootstrapHookBridge } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from './services.ts';
-import { createHostPowerSeam } from '@goodvibes-jev/engine/platform/platform/power';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { createHostPowerSeam } from '@goodvibes/engine/platform/platform/power';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { createUiRuntimeServices, type UiRuntimeServices } from './ui-services.ts';
 import { getTerminalSize } from '../shell/terminal-size.ts';
 import { composeAgentToolRegistry, decorateAgentWorkerRegistry } from './agent-tool-registry.ts';

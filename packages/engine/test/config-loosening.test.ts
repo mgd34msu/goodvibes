@@ -16,7 +16,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager, type ConfigSetOptions } from '../platform/src/platform/config/manager.ts';
-import { agentActor, localOwnerActor, type Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { agentActor, localOwnerActor, type Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { CONFIG_KEYS, type ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { configKeyFacts } from '../platform/src/platform/config/config-key-facts.ts';
 import { SAFETY_GATE_CONFIG_PREFIXES } from '../platform/src/platform/config/settings-ingestion.ts';

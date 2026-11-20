@@ -8,8 +8,8 @@
  * app installs where its knowledge is and how it prints; the actions and
  * their words are the same.
  */
-import type { KnowledgeApi, KnowledgeService } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import type { KnowledgeApi, KnowledgeService } from '@goodvibes/engine/platform/platform/knowledge';
+import { readRefusal } from '@goodvibes/engine/errors';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';

@@ -1,4 +1,4 @@
-import { z } from '@goodvibes-jev/bash-zod';
+import { z } from '@goodvibes/bash-zod';
 export interface ShellCheckReplacement {
     precedence: number;
     line: number;

@@ -1,4 +1,4 @@
-import { registerWorkstreamCommand } from '@goodvibes-jev/engine/terminal-shell';
+import { registerWorkstreamCommand } from '@goodvibes/engine/terminal-shell';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { commandRefusal } from './confirmation.ts';
 

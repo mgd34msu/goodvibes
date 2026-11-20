@@ -1,5 +1,5 @@
-import type { Tool, ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolExecuteOptions, ToolInputProjector, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool, ToolDefinition } from '@goodvibes/engine/platform/platform/types';
+import type { ToolExecuteOptions, ToolInputProjector, ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';

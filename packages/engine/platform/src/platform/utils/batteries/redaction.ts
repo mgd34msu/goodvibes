@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment/decisions';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment/decisions';
 
 export const profileDistinctive = defineBattery({
   name: 'engine.redaction.profile-distinctive', version: 1, accuracyFloor: 0.95,

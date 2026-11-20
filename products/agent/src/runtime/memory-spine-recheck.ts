@@ -1,4 +1,4 @@
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 /** The cadence used when `watchers.heartbeatIntervalMs` is unset or not a usable number. */
 export const MEMORY_SPINE_RECHECK_DEFAULT_MS = 30_000;

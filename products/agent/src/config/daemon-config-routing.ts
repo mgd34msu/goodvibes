@@ -44,12 +44,12 @@ import {
   type EffectiveConfigView,
   type LocalConfigReader,
   type LocalConfigWriter,
-} from '@goodvibes-jev/engine/platform/platform/config';
-import type { DaemonConfigClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { bearerFor, type DaemonTarget } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
-import { readOperatorTokenFile, resolveDaemonHomeDir } from '@goodvibes-jev/engine/platform/platform/workspace/daemon-home';
+} from '@goodvibes/engine/platform/platform/config';
+import type { DaemonConfigClient } from '@goodvibes/engine/platform/platform/runtime/client';
+import { bearerFor, type DaemonTarget } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target';
+import { readOperatorTokenFile, resolveDaemonHomeDir } from '@goodvibes/engine/platform/platform/workspace/daemon-home';
 import { join } from 'node:path';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 export {
   configKeyScope,

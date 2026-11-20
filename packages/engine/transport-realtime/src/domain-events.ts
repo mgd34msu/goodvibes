@@ -1,5 +1,5 @@
-import type { EventEnvelope } from '@goodvibes-jev/engine/transport-core';
-import { DEFAULT_STREAM_RECONNECT_POLICY, getStreamReconnectDelay } from '@goodvibes-jev/engine/transport-http';
+import type { EventEnvelope } from '@goodvibes/engine/transport-core';
+import { DEFAULT_STREAM_RECONNECT_POLICY, getStreamReconnectDelay } from '@goodvibes/engine/transport-http';
 import {
   createRuntimeEventFeeds,
   isAbortError,
@@ -7,7 +7,7 @@ import {
   type EventLike,
   type RuntimeEventFeed,
   type RuntimeEventFeeds,
-} from '@goodvibes-jev/engine/transport-core';
+} from '@goodvibes/engine/transport-core';
 
 export interface SerializedEventEnvelope<TEvent extends EventLike = EventLike> {
   readonly type: string;

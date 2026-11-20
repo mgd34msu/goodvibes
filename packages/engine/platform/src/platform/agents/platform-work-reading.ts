@@ -1,5 +1,5 @@
 import { prepareJudgmentResult } from '../gate/judgment-result.js';
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { agentReadScope } from '../gate/batteries/agent-read-scope.js';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { JudgmentHeldError, requireActingReading } from '../types/judgment-held.js';

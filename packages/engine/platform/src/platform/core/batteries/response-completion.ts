@@ -1,4 +1,4 @@
-import { defineBattery, oneOf, yesNo, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, yesNo, STAKES_BANDS } from '@goodvibes/judgment';
 
 /** The most sentences of one answer the unsupported-passage question can number. */
 export const MAX_ANSWER_PASSAGES = 24;

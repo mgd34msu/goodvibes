@@ -26,7 +26,7 @@ import { APP_PASSWORD_LABEL, APP_PASSWORD_URL, TWO_STEP_URL } from './setup-plan
 import { captureGooglePage, describeElements, findElement, looksLikeGoogleSignIn, readGoogleAppPasswordState, readTextUntil, requireElement } from './browser-elements.js';
 import { consumeGoogleElement } from './browser-elements.js';
 import { ownGoogleBrowser } from './browser-readings.js';
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import type { GoogleBrowserPort } from './types.js';
 
 export type AppPasswordReason =

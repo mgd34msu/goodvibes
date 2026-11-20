@@ -1,4 +1,4 @@
-import { BrowserJudgmentError } from '@goodvibes-jev/engine/daemon-api';
+import { BrowserJudgmentError } from '@goodvibes/engine/daemon-api';
 
 interface Waiting {
   readonly signal: AbortSignal;

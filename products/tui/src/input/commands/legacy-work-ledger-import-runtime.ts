@@ -1,11 +1,11 @@
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
-import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
-import { createNativeHostFetch } from '@goodvibes-jev/engine/terminal-shell/native';
+import { OwnedSelectionObservation } from '@goodvibes/engine/platform/platform/runtime/client/selection-observation';
+import { createOperatorApiClient } from '@goodvibes/engine/operator-client';
+import { createNativeHostFetch } from '@goodvibes/engine/terminal-shell/native';
 import { realpathSync } from 'node:fs';
-import { openLegacyImportOperator, resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner, type LegacyImportOperatorSession } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
+import { openLegacyImportOperator, resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner, type LegacyImportOperatorSession } from '@goodvibes/engine/terminal-shell/legacy-work-ledger-import';
 import type { CommandContext } from '../command-registry.ts';
 import { resolveNativeHostCredential } from '../../runtime/client/native-host-credential.ts';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
 export type OpenTuiLegacyImportSession = (context: CommandContext, projectId: string) => Promise<LegacyImportOperatorSession>;
 /** An import session for `/work import…` (terminal-shell/native/work-command.ts) on this terminal's host. */
 export const openTuiLegacyImport: OpenTuiLegacyImportSession = async (context, projectId) => {

@@ -1,12 +1,12 @@
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import {
   previewAgentWorkspaceTuiSettingsImport,
 } from '../input/agent-workspace-settings.ts';
 import { settingsThrownFailure } from './agent-settings-admission.ts';
 import { createAgentSettingsImportProjector, executeAdmittedAgentSettingsImport, isAgentSettingsImportMutation } from './agent-settings-import-admission.ts';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
+import { confirmParameter, requestParameter } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
 
 interface AgentSettingsImportArgs {
   readonly action?: unknown;

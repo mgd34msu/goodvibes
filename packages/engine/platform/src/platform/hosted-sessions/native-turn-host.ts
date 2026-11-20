@@ -9,7 +9,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { redactDiagnosticText } from '../utils/redaction.js';
 import { readNativeConversationTurnStatus } from '../core/native-turn-admission.js';
-import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
+import type { OperatorRemoteClient } from '@goodvibes/engine/operator-client';
 import { createOperatorNativeConversationIntakeClient, type NativeConversationTurnPermit, type NativeConversationTurnSource } from '../workflow/work-ledger/native-intake-client.js';
 import type { NativeConversationIntakeHost, NativeConversationContinuationOwner } from '../workflow/work-ledger/native-intake.js';
 import { holdsNativeOwnership, type NativePairedExecutionAuthority, type NativePairedExecutionSnapshot } from '../workflow/work-ledger/native-execution.js';

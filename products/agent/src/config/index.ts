@@ -6,16 +6,16 @@
  * - Pure helpers that derive values from an explicit ConfigManager instance
  */
 
-export { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+export { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 export { AgentConfigManager, AGENT_NOTIFICATIONS_METADATA_ONLY_KEY, AGENT_HOSTED_RESEARCH_SCREENING_KEY } from './host-settings.ts';
-export type { DeepReadonly } from '@goodvibes-jev/engine/platform/platform/config';
-export type { GoodVibesConfig, ConfigKey, ConfigValue, ConfigSetting, PermissionMode, PermissionAction, PermissionsToolConfig, NotificationsConfig } from '@goodvibes-jev/engine/platform/platform/config';
-export { DEFAULT_CONFIG, CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config/schema';
-export { ConfigError } from '@goodvibes-jev/engine/platform/platform/types';
+export type { DeepReadonly } from '@goodvibes/engine/platform/platform/config';
+export type { GoodVibesConfig, ConfigKey, ConfigValue, ConfigSetting, PermissionMode, PermissionAction, PermissionsToolConfig, NotificationsConfig } from '@goodvibes/engine/platform/platform/config';
+export { DEFAULT_CONFIG, CONFIG_SCHEMA } from '@goodvibes/engine/platform/platform/config/schema';
+export { ConfigError } from '@goodvibes/engine/platform/platform/types';
 
-import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
+import { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { GoodVibesConfig } from '@goodvibes/engine/platform/platform/config';
+import { getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers/provider-model';
 
 export function getConfigSnapshot(configManager: Pick<ConfigManager, 'getRaw'>): Readonly<GoodVibesConfig> {
   return configManager.getRaw();
@@ -41,7 +41,7 @@ export function getWorkingDirectory(configManager: Pick<ConfigManager, 'getWorki
   return configManager.getWorkingDirectory();
 }
 
-export { getConfiguredApiKeys, getConfiguredSystemPrompt, resolveApiKeys } from '@goodvibes-jev/engine/platform/platform/config';
+export { getConfiguredApiKeys, getConfiguredSystemPrompt, resolveApiKeys } from '@goodvibes/engine/platform/platform/config';
 
 // The daemon-client credential STATUS read (secret-free, honest-degrade).
 // Value reads above stay local/env; only the status VISIBILITY path moves to the daemon.

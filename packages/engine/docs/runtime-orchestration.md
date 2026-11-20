@@ -6,9 +6,9 @@ session state.
 
 Public API surfaces:
 
-- `@goodvibes-jev/engine/platform/platform/core`
-- `@goodvibes-jev/engine/platform/platform/runtime`
-- `@goodvibes-jev/engine/platform/platform/orchestration`
+- `@goodvibes/engine/platform/platform/core`
+- `@goodvibes/engine/platform/platform/runtime`
+- `@goodvibes/engine/platform/platform/orchestration`
 
 > See [Public surface reference](./public-surface.md) for stability status and the full list of exported platform subpaths.
 
@@ -194,7 +194,7 @@ units. The planner runs as the `planner` template.
 ## Contracts
 
 A contract is the unit of checked work. The contract runner
-(`@goodvibes-jev/engine/platform/platform/contract`, `createContractRunner` in
+(`@goodvibes/engine/platform/platform/contract`, `createContractRunner` in
 `contract/runner.ts`) plans the work, runs it through sub-agents, and has Jev
 judge it while it runs. It replaces the retired write-review-fix-confirm loop:
 Jev reads the work continuously and nudges the sub-agent instead of running
@@ -508,7 +508,7 @@ groups `g1`, `g2` and its units `u1`, `u2`.
 
 ## Orchestration engine
 
-`@goodvibes-jev/engine/platform/platform/orchestration` is the phase/work-item
+`@goodvibes/engine/platform/platform/orchestration` is the phase/work-item
 pipeline the contract runner runs on: one engine per contract, one workstream
 per contract group, one work item per unit. A workstream holds one or more
 ordered phases, each with a `PhaseKind` that determines the role of the agent
@@ -725,7 +725,7 @@ recorder.
 A record with a status (a task, a trigger, an MCP server, a query, a research
 run) declares its legal moves once, as a table, in the module that owns the
 record. The table is built with `defineLifecycle` from
-`@goodvibes-jev/engine/platform/platform/utils`. Each row lists the states that state may
+`@goodvibes/engine/platform/platform/utils`. Each row lists the states that state may
 move to; a state with an empty row is final, and a state may move to itself
 only where its row says so. Because the table is typed as
 `Record<State, readonly State[]>`, adding a state without a row is a compile
@@ -734,7 +734,7 @@ error.
 The task lifecycle (`runtime/tasks/lifecycle.ts`):
 
 ```ts
-import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
+import { defineLifecycle } from '@goodvibes/engine/platform/platform/utils';
 
 export const taskLifecycle = defineLifecycle<TaskLifecycleState>('task', {
   queued: ['running', 'cancelled'],

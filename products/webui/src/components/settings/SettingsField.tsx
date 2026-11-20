@@ -1,4 +1,4 @@
-import { validEndpointURL } from '@goodvibes-jev/judgment/decisions';
+import { validEndpointURL } from '@goodvibes/judgment/decisions';
 import { JudgmentFallbackEditor } from "./JudgmentFallbackEditor";
 import { JudgmentModelField, JudgmentProviderField, commitJudgmentDestination, type CommitSettings } from "./JudgmentModelFields";
 import { DecisionRouterEditor } from "./DecisionRouterEditor";
@@ -48,7 +48,7 @@ import { useRef, useState } from "react";
 import {
   captureStructuredCredentialReferenceConfigValue,
   isStructuredCredentialReferenceConfigKey,
-} from "@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs";
+} from "@goodvibes/engine/platform/platform/judgment-browser/catalogs";
 import { useSettingsDraft } from "../../hooks/useSettingsDraft";
 import { SettingsDraftConflict } from "./SettingsDraftConflict";
 import { maskSecretValue } from "../../lib/config-redaction";

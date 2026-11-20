@@ -2,7 +2,7 @@ import { FetchRuntimeService, type FetchRuntimeDeps } from '../tools/fetch/index
 import type { FetchExtractMode } from '../tools/fetch/schema.js';
 import { recordSearchResultsAsUntrusted } from './untrusted-ingest.js';
 import { WebSearchProviderRegistry } from './provider-registry.js';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import type {
   WebSearchEvidence,
   WebSearchProvider,

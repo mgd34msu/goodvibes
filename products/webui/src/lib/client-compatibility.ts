@@ -21,7 +21,7 @@ import {
   type ClientCompatibilityStatus,
   type ClientCompatibilityVerdict,
   type ClientRestartWording,
-} from '@goodvibes-jev/engine/platform/platform/control-plane/build-compatibility';
+} from '@goodvibes/engine/platform/platform/control-plane/build-compatibility';
 import { subscribeClientLifetime } from './client-lifetime';
 
 export { CLIENT_COMPATIBILITY_FLOOR_HEADER, compareBuildVersions, readClientCompatibilityFloor };

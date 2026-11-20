@@ -1,10 +1,10 @@
-import type { GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import type { GatePresetName } from '@goodvibes/engine/platform/platform/gate/presets';
 import { createNativeHostFetch, NativeHostSelectionChangedError } from './native-host-fetch.js';
 import { createNativeHostedTurnClient } from './native-hosted-turn.js';
 import { isNativeOwnerPrincipal } from './native-paired-principal.js';
-import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
-import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
-import { createOperatorNativeConversationIntakeClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
+import { createOperatorNativeWorkExecutionClient } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes/engine/operator-client';
+import { createOperatorNativeConversationIntakeClient } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import type { NativeSubmissionHost } from './native-work-submission-host.js';
 import { NativeIntakeFailure, type NativeConversationIntakeBinding } from './native-conversation-intake.js';
 export function createNativeConversationIntakeBinding(host: NativeSubmissionHost, projectId: string, current: () => boolean = () => true, options: {

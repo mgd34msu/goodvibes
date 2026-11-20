@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes/judgment/decisions';
 /**
  * DaemonLifecycleRuntime, the daemon facade's lifecycle sidecar: the
  * clean-shutdown marker (crash detection), the persisted receipt store

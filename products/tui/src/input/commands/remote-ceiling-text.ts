@@ -1,4 +1,4 @@
-import type { RemoteRunnerContract } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { RemoteRunnerContract } from '@goodvibes/engine/platform/platform/runtime/operations';
 
 /**
  * What a runner contract's ceiling does, in the words the remote commands

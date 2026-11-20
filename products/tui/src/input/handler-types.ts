@@ -8,7 +8,7 @@
  * InputHandler declares `implements InputHandlerLike`; no cycle is created
  * because this file imports only from leaf modules (no import from handler.ts).
  */
-import { type createOAuthLocalListener } from '@goodvibes-jev/engine/platform/platform/config';
+import { type createOAuthLocalListener } from '@goodvibes/engine/platform/platform/config';
 import type { OnboardingWizardController, OnboardingWizardAction } from './onboarding/onboarding-wizard.ts';
 import type { OnboardingWizardSnapshot, OpenOnboardingWizardOptions } from './handler-ui-state.ts';
 import type {
@@ -20,15 +20,15 @@ import type { CommandContext } from './command-registry.ts';
 import type { ConversationManager } from '../core/conversation';
 import type { ModelPickerModal, ModelPickerTarget } from './model-picker.ts';
 import type { ClipboardPasteSource } from './handler-content-actions.ts';
-import type { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
-import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
+import type { SelectionManager } from '@goodvibes/engine/terminal-shell';
+import type { InfiniteBuffer } from '@goodvibes/engine/terminal-shell';
 import type { AutocompleteEngine } from './autocomplete.ts';
 import type { BookmarkModal } from './bookmark-modal.ts';
 import type { SettingsModal } from './settings-modal.ts';
 import type { McpWorkspace } from './mcp-workspace.ts';
 import type { SessionPickerModal } from './session-picker-modal.ts';
 import type { ConfigModal } from './config-modal.ts';
-import type { ProfilePickerModal } from '@goodvibes-jev/engine/terminal-shell/profile-picker-state';
+import type { ProfilePickerModal } from '@goodvibes/engine/terminal-shell/profile-picker-state';
 import type { ContextInspectorModal } from '../renderer/context-inspector.ts';
 import type { FilePickerModal } from './file-picker.ts';
 import type { BlockActionsMenu } from '../renderer/block-actions.ts';
@@ -112,11 +112,11 @@ export interface InputHandlerLike {
   modelPicker: ModelPickerModal;
   filePicker: FilePickerModal;
   blockActionsMenu: BlockActionsMenu;
-  surfaceModals: import('@goodvibes-jev/engine/terminal-shell/surface-modal-host').SurfaceModalHost;
+  surfaceModals: import('@goodvibes/engine/terminal-shell/surface-modal-host').SurfaceModalHost;
   /** The handler's own modals as objects on the modal stack: the shared ones, the config surfaces and onboarding. */
-  readonly modals: import('@goodvibes-jev/engine/terminal-shell/modal-stack').HandlerModals & {
-    readonly config: import('@goodvibes-jev/engine/terminal-shell/surface-modal-host').TrackedModal;
-    readonly onboarding: import('@goodvibes-jev/engine/terminal-shell/surface-modal-host').TrackedModal;
+  readonly modals: import('@goodvibes/engine/terminal-shell/modal-stack').HandlerModals & {
+    readonly config: import('@goodvibes/engine/terminal-shell/surface-modal-host').TrackedModal;
+    readonly onboarding: import('@goodvibes/engine/terminal-shell/surface-modal-host').TrackedModal;
   };
   sessionView: import('./handler-session-view-route.ts').SessionViewControls | null;
   transcriptScroll: import('./handler-modal-stack.ts').TranscriptScrollControls | null;

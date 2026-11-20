@@ -35,8 +35,8 @@ import type {
   HostedDetachPolicy,
   HostedSessionHistoryMessage,
   HostedSessionRecord,
-} from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+} from '@goodvibes/engine/platform/platform/hosted-sessions';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 export type { CreateHostedSessionInput, HostedDetachPolicy, HostedSessionHistoryMessage, HostedSessionRecord };
 /** What `sessions.hosted.attach` answers with: the record, and what was said so far. */
 export interface HostedSessionAttachment {

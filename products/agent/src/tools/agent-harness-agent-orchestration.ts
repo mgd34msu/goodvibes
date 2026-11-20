@@ -1,15 +1,15 @@
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
+import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
+import { redactSensitiveData } from '@goodvibes/engine/platform/platform/utils';
 import type { CommandContext } from '../input/command-registry.ts';
-import type { ProjectWorkPlanTask as WorkPlanItem } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { ProjectWorkPlanTask as WorkPlanItem } from '@goodvibes/engine/platform/platform/knowledge';
 import { AGENT_TEMPLATES, AGENT_TOOL_MODES, agentOrchestrationDecisionCards } from './agent-harness-agent-orchestration-policy.ts';
 import { remoteReadModelSnapshot, type RemoteCaptureOutcomeRecord, type RemoteWorkspaceEvidenceRecord } from './agent-harness-remote-read-models.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 interface AgentHarnessAgentOrchestrationArgs {
   readonly agentId?: unknown;

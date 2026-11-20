@@ -1,4 +1,4 @@
-import { taskDetailLines } from '@goodvibes-jev/engine/terminal-shell/task-presentation';
+import { taskDetailLines } from '@goodvibes/engine/terminal-shell/task-presentation';
 /**
  * tasks-runtime.ts, `/tasks`.
  *
@@ -27,8 +27,8 @@ import { reviewWorktreeAttachments } from '@/runtime/index.ts';
 import { requireOperatorClient, requireOpsApi, requireShellPaths } from './runtime-services.ts';
 import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
 
-import { createTasksRuntimeCommands } from '@goodvibes-jev/engine/terminal-shell/tasks-runtime-commands';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { createTasksRuntimeCommands } from '@goodvibes/engine/terminal-shell/tasks-runtime-commands';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 export const { registerTasksRuntimeCommands } = createTasksRuntimeCommands<CommandContext>({
   listTitle: 'Runtime Tasks',
   local: (ctx) => requireOperatorClient(ctx).tasks,

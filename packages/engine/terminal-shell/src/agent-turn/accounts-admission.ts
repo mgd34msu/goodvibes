@@ -1,4 +1,4 @@
-import { assertCurrentToolEffect, ToolInputProjectionError, type ToolExecuteOptions, type ToolInputProjector } from '@goodvibes-jev/engine/platform/platform/tools';
+import { assertCurrentToolEffect, ToolInputProjectionError, type ToolExecuteOptions, type ToolInputProjector } from '@goodvibes/engine/platform/platform/tools';
 
 /**
  * Tells the gate that `list` only reads the register. Every other action is a

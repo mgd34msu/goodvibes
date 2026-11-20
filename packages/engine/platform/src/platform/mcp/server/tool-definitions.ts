@@ -16,7 +16,7 @@ import type {
   JsonSchema,
   OperatorContractManifest,
   OperatorMethodContract,
-} from '@goodvibes-jev/engine/contracts';
+} from '@goodvibes/engine/contracts';
 import {
   isSessionLifecycleMethodId,
   sessionLifecycleRank,

@@ -1,4 +1,4 @@
-import type { Selection } from '@goodvibes-jev/engine/errors';
+import type { Selection } from '@goodvibes/engine/errors';
 // error-response.ts imports this file too; the binding is read only when a selection is refused.
 import { jsonErrorResponse } from './error-response.js';
 

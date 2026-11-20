@@ -20,7 +20,7 @@
  *
  * Cost: a table lookup and a set membership per effect; no I/O.
  */
-import { actorHoldsScope, type Actor, type ActorClass } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { actorHoldsScope, type Actor, type ActorClass } from '@goodvibes/engine/daemon-api/http-policy';
 import type { OwnerOnlyKind } from '../gate/classify.js';
 
 /** The classes a rule's `least` and an ask's `floor` name. A peer reaches only rows whose `least` is `peer`. */

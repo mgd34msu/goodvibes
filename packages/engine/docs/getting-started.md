@@ -1,6 +1,6 @@
 # Getting started
 
-> **What this platform is:** `@goodvibes-jev/engine/platform` provides typed clients for the GoodVibes daemon.
+> **What this platform is:** `@goodvibes/engine/platform` provides typed clients for the GoodVibes daemon.
 > It does **not** call Anthropic, OpenAI, Gemini, or any other AI provider directly. The daemon
 > orchestrates those on your behalf. If you need to call a provider directly, use their official
 > SDK instead. If you don't have a daemon yet, see [Daemon embedding](./daemon-embedding.md).
@@ -17,8 +17,8 @@ bun install
 bun run build
 ```
 
-The platform is a subpath of the `@goodvibes-jev/engine` workspace package. Products
-declare `"@goodvibes-jev/engine": "workspace:*"` and import the entry points
+The platform is a subpath of the `@goodvibes/engine` workspace package. Products
+declare `"@goodvibes/engine": "workspace:*"` and import the entry points
 shown below. For the application and a local daemon, use the
 [suite installer](../../../docs/installation.md).
 
@@ -27,8 +27,8 @@ shown below. For the application and a local daemon, use the
 For Bun services, TUI apps, and CLI tools, import the platform facade entry point:
 
 ```ts
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
-import { createMemoryTokenStore } from '@goodvibes-jev/engine/platform/auth';
+import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
+import { createMemoryTokenStore } from '@goodvibes/engine/platform/auth';
 
 const platformClient = createGoodVibesPlatform({
   baseUrl: process.env.GOODVIBES_BASE_URL ?? 'http://127.0.0.1:3421',
@@ -51,7 +51,7 @@ const platformClient = createGoodVibesPlatform({
 For daemon embedding in a Bun server host, call `dispatchDaemonApiRoutes(req, handlers)` inside your server's `fetch` handler. It returns `Promise<Response | null>`; when the result is `null`, no daemon route matched, so fall through to your own router:
 
 ```ts
-import { dispatchDaemonApiRoutes } from '@goodvibes-jev/engine/platform/daemon';
+import { dispatchDaemonApiRoutes } from '@goodvibes/engine/platform/daemon';
 
 // handlers: DaemonApiRouteHandlers; an optional extensions array can inject extra route dispatchers.
 Bun.serve({
@@ -72,7 +72,7 @@ For a React Native or Expo deep-dive, see [React Native integration](./react-nat
 ### React Native
 
 ```ts
-import { createReactNativeGoodVibesPlatform } from '@goodvibes-jev/engine/platform/react-native';
+import { createReactNativeGoodVibesPlatform } from '@goodvibes/engine/platform/react-native';
 
 const token = await SecureStore.getItemAsync('gv-token');
 
@@ -92,7 +92,7 @@ const stop = platformClient.realtime.runtime()
 ### Expo
 
 ```ts
-import { createExpoGoodVibesPlatform } from '@goodvibes-jev/engine/platform/expo';
+import { createExpoGoodVibesPlatform } from '@goodvibes/engine/platform/expo';
 
 const platformClient = createExpoGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',
@@ -103,8 +103,8 @@ const platformClient = createExpoGoodVibesPlatform({
 ### Browser / web app
 
 ```ts
-import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
-import { createBrowserTokenStore } from '@goodvibes-jev/engine/platform/auth';
+import { createBrowserGoodVibesPlatform } from '@goodvibes/engine/platform/browser';
+import { createBrowserTokenStore } from '@goodvibes/engine/platform/auth';
 
 const platformClient = createBrowserGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',
@@ -124,7 +124,7 @@ Cloudflare is optional and off by default. For onboarding, call the daemon's
 Queues, DLQ, Worker secrets, queue consumer, and cron trigger.
 
 ```ts
-import { createGoodVibesCloudflareWorker } from '@goodvibes-jev/engine/platform/workers';
+import { createGoodVibesCloudflareWorker } from '@goodvibes/engine/platform/workers';
 
 // Reads GOODVIBES_DAEMON_URL, GOODVIBES_OPERATOR_TOKEN, and
 // GOODVIBES_WORKER_TOKEN from Worker environment bindings.
@@ -148,8 +148,8 @@ When `tokenStore` is present, `auth.login()` and `auth.clearToken()` automatical
 ## Login flow with token persistence
 
 ```ts
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
-import { createMemoryTokenStore } from '@goodvibes-jev/engine/platform/auth';
+import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
+import { createMemoryTokenStore } from '@goodvibes/engine/platform/auth';
 
 const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',
@@ -182,10 +182,10 @@ Recommended defaults:
 
 ## Error handling
 
-All platform errors are instances of `GoodVibesError` with a typed `kind` discriminant. Import from `@goodvibes-jev/engine/platform/errors`:
+All platform errors are instances of `GoodVibesError` with a typed `kind` discriminant. Import from `@goodvibes/engine/platform/errors`:
 
 ```ts
-import { GoodVibesError } from '@goodvibes-jev/engine/platform/errors';
+import { GoodVibesError } from '@goodvibes/engine/platform/errors';
 
 try {
   await platformClient.operator.control.snapshot();
@@ -213,7 +213,7 @@ See [Error kinds reference](./error-kinds.md) for all `EngineErrorKind` values.
 The platform ships a `PlatformObserver` interface and a built-in `createConsoleObserver` adapter:
 
 ```ts
-import { createGoodVibesPlatform, createConsoleObserver } from '@goodvibes-jev/engine/platform';
+import { createGoodVibesPlatform, createConsoleObserver } from '@goodvibes/engine/platform';
 
 const platformClient = createGoodVibesPlatform({
   baseUrl: 'http://127.0.0.1:3421',
@@ -225,20 +225,20 @@ See [Observability](./observability.md) for the `PlatformObserver` interface and
 
 ## Choosing an entry point
 
-- `@goodvibes-jev/engine/platform`: Bun full surface. Use this for TUI, daemon, and CLI apps.
-- `@goodvibes-jev/engine/platform/daemon`: Bun server hosts embedding daemon routes.
-- `@goodvibes-jev/engine/platform/react-native`: React Native (Hermes) companion apps.
-- `@goodvibes-jev/engine/platform/expo`: Expo companion defaults and Expo secure token stores.
-- `@goodvibes-jev/engine/platform/browser`: browser apps that need the full operator contract.
-- `@goodvibes-jev/engine/platform/browser/knowledge`: base knowledge/wiki WebUI apps.
-- `@goodvibes-jev/engine/platform/browser/homeassistant`: Home Assistant browser panels.
-- `@goodvibes-jev/engine/platform/browser/agent`: agent-scoped browser companion. Routes Knowledge and Wiki calls to the Agent-owned knowledge environment.
-- `@goodvibes-jev/engine/platform/web`: full browser and service-worker defaults for apps that need the complete operator contract. See [Web UI integration](./web-ui-integration.md).
-- `@goodvibes-jev/engine/platform/operator`: operator/control-plane client only.
-- `@goodvibes-jev/engine/platform/peer`: peer/distributed-runtime client only.
-- `@goodvibes-jev/engine/platform/auth`: token storage helpers and auth flows.
-- `@goodvibes-jev/engine/platform/errors`: typed error classes.
-- `@goodvibes-jev/engine/platform/transport-*`: low-level transport primitives, including `@goodvibes-jev/engine/platform/transport-direct` for an in-process direct transport.
+- `@goodvibes/engine/platform`: Bun full surface. Use this for TUI, daemon, and CLI apps.
+- `@goodvibes/engine/platform/daemon`: Bun server hosts embedding daemon routes.
+- `@goodvibes/engine/platform/react-native`: React Native (Hermes) companion apps.
+- `@goodvibes/engine/platform/expo`: Expo companion defaults and Expo secure token stores.
+- `@goodvibes/engine/platform/browser`: browser apps that need the full operator contract.
+- `@goodvibes/engine/platform/browser/knowledge`: base knowledge/wiki WebUI apps.
+- `@goodvibes/engine/platform/browser/homeassistant`: Home Assistant browser panels.
+- `@goodvibes/engine/platform/browser/agent`: agent-scoped browser companion. Routes Knowledge and Wiki calls to the Agent-owned knowledge environment.
+- `@goodvibes/engine/platform/web`: full browser and service-worker defaults for apps that need the complete operator contract. See [Web UI integration](./web-ui-integration.md).
+- `@goodvibes/engine/platform/operator`: operator/control-plane client only.
+- `@goodvibes/engine/platform/peer`: peer/distributed-runtime client only.
+- `@goodvibes/engine/platform/auth`: token storage helpers and auth flows.
+- `@goodvibes/engine/platform/errors`: typed error classes.
+- `@goodvibes/engine/platform/transport-*`: low-level transport primitives, including `@goodvibes/engine/platform/transport-direct` for an in-process direct transport.
 
 See [Package guide](./packages.md) for a full decision matrix, and the canonical [Public surface](./public-surface.md) for every published entry point.
 

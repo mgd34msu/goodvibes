@@ -19,10 +19,10 @@
  */
 
 import { readSurfaceMessageText, type AgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
-import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn/daemon-operator-client';
+import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from '@goodvibes/engine/terminal-shell/agent-turn/daemon-operator-client';
 import { UNKNOWN_PRINCIPAL_LABEL } from './principal-attribution.ts';
 import { renderForModel, untrustedFrom } from './untrusted-content.ts';
-import type { Page } from '@goodvibes-jev/engine/errors';
+import type { Page } from '@goodvibes/engine/errors';
 
 /** The daemon method that serves provider inbound feeds. */
 export const CHANNEL_INBOX_LIST_METHOD = 'channels.inbox.list';

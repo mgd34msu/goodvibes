@@ -1,8 +1,8 @@
-# @goodvibes-jev/engine/contracts
+# @goodvibes/engine/contracts
 
 Public runtime-neutral GoodVibes contract module for operator and peer artifacts, generated ids, lookup helpers, and schema exports.
 
-Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/platform/contracts`. These modules are subpath exports of the engine package.
+Most applications should install `@goodvibes/engine` and import `@goodvibes/engine/platform/contracts`. These modules are subpath exports of the engine package.
 
 Consumer import:
 
@@ -11,7 +11,7 @@ import {
   getOperatorContract,
   getOperatorMethod,
   type OperatorMethodOutput,
-} from '@goodvibes-jev/engine/platform/contracts';
+} from '@goodvibes/engine/platform/contracts';
 ```
 
 This surface provides:
@@ -29,7 +29,7 @@ import {
   getOperatorContract,
   getOperatorMethod,
   type OperatorMethodOutput,
-} from '@goodvibes-jev/engine/platform/contracts';
+} from '@goodvibes/engine/platform/contracts';
 
 const contract = getOperatorContract();
 const loginMethod = getOperatorMethod('control.auth.login');
@@ -43,7 +43,7 @@ import {
   getPeerContract,
   getPeerEndpoint,
   listPeerEndpoints,
-} from '@goodvibes-jev/engine/platform/contracts';
+} from '@goodvibes/engine/platform/contracts';
 
 const peerContract = getPeerContract();
 const pairEndpoint = getPeerEndpoint('pair.request');
@@ -59,7 +59,7 @@ import {
   isPeerEndpointId,
   RUNTIME_EVENT_DOMAINS,
   isRuntimeEventDomain,
-} from '@goodvibes-jev/engine/platform/contracts';
+} from '@goodvibes/engine/platform/contracts';
 
 listOperatorMethods(); // readonly OperatorMethodContract[]
 isOperatorMethodId('control.auth.login'); // true
@@ -81,15 +81,15 @@ Node-only artifact path helpers:
 import {
   getOperatorContractPath,
   getPeerContractPath,
-} from '@goodvibes-jev/engine/platform/contracts/node';
+} from '@goodvibes/engine/platform/contracts/node';
 ```
 
 For direct contract imports from the engine package, use
-`@goodvibes-jev/engine/contracts` and `@goodvibes-jev/engine/contracts/node`:
+`@goodvibes/engine/contracts` and `@goodvibes/engine/contracts/node`:
 
 ```ts
-import { getOperatorContract, getPeerContract } from '@goodvibes-jev/engine/contracts';
-import { getOperatorContractPath, getPeerContractPath } from '@goodvibes-jev/engine/contracts/node';
+import { getOperatorContract, getPeerContract } from '@goodvibes/engine/contracts';
+import { getOperatorContractPath, getPeerContractPath } from '@goodvibes/engine/contracts/node';
 ```
 
 See the [zod-schemas README](./src/zod-schemas/README.md) for the event-envelope

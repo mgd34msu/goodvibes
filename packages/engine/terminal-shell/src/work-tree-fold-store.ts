@@ -17,8 +17,8 @@
 
 import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { sanitizeSessionName } from '@goodvibes-jev/engine/platform/platform/sessions';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
+import { sanitizeSessionName } from '@goodvibes/engine/platform/platform/sessions';
+import { atomicWriteFileSync } from '@goodvibes/engine/platform/platform/config';
 import { isWorkTreeFoldKey, type TurnOutcomeRecord } from './work-tree-focus.js';
 
 export { isWorkTreeFoldKey };

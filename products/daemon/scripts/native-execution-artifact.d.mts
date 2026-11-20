@@ -1,5 +1,5 @@
-import type { inspectTerminalReaderArtifact, NativeArtifactMember, RetainedNativeArtifactFiles } from '@goodvibes-jev/engine/toolchain';
-import type { PublishedReleaseFile } from '@goodvibes-jev/engine/toolchain/release-publication';
+import type { inspectTerminalReaderArtifact, NativeArtifactMember, RetainedNativeArtifactFiles } from '@goodvibes/engine/toolchain';
+import type { PublishedReleaseFile } from '@goodvibes/engine/toolchain/release-publication';
 
 export const NATIVE_EXECUTION_TARGETS: readonly ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'];
 export interface NativeExecutionSource {
@@ -14,7 +14,7 @@ export interface NativeExecutionMember { readonly path: string; readonly mode: n
 export interface NativeExecutionArtifact extends NativeExecutionSource {
   readonly schema: 1;
   readonly kind: 'daemon-native-execution';
-  readonly packageName: '@goodvibes-jev/daemon';
+  readonly packageName: '@goodvibes/daemon';
   readonly version: string;
   readonly files: readonly (NativeExecutionMember & { readonly sha256: string; readonly size: number })[];
 }

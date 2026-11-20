@@ -1,2 +1,2 @@
-export type { ClientTransport } from '@goodvibes-jev/engine/transport-core';
-export { createClientTransport } from '@goodvibes-jev/engine/transport-core';
+export type { ClientTransport } from '@goodvibes/engine/transport-core';
+export { createClientTransport } from '@goodvibes/engine/transport-core';

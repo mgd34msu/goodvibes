@@ -3,8 +3,8 @@ import { sameKnowledgeRecord } from '../../store-record-representation.js';
 import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { knowledgeClockIso } from '../../store-record-representation.js';
 import { createSupportReferenceLabels } from './structural-references.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import type { JsonValue, JudgmentPort } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import type { JsonValue, JudgmentPort } from '@goodvibes/judgment';
 import { GENERATED_FACT_SUPPORT_SLOTS as SLOTS, generatedFactBatchSupport as battery, generatedFactSupportState } from './batteries.js';
 import { freezeSupport, projectSupportInput, createSupportOriginalValues, originalSupportValues, releaseOriginalSupportValues, type ProjectedSupportInput } from './projection.js';
 import { GENERATED_FACT_SUPPORT_LIMITS as LIMITS, KnowledgeGeneratedFactSupportHeldError as Held,

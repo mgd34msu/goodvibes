@@ -1,4 +1,4 @@
-import { sharedWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { sharedWorkspaceRegisterPath } from '@goodvibes/engine/platform/platform/workspace';
 import type { ShellPathService } from '../index.js';
 import {
   createCheckpointEligibilityChecker,
@@ -9,7 +9,7 @@ import {
   type RegisteredWorkspaceRecord,
   type WorkspaceGitMetadata,
   type WorkspaceResolution,
-} from '@goodvibes-jev/engine/platform/platform/workspace';
+} from '@goodvibes/engine/platform/platform/workspace';
 
 /**
  * Checkpoint eligibility, read live off the shared workspace-registration store.

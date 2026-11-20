@@ -41,13 +41,13 @@
  * injected into the new one) and given to it when the terminal returns.
  */
 
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { SessionBindingOwner, type SessionBinding } from '@goodvibes-jev/engine/platform/platform/runtime/client/session-binding';
-import type { Page } from '@goodvibes-jev/engine/errors';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { SessionBindingOwner, type SessionBinding } from '@goodvibes/engine/platform/platform/runtime/client/session-binding';
+import type { Page } from '@goodvibes/engine/errors';
 import type {
   SharedSessionInputIntent,
   SharedSessionInputRecord,
-} from '@goodvibes-jev/engine/platform/platform/control-plane';
+} from '@goodvibes/engine/platform/platform/control-plane';
 
 /** The TUI's own participant surfaceId, inputs it authored are never re-injected. */
 export const TUI_SURFACE_ID = 'surface:tui';

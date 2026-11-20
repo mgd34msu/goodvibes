@@ -6,11 +6,11 @@
 // (FleetSpawn) is shared with the Agent in terminal-shell/fleet-spawn.ts.
 // ---------------------------------------------------------------------------
 
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { AcpSpawnGateway, AcpSpawnGatewayResolution } from '@goodvibes-jev/engine/terminal-shell/fleet-spawn';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { AcpSpawnGateway, AcpSpawnGatewayResolution } from '@goodvibes/engine/terminal-shell/fleet-spawn';
 import { resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
 
-export * from '@goodvibes-jev/engine/terminal-shell/fleet-spawn';
+export * from '@goodvibes/engine/terminal-shell/fleet-spawn';
 
 export interface AcpSpawnGatewayDeps {
   readonly configManager: ConfigManager;

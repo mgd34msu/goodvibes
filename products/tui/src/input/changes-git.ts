@@ -7,8 +7,8 @@
  */
 
 import { isAbsolute, join, relative } from 'node:path';
-import { GitService } from '@goodvibes-jev/engine/platform/platform/git';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { GitService } from '@goodvibes/engine/platform/platform/git';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 /** Which diff the modal shows. */
 export type ChangesSource = 'session' | 'working' | 'staged' | 'head';
@@ -278,7 +278,7 @@ export function initRepo(cwd: string): string | null {
  * removed or changed), comparing `ref` against the file on disk. Null when it
  * cannot be computed (a new file, an unsupported language, no repo).
  */
-export async function loadSemanticDiff(cwd: string, filePath: string, ref: string): Promise<import('@goodvibes-jev/engine/terminal-shell/semantic-diff').SemanticDiff | null> {
+export async function loadSemanticDiff(cwd: string, filePath: string, ref: string): Promise<import('@goodvibes/engine/terminal-shell/semantic-diff').SemanticDiff | null> {
   try {
     const top = await run(['rev-parse', '--show-toplevel'], cwd);
     const repoRoot = top.ok ? top.out.trim() || cwd : cwd;
@@ -287,7 +287,7 @@ export async function loadSemanticDiff(cwd: string, filePath: string, ref: strin
     const before = await run(['show', `${ref}:${repoRel}`], repoRoot);
     if (!before.ok) return null;
     const after = await Bun.file(absPath).text();
-    const { computeSemanticDiff } = await import('@goodvibes-jev/engine/terminal-shell/semantic-diff');
+    const { computeSemanticDiff } = await import('@goodvibes/engine/terminal-shell/semantic-diff');
     return await computeSemanticDiff(filePath, before.out, after);
   } catch {
     return null;

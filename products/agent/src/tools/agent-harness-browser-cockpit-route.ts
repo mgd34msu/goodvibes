@@ -1,8 +1,8 @@
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import type { CommandContext } from '../input/command-registry.ts';
 import { resolveRuntimeEndpointBinding } from '../cli/endpoints.ts';
 import { readOnboardingDoneMarker } from '../runtime/onboarding/completion.ts';
-import { resolveWebUiOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { resolveWebUiOrigin } from '@goodvibes/engine/platform/platform/pairing';
 
 /** The Agent's own onboarding marker, read from its file. */
 function agentOnboarding(context: CommandContext, includeDetails: boolean): Record<string, unknown> {

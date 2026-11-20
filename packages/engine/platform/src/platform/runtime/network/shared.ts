@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
-import { isLoopbackHost } from '@goodvibes-jev/engine/transport-http/paths';
+import { isLoopbackHost } from '@goodvibes/engine/transport-http/paths';
 const PEM_EXTENSIONS = new Set(['.pem', '.crt', '.cer']);
 
 export interface NetworkRootConfig {

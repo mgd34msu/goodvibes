@@ -1,8 +1,8 @@
-import type { ConfigChange, ConfigKey, ConfigManager, JudgmentFallbackSettings, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { CONFIG_SCHEMA, localOwnerActor } from '@goodvibes-jev/engine/platform/platform/config';
-import { DECISION_MODEL_PROFILES, captureJudgmentBackendSettings, validEndpointURL, type DecisionModelProfile } from '@goodvibes-jev/judgment';
+import type { ConfigChange, ConfigKey, ConfigManager, JudgmentFallbackSettings, SecretsManager } from '@goodvibes/engine/platform/platform/config';
+import { CONFIG_SCHEMA, localOwnerActor } from '@goodvibes/engine/platform/platform/config';
+import { DECISION_MODEL_PROFILES, captureJudgmentBackendSettings, validEndpointURL, type DecisionModelProfile } from '@goodvibes/judgment';
 import type { OpenSelection, SelectionItem } from './selection-modal.js';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 export type SettingsChoiceAction = 'judgment-provider' | 'judgment-model' | 'decision-policy' | 'permission-mode' | 'decision-router' | 'judgment-fallbacks';
 export interface SettingsChoiceContext {

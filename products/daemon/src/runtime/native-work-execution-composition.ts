@@ -1,10 +1,10 @@
-import type { PairingTokenManager } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { checkSettings, readContractConfig } from '@goodvibes-jev/engine/platform/platform/contract';
+import type { PairingTokenManager } from '@goodvibes/engine/platform/platform/pairing';
+import { checkSettings, readContractConfig } from '@goodvibes/engine/platform/platform/contract';
 import { realpathSync } from 'node:fs';
-import type { KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { createNativeWorkExecutionHost } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution';
-import type { NativeExecutionScopeOwner } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution';
-import type { JudgmentPort, DecisionLog } from '@goodvibes-jev/judgment';
+import type { KnowledgeStore } from '@goodvibes/engine/platform/platform/knowledge';
+import { createNativeWorkExecutionHost } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution';
+import type { NativeExecutionScopeOwner } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution';
+import type { JudgmentPort, DecisionLog } from '@goodvibes/judgment';
 import { createDaemonContractServices, type DaemonContractCompositionOptions } from './contract-composition.js';
 import { createDaemonContinuationPolicy } from './native-continuation-policy.js';
 

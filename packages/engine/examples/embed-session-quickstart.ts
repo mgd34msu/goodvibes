@@ -12,7 +12,7 @@ import {
   type PermissionPromptRequest,
   type PermissionPromptDecision,
   type AnyRuntimeEvent,
-} from '@goodvibes-jev/engine/platform/embed';
+} from '@goodvibes/engine/platform/embed';
 
 async function main(): Promise<void> {
   // 1. Create a session against a workspace. The permission callback is the

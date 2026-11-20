@@ -1,4 +1,4 @@
-import type { OperatorApiClientOptions } from '@goodvibes-jev/engine/operator-client';
+import type { OperatorApiClientOptions } from '@goodvibes/engine/operator-client';
 
 type NativeHostFetch = NonNullable<OperatorApiClientOptions['fetchImpl']>;
 

@@ -1,5 +1,5 @@
-import type { OperatorRemoteClient } from "@goodvibes-jev/engine/operator-client";
-import { createOperatorNativeWorkExecutionClient } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
+import type { OperatorRemoteClient } from "@goodvibes/engine/operator-client";
+import { createOperatorNativeWorkExecutionClient } from "@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client";
 import {
   createOperatorNativeConversationIntakeClient,
   nativeConversationIntakeCaptureRequestSchema,
@@ -7,7 +7,7 @@ import {
   type NativeConversationIntakeLookupResult,
   type NativeConversationIntakeUnsupportedSource,
   type NativeSelectedDiffSelector,
-} from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
+} from "@goodvibes/engine/platform/platform/workflow/work-ledger/native-intake-client";
 import { GOODVIBES_BASE_URL, client as platformClient, type OperatorMethodId, type OperatorMethodInput } from "./goodvibes";
 import {
   isClientLifetimeCurrent,

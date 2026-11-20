@@ -1,7 +1,7 @@
 /** Native consent and credential lifetime for the two explicitly approved hosted services. */
 import { randomUUID } from 'node:crypto';
-import { isSecretRefInput, normalizeSecretRef, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
+import { isSecretRefInput, normalizeSecretRef, type ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { ProtectedSourceOwnerOptions } from '@goodvibes/engine/platform/platform/security';
 import type { SecretsManager } from '../config/secrets.js';
 import { InboxAdmissionRefusal } from './inbox-admission-refusal.js';
 

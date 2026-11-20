@@ -1,5 +1,5 @@
-import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { commandJsonOrText as jsonOrText } from '@goodvibes/engine/terminal-shell/cli-output';
+import { FEATURE_SETTINGS } from '@goodvibes/engine/platform/platform/runtime/state';
 import { createAgentDaemonVerbCaller, ConnectedHostVerbError, describeConnectedHostVerbError } from '../runtime/client/daemon-verbs.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';

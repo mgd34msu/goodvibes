@@ -17,10 +17,10 @@ import { hasDerivedAcceptanceChecks } from './owned-source.js';
  */
 import { nativeContractPort, type NativeContractServices } from './native-decisions.js';
 import type { Contract } from './types.js';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { prepareJudgmentResult, retainStrictJudgmentJson } from '../gate/judgment-result.js';
-import { type JudgmentPort, type YesNoReading } from '@goodvibes-jev/judgment';
+import { type JudgmentPort, type YesNoReading } from '@goodvibes/judgment';
 import type { PlanCheck } from '../../events/contract.js';
 import { criterionShape } from './batteries/criterion-shape.js';
 import { criterionTrace, traceClaim } from './batteries/criterion-trace.js';

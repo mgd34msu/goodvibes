@@ -1,4 +1,4 @@
-import { defineBattery, defineRerank, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, defineRerank, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 const concrete = { id: 'concrete', content: { title: 'Video inputs', summary: 'This model provides four HDMI inputs, including one eARC connector.' } };
 const boilerplate = { id: 'boilerplate', content: { title: 'Specifications', summary: 'Features and specifications are subject to change without notice.' } };
 const maintenance = { id: 'maintenance', content: { title: 'Battery care', summary: 'Replace both remote batteries when the low-battery indicator appears.' } };

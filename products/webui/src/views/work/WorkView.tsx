@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, History, Inbox, ListChecks, RefreshCw, Search } from 'lucide-react';
-import type { BoardRow } from '@goodvibes-jev/engine/contracts';
+import type { BoardRow } from '@goodvibes/engine/contracts';
 import { client as platformClient } from '../../lib/goodvibes';
 import { firstArray, firstString } from '../../lib/object';
 import { queryKeys } from '../../lib/queries';

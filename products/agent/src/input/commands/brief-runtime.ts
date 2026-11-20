@@ -1,9 +1,9 @@
-import type { AutomationJob } from '@goodvibes-jev/engine/platform/platform/automation';
+import type { AutomationJob } from '@goodvibes/engine/platform/platform/automation';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { readAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { readAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import { buildAgentWorkspaceBriefPart } from '../agent-workspace-snapshot.ts';
-import { WORK_PLAN_TASK_STATUSES as WORK_PLAN_STATUSES, type ProjectWorkPlanTaskStatus as WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { WORK_PLAN_TASK_STATUSES as WORK_PLAN_STATUSES, type ProjectWorkPlanTaskStatus as WorkPlanItemStatus } from '@goodvibes/engine/platform/platform/knowledge';
 
 type StatusCounts = Record<WorkPlanItemStatus, number>;
 

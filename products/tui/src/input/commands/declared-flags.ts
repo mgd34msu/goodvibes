@@ -5,4 +5,4 @@ export {
   type DeclaredFlags,
   type DeclaredFlagsResult,
   type ParsedDeclaredFlags,
-} from '@goodvibes-jev/engine/terminal-shell/declared-flags';
+} from '@goodvibes/engine/terminal-shell/declared-flags';

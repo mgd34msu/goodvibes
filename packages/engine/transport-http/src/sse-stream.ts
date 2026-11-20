@@ -5,8 +5,8 @@ import {
   normalizeStreamReconnectPolicy,
   type StreamReconnectPolicy,
 } from './reconnect.js';
-import { createHttpStatusError, HttpStatusError, RETRYABLE_STATUS_CODES, refusal, toRefusal, type Refusal } from '@goodvibes-jev/engine/errors';
-import { isAbortError, readStreamGapDropped, type FetchLike } from '@goodvibes-jev/engine/transport-core';
+import { createHttpStatusError, HttpStatusError, RETRYABLE_STATUS_CODES, refusal, toRefusal, type Refusal } from '@goodvibes/engine/errors';
+import { isAbortError, readStreamGapDropped, type FetchLike } from '@goodvibes/engine/transport-core';
 import type { TransportJsonError } from './http-core.js';
 
 /** How a stream ended. Exactly one is reported, once, for every stream that opened. */

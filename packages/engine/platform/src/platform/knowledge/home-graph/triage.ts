@@ -1,7 +1,7 @@
 import { isClassicOperation } from '../../runtime/decision-policy.js';
 import { KNOWLEDGE_WITHOUT_DECISION_MODEL } from '../decision-policy.js';
-import { matchesJudgmentModel } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
+import { matchesJudgmentModel } from '@goodvibes/judgment';
+import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes/engine/errors';
 import { JudgmentInputError } from '../../gate/judgment-input.js';
 import type { KnowledgeIssueRecord } from '../types.js';
 import type { KnowledgeStore } from '../store.js';

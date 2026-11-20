@@ -1,7 +1,7 @@
-import type { Reading } from '@goodvibes-jev/judgment/decisions';
+import type { Reading } from '@goodvibes/judgment/decisions';
 import {
   BrowserJudgmentError, judgmentRecord, type BrowserJudgmentRequest,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';
 import type { BrowserJudgmentProjection } from './types.js';
 
 const invalid = (): never => { throw new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE'); };

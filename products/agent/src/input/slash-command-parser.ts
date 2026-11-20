@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/slash-command-parser';
+export * from '@goodvibes/engine/terminal-shell/slash-command-parser';

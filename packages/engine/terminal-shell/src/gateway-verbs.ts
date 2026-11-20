@@ -21,8 +21,8 @@ import {
   registerGatewayVerbGroups,
   type GatewayMethodCatalog,
   type GatewayVerbGroupDeps,
-} from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { ArchivableProcessRegistry, ProcessRegistryDeps } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+} from '@goodvibes/engine/platform/platform/control-plane';
+import type { ArchivableProcessRegistry, ProcessRegistryDeps } from '@goodvibes/engine/platform/platform/runtime/fleet';
 
 /**
  * Attach handlers for the ws-only gateway verb groups (fleet.* / checkpoints.* /

@@ -1,11 +1,11 @@
-# @goodvibes-jev/engine/peer-client
+# @goodvibes/engine/peer-client
 
 Public GoodVibes peer package for distributed-runtime peer APIs and work exchange flows.
 
-Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/platform/peer`. These modules are subpath exports of the engine package.
+Most applications should install `@goodvibes/engine` and import `@goodvibes/engine/platform/peer`. These modules are subpath exports of the engine package.
 
 ```ts
-import { createPeerApiClient } from '@goodvibes-jev/engine/platform/peer';
+import { createPeerApiClient } from '@goodvibes/engine/platform/peer';
 
 const peer = createPeerApiClient({
   baseUrl: 'http://127.0.0.1:3421',
@@ -36,9 +36,9 @@ peer.dispose();
 Advanced consumers can also build directly from a preconfigured transport and contract:
 
 ```ts
-import { getPeerContract } from '@goodvibes-jev/engine/platform/contracts';
-import { createPeerRemoteClient } from '@goodvibes-jev/engine/platform/peer';
-import { createHttpTransport } from '@goodvibes-jev/engine/platform/transport-http';
+import { getPeerContract } from '@goodvibes/engine/platform/contracts';
+import { createPeerRemoteClient } from '@goodvibes/engine/platform/peer';
+import { createHttpTransport } from '@goodvibes/engine/platform/transport-http';
 
 const transport = createHttpTransport({
   baseUrl: 'http://127.0.0.1:3421',
@@ -55,5 +55,5 @@ const heartbeat = await peer.peer.heartbeat({ capabilities: ['work'], version: '
 
 ## See also
 
-- Main platform: [`@goodvibes-jev/engine/platform`](../platform/README.md)
+- Main platform: [`@goodvibes/engine/platform`](../platform/README.md)
 - [Getting Started](../docs/getting-started.md)

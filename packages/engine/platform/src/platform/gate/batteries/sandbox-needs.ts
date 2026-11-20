@@ -18,7 +18,7 @@
  * inside the boundary and fails there; a wrong yes means one extra ask. Code
  * reads an uncertain reading as a yes.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 
 const cmd = (command: string) => ({ command, workspace: '/home/dev/projects/shop-api (a TypeScript web service)' });

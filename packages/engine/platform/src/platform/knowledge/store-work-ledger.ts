@@ -1,5 +1,5 @@
 import { knowledgeSchemaColumns } from './store-schema-validation-data.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { readKnowledgeSourceSnapshot } from './store-source-generation.js';
 import { readWorkPlanTaskImportRecord } from './store-work-plan-tasks.js';
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';

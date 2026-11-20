@@ -10,14 +10,14 @@
  * Every action names which machine it acts on: this one unless another
  * daemon's address is given.
  */
-import { resolveDaemonHomeDir } from '@goodvibes-jev/engine/platform/platform/workspace/daemon-home';
-import { runClusterCommand } from '@goodvibes-jev/engine/terminal-shell/cluster-commands';
-import { defineCommand, type ActionDescription, type ActionValues, type InputDescription } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { resolveDaemonHomeDir } from '@goodvibes/engine/platform/platform/workspace/daemon-home';
+import { runClusterCommand } from '@goodvibes/engine/terminal-shell/cluster-commands';
+import { defineCommand, type ActionDescription, type ActionValues, type InputDescription } from '@goodvibes/engine/terminal-shell/command-actions';
+import { textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
-import { createNetworkFetch } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
+import { createNetworkFetch } from '@goodvibes/engine/platform/platform/runtime/transport';
 
 const MACHINE: InputDescription = textInput({
   id: 'machine', label: 'Which machine', help: 'The daemon to act on: this machine, or another one\'s address (https://host:port)',

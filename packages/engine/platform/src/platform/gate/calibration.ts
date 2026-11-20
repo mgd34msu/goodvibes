@@ -1,4 +1,4 @@
-import { calibrationCovers, HOSTED_BASE_URL } from '@goodvibes-jev/judgment';
+import { calibrationCovers, HOSTED_BASE_URL } from '@goodvibes/judgment';
 import { GATE_CALIBRATION_RECORD, type GateCalibrationRecord } from './gate-calibration-record.js';
 import { registry } from './judgment-registry.js';
 

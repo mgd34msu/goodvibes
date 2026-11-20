@@ -1,13 +1,13 @@
 import type {
   OperatorMethodContract,
   OperatorMethodId,
-} from '@goodvibes-jev/engine/contracts';
-import { getOperatorContract } from '@goodvibes-jev/engine/contracts';
+} from '@goodvibes/engine/contracts';
+import { getOperatorContract } from '@goodvibes/engine/contracts';
 import {
   createHttpTransport,
   type HttpTransport,
   type HttpTransportOptions,
-} from '@goodvibes-jev/engine/transport-http';
+} from '@goodvibes/engine/transport-http';
 import {
   createOperatorRemoteClient,
   type OperatorRemoteClient,
@@ -92,7 +92,7 @@ export type OperatorApiClient =
  * @returns An `OperatorApiClient` instance ready to make authenticated requests.
  *
  * @example
- * import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+ * import { createOperatorApiClient } from '@goodvibes/engine/operator-client';
  *
  * const operator = createOperatorApiClient({
  *   baseUrl: 'https://daemon.example.com',

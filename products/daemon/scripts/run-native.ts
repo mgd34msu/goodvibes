@@ -5,7 +5,7 @@ import { acquireDaemonNative } from './acquire-native.ts';
 import { readDaemonInstallOwner } from './install-native.ts';
 import { inspectInstallationIdentity } from '../src/cli/native-installation.ts';
 import { assertNativeInstallationIdle, finishDaemonNativeLaunch, runVerifiedDaemonNative } from '../src/cli/native-launch.ts';
-import { UpdateTransactionError } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { UpdateTransactionError } from '@goodvibes/engine/platform/platform/runtime/self-update';
 
 if (import.meta.main) {
   try {

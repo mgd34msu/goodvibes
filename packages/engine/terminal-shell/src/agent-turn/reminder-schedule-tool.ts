@@ -1,12 +1,12 @@
 import { captureScheduleEffect, createScheduleInputProjector, formatExistingScheduleResult, formatScheduleOperatorResult } from './schedule-effect.js';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { buildReminderSchedulePreview, parseReminderScheduleArgs } from './reminder-schedule.js';
 import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import type { AgentInProcessHost } from './in-process-host.js';
-import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
 import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } from './personal-ops-effect-receipt.js';
 import { readFlag, readString } from './tool-args.js';
 

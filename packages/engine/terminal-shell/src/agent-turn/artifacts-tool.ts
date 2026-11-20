@@ -1,11 +1,11 @@
 import { existsSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { chmod, copyFile, link, mkdir, open, readdir, readlink, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
-import { publishReplacement, recoverReplacements, stageReplacement } from '@goodvibes-jev/engine/platform/platform/state';
+import { publishReplacement, recoverReplacements, stageReplacement } from '@goodvibes/engine/platform/platform/state';
 import { dirname, join } from 'node:path';
-import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolRegistry, ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import type { ToolRegistry, ToolExecuteOptions } from '@goodvibes/engine/platform/platform/tools';
 import { toolErrorText } from './tool-error-text.js';
 import { agentArtifactEffectGuard, assertAgentArtifactBytes, captureAgentArtifactSource, captureAgentExportPath } from './artifact-effect.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';

@@ -44,9 +44,9 @@ function readPeer(program: typeof PROGRAMS[number], path: string, target: Client
     const profilePath = path + '.readers.json'; boundedProfile(profilePath);
     const originalProfile = readFileObservation(profilePath);
     const artifact = parseClientReaderArtifact(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(originalProfile.bytes)));
-    const expectedPackage: ClientReaderPackage = program === 'goodvibes' ? '@goodvibes-jev/tui' : program === 'goodvibes-agent' ? '@goodvibes-jev/agent' : '@goodvibes-jev/daemon';
+    const expectedPackage: ClientReaderPackage = program === 'goodvibes' ? '@goodvibes/tui' : program === 'goodvibes-agent' ? '@goodvibes/agent' : '@goodvibes/daemon';
     if (artifact.packageName !== expectedPackage || artifact.target !== target) throw new NativeDataCompatibilityError('mixed-readers');
-    if ((target.startsWith('linux-') || artifact.packageName === '@goodvibes-jev/daemon') && artifact.files.length !== 4) throw new NativeDataCompatibilityError('unconfirmed-reader');
+    if ((target.startsWith('linux-') || artifact.packageName === '@goodvibes/daemon') && artifact.files.length !== 4) throw new NativeDataCompatibilityError('unconfirmed-reader');
     const members = artifact.files.map(member => ({ member, path: clientReaderMemberPath(path, artifact, member.path) }));
     const assertCurrent = retainFiles([profilePath, ...members.map(item => item.path), path, ...['.bun', '.bun.json', '.bun.LICENSE.md'].map(suffix => path + suffix)], io);
     for (const item of members) {

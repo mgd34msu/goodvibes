@@ -1,22 +1,22 @@
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
-import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
+import { agentResearchSourceOwner } from '@goodvibes/engine/terminal-shell/agent-turn/protected-research-report';
 import { withModelReadingSource, captureModelReadingInput, assertModelReadingInputCurrent } from './agent-harness-model-reading-source.ts';
 /** Preferred settings and compatibility harness share one exact effect-owner plan. */
 import { settingsOutcomeError } from './agent-settings-outcome.ts';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
-import { agentSettingsWriteRefusal } from '@goodvibes-jev/engine/platform/platform/gate/policy';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate/judgment-input';
+import { agentSettingsWriteRefusal } from '@goodvibes/engine/platform/platform/gate/policy';
 import { assertCurrentToolInvocation, assertProjectionExecution, claimCurrentToolSettingsDispatch,
   commitCurrentToolSettingsPlan, currentToolSettingsPresentation, projectOverlayRefusal, ToolInputProjectionError,
-  type ToolInputProjector, type ToolRegistry, type ToolPreparedSettingsMutation } from '@goodvibes-jev/engine/platform/platform/tools';
+  type ToolInputProjector, type ToolRegistry, type ToolPreparedSettingsMutation } from '@goodvibes/engine/platform/platform/tools';
 import { assertPreparedConfigWriteRoute, resolvePreparedConfigWriteRoute, captureRemoteSettingsPrecondition,
   assertRemoteSettingsPrecondition, inspectRemoteSettingsPrecondition, applyRemoteSettingsPrecondition, isSecretBearingConfigKey, describeSettingsReceiptFailure,
   type ConfigKey, type ConfigWriteRoute, type PreparedConfigMutationFacts,
-  type PreparedConfigMutationReceipt, type RemoteSettingsPrecondition } from '@goodvibes-jev/engine/platform/platform/config';
+  type PreparedConfigMutationReceipt, type RemoteSettingsPrecondition } from '@goodvibes/engine/platform/platform/config';
 import type { CommandContext } from '../input/command-registry.ts';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
 type ToolExecuteOptions = NonNullable<Parameters<Tool['execute']>[1]>;
-import { resolveWakeEnablementCompanion } from '@goodvibes-jev/engine/platform/platform/voice';
+import { resolveWakeEnablementCompanion } from '@goodvibes/engine/platform/platform/voice';
 import { AGENT_WAKE_SURFACE } from '../audio/wake-surface.ts';
 import { coerceHarnessSettingValue, resolveHarnessSettingAsync, type HarnessSettingLookup } from '../agent/harness-control.ts';
 import { getAgentSettingsSchema } from '../config/settings-catalog.ts';

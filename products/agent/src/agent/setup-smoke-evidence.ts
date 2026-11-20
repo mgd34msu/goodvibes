@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { writeStoreJson } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
+import { writeStoreJson } from '@goodvibes/engine/terminal-shell/agent-turn/store-file';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 
 type SetupSmokeEvidenceShellPaths = Pick<ShellPathService, 'resolveUserPath'>;

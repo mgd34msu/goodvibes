@@ -1,14 +1,14 @@
 import { afterEach, beforeEach } from 'bun:test';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import {
   NAMED_ID_KINDS,
   type ChannelTask,
   type NamedIdKind,
   type PersonalOpsLaneId,
   type TaskRouteSlots,
-} from '@goodvibes-jev/engine/platform/platform/routing';
-import type { EntryType } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+} from '@goodvibes/engine/platform/platform/routing';
+import type { EntryType } from '@goodvibes/judgment';
+import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes/judgment/testing';
 
 type Flag = { [K in keyof TaskRouteSlots]: TaskRouteSlots[K] extends boolean ? K : never }[keyof TaskRouteSlots];
 

@@ -1,6 +1,6 @@
 export type {
   RawServerSentEventHandlers,
   RawServerSentEventOptions,
-} from '@goodvibes-jev/engine/transport-http';
-export { openRawServerSentEventStream } from '@goodvibes-jev/engine/transport-http';
-export { isAbortError } from '@goodvibes-jev/engine/transport-core';
+} from '@goodvibes/engine/transport-http';
+export { openRawServerSentEventStream } from '@goodvibes/engine/transport-http';
+export { isAbortError } from '@goodvibes/engine/transport-core';

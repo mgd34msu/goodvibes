@@ -18,10 +18,10 @@ import {
   type AgentRuntimeProfileInfo,
 } from '../agent/runtime-profile.ts';
 import { existsSync } from 'node:fs';
-import { optionArgsOf } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
-import { claimSurfaceHome, SurfaceHomeInUseError } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { optionArgsOf } from '@goodvibes/engine/terminal-shell/cli-parser-engine';
+import { claimSurfaceHome, SurfaceHomeInUseError } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
+import { formatAgentRecordSource } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
 import type { CliCommandOutput, GoodVibesCliParseResult } from './types.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
 

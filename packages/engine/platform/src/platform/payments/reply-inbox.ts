@@ -23,8 +23,8 @@
 import type { PaymentReplySource, PaymentAnswer, PaymentReplyReading, PreparedPaymentReply } from './notice-delivery.js';
 import { readPaymentReply } from './notice-delivery.js';
 import { parseCommandAuthorityChannel, type CommandAuthorityChannel, type PaymentAnswerChannel } from './types.js';
-import { JudgmentError } from '@goodvibes-jev/judgment';
-import { JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import { JudgmentError } from '@goodvibes/judgment';
+import { JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes/engine/errors';
 import type { ChannelDeliveryReceipt } from '../channels/delivery/types.js';
 import { capturePaymentNoticeReceipt, matchesPaymentNoticeReceipt as matchesReceipt } from './notice-receipt.js';
 import { PaymentReplyHistoryOwner, type RetainedPaymentReplyHistory } from './reply-history-owner.js';

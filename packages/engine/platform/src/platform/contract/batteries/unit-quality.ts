@@ -14,7 +14,7 @@
  * Readings to verdicts (section 4.5) and the mid-run nudge rule sit beside
  * the band: {@link qualityVerdict} and {@link midRunNudgeItems}.
  */
-import { defineBattery, STAKES_BANDS, yesNo, type YesNoBand, type YesNoReading } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo, type YesNoBand, type YesNoReading } from '@goodvibes/judgment';
 import { QUALITY_ITEMS, type QualityItem } from '../types.js';
 
 export const UNIT_QUALITY_BAND: YesNoBand = { yes: STAKES_BANDS.medium.yesNo.yes, no: STAKES_BANDS.high.yesNo.no };

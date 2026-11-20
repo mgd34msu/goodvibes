@@ -161,7 +161,7 @@
         "[Symbol.hasInstance]",
         "constructor"
       ],
-      "text": "export declare class WebSocketTransportError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options: { readonly cause?: unknown; readonly hint?: string; readonly code: string; readonly category?: import('@goodvibes-jev/engine/errors').ErrorCategory | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly requestId?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; }); }"
+      "text": "export declare class WebSocketTransportError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options: { readonly cause?: unknown; readonly hint?: string; readonly code: string; readonly category?: import('@goodvibes/engine/errors').ErrorCategory | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly requestId?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; }); }"
     },
     {
       "name": "buildEventSourceUrl",
@@ -385,7 +385,7 @@
         "[Symbol.hasInstance]",
         "constructor"
       ],
-      "text": "export declare class WebSocketTransportError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options: { readonly cause?: unknown; readonly hint?: string; readonly code: string; readonly category?: import('@goodvibes-jev/engine/errors').ErrorCategory | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly requestId?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; }); }"
+      "text": "export declare class WebSocketTransportError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options: { readonly cause?: unknown; readonly hint?: string; readonly code: string; readonly category?: import('@goodvibes/engine/errors').ErrorCategory | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly requestId?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; }); }"
     },
     {
       "name": "buildEventSourceUrl",

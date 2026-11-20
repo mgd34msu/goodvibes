@@ -45,7 +45,7 @@ import {
   evaluateCardEntry,
   isRemoteMessageSurface,
   mayEnterCardDetails,
-} from '@goodvibes-jev/engine/platform/platform/payments';
+} from '@goodvibes/engine/platform/platform/payments';
 
 /** The shapes the platform scanner reports. Never accompanied by the matching text. */
 export type CardDetailShape = 'card-number' | 'expiry' | 'cvv';

@@ -1,8 +1,8 @@
 import { assertScreeningOperation, captureScreeningOperation as captureOperation } from './operation.js';
 import { createClassicProtectedSourceOwner, classicScreeningParts } from './classic-owner.js';
 import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
-import { DecisionModelsDisabledError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { createSystemOnePort, DEFAULT_MODEL, JudgmentError, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
+import { DecisionModelsDisabledError, decisionModelPolicyState } from '@goodvibes/engine/errors';
+import { createSystemOnePort, DEFAULT_MODEL, JudgmentError, type JudgmentRetryProgress } from '@goodvibes/judgment';
 import { types as nodeTypes } from 'node:util';
 import { JudgmentInputError } from '../../gate/judgment-input.js';
 import { captureScreeningSource, isMalformedScreeningProposal, proposeScreeningSpans, type ScreeningSource, type ScreeningSpan } from './proposal.js';
@@ -13,7 +13,7 @@ import { SOURCE_SCREENING_LIMITS as LIMITS, type ProtectedSource, type Protected
   type HostedProtectedSourceOwnerOptions,
   type SourceScreeningReceipt, type SourceScreeningResult, type ProtectedResearchReference,
   type ResearchReferenceScreeningReceipt, type ResearchReferenceScreeningResult, type ResearchReferenceOperation } from './types.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 
 type Handle = ProtectedSource | ProtectedResearchReference;
 type Receipt = SourceScreeningReceipt | ResearchReferenceScreeningReceipt;

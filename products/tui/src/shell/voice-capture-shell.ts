@@ -1,4 +1,4 @@
-import { writeVoiceDraft } from '@goodvibes-jev/engine/terminal-shell/audio/voice-capture-composition';
+import { writeVoiceDraft } from '@goodvibes/engine/terminal-shell/audio/voice-capture-composition';
 /**
  * voice-capture-shell.ts, the shell's side of microphone capture.
  *
@@ -15,7 +15,7 @@ import { writeVoiceDraft } from '@goodvibes-jev/engine/terminal-shell/audio/voic
  * import shell-UI.
  */
 
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';

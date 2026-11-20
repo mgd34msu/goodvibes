@@ -21,11 +21,11 @@ export {
 } from '../../runtime/client/operator-endpoint.ts';
 
 import { describeOperatorRpcError, resolveOperatorRpc } from '../../runtime/client/operator-endpoint.ts';
-import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import type { OperatorRpc } from '../../runtime/client/operator-endpoint.ts';
 import type { CommandContext } from '../command-registry.ts';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
 
 /**
  * Resolve (or honestly refuse to resolve) an operator platform client wired to this

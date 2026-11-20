@@ -1,13 +1,13 @@
 import {
   handleGlobalShortcutToken as routeShortcut,
   type GlobalShortcutState,
-} from '@goodvibes-jev/engine/terminal-shell/global-shortcuts';
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+} from '@goodvibes/engine/terminal-shell/global-shortcuts';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { CommandContext } from './command-registry.ts';
-import { cycleSessionPermissionMode, getSharedModeFlash } from '@goodvibes-jev/engine/terminal-shell/session-permission-mode';
+import { cycleSessionPermissionMode, getSharedModeFlash } from '@goodvibes/engine/terminal-shell/session-permission-mode';
 import { getSharedNotificationFeed } from '../core/notifications-feed.ts';
 import { hasActiveExecutionMode, readExecutionMode, setExecutionMode } from '../permissions/execution-mode.ts';
-export type { PromptEdit } from '@goodvibes-jev/engine/terminal-shell/global-shortcuts';
+export type { PromptEdit } from '@goodvibes/engine/terminal-shell/global-shortcuts';
 export type GlobalShortcutRouteState = GlobalShortcutState & {
   commandContext?: CommandContext;
   cycleAgentWorkspaceCategory: (direction: 'next' | 'prev') => void;

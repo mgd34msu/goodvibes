@@ -33,7 +33,7 @@ import { completeJudgmentView } from './complete-view.js';
  * runs or changes on them. Code reports a candidate unless the reading is a
  * no, so an uncertain one is shown rather than hidden.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** Lines of context carried on each side of a candidate line. */
 export const FRONTEND_CONTEXT_LINES = 3;

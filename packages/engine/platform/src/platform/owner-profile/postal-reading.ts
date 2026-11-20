@@ -1,7 +1,7 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /** One exact closed-tier field; no shared address cache and no heuristic fallback. */
-import { checkAnswers, defineExtractionVerifier, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import { checkAnswers, defineExtractionVerifier, type JsonValue, type JudgmentPort } from '@goodvibes/judgment';
+import { captureJudgmentPort, DecisionModelsDisabledError } from '@goodvibes/engine/errors';
 import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { POSTAL_PARTS, PostalAddressHeldError, type PostalParts, type PreparedPostalAddress, type ProfilePostalReader } from '../config/postal-address.js';

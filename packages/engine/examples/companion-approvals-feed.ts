@@ -1,11 +1,11 @@
 /**
  * Subscribe to approval updates from a browser companion surface.
  *
- * Both `@goodvibes-jev/engine/platform/browser` and `@goodvibes-jev/engine/platform/web` are valid
+ * Both `@goodvibes/engine/platform/browser` and `@goodvibes/engine/platform/web` are valid
  * for browser companion code. This example uses `/browser` for explicit browser
  * context; use `/web` when you want web + service-worker defaults.
  */
-import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+import { createBrowserGoodVibesPlatform } from '@goodvibes/engine/platform/browser';
 
 const platformClient = createBrowserGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',

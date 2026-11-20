@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/wake-inference';
+export * from '@goodvibes/engine/terminal-shell/wake-inference';

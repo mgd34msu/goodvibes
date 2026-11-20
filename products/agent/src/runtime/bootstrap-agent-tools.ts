@@ -9,11 +9,11 @@
  */
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import type { ConfigManager } from '../config/index.ts';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 import type { RuntimeServices } from './services.ts';
 import { bindControlCommands } from './control-surfaces.ts';
-import { missingConversationalCaptureTools } from '@goodvibes-jev/engine/terminal-shell/agent-turn/conversational-capture';
+import { missingConversationalCaptureTools } from '@goodvibes/engine/terminal-shell/agent-turn/conversational-capture';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { registerAgentAuditTool } from '../tools/agent-audit-tool.ts';
 import { registerAgentAutonomyTool } from '../tools/agent-autonomy-tool.ts';
@@ -42,9 +42,9 @@ import { registerAgentTerminalProcessTools } from '../tools/agent-terminal-proce
 import { registerAgentVibeTool } from '../tools/agent-vibe-tool.ts';
 import { registerAgentWorkspaceTool } from '../tools/agent-workspace-tool.ts';
 import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compaction.ts';
-import { declareAgentReadModes } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-modes';
+import { declareAgentReadModes } from '@goodvibes/engine/terminal-shell/agent-turn/read-modes';
 import { wireCapabilityIndex } from './bootstrap-capability-wiring.ts';
-import { registerClientPhoneTool } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { registerClientPhoneTool } from '@goodvibes/engine/platform/platform/runtime/client';
 
 export interface AgentToolRegistrationDeps {
   readonly toolRegistry: ToolRegistry;

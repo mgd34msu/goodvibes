@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/recall-shared';
+export * from '@goodvibes/engine/terminal-shell/recall-shared';

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { httpStatusOf, structuralFailureConclusions } from '@goodvibes-jev/engine/errors';
+import { httpStatusOf, structuralFailureConclusions } from '@goodvibes/engine/errors';
 import { STALE_TEMP_FILE_MIN_AGE_MS, writeDocument } from '../utils/atomic-json-store.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { ProviderRegistry } from '../providers/registry.js';

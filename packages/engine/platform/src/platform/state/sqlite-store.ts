@@ -32,7 +32,7 @@ import { activationCacheRowSql, readKnowledgeActivationDependencies, parseKnowle
 import { queryPersistedPlanningProjects } from '../knowledge/project-planning/persisted-project-query.js';
 import { planningSourceIdentityParams, planningSourceIdentitySql, type PlanningSourceIdentity } from '../knowledge/store-planning-source-selector.js';
 import { knowledgeRowGenerationFromRows } from '../knowledge/store-row-revisions.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { acquireArtifactReferenceLock } from './artifact-reference-lock.js';
 import { adoptSqliteDatabase, type SqliteFile, type SqliteMigration } from './sqlite-file.js';
 import { logger } from '../utils/logger.js';

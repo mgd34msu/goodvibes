@@ -13,8 +13,8 @@
  * Colors come only from the active theme's tokens.
  */
 
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
+import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { activeTokens } from './theme.js';
 import {
   NARROW_MODAL_BREAKPOINT,

@@ -1,4 +1,4 @@
-import { defineRerank, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineRerank, STAKES_BANDS } from '@goodvibes/judgment';
 
 /** Every group is read in one request; the caller requires exactly one settled yes. */
 export const registryCatalogGroupFit = defineRerank({

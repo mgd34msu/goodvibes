@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
+import type { PluginManager } from '@goodvibes/engine/platform/platform/plugins';
 import type { TerminalCommandRegistry } from './command-registry.js';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { commandRefusal, type CommandConfirmation } from './command-confirmation.js';
 import { defineCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';

@@ -4,9 +4,9 @@
  * register this one description, so their guided path, typed line, help,
  * completion, confirmation and the model's catalogue entry are the same.
  */
-import type { McpApi, McpConfigScope, McpServerConfig, McpStoredToolRuleResult, McpToolRule } from '@goodvibes-jev/engine/platform/platform/mcp';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import type { McpApi, McpConfigScope, McpServerConfig, McpStoredToolRuleResult, McpToolRule } from '@goodvibes/engine/platform/platform/mcp';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { commandRefusal } from './command-confirmation.js';
 import { maskLaunchArgs } from './renderer/mcp-form-rows.js';
 import type { TerminalCommandRegistry } from './command-registry.js';

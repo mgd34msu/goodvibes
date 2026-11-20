@@ -1,8 +1,8 @@
-import { packageBinIssues, packageBinTargets } from '@goodvibes-jev/engine/terminal-shell/package-inspection';
-import type { PackageBinVerification, PackageInspectionReport } from '@goodvibes-jev/engine/terminal-shell/package-inspection';
-import { readPackageManifest, inspectPackageBin, inspectTarballContents } from '@goodvibes-jev/engine/terminal-shell/package-inspection';
-import { parseNpmPackJson, type NpmPackDryRunResult } from '@goodvibes-jev/engine/terminal-shell/npm-pack-report';
-export { parseNpmPackJson, type NpmPackDryRunResult } from '@goodvibes-jev/engine/terminal-shell/npm-pack-report';
+import { packageBinIssues, packageBinTargets } from '@goodvibes/engine/terminal-shell/package-inspection';
+import type { PackageBinVerification, PackageInspectionReport } from '@goodvibes/engine/terminal-shell/package-inspection';
+import { readPackageManifest, inspectPackageBin, inspectTarballContents } from '@goodvibes/engine/terminal-shell/package-inspection';
+import { parseNpmPackJson, type NpmPackDryRunResult } from '@goodvibes/engine/terminal-shell/npm-pack-report';
+export { parseNpmPackJson, type NpmPackDryRunResult } from '@goodvibes/engine/terminal-shell/npm-pack-report';
 import { resolveWorkspaceBinary, workspaceBinaryCandidates } from './workspace-binary.ts';
 import { execSync } from 'node:child_process';
 import 'node:fs';
@@ -60,7 +60,7 @@ function npmPackDryRun(root: string): NpmPackDryRunResult {
 export function verifyPackageCliInstall(root: string): PackageCliVerificationReport {
   const pkg = readPackageJson(root);
   const dependencies = pkg.dependencies as Record<string, unknown> | undefined;
-  const workspaceDistribution = pkg.private === true && dependencies?.['@goodvibes-jev/engine'] === 'workspace:*';
+  const workspaceDistribution = pkg.private === true && dependencies?.['@goodvibes/engine'] === 'workspace:*';
   const requiredTarballPaths = workspaceDistribution ? WORKSPACE_REQUIRED_TARBALL_PATHS : PUBLISHED_REQUIRED_TARBALL_PATHS;
   const workspace = workspaceDistribution
     ? { binaryCandidates: workspaceBinaryCandidates(root), selectedBinary: resolveWorkspaceBinary(root) ?? null }

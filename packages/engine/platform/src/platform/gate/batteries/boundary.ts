@@ -22,7 +22,7 @@
  * Bands: critical stakes for `catastrophic` (a yes refuses without the owner),
  * high stakes for `cardDetails`.
  */
-import { type JsonValue, defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { type JsonValue, defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 const call = (tool: string, args: { readonly [key: string]: JsonValue }) => ({ tool, arguments: args, workingDirectory: '/home/dev/projects/shop-api' });
 /** The channel tool's real shape: a provider-native operation on a surface, its text carried in `input`. */

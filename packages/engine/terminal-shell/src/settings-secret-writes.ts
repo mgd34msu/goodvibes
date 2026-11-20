@@ -1,8 +1,8 @@
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { buildSecretBackedConfigUpdate, defaultSecretBackedScope, getSecretWriteMedium } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import type { SecretsManager } from '@goodvibes/engine/platform/platform/config';
+import { buildSecretBackedConfigUpdate, defaultSecretBackedScope, getSecretWriteMedium } from '@goodvibes/engine/platform/platform/config';
 export type SettingsSecretsManager = Pick<SecretsManager, 'delete' | 'set'>;
 /**
  * The daemon's own credential write, when this app has a daemon to write to.

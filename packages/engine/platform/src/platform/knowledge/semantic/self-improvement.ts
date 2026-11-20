@@ -25,7 +25,7 @@ import { runWithBudget, timerBudgetMs } from './self-improvement-budget.js';
 import { captureRepairFailureReader, type RepairFailureConclusion } from './self-improvement-failure.js';
 import { captureRepairFailureWrites, KnowledgeRepairFailureWriteStaleError } from './self-improvement-failure-writes.js';
 import { KnowledgeNodeActivationHeldError } from '../activation/types.js';
-import { DecisionModelsDisabledError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError, JudgmentPortMissingError } from '@goodvibes/engine/errors';
 import { isKnowledgeSourceQualityFailure } from '../source-quality.js';
 import { isTerminalRefinementState } from '../store-lifecycle-authority.js';
 import { storedRefinementTaskForGap, updateRefinementTask, upsertRefinementTaskForGap } from './self-improvement-tasks.js';

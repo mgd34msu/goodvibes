@@ -13,7 +13,7 @@ export function readProductVersion(moduleDirectory: string, packageName: string,
 }
 
 export function workspaceProductUpdatePolicy(manifest: { readonly private?: boolean; readonly dependencies?: Readonly<Record<string, unknown>> }, packageName: string, label: string) {
-  const isWorkspaceDistribution = detectInstallKind(process.execPath) !== 'binary' && manifest.private === true && manifest.dependencies?.['@goodvibes-jev/engine'] === 'workspace:*';
+  const isWorkspaceDistribution = detectInstallKind(process.execPath) !== 'binary' && manifest.private === true && manifest.dependencies?.['@goodvibes/engine'] === 'workspace:*';
   const rebuildCommand = `bun run --filter ${packageName} build`;
   const guidance = `This ${label} is built from a private Jev workspace. Update the workspace and build the engine, then run ${rebuildCommand} from the workspace root.`;
   return { isWorkspaceDistribution, rebuildCommand, guidance };

@@ -1,5 +1,5 @@
 /** Reconstructs a complete original-requirements reading from actual recorded batches. */
-import { judgeCriteriaDigest, type DecisionLog } from '@goodvibes-jev/judgment';
+import { judgeCriteriaDigest, type DecisionLog } from '@goodvibes/judgment';
 import type { ContractView } from '../../contract/types.js';
 
 const object = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;

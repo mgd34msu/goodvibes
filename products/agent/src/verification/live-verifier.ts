@@ -1,15 +1,15 @@
-import { createVerificationCompactor } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
-import { resolveVerificationHostUrl, verificationHostTarget } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
-import { bearerFor, type DaemonTarget } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
-import { writeVerificationReportFiles } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
+import { createVerificationCompactor } from '@goodvibes/engine/terminal-shell/verification-primitives';
+import { resolveVerificationHostUrl, verificationHostTarget } from '@goodvibes/engine/terminal-shell/verification-primitives';
+import { bearerFor, type DaemonTarget } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target';
+import { writeVerificationReportFiles } from '@goodvibes/engine/terminal-shell/verification-primitives';
 import {
   createVerificationPrimitives,
   renderVerificationTables,
   validateDaemonHealth,
   type LiveVerificationStatus,
   type LiveVerificationCheck,
-} from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
-export type { LiveVerificationStatus, LiveVerificationCheck } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
+} from '@goodvibes/engine/terminal-shell/verification-primitives';
+export type { LiveVerificationStatus, LiveVerificationCheck } from '@goodvibes/engine/terminal-shell/verification-primitives';
 
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';

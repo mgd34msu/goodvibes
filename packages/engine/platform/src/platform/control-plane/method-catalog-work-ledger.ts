@@ -1,4 +1,4 @@
-import { JEV_DECISION_SCHEMA } from '@goodvibes-jev/judgment/decisions';
+import { JEV_DECISION_SCHEMA } from '@goodvibes/judgment/decisions';
 import { array, boolean, literal, union, enum as enumSchema, number, strictObject, string, type z } from 'zod/v4';
 import { ledgerWorkSchema, ledgerAttemptSchema, ledgerEvidenceSchema, workLedgerReadEventSchema, ledgerEventSchema, legacyWorkLedgerManifestSchema } from '../workflow/work-ledger/types.js';
 import { methodDescriptor, type GatewayMethodDescriptor } from './method-catalog-shared.js';

@@ -28,7 +28,7 @@
  * `TurnContext`. The loop itself never branches on which product runs it.
  */
 import { setTimeout as delay } from 'node:timers/promises';
-import { classifyFailure, type FailureClassification } from '@goodvibes-jev/engine/errors';
+import { classifyFailure, type FailureClassification } from '@goodvibes/engine/errors';
 import type { ToolCall, ToolResult } from '../types/tools.js';
 import { isBillingOrCreditError } from '../types/errors.js';
 import { ConsecutiveErrorBreaker, CONSECUTIVE_ERROR_BREAK } from './circuit-breaker.js';

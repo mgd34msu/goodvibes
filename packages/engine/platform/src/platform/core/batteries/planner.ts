@@ -1,5 +1,5 @@
 /** Execution strategy is a reading of the task and available capabilities. */
-import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes/judgment';
 
 export const executionStrategy = defineBattery({
   name: 'engine.core.execution-strategy', version: 1,

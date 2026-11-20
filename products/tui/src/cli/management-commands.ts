@@ -1,31 +1,31 @@
-import { createCliSecretsCommand } from '@goodvibes-jev/engine/terminal-shell/cli-secrets-command';
-import { createCliWorkspaceCommands } from '@goodvibes-jev/engine/terminal-shell/cli-workspace-commands';
-import { createCliSubscriptionView } from '@goodvibes-jev/engine/terminal-shell/cli-subscription-view';
-import { cliCommandRefusal } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import '@goodvibes-jev/engine/platform/platform/sessions';
+import { createCliSecretsCommand } from '@goodvibes/engine/terminal-shell/cli-secrets-command';
+import { createCliWorkspaceCommands } from '@goodvibes/engine/terminal-shell/cli-workspace-commands';
+import { createCliSubscriptionView } from '@goodvibes/engine/terminal-shell/cli-subscription-view';
+import { cliCommandRefusal } from '@goodvibes/engine/terminal-shell/cli-output';
+import '@goodvibes/engine/platform/platform/sessions';
 import 'node:fs';
 import { join } from 'node:path';
-import { createRuntimeSecretsManager, resolveDaemonEnabled, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { createRuntimeSecretsManager, resolveDaemonEnabled, resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
-import '@goodvibes-jev/engine/platform/platform/config';
-import '@goodvibes-jev/engine/platform/platform/config';
-import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes/engine/platform/platform/config';
+import '@goodvibes/engine/platform/platform/config';
+import '@goodvibes/engine/platform/platform/config';
 import '@/runtime/index.ts';
 import {
   generateQrMatrix,
   renderQrToString,
   PAIRING_HANDOFF_OFFER_KINDS,
   type PairingHandoffOfferKind,
-} from '@goodvibes-jev/engine/platform/platform/pairing';
-import { ensurePublicBaseUrl } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { defaultPairingTokenName } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { formatHttpOrigin, pairingOriginUsesStableHost, refreshStableHostInputs, resolvePairingWebOrigin, resolveWebUiOrigin, stableUrlHostForBindHost } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
-import { classifyBindPosture, isNetworkFacing } from '@goodvibes-jev/engine/terminal-shell';
-import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+} from '@goodvibes/engine/platform/platform/pairing';
+import { ensurePublicBaseUrl } from '@goodvibes/engine/platform/platform/pairing';
+import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } from '@goodvibes/engine/platform/platform/pairing';
+import { defaultPairingTokenName } from '@goodvibes/engine/platform/platform/pairing';
+import { formatHttpOrigin, pairingOriginUsesStableHost, refreshStableHostInputs, resolvePairingWebOrigin, resolveWebUiOrigin, stableUrlHostForBindHost } from '@goodvibes/engine/platform/platform/pairing';
+import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell';
+import { classifyBindPosture, isNetworkFacing } from '@goodvibes/engine/terminal-shell';
+import type { CliCommandRuntime } from '@goodvibes/engine/terminal-shell';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { createDaemonVerbCaller } from '../runtime/client/operator-endpoint.ts';
 import { withProviderServices, withSessionServices, type OneShotProviderServices, type OneShotSessionServices } from './one-shot-services.ts';
 import {
@@ -134,7 +134,7 @@ interface PairingHandoffCreateResult {
   readonly fragment: string;
   readonly deepLink?: string | undefined;
   /** The honest TLS/capability posture of the origin the QR points at (platform-computed). */
-  readonly posture?: import('@goodvibes-jev/engine/platform/platform/pairing').OriginPosture | undefined;
+  readonly posture?: import('@goodvibes/engine/platform/platform/pairing').OriginPosture | undefined;
 }
 
 export async function renderPairing(runtime: CliCommandRuntime): Promise<string> {

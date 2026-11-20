@@ -23,7 +23,7 @@
 import type { ChannelDeliveryRouter, ChannelDeliveryTarget } from '../../channels/index.js';
 import { createChannelPaymentNotifier } from '../notice-delivery.js';
 import type { PaymentNoticeRouter, PaymentNoticeTarget, PaymentReplySource } from '../notice-delivery.js';
-import { absent, failedRead, present, refusal, RefusalError, type Observed } from '@goodvibes-jev/engine/errors';
+import { absent, failedRead, present, refusal, RefusalError, type Observed } from '@goodvibes/engine/errors';
 import { PAYMENT_ANSWER_UNREADABLE, PURCHASE_AMOUNT_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA, type PaymentNotifier, type PaymentNoticeWindow, type PurchaseNoticeFacts } from '../payment-ports.js';
 import type { NewOwnerItem, OwnerItem } from '../../control-plane/owner-inbox.js';
 import type { ChannelDelivery } from '../windows.js';

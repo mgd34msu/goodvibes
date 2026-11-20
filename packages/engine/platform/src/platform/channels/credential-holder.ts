@@ -26,7 +26,7 @@
  * next time instead of being remembered as empty.
  */
 import { getSecretRefSource, type SecretProviderSource } from '../config/secret-refs.js';
-import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+import { HttpStatusError } from '@goodvibes/engine/errors';
 import { DeliveryError } from '../integrations/delivery.js';
 
 interface CredentialStoreEvents {

@@ -1,2 +1,2 @@
 /** Shared implementation owned by the engine platform. */
-export * from '@goodvibes-jev/engine/terminal-shell/native';
+export * from '@goodvibes/engine/terminal-shell/native';

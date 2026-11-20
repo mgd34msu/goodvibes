@@ -1,4 +1,4 @@
-import { WEBUI_CODE_LANGUAGES, type WebuiCodeLanguage } from '@goodvibes-jev/engine/contracts';
+import { WEBUI_CODE_LANGUAGES, type WebuiCodeLanguage } from '@goodvibes/engine/contracts';
 
 // The aliases the web UI's highlighter (highlight.js 11) registers for each supported grammar,
 // so a tag the renderer resolves is never sent for a reading.

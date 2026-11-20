@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/footer-targets';
+export * from '@goodvibes/engine/terminal-shell/footer-targets';

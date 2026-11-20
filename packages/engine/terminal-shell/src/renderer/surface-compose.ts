@@ -18,10 +18,10 @@
  * golden-frame tests (plain Line[]) share them.
  */
 
-import { createEmptyCell } from '@goodvibes-jev/engine/platform/platform/types/grid';
-import type { Cell } from '@goodvibes-jev/engine/platform/platform/types';
-import { ansiToHex, isHexColor, mixHex, normalizeHex } from '@goodvibes-jev/engine/platform/platform/presentation';
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import { createEmptyCell } from '@goodvibes/engine/platform/platform/types/grid';
+import type { Cell } from '@goodvibes/engine/platform/platform/types';
+import { ansiToHex, isHexColor, mixHex, normalizeHex } from '@goodvibes/engine/platform/platform/presentation';
+import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { getTerminalPalette } from '../terminal-palette-store.js';
 import { activeThemeMode, activeTokens } from './theme.js';
 import { isTransparentCell, type SurfaceLayer } from './surface-kit.js';

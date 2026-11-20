@@ -19,7 +19,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import { imapFixturePort } from './_helpers/imap-semantic-port.ts';
 import {
   createInboundMailIntake,
@@ -45,7 +45,7 @@ import { makeFakeMailbox, openMailboxSocket, type FakeMailboxOptions, type FakeM
 import { FakeClock, fixedRandom } from './_helpers/inbound-watcher-harness.ts';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 
 const KEY = 'reader-key';
 const ACCOUNT = 'primary';

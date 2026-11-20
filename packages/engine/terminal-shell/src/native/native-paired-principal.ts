@@ -1,4 +1,4 @@
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
+import type { OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 
 type CurrentAuth = OperatorMethodOutput<'control.auth.current'>;
 

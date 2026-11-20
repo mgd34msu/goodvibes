@@ -1,5 +1,5 @@
 {
-  "name": "@goodvibes-jev/webui",
+  "name": "@goodvibes/webui",
   "private": true,
   "version": "3.3.1",
   "license": "MIT",
@@ -50,10 +50,10 @@
     "react-markdown": "^10.1.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
-    "@goodvibes-jev/engine": "workspace:*"
+    "@goodvibes/engine": "workspace:*"
   },
   "devDependencies": {
-    "@goodvibes-jev/judgment": "workspace:*",
+    "@goodvibes/judgment": "workspace:*",
     "@eslint/js": "10.0.1",
     "@happy-dom/global-registrator": "21.0.4",
     "@playwright/test": "^1.61.0",
@@ -70,6 +70,6 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "8.61.1",
     "vite": "^8.3.3",
-    "@goodvibes-jev/daemon": "workspace:*"
+    "@goodvibes/daemon": "workspace:*"
   }
 }

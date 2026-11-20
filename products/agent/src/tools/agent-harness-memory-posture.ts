@@ -1,26 +1,26 @@
-import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { withConfiguredDecisionModelPolicy } from '@goodvibes/engine/platform/platform/runtime';
 import {
   MemoryUsageStatsStore,
   type MemoryDoctorReport,
   type MemoryEmbeddingProviderStatus,
   type MemoryVectorStats,
   type MemoryUsageSummary,
-} from '@goodvibes-jev/engine/platform/platform/state';
+} from '@goodvibes/engine/platform/platform/state';
 import type { CommandContext } from '../input/command-registry.ts';
 import { buildAgentWorkspaceMemorySnapshot, type buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
 import { buildAgentWorkspaceSessionMemoryCount } from '../input/agent-workspace-snapshot-builders.ts';
 import { readConfigString } from '../input/agent-workspace-snapshot-config.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { capturePersonalOpsSnapshot, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { assertMemoryCurrent, retainMemoryReadingOptions, selectMemoryProvider } from './agent-harness-memory-provider-readings.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { EXTERNAL_MEMORY_SETUP_STEP, externalMemoryProviders } from './agent-harness-memory-external-providers.ts';
 import type { ExternalMemoryProviderRecord, MemoryPostureProvider, MemoryProviderResolution } from './agent-harness-memory-external-providers.ts';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 type MemoryPostureStatus = 'ready' | 'needs-review' | 'empty' | 'unavailable';
 type MemoryVectorPostureStatus = 'ready' | 'attention' | 'disabled' | 'unavailable';

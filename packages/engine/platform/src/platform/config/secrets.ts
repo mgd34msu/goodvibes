@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { assertSecurityReadSource } from '../security/read-source.js';
 import { Secret } from '../security/secret.js';
 /**

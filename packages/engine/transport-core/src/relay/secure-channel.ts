@@ -14,7 +14,7 @@
 
 import { aeadOpen, aeadSeal, RELAY_NONCE_BYTES } from './crypto.js';
 import type { RelayHandshakeKeys } from './handshake.js';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 
 const COUNTER_BYTES = 8;
 const DIRECTION_PREFIX_BYTES = RELAY_NONCE_BYTES - COUNTER_BYTES; // 4

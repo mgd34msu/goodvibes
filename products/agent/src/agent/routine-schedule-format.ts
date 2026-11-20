@@ -1,7 +1,7 @@
-import { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_METHOD } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+import { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_METHOD } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-delivery-targets';
 import type { RoutineScheduleCorrelationResult, RoutineSchedulePromotionFailure, RoutineSchedulePromotionPreview, RoutineSchedulePromotionSuccess, RoutineScheduleReceipt, RoutineScheduleReceiptSnapshot } from './routine-schedule-promotion.ts';
-import { deliveryTargetFlag } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
-import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-next-routes';
+import { deliveryTargetFlag } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-next-routes';
 import { scheduleDeliveryLine } from './schedule-delivery-line.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {

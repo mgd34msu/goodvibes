@@ -1,7 +1,7 @@
 import type { DaemonRuntimeRouteHandlers } from './context.js';
 import type { JsonRecord } from './route-helpers.js';
-import type { ConversationMessageEnvelope } from '@goodvibes-jev/engine/contracts/conversation-message';
-import type { Page } from '@goodvibes-jev/engine/errors';
+import type { ConversationMessageEnvelope } from '@goodvibes/engine/contracts/conversation-message';
+import type { Page } from '@goodvibes/engine/errors';
 
 /**
  * The conversation-message envelope, declared once in the contracts package.

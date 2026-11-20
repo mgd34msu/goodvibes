@@ -3,7 +3,7 @@
  * Actual products use this implementation instead of maintaining parallel
  * per-product downloaders.
  */
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { applyVerifiedUpdate, CHECKSUM_MANIFEST_NAME, DEFAULT_UPDATE_TIMEOUT_MS, parseChecksumFile, rollbackKeptPrevious, sha256, UpdateTransactionError,

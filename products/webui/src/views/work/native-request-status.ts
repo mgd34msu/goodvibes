@@ -3,8 +3,8 @@
  * and the one decision (if any) it is waiting on. Every line is computed from the
  * host's last answer; nothing here reads or writes.
  */
-import type { NativeWorkExecutionSnapshot } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
-import type { NativeHostedTurnSnapshot } from "@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client";
+import type { NativeWorkExecutionSnapshot } from "@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client";
+import type { NativeHostedTurnSnapshot } from "@goodvibes/engine/platform/platform/hosted-sessions/native-turn-client";
 import type { NativeIntakeResult } from "../../lib/native-intake";
 import type { NativeExecutionObservation } from "../../lib/native-execution";
 import type { NativeTurnObservation } from "../../lib/native-turn";

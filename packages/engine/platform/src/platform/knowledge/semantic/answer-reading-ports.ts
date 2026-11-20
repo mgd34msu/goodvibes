@@ -1,5 +1,5 @@
 import { requireSemanticKnowledge } from '../decision-policy.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { KnowledgeAnswerQualityHeldError } from './answer-verification/types.js';
 
 /** Preserve earlier answer configuration through the later gap judgment awaits. */

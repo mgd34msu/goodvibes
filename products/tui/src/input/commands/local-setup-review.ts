@@ -1,4 +1,4 @@
-import { createSetupReviewCollector } from '@goodvibes-jev/engine/terminal-shell/setup-review';
+import { createSetupReviewCollector } from '@goodvibes/engine/terminal-shell/setup-review';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import type { CommandContext } from '../command-registry.ts';
@@ -8,9 +8,9 @@ import {
   renderSandboxProfiles,
   renderSandboxRecommendation,
   renderSandboxReview,
-} from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
-import '@goodvibes-jev/engine/platform/platform/plugins';
-import '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/platform/platform/runtime/sandbox';
+import '@goodvibes/engine/platform/platform/plugins';
+import '@goodvibes/engine/platform/platform/config';
 import { VERSION } from '../../version.ts';
 import { DEEP_LINK_SURFACES, buildDeepLink } from './deep-link.ts';
 import { maskLiteralSecrets, type SetupReviewSnapshot } from './local-setup-transfer.ts';

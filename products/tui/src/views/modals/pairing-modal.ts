@@ -1,15 +1,15 @@
 import { MODAL_TONES } from './modal-theme.ts';
 import { infoRow } from './modal-surface-helpers.ts';
 import { actionKeyText } from '../../input/config-modal-keys.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import type {
   ConfigModalActionContext,
   ConfigModalRow,
   ConfigModalSurface,
   ConfigModalView,
 } from '../../input/config-modal-types.ts';
-import { describeOriginPosture, generateQrMatrix, renderQrToString, type OriginPosture, type PairingHandoffOfferKind } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { describeOriginPosture, generateQrMatrix, renderQrToString, type OriginPosture, type PairingHandoffOfferKind } from '@goodvibes/engine/platform/platform/pairing';
+import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } from '@goodvibes/engine/platform/platform/pairing';
 
 // ---------------------------------------------------------------------------
 // Device Pairing config-modal surface. Shows the web-app origin, the per-device

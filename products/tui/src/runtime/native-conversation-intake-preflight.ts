@@ -1,1 +1,1 @@
-export { NativeConversationIntakePreflight } from '@goodvibes-jev/engine/terminal-shell/native/intake-preflight';
+export { NativeConversationIntakePreflight } from '@goodvibes/engine/terminal-shell/native/intake-preflight';

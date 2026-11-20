@@ -30,18 +30,18 @@
  * reason to refuse to start.
  */
 import { nativeDeviceRecoveryObserver } from './startup-observation.js';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { createDevicePostureRuntime, registerDevicePhoneTool } from '@goodvibes-jev/engine/platform/platform/devices';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { createDevicePostureRuntime, registerDevicePhoneTool } from '@goodvibes/engine/platform/platform/devices';
 import type {
   DeviceApprovalBridge,
   DevicePeerTransport,
   DevicePhoneToolRegistry,
   DevicePostureRuntime,
   DevicePostureRuntimeOptions,
-} from '@goodvibes-jev/engine/platform/platform/devices';
-import { registerDevicesGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { isEffectiveDangerMode, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/platform/platform/devices';
+import { registerDevicesGatewayMethods } from '@goodvibes/engine/platform/platform/control-plane';
+import type { GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
+import { isEffectiveDangerMode, type ConfigManager } from '@goodvibes/engine/platform/platform/config';
 
 /** Who this surface records in the device audit trail. */
 export const DAEMON_DEVICE_ACTOR = 'daemon:phone-tool';

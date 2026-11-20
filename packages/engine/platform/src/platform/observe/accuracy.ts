@@ -7,7 +7,7 @@ import {
   type FixtureCheck,
   type Outcome,
   type TruthSource,
-} from '@goodvibes-jev/judgment';
+} from '@goodvibes/judgment';
 import type { LoggedReading } from './log-readings.js';
 import { UNNAMED } from './log-readings.js';
 

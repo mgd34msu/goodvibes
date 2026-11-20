@@ -13,7 +13,7 @@
 // ('none' attestation), so there is no attestation certificate chain to check.
 // That choice is documented in docs/relay-zero-knowledge.md (threat model).
 
-import { decodeUtf8, fromBase64Url, toBase64Url } from '@goodvibes-jev/engine/transport-core/relay';
+import { decodeUtf8, fromBase64Url, toBase64Url } from '@goodvibes/engine/transport-core/relay';
 
 /** A stored step-up credential: what the daemon persists per registered passkey. */
 export interface StoredStepUpCredential {

@@ -15,7 +15,7 @@ import type {
   OmitNamed,
   OperatorMethodInput,
   RequiredNamedKeys,
-} from '@goodvibes-jev/engine/platform/contracts';
+} from '@goodvibes/engine/platform/contracts';
 
 // `automation.jobs.create` is an open envelope whose schema REQUIRES `prompt`.
 type JobsCreate = OperatorMethodInput<'automation.jobs.create'>;

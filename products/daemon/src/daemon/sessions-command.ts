@@ -16,7 +16,7 @@
  * This module decides nothing about what a session IS. It parses, calls, and
  * renders.
  */
-import { callDaemonMethod } from '@goodvibes-jev/engine/terminal-shell';
+import { callDaemonMethod } from '@goodvibes/engine/terminal-shell';
 import {
   resolveTargetOrFailure,
   type DaemonCommandResult,

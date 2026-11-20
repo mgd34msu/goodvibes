@@ -2,7 +2,7 @@
 /**
  * engine-release-gates, the Agent's engine-pin checks with readable issue lines.
  *
- * The checks live in the shared @goodvibes-jev/engine/toolchain `engine-pin-gate`
+ * The checks live in the shared @goodvibes/engine/toolchain `engine-pin-gate`
  * (one implementation across tui/agent/webui), and the pin shape they run with
  * is the `enginePin` section of this product's toolchain.config.json, the same
  * one the toolchain's own `engine-pin-gate` command reads. This file only maps
@@ -16,7 +16,7 @@ import {
   resolveEnginePinConfig,
   runEnginePinGate,
   type EnginePinConfig,
-} from '@goodvibes-jev/engine/toolchain';
+} from '@goodvibes/engine/toolchain';
 
 /** The Agent's engine-pin shape, read from `<root>/toolchain.config.json`. */
 export function agentEnginePin(root: string = process.cwd()): EnginePinConfig {

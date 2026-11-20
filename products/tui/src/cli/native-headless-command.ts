@@ -1,20 +1,20 @@
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
+import { OwnedSelectionObservation } from '@goodvibes/engine/platform/platform/runtime/client/selection-observation';
 import type { ConversationMessageSnapshot } from '../core/conversation.ts';
-import { runHeadlessCommand, type HeadlessCommandRuntime } from '@goodvibes-jev/engine/terminal-shell/headless-command';
-import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell-paths';
+import { runHeadlessCommand, type HeadlessCommandRuntime } from '@goodvibes/engine/terminal-shell/headless-command';
+import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
 import { bootstrapRuntime } from '../runtime/bootstrap.ts';
 import { executeNativeHeadless, runWithHeadlessTimeout, writeNativeHeadlessResult, type NativeHeadlessHost, type NativeHeadlessResult } from './native-headless.ts';
-import type { HeadlessRunFlags } from '@goodvibes-jev/engine/terminal-shell/headless-turn-events';
+import type { HeadlessRunFlags } from '@goodvibes/engine/terminal-shell/headless-turn-events';
 import { executeHeadlessTurn, headlessSessionSnapshot, settleHeadlessTurn } from './native-headless-turn.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import type { NativeHeadlessMode } from '@goodvibes-jev/engine/terminal-shell/native-headless-options';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import type { NativeHeadlessMode } from '@goodvibes/engine/terminal-shell/native-headless-options';
+import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
 import { resolveNativeHostCredential } from '../runtime/client/native-host-credential.ts';
-import { claimHeadlessSession, restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
-import { closeSessionHere, createSessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { claimHeadlessSession, restoreHeadlessSession } from '@goodvibes/engine/terminal-shell/startup-lifecycle';
+import { closeSessionHere, createSessionSurface } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
-import { announceHeadlessRecovery, refusedHeadlessRun } from '@goodvibes-jev/engine/terminal-shell/headless-command';
-import { keepHeadlessSessionRecoverable } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
+import { announceHeadlessRecovery, refusedHeadlessRun } from '@goodvibes/engine/terminal-shell/headless-command';
+import { keepHeadlessSessionRecoverable } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
 
 export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, mode: NativeHeadlessMode = 'submit', limits: HeadlessRunFlags = {}): Promise<number> {
   const credentialObservation = new OwnedSelectionObservation();

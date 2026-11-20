@@ -3,7 +3,7 @@
  * generate-command-actions.ts
  *
  * Snapshots the engine's slash-command actions
- * (`@goodvibes-jev/engine/contracts/command-actions.json`, written from the
+ * (`@goodvibes/engine/contracts/command-actions.json`, written from the
  * command descriptions by packages/engine/scripts/generate-command-actions.ts)
  * into one browser-safe module:
  *

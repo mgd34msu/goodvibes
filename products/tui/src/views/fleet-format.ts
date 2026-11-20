@@ -7,16 +7,16 @@
 // reading drawn by terminal-shell renderer/work-board.ts.
 // ---------------------------------------------------------------------------
 
-import type { ProcessCostState, ProcessNode, ProcessCheckSummary, ProcessUsage } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ProcessCostState, ProcessNode, ProcessCheckSummary, ProcessUsage } from '@goodvibes/engine/platform/platform/runtime/fleet';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
 import { buildViewLine, DEFAULT_VIEW_PALETTE, type ViewPalette } from './polish.ts';
 import { fleetAttentionText, fleetNodeAttention, fleetStallMarker, fleetUsageTokens, hasFleetCost, type FleetStateTone } from './fleet-read-model.ts';
 import { fleetStateDisplay } from './fleet-stop.ts';
 import { formatElapsed } from '../utils/format-elapsed.ts';
-import { truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
-import { contractTree, type ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
+import { truncateDisplay } from '@goodvibes/engine/platform/platform/utils/terminal-width';
+import { contractTree, type ContractView } from '@goodvibes/engine/platform/platform/contract';
 import { cellText } from '../renderer/lane-graph/bead.ts';
-import { wrapText } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import { wrapText } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { isObservedExternalNode, renderObservedDetailLines } from './fleet-observed-render.ts';
 import { renderPoolSummary, type WorkstreamGraphSnapshot } from './workstream-graph-render.ts';
 

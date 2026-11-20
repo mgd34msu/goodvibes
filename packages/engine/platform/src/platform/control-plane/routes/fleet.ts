@@ -11,7 +11,7 @@
  * Wired via `GatewayMethodCatalog.register(descriptor, handler)`, the SAME
  * mechanism the plugin API already uses (../../plugins/api.ts
  * `registerGatewayMethod`), rather than a new REST path in the external
- * `@goodvibes-jev/engine/daemon-api` package or a change to
+ * `@goodvibes/engine/daemon-api` package or a change to
  * ../../daemon/http/router.ts (both out of this brief's file ownership).
  * The registered handler is reached over real HTTP today via the existing
  * generic invoke endpoint `POST /api/control-plane/methods/{methodId}/invoke`
@@ -37,7 +37,7 @@ import { FLEET_NODE_KINDS, FLEET_NODE_STATES } from '../../../events/fleet.js';
 import { contractRawForWire } from '../../runtime/fleet/contract-wire.js';
 import type { AttemptJudgment, AttemptPickResult, HeldMergeGroup } from '../../orchestration/types.js';
 import { AttemptError } from '../../orchestration/attempts.js';
-import { paginateItems } from '@goodvibes-jev/engine/daemon-api';
+import { paginateItems } from '@goodvibes/engine/daemon-api';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';

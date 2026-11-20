@@ -1,4 +1,4 @@
-import { toJson, type JsonValue } from '@goodvibes-jev/judgment';
+import { toJson, type JsonValue } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
 import type { KnowledgeObjectProfilePolicy } from '../../extensions.js';
 import { HOME_GRAPH_KNOWLEDGE_EXTENSION } from '../../home-graph/extension.js';

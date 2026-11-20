@@ -1,10 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import { runStoreFileUpdateSync, writeStoreJson } from './store-file.js';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
-import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { MemoryRecord } from '@goodvibes/engine/platform/platform/state';
+import type { MemoryAccess } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import { AgentPersonaRegistry, type AgentPersonaRecord } from './persona-registry.js';
 import { AgentRoutineRegistry, type AgentRoutineRecord } from './routine-registry.js';

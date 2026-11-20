@@ -21,8 +21,8 @@
 // never text written into the body). A frame larger than the
 // relay forwards in one message is sent and received in fragments.
 
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
-import { createUuidV4, StreamGapError, type FetchLike } from '@goodvibes-jev/engine/transport-core';
+import { GoodVibesError } from '@goodvibes/engine/errors';
+import { createUuidV4, StreamGapError, type FetchLike } from '@goodvibes/engine/transport-core';
 import {
   RelaySecureChannel,
   TunnelFragmentJoiner,
@@ -44,7 +44,7 @@ import {
   type RelayInitiatorState,
   type RelayPairingPayload,
   type TunnelHeader,
-} from '@goodvibes-jev/engine/transport-core/relay';
+} from '@goodvibes/engine/transport-core/relay';
 
 /** Minimal structural WebSocket shape the relay client needs (browser/Bun/Node). */
 export interface RelayWebSocketLike {

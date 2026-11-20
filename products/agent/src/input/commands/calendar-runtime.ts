@@ -5,8 +5,8 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { AgentCalendarRegistry, localIsoDate, UNTITLED_EVENT_TITLE } from '../../agent/calendar-registry.ts';
-import { formatJsonStoreWriteReport } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
-import { registerCalendarCommand, type CalendarNewEvent } from '@goodvibes-jev/engine/terminal-shell/calendar-command';
+import { formatJsonStoreWriteReport } from '@goodvibes/engine/terminal-shell/agent-turn/store-file';
+import { registerCalendarCommand, type CalendarNewEvent } from '@goodvibes/engine/terminal-shell/calendar-command';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { resolveCommandFilePath } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
@@ -21,7 +21,7 @@ import {
 } from './calendar-subscription-runtime.ts';
 import { calendarAccounts, connectCalendar, disconnectCalendar, fetchProviderUpcoming, sourceLabel, useCalendarApp } from './calendar-connect-runtime.ts';
 import { commandRefusal } from './confirmation.ts';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { readRefusal } from '@goodvibes/engine/errors';
 
 /** Today's local calendar date, 'YYYY-MM-DD', the convention stored wall-clock times use. */
 function todayIsoDate(): string {

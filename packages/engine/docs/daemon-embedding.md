@@ -4,7 +4,7 @@ This is the **full surface**. Bun runtime required. See [Runtime surfaces](./sur
 
 ## What the daemon surface gives you
 
-Use `@goodvibes-jev/engine/platform/daemon` when you want to host GoodVibes daemon routes in another server process, rather than running the standalone `goodvibes-daemon` binary. It gives you:
+Use `@goodvibes/engine/platform/daemon` when you want to host GoodVibes daemon routes in another server process, rather than running the standalone `goodvibes-daemon` binary. It gives you:
 
 - **Agent execution and lifecycle management**: creating, running, and tearing down agent turns.
 - **Tool execution, LSP integration, and MCP protocol support**: the tool-calling surface an agent turn drives, including language-server-backed tools and MCP server connections.
@@ -27,18 +27,18 @@ Concretely, the package gives you:
 import {
   createDaemonControlRouteHandlers,
   createDaemonTelemetryRouteHandlers,
-} from '@goodvibes-jev/engine/platform/daemon';
+} from '@goodvibes/engine/platform/daemon';
 ```
 
 ## Operator/automation/session/task dispatch
 
 ```ts
-import { dispatchDaemonApiRoutes } from '@goodvibes-jev/engine/platform/daemon';
+import { dispatchDaemonApiRoutes } from '@goodvibes/engine/platform/daemon';
 ```
 
 ## Other exported dispatchers
 
-The daemon package (`@goodvibes-jev/engine/platform/daemon`) also exports:
+The daemon package (`@goodvibes/engine/platform/daemon`) also exports:
 
 ```ts
 import {
@@ -47,7 +47,7 @@ import {
   dispatchTaskRoutes,
   dispatchOperatorRoutes,
   dispatchRemoteRoutes,
-} from '@goodvibes-jev/engine/platform/daemon';
+} from '@goodvibes/engine/platform/daemon';
 ```
 
 Other route categories (channel, integration, system, knowledge, media) are host-owned
@@ -149,7 +149,7 @@ The example at [daemon-fetch-handler-quickstart.ts](../examples/daemon-fetch-han
 All platform errors extend `GoodVibesError`. The daemon surface emits typed errors across the full `EngineErrorKind` union (`'auth'`, `'config'`, `'contract'`, `'network'`, `'not-found'`, `'protocol'`, `'rate-limit'`, `'service'`, `'internal'`, `'tool'`, `'validation'`, `'unknown'`). Tool-execution, upstream-service, protocol, and daemon-internal failures surface through their matching kind so callers do not need to infer them from English messages. See [Error Kinds](./error-kinds.md) for details.
 
 ```ts
-import { GoodVibesError } from '@goodvibes-jev/engine/platform/errors';
+import { GoodVibesError } from '@goodvibes/engine/platform/errors';
 
 try {
   await handler(req);
@@ -190,7 +190,7 @@ production telemetry pipelines. See [Observability](./observability.md) for the
 full observer API.
 
 ```ts
-import { createGoodVibesPlatform, createConsoleObserver } from '@goodvibes-jev/engine/platform';
+import { createGoodVibesPlatform, createConsoleObserver } from '@goodvibes/engine/platform';
 
 const platformClient = createGoodVibesPlatform({
   baseUrl: 'https://daemon.example.com',

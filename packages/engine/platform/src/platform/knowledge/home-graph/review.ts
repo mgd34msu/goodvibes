@@ -1,6 +1,6 @@
 import { createKnowledgeIssueOperatorMutation } from '../store-lifecycle-authority.js';
 import { createKnowledgeNodeOperatorMutation } from '../store-node-authority.js';
-import { GoodVibesError, RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError, RefusalError, refusal } from '@goodvibes/engine/errors';
 import type {
   KnowledgeIssueRecord,
   KnowledgeNodeRecord,

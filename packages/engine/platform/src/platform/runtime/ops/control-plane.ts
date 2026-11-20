@@ -9,7 +9,7 @@
  * This is the single integration point for the /ops commands and Ctrl+O panel.
  */
 import { randomUUID } from 'node:crypto';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import type { TaskManager } from '../tasks/types.js';
 import type { RuntimeEventBus } from '../events/index.js';
 import type { RuntimeStore } from '../store/index.js';

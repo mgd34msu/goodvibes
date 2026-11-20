@@ -3,7 +3,7 @@ import {
   createArtifactFromUploadRequest,
   isArtifactUploadRequest,
   type ArtifactStoreUploadLike,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';
 import type {
   HomeGraphAskInput,
   HomeGraphExport,

@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 
 /**
  * attempts.ts, best-of-N sibling attempts for the orchestration engine.
@@ -36,7 +36,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { OwnedScope } from '../utils/owned-work.js';
 import { existsSync } from 'node:fs';
-import { done, failedOutcome, observe, pending, refusal, type EffectOutcome } from '@goodvibes-jev/engine/errors';
+import { done, failedOutcome, observe, pending, refusal, type EffectOutcome } from '@goodvibes/engine/errors';
 
 /** How long a pick waits for each loser's worktree clean-up before reporting it still cleaning. */
 const LOSER_CLEANUP_DEADLINE_MS = 10_000;

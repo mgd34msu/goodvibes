@@ -15,9 +15,9 @@
  * only looks at the filesystem.
  */
 
-import { scanMcpServers } from '@goodvibes-jev/engine/platform/platform/discovery';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import { scanMcpServers } from '@goodvibes/engine/platform/platform/discovery';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { McpRegistry } from '@goodvibes/engine/platform/platform/mcp';
 
 /** How long after boot the scan runs, so it never competes with startup. */
 const SCAN_DELAY_MS = 2000;

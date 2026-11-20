@@ -6,14 +6,14 @@
  * even though the wire enum (PROCESS_KIND_SCHEMA / PROCESS_STATE_SCHEMA,
  * operator-contract-schemas-fleet.ts) is closed, because these types are
  * hand-mirrored from the platform source rather than generated (the pinned
- * @goodvibes-jev/engine/contracts codegen package predates fleet.*, see the
+ * @goodvibes/engine/contracts codegen package predates fleet.*, see the
  * invokeGatewayMethod comment in goodvibes.ts) and a daemon newer than this
  * client may introduce a kind/state we have never seen. Render it verbatim,
  * never drop it.
  */
 
-import type { ProcessCheckSummary, ProcessCheckCriterion, ProcessKind } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import { FLEET_NODE_KINDS, FLEET_NODE_STATES } from '@goodvibes-jev/engine/platform/events';
+import type { ProcessCheckSummary, ProcessCheckCriterion, ProcessKind } from '@goodvibes/engine/platform/platform/runtime/fleet';
+import { FLEET_NODE_KINDS, FLEET_NODE_STATES } from '@goodvibes/engine/platform/events';
 import type { ApprovalRecord, FleetProcessNode } from './goodvibes';
 import { asRecord } from './object';
 

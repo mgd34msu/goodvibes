@@ -1,7 +1,7 @@
 /** Explicit deterministic core readings; no text heuristic stands in for Jev. */
 import { afterEach, beforeEach } from 'bun:test';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
+import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes/judgment/testing';
 type Intent = 'chat' | 'task' | 'project';
 import type { ExecutionStrategy } from '../../platform/src/platform/core/adaptive-planner.ts';
 

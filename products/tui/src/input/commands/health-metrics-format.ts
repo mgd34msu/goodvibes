@@ -5,7 +5,7 @@
  * maps say "none reported" rather than showing zeros, and an unobserved quota
  * renders as an explicit "no signal yet" instead of a fabricated full quota.
  */
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 
 /** Cap on how many entries of a single metric map we list before summarizing the rest. */
 export const METRIC_MAP_LIST_CAP = 40;

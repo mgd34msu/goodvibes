@@ -1,8 +1,8 @@
 /** Detached checkout ownership. Durable admission is an acknowledgement of one
  * operation, never a successful purchase. Actual work and its execution lease
  * outlive the request and remain drained by the registration owner. */
-import { JudgmentError } from '@goodvibes-jev/judgment';
-import { DecisionModelsDisabledError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { JudgmentError } from '@goodvibes/judgment';
+import { DecisionModelsDisabledError, JudgmentPortMissingError } from '@goodvibes/engine/errors';
 import { isDeepStrictEqual } from 'node:util';
 import { AsyncResource } from 'node:async_hooks';
 import { withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';

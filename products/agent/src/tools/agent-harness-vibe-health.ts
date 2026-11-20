@@ -1,8 +1,8 @@
 import type { CommandContext } from '../input/command-registry.ts';
-import type { AgentVibeFile, BlockedAgentVibeFile } from '@goodvibes-jev/engine/terminal-shell/agent-turn/vibe-file';
-import { discoverVibeFiles } from '@goodvibes-jev/engine/terminal-shell/agent-turn/vibe-file';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { homeRelativePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/home-path';
+import type { AgentVibeFile, BlockedAgentVibeFile } from '@goodvibes/engine/terminal-shell/agent-turn/vibe-file';
+import { discoverVibeFiles } from '@goodvibes/engine/terminal-shell/agent-turn/vibe-file';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { homeRelativePath } from '@goodvibes/engine/terminal-shell/agent-turn/home-path';
 
 export interface AgentHarnessVibeHealthFile {
   readonly path: string;

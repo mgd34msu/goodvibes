@@ -3,8 +3,8 @@ import { hostname } from 'node:os';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
-import { resolveGoodVibesTreeDirectory } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveVerificationHostUrl } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
+import { resolveGoodVibesTreeDirectory } from '@goodvibes/engine/platform/platform/config';
+import { resolveVerificationHostUrl } from '@goodvibes/engine/terminal-shell/verification-primitives';
 import {
   type DistributedNodeHostContract,
   type DistributedPeerKind,

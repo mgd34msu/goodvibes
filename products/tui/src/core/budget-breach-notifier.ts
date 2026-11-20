@@ -23,18 +23,18 @@ import { isConversationUsageAvailable } from './conversation-usage.ts';
  * behavior.notificationsMetadataOnly is not explicitly false the desktop and
  * webhook text carries the numbers only.
  */
-import { notifyNow } from '@goodvibes-jev/engine/platform/platform/utils';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import { calcSessionCost, computeBudgetBreach, isModelPriced } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { notifyNow } from '@goodvibes/engine/platform/platform/utils';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import type { WebhookNotifier } from '@goodvibes/engine/platform/platform/integrations';
+import { calcSessionCost, computeBudgetBreach, isModelPriced } from '@goodvibes/engine/platform/platform/providers';
+import type { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
 import {
   shouldFireAlert,
   buildBudgetNotification,
   readNotificationsMetadataOnly,
   type ConfigGet,
   type BudgetNotificationFacts,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+} from '@goodvibes/engine/platform/platform/runtime/operations';
 
 export interface BudgetBreachUsageSnapshot {
   readonly input: number;

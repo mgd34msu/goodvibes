@@ -5,7 +5,7 @@
  * its profile and occasions tools, in the Agent process and in a turn the
  * daemon hosts for the Agent.
  */
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
 
 /** Capture private DTO metadata without interpreting fields that will never be sent. */
 export function captureCatalogData<T>(value: T, budget = { nodes: 0, characters: 0, slots: 0 }): T {

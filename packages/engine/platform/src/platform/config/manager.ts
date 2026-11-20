@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import { POSTAL_PARTS, PostalAddressHeldError, type ProfilePostalReader, type PostalKind, type PostalReadOptions, type PreparedPostalAddress, type PostalParts } from './postal-address.js';
 import { DurablePolicyEpochOwner } from './durable-policy-epoch.js';
 import { PreparedSettingsTarget, settingsFileIdentity } from './prepared-target.js';
@@ -7,7 +7,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { isDeepStrictEqual } from 'node:util';
 import { VERSION } from '../version.js';
-import { JudgmentAuthorityRetiredError, RefusalError } from '@goodvibes-jev/engine/errors';
+import { JudgmentAuthorityRetiredError, RefusalError } from '@goodvibes/engine/errors';
 import { unboundCredentialDestinationRefusal } from './credential-destination-keys.js';
 import { decisionOrClassic, isClassicOperation, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
@@ -46,9 +46,9 @@ import { resolveWithProfileFallback, type ConfigProfileFallbackReader } from './
 import { ingestManagerSettings, toConfigLoadFailure, type IngestionNoticeSink, type SettingsIngestionNotice } from './manager-ingestion.js';
 import { persistCategoryKeyRemoval, persistCategoryPatch, type CategoryIoDeps } from './manager-category-io.js';
 import { configKeyFacts } from './config-key-facts.js';
-import { refusal as buildRefusal, type Refusal } from '@goodvibes-jev/engine/errors';
+import { refusal as buildRefusal, type Refusal } from '@goodvibes/engine/errors';
 import type { ToolDecision } from '../types/tools.js';
-import { localOwnerActor, type Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor, type Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { admitEffects } from '../security/effect-authority.js';
 import { HostSettings, type HostBooleanSettingHandle, type HostManagedSettingLocks, type HostSetting, type HostSettingValue, type HostSettingValues } from './host-settings.js';
 import { HostSettingsReadError, hostSettingsFileExists, readHostSettingValues, readHostSettingsFile, recoverHostSettingsWriteFailure } from './manager-host-settings.js';

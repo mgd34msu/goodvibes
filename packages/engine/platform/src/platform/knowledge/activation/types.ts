@@ -1,4 +1,4 @@
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 /**
  * What one serving reading may send to the decision model: the passages of the
  * node's sources that bear on it, never whole documents. The number of nodes in

@@ -32,7 +32,7 @@ import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 import { createWebSearchTool } from '../platform/src/platform/tools/web-search/index.ts';
 import { WebSearchProviderRegistry } from '../platform/src/platform/web-search/provider-registry.ts';
 import { WebSearchService } from '../platform/src/platform/web-search/service.ts';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 
 /** A stdio MCP server with one tool, `lookup`, that returns a planted instruction. */
 const STAND_IN_SERVER = `

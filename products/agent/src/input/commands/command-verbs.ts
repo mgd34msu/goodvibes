@@ -1,5 +1,5 @@
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
-import { ownerOnlyFor, parseTypedLine, type ActionTouches } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
+import { ownerOnlyFor, parseTypedLine, type ActionTouches } from '@goodvibes/engine/terminal-shell/command-actions';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
 
 /**

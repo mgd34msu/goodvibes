@@ -27,12 +27,12 @@
 // summary (renderFleetContractSummary) instead of a transcript.
 // ---------------------------------------------------------------------------
 
-import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
+import type { ContractView } from '@goodvibes/engine/platform/platform/contract';
 import { cellText } from '../renderer/lane-graph/bead.ts';
 import { projectContractTree, contractStatusSummary } from '../core/work-tree-contract.ts';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ConversationMessageSnapshot } from '@goodvibes/engine/platform/platform/core';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { createEmptyLine, type Line } from '@goodvibes/engine/platform/platform/types';
 import type { MessageLineCache } from '../core/conversation-line-cache.ts';
 import type { ConversationRenderContext } from '../core/conversation-rendering.ts';
 import { renderConversationEventLine, renderConversationNotice } from '../renderer/conversation-surface.ts';

@@ -1,7 +1,7 @@
 import type { ConfigModalActionContext, ConfigModalSurface, ConfigModalView } from '../../input/config-modal-types.ts';
 import type { ServiceInspectionQuery, SubscriptionAccessQuery } from '@/runtime/index.ts';
-import type { ProviderSubscription, PendingSubscriptionLogin } from '@goodvibes-jev/engine/platform/platform/config';
-import { listBuiltinSubscriptionProviders, subscriptionState } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ProviderSubscription, PendingSubscriptionLogin } from '@goodvibes/engine/platform/platform/config';
+import { listBuiltinSubscriptionProviders, subscriptionState } from '@goodvibes/engine/platform/platform/config';
 import { formatElapsed } from '../../utils/format-elapsed.ts';
 import { toneStyle, statusGlyph, pad, postureLine, kv, runModalCommand, type Tone } from './modal-surface-helpers.ts';
 

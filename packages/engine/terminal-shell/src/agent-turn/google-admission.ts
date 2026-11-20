@@ -1,9 +1,9 @@
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { secretReferenceFor, type ConfigManager, type SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, clientCredentialsFromInput, googleClientConfigEntries, readClientCredentialsFromJson } from '@goodvibes-jev/engine/platform/platform/google';
+import { secretReferenceFor, type ConfigManager, type SecretsManager } from '@goodvibes/engine/platform/platform/config';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, clientCredentialsFromInput, googleClientConfigEntries, readClientCredentialsFromJson } from '@goodvibes/engine/platform/platform/google';
 import { assertCurrentToolEffect, assertProjectionExecution, commitCurrentToolSettingsPlan, ToolInputProjectionError,
-  type ToolInputProjector, type ToolPreparedSettingsMutation } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+  type ToolInputProjector, type ToolPreparedSettingsMutation } from '@goodvibes/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
 
 export interface GoogleAdmissionOwners {
   readonly configManager: ConfigManager;

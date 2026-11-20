@@ -11,7 +11,7 @@ import { paymentContinuationBinding } from './continuation-binding.js';
 import { BrowserPageConnectionError } from '../../browser/browser-page-connection-data.js';
 import type { BeginCheckoutInput } from '../payments-gateway-service.js';
 import type { DetachedCheckoutOwner } from './checkout-operations.js';
-import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
+import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
 
 function frame(context: HandlerContextEnvelope) {
   return { principalId: context.principalId, principalKind: context.principalKind, admin: context.admin,

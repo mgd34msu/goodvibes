@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import { knowledgeSchemaColumns, executionAttemptColumns } from './store-schema-validation-data.js';
 import { NativeExecutionMoveRefused, executionIntentMoveText, executionRecordMoveText } from './store-native-refusal.js';
 import { createNativeCiContinuationStorage } from './store-native-ci-continuation.js';

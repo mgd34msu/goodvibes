@@ -1,5 +1,5 @@
 export type {
   PeerRemoteClient,
   PeerRemoteClientInvokeOptions,
-} from '@goodvibes-jev/engine/peer-client';
-export { createPeerRemoteClient } from '@goodvibes-jev/engine/peer-client';
+} from '@goodvibes/engine/peer-client';
+export { createPeerRemoteClient } from '@goodvibes/engine/peer-client';

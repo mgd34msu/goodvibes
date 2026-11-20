@@ -19,17 +19,17 @@
  *   reason and next steps for a person or an agent to act on.
  *
  * The route each method is served on comes from the operator contract the Agent
- * was built with, through `@goodvibes-jev/engine/operator-client`; a method the
+ * was built with, through `@goodvibes/engine/operator-client`; a method the
  * contract publishes for the WebSocket only goes to the host's invoke-by-id
  * endpoint.
  */
 
 import { lstatSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
-import { categoryForCode, categoryForStatus, GoodVibesError, httpStatusOf } from '@goodvibes-jev/engine/errors';
-import { createOperatorApiClient, type OperatorApiClient } from '@goodvibes-jev/engine/operator-client';
-import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { categoryForCode, categoryForStatus, GoodVibesError, httpStatusOf } from '@goodvibes/engine/errors';
+import { createOperatorApiClient, type OperatorApiClient } from '@goodvibes/engine/operator-client';
+import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
+import { resolveConnectedHostDialEnabled } from '@goodvibes/engine/platform/platform/config';
 import { connectedHostBaseUrl } from './connected-host-dial.js';
 import {
   connectedHostOperatorTokenPath,

@@ -1,13 +1,13 @@
-# @goodvibes-jev/engine/errors
+# @goodvibes/engine/errors
 
 Public GoodVibes error module for structured platform, transport, and daemon failures.
 
-Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/platform/errors`. These modules are subpath exports of the engine package.
+Most applications should install `@goodvibes/engine` and import `@goodvibes/engine/platform/errors`. These modules are subpath exports of the engine package.
 
 ## Install
 
 ```sh
-npm install @goodvibes-jev/engine
+npm install @goodvibes/engine
 ```
 
 ## The error model
@@ -15,7 +15,7 @@ npm install @goodvibes-jev/engine
 Every error thrown from the platform's public surface is a `GoodVibesError`. The `kind` field is the primary discriminant. Switch on it instead of `instanceof` chains or message parsing:
 
 ```ts
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 
 try {
   await callIntegration();
@@ -37,7 +37,7 @@ try {
 Concrete subclasses (`ConfigurationError`, `ContractError`, `HttpStatusError`) remain available for class-specific handling:
 
 ```ts
-import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+import { HttpStatusError } from '@goodvibes/engine/errors';
 
 try {
   // integration code
@@ -48,10 +48,10 @@ try {
 }
 ```
 
-The same symbols are re-exported from the platform facade, so platform consumers can import them from `@goodvibes-jev/engine/platform/errors` instead:
+The same symbols are re-exported from the platform facade, so platform consumers can import them from `@goodvibes/engine/platform/errors` instead:
 
 ```ts
-import { HttpStatusError } from '@goodvibes-jev/engine/platform/errors';
+import { HttpStatusError } from '@goodvibes/engine/platform/errors';
 ```
 
 ## Branch on structured fields
@@ -74,7 +74,7 @@ import {
   DaemonErrorCategory,
   type DaemonErrorSource,
   type StructuredDaemonErrorBody,
-} from '@goodvibes-jev/engine/errors/daemon-error-contract';
+} from '@goodvibes/engine/errors/daemon-error-contract';
 ```
 
 `DaemonErrorCategory` is both a string-literal union and a runtime const; `StructuredDaemonErrorBody` is the JSON shape the daemon returns in HTTP error responses.

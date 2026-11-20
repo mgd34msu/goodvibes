@@ -1,18 +1,18 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { OnboardingCheckMarkerState } from './onboarding-state-types.js';
 import { resolveRuntimeEndpointBinding } from './cli-endpoints.js';
 import { resolveWebSurfaceExposure } from './cli-network-posture.js';
-import { DEFAULT_DECISION_MODEL_POLICY, decisionModelPolicyLabel, decisionModelUse, parseDecisionModelPolicy, type DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
-import { SubscriptionManager, decisionModelSet, decisionModelSettings, getBuiltinSubscriptionProvider, sharedSubscriptionsPath, type SubscriptionShellPaths } from '@goodvibes-jev/engine/platform/platform/config';
-import { getBuiltinProviderEnvVars } from '@goodvibes-jev/engine/platform/platform/config/provider-credential-catalog';
-import { describePermissionModeInForce, type PermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { gatePresetLabel } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import { DEFAULT_DECISION_MODEL_POLICY, decisionModelPolicyLabel, decisionModelUse, parseDecisionModelPolicy, type DecisionModelPolicy } from '@goodvibes/engine/errors';
+import { SubscriptionManager, decisionModelSet, decisionModelSettings, getBuiltinSubscriptionProvider, sharedSubscriptionsPath, type SubscriptionShellPaths } from '@goodvibes/engine/platform/platform/config';
+import { getBuiltinProviderEnvVars } from '@goodvibes/engine/platform/platform/config/provider-credential-catalog';
+import { describePermissionModeInForce, type PermissionModeInForce } from '@goodvibes/engine/platform/platform/permissions';
+import { gatePresetLabel } from '@goodvibes/engine/platform/platform/gate/presets';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { builtinProviderNames, resolveSavedModelInUse } from '@goodvibes-jev/engine/platform/platform/providers/provider-names';
-import { readCustomProviderNames } from '@goodvibes-jev/engine/platform/platform/providers/custom-provider-files';
-import { loadPersistedProviders } from '@goodvibes-jev/engine/platform/platform/discovery/persisted-providers';
-import type { DiscoveredServer } from '@goodvibes-jev/engine/platform/platform/discovery';
+import { builtinProviderNames, resolveSavedModelInUse } from '@goodvibes/engine/platform/platform/providers/provider-names';
+import { readCustomProviderNames } from '@goodvibes/engine/platform/platform/providers/custom-provider-files';
+import { loadPersistedProviders } from '@goodvibes/engine/platform/platform/discovery/persisted-providers';
+import type { DiscoveredServer } from '@goodvibes/engine/platform/platform/discovery';
 
 /**
  * Whether a decision model is in use, from the settings alone (status runs

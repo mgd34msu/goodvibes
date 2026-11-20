@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 const state = (category: string, text: string, candidate = text, query = 'What are AC-7 specifications?') => ({
   query, subjects: [{ title: 'AC-7' }], source: { title: 'AC-7 manual', sourceType: 'manual' }, text,
   category: { title: category }, candidate: { reference: 'value-1', text: candidate },

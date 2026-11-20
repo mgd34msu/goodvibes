@@ -1,5 +1,5 @@
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { defineBattery, yesNo, toJson, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import { defineBattery, yesNo, toJson, STAKES_BANDS } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../judgment-input.js';
 import { JudgmentHeldError, requireActingReading } from '../../types/judgment-held.js';
 export const executionPurpose = defineBattery({

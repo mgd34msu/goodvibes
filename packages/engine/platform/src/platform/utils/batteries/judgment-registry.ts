@@ -1,4 +1,4 @@
-import { BatteryRegistry } from '@goodvibes-jev/judgment';
+import { BatteryRegistry } from '@goodvibes/judgment';
 import { profileDistinctive } from './redaction.js';
 import { exportCredentialSpans } from './export-credential-spans.js';
 

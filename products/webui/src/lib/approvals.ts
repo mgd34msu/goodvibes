@@ -12,8 +12,8 @@
  * daemon applies the selection.
  */
 
-import { readApprovalEditHunks as readPlatformEditHunks } from '@goodvibes-jev/engine/platform/platform/control-plane/approval-hunk-apply';
-import type { ApprovalReading } from '@goodvibes-jev/engine/platform/platform/control-plane/approval-lifecycle';
+import { readApprovalEditHunks as readPlatformEditHunks } from '@goodvibes/engine/platform/platform/control-plane/approval-hunk-apply';
+import type { ApprovalReading } from '@goodvibes/engine/platform/platform/control-plane/approval-lifecycle';
 import type { ApprovalActionResult, ApprovalAttribution, ApprovalAuditRecord, ApprovalEditHunk, ApprovalRecord, ApprovalRememberOption } from './goodvibes';
 
 export type { ApprovalReading };

@@ -1,5 +1,5 @@
-import type { DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import type { ToolActivity } from '@goodvibes-jev/engine/contracts';
+import type { DecisionModelPolicyState } from '@goodvibes/engine/errors';
+import type { ToolActivity } from '@goodvibes/engine/contracts';
 
 /** Represents a tool the LLM can invoke. Parameters follow JSON Schema. */
 export type ToolSideEffect =

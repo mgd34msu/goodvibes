@@ -1,19 +1,19 @@
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
-import { factsFor } from '@goodvibes-jev/engine/platform/platform/routing';
-import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { readTierPromptSupplement } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
-import { describeMemoryPromptEligibility, isPromptActiveMemory, MIN_PROMPT_MEMORY_CONFIDENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/memory-prompt';
-import { AgentPersonaRegistry, buildActivePersonaPrompt } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
-import { buildProjectContextPrompt, discoverProjectContextFiles } from '@goodvibes-jev/engine/terminal-shell/agent-turn/project-context-files';
-import { AgentRoutineRegistry, buildEnabledRoutinesPrompt, evaluateAgentRoutineReadiness } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
-import { AgentSkillRegistry, buildEnabledSkillsPrompt, evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
-import { buildVibePrompt, discoverVibeFiles } from '@goodvibes-jev/engine/terminal-shell/agent-turn/vibe-file';
-import { buildCapabilitySummaryPrompt } from '@goodvibes-jev/engine/terminal-shell/agent-turn/capability-summary-prompt';
-import type { PromptContextReceipt } from '@goodvibes-jev/engine/terminal-shell/agent-turn/prompt-context-receipts';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
+import { factsFor } from '@goodvibes/engine/platform/platform/routing';
+import type { MemoryApi } from '@goodvibes/engine/platform/platform/knowledge';
+import { readTierPromptSupplement } from '@goodvibes/engine/platform/platform/providers';
+import type { MemoryRecord } from '@goodvibes/engine/platform/platform/state';
+import { describeMemoryPromptEligibility, isPromptActiveMemory, MIN_PROMPT_MEMORY_CONFIDENCE } from '@goodvibes/engine/terminal-shell/agent-turn/memory-prompt';
+import { AgentPersonaRegistry, buildActivePersonaPrompt } from '@goodvibes/engine/terminal-shell/agent-turn/persona-registry';
+import { buildProjectContextPrompt, discoverProjectContextFiles } from '@goodvibes/engine/terminal-shell/agent-turn/project-context-files';
+import { AgentRoutineRegistry, buildEnabledRoutinesPrompt, evaluateAgentRoutineReadiness } from '@goodvibes/engine/terminal-shell/agent-turn/routine-registry';
+import { AgentSkillRegistry, buildEnabledSkillsPrompt, evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
+import { buildVibePrompt, discoverVibeFiles } from '@goodvibes/engine/terminal-shell/agent-turn/vibe-file';
+import { buildCapabilitySummaryPrompt } from '@goodvibes/engine/terminal-shell/agent-turn/capability-summary-prompt';
+import type { PromptContextReceipt } from '@goodvibes/engine/terminal-shell/agent-turn/prompt-context-receipts';
 import { capabilitySnapshot } from '../capabilities/capability-snapshot.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
 
 interface PromptContextArgs {
   readonly includeParameters?: unknown;

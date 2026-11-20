@@ -49,7 +49,7 @@
  * Time, network, filesystem, activity, service actions, and process exit are
  * all injectable; the whole loop is provable under test.
  */
-import { readFailureTransience } from '@goodvibes-jev/engine/errors';
+import { readFailureTransience } from '@goodvibes/engine/errors';
 import { daemonReadingPort } from './reading-lifetime.js';
 import { captureJudgmentFailure } from '../gate/failure-input.js';
 import { flushActivityLogSync, logger } from '../utils/logger.js';
@@ -80,7 +80,7 @@ import type { ServiceHandoverOutcome } from './service-handover.js';
 import { inspectDaemonUpdateInstallation, resolveDaemonUpdateTargets } from '../runtime/daemon-update-installation.js';
 import { assertStagedClientReaderCompatible } from '../runtime/client-reader-update.js';
 import { observesUpdateFiles } from '../runtime/update-file-io.js';
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import { applySuiteUpdate, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration, SuiteUpdatePreparationError, SuiteUpdateRecoveryError, type SuiteUpdateResult } from '../runtime/suite-update.js';
 import { prepareHandoverBeforeStop, prepareServiceHandover, ServiceHandoverPreflightError, type PreparedServiceHandover } from './service-handover-preflight.js';
 import type { DaemonWorkAdmission } from './work-admission.js';

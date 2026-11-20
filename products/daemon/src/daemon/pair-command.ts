@@ -38,7 +38,7 @@
  * default every other pairing producer uses when the operator did not supply
  * one. The name is user-visible and editable later in device management.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import {
   availablePairingOffers,
   defaultPairingTokenName,
@@ -46,7 +46,7 @@ import {
   isLoopbackHost,
   resolvePairingWebOrigin,
   type PairingHandoffOfferKind,
-} from '@goodvibes-jev/engine/platform/platform/pairing';
+} from '@goodvibes/engine/platform/platform/pairing';
 import { renderPairingBanner } from '../core/pairing-banner.js';
 import {
   callDaemonMethod,
@@ -57,7 +57,7 @@ import {
   type DaemonFetch,
   resolveRuntimeEndpointBinding,
   type RemoteDaemonTarget,
-} from '@goodvibes-jev/engine/terminal-shell';
+} from '@goodvibes/engine/terminal-shell';
 import type { DaemonCommandResult, RemoteCommandFlags } from './status-command.js';
 
 export interface PairCommandDeps {

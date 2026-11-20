@@ -27,7 +27,7 @@
  * (`daemon.timezone`, or this machine's zone when that is unset).
  */
 
-import { revealOrNull, type Secret } from '@goodvibes-jev/engine/platform/platform/security';
+import { revealOrNull, type Secret } from '@goodvibes/engine/platform/platform/security';
 import {
   CalendarApiError,
   CalendarConnector,
@@ -49,13 +49,13 @@ import {
   type OAuthClientOverrides,
   type ProviderCalendar,
   type ResolvedClientConfig,
-} from '@goodvibes-jev/engine/platform/platform/calendar';
+} from '@goodvibes/engine/platform/platform/calendar';
 import {
   createOAuthLocalListener,
   readConsumerSetting,
   resolveSecretWriteScope,
   type SecretScope,
-} from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/platform/platform/config';
 
 /** The config keys the connector reads. clientId is not a secret (RFC 8252); the
  *  secret ref is secret-backed and listed in SECRET_CONFIG_KEYS. */

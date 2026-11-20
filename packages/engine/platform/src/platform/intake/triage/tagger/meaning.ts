@@ -1,6 +1,6 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /** Custom label meaning is a versioned recorded reading, never substring dispatch. */
-import { defineBattery, oneOf, STAKES_BANDS, type DecisionRecorder, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS, type DecisionRecorder, type JudgmentPort } from '@goodvibes/judgment';
 import { executePolicyCheck } from '../../../gate/execute-policy-check.js';
 import { snapshotJudgmentInput } from '../../../gate/judgment-input.js';
 import { types } from 'node:util';

@@ -31,7 +31,7 @@
  * restart and a pass that finds one again does not report it again.
  */
 
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { agreementContent, alignmentContent, memoryAgreement, memoryAlignment, type MemoryReplacement } from './batteries/memory-alignment.js';
 import type { MemoryRecord, MemoryReviewPatch, MemoryScope, MemorySearchFilter, MemorySemanticSearchResult } from './memory-store.js';
 import type { MemoryOperationOptions } from './memory-operation.js';

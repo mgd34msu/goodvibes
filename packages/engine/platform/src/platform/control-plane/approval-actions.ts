@@ -19,7 +19,7 @@
  * broker's one write.
  */
 import type { AskPresentation } from '../permissions/ask-presentation.js';
-import type { Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { admitEffects } from '../security/effect-authority.js';
 import type { ApprovalActionInput, ApprovalBroker, ApprovalRelayPort, SharedApprovalRecord } from './approval-broker.js';
 import type { ResolveSharedApprovalInput } from './approval-broker-owner.js';

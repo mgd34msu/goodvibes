@@ -16,10 +16,10 @@
 // and its tests round-trip against a mocked daemon.
 // ---------------------------------------------------------------------------
 
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import { resolveOperatorRpc, describeOperatorRpcError } from '../runtime/client/operator-endpoint.ts';
-import { memoryStatusLines, type MemoryGovernorSnapshotResult } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
+import { memoryStatusLines, type MemoryGovernorSnapshotResult } from '@goodvibes/engine/platform/platform/runtime/memory';
 
 /** The narrow async verb surface the /health memory (doctor) surface drives. */
 export interface MemoryDiagnosticsGateway {

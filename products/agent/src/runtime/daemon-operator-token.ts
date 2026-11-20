@@ -1,4 +1,4 @@
-import { readDaemonOperatorBearer } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { readDaemonOperatorBearer } from '@goodvibes/engine/platform/platform/runtime/operations';
 
 /**
  * The bearer token this process's daemon serves with, read without creating anything.

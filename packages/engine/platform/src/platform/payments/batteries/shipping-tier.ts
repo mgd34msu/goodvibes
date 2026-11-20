@@ -25,7 +25,7 @@
  * slower parcel; nothing irreversible turns on it. A tier whose reading does
  * not act is left out and the ladder steps past it.
  */
-import { defineSelector, NONE, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineSelector, NONE, STAKES_BANDS } from '@goodvibes/judgment';
 
 /** The candidate id of the delivery option at `index`. */
 export const shippingOptionId = (index: number): string => `o${index}`;

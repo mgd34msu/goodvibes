@@ -10,7 +10,7 @@
  * Every hold is keyed by its work id, so overlapping work refcounts naturally
  * and the inhibitor releases exactly when the last piece drains.
  */
-import type { EventEnvelope } from '@goodvibes-jev/engine/transport-core';
+import type { EventEnvelope } from '@goodvibes/engine/transport-core';
 import type { PowerManager } from './manager.js';
 
 /**

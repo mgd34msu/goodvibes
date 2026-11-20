@@ -9,9 +9,9 @@
  * Providers are actual surface factories supplied by the product root. This
  * module defines no gateway descriptor, fallback handler or semantic policy.
  */
-import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
-import type { RoutingRegistration as EngineRoutingRegistration } from '@goodvibes-jev/engine/platform/platform/channels';
-import type { PaymentReplyInbox } from '@goodvibes-jev/engine/platform/platform/payments';
+import { createAsyncDisposalScope } from '@goodvibes/engine/platform/platform/runtime/disposal';
+import type { RoutingRegistration as EngineRoutingRegistration } from '@goodvibes/engine/platform/platform/channels';
+import type { PaymentReplyInbox } from '@goodvibes/engine/platform/platform/payments';
 import type { HandlerContext, OwnedHandlerSurface, SurfaceRegister } from './context.js';
 
 /** The canonical routing handle narrowed to the members other surfaces need. */

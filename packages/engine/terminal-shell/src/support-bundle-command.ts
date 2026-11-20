@@ -1,15 +1,15 @@
 import { retainCliConfig } from './cli-config-owner.js';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { configKeyFacts, isDaemonOwnedConfigKey, isSecretBearingConfigKey, localOwnerActor } from '@goodvibes-jev/engine/platform/platform/config';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import type { ConfigKey, ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { configKeyFacts, isDaemonOwnedConfigKey, isSecretBearingConfigKey, localOwnerActor } from '@goodvibes/engine/platform/platform/config';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic, isClassicOperation, withDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
-import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
-import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell-paths';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { listProviderRuntimeSnapshots, type ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
+import { decisionOrClassic, isClassicOperation, withDecisionModelPolicy } from '@goodvibes/engine/platform/platform/runtime/decision-policy';
+import { captureOwnedJson } from '@goodvibes/engine/platform/platform/gate/judgment-input';
+import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { listProviderRuntimeSnapshots, type ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
 import type { CliCommandOutput } from './cli-types.js';
 import { REDACTED_VALUE, prepareConfigRedaction, redactSerializedSecrets } from './cli-redaction.js';
 import {

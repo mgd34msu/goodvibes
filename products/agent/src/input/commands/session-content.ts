@@ -1,16 +1,16 @@
 import { join } from 'path';
-import { createUndoCommands, refuseWhileTurnRuns } from '@goodvibes-jev/engine/terminal-shell/everyday-commands';
+import { createUndoCommands, refuseWhileTurnRuns } from '@goodvibes/engine/terminal-shell/everyday-commands';
 import 'node:fs';
 import 'node:fs/promises';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 
-import { extractText } from '@goodvibes-jev/engine/platform/platform/export';
+import { extractText } from '@goodvibes/engine/platform/platform/export';
 import { requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import './confirmation.ts';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
-import { dropFileChange, redoLastFileChange, undoLastFileChange } from '@goodvibes-jev/engine/terminal-shell/recovery-commands';
-import { createCheckpointCommand } from '@goodvibes-jev/engine/terminal-shell/checkpoint-command';
+import { dropFileChange, redoLastFileChange, undoLastFileChange } from '@goodvibes/engine/terminal-shell/recovery-commands';
+import { createCheckpointCommand } from '@goodvibes/engine/terminal-shell/checkpoint-command';
 
 function formatSessionFailure(action: string, error: unknown): string {
   return [`Failed to ${action}`, `  error ${summarizeError(error)}`].join('\n');
@@ -57,7 +57,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
 
 }
 
-import { createSessionContentCommands } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
+import { createSessionContentCommands } from '@goodvibes/engine/terminal-shell/session-content-commands';
 import { commandRefusal } from './confirmation.ts';
 export const contentCommands = createSessionContentCommands<CommandContext, ReturnType<typeof getCurrentConversationMessages>[number]>({
   paths: requireShellPaths,

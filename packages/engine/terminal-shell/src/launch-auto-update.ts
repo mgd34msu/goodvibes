@@ -18,8 +18,8 @@ import {
   suiteUpdateRequiresRecovery,
   type SuiteUpdateResult,
   type UpdateFetchLike,
-} from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import type { InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+} from '@goodvibes/engine/platform/platform/runtime/self-update';
+import type { InstallKind } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { runLaunchUpdatePreflight, type LaunchUpdateCheck } from './launch-update-preflight.js';
 import { withTimeout } from './service-io.js';
 

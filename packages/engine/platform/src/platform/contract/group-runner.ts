@@ -26,7 +26,7 @@ import { nativeContractRoute } from './native-decisions.js';
  *   runs once and the decision says so.
  */
 import { initializeContractMemberWorktree } from './input-snapshot.js';
-import { mapLimit } from '@goodvibes-jev/judgment';
+import { mapLimit } from '@goodvibes/judgment';
 
 import type { CreateWorkstreamInput, OrchestrationEngine } from '../orchestration/engine.js';
 import type { FleetCapacityFn } from '../orchestration/elastic-pool.js';

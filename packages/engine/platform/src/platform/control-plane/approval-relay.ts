@@ -48,7 +48,7 @@ import {
   type ApprovalViewer,
   type TransitionOutcome,
 } from './approval-lifecycle.js';
-import { refusal, type Refusal } from '@goodvibes-jev/engine/errors';
+import { refusal, type Refusal } from '@goodvibes/engine/errors';
 
 export const APPROVAL_RELAY_TYPES = {
   state: 'APPROVAL_STATE',

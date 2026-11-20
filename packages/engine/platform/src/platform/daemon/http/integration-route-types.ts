@@ -6,5 +6,5 @@ export type {
   MemoryRegistryLike,
   ProviderRuntimeSnapshotServiceLike,
   UserAuthManagerLike,
-} from '@goodvibes-jev/engine/daemon-api';
-export type { DaemonRuntimeEventDomain as RuntimeEventDomain } from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';
+export type { DaemonRuntimeEventDomain as RuntimeEventDomain } from '@goodvibes/engine/daemon-api';

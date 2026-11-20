@@ -7,7 +7,7 @@
  * its outcome (setFirstRunScreen). splash-additions.ts draws it; Tab in an
  * empty composer and a click on a prompt fill the composer from it.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { createModeWordsSource, type ModeWordsSource } from '../session-permission-mode.js';
 import { starterPrompts } from './starter-prompts.js';
 

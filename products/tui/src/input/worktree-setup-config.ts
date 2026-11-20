@@ -10,15 +10,15 @@
  * separated, or a JSON list when an entry holds a comma), and its row says what
  * `auto` runs or copies for this repository, from the same derivation.
  */
-import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes/engine/platform/platform/config';
 import {
   deriveWorktreeSetup,
   readWorktreeSetupChoice,
   worktreeSetupSettingValue,
   type WorktreeSetupChoice,
   type WorktreeSetupListSetting,
-} from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { formatListEditText, parseListEditText } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
+} from '@goodvibes/engine/platform/platform/runtime/shell';
+import { formatListEditText, parseListEditText } from '@goodvibes/engine/terminal-shell/settings-behavior';
 import type { SettingEntry } from './settings-modal-types.ts';
 
 export const WORKTREE_SETUP_COMMANDS_CONFIG_KEY: ConfigKey = 'worktree.setup.commands';

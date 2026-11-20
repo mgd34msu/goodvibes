@@ -36,7 +36,7 @@ import { selectBaselineExecutionRoot } from './tree-baseline.js';
 import { loadWorkstreamSnapshot } from '../orchestration/persistence.js';
 import { awaitNativeResumeConditions, nativeDecisionState } from './native-decisions.js';
 import { logger } from '../utils/logger.js';
-import type { Refusal } from '@goodvibes-jev/engine/errors';
+import type { Refusal } from '@goodvibes/engine/errors';
 import { queueSessionNudge, type UnitCheckLoop } from './agent-hooks.js';
 import { engineItem, type GroupRunner } from './group-runner.js';
 import type { ContractRun } from './run-context.js';

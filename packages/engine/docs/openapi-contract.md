@@ -5,8 +5,8 @@ from the committed contract artifact and kept honest by a drift gate.
 
 ## Where to fetch it
 
-- **Package export:** `@goodvibes-jev/engine/contracts/operator-openapi.json` and
-  `@goodvibes-jev/engine/platform/contracts/operator-openapi.json`
+- **Package export:** `@goodvibes/engine/contracts/operator-openapi.json` and
+  `@goodvibes/engine/platform/contracts/operator-openapi.json`
 - **In the repository:** `contracts/artifacts/operator-openapi.json`, the only
   tracked copy. A second byte-identical file under `docs/` was removed; link to
   this one. Agents that only need sessions, tasks, contracts, approvals and

@@ -2,7 +2,7 @@
  * memory-spine-rest-transport.ts
  *
  * Thin adapter over the platform's own memory-spine REST transport
- * (`@goodvibes-jev/engine/platform/platform/runtime/memory-spine`), which implements
+ * (`@goodvibes/engine/platform/platform/runtime/memory-spine`), which implements
  * the full CORE + EXTENDED verb catalog directly on the platform's own
  * transport-http primitives. The hand-rolled `wireFetch`/per-verb JSON
  * parsing is retired in favor of that shared implementation (see the platform
@@ -31,8 +31,8 @@
  *    cannot store a second copy.
  */
 
-import { createMemorySpineRestTransport as createPlatformMemorySpineRestTransport, captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, memoryVerbUnavailableError } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import type { MemoryTransport, MemoryOperationOptions } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import { createMemorySpineRestTransport as createPlatformMemorySpineRestTransport, captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, memoryVerbUnavailableError } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
+import type { MemoryTransport, MemoryOperationOptions } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
 import type { SessionRegistrationConnection } from './session-spine-rest-transport.ts';
 
 const DEFAULT_MEMORY_WIRE_TIMEOUT_MS = 2_000;

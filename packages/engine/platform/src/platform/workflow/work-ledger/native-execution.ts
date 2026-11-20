@@ -15,7 +15,7 @@ import type { ReadAccessFilter } from '../../tools/shared/read-access.js';
 /** Native work -> durable runner bridge. No product payload can provide its authority owners. */
 import { randomBytes, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import type { DecisionLog, EntryType, JudgmentPort } from '@goodvibes-jev/judgment';
+import type { DecisionLog, EntryType, JudgmentPort } from '@goodvibes/judgment';
 import { decideAutonomous } from '../../gate/autonomous-decision.js';
 import { durableKeyIdentity, freezeDurableKey, durablePayloadRevision, sameDurableRequest, parseDurableAdmission, type DurableContractAdmission, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from '../../contract/durable-admission.js';
 import { captureNativeContractSource } from '../../contract/native-source.js';
@@ -24,7 +24,7 @@ import type { ContractIntegrationInspection } from '../../contract/integration-i
 import { isTerminalContractStatus, type ContractView, type StartContractInput } from '../../contract/types.js';
 import type { NativeContractCompositionOwner } from '../../runtime/contract-composition.js';
 import { NativeWorkExecutionError, parseNativeWorkExecutionRecord, parseNativeWorkExecutionIntent, nativeExecutionOwnerMatches, nativeExecutionTargetRevision, bindNativeExecutionRequest, type NativeExecutionOwnerFacts, type NativeWorkExecutionIntent, type NativeWorkExecutionRecord, type NativeWorkExecutionStorage, type NativeWorkExecutionTarget, type NativeWorkExecutionTransaction } from './native-execution-types.js';
-import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
+import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
 
 export interface NativePairedExecutionSnapshot {
   /** `local`: the owner's own machine, whose apps use the operator token they already hold. */

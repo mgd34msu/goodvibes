@@ -57,7 +57,7 @@ import { readInvocationParams, requireStringValue } from './invocation-params.js
 import { OWNER_ONLY_KINDS } from '../../gate/classify.js';
 import { readApproval } from '../approval-lifecycle.js';
 import { approvalViewerOfActor } from '../approval-actions.js';
-import { systemActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { systemActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { admitEffects } from '../../security/effect-authority.js';
 
 /** The broker surface this verb needs, nothing but raising and reading back. */

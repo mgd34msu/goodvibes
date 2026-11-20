@@ -1,6 +1,6 @@
 /**
  * presentation-bridge.ts, the semantic bridge from web UI status vocabulary
- * onto the platform presentation contract's glyphs (@goodvibes-jev/engine/platform/platform/presentation),
+ * onto the platform presentation contract's glyphs (@goodvibes/engine/platform/platform/presentation),
  * the same contract the TUI and agent already render through.
  *
  * HAND-WRITTEN, not generated, see src/lib/generated/presentation-tokens.ts

@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   DECISION_MODEL_PROFILES,
   captureJudgmentBackendSettings,
-} from "@goodvibes-jev/judgment/decisions";
+} from "@goodvibes/judgment/decisions";
 import { Select } from "../ui/Select";
 import { Input } from "../ui/Field";
 import { Button } from "../ui/Button";

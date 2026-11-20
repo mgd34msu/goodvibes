@@ -1,12 +1,12 @@
-import type { PermissionCategory } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { analyzePermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
-import type { ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { PermissionCategory } from '@goodvibes/engine/platform/platform/permissions';
+import { analyzePermissionRequest } from '@goodvibes/engine/platform/platform/permissions';
+import type { ToolDefinition } from '@goodvibes/engine/platform/platform/types';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
+import { snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate/judgment-input';
 import { explainAgentToolPolicyInvocation } from './agent-tool-policy-guard.ts';
 import { computeApprovalPosture, readApprovalPostureFromConfig, type ApprovalPosture } from '../permissions/approval-posture.ts';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 /** `decided_at_call`: nothing settles it in advance; the decision model (or the owner) decides when the call is made. */
 type PolicyExplanationStatus = 'allowed' | 'denied' | 'owner_decides' | 'decided_at_call' | 'not_evaluated';

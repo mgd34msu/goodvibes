@@ -1,4 +1,4 @@
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import { buildGlobMatcher } from '../utils/glob-to-regex.js';
 import type { ContractView } from './types.js';
 

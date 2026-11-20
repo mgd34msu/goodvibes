@@ -6,11 +6,11 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { buildCliServicePosture, type CliServicePosture } from '../cli/service-posture.ts';
 import type { AgentHarnessSetupArgs, SetupLookupSource, SetupPlanStatus, SurfaceRegistryLike, SetupSmokeArtifactStore } from './agent-harness-setup-posture-types.ts';
 import type { OnboardingStep1CapabilityItem } from '../runtime/onboarding/index.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
 
-export { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+export { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 export function readRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {};

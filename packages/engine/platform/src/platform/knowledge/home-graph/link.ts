@@ -3,7 +3,7 @@ import { homeGraphIdentitySpace } from '../store-homegraph-node-selector.js';
 import { isClassicOperation } from '../../runtime/decision-policy.js';
 import { upsertObservedKnowledgeNode } from '../store-node-observation.js';
 import { snapshotNodeInput } from '../activation/projection.js';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import type { KnowledgeEdgeRecord, KnowledgeNodeRecord, KnowledgeNodeUpsertInput, KnowledgeSourceRecord } from '../types.js';
 import type { KnowledgeStore } from '../store.js';
 import { isActiveKnowledgeEdge } from '../projection-utils.js';

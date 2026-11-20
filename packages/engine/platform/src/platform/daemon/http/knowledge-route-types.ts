@@ -8,4 +8,4 @@ export type {
   KnowledgePacketDetail,
   KnowledgeProjectionTargetKind,
   KnowledgeServiceLike,
-} from '@goodvibes-jev/engine/daemon-api';
+} from '@goodvibes/engine/daemon-api';

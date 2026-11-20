@@ -1,22 +1,22 @@
-import { createOnboardingConfigApply } from '@goodvibes-jev/engine/terminal-shell/onboarding-config-apply';
+import { createOnboardingConfigApply } from '@goodvibes/engine/terminal-shell/onboarding-config-apply';
 import {
   createOnboardingApplyPipeline,
   onboardingVerificationFailureKind,
   orderOnboardingOperations,
   prevalidateOnboardingOperations,
-} from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-pipeline';
-import { createOnboardingConfigValidator } from '@goodvibes-jev/engine/terminal-shell/onboarding-config-validation';
+} from '@goodvibes/engine/terminal-shell/onboarding-apply-pipeline';
+import { createOnboardingConfigValidator } from '@goodvibes/engine/terminal-shell/onboarding-config-validation';
 const { validateConfigValue } = createOnboardingConfigValidator<Extract<OnboardingApplyOperation, { kind: 'set-config' }>>({
   separator: ': ',
 });
-import { createOnboardingApplyPrimitives } from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-primitives';
-import { createOnboardingFileHelpers, type RollbackAction } from '@goodvibes-jev/engine/terminal-shell/onboarding-file-helpers';
+import { createOnboardingApplyPrimitives } from '@goodvibes/engine/terminal-shell/onboarding-apply-primitives';
+import { createOnboardingFileHelpers, type RollbackAction } from '@goodvibes/engine/terminal-shell/onboarding-file-helpers';
 const { readJsonObject, writeJsonObject, setNestedValue, restoreFile, snapshotFileRollback, runRollbacks } =
   createOnboardingFileHelpers();
 import { existsSync, readFileSync } from 'node:fs';
-import '@goodvibes-jev/engine/platform/platform/config';
-import '@goodvibes-jev/engine/platform/platform/config';
-import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes/engine/platform/platform/config';
+import '@goodvibes/engine/platform/platform/config';
+import '@goodvibes/engine/platform/platform/config';
 import { getOnboardingRuntimeStatePath, readOnboardingRuntimeState, writeOnboardingAcknowledgementState } from './state.ts';
 import { verifyOnboardingRequest } from './verify.ts';
 import type {
@@ -26,7 +26,7 @@ import type {
   OnboardingApplyOperation,
   OnboardingApplyRequest,
 } from './types.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 interface BootstrapCredential {
   readonly username: string;

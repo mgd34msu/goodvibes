@@ -1,7 +1,7 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { effectivePermissionMode, gatePresetLabel, isGatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
-import type { GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate';
-import { describePermissionModeInForce, type ModeInForceWords, type PermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { effectivePermissionMode, gatePresetLabel, isGatePresetName } from '@goodvibes/engine/platform/platform/gate/presets';
+import type { GatePresetName } from '@goodvibes/engine/platform/platform/gate';
+import { describePermissionModeInForce, type ModeInForceWords, type PermissionModeInForce } from '@goodvibes/engine/platform/platform/permissions';
 
 /** Borrow the active conversation's owner; no second configuration store. */
 export interface ActiveExecutionMode {

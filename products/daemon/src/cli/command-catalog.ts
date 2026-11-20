@@ -2,7 +2,7 @@
  * command-catalog.ts, WHAT the daemon binary understands.
  *
  * This file is data. It holds no parsing logic and reads no argv. The engine is
- * `parseWithCatalog` in @goodvibes-jev/engine/terminal-shell: it knows tokens,
+ * `parseWithCatalog` in @goodvibes/engine/terminal-shell: it knows tokens,
  * values, arity, `--` and refusals, and nothing about daemons. `DAEMON_CLI_CATALOG`
  * at the bottom is this binary's whole vocabulary expressed in that engine's
  * catalog contract, so a front-end with different commands is a different
@@ -23,8 +23,8 @@
  * to match. The vocabulary below is exactly the set of things this binary
  * actually does, and the engine refuses everything else.
  */
-import { catalogFlagArity, catalogFlagsForCommand, resolveCatalogCommand } from '@goodvibes-jev/engine/terminal-shell/cli-catalog-types';
-import type { CliCatalog, CliFlagKind, CommandFlagSpec, CommandSpec, EngineParseResult, RejectedFlagSpec } from '@goodvibes-jev/engine/terminal-shell';
+import { catalogFlagArity, catalogFlagsForCommand, resolveCatalogCommand } from '@goodvibes/engine/terminal-shell/cli-catalog-types';
+import type { CliCatalog, CliFlagKind, CommandFlagSpec, CommandSpec, EngineParseResult, RejectedFlagSpec } from '@goodvibes/engine/terminal-shell';
 import type { DaemonCliFlags } from './types.ts';
 import { WEBUI_BINDING_QUERY } from './machine-contracts.ts';
 
@@ -188,7 +188,7 @@ const YES_FLAG: DaemonCommandFlagSpec = {
 /**
  * The target-daemon flags, spelled the same way everywhere.
  *
- * This is the convention @goodvibes-jev/engine/terminal-shell's
+ * This is the convention @goodvibes/engine/terminal-shell's
  * cluster-remote-daemon-target established and asked later subcommands to
  * follow: `--host`/`--port`/`--token`, each
  * defaulting to this machine's own daemon, the configured control-plane

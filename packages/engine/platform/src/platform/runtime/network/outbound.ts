@@ -5,7 +5,7 @@ import * as tls from 'node:tls';
 import { logger } from '../../utils/logger.js';
 import { isLocalHostname, readPemEntriesFromDirectory, resolvePathFromGoodVibesRoot } from './shared.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { exemptLoopbackFromProxy } from '@goodvibes-jev/engine/transport-http/paths';
+import { exemptLoopbackFromProxy } from '@goodvibes/engine/transport-http/paths';
 
 export type OutboundTrustMode = 'bundled' | 'bundled+custom' | 'custom';
 

@@ -1,12 +1,12 @@
 import {
   buildMcpWorkspaceFormFields,
   type McpWorkspaceFormField as PlatformMcpWorkspaceFormField,
-} from '@goodvibes-jev/engine/terminal-shell/mcp-workspace-model';
+} from '@goodvibes/engine/terminal-shell/mcp-workspace-model';
 import {
   McpWorkspaceState,
   type McpWorkspaceMode as PlatformMcpWorkspaceMode,
-} from '@goodvibes-jev/engine/terminal-shell/mcp-workspace-state';
-export { handleMcpWorkspaceToken } from '@goodvibes-jev/engine/terminal-shell/mcp-workspace-input';
+} from '@goodvibes/engine/terminal-shell/mcp-workspace-state';
+export { handleMcpWorkspaceToken } from '@goodvibes/engine/terminal-shell/mcp-workspace-input';
 import {
   MCP_WORKSPACE_MODAL_NAME,
   formToServerConfig,
@@ -14,16 +14,16 @@ import {
   type McpWorkspaceServerRow,
   type McpWorkspaceRow,
   type McpWorkspaceFormBase,
-} from '@goodvibes-jev/engine/terminal-shell/mcp-workspace-model';
+} from '@goodvibes/engine/terminal-shell/mcp-workspace-model';
 export {
   MCP_WORKSPACE_MODAL_NAME,
   type McpWorkspaceServerRow,
   type McpWorkspaceRow,
   type McpWorkspaceActionRow,
-} from '@goodvibes-jev/engine/terminal-shell/mcp-workspace-model';
+} from '@goodvibes/engine/terminal-shell/mcp-workspace-model';
 export type McpWorkspaceForm = McpWorkspaceFormBase;
 
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { CommandContext } from './command-registry.ts';
 import { requireMcpApi, requireShellPaths } from './commands/runtime-services.ts';
 

@@ -4,7 +4,7 @@
  * Exposes the existing catalog/receipt/rollback machinery alongside the
  * capability-bundle format, SHA-256-pinned distribution, and the governed
  * marketplace index. This is the public entry point for building and installing
- * bundles under `@goodvibes-jev/engine/platform/platform/runtime/ecosystem`.
+ * bundles under `@goodvibes/engine/platform/platform/runtime/ecosystem`.
  */
 
 export * from './catalog.js';

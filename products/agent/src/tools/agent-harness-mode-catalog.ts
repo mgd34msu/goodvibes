@@ -1,10 +1,10 @@
 import { AGENT_HARNESS_MODES } from './agent-harness-tool-schema.ts';
 import { catalogEnvelope, readLimit } from './agent-harness-tool-utils.ts';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { RELEASE_PACKAGE_ROOT } from './agent-harness-release-readiness.ts';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 export type AgentHarnessMode = typeof AGENT_HARNESS_MODES[number];
 

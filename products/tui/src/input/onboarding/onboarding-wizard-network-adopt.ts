@@ -4,7 +4,7 @@
  * already running elsewhere with a known token. Extracted from
  * onboarding-wizard-steps.ts to keep that file under the architecture line cap.
  */
-import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config';
+import { parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config';
 import { normalizeText } from './onboarding-wizard-helpers.ts';
 import type { OnboardingWizardControllerLike } from './onboarding-wizard-types.ts';
 import type { OnboardingWizardFieldDefinition } from './onboarding-wizard-types.ts';

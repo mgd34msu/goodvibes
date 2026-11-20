@@ -14,7 +14,7 @@
  * `interactive` flag or the piped run's own terminal-required error decides
  * it, so a command starts with no request.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** What `awaiting_input` sees: the command, the unterminated last line, and the output before it. */
 export function pendingPromptView(command: string, line: string, recentOutput: string): { command: string; lastLine: string; recentOutput: string } {

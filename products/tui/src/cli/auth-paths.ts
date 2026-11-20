@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
-import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell-paths';
-import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell/cli-types';
+import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
+import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
+import type { CliCommandRuntime } from '@goodvibes/engine/terminal-shell/cli-types';
 
 /** Where the local auth store, the setup credential and the daemon's operator tokens live, and whether each exists. */
 export function readAuthPaths(runtime: Pick<CliCommandRuntime, 'workingDirectory' | 'homeDirectory'>) {

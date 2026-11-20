@@ -8,10 +8,10 @@ import {
   completionFlagFromCatalog,
   runCompletionCommand as runSharedCompletionCommand,
   type CompletionTable,
-} from '@goodvibes-jev/engine/terminal-shell/shell-completion';
+} from '@goodvibes/engine/terminal-shell/shell-completion';
 import { DAEMON_COMMANDS, GLOBAL_FLAGS } from './command-catalog.ts';
 
-export { COMPLETION_SHELLS, isCompletionShell, type CompletionShell } from '@goodvibes-jev/engine/terminal-shell/shell-completion';
+export { COMPLETION_SHELLS, isCompletionShell, type CompletionShell } from '@goodvibes/engine/terminal-shell/shell-completion';
 
 const DIRECTORY_FLAGS: ReadonlySet<string> = new Set(['--daemon-home', '--working-dir', '--cd', '-C']);
 

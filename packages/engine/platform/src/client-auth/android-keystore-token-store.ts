@@ -26,7 +26,7 @@
  *
  * Error messages use the format: [what happened] · [why] · [what to do]
  */
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import type { GoodVibesTokenStore } from './types.js';
 import { createNativeTokenPersistence } from './native-token-persistence.js';
 
@@ -192,7 +192,7 @@ export interface AndroidKeystoreTokenStore extends GoodVibesTokenStore {
  *
  * @example
  * ```ts
- * import { createAndroidKeystoreTokenStore, createReactNativeGoodVibesPlatform } from '@goodvibes-jev/engine/platform/react-native';
+ * import { createAndroidKeystoreTokenStore, createReactNativeGoodVibesPlatform } from '@goodvibes/engine/platform/react-native';
  *
  * const tokenStore = createAndroidKeystoreTokenStore({
  *   service: 'com.myapp.gv',

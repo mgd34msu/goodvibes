@@ -22,7 +22,7 @@ import { completeJudgmentView } from './complete-view.js';
  * nothing runs on them. Code lists a route unless the reading is a no, and
  * marks one whose reading is uncertain.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** Lines of context carried on each side of a candidate route line. */
 export const ROUTE_CONTEXT_LINES = 3;

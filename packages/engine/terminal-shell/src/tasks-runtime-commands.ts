@@ -12,11 +12,11 @@ import {
   type LocalTaskSource,
   type DaemonVerbCaller,
   type UnionTask,
-} from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import type { OpsApi } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
-import type { TaskKind } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+} from '@goodvibes/engine/platform/platform/runtime/client';
+import type { OpsApi } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
+import type { TaskKind } from '@goodvibes/engine/platform/platform/runtime/state';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { readRefusal } from '@goodvibes/engine/errors';
 import { sortUnionTasks } from './task-presentation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { commandRefusal } from './command-confirmation.js';

@@ -9,7 +9,7 @@
  * content now, so none of them dead-ends.
  */
 
-import type { ProcessKind } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { ProcessKind } from '@goodvibes/engine/platform/platform/runtime/fleet';
 
 /** A specific row to select when a view opens (a fleet process id, optionally its kind). */
 export interface ViewTarget {

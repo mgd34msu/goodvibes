@@ -61,9 +61,9 @@
  */
 
 import { TRANSCRIPT_LAYOUT as LAYOUT } from './transcript-layout.js';
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { createStyledCell } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
+import { createStyledCell } from '@goodvibes/engine/platform/platform/types';
+import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 
 /** Columns added per nesting level. Fixed, never content-dependent. */
 const TREE_STEP_COLS = 2;

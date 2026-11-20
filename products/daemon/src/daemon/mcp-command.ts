@@ -23,10 +23,10 @@
  * is ever written to it. Every refusal is ONE line on stderr that names the
  * missing prerequisite, and the process ends when the client closes stdin.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { getOperatorContract } from '@goodvibes-jev/engine/contracts';
-import { callDaemonRoute, resolveRemoteDaemonTarget } from '@goodvibes-jev/engine/terminal-shell';
-import { createHttpJsonTransport, createOperatorRemoteClient } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { getOperatorContract } from '@goodvibes/engine/contracts';
+import { callDaemonRoute, resolveRemoteDaemonTarget } from '@goodvibes/engine/terminal-shell';
+import { createHttpJsonTransport, createOperatorRemoteClient } from '@goodvibes/engine/platform/platform/runtime/transport';
 import {
   AGENT_MCP_TOOL_CATEGORIES,
   createOperatorMcpServer,
@@ -34,7 +34,7 @@ import {
   serveOperatorMcp,
   type ChunkSink,
   type ChunkSource,
-} from '@goodvibes-jev/engine/platform/platform/mcp/server';
+} from '@goodvibes/engine/platform/platform/mcp/server';
 import { VERSION } from '../version.js';
 
 export const MCP_SUBCOMMANDS = ['serve'] as const;

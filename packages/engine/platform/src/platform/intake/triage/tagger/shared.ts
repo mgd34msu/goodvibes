@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /** Fixed provider meanings. No message-derived heuristics or arbitrary flags. */
 export const TAGS = Object.freeze({
   'GoodVibes/Spam': Object.freeze({ imap: 'GoodVibes_Spam', slack: 'no_entry_sign', discord: '🚫' }),

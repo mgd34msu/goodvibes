@@ -15,7 +15,7 @@
  */
 import type { ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
-import { formatBeadTime, summarizeToolCall, type BeadStatus, type ToolCallSummary } from '@goodvibes-jev/engine/contracts';
+import { formatBeadTime, summarizeToolCall, type BeadStatus, type ToolCallSummary } from '@goodvibes/engine/contracts';
 import { asRecord } from '../../lib/object';
 import {
   describeToolActivity,

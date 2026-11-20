@@ -1,4 +1,4 @@
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { admitByAllowlists, ChannelPolicyManager, type ChannelAllowlists } from '../policy-manager.js';
 import type {
   ChannelAccountRecord,

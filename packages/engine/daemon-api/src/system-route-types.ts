@@ -1,4 +1,4 @@
-import type { Refusal } from '@goodvibes-jev/engine/errors';
+import type { Refusal } from '@goodvibes/engine/errors';
 import type { JsonRecord } from './route-helpers.js';
 import type { CredentialKind } from './http-policy.js';
 import type { Actor } from './actor.js';

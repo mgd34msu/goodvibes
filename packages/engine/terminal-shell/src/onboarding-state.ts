@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
-import { readVersioned, setAsideNewerVersionFile } from '@goodvibes-jev/engine/platform/platform/config';
-import { logger, ProcessLockBusyError, withProcessLockSync } from '@goodvibes-jev/engine/platform/platform/utils';
+import { atomicWriteFileSync } from '@goodvibes/engine/platform/platform/config';
+import { readVersioned, setAsideNewerVersionFile } from '@goodvibes/engine/platform/platform/config';
+import { logger, ProcessLockBusyError, withProcessLockSync } from '@goodvibes/engine/platform/platform/utils';
 import type { OnboardingAcknowledgementRuntimeState, OnboardingAcknowledgementTarget, OnboardingMode, OnboardingShellPaths, OnboardingStateScope, } from './onboarding-state-types.js';
 const ONBOARDING_RUNTIME_STATE_FILE = 'onboarding-state.json';
 /**

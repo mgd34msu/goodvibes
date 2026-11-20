@@ -27,7 +27,7 @@
  *
  * Checked by `bun run types:check`.
  */
-import type { GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
+import type { GoodVibesConfig } from '@goodvibes/engine/platform/platform/config';
 
 type ConfigKey = keyof GoodVibesConfig;
 

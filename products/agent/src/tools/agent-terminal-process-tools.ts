@@ -1,13 +1,13 @@
 import { processClassificationOptions } from './agent-harness-process-launch.ts';
 import type { EffectResult } from './agent-harness-tool-utils.ts';
 import { createProcessInputProjector } from './agent-process-ingress.ts';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { backgroundProcessSummary, describeBackgroundProcess, runBackgroundProcessAction } from './agent-harness-background-processes.ts';
-import { harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ingress';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
-import { readFlag, readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ingress';
+import { confirmParameter, requestParameter } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
+import { readFlag, readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 const READ_ONLY_PROCESS_ACTIONS = new Set(['list', 'status', 'poll', 'log', 'output', 'capabilities', 'doctor', 'parity']);
 

@@ -1,20 +1,20 @@
 import type { ShellPathService } from '@/runtime/index.ts';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { openWorkspaceRegistrationStore, readWorkspaceRegisterSync } from '@goodvibes-jev/engine/platform/platform/workspace/registration/store';
-import { readCheckpointEligibilitySync, createCheckpointEligibilityChecker } from '@goodvibes-jev/engine/platform/platform/workspace/registration/checkpoint-eligibility';
-import { broadRootReason } from '@goodvibes-jev/engine/platform/platform/workspace/checkpoint/root-guard';
-import { resolveWorkspaceRegistration, normalizeWorkspaceRoot } from '@goodvibes-jev/engine/platform/platform/workspace/registration/resolution';
-import { probeWorktreeLink } from '@goodvibes-jev/engine/platform/platform/workspace/registration/worktree-link';
-import type { WorkspaceRegistrationStore, CheckpointEligibility, RegisterWorkspaceResult, RegisteredWorkspaceRecord, DeclinedWorkspaceRecord, WorkspaceGitMetadata, WorkspaceResolution } from '@goodvibes-jev/engine/platform/platform/workspace';
-import { sharedWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace/registration/shared-register-path';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { openWorkspaceRegistrationStore, readWorkspaceRegisterSync } from '@goodvibes/engine/platform/platform/workspace/registration/store';
+import { readCheckpointEligibilitySync, createCheckpointEligibilityChecker } from '@goodvibes/engine/platform/platform/workspace/registration/checkpoint-eligibility';
+import { broadRootReason } from '@goodvibes/engine/platform/platform/workspace/checkpoint/root-guard';
+import { resolveWorkspaceRegistration, normalizeWorkspaceRoot } from '@goodvibes/engine/platform/platform/workspace/registration/resolution';
+import { probeWorktreeLink } from '@goodvibes/engine/platform/platform/workspace/registration/worktree-link';
+import type { WorkspaceRegistrationStore, CheckpointEligibility, RegisterWorkspaceResult, RegisteredWorkspaceRecord, DeclinedWorkspaceRecord, WorkspaceGitMetadata, WorkspaceResolution } from '@goodvibes/engine/platform/platform/workspace';
+import { sharedWorkspaceRegisterPath } from '@goodvibes/engine/platform/platform/workspace/registration/shared-register-path';
 
-export { normalizeWorkspaceRoot } from '@goodvibes-jev/engine/platform/platform/workspace/registration/resolution';
+export { normalizeWorkspaceRoot } from '@goodvibes/engine/platform/platform/workspace/registration/resolution';
 export type {
   DeclinedWorkspaceRecord,
   RegisteredWorkspaceRecord,
   WorkspaceCoverageStatus,
   WorkspaceResolution,
-} from '@goodvibes-jev/engine/platform/platform/workspace';
+} from '@goodvibes/engine/platform/platform/workspace';
 
 /**
  * CHECKPOINT-ELIGIBILITY BOUNDARY (owner ruling: the checkpoint boundary stays

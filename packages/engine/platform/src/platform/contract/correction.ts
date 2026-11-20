@@ -27,8 +27,8 @@ import { nativeContractActionSource } from './native-decisions.js';
  * files the unit and its fixes touched.
  */
 import { waitForTaskRecovery } from '../core/response-completion.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { hashState, JudgmentError } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import { hashState, JudgmentError } from '@goodvibes/judgment';
 import type { StallRoute } from '../../events/contract.js';
 import type { WorkItem } from '../orchestration/types.js';
 import { stallRoute } from './batteries/stall-route.js';
@@ -398,7 +398,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       const canRepair = config().planRepairLimit === 0 || nativeSpent(contract, key) < config().planRepairLimit + 1;
       const decision = await readDecision(run, { stage: 'fix-plan', targetId: brief.targetId,
         action: 'Run this exact checked fix group against the existing target criteria', allowAct: valid,
-        state: () => ({ plan: checked.plan ?? null, problems: checked.problems, requiredIds: brief.requiredIds, round, attempts: nativeSpent(contract, key), limit: config().planRepairLimit === 0 ? null : config().planRepairLimit + 1 }) as unknown as import('@goodvibes-jev/judgment').EntryType,
+        state: () => ({ plan: checked.plan ?? null, problems: checked.problems, requiredIds: brief.requiredIds, round, attempts: nativeSpent(contract, key), limit: config().planRepairLimit === 0 ? null : config().planRepairLimit + 1 }) as unknown as import('@goodvibes/judgment').EntryType,
         continuations: canRepair ? [{ id: 'repair-fix-plan', kind: 'revise-action', description: 'Use one remaining fix-planner attempt to repair only this derived group.' }] : [],
         decisionIds: checked.decisionIds, signal: run.abort.signal });
       await input.assertCurrent();
@@ -506,7 +506,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       const cost = itemClosed(run, unit) ? 2 : 1;
       const decision = await readDecision(run, { stage: 'stall', targetId: unit.id, action: 'Start a fresh worker with this exact unit brief, criteria and selected route',
         allowAct: run.contract.sessionMode !== true && (config().maxFixRounds === 0 || unit.fixRounds + unit.freshAgents + cost <= config().maxFixRounds),
-        state: () => ({ goal: unit.goal, brief: unit.brief, criteria: unit.criteria.map(c => ({ id: c.id, text: c.text, status: c.status })), route, spent: unit.fixRounds + unit.freshAgents, limit: config().maxFixRounds === 0 ? null : config().maxFixRounds, cost }) as unknown as import('@goodvibes-jev/judgment').EntryType,
+        state: () => ({ goal: unit.goal, brief: unit.brief, criteria: unit.criteria.map(c => ({ id: c.id, text: c.text, status: c.status })), route, spent: unit.fixRounds + unit.freshAgents, limit: config().maxFixRounds === 0 ? null : config().maxFixRounds, cost }) as unknown as import('@goodvibes/judgment').EntryType,
         continuations: [], decisionIds, signal: run.abort.signal });
       if (decision.decision.outcome !== 'act') { run.control.fail('other', decidedWithoutModel(decision) ? 'no fresh worker can start on this unit: its fix rounds are used up or the work must stay in the session, so the unmet criteria were not repaired' : 'the decision model would not start another worker on this unit, so the unmet criteria were not repaired'); return; }
       decision.recordClaim();
@@ -600,7 +600,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
     const decision = await readDecision(run, { stage: check.check.result === 'native-decision' || check.check.result === 'await-owner' ? 'evidence' : 'stall', targetId: unit.id,
       action: 'Plan a bounded correction that must preserve all criteria and produce actual new evidence', allowAct: canSplit,
       state: () => ({ goal: unit.goal, criteria: unit.criteria.map(c => ({ id: c.id, text: c.text, status: c.status })), check: { id: check.check.id, result: check.check.result, goal: check.check.goal, quality: check.check.quality },
-        fixRounds: unit.fixRounds, freshAgents: unit.freshAgents, limit: config().maxFixRounds === 0 ? null : config().maxFixRounds, sessionMode: run.contract.sessionMode === true }) as unknown as import('@goodvibes-jev/judgment').EntryType,
+        fixRounds: unit.fixRounds, freshAgents: unit.freshAgents, limit: config().maxFixRounds === 0 ? null : config().maxFixRounds, sessionMode: run.contract.sessionMode === true }) as unknown as import('@goodvibes/judgment').EntryType,
       continuations: canFresh ? [{ id: 'fresh-worker', kind: 'revise-action', description: 'Prepare a fresh worker for the same requirements and obtain a new exact-action decision before starting it.' }] : [],
       decisionIds: check.check.decisionIds, signal: run.abort.signal });
     if (decision.decision.outcome === 'reject') { run.control.fail('other', decidedWithoutModel(decision) ? 'no correction round is left for this unit: its fix rounds are used up or the work must stay in the session' : 'the decision model stopped correcting the work: the evidence or the remaining budget was not enough for another round'); return; }

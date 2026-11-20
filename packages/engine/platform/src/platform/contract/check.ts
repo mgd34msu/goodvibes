@@ -26,8 +26,8 @@ import { nativeContractPort, type NativeContractServices } from './native-decisi
 import { assignedReviewPaths, reviewProjectPath } from './review-inventory.js';
 import { reviewedFileFromObservation } from './review-file-observations.js';
 import type { Contract } from './types.js';
-import { hashState, type EntryType, type JudgmentPort, type YesNoReading } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { hashState, type EntryType, type JudgmentPort, type YesNoReading } from '@goodvibes/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { saysYesAtAct } from './batteries/request-shape.js';
 import { criterionVerdict, UNIT_JUDGES } from './batteries/unit-judge.js';
 import { midRunNudgeItems, qualityVerdict, unitQuality, type QualityVerdict } from './batteries/unit-quality.js';

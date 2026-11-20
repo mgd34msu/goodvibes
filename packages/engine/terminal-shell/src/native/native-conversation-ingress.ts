@@ -1,5 +1,5 @@
-import type { Orchestrator, OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { Orchestrator, OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { NativeConversationInput } from './native-conversation-input.js';
 import {
   nativeConversationIntakeAccepted,

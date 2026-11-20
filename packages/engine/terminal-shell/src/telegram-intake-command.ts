@@ -15,7 +15,7 @@
  * the model runs may list and look up; only the owner typing at this terminal
  * configures, decides, reads an original, cancels, revokes or releases.
  */
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
 import { commandRefusal } from './command-confirmation.js';

@@ -1,4 +1,4 @@
-import { formatAgentChannelDeliveryReceiptLine, readAgentChannelDeliveryReceipts } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery-receipts';
+import { formatAgentChannelDeliveryReceiptLine, readAgentChannelDeliveryReceipts } from '@goodvibes/engine/terminal-shell/agent-turn/channel-delivery-receipts';
 import type { CommandContext } from './command-registry.ts';
 import {
   readConnectedHostMethod,
@@ -11,7 +11,7 @@ import type { AgentWorkspaceChannelStatus } from './agent-workspace-channels.ts'
 import { buildAgentWorkspaceChannels } from './agent-workspace-channels.ts';
 import { createChannelPrincipalAttributionResolver, type ChannelPrincipalAttributionResolver, UNKNOWN_PRINCIPAL_LABEL } from '../agent/principal-attribution.ts';
 import { renderForModel, untrustedFrom } from '../agent/untrusted-content.ts';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
 
 type JsonRecord = Record<string, unknown>;
 

@@ -1,15 +1,15 @@
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
-import { serviceExpectedOutcome, type ServiceMethodId } from '@goodvibes-jev/engine/terminal-shell/agent-turn/service-lifecycle';
+import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
+import { serviceExpectedOutcome, type ServiceMethodId } from '@goodvibes/engine/terminal-shell/agent-turn/service-lifecycle';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
-import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
-import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
+import { resolveConnectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { getOperatorContract } from '@goodvibes/engine/platform/contracts';
 import { requirePlatform, requireShellPaths } from '../input/commands/runtime-services.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { CliServicePosture } from '../cli/service-posture.ts';
-import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
+import { readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
 import { readConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
 import { operatorMethodRoute, provisionConnectedHostTokenRoute } from './agent-harness-setup-posture-utils.ts';
-import { homeRelativePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/home-path';
+import { homeRelativePath } from '@goodvibes/engine/terminal-shell/agent-turn/home-path';
 import type { OperatorContractMethod, SetupBootstrapPlan, SetupConnectedHostAuthPosture, SetupPlanStatus, SetupRepairCard, SetupRepairCardEffect, SetupRepairLiveEvidence, SetupRepairOutcome, SetupRepairRecommendation, SetupRepairCardState, SetupServiceLifecycleDecision, SetupServiceProbe, SetupServiceProbeStatus } from './agent-harness-setup-posture-types.ts';
 import type { collectSnapshot } from './agent-harness-setup-posture-utils.ts';
 

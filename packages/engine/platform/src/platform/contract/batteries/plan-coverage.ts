@@ -45,7 +45,7 @@ import {
   type Question,
   type YesNoBand,
   type YesNoReading,
-} from '@goodvibes-jev/judgment';
+} from '@goodvibes/judgment';
 
 /** The band on every part: yes side medium (a false gap costs a repair), no side high (a missed requirement is never judged). */
 export const COVERAGE_BAND: YesNoBand = { yes: STAKES_BANDS.medium.confidence, no: STAKES_BANDS.high.confidence };

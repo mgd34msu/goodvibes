@@ -3,8 +3,8 @@ import {
   isCommonConversationModalOpen,
   composeConversationLayers,
   type ModalEntry,
-} from '@goodvibes-jev/engine/terminal-shell/renderer/conversation-overlays';
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+} from '@goodvibes/engine/terminal-shell/renderer/conversation-overlays';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
 import type { ConversationManager } from '../core/conversation';
 import type { CommandRegistry } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
@@ -13,7 +13,7 @@ import { renderFilePickerOverlay } from './file-picker-overlay.ts';
 import { renderModelWorkspace } from './model-workspace.ts';
 import { renderSelectionModalOverlay } from './selection-modal-overlay.ts';
 import { renderSearchOverlay } from './search-overlay.ts';
-import { renderHistorySearchOverlay } from '@goodvibes-jev/engine/terminal-shell/history-search-overlay';
+import { renderHistorySearchOverlay } from '@goodvibes/engine/terminal-shell/history-search-overlay';
 import { renderContextInspector } from './context-inspector.ts';
 import { renderSettingsModal } from './settings-modal.ts';
 import { renderConfigModal } from './config-modal.ts';
@@ -29,7 +29,7 @@ import type { SurfaceLayer } from './surface-kit.ts';
 import { layerToLines } from './surface-kit-extra.ts';
 import './surface-kit-parts.ts';
 import { getSharedToastCenter } from './toast-center.ts';
-import { firstRunOwnsScreen } from '@goodvibes-jev/engine/terminal-shell/first-run';
+import { firstRunOwnsScreen } from '@goodvibes/engine/terminal-shell/first-run';
 
 export interface ConversationOverlayContext {
   readonly input: InputHandler;

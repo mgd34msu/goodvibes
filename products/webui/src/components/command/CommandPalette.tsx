@@ -12,7 +12,7 @@
 import { ArrowRight, CornerDownLeft, MessageSquare, Search, Settings, Zap } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { classicCommandIndices } from '@goodvibes-jev/engine/platform/browser/decision-policy';
+import { classicCommandIndices } from '@goodvibes/engine/platform/browser/decision-policy';
 import { type CommandDef, getCommands, subscribeCommands } from '../../lib/commands';
 import {
   buildPaletteSections,

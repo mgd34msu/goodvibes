@@ -19,16 +19,16 @@ export {
   parseReleaseTagFromLocation,
   resolveLatestReleaseTag,
   type UpdateFetchLike,
-} from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+} from '@goodvibes/engine/platform/platform/runtime/self-update';
 
-export { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/install-kind';
-export type { InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+export { detectInstallKind } from '@goodvibes/engine/platform/platform/runtime/install-kind';
+export type { InstallKind } from '@goodvibes/engine/platform/platform/runtime/operations';
 
-import { fallbackUpdateCommand as platformFallbackUpdateCommand } from '@goodvibes-jev/engine/platform/platform/runtime/install-kind';
-import type { InstallKind as PlatformInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { fallbackUpdateCommand as platformFallbackUpdateCommand } from '@goodvibes/engine/platform/platform/runtime/install-kind';
+import type { InstallKind as PlatformInstallKind } from '@goodvibes/engine/platform/platform/runtime/operations';
 
 /** The package a package-managed install of this terminal is upgraded through. */
-const TERMINAL_PACKAGE_NAME = '@goodvibes-jev/tui';
+const TERMINAL_PACKAGE_NAME = '@goodvibes/tui';
 
 /** The exact command to tell the user to run instead of a swap, for each non-binary install kind. */
 export function fallbackUpdateCommand(kind: Exclude<PlatformInstallKind, 'binary'>): string {

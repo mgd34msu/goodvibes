@@ -36,15 +36,15 @@ import {
   type ClusterClock,
   type ClusterSurfaceHolding,
   type GroupOperationsContext,
-} from '@goodvibes-jev/engine/platform/platform/cluster';
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/platform/platform/cluster';
+import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { SecretsManager } from '../config/secrets.js';
-import type { ClusterTransport } from '@goodvibes-jev/engine/platform/platform/cluster';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ClusterTransport } from '@goodvibes/engine/platform/platform/cluster';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { ShellPathService } from './index.js';
 import { createClusterComposition } from './cluster-composition.js';
-import type { ClusterCoordinator } from '@goodvibes-jev/engine/platform/platform/cluster';
+import type { ClusterCoordinator } from '@goodvibes/engine/platform/platform/cluster';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import { VERSION } from '../version.js';
 

@@ -3,8 +3,8 @@
  * request shape builder, a scripted Jev port, a fake planner runner and a
  * config reader. Tests change what they exercise.
  */
-import type { Question } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import type { Question } from '@goodvibes/judgment';
+import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes/judgment/testing';
 import type { DecompositionRunner, DecompositionRunnerRequest, DecompositionRunResult } from '../../platform/src/platform/core/plan-decomposition.js';
 import type { ContractPlan } from '../../platform/src/platform/contract/plan-schema.js';
 import type { ContractConfigReader, RequestShape, ShapeReading, UnitRoute } from '../../platform/src/platform/contract/index.js';

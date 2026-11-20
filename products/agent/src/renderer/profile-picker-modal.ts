@@ -1,4 +1,4 @@
-import { createProfilePickerRenderer } from '@goodvibes-jev/engine/terminal-shell/renderer/profile-picker-modal';
+import { createProfilePickerRenderer } from '@goodvibes/engine/terminal-shell/renderer/profile-picker-modal';
 import { renderProfilePickerStatePackageText } from '../input/profile-picker-modal.ts';
 const renderer = createProfilePickerRenderer({
  hints:[['↑↓','move'],['⏎','load']],canDelete:false,

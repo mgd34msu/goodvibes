@@ -9,8 +9,8 @@
  * `describeOperatorRpcError`, which names the transport, never a value.
  */
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { registerAboutMeCommand } from '@goodvibes-jev/engine/terminal-shell/about-me-command';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { registerAboutMeCommand } from '@goodvibes/engine/terminal-shell/about-me-command';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
 
 /** Which surface is recording a line; named in the provenance suffix. */

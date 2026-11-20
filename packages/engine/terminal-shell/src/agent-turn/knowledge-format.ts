@@ -1,4 +1,4 @@
-import { done, failedOutcome, observe, refusal, tally, type EffectOutcome, type Tally } from '@goodvibes-jev/engine/errors';
+import { done, failedOutcome, observe, refusal, tally, type EffectOutcome, type Tally } from '@goodvibes/engine/errors';
 
 type JsonRecord = Record<string, unknown>;
 

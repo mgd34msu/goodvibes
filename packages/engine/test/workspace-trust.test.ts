@@ -13,9 +13,9 @@ import { afterAll, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes/judgment';
+import { choiceAnswer, fakePort } from '@goodvibes/judgment/testing';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { createPermissionConfigReader, PermissionManager } from '../platform/src/platform/permissions/manager.ts';
@@ -24,7 +24,7 @@ import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/d
 import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.ts';
 import { trustGatedAsk, WorkspaceTrustManager, type WorkspaceTrustLevel } from '../platform/src/platform/runtime/workspace-trust.ts';
 import { forgetGateReadings, gateReadingsPort } from './_helpers/gate-readings.ts';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'gv-workspace-trust-')));
 afterAll(() => { rmSync(root, { recursive: true, force: true }); });

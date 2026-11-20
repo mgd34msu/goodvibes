@@ -1,5 +1,5 @@
-import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { commandArgsWithLiteralMarker } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
+import { commandJsonOrText as jsonOrText } from '@goodvibes/engine/terminal-shell/cli-output';
+import { commandArgsWithLiteralMarker } from '@goodvibes/engine/terminal-shell/cli-parser-engine';
 /**
  * owner-profile-command.ts, `goodvibes-agent owner-profile` over the daemon's
  * `profile.*` control-plane verbs (docs/owner-profile.md §11.1).
@@ -19,9 +19,9 @@ import { commandArgsWithLiteralMarker } from '@goodvibes-jev/engine/terminal-she
  *   this file logs a value, and `status` prints counts and field names only.
  */
 
-import { createProfileGatewayInvoke, type ProfileGatewayInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn/profile-gateway';
-import { connectedHostFamilyRemote } from '@goodvibes-jev/engine/terminal-shell/agent-turn/family-remote';
-import { narrowProfileGet, narrowProfilePerson, narrowProfileProvenance, narrowProfileRead, isWithheldProfileSection, withholdPeople, type ContainedProfileRead, narrowProfileStatus, narrowProfileWrite, PROFILE_METHOD_IDS, PROFILE_RECORDING_SURFACE, PROFILE_RESPONSE_UNREADABLE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/profile-types';
+import { createProfileGatewayInvoke, type ProfileGatewayInvoke } from '@goodvibes/engine/terminal-shell/agent-turn/profile-gateway';
+import { connectedHostFamilyRemote } from '@goodvibes/engine/terminal-shell/agent-turn/family-remote';
+import { narrowProfileGet, narrowProfilePerson, narrowProfileProvenance, narrowProfileRead, isWithheldProfileSection, withholdPeople, type ContainedProfileRead, narrowProfileStatus, narrowProfileWrite, PROFILE_METHOD_IDS, PROFILE_RECORDING_SURFACE, PROFILE_RESPONSE_UNREADABLE } from '@goodvibes/engine/terminal-shell/agent-turn/profile-types';
 import { operatorFlagValue, parseOperatorCommandArgs } from './operator-command-args.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';

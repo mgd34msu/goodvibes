@@ -1,6 +1,6 @@
-import { setSecretBackedSettingValue as writeSetting } from '@goodvibes-jev/engine/terminal-shell/settings-secret-writes';
+import { setSecretBackedSettingValue as writeSetting } from '@goodvibes/engine/terminal-shell/settings-secret-writes';
 import { agentDaemonCredentialsInstalled, isDaemonOwnedConfigKey, routeDaemonOwnedCredentialWrite } from '../config/daemon-credential-routing.ts';
-export type { SettingsSecretsManager } from '@goodvibes-jev/engine/terminal-shell/settings-secret-writes';
+export type { SettingsSecretsManager } from '@goodvibes/engine/terminal-shell/settings-secret-writes';
 export interface SettingsSecretWriteReport { readonly ok: boolean; readonly message: string; }
 type WriteArgs = Omit<Parameters<typeof writeSetting>[0], 'route' | 'onDaemonWrite' | 'onFailure' | 'onError' | 'daemonCredentials'>;
 export function setSecretBackedSettingValue(args: WriteArgs & { readonly onWriteReported?: ((report: SettingsSecretWriteReport) => void) | undefined }): Promise<boolean> {

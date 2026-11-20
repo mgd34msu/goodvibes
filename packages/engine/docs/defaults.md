@@ -3,7 +3,7 @@
 This document records every timeout, retry, and backoff default in the platform.
 All values are in milliseconds unless stated otherwise.
 
-## HTTP transport (`@goodvibes-jev/engine/platform/transport-http`)
+## HTTP transport (`@goodvibes/engine/platform/transport-http`)
 
 | Path | Default | Notes |
 |------|---------|-------|
@@ -19,7 +19,7 @@ All values are in milliseconds unless stated otherwise.
 **Rationale:** Single-attempt default keeps latency predictable for interactive workloads. Callers
 increase `maxAttempts` for batch/background operations.
 
-## SSE stream reconnect (`@goodvibes-jev/engine/platform/transport-http`, `reconnect.ts`)
+## SSE stream reconnect (`@goodvibes/engine/platform/transport-http`, `reconnect.ts`)
 
 | Path | Default | Notes |
 |------|---------|-------|
@@ -132,18 +132,18 @@ See [Web UI Integration → Deployment topology](./web-ui-integration.md#deploym
 
 See [Voice and streaming TTS](./voice.md) for the provider-agnostic streaming route and TUI integration contract.
 
-## WebSocket reconnect (`@goodvibes-jev/engine/platform/transport-realtime`)
+## WebSocket reconnect (`@goodvibes/engine/platform/transport-realtime`)
 
 | Path | Default | Notes |
 |------|---------|-------|
-| `DEFAULT_WS_MAX_ATTEMPTS` | unlimited | Shared constant in `@goodvibes-jev/engine/platform/transport-realtime`; passed to `normalizeStreamReconnectPolicy`. A refused or revoked credential ends the connection at once |
+| `DEFAULT_WS_MAX_ATTEMPTS` | unlimited | Shared constant in `@goodvibes/engine/platform/transport-realtime`; passed to `normalizeStreamReconnectPolicy`. A refused or revoked credential ends the connection at once |
 | `reconnect.baseDelayMs` | 500 (inherited from SSE policy) | |
 | `reconnect.maxDelayMs` | 30 000 (inherited from SSE policy) | |
 | `reconnect.backoffFactor` | 2 | |
 
 **Rationale:** Matches SSE for a symmetric schedule. Finite cap prevents infinite auth-failure loops.
 
-## Auth (`@goodvibes-jev/engine/platform/auth`)
+## Auth (`@goodvibes/engine/platform/auth`)
 
 | Path | Timeout | Max Retries | Notes |
 |------|---------|-------------|-------|
@@ -153,7 +153,7 @@ See [Voice and streaming TTS](./voice.md) for the provider-agnostic streaming ro
 **Rationale:** Auth calls go through the HTTP transport layer which applies `DEFAULT_HTTP_RETRY_POLICY`.
 There is no separate auth-specific timeout; callers should pass an `AbortSignal` for bounded waits.
 
-## Session auth (`@goodvibes-jev/engine/platform/daemon`, daemon embedders)
+## Session auth (`@goodvibes/engine/platform/daemon`, daemon embedders)
 
 | Constant | Default | Notes |
 |----------|---------|-------|
@@ -168,6 +168,6 @@ There is no separate auth-specific timeout; callers should pass an `AbortSignal`
 | General rate limiter | 60 requests / minute / IP | Applied to all routes except login; configurable via `rateLimit` daemon option |
 | Login rate limiter | 5 requests / minute / IP | Applied to `POST /login` only; configurable via `loginRateLimit` daemon option |
 
-## Outbound producer queue (`@goodvibes-jev/engine/platform/transport-realtime`, `runtime-events.ts`)
+## Outbound producer queue (`@goodvibes/engine/platform/transport-realtime`, `runtime-events.ts`)
 
 The WebSocket connector's outbound queue holds up to 1024 messages and 8 MiB (`maxQueuedMessages`, `maxQueuedBytes`). Messages sent while the socket is connecting, reconnecting or still authenticating are held in order and flushed when the socket is ready; one that does not fit, or is alone over 8 MiB, is dropped and reported through `onBackpressure`, a `TRANSPORT_BACKPRESSURE` event and `onError`. Inbound runtime-event frames arrive in chunks of at most 64 KiB; a reassembled message is capped at 64M characters (a longer one is refused and the partial message dropped), and sending a message over that cap throws.

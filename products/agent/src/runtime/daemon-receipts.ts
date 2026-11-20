@@ -20,7 +20,7 @@
  * (dedupe by id), as soon as, and whenever, a delivery sink is attached.
  */
 
-import type { DaemonReceipt } from '@goodvibes-jev/engine/platform/platform/daemon/receipts';
+import type { DaemonReceipt } from '@goodvibes/engine/platform/platform/daemon/receipts';
 
 export type { DaemonReceipt };
 

@@ -1,5 +1,5 @@
 /** What a settings owner's pre-effect refusal tells the caller, shared by the change and import clients. */
-import type { SettingsPreconditionReceipt } from '@goodvibes-jev/engine/daemon-api';
+import type { SettingsPreconditionReceipt } from '@goodvibes/engine/daemon-api';
 
 export type SettingsRefusalReason = NonNullable<SettingsPreconditionReceipt['refusalReason']>;
 const REASONS: readonly SettingsRefusalReason[] = ['stale', 'spent', 'managed', 'read-only', 'owner-fault'];

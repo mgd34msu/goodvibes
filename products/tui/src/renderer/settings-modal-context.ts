@@ -1,6 +1,6 @@
-import { SHARED_SETTING_ENUM_DESCRIPTIONS } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
-import { buildMcpHelp } from '@goodvibes-jev/engine/terminal-shell/renderer/mcp-trust-context';
-import { helpFact, helpHeading, helpText, helpWarning, type HelpLine } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-documentation';
+import { SHARED_SETTING_ENUM_DESCRIPTIONS } from '@goodvibes/engine/terminal-shell/renderer/settings-metadata';
+import { buildMcpHelp } from '@goodvibes/engine/terminal-shell/renderer/mcp-trust-context';
+import { helpFact, helpHeading, helpText, helpWarning, type HelpLine } from '@goodvibes/engine/terminal-shell/renderer/settings-documentation';
 /**
  * settings-modal-context.ts, the documentation the settings modal shows for
  * its selected row: every setting's key, current and default value, type,
@@ -12,15 +12,15 @@ import { helpFact, helpHeading, helpText, helpWarning, type HelpLine } from '@go
  */
 
 import type { SettingsModal, SettingEntry, SettingsCategory } from '../input/settings-modal.ts';
-import { FEATURE_SETTINGS_BY_ID, isFeatureValueEnabled } from '@goodvibes-jev/engine/terminal-shell';
+import { FEATURE_SETTINGS_BY_ID, isFeatureValueEnabled } from '@goodvibes/engine/terminal-shell';
 import { CATEGORY_INFO, describeUiRouting, formatValue, getSettingLabel } from './settings-modal-helpers.ts';
 import { buildConnectionHelp } from './settings-modal-connections.ts';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import '../input/concealed-input.ts';
-import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments';
-import '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes/engine/platform/platform/payments';
+import '@goodvibes/engine/platform/platform/runtime/operations';
 import { GLYPHS } from './ui-primitives.ts';
-import { GATE_PRESETS } from '@goodvibes-jev/engine/platform/platform/gate';
+import { GATE_PRESETS } from '@goodvibes/engine/platform/platform/gate';
 
 export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
   'display.themeMode': {
@@ -213,7 +213,7 @@ export function categoryItemCount(modal: SettingsModal, category: SettingsCatego
   return modal.groups.get(category)?.length ?? 0;
 }
 
-import { createSettingContext, createSubscriptionContext } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-context';
+import { createSettingContext, createSubscriptionContext } from '@goodvibes/engine/terminal-shell/renderer/settings-context';
 export const { currentSettingValue, buildSettingHelp } = createSettingContext<SettingsModal, SettingEntry>({
   isSecretKey: isSecretConfigKey,
   cursor: GLYPHS.surface.cursor,

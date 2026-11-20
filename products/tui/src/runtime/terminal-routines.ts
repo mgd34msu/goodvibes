@@ -23,14 +23,14 @@ import {
   type AutomationJob,
   type AutomationManager,
   type AutomationScheduleDefinition,
-} from '@goodvibes-jev/engine/platform/platform/automation';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
-import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { scheduleTimingFields } from '@goodvibes-jev/engine/terminal-shell/schedule-command';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { writeJsonFileAtomic } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
-import { holdProcessLock, logger, summarizeError, type HeldProcessLock } from '@goodvibes-jev/engine/platform/platform/utils';
+} from '@goodvibes/engine/platform/platform/automation';
+import { GoodVibesError } from '@goodvibes/engine/errors';
+import type { OperatorMethodInput } from '@goodvibes/engine/platform';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { scheduleTimingFields } from '@goodvibes/engine/terminal-shell/schedule-command';
+import { resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
+import { writeJsonFileAtomic } from '@goodvibes/engine/platform/platform/state/durable-file-io';
+import { holdProcessLock, logger, summarizeError, type HeldProcessLock } from '@goodvibes/engine/platform/platform/utils';
 import { describeOperatorRpcError, resolveOperatorRpc, type OperatorRpcAvailable } from './client/operator-endpoint.ts';
 
 type CreateJobInput = OperatorMethodInput<'automation.jobs.create'>;

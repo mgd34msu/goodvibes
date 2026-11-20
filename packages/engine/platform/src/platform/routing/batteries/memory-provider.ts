@@ -1,4 +1,4 @@
-import { defineSelector, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineSelector, STAKES_BANDS } from '@goodvibes/judgment';
 
 const memoryProviderPickBand = Object.freeze({
   actAt: STAKES_BANDS.high.confidence.actAt, confirmAt: STAKES_BANDS.high.confidence.confirmAt,

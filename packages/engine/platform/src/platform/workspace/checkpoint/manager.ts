@@ -30,7 +30,7 @@ import { validateCheckpointManifest, CheckpointManifestShapeError, type Manifest
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { logger } from '../../utils/logger.js';

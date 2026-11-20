@@ -1,6 +1,6 @@
 import type { CommandContext } from '../input/command-registry.ts';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
+import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
 import { mcpServerRecords, mcpToolRecords, mcpToolSchema, qualifiedToolName, schemaObject } from './agent-harness-personal-ops-discovery.ts';
 import type { McpToolRecord, McpToolSchema } from './agent-harness-personal-ops-types.ts';
 

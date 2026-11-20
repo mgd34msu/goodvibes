@@ -1,12 +1,12 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ProviderRegistry, BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { RouteBindingManager, SurfaceRegistry } from '@goodvibes-jev/engine/platform/platform/channels';
-import type { WatcherRegistry } from '@goodvibes-jev/engine/platform/platform/watchers';
-import type { AutomationManager, AutomationDeliveryManager } from '@goodvibes-jev/engine/platform/platform/automation';
-import type { ControlSurfaceEntry, ControlToolOptions } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
-import type { DomainDispatch, RuntimeEventBus, RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
+import type { ProviderRegistry, BenchmarkStore } from '@goodvibes/engine/platform/platform/providers';
+import type { RouteBindingManager, SurfaceRegistry } from '@goodvibes/engine/platform/platform/channels';
+import type { WatcherRegistry } from '@goodvibes/engine/platform/platform/watchers';
+import type { AutomationManager, AutomationDeliveryManager } from '@goodvibes/engine/platform/platform/automation';
+import type { ControlSurfaceEntry, ControlToolOptions } from '@goodvibes/engine/platform/platform/tools';
+import type { MemoryRegistry } from '@goodvibes/engine/platform/platform/state';
+import type { DomainDispatch, RuntimeEventBus, RuntimeStore } from '@goodvibes/engine/platform/platform/runtime/state';
 import { resolveRuntimeEndpointBinding } from './cli-endpoints.js';
 export function initializeTerminalCatalog(
   provider: ProviderRegistry,
@@ -86,7 +86,7 @@ export function attachTerminalRuntimeBindings(
   };
 }
 
-export { createAutomationAgentControls, createAutomationSpawnTask } from '@goodvibes-jev/engine/platform/platform/automation';
+export { createAutomationAgentControls, createAutomationSpawnTask } from '@goodvibes/engine/platform/platform/automation';
 
 /**
  * Local memory consolidation runs only while this process is the memory

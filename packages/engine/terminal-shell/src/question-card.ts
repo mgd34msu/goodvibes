@@ -31,10 +31,10 @@ import {
   type OwnerAnswer,
   type OwnerInboxListFilter,
   type OwnerItem,
-} from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { presentInboxAsk, type AskFacts, type AskPresentation } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { homeOwnerInbox } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+} from '@goodvibes/engine/platform/platform/control-plane';
+import { presentInboxAsk, type AskFacts, type AskPresentation } from '@goodvibes/engine/platform/platform/permissions';
+import { homeOwnerInbox } from '@goodvibes/engine/platform/platform/runtime/client';
+import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { activeTokens } from './renderer/theme.js';
 import { beginModal, finishModal, layoutHintRows, modalInnerWidth, standardModalWidth, wrapLines, type KitHint, type SurfaceLayer } from './renderer/surface-kit.js';
 import { paintKeycapHints } from './renderer/surface-kit-parts.js';

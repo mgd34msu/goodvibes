@@ -1,7 +1,7 @@
-import type { StructuredRedactionOptions } from '@goodvibes-jev/engine/platform/platform/utils';
-import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import type { StructuredRedactionOptions } from '@goodvibes/engine/platform/platform/utils';
+import { captureOwnedJson } from '@goodvibes/engine/platform/platform/gate';
 import { LANE_IDS } from './agent-harness-personal-ops-types.ts';
-import { PERSONAL_OPS_EFFECT_RECEIPT_PURPOSE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/personal-ops-effect-receipt';
+import { PERSONAL_OPS_EFFECT_RECEIPT_PURPOSE } from '@goodvibes/engine/terminal-shell/agent-turn/personal-ops-effect-receipt';
 
 /** Written by `writePersonalOpsEffectReceipt` after a provider effect the Agent performed. */
 export { PERSONAL_OPS_EFFECT_RECEIPT_PURPOSE };

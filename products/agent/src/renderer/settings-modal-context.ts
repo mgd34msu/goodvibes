@@ -1,7 +1,7 @@
-import { SHARED_SETTING_ENUM_DESCRIPTIONS } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
-import { SHARED_CATEGORY_INFO } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
-import { buildMcpHelp } from '@goodvibes-jev/engine/terminal-shell/renderer/mcp-trust-context';
-import { helpFact, helpText, helpWarning, type HelpLine } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-documentation';
+import { SHARED_SETTING_ENUM_DESCRIPTIONS } from '@goodvibes/engine/terminal-shell/renderer/settings-metadata';
+import { SHARED_CATEGORY_INFO } from '@goodvibes/engine/terminal-shell/renderer/settings-metadata';
+import { buildMcpHelp } from '@goodvibes/engine/terminal-shell/renderer/mcp-trust-context';
+import { helpFact, helpText, helpWarning, type HelpLine } from '@goodvibes/engine/terminal-shell/renderer/settings-documentation';
 /**
  * settings-modal-context.ts, the documentation the settings modal shows for
  * the selected row: category purposes, enum value meanings, and the facts and
@@ -9,11 +9,11 @@ import { helpFact, helpText, helpWarning, type HelpLine } from '@goodvibes-jev/e
  * line with its kind (HelpLine); settings-modal.ts lays them out with the surface kit.
  */
 
-import { GATE_PRESETS } from '@goodvibes-jev/engine/platform/platform/gate';
+import { GATE_PRESETS } from '@goodvibes/engine/platform/platform/gate';
 import type { SettingsModal, SettingEntry, FlagEntry, SubscriptionEntry, SettingsCategory } from '../input/settings-modal.ts';
 import { describeUiRouting, formatValue, getSettingLabel } from './settings-modal-helpers.ts';
 import { isSecretConfigKey } from '../config/secret-config.ts';
-import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments';
+import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes/engine/platform/platform/payments';
 import { formatProviderAuthRouteId } from '../provider-auth-route-display.ts';
 import { isDaemonOwnedConfigKey } from '../config/daemon-config-routing.ts';
 
@@ -234,7 +234,7 @@ import {
   createSettingContext,
   createSubscriptionContext,
   formatDefaultValue,
-} from '@goodvibes-jev/engine/terminal-shell/renderer/settings-context';
+} from '@goodvibes/engine/terminal-shell/renderer/settings-context';
 export const { currentSettingValue, buildSettingHelp } = createSettingContext<SettingsModal, SettingEntry>({
   isSecretKey: isSecretConfigKey,
   cursor: '▏',

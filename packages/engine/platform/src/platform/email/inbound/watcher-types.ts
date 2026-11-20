@@ -15,7 +15,7 @@
  * Re-exported from `watcher.ts`, which remains the name every consumer imports.
  */
 
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import type { ImapBodyProbe } from '../imap-body-probe.js';
 import type {
   InboundCapabilityVerdict,

@@ -1,5 +1,5 @@
 import { commandRefusal } from './command-confirmation.js';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 export interface AlwaysSpeakContext {
   readonly platform: { readonly configManager: Pick<ConfigManager, 'setDynamic'>; readonly voiceService?: unknown };
 }

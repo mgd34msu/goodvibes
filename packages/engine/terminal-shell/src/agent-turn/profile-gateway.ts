@@ -18,10 +18,10 @@
  * gets an honest unavailable result naming which route was missing.
  */
 
-import { captureOccasionsGatewayTarget } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { ProfileMutationOptions } from '@goodvibes-jev/engine/platform/platform/owner-profile';
+import { captureOccasionsGatewayTarget } from '@goodvibes/engine/platform/platform/control-plane';
+import type { ProfileMutationOptions } from '@goodvibes/engine/platform/platform/owner-profile';
 import { dirname } from 'node:path';
-import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
+import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes/engine/platform/contracts';
 import { PROFILE_METHOD_IDS, type ProfileMethodId } from './profile-types.js';
 import {
   captureFamilyGatewayRoute,

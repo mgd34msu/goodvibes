@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
-import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { createClassicProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security/source-screening/classic-owner';
+import { decisionModelPolicyState } from '@goodvibes/engine/errors';
+import { createClassicProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security/source-screening/classic-owner';
 import { ConfigManager, SecretsManager, daemonConfigPathForHome, isSecretRefInput, normalizeSecretRef, resolveGoodVibesDaemonHome,
-  type HostBooleanSetting, type SecretStorageMode } from '@goodvibes-jev/engine/platform/platform/config';
-import { createProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security/source-screening/owner';
-import type { ProtectedSourceOwner, ProtectedSource, ProtectedResearchReference, SourceScreeningReceipt, ResearchReferenceScreeningReceipt } from '@goodvibes-jev/engine/platform/platform/security';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
+  type HostBooleanSetting, type SecretStorageMode } from '@goodvibes/engine/platform/platform/config';
+import { createProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security/source-screening/owner';
+import type { ProtectedSourceOwner, ProtectedSource, ProtectedResearchReference, SourceScreeningReceipt, ResearchReferenceScreeningReceipt } from '@goodvibes/engine/platform/platform/security';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 
 /** The Agent's consent to screen raw report text with the hosted screening providers. */

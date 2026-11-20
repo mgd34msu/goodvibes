@@ -16,7 +16,7 @@ import type {
 import { instrumentedFetch } from '../../utils/fetch-with-timeout.js';
 import { resolveReachableBaseUrl } from '../../utils/reachable-base-url.js';
 import { validatePublicWebhookUrl } from '../../utils/url-safety.js';
-import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+import { HttpStatusError } from '@goodvibes/engine/errors';
 import { createHash } from 'node:crypto';
 
 /** The lifetime is checked only after payload preparation, without an intervening await. */

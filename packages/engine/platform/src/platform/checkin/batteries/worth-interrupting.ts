@@ -1,4 +1,4 @@
-import { defineBattery, defineFidelityChecker, yesNo, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, defineFidelityChecker, yesNo, STAKES_BANDS } from '@goodvibes/judgment';
 
 
 export const worthInterrupting = defineBattery({

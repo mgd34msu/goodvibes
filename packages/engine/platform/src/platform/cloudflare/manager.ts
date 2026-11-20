@@ -1,7 +1,7 @@
 import { revealOrNull } from '../security/secret.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { done, observe, refusal, unknownOutcome } from '@goodvibes-jev/engine/errors';
+import { done, observe, refusal, unknownOutcome } from '@goodvibes/engine/errors';
 import { effectKey, newOperationId } from '../state/operation.js';
 import { openOperationLog, type OperationLog } from '../state/operation-log.js';
 import type { ConfigKey } from '../config/schema.js';

@@ -17,8 +17,8 @@
  * the shared list codec (settings-modal-lists.ts). The key and the reader are the engine's,
  * so the modal shows exactly the list commands get.
  */
-import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
-import { EXEC_ENV_SCRUB_ALLOWLIST_KEY, configuredCredentialEnvScrub } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes/engine/platform/platform/config';
+import { EXEC_ENV_SCRUB_ALLOWLIST_KEY, configuredCredentialEnvScrub } from '@goodvibes/engine/platform/platform/tools';
 import type { SettingEntry, SettingsCategory } from './settings-modal-types.ts';
 
 export const EXEC_ENV_SCRUB_ALLOWLIST_CONFIG_KEY: ConfigKey = EXEC_ENV_SCRUB_ALLOWLIST_KEY;

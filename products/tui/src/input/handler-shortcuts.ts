@@ -2,11 +2,11 @@ import {
   handleGlobalShortcutToken as routeShortcut,
   handleKillRingShortcut,
   type GlobalShortcutState,
-} from '@goodvibes-jev/engine/terminal-shell/global-shortcuts';
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+} from '@goodvibes/engine/terminal-shell/global-shortcuts';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { CommandContext } from './command-registry.ts';
 import type { KillRing } from './kill-ring.ts';
-import { cycleSessionPermissionMode, getSharedModeFlash } from '@goodvibes-jev/engine/terminal-shell/session-permission-mode';
+import { cycleSessionPermissionMode, getSharedModeFlash } from '@goodvibes/engine/terminal-shell/session-permission-mode';
 import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
 
 export type GlobalShortcutRouteState = GlobalShortcutState & {

@@ -12,9 +12,9 @@
  * the person wrote disappears on the way to the model.
  */
 
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-import { splitAtModelDirectives } from '@goodvibes-jev/engine/terminal-shell/submission-router';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
+import { splitAtModelDirectives } from '@goodvibes/engine/terminal-shell/submission-router';
 
 export interface AtModelSwitchOptions {
   readonly providerRegistry: Pick<ProviderRegistry, 'setCurrentModel' | 'getCurrentModel'>;

@@ -1,1 +1,1 @@
-export { formatElapsed } from '@goodvibes-jev/engine/terminal-shell/format';
+export { formatElapsed } from '@goodvibes/engine/terminal-shell/format';

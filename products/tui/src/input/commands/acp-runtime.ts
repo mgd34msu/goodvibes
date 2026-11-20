@@ -12,9 +12,9 @@
 // ---------------------------------------------------------------------------
 
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { registerAgentsCommand } from '@goodvibes-jev/engine/terminal-shell/agents-command';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { registerAgentsCommand } from '@goodvibes/engine/terminal-shell/agents-command';
 import { describeOperatorRpcError, getOperatorRpc, type OperatorRpcAvailable } from './operator-rpc.ts';
 import { parseViewTarget } from '../views.ts';
 import { teamHost } from './teamwork-runtime.ts';

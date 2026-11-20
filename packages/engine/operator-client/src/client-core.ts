@@ -1,12 +1,12 @@
-import { ContractError, GoodVibesError } from '@goodvibes-jev/engine/errors';
-import type { OperatorContractManifest, OperatorMethodContract } from '@goodvibes-jev/engine/contracts';
+import { ContractError, GoodVibesError } from '@goodvibes/engine/errors';
+import type { OperatorContractManifest, OperatorMethodContract } from '@goodvibes/engine/contracts';
 import type {
   OperatorMethodInput,
   OperatorMethodOutput,
   OperatorStreamMethodId,
   OperatorTypedMethodId,
-} from '@goodvibes-jev/engine/contracts';
-import type { HttpTransport } from '@goodvibes-jev/engine/transport-http';
+} from '@goodvibes/engine/contracts';
+import type { HttpTransport } from '@goodvibes/engine/transport-http';
 import {
   invokeContractRoute,
   firstJsonSchemaFailureAsync,
@@ -21,7 +21,7 @@ import {
   splitClientArgs,
   type MethodArgs,
   type WithoutKeys,
-} from '@goodvibes-jev/engine/transport-http';
+} from '@goodvibes/engine/transport-http';
 
 /** Per-call options forwarded to the transport's `invokeContractRoute`. */
 export interface OperatorRemoteClientInvokeOptions extends ContractInvokeOptions {}

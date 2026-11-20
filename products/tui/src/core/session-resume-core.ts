@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/session-resume';
+export * from '@goodvibes/engine/terminal-shell/session-resume';

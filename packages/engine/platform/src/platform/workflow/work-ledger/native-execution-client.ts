@@ -1,4 +1,4 @@
-import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
+import type { OperatorRemoteClient } from '@goodvibes/engine/operator-client';
 import {
   NATIVE_WORK_EXECUTION_MAX_REQUEST_BYTES,
   NATIVE_WORK_EXECUTION_MAX_RESPONSE_BYTES,

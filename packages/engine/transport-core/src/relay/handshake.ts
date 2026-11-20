@@ -37,7 +37,7 @@ import {
   sha256,
   type RelayKeyPair,
 } from './crypto.js';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 
 const HANDSHAKE_LABEL = encodeUtf8('gv-relay-e2e/v1');
 const CONFIRM_PLAINTEXT = encodeUtf8('gv-relay-confirm');

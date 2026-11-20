@@ -1,13 +1,13 @@
 import { discoverPersonas, type DiscoveredPersonaRecord } from '../../agent/persona-discovery.ts';
-import { AgentPersonaRegistry, type AgentPersonaRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
-import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
+import { AgentPersonaRegistry, type AgentPersonaRecord } from '@goodvibes/engine/terminal-shell/agent-turn/persona-registry';
+import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { commandRefusal } from './confirmation.ts';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
-import { discoverVibeFiles, formatVibeStatus, initVibeFile, loadVibeImportSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn/vibe-file';
-import { defineCommand, defineList, type ActionDescription, type InputDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { choiceInput, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { readRefusal } from '@goodvibes/engine/errors';
+import { discoverVibeFiles, formatVibeStatus, initVibeFile, loadVibeImportSource } from '@goodvibes/engine/terminal-shell/agent-turn/vibe-file';
+import { defineCommand, defineList, type ActionDescription, type InputDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import { choiceInput, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 
 function splitList(value: string | undefined): readonly string[] {
   if (!value) return [];

@@ -1,10 +1,10 @@
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { readConnectedDaemonOrigin, resolveDaemonEnabled, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { OwnedSelectionObservation } from '@goodvibes/engine/platform/platform/runtime/client/selection-observation';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { readConnectedDaemonOrigin, resolveDaemonEnabled, resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config';
 import { daemonTokenOverride, resolveControlPlaneBaseUrl } from './operator-endpoint.ts';
 import { statSync } from 'node:fs';
-import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
-import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
+import { isLoopbackHost } from '@goodvibes/engine/platform/platform/utils/reachable-base-url';
+import { operatorTokenPath } from '@goodvibes/engine/platform/platform/pairing/companion-token';
 import { canonicalizePairingHost, readTuiHostPairing, tuiHostPairingStorePath, type TuiHostPairing } from '../tui-host-credential-store.ts';
 import { readTuiLegacyPairingBootstrap } from '../tui-host-pairing-bootstrap.ts';
 

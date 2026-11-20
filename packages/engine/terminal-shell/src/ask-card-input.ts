@@ -18,7 +18,7 @@
  * rule (a sentence being typed when the card appeared keeps going to the
  * composer) are the products' blocking-input, before this.
  */
-import type { PermissionPromptRequest, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { PermissionPromptRequest, RememberTier } from '@goodvibes/engine/platform/platform/permissions';
 import { applyHunkKey, hunkSelectionAnswer } from './hunk-selection.js';
 import { askPresentationFor } from './permission-prompt-facts.js';
 import { askCardButtons, askCardChoice, isCommandPromptAsk, type AskCardState } from './renderer/ask-card.js';

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ArtifactRecord } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ArtifactRecord } from '@goodvibes/engine/platform/platform/artifacts';
 import { createZipArchive, packageArtifactFilename, prepareArtifactMetadata, sanitizeArtifactSourceUri, type ArtifactPackageEntry } from './artifact-archive.js';
 import type { AgentModelCompareArtifactStore, LoadedComparisonHandoff, SavedComparisonArtifact } from './model-compare-types.js';
 import { MAX_HANDOFF_ARCHIVE_BYTES, MAX_HANDOFF_ARTIFACT_BYTES, MAX_HANDOFF_DIFF_INPUT_LINES, MAX_HANDOFF_DIFF_ROWS, MAX_HANDOFF_DIFF_SECTION_PREVIEW_CHARS } from './model-compare-types.js';

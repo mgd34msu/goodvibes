@@ -5,11 +5,11 @@
  * reads. Token use stays on the status line and in /context.
  */
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
-import { describeContextWindowSource } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ModelDefinition } from '@goodvibes/engine/platform/platform/providers';
+import { describeContextWindowSource } from '@goodvibes/engine/platform/platform/providers';
 import { abbreviateCount } from '../../utils/format-number.ts';
-import { worktreeStatusLines } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { createStatusCommand } from '@goodvibes-jev/engine/terminal-shell/health-command';
+import { worktreeStatusLines } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { createStatusCommand } from '@goodvibes/engine/terminal-shell/health-command';
 
 /** The /status text for a model, its known window (null when unknown) and any user override. */
 export function buildAgentStatusText(model: ModelDefinition, knownWindow: number | null, override: number | null): string {

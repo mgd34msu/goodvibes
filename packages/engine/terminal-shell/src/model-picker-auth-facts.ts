@@ -1,6 +1,6 @@
-import type { Secret } from '@goodvibes-jev/engine/platform/platform/security';
-import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { BUILTIN_PROVIDER_ENV_KEYS } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { Secret } from '@goodvibes/engine/platform/platform/security';
+import type { SubscriptionManager } from '@goodvibes/engine/platform/platform/config';
+import { BUILTIN_PROVIDER_ENV_KEYS } from '@goodvibes/engine/platform/platform/providers';
 import { customProviderKeyName } from './local-provider-commands.js';
 export function deriveConfiguredVia(
   providerId: string,

@@ -5,7 +5,7 @@
  * results. Decoupled from transport and token storage implementations.
  */
 
-import type { OperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import type { OperatorApiClient } from '@goodvibes/engine/operator-client';
 import type {
   GoodVibesAuthLoginOptions,
   GoodVibesCurrentAuth,

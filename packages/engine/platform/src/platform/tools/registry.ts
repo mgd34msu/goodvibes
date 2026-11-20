@@ -1,9 +1,9 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { currentExecutionMode, withInvocationExecutionMode } from '../gate/execution-context.js';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { randomUUID } from 'node:crypto';
-import { judgmentPort, createSharedRegexTester, type SharedRegexTester } from '@goodvibes-jev/engine/errors';
+import { judgmentPort, createSharedRegexTester, type SharedRegexTester } from '@goodvibes/engine/errors';
 import { endDecisionPhaseWithoutModel, isClassicOperation } from '../runtime/decision-policy.js';
 import {
   ToolInputProjectionError, assertProjectionCurrent, assertProjectionSignal, captureProjectionArgs, captureProjectionStructure,
@@ -19,7 +19,7 @@ import {
 import { captureNativeReferenceProjection } from './native-reference-projection.js';
 import { mcpResultIngest } from './mcp/result-ingest.js';
 import { deferUntrustedIngests, getProcessUntrustedContentLedger, type UntrustedIngest } from '../security/untrusted-content.js';
-import { type JudgmentPort } from '@goodvibes-jev/judgment';
+import { type JudgmentPort } from '@goodvibes/judgment';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { assertAutonomousConfigTransition, completeAutonomousConfigTransition, bindAutonomousNestedAdmission, readAutonomousSettingsPresentation, readAutonomousWorkspaceConstraint, readAutonomousEffectConstraint, readAutonomousNestedOwner, consumeAutonomousAdmission, type AutonomousNestedOwner, type AutonomousPermissionAdmission, type PermissionManager } from '../permissions/manager.js';
 import type { AutonomousChoiceProjection } from '../permissions/autonomous-input-projection.js';
@@ -32,9 +32,9 @@ import type { PreparedSubscriptionImportTransition } from '../config/subscriptio
 import { assertPreparedConfigWriteRoute } from '../config/settings-precondition-client.js';
 import { assertRemoteSettingsImportPrecondition, applyRemoteSettingsImportPrecondition,
   assertCompletedRemoteSettingsImportPrecondition } from '../config/settings-import-precondition-client.js';
-import { firstJsonSchemaFailure, firstJsonSchemaFailureAsync } from '@goodvibes-jev/engine/transport-http';
+import { firstJsonSchemaFailure, firstJsonSchemaFailureAsync } from '@goodvibes/engine/transport-http';
 import { PERMISSION_CATEGORIES, type Tool, type ToolDefinition, type ToolExecuteOptions, type ToolResult } from '../types/tools.js';
-import type { ToolActivity } from '@goodvibes-jev/engine/contracts';
+import type { ToolActivity } from '@goodvibes/engine/contracts';
 import { UnknownPreparedToolError } from './preparation-error.js';
 import { createToolSchemaTool, deferredToolRefusal, oneLineDefinition, TOOL_SCHEMA_TOOL_NAME } from './tool-schema.js';
 import { ToolError } from '../types/errors.js';
@@ -44,7 +44,7 @@ import type { ContractVerificationResult, ContractVerifierOptions } from '../run
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
-import { JudgmentError } from '@goodvibes-jev/judgment';
+import { JudgmentError } from '@goodvibes/judgment';
 
 /**
  * ToolRegistry - Central registry for all tools available to the LLM.

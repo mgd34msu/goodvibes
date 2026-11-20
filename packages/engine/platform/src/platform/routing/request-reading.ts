@@ -6,8 +6,8 @@ import { isClassicOperation } from '../runtime/decision-policy.js';
  * model in use the work is not read: the tier is the purpose's floor (standard
  * when the purpose has none) and the reading says it is unassessed.
  */
-import { fanOut, type ChoiceReading, type ScoreReading } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { fanOut, type ChoiceReading, type ScoreReading } from '@goodvibes/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { REQUEST_BATTERIES, type RequestDomain, type RequestIntent, type RequestLanguage } from './batteries/request.js';
 import {
@@ -98,7 +98,7 @@ export function unassessedRequestReading(request: Pick<RoutingRequest, 'purpose'
  */
 export async function readRequest(
   request: RoutingRequest,
-  options: import('@goodvibes-jev/judgment').CallOptions = {},
+  options: import('@goodvibes/judgment').CallOptions = {},
 ): Promise<RequestReading> {
   if (isClassicOperation()) { options.signal?.throwIfAborted(); return unassessedRequestReading(request); }
   const site = options.site ?? 'routing.request';

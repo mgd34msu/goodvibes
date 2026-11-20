@@ -12,7 +12,7 @@
  * Band: medium stakes. Code flags a pattern unless the reading is a no that
  * acts, so a doubtful pattern is shown to the owner.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 const path = (pattern: string, effect: 'allow' | 'deny' = 'allow') => ({ kind: 'path', pattern, effect });
 const host = (pattern: string, effect: 'allow' | 'deny' = 'allow') => ({ kind: 'host', pattern, effect });

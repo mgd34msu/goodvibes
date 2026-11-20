@@ -11,7 +11,7 @@
  * it for the boot snapshot), this component only renders whatever result it
  * is handed, honestly.
  */
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
+import type { OperatorMethodOutput } from '@goodvibes/engine/contracts';
 import { StatusBadge } from './StatusBadge';
 import { EmptyState } from './feedback/EmptyState';
 import { ErrorState } from './feedback/ErrorState';

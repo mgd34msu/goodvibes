@@ -12,8 +12,8 @@
  * The service is injectable so tests drive every path against fakes with no real
  * network, port, or browser.
  */
-import type { CalendarProviderId, DeviceCodeFlowStart, EventWindow, MergedCalendarEvent } from '@goodvibes-jev/engine/platform/platform/calendar';
-import type { CalendarProvider } from '@goodvibes-jev/engine/terminal-shell/calendar-command';
+import type { CalendarProviderId, DeviceCodeFlowStart, EventWindow, MergedCalendarEvent } from '@goodvibes/engine/platform/platform/calendar';
+import type { CalendarProvider } from '@goodvibes/engine/terminal-shell/calendar-command';
 import type { CommandContext } from '../command-registry.ts';
 import { requireSecretsManager } from './runtime-services.ts';
 import { CalendarOAuthService, type CalendarConfigReader, type CalendarSecretSlice, type ConnectResult } from '../../agent/calendar/calendar-oauth-service.ts';

@@ -1,4 +1,4 @@
-import { classifyFailure } from '@goodvibes-jev/engine/errors';
+import { classifyFailure } from '@goodvibes/engine/errors';
 import type { RuntimeEventBus, RuntimeEventEnvelope, AnyRuntimeEvent } from '../runtime/events/index.js';
 import type { ContractEvent } from '../../events/contract.js';
 import type {

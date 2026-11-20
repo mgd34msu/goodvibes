@@ -103,12 +103,12 @@ the daemon and selected model route to process them.
 
 ## Dependency and platform safety
 
-- In this monorepo WebUI resolves `@goodvibes-jev/engine` through the workspace
+- In this monorepo WebUI resolves `@goodvibes/engine` through the workspace
   link to `packages/engine`, so it always runs against the local engine source.
 - Verify the engine version with:
 
 ```bash
-node -p "require('./node_modules/@goodvibes-jev/engine/package.json').version"
+node -p "require('./node_modules/@goodvibes/engine/package.json').version"
 ```
 
 ## Security issue checklist

@@ -1,6 +1,6 @@
-import { registerTelegramIntakeCommand } from '@goodvibes-jev/engine/terminal-shell/telegram-intake-command';
-import { createConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
-import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
+import { registerTelegramIntakeCommand } from '@goodvibes/engine/terminal-shell/telegram-intake-command';
+import { createConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
+import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes/engine/platform/contracts';
 import { isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 
 /** /telegram (one description shared with the terminal app): delegated Telegram intake on the connected host. */

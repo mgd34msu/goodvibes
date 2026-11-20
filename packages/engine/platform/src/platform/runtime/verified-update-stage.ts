@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes/judgment/decisions';
 /** platform-owned pin evidence for one synchronous native update admission. Pins
  * were computed during download verification; retained staging proves these
  * same bytes remain selected. A token is neither serializable authority nor

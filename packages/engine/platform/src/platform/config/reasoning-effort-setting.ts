@@ -1,4 +1,4 @@
-import { REASONING_EFFORT_SEVERITY } from '@goodvibes-jev/engine/contracts';
+import { REASONING_EFFORT_SEVERITY } from '@goodvibes/engine/contracts';
 
 export { REASONING_EFFORT_SEVERITY };
 

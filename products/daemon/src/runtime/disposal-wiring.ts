@@ -6,4 +6,4 @@
  * scope; the daemon's own owners (devices, cluster, native work, handler
  * surfaces) are registered in scopes built from this, which drain first.
  */
-export { createAsyncDisposalScope as createDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
+export { createAsyncDisposalScope as createDisposalScope } from '@goodvibes/engine/platform/platform/runtime/disposal';

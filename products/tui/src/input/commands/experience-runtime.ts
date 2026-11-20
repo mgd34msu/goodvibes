@@ -1,21 +1,21 @@
 import {
   createApprovalCommand,
   createVoiceExperienceCommand,
-} from '@goodvibes-jev/engine/terminal-shell/experience-commands';
+} from '@goodvibes/engine/terminal-shell/experience-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import {
   createVoiceProvisionGateway,
   renderVoiceProvision,
   runVoiceSetupWithProgress,
   VOICE_SETUP_ANNOUNCEMENT,
 } from '../../core/voice-provision-gateway.ts';
-import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
+import { resolveWakeRuntimeSettings } from '@goodvibes/engine/platform/platform/voice/wake/runtime';
 import { terminalWakeCapabilities, WAKE_SETUP_ANNOUNCEMENT } from '../../core/wake-provision-status.ts';
 import { printWakeStatus } from '../../core/wake-provision-runner.ts';
-import { wakeProvisionStatus } from '@goodvibes-jev/engine/platform/platform/voice';
-import type { VoiceSetupOutcome } from '@goodvibes-jev/engine/platform/platform/runtime/voice-setup';
+import { wakeProvisionStatus } from '@goodvibes/engine/platform/platform/voice';
+import type { VoiceSetupOutcome } from '@goodvibes/engine/platform/platform/runtime/voice-setup';
 import { proposesSpeechToText, runWakeSetupPlan } from '../../core/wake-setup-plan.ts';
 import { requireVoiceSetup } from './runtime-services.ts';
 

@@ -1,6 +1,6 @@
-import type { ConversationMessageSnapshot, NoticeMeta, TokenUsage } from '@goodvibes-jev/engine/platform/platform/core';
-import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
+import type { ConversationMessageSnapshot, NoticeMeta, TokenUsage } from '@goodvibes/engine/platform/platform/core';
+import type { ContentPart } from '@goodvibes/engine/platform/platform/providers';
+import type { ToolCall } from '@goodvibes/engine/platform/platform/types';
 type ToolHostEvidence = NonNullable<Extract<ConversationMessageSnapshot, { role: 'tool' }>['hostEvidence']>;
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);

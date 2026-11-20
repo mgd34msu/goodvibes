@@ -8,7 +8,7 @@
  * The ladder's rungs are code except one: cancellation, stop-reason values
  * and the cascade, tool, permission and compaction flags are exact checks.
  * What the free-text error message says is read by Jev through the engine's
- * shared failure reading (readFailure in @goodvibes-jev/engine/errors). That
+ * shared failure reading (readFailure in @goodvibes/engine/errors). That
  * reading already asks what kind of failure an error's wording describes and
  * remembers each wording, so the retry and display paths and this classifier
  * read one error once instead of asking a second battery the same question.
@@ -16,7 +16,7 @@
  * which is the coarsening this rung needs: an unsure reading falls through to
  * the stop-reason rungs below it, as unmatched wording always did.
  */
-import { readFailure, captureJudgmentPort, type FailureCategory } from '@goodvibes-jev/engine/errors';
+import { readFailure, captureJudgmentPort, type FailureCategory } from '@goodvibes/engine/errors';
 import type { OwnedJudgmentOptions } from '../owned-judgment-work.js';
 import type { FailureClass } from './types.js';
 import { decisionOrClassic, isClassicOperation } from '../decision-policy.js';

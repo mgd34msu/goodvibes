@@ -11,7 +11,7 @@
 // reachable via the `runtime.metrics.get` operator method, its REST binding
 // GET /api/runtime/metrics, or directly by platform consumers importing
 // `snapshotMetrics`/`RuntimeMetricsSnapshot` from
-// `@goodvibes-jev/engine/platform/platform/runtime/observability`.
+// `@goodvibes/engine/platform/platform/runtime/observability`.
 import { classifyEditFallbackWarning } from '../../tools/edit/match.js';
 
 /** The failure classes tracked, keyed per model. */

@@ -28,9 +28,9 @@ import {
   DEFAULT_FLEET_REFRESH_MS,
   mergeFleetNodes,
   type DaemonVerbCaller,
-} from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import type { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+} from '@goodvibes/engine/platform/platform/runtime/client';
+import type { ProcessNode } from '@goodvibes/engine/platform/platform/runtime/fleet';
+import type { logger } from '@goodvibes/engine/platform/platform/utils';
 
 export { DEFAULT_FLEET_REFRESH_MS, mergeFleetNodes };
 

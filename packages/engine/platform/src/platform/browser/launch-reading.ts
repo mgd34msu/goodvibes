@@ -1,6 +1,6 @@
 import { prepareJudgmentResult } from '../gate/judgment-result.js';
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
+import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { requireActingReading } from '../types/judgment-held.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';

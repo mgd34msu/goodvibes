@@ -8,35 +8,35 @@ import {
   type CliServiceRuntime,
   type CliServiceEndpointPosture,
   type CliServiceLogPosture,
-} from '@goodvibes-jev/engine/terminal-shell/service-posture';
+} from '@goodvibes/engine/terminal-shell/service-posture';
 export type {
   CliServiceRuntime,
   CliServiceEndpointPosture,
   CliServiceLogPosture,
-} from '@goodvibes-jev/engine/terminal-shell/service-posture';
-import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { isExecutable } from '@goodvibes-jev/engine/terminal-shell/cli-environment';
-import { probeTcp as probe } from '@goodvibes-jev/engine/terminal-shell/service-io';
+} from '@goodvibes/engine/terminal-shell/service-posture';
+import { yesNo } from '@goodvibes/engine/terminal-shell/cli-output';
+import { isExecutable } from '@goodvibes/engine/terminal-shell/cli-environment';
+import { probeTcp as probe } from '@goodvibes/engine/terminal-shell/service-io';
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { resolveServiceUnitHome } from '@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default';
-import { readDaemonSetting } from '@goodvibes-jev/engine/platform/platform/workspace/daemon-home';
-import { serviceStateDirectory } from '@goodvibes-jev/engine/platform/platform/daemon/service-manager';
-import type { PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
-import { buildManagedDaemonServiceManager, resolveConfiguredServiceName } from '@goodvibes-jev/engine/terminal-shell/managed-daemon-service';
-import type { ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { formatRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell/cli-endpoints';
-import type { RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
-import { redactText } from '@goodvibes-jev/engine/terminal-shell/cli-redaction';
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { resolveServiceUnitHome } from '@goodvibes/engine/platform/platform/daemon/daemon-service-default';
+import { readDaemonSetting } from '@goodvibes/engine/platform/platform/workspace/daemon-home';
+import { serviceStateDirectory } from '@goodvibes/engine/platform/platform/daemon/service-manager';
+import type { PlatformServiceManager } from '@goodvibes/engine/platform/platform/daemon';
+import { buildManagedDaemonServiceManager, resolveConfiguredServiceName } from '@goodvibes/engine/terminal-shell/managed-daemon-service';
+import type { ManagedServiceStatus } from '@goodvibes/engine/platform/platform/daemon';
+import { resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
+import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { formatRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell/cli-endpoints';
+import type { RuntimeEndpointId } from '@goodvibes/engine/terminal-shell';
+import { redactText } from '@goodvibes/engine/terminal-shell/cli-redaction';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
+import { captureStrictJudgmentJson } from '@goodvibes/engine/platform/platform/gate';
 
 export interface CliServicePosture {
   readonly config: {

@@ -1,6 +1,6 @@
 import { knowledgeSchemaColumns, conversationRequestColumns } from './store-schema-validation-data.js';
 /** Durable conversation capture in the same coordinated image as its native ledger publication. */
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { isDeepStrictEqual } from 'node:util';
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
 import { createEmptyWorkLedgerState, readWorkLedgerState } from '../workflow/work-ledger/service.js';

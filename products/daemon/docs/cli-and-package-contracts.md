@@ -1,6 +1,6 @@
 # Daemon CLI and package contracts
 
-The private `@goodvibes-jev/daemon` package exposes an import-inert `./cli`
+The private `@goodvibes/daemon` package exposes an import-inert `./cli`
 barrel and a separate executable entrypoint. Source and emitted modules support
 its Bun and ESM export conditions. Product identity/version comes from the
 actual private manifest, with an exact synchronized compiled fallback; the

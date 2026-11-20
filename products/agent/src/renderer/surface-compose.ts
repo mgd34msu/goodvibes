@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/surface-compose';
+export * from '@goodvibes/engine/terminal-shell/surface-compose';

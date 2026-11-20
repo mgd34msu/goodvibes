@@ -37,16 +37,16 @@ import {
   type RewindReceipt,
   type RewindRestoreResult,
   type RewindWorkspacePort,
-} from '@goodvibes-jev/engine/platform/platform/rewind';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { logger, readDocument, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
+} from '@goodvibes/engine/platform/platform/rewind';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { logger, readDocument, writeDocument } from '@goodvibes/engine/platform/platform/utils';
 import { join } from 'node:path';
-import type { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import type { RewindScope } from '@goodvibes-jev/engine/terminal-shell/checkpoint-command';
+import type { WorkspaceCheckpointManager } from '@goodvibes/engine/platform/platform/workspace';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import type { RewindScope } from '@goodvibes/engine/terminal-shell/checkpoint-command';
 import type { CommandContext } from '../command-registry.ts';
 import { buildRewindReceiptBlock } from '../../core/rewind-receipt.ts';
-import { getTurnAnchors, type TurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
+import { getTurnAnchors, type TurnAnchor } from '@goodvibes/engine/platform/platform/rewind';
 import { createConversationRewindPort, type ConversationRewindPort } from '../../runtime/conversation-rewind-port.ts';
 
 // ---------------------------------------------------------------------------

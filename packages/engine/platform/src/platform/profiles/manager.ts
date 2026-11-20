@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'fs';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { join } from 'path';
 import { logger } from '../utils/logger.js';

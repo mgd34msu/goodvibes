@@ -19,7 +19,7 @@ import {
   storedTurnFailure,
   type TurnFailureAction,
   type TurnFailureReading,
-} from '@goodvibes-jev/engine/platform/platform/core/turn-failure';
+} from '@goodvibes/engine/platform/platform/core/turn-failure';
 import { Button } from '../../components/ui/Button';
 import type { ChatMessage } from './types';
 

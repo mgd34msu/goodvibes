@@ -52,7 +52,7 @@ export interface ContractedAgentGraph extends AgentExecutionGraph {
 
 export interface ContractedAgentGraphOptions extends AgentExecutionGraphOptions {
   readonly nativeDataWriter?: import('./native-reader-compatibility.js').NativeDataWriteOwner | undefined;
-  readonly judgmentLog?: Pick<import('@goodvibes-jev/judgment').DecisionLog, 'get'> | undefined;
+  readonly judgmentLog?: Pick<import('@goodvibes/judgment').DecisionLog, 'get'> | undefined;
   readonly surfaceRoot?: string | undefined;
   /** The owner conversation's stored messages by session id, when this host holds it (contract-composition.ts). */
   readonly ownerConversationMessages?: ((sessionId: string) => readonly object[] | undefined) | undefined;

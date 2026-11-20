@@ -1,6 +1,6 @@
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { AudioCaptureOpener } from '@goodvibes-jev/engine/platform/platform/voice';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ConfigKey, ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { AudioCaptureOpener } from '@goodvibes/engine/platform/platform/voice';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { sharedStreamingAudioPlayer, type StreamingAudioPlayer } from './player.js';
 import type { playActivationSound } from './activation-sound.js';
 import type { TerminalWakeRuntime, TerminalWakeRuntimeDeps } from './wake-runtime.js';

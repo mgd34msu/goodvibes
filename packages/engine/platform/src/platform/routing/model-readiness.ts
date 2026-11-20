@@ -1,5 +1,5 @@
 /** Typed, fail-closed composition of the engine-owned model-readiness batteries. */
-import type { BatteryItems, BatteryRun, ConfidenceBand, ScoreReading, YesNoReading } from '@goodvibes-jev/judgment';
+import type { BatteryItems, BatteryRun, ConfidenceBand, ScoreReading, YesNoReading } from '@goodvibes/judgment';
 import { localRecipeFit, routeReadiness } from './batteries/model-readiness.js';
 
 export type ModelReadinessOutcome = 'ready' | 'held' | 'rejected' | 'deferred' | 'unavailable';

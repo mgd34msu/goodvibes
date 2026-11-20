@@ -17,9 +17,9 @@ import { afterAll, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SessionMemoryStore } from '@goodvibes-jev/engine/platform/platform/core';
-import { ShellPassthrough } from '@goodvibes-jev/engine/terminal-shell/shell-passthrough';
-import { createShellSubmissionPorts } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
+import { SessionMemoryStore } from '@goodvibes/engine/platform/platform/core';
+import { ShellPassthrough } from '@goodvibes/engine/terminal-shell/shell-passthrough';
+import { createShellSubmissionPorts } from '@goodvibes/engine/terminal-shell/shell-frame-facts';
 import { createOwnerSubmission } from '../../shell/owner-submission.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'spoken-no-shell-'));

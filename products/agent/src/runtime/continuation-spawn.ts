@@ -3,9 +3,9 @@
  * from this Agent: handed to the daemon to host when it can be, otherwise spawned
  * here with the platform's one spawn decision (`buildContinuationSpawnInput`).
  */
-import { buildContinuationSpawnInput, type ContinuationSpawnDeps } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
-import type { SharedSessionContinuationRequest } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import { buildContinuationSpawnInput, type ContinuationSpawnDeps } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
+import type { SharedSessionContinuationRequest } from '@goodvibes/engine/platform/platform/control-plane';
+import type { AgentManager } from '@goodvibes/engine/platform/platform/tools';
 import { heldDispositionForUnconfirmedHandoff, type HostedConversationHandoff } from './client/hosted-handoff.ts';
 
 export type { ContinuationSpawnDeps };

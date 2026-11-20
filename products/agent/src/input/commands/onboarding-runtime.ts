@@ -1,5 +1,5 @@
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { setupCommandDescription, type SetupRun, type SetupTopicId } from '@goodvibes-jev/engine/terminal-shell/setup-command';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { setupCommandDescription, type SetupRun, type SetupTopicId } from '@goodvibes/engine/terminal-shell/setup-command';
 import { previewAgentHostPairing, unpairAgentHost } from '../../runtime/agent-host-pairing.ts';
 import { formatSetupPairing } from '../../runtime/setup-pairing-presentation.ts';
 import { isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';

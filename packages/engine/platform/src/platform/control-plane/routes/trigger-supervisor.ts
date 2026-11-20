@@ -1,4 +1,4 @@
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { readRefusal } from '@goodvibes/engine/errors';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import { builtinTriggerOperationMethodDescriptors, builtinTriggerSupervisorMethodDescriptors } from '../method-catalog-trigger-supervisor.js';
 import { triggerOperatorStatus, TriggerOperatorError, type TriggerOperatorSupervisor } from '../../triggers/operator.js';
@@ -10,7 +10,7 @@ import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { refuseNonUserRequest } from './explicit-user-request.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
-import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
+import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
 function authenticate(invocation: GatewayMethodInvocation, scope: string): void {
   if (!invocation.context.principalId || invocation.context.admin !== true || missingScopes(invocation.context.scopes, [scope]).length > 0
     || invocation.isAuthorized && !invocation.isAuthorized([scope])) {

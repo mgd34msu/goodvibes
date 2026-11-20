@@ -1,7 +1,7 @@
 /**
  * bundle-budget.ts
  *
- * Reports gzipped entry-file sizes for @goodvibes-jev/engine/platform.
+ * Reports gzipped entry-file sizes for @goodvibes/engine/platform.
  * Imported dependencies are not included, so these are not consumer bundle sizes.
  *
  * Usage:

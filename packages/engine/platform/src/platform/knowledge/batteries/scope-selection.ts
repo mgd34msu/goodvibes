@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment/decisions';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment/decisions';
 
 /** The namespace boundary has already selected candidates; Jev cannot reassign it. */
 export const knowledgeScopeSelection = defineBattery({

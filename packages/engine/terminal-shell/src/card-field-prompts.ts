@@ -1,10 +1,10 @@
-import type { OperatorApiClient } from '@goodvibes-jev/engine/operator-client';
+import type { OperatorApiClient } from '@goodvibes/engine/operator-client';
 import type { ConcealedInputRequest } from './concealed-input.js';
 import { isPairedOperatorPrincipal } from './native/native-paired-principal.js';
 import { RetainedOperatorConnection } from './retained-operator-connection.js';
 import type { PaymentWindowCommandPolicy } from './payment-window-command.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
-import { classifyFailure } from '@goodvibes-jev/engine/errors';
+import { classifyFailure } from '@goodvibes/engine/errors';
 
 export type CardFieldId = 'label' | 'kind' | 'number' | 'expiry' | 'cvv' | 'cardholderName';
 export interface CardField {

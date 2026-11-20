@@ -3,13 +3,13 @@
  * `checkpoints.diff` and `sessions.changes.get` text), plus the helpers that
  * turn one selected hunk into a structured, human-readable steer context block.
  *
- * The parsing itself is the engine's one reader (`@goodvibes-jev/engine/platform/
+ * The parsing itself is the engine's one reader (`@goodvibes/engine/platform/
  * platform/git/diff`), which the TUI and the daemon's hunk revert use too, so a
  * hunk is numbered and cut here exactly as the daemon reads it back when it is
  * reverted. This module only shapes that result for the views: a display path,
  * a binary flag, stable hunk ids and per-hunk counts.
  */
-import { parseUnifiedDiff as parseStructuredDiff, type StructuredDiffFile } from '@goodvibes-jev/engine/platform/platform/git/diff';
+import { parseUnifiedDiff as parseStructuredDiff, type StructuredDiffFile } from '@goodvibes/engine/platform/platform/git/diff';
 
 export type DiffLineType = 'context' | 'add' | 'del' | 'meta';
 

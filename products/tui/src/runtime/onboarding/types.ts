@@ -11,9 +11,9 @@ import type {
   TerminalOnboardingApplyResult,
   TerminalOnboardingSurfaceReadHelper,
   TerminalOnboardingProviderAccountReadHelper,
-} from '@goodvibes-jev/engine/terminal-shell/onboarding-workflow-types';
-import type { TerminalOnboardingProviderAccount } from '@goodvibes-jev/engine/terminal-shell/onboarding-snapshot-collector';
-import type { TerminalOnboardingConfigSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-snapshot-reads';
+} from '@goodvibes/engine/terminal-shell/onboarding-workflow-types';
+import type { TerminalOnboardingProviderAccount } from '@goodvibes/engine/terminal-shell/onboarding-snapshot-collector';
+import type { TerminalOnboardingConfigSnapshot } from '@goodvibes/engine/terminal-shell/onboarding-snapshot-reads';
 import type {
   OnboardingNetworkMode,
   OnboardingAcknowledgementReason,
@@ -28,7 +28,7 @@ import type {
   OnboardingRuntimeDefaultsSnapshot,
   OnboardingAcknowledgementState,
   OnboardingReopenEditAcknowledgementState,
-} from '@goodvibes-jev/engine/terminal-shell/onboarding-data-types';
+} from '@goodvibes/engine/terminal-shell/onboarding-data-types';
 export type {
   OnboardingNetworkMode,
   OnboardingAcknowledgementReason,
@@ -43,18 +43,18 @@ export type {
   OnboardingRuntimeDefaultsSnapshot,
   OnboardingAcknowledgementState,
   OnboardingReopenEditAcknowledgementState,
-} from '@goodvibes-jev/engine/terminal-shell/onboarding-data-types';
+} from '@goodvibes/engine/terminal-shell/onboarding-data-types';
 export type {
   OnboardingVerificationStatus,
   OnboardingVerificationItem,
   OnboardingVerificationResult,
-} from '@goodvibes-jev/engine/terminal-shell/onboarding-verification';
-import type { OnboardingAcknowledgementSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
-export type { OnboardingAcknowledgementSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
+} from '@goodvibes/engine/terminal-shell/onboarding-verification';
+import type { OnboardingAcknowledgementSnapshot } from '@goodvibes/engine/terminal-shell/onboarding-state-types';
+export type { OnboardingAcknowledgementSnapshot } from '@goodvibes/engine/terminal-shell/onboarding-state-types';
 import type {
   OnboardingAcknowledgementTarget,
   OnboardingStateScope,
-} from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
+} from '@goodvibes/engine/terminal-shell/onboarding-state-types';
 export type {
   OnboardingMode,
   OnboardingAcknowledgementTarget,
@@ -65,10 +65,10 @@ export type {
   OnboardingCheckMarkerState,
   OnboardingCheckMarkersState,
   WriteOnboardingCheckMarkerOptions,
-} from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
-import type { ConfigManager, ConfigKey, GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/terminal-shell/onboarding-state-types';
+import type { ConfigManager, ConfigKey, GoodVibesConfig } from '@goodvibes/engine/platform/platform/config';
 import type { SecretsManager } from '../../config/secrets.ts';
-import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import type { UserAuthManager } from '@goodvibes/engine/platform/platform/security';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { LocalAuthInspectionQuery, ServiceInspectionQuery, SubscriptionAccessQuery } from '@/runtime/index.ts';
 

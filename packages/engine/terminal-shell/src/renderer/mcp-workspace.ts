@@ -1,5 +1,5 @@
 import { formRows, maskLaunchArgs } from './mcp-form-rows.js';
-import type { RegisteredTool } from '@goodvibes-jev/engine/platform/platform/mcp';
+import type { RegisteredTool } from '@goodvibes/engine/platform/platform/mcp';
 import type { McpWorkspaceRow, McpWorkspaceServerRow, McpWorkspaceFormField } from '../mcp-workspace-model.js';
 import { activeTokens } from './theme.js';
 import { beginModal, finishModal, searchRow, scrollCountText, type KitHint, type ModalFrame, type SurfaceLayer } from './surface-kit.js';

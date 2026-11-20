@@ -1,5 +1,5 @@
-import { taskDetailLines } from '@goodvibes-jev/engine/terminal-shell/task-presentation';
-import '@goodvibes-jev/engine/terminal-shell/task-presentation';
+import { taskDetailLines } from '@goodvibes/engine/terminal-shell/task-presentation';
+import '@goodvibes/engine/terminal-shell/task-presentation';
 /**
  * `/tasks`, the Agent's read-only view of runtime tasks.
  *
@@ -16,11 +16,11 @@ import '@goodvibes-jev/engine/terminal-shell/task-presentation';
  */
 import type { CommandContext } from '../command-registry.ts';
 
-import '@goodvibes-jev/engine/platform/platform/runtime/client';
+import '@goodvibes/engine/platform/platform/runtime/client';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
 import { requireOperatorClient, requireShellPaths } from './runtime-services.ts';
 
-import { createTasksRuntimeCommands } from '@goodvibes-jev/engine/terminal-shell/tasks-runtime-commands';
+import { createTasksRuntimeCommands } from '@goodvibes/engine/terminal-shell/tasks-runtime-commands';
 import { commandRefusal } from './confirmation.ts';
 import { backgroundCommandsReport } from './agent-context-reports.ts';
 export const { registerTasksRuntimeCommands } = createTasksRuntimeCommands<CommandContext>({

@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard, DEFAULT_DECISION_DEADLINE_MS } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, DEFAULT_DECISION_DEADLINE_MS } from '@goodvibes/judgment/decisions';
 /**
  * memory-usage-detection.ts, reference detection and the per-turn usage
  * tracker every product shares.
@@ -21,7 +21,7 @@ import { assertSynchronousJudgmentGuard, DEFAULT_DECISION_DEADLINE_MS } from '@g
  * labelled as a reading (see MEMORY_USAGE_SIGNAL_NOTE). With decision models
  * off nothing is read and the injections are counted as not assessed.
  */
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { memoryUsage } from './batteries/memory-usage.js';
 import { retainOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { prepareJudgmentResult } from '../gate/judgment-result.js';

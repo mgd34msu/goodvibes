@@ -13,14 +13,14 @@
  * backend; otherwise they run on the connector too.
  */
 
-import { revealOrNull } from '@goodvibes-jev/engine/platform/platform/security';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { revealOrNull } from '@goodvibes/engine/platform/platform/security';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { registerAgentGoogleTool, type GoogleCalendarHost } from './google-tool.js';
 import type { DaemonExpectationClient } from './session-expectations.js';
-import { startLoopbackListener } from '@goodvibes-jev/engine/platform/platform/google/node';
-import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { OwnerApprovalStore } from '@goodvibes-jev/engine/platform/platform/security';
+import { startLoopbackListener } from '@goodvibes/engine/platform/platform/google/node';
+import type { ConfigManager, SecretsManager } from '@goodvibes/engine/platform/platform/config';
+import type { ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
+import type { OwnerApprovalStore } from '@goodvibes/engine/platform/platform/security';
 import { retainGoogleConnectionOwners } from './google-admission.js';
 
 /** The slice of the runtime this wiring needs. Nothing wider. */

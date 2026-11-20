@@ -48,7 +48,7 @@ export const BINARY_INSTALL_COMMAND = 'curl -fsSL https://goodvibes.sh/install.s
  * quoted as one argument, never interpreted as shell source.
  */
 export function fallbackUpdateCommand(kind: Exclude<InstallKind, 'binary'>, packageName: string): string {
-  if (kind === 'bun-global-package' && !/^@(?:goodvibes-jev\/(?:tui|agent|daemon|webui)|pellux\/goodvibes-(?:tui|agent|daemon))$/.test(packageName)) {
+  if (kind === 'bun-global-package' && !/^@(?:goodvibes\/(?:tui|agent|daemon|webui)|pellux\/goodvibes-(?:tui|agent|daemon))$/.test(packageName)) {
     return `bun add -g ${quoteShadowArgument(packageName)}`;
   }
   return BINARY_INSTALL_COMMAND;

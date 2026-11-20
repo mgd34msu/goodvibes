@@ -1,28 +1,28 @@
-import { WebSocketMessageAssembler, createStreamTextAssembler, sendWebSocketMessage } from '@goodvibes-jev/engine/transport-core';
+import { WebSocketMessageAssembler, createStreamTextAssembler, sendWebSocketMessage } from '@goodvibes/engine/transport-core';
 import {
   RUNTIME_EVENT_DOMAINS,
   type RuntimeEventDomain,
   type RuntimeEventRecord,
-} from '@goodvibes-jev/engine/contracts';
+} from '@goodvibes/engine/contracts';
 import {
   ConfigurationError,
   GoodVibesError,
   createHttpStatusError,
   isStructuredDaemonErrorBody,
-} from '@goodvibes-jev/engine/errors';
+} from '@goodvibes/engine/errors';
 import {
   normalizeAuthToken,
   normalizeStreamReconnectPolicy,
   getStreamReconnectDelay,
-} from '@goodvibes-jev/engine/transport-http';
-import { buildUrl } from '@goodvibes-jev/engine/transport-http';
+} from '@goodvibes/engine/transport-http';
+import { buildUrl } from '@goodvibes/engine/transport-http';
 import {
   describeUnknownTransportError,
   injectTraceparentAsync,
   invokeTransportObserver,
   transportErrorFromUnknown,
   type TransportObserver,
-} from '@goodvibes-jev/engine/transport-core';
+} from '@goodvibes/engine/transport-core';
 import {
   createRemoteDomainEvents,
   type DomainEventConnector,
@@ -143,7 +143,7 @@ function buildWsErrorOpts(
   overrides: {
     hint?: string;
     cause?: unknown;
-    category?: import('@goodvibes-jev/engine/errors').ErrorCategory;
+    category?: import('@goodvibes/engine/errors').ErrorCategory;
     recoverable?: boolean;
     status?: number;
     requestId?: string;
@@ -259,7 +259,7 @@ export class WebSocketTransportError extends GoodVibesError {
       readonly hint?: string;
       readonly code: string;
       /** Defaults to `'network'`. Override when the server sends a structured category (e.g. `'rate_limit'`). */
-      readonly category?: import('@goodvibes-jev/engine/errors').ErrorCategory | undefined;
+      readonly category?: import('@goodvibes/engine/errors').ErrorCategory | undefined;
       /** Defaults to `true`. Override to `false` for unrecoverable structured errors. */
       readonly recoverable?: boolean | undefined;
       readonly status?: number | undefined;

@@ -29,7 +29,7 @@ import { TelegramIngressSupervisor } from '../platform/src/platform/channels/tel
 import { TelegramOffsetStore } from '../platform/src/platform/channels/telegram/offset-store.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { surfaceDaemon } from './_helpers/surface-daemon.ts';
 
 const TOKEN = '7000001:fixture-token';

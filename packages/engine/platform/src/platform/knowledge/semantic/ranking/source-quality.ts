@@ -1,4 +1,4 @@
-import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 export const pageSourceQuality = defineBattery({
   name: 'engine.knowledge.page-source-quality', version: 1,
   description: 'Reads useful reference content and its source authority from actual source/provenance evidence, not URL keyword lists or weights.', accuracyFloor: 0.9,

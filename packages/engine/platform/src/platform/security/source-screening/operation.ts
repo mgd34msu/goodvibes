@@ -1,6 +1,6 @@
 import { types as nodeTypes } from 'node:util';
 import type { ResearchReferenceOperation } from './types.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 const invalid = (): never => { throw new Error('Protected source owner is unavailable or the handle is not current'); };
 const apply = Reflect.apply;
 const signalAborted = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted')!.get!;

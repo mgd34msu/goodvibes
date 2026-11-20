@@ -17,7 +17,7 @@
  * approvals.ts document, so an event this client has never seen degrades to
  * being ignored rather than crashing the attached view.
  */
-import { isTurnSettlingEvent, readTurnSettlement, settlesRunningTurn } from '@goodvibes-jev/engine/transport-core/turn-settlement';
+import { isTurnSettlingEvent, readTurnSettlement, settlesRunningTurn } from '@goodvibes/engine/transport-core/turn-settlement';
 import { asRecord, firstString } from './object';
 
 /** One decoded `turn`/`tools` domain frame, narrowed to what a hosted-session

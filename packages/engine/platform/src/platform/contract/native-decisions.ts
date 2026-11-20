@@ -1,12 +1,12 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { isDeepStrictEqual } from 'node:util';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { bindNativeCiSourceIssuer } from '../ci-watch/native-owner.js';
 import type { ExternalOperationSource } from '../permissions/external-request.js';
 /** Native semantic ownership. Registered continuations never run through an owner reply or a fake tool. */
-import { hashState, JudgmentError, type EntryType, type JudgmentPort, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { captureJevDecisionContext, parseJevDecision, type JevContinuation, type JevDecision, type JevDecisionBinding, type JevDecisionContext, type JevVersionRef } from '@goodvibes-jev/judgment/decisions';
+import { hashState, JudgmentError, type EntryType, type JudgmentPort, type JudgmentRetryProgress } from '@goodvibes/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import { captureJevDecisionContext, parseJevDecision, type JevContinuation, type JevDecision, type JevDecisionBinding, type JevDecisionContext, type JevVersionRef } from '@goodvibes/judgment/decisions';
 import { decideAutonomous, type AutonomousDecision } from '../gate/autonomous-decision.js';
 import { autonomousSourceEvidence } from '../permissions/autonomous.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';

@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { mkdtemp, open, rm, type FileHandle } from 'node:fs/promises';
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';

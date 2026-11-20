@@ -5,9 +5,9 @@
  */
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireLocalUserAuthManager } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { defineCommand, defineList, type CommandDescription, type FixedChoice, type InputDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { defineCommand, defineList, type CommandDescription, type FixedChoice, type InputDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
 
 function formatRoles(roles: readonly string[]): string {
   return roles.length > 0 ? roles.join(', ') : '(none)';

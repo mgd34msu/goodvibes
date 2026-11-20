@@ -10,7 +10,7 @@
  * Medium bands: a wrong reading labels a provider's models free, metered or
  * subscription for a day, which the failover chain and the planner act on.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** How a user pays: per token, through a plan, or not at all because the models run locally. */
 export type ProviderAccess = 'metered' | 'subscription' | 'local';

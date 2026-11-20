@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/transport-core';
+export * from '@goodvibes/engine/transport-core';

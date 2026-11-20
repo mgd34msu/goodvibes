@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/surface-kit-extra';
+export * from '@goodvibes/engine/terminal-shell/surface-kit-extra';

@@ -1,5 +1,5 @@
 import { cliCommandDone, cliCommandRefusal, yesNo, formatJsonOrText, type CliCommandOutput } from './cli-output.js';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import {
   formatProviderModel,
   listProviderRuntimeSnapshots,
@@ -8,9 +8,9 @@ import {
   type FavoritesStore,
   type CanonicalModel,
   type ModelDefinition,
-} from '@goodvibes-jev/engine/platform/platform/providers';
-import { summarizeProviderAuthRoutes } from '@goodvibes-jev/engine/platform/platform/providers/auth-route-presentation';
-import type { formatProviderAuthRoute as ProviderAuthRouteFormatter } from '@goodvibes-jev/engine/platform/platform/providers/auth-route-presentation';
+} from '@goodvibes/engine/platform/platform/providers';
+import { summarizeProviderAuthRoutes } from '@goodvibes/engine/platform/platform/providers/auth-route-presentation';
+import type { formatProviderAuthRoute as ProviderAuthRouteFormatter } from '@goodvibes/engine/platform/platform/providers/auth-route-presentation';
 
 const MODEL_LISTING_LIMIT = 200;
 

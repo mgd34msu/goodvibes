@@ -19,7 +19,7 @@ import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-inp
  * is applied; anything else (unsure, late, unavailable) applies nothing and
  * the edit fails with the closest lines as its hint.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** Most characters of the find text or the window one request carries; a larger edit is answered not found without a request. */
 export const MAX_JUDGED_EDIT_CHARS = 20_000;

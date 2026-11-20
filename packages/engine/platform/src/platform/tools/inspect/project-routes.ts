@@ -13,9 +13,9 @@ import { assertCapturedToolAccessCurrent } from '../shared/captured-input-tools.
  */
 import { existsSync } from 'node:fs';
 import { basename, dirname, join, relative, sep } from 'node:path';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { isClassicOperation } from '../../runtime/decision-policy.js';
-import type { YesNoReading } from '@goodvibes-jev/judgment';
+import type { YesNoReading } from '@goodvibes/judgment';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import { readFileCandidates } from './candidate-readings.js';
 import { apiRoutes, HANDLER_METHODS, handlerView, routeLineView, servesQuestion } from '../batteries/api-routes.js';

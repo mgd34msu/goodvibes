@@ -22,7 +22,7 @@
  * denies on its own, it annotates the human ask, which the human still decides.
  */
 
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import { sandboxAdvisory } from '../../gate/batteries/sandbox-advisory.js';
 
 /** The verdict the advisory reading gives: looks safe, flags risk, or cannot tell. */

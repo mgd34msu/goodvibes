@@ -33,7 +33,7 @@ import { verifyUnitClaims } from '../contract/claims.js';
 import { contractUnitSpawn } from './contract-binding.js';
 import { runContractGates } from '../contract/gates.js';
 import { getContractTransportRetryDelayMs, getContractTransportRetryLimit } from '../contract/config.js';
-import { readFailure } from '@goodvibes-jev/engine/errors';
+import { readFailure } from '@goodvibes/engine/errors';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { FenceError, FenceIssuer, type Fence } from '../utils/owner-fence.js';

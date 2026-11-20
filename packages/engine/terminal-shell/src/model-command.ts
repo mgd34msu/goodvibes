@@ -5,8 +5,8 @@
  * the model thinks. Each app says how it reaches its provider API and what it
  * does before a switch lands (the terminal app asks for a missing key first).
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { LLMProvider, ProviderApi, ProviderApiLiveModelRefreshReport, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { LLMProvider, ProviderApi, ProviderApiLiveModelRefreshReport, ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
 import {
   describeEffortForModel,
   describeServingEffort,
@@ -15,8 +15,8 @@ import {
   resolveRequestedEffortForServingModel,
   servingEffortForLevel,
   toEffortModel,
-} from '@goodvibes-jev/engine/platform/platform/providers/reasoning-effort-surface';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+} from '@goodvibes/engine/platform/platform/providers/reasoning-effort-surface';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';

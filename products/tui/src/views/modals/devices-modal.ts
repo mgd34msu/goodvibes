@@ -7,8 +7,8 @@ import type {
   ConfigModalSurface,
   ConfigModalView,
 } from '../../input/config-modal-types.ts';
-import type { MintedPairingToken, PublicPairingToken } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { formatDeviceLine, shortTokenId } from '@goodvibes-jev/engine/platform/platform/pairing';
+import type { MintedPairingToken, PublicPairingToken } from '@goodvibes/engine/platform/platform/pairing';
+import { formatDeviceLine, shortTokenId } from '@goodvibes/engine/platform/platform/pairing';
 
 // ---------------------------------------------------------------------------
 // Paired Devices, the settings security-domain device/token management surface.

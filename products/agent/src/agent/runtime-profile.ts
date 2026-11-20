@@ -1,11 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { AgentPersonaRegistry, assertNoSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
-import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
-import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
-import { discoverVibeFiles } from '@goodvibes-jev/engine/terminal-shell/agent-turn/vibe-file';
+import { AgentPersonaRegistry, assertNoSecretLikeText } from '@goodvibes/engine/terminal-shell/agent-turn/persona-registry';
+import { AgentRoutineRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/routine-registry';
+import { AgentSkillRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
+import { discoverVibeFiles } from '@goodvibes/engine/terminal-shell/agent-turn/vibe-file';
 import { discoverPersonas, type DiscoveredPersonaRecord } from './persona-discovery.ts';
 import { discoverRoutines, type DiscoveredRoutineRecord } from './routine-discovery.ts';
 import { discoverSkills, type SkillRecord } from './skill-discovery.ts';

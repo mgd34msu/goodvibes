@@ -1,10 +1,10 @@
-import type { LocalAuthSnapshot } from '@goodvibes-jev/engine/platform/platform/security';
-import type { SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { LocalAuthSnapshot } from '@goodvibes/engine/platform/platform/security';
+import type { SecretsManager } from '@goodvibes/engine/platform/platform/config';
 import type {
   LocalAuthInspectionQuery,
   ServiceInspectionQuery,
   SubscriptionAccessQuery,
-} from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+} from '@goodvibes/engine/platform/platform/runtime/ui';
 import type { OnboardingServiceState, OnboardingSurfaceRecord } from './onboarding-data-types.js';
 import type { OnboardingAcknowledgementSnapshot } from './onboarding-state-types.js';
 import {

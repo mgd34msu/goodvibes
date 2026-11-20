@@ -1,4 +1,4 @@
-import { MEMORY_RECORD_NOT_FOUND_CODE } from '@goodvibes-jev/engine/errors';
+import { MEMORY_RECORD_NOT_FOUND_CODE } from '@goodvibes/engine/errors';
 import type { DaemonIntegrationRouteHandlers } from './context.js';
 import { jsonErrorResponse, readServiceErrorResponse } from './error-response.js';
 import type { DaemonIntegrationRouteContext, IntegrationHelperServiceLike, MemoryRecordReviewInput } from './integration-route-types.js';

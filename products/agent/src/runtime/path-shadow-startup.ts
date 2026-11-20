@@ -27,7 +27,7 @@ import type { UpdateFetchLike } from './update-check.ts';
 import { VERSION } from '../version.ts';
 
 /** The package a package-managed Agent install is upgraded through. */
-export const AGENT_PACKAGE_NAME = '@goodvibes-jev/agent';
+export const AGENT_PACKAGE_NAME = '@goodvibes/agent';
 
 /** The same release lookup /update uses, one source of truth for "latest". */
 function resolveLatestRelease(): Promise<string | undefined> {

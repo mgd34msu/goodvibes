@@ -1,6 +1,6 @@
 import { requireSemanticKnowledge } from '../decision-policy.js';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { mapLimit } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
+import { mapLimit } from '@goodvibes/judgment';
 import { extractedSentenceKind, readKnowledgeBattery } from './repair-decisions.js';
 import { repairProfileValueCandidates } from './repair-profile/reader.js';
 import { prepareKnowledgeExtractionValueReading } from './extraction-value/reader.js';

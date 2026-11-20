@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/model-picker-types';
+export * from '@goodvibes/engine/terminal-shell/model-picker-types';

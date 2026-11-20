@@ -1,4 +1,4 @@
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 
 /**
  * Why a configured inbox account could not be admitted, as a fixed token.

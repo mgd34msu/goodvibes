@@ -4,13 +4,13 @@
  * archetypes read from this project's agents folder.
  */
 import type { CommandContext } from '../command-registry.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { TEAM_MODES, TEAM_RECIPES, type AgentsHost } from '@goodvibes-jev/engine/terminal-shell/agents-command';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { TEAM_MODES, TEAM_RECIPES, type AgentsHost } from '@goodvibes/engine/terminal-shell/agents-command';
 import { join } from 'node:path';
-import { AGENT_TEMPLATES } from '@goodvibes-jev/engine/platform/platform/tools';
-import { archetypeFamilyOf, readArchetypeListing, type AgentArchetype, type ArchetypeFamily, type ArchetypeFamilyReading } from '@goodvibes-jev/engine/platform/platform/agents';
+import { AGENT_TEMPLATES } from '@goodvibes/engine/platform/platform/tools';
+import { archetypeFamilyOf, readArchetypeListing, type AgentArchetype, type ArchetypeFamily, type ArchetypeFamilyReading } from '@goodvibes/engine/platform/platform/agents';
 import { requireAgentManager, requireReadModels, requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 type TeamworkModeId =
   | 'local-engineer'

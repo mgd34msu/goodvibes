@@ -19,7 +19,7 @@ import { completeJudgmentView } from './complete-view.js';
  * reading that does not act is reported as `error`, the envelope's code for
  * a failure it does not place.
  */
-import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes/judgment';
 
 export const CHILD_FAILURE_OPTIONS = {
   max_turns: 'The agent used up its allowed number of turns or steps.',

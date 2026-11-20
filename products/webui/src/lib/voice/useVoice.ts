@@ -32,7 +32,7 @@ import {
   type AudioCaptureFailureReason,
   type CapturedUtterance,
   type UtteranceAudioArtifact,
-} from '@goodvibes-jev/engine/platform/platform/voice/capture';
+} from '@goodvibes/engine/platform/platform/voice/capture';
 import { client as platformClient } from '../goodvibes';
 import { queryKeys } from '../queries';
 import { asRecord } from '../object';
@@ -45,7 +45,7 @@ import {
   type SharedVoiceConfig,
   type VoiceAvailability,
 } from './voice-config';
-import type { WakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
+import type { WakeRuntimeSettings } from '@goodvibes/engine/platform/platform/voice/wake/runtime';
 import { detectMicSupport, type MicSupport } from './capture';
 import { micArbiter, type MicLease } from './mic-arbiter';
 import { resolveWebuiWakeSettings } from './wake-config';

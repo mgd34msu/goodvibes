@@ -1,6 +1,6 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { types as nodeTypes } from 'node:util';
-import { toJson, type JsonValue } from '@goodvibes-jev/judgment';
+import { toJson, type JsonValue } from '@goodvibes/judgment';
 import { assertJudgmentInput, retainOwnedJson } from '../../../gate/judgment-input.js';
 import type { KnowledgeStore } from '../../store.js';
 import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../../types.js';

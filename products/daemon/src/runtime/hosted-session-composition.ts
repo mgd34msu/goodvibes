@@ -4,7 +4,7 @@ import { nativeHostedConversationOwner } from './native-hosted-conversation-comp
  * hosted-session-composition.ts, what this daemon states so it may host
  * conversation loops.
  *
- * The engine is the platform's (`@goodvibes-jev/engine/platform/platform/hosted-sessions`):
+ * The engine is the platform's (`@goodvibes/engine/platform/platform/hosted-sessions`):
  * lifecycle, the detach policy, the bounded disk state, the verbs, the
  * lifecycle channel. It is off until a product says how a workspace FLOOR is
  * built, and that is deliberate, the floor's `requestApproval` seam is where a
@@ -57,26 +57,26 @@ import { nativeHostedConversationOwner } from './native-hosted-conversation-comp
  *    own composition, where a reader can see which spawns hold it. Nothing on
  *    the wire and nothing in a tool argument can reach it.
  */
-import { createClientRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
-import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
-import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import type { DaemonHostedSessionsOptions } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { createClientRuntimeServices } from '@goodvibes/engine/platform/platform/runtime/client-services';
+import { createRuntimeStore } from '@goodvibes/engine/platform/platform/runtime/store';
+import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import type { DaemonHostedSessionsOptions } from '@goodvibes/engine/platform/platform/daemon';
 import type {
   HostedSessionExecPosture,
   HostedWorkspaceFloor,
-} from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+} from '@goodvibes/engine/platform/platform/hosted-sessions';
 import {
   containmentFor,
   hostedAgentAsker,
   hostedWorkerSurface,
-} from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
-import { CONVERSATIONAL_DIAGNOSIS_SECTION, askingQuestions } from '@goodvibes-jev/engine/platform/platform/agents';
-import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, WORKSPACE_TRUST_ASK_TIMEOUT_MS, type ApprovalRaise } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+} from '@goodvibes/engine/platform/platform/hosted-sessions';
+import { CONVERSATIONAL_DIAGNOSIS_SECTION, askingQuestions } from '@goodvibes/engine/platform/platform/agents';
+import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, WORKSPACE_TRUST_ASK_TIMEOUT_MS, type ApprovalRaise } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { RuntimeServices } from './runtime-services-types.js';
 import { daemonWorkspaceCheckpoints } from './workspace-checkpointing.js';
 import { hostedRewindStorage, hostedSessionConversations } from './conversation-rewind-port.js';
-import { createAgentHostedTurn } from '@goodvibes-jev/engine/terminal-shell/agent-turn/hosted-turn';
+import { createAgentHostedTurn } from '@goodvibes/engine/terminal-shell/agent-turn/hosted-turn';
 
 /** The operator policy a session hosted by THIS daemon runs under. */
 function hostedSystemPrompt(input: { readonly workspaceRoot: string }): string {

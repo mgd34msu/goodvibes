@@ -26,7 +26,7 @@
  * the real engine and the real listener with a stubbed inference session, rather
  * than testing a second implementation of this logic.
  */
-import { FenceIssuer } from '@goodvibes-jev/engine/platform/platform/utils/owner-fence';
+import { FenceIssuer } from '@goodvibes/engine/platform/platform/utils/owner-fence';
 import {
   AudioCaptureError as CaptureFailure,
   utteranceToAudioArtifact,
@@ -35,7 +35,7 @@ import {
   type CapturedUtterance,
   type UtteranceAudioArtifact,
   type NoiseSuppressionFactory,
-} from '@goodvibes-jev/engine/platform/platform/voice/capture';
+} from '@goodvibes/engine/platform/platform/voice/capture';
 import {
   WakeListener,
   WakeWordEngine,
@@ -45,7 +45,7 @@ import {
   type WakeModelHandle,
   type WakeRuntimeSettings,
   type WakeStartRefusal,
-} from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
+} from '@goodvibes/engine/platform/platform/voice/wake/runtime';
 import { micArbiter, type MicArbiter } from './mic-arbiter';
 import { playWakeChime } from './wake-chime';
 import { loadWakeModel, openWakeModelCache, WakeModelError } from './wake-models';

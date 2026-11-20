@@ -10,7 +10,7 @@
  */
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { OperatorMethodInput } from '@goodvibes-jev/engine/contracts';
+import type { OperatorMethodInput } from '@goodvibes/engine/contracts';
 import { client as platformClient } from '../lib/goodvibes';
 import { useEventStreamState } from '../lib/event-stream';
 import { queryKeys } from '../lib/queries';

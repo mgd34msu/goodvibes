@@ -22,7 +22,7 @@ import { AUTH_AUDIENCE_URL, AUTH_CLIENTS_URL } from './setup-plan.js';
 import { captureGooglePage, findElement, looksLikeGoogleSignIn, readTextUntil, requireElement } from './browser-elements.js';
 import { consumeGoogleElement } from './browser-elements.js';
 import { ownGoogleBrowser } from './browser-readings.js';
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import type { GoogleBrowserPort } from './types.js';
 
 export type PublishingStatus = 'testing' | 'in-production' | 'unknown';

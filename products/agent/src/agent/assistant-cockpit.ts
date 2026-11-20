@@ -1,4 +1,4 @@
-import { presetForMode } from '@goodvibes-jev/engine/platform/platform/gate';
+import { presetForMode } from '@goodvibes/engine/platform/platform/gate';
 import type { AgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-types.ts';
 
 /** `unmeasured`: the caller had no data for the lane, so it is neither healthy nor a finding. */

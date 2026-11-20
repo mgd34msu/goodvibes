@@ -3,9 +3,9 @@
  * much the app prints (quiet, balanced or operator), and one kind of
  * notification's own level. Saved as the `behavior.hitlMode` setting.
  */
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ShellModeManagerService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ConfigKey, ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { ShellModeManagerService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';

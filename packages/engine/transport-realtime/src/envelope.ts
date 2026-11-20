@@ -1,4 +1,4 @@
-import type { EventLike, StreamTextAssembler } from '@goodvibes-jev/engine/transport-core';
+import type { EventLike, StreamTextAssembler } from '@goodvibes/engine/transport-core';
 import type { SerializedEventEnvelope } from './domain-events.js';
 
 /**

@@ -1,4 +1,4 @@
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 import type { SourceReadEvidence } from './evidence.js';
 import { currentFileMatchesText, isCurrentNativeFileObservation } from './current-file-observations.js';
 

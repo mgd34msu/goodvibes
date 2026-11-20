@@ -14,8 +14,8 @@
  * one; what lives here is this product's surface identity and its config
  * writer.
  */
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveWakeEnablementCompanion } from '@goodvibes-jev/engine/platform/platform/voice';
+import type { ConfigKey, ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { resolveWakeEnablementCompanion } from '@goodvibes/engine/platform/platform/voice';
 import { AGENT_WAKE_SURFACE } from '../audio/wake-surface.ts';
 import { routeConfigWrite, type AgentConfigRoutingOptions } from './daemon-config-routing.ts';
 

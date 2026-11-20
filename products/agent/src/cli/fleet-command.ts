@@ -1,12 +1,12 @@
-import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { commandArgsWithLiteralMarker } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
+import { commandJsonOrText as jsonOrText } from '@goodvibes/engine/terminal-shell/cli-output';
+import { commandArgsWithLiteralMarker } from '@goodvibes/engine/terminal-shell/cli-parser-engine';
 import type {
   AttemptCandidate,
   AttemptJudgment,
   AttemptPickResult,
   HeldMergeGroup,
-} from '@goodvibes-jev/engine/platform/platform/orchestration';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+} from '@goodvibes/engine/platform/platform/orchestration';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { operatorFlagValue, parseOperatorCommandArgs } from './operator-command-args.ts';
 import { createAgentDaemonVerbCaller, ConnectedHostVerbError } from '../runtime/client/daemon-verbs.ts';
 import type { CliCommandOutput } from './types.ts';

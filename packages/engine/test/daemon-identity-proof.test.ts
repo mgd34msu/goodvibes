@@ -30,7 +30,7 @@ import { daemonAuthHeaders } from '../platform/src/platform/runtime/client/daemo
 import { writeConnectedDaemonToken } from '../platform/src/platform/runtime/client/daemon-credentials.ts';
 import { getOrCreateCompanionToken } from '../platform/src/platform/pairing/companion-token.ts';
 import { resolveGoodVibesDaemonHome } from '../platform/src/platform/config/goodvibes-home.ts';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 import type { ConfigKey } from '../platform/src/platform/config/schema-types.ts';
 import type { RuntimeServices } from '../platform/src/platform/runtime/services.ts';
 

@@ -9,7 +9,7 @@
  * WHERE EACH LINE COMES FROM
  *
  * Everything about the RUNNING daemon comes from that daemon, over the
- * --host/--port/--token convention @goodvibes-jev/engine/terminal-shell
+ * --host/--port/--token convention @goodvibes/engine/terminal-shell
  * established: `/status` for identity, `/api/health` for the health roll-up and
  * the address it actually bound, `/api/channels/status` for the channels, and
  * `/api/cluster/status` for this machine's place in its group. Hosted sessions
@@ -29,12 +29,12 @@
  * NOTHING HERE DECIDES WHAT AN ANSWER MEANS. A sub-question that fails is one
  * line saying it failed; only an unreachable daemon is a failed command.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { describeCrashLog, summarizeCrashLog, type CrashLogSummary } from '@goodvibes-jev/engine/platform/platform/runtime/crash-capture';
-import { resolveRemoteDaemonTarget } from '@goodvibes-jev/engine/terminal-shell/cluster-remote-daemon-target';
-import type { DaemonFailureCode, DaemonFetch, DaemonVerbOutcome, RemoteDaemonTarget } from '@goodvibes-jev/engine/terminal-shell';
-import { callDaemonMethod, callDaemonRoute } from '@goodvibes-jev/engine/terminal-shell/raw-reply-route';
-import { formatDaemonUpdateCheckLine, formatDaemonUpdateStatusLines, type DaemonUpdateStatusView } from '@goodvibes-jev/engine/terminal-shell/daemon-update-status';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { describeCrashLog, summarizeCrashLog, type CrashLogSummary } from '@goodvibes/engine/platform/platform/runtime/crash-capture';
+import { resolveRemoteDaemonTarget } from '@goodvibes/engine/terminal-shell/cluster-remote-daemon-target';
+import type { DaemonFailureCode, DaemonFetch, DaemonVerbOutcome, RemoteDaemonTarget } from '@goodvibes/engine/terminal-shell';
+import { callDaemonMethod, callDaemonRoute } from '@goodvibes/engine/terminal-shell/raw-reply-route';
+import { formatDaemonUpdateCheckLine, formatDaemonUpdateStatusLines, type DaemonUpdateStatusView } from '@goodvibes/engine/terminal-shell/daemon-update-status';
 import {
   describeLocalDaemonState,
   formatDuration,

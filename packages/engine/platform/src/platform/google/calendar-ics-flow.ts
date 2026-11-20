@@ -15,7 +15,7 @@ import { CALENDAR_SETTINGS_URL } from './setup-plan.js';
 import { describeElements, looksLikeGoogleSignIn, requireElement } from './browser-elements.js';
 import { consumeGoogleElement } from './browser-elements.js';
 import { ownGoogleBrowser } from './browser-readings.js';
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import type { GoogleBrowserElement, GoogleBrowserPort } from './types.js';
 
 export type CalendarIcsReason =

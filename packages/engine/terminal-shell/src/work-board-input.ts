@@ -22,12 +22,12 @@ import {
   type WorkBoardSession,
   type WorkBoardSources,
   type WorkBoardTask,
-} from '@goodvibes-jev/engine/contracts';
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+} from '@goodvibes/engine/contracts';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
+import type { ProcessNode } from '@goodvibes/engine/platform/platform/runtime/fleet';
+import type { PermissionPromptRequest } from '@goodvibes/engine/platform/platform/permissions';
 import { askPresentationFor } from './permission-prompt-facts.js';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import type { ConfirmOptions } from './confirm-dialog-types.js';
 import { isTextBackspace } from './delete-key-policy.js';
 import type { FleetSpawn } from './fleet-spawn.js';

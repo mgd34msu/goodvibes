@@ -1,4 +1,4 @@
-import type { Secret } from '@goodvibes-jev/engine/platform/platform/security';
+import type { Secret } from '@goodvibes/engine/platform/platform/security';
 import type { CommandContext } from '../input/command-registry.ts';
 import { isInvokableContractMethod, operatorContractMethods } from '../tools/agent-harness-personal-ops-discovery.ts';
 import type { McpServerPosture, PresenceReading } from './capability-probe-runner.ts';

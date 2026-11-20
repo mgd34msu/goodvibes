@@ -47,7 +47,7 @@ import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, REGULAR_KNOWLEDGE_DB_FILE } from '..
 import { createRuntimeAcquisitionScope, type RuntimeAcquisitionScope } from './acquisition-scope.js';
 import { buildRuntimeGraph } from './runtime-graph.js';
 import type { JudgmentServices } from './judgment-services.js';
-import type { BrowserJudgmentCapability } from '@goodvibes-jev/engine/daemon-api';
+import type { BrowserJudgmentCapability } from '@goodvibes/engine/daemon-api';
 import type { RuntimeEventBus } from './events/index.js';
 import type { DomainDispatch, RuntimeStore } from './store/index.js';
 import type { DistributedRuntimeManager } from './remote/distributed-runtime-manager.js';

@@ -1,4 +1,4 @@
-import { defineSelector, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineSelector, STAKES_BANDS } from '@goodvibes/judgment';
 import { DEFAULT_DECISION_ROUTER_SETTINGS } from '../../config/decision-router-settings.js';
 
 const candidates = Object.entries(DEFAULT_DECISION_ROUTER_SETTINGS.categories).map(([id, category]) => ({

@@ -1,10 +1,10 @@
 import { hasActiveExecutionMode, readExecutionMode, setExecutionMode } from '../permissions/execution-mode.ts';
 import { captureModelReadingInput } from '../tools/agent-harness-model-reading-source.ts';
-import type { Ranked } from '@goodvibes-jev/judgment';
-import type { ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import type { Ranked } from '@goodvibes/judgment';
+import type { ConfigManager, ConfigSetting } from '@goodvibes/engine/platform/platform/config';
 import { isAgentHostSettingKey } from '../config/host-settings.ts';
 import { getAgentSettingsSchema, type AgentConfigSetting, type AgentHostReader, type AgentSettingsCatalog } from '../config/settings-catalog.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { applyWakeEnablementCompanion, type WakeCompanionWrite } from '../config/wake-enablement-companion.ts';
 import type { SecretsManager } from '../config/secrets.ts';
 import {
@@ -14,10 +14,10 @@ import {
   isSecretReferenceValue,
   persistSecretBackedConfigValue,
 } from '../config/secret-config.ts';
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
+import { captureCatalogData } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
 import { settingDomainForPhrase } from '../config/settings-search-vocabulary.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
 import {
   agentDaemonConfigClientInstalled,
   agentDaemonConfigClientRevision,

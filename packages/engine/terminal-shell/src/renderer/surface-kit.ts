@@ -21,10 +21,10 @@
  * Colors come only from the active theme's tokens (activeTokens()).
  */
 
-import { createEmptyCell } from '@goodvibes-jev/engine/platform/platform/types/grid';
-import type { Cell, Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { mixHex } from '@goodvibes-jev/engine/platform/platform/presentation';
-import { getDisplayWidth, wrapText } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
+import { createEmptyCell } from '@goodvibes/engine/platform/platform/types/grid';
+import type { Cell, Line } from '@goodvibes/engine/platform/platform/types';
+import { mixHex } from '@goodvibes/engine/platform/platform/presentation';
+import { getDisplayWidth, wrapText } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { activeTokens } from './theme.js';
 
 // ---------------------------------------------------------------------------

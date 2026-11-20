@@ -17,7 +17,7 @@ import { contractWorkReceipts } from './work-receipts.js';
 import { buildPreviousChecks } from './nudge.js';
 import { unitToolContract } from './plan-schema.js';
 import type { ContractGroupView, ContractUnitView, ContractView, CriterionView } from './types.js';
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes/judgment';
 
 /** The fixed closing paragraph of every brief. */
 export const BRIEF_CHECKED_PARAGRAPH =

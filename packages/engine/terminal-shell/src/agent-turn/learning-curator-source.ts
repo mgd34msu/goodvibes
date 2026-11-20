@@ -1,5 +1,5 @@
-import type { MemoryAddOptions } from '@goodvibes-jev/engine/platform/platform/state';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { MemoryAddOptions } from '@goodvibes/engine/platform/platform/state';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { AgentPersonaCreateInput, AgentPersonaUpdateInput } from './persona-registry.js';
 import type { AgentSkillCreateInput, AgentSkillUpdateInput } from './skill-registry.js';
 import type { AgentRoutineCreateInput, AgentRoutineUpdateInput } from './routine-registry.js';
@@ -10,16 +10,16 @@ import { AgentRoutineRegistry } from './routine-registry.js';
 import { AgentResearchRunRegistry } from './research-run-registry.js';
 import { summarizeMemoryItem, summarizeNoteItem, summarizePersonaItem, summarizeSkillItem, summarizeSkillBundleItem, summarizeRoutineItem } from './local-library-items.js';
 import type { AgentWorkspaceLocalLibraryItem } from './local-library-items.js';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
-import type { MemoryApi, ProjectWorkPlan, ProjectWorkPlanTask } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import type { SessionManager } from '@goodvibes/engine/platform/platform/sessions';
+import type { MemoryApi, ProjectWorkPlan, ProjectWorkPlanTask } from '@goodvibes/engine/platform/platform/knowledge';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
 import { captureCatalogData } from './catalog-data.js';
 import type { CatalogRankingOptions } from './catalog-ranking.js';
 import { discoverVibeFiles } from './vibe-file.js';
 import type { LocalLearningCandidateDomain, LearningCandidate } from './learning-curator-types.js';
 import { LearningCurationStore } from './learning-curation-store.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 
 /** A work-plan task as the curator reads it: the row's fields under the record id the readings use. */
 export interface LearningWorkItem {

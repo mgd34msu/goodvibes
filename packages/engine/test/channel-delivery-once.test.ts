@@ -40,7 +40,7 @@ import { scratchSettings } from './_helpers/scratch-settings.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { ntfyOutboundDedup } from '../platform/src/platform/integrations/ntfy.ts';
 import type { PendingSurfaceReply } from '../platform/src/platform/daemon/types.ts';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => {

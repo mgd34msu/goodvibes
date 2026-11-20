@@ -15,7 +15,7 @@
  * Browser-safe: no `node:` import, so the web UI keys its review marks with
  * the same digest.
  */
-import { RefusalError, refusal, type TargetChange } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal, type TargetChange } from '@goodvibes/engine/errors';
 import { base64Url, sha256Base64Url, sha256Bytes } from './sha256.js';
 
 function canonical(value: unknown, seen: Set<object>, inArray: boolean): string | undefined {

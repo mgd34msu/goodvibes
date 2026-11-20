@@ -25,7 +25,7 @@ import { nativeContractSourceData } from '../native-source.js';
  * A reply to a previously saved writing question is read with `forbids_writing` alone
  * (`readForbidsWriting`), since the reply says nothing about the others.
  */
-import { defineBattery, STAKES_BANDS, yesNo, type JudgmentPort, type YesNoBand, type YesNoReading } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo, type JudgmentPort, type YesNoBand, type YesNoReading } from '@goodvibes/judgment';
 import type { RequestShape, ShapeReading } from '../types.js';
 
 /** Yes read at medium stakes, no at high: a false "no" acts against the user's words. */

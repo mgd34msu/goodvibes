@@ -1,11 +1,11 @@
-import { createBoundNativeWorkLedgerView } from '@goodvibes-jev/engine/terminal-shell/native/bound-work-ledger-host';
-import { AGENT_NATIVE_INTAKE_POLICY } from '@goodvibes-jev/engine/terminal-shell/native-intake';
+import { createBoundNativeWorkLedgerView } from '@goodvibes/engine/terminal-shell/native/bound-work-ledger-host';
+import { AGENT_NATIVE_INTAKE_POLICY } from '@goodvibes/engine/terminal-shell/native-intake';
 export {
   createNativeLedgerBinding,
   discoverNativeLedgerProject,
   type NativeLedgerHost,
   type NativeLedgerBindingFactory,
-} from '@goodvibes-jev/engine/terminal-shell/native/bound-work-ledger-host';
+} from '@goodvibes/engine/terminal-shell/native/bound-work-ledger-host';
 /**
  * Agent admits hosted turns but never selected-diff execution, and preserves
  * paired journal identities.

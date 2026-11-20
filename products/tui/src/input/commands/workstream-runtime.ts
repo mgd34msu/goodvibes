@@ -1,7 +1,7 @@
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
-import { registerWorkstreamCommand, renderContractStatus } from '@goodvibes-jev/engine/terminal-shell';
-import { captureNativeConversationInput } from '@goodvibes-jev/engine/terminal-shell/native';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { registerWorkstreamCommand, renderContractStatus } from '@goodvibes/engine/terminal-shell';
+import { captureNativeConversationInput } from '@goodvibes/engine/terminal-shell/native';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { directOwnerWorkstreamInput, isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 
 export { renderContractStatus };

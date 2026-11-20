@@ -1,12 +1,12 @@
 /** Payment settings rows shared by both terminal apps. */
-import type { ConfigManager, ConfigKey, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager, ConfigKey, ConfigSetting } from '@goodvibes/engine/platform/platform/config';
 export {
   PAYMENTS_CVV_HANDLING_CONFIG_KEY,
   PAYMENTS_ADDRESS_FIELD_SUFFIXES,
   paymentsAddressConfigKey,
   paymentsAddressConfigKeys,
-} from '@goodvibes-jev/engine/platform/platform/config';
-export type { PaymentsAddressKind } from '@goodvibes-jev/engine/platform/platform/config';
+} from '@goodvibes/engine/platform/platform/config';
+export type { PaymentsAddressKind } from '@goodvibes/engine/platform/platform/config';
 export type PaymentsConfigReader = Pick<ConfigManager, 'get'>;
 export interface PaymentsSettingEntry {
   setting: ConfigSetting;

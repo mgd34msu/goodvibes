@@ -9,7 +9,7 @@
  *
  * So this is the runtime-neutral half, the front end, the engine, the detection
  * rules, the restart policy, the settings resolution and the listener, exported
- * as `@goodvibes-jev/engine/platform/platform/voice/wake/runtime`. A browser host provides
+ * as `@goodvibes/engine/platform/platform/voice/wake/runtime`. A browser host provides
  * the model bytes and the inference session; a terminal or daemon host can import
  * either this or the full barrel.
  *

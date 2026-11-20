@@ -3,9 +3,9 @@ import { execFileSync, spawn, type ChildProcessByStdio } from 'node:child_proces
 import type { Readable } from 'node:stream';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { parseDaemonCiArtifact, parseNativeReaderCapabilities, realUpdateFileIo, type NativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import { retainNativeArtifactFiles } from '@goodvibes-jev/engine/toolchain';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
+import { parseDaemonCiArtifact, parseNativeReaderCapabilities, realUpdateFileIo, type NativeReaderCapabilities } from '@goodvibes/engine/platform/platform/runtime/self-update';
+import { retainNativeArtifactFiles } from '@goodvibes/engine/toolchain';
+import { atomicWriteFileSync } from '@goodvibes/engine/platform/platform/config';
 import { drainNativeProcessGroup, signalNativeProcessGroup, spawnNativeProcessGroup } from './native-execution-process.mjs';
 
 import { daemonCiPayloads, daemonCiPayloadSpecs, daemonNativeHost, type DaemonArtifactSource, type DaemonCiArtifact } from '../src/cli/native-artifact.ts';

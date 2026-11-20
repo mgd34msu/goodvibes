@@ -1,8 +1,8 @@
 /**
  * Login with the operator API and persist the returned token in memory.
  */
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
-import { createMemoryTokenStore } from '@goodvibes-jev/engine/platform/auth';
+import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
+import { createMemoryTokenStore } from '@goodvibes/engine/platform/auth';
 
 const tokenStore = createMemoryTokenStore();
 

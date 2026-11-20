@@ -19,7 +19,7 @@
  * bespoke systemd shim) was dead code and got deleted from the platform. The platform's
  * REAL wired service machinery, reached in production by the daemon's own HTTP
  * `/api/service/*` routes via facade-composition.ts, is
- * `PlatformServiceManager` (`@goodvibes-jev/engine/platform/platform/daemon`): a single
+ * `PlatformServiceManager` (`@goodvibes/engine/platform/platform/daemon`): a single
  * systemd/launchd/windows-aware manager with install/uninstall/status/start/
  * stop/restart and a `suggestedCommands` hint list. This module now rewires the
  * three CLI subcommands onto that manager instead of the deleted shim.
@@ -33,8 +33,8 @@
  */
 
 import { copyFileSync } from 'node:fs';
-import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { PlatformServiceManager, type ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { PlatformServiceManager, type ManagedServiceStatus } from '@goodvibes/engine/platform/platform/daemon';
 import {
   buildManagedDaemonServiceManager,
   listProductServiceNames,

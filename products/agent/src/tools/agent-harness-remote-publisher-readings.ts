@@ -1,9 +1,9 @@
-import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
-import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
-import { remotePublisherOutcomeKind, remotePublisherSchemaStatus } from '@goodvibes-jev/engine/platform/platform/routing';
-import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes/engine/errors';
+import { prepareJudgmentResult } from '@goodvibes/engine/platform/platform/gate';
+import { remotePublisherOutcomeKind, remotePublisherSchemaStatus } from '@goodvibes/engine/platform/platform/routing';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes/engine/platform/platform/runtime';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { personalOpsEntry } from './agent-harness-personal-ops-source.ts';
 

@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/contracts';
+export * from '@goodvibes/engine/contracts';

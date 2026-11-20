@@ -1,5 +1,5 @@
 import type { CommandContext } from '../command-registry.ts';
-import { assertJudgmentInput, retainStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
+import { assertJudgmentInput, retainStrictJudgmentJson } from '@goodvibes/engine/platform/platform/gate';
 
 export class CommandReadingHeldError extends Error {
   constructor() { super('Command reading is unavailable or retired.'); this.name = 'CommandReadingHeldError'; }

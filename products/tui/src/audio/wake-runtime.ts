@@ -2,10 +2,10 @@ import {
   createTerminalWakeRuntime,
   type TerminalWakeRuntime,
   type TerminalWakeRuntimeDeps,
-} from '@goodvibes-jev/engine/terminal-shell/audio/wake-runtime';
+} from '@goodvibes/engine/terminal-shell/audio/wake-runtime';
 import { describeWakeBlockers, describeWakeLimitations, terminalWakeCapabilities } from '../core/wake-provision-status.ts';
 import { describeTranscriptionFailure } from '../core/voice-stt-gateway.ts';
-export type { WakeProvisionSnapshot, WakeRuntimeTestSeams } from '@goodvibes-jev/engine/terminal-shell/audio/wake-runtime';
+export type { WakeProvisionSnapshot, WakeRuntimeTestSeams } from '@goodvibes/engine/terminal-shell/audio/wake-runtime';
 /** TUI enablement remains read-only: provisioning is an explicit install/setup act. */
 export type WakeRuntimeDeps = Omit<TerminalWakeRuntimeDeps, 'ensureProvisioned'>;
 export type WakeRuntime = TerminalWakeRuntime;

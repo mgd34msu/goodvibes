@@ -8,7 +8,7 @@ import type { AutomationRun } from './runs.js';
 import { summarizeError } from '../utils/error-display.js';
 import { readFailureTransience, type FailureTransience } from '../integrations/delivery.js';
 import type { UnattendedAnswer, UnattendedRuns } from './unattended-runs.js';
-import type { ScheduleRunOutcome } from '@goodvibes-jev/engine/contracts';
+import type { ScheduleRunOutcome } from '@goodvibes/engine/contracts';
 
 export interface AutomationFailureFollowUpContext {
   readonly jobs: Map<string, AutomationJob>;

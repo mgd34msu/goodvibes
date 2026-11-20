@@ -7,7 +7,7 @@
  * while nothing is attached is dropped, which only loses an optional report:
  * the message itself is still in the inbox.
  */
-import type { OwnerMailObservation } from '@goodvibes-jev/engine/platform/platform/intake';
+import type { OwnerMailObservation } from '@goodvibes/engine/platform/platform/intake';
 
 export type OwnerMailHandler = (mail: OwnerMailObservation) => void;
 

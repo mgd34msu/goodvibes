@@ -5,9 +5,9 @@
  * permission-prompt-facts.ts). The layout, the buttons and the keys are the
  * shared ones, the same in the Agent; this file keeps only the wiring.
  */
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { askPresentationFor, type TerminalAskContext } from '@goodvibes-jev/engine/terminal-shell/permission-prompt-facts';
-import { renderAskCard, type AskCardState } from '@goodvibes-jev/engine/terminal-shell/renderer/ask-card';
+import type { PermissionPromptRequest } from '@goodvibes/engine/platform/platform/permissions';
+import { askPresentationFor, type TerminalAskContext } from '@goodvibes/engine/terminal-shell/permission-prompt-facts';
+import { renderAskCard, type AskCardState } from '@goodvibes/engine/terminal-shell/renderer/ask-card';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';
 
 export type PermissionCardState = AskCardState;

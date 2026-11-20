@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/hosted-session-registry';
+export * from '@goodvibes/engine/terminal-shell/hosted-session-registry';

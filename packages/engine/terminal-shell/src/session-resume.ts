@@ -23,12 +23,12 @@
  * resume applies it. A session that crashed before its first save has only
  * the snapshot; opening it is restoring it.
  */
-import type { SessionBranches, SessionManager, SessionMeta } from '@goodvibes-jev/engine/platform/platform/sessions';
-import type { SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { SessionBranches, SessionManager, SessionMeta } from '@goodvibes/engine/platform/platform/sessions';
+import type { SessionSurface } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { TerminalConversationManager as ConversationManager } from './terminal-conversation.js';
-import { restoreTurnAnchors } from '@goodvibes-jev/engine/platform/platform/rewind';
+import { restoreTurnAnchors } from '@goodvibes/engine/platform/platform/rewind';
 import { restoreWorkTreeFolds } from './work-tree-wiring.js';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import {
   claimSessionHere,
   closeSessionHere,
@@ -37,7 +37,7 @@ import {
   moveSessionHere,
   takeSessionOverHere,
   type SessionCrashSnapshot,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+} from '@goodvibes/engine/platform/platform/runtime/operations';
 import { crashSnapshotHandlerFor, type CrashSnapshotHandler, type CrashSnapshotHandling } from './session-crash-offer.js';
 /** Runs when a saved session becomes the live one in `conversation`; awaited by the resume routine. */
 export type SessionOpenedListener = (sessionId: string) => Promise<unknown>;
@@ -261,10 +261,10 @@ async function openCrashSnapshotOnly(
 }
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
+import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes/engine/platform/platform/rewind';
 import { saveWorkTreeFolds } from './work-tree-fold-store.js';
 import { readConversationMessageSnapshots } from './conversation-message-snapshot.js';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConversationMessageSnapshot } from '@goodvibes/engine/platform/platform/core';
 export function copySessionSidecars(
   source: string,
   destination: string,

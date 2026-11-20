@@ -14,7 +14,7 @@
  * resolved, and the Agent does not own the daemon's binary, its arguments, or
  * its environment. `goodvibes-daemon install-service` does, it is the daemon
  * naming itself. So the repair path talks to the daemon's CLI, which is
- * installed alongside the Agent (the Agent depends on @goodvibes-jev/daemon
+ * installed alongside the Agent (the Agent depends on @goodvibes/daemon
  * and its launcher lands on PATH), and which publishes a machine-readable
  * exit-code contract precisely so a caller never parses prose:
  *

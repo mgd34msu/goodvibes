@@ -1,15 +1,15 @@
-import { formatTranscript, resolveSessionExportRequest, type TranscriptFormat } from '@goodvibes-jev/engine/terminal-shell/session-export-format';
-import { createSessionWorkflowCommands } from '@goodvibes-jev/engine/terminal-shell/session-workflow-commands';
-import '@goodvibes-jev/engine/terminal-shell/transcript-review';
+import { formatTranscript, resolveSessionExportRequest, type TranscriptFormat } from '@goodvibes/engine/terminal-shell/session-export-format';
+import { createSessionWorkflowCommands } from '@goodvibes/engine/terminal-shell/session-workflow-commands';
+import '@goodvibes/engine/terminal-shell/transcript-review';
 
-import '@goodvibes-jev/engine/terminal-shell/transcript-kinds';
+import '@goodvibes/engine/terminal-shell/transcript-kinds';
 
 import type { CommandContext } from '../command-registry.ts';
 
 import type { ConversationMessageSnapshot } from '../../core/conversation.ts';
 import { formatReturnContextForDisplay, getReturnContextMode, maybeAssistReturnContextSummary } from '@/runtime/index.ts';
 import { requireProviderApi, requireSessionManager } from './runtime-services.ts';
-import { logger, redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, redactSensitiveDataAsync, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import './confirmation.ts';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
 import { copySessionSidecars, moveLiveSessionArtifacts } from '../../core/session-resume-core.ts';

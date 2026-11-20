@@ -1,5 +1,5 @@
 import { CONNECTED_HOST_LIFECYCLE_STATEMENT } from './agent-harness-connected-host-capabilities.ts';
-import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
+import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
 import type { CommandExecutionPolicy } from './agent-harness-metadata.ts';
 
 function agentHarnessModes(...modes: readonly string[]): string {

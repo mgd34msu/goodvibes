@@ -2,4 +2,4 @@ export type {
   DaemonErrorCategory,
   DaemonErrorSource,
   StructuredDaemonErrorBody,
-} from '@goodvibes-jev/engine/errors';
+} from '@goodvibes/engine/errors';

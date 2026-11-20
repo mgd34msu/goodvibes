@@ -19,15 +19,15 @@ import { cpSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { CommandContext } from '../command-registry.ts';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { choiceInput, doAction, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { choiceInput, doAction, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import { EvalRunner, createHeadlessRunExecutor, discoverTasks, formatTaskSuiteResult, runTaskSuite, taskSuiteAsEvalSuite } from '@/runtime/index.ts';
 import type { EvalSuiteResult } from '@/runtime/index.ts';
 import { loadBaseline, captureBaseline, formatBaselineComparison, writeBaseline } from '@/runtime/index.ts';
-import type { EvalRegistry } from '@goodvibes-jev/engine/platform/platform/observe';
+import type { EvalRegistry } from '@goodvibes/engine/platform/platform/observe';
 import { formatGateResult } from '@/runtime/index.ts';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 // ── Subcommand helpers ────────────────────────────────────────────────────────
 

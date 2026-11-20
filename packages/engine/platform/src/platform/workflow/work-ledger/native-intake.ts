@@ -1,12 +1,12 @@
 /** Durable original-input ownership before native work exists. Never starts execution. */
 import { nativeSelectedDiffSelector, type NativeSelectedDiffSelector } from './native-diff-context.js';
-import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { decisionModelPolicyState } from '@goodvibes/engine/errors';
 import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { captureNativeConversationContinuation, nativeConversationContinuationSchema, type NativeConversationContinuation } from './native-continuation-context.js';
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
-import { canonicalJson, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { canonicalJson, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes/judgment';
 import type { AutonomousDecision } from '../../gate/autonomous-decision.js';
 import { holdsNativeOwnership, type NativeExecutionScope, type NativeExecutionScopeOwner, type NativePairedExecutionAuthority, type NativePairedExecutionSnapshot } from './native-execution.js';
 import { createWorkLedger } from './service.js';
@@ -23,7 +23,7 @@ import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeL
   nativeConversationIntakeTransitionRequestSchema, nativeConversationIntakeResultSchema, nativeConversationIntakeWorkReceiptSchema,
   type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeLookupRequest, type NativeConversationIntakeTransitionRequest,
   type NativeConversationIntakeResult, type NativeConversationIntakeLookupResult, type NativeConversationIntakeWorkReceipt } from './native-intake-wire.js';
-import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
+import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
 
 type NativeConversationIntakeErrorCode = 'invalid' | 'unsupported-authority' | 'forbidden' | 'stale' | 'conflict' | 'request-conflict' | 'not-found' | 'recovery-required' | 'indeterminate' | 'unavailable' | 'closed';
 const NEXT_STEP: Record<NativeConversationIntakeErrorCode, string> = {

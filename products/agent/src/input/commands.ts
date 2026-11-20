@@ -52,7 +52,7 @@ import { registerDocumentsRuntimeCommands } from './commands/documents-runtime.t
 import { registerArtifactsRuntimeCommands } from './commands/artifacts-runtime.ts';
 import { registerCompareRuntimeCommands } from './commands/compare-runtime.ts';
 import { registerResearchRuntimeCommands } from './commands/research-runtime.ts';
-import type { RememberedRuleStore } from '@goodvibes-jev/engine/platform/platform/gate/policy';
+import type { RememberedRuleStore } from '@goodvibes/engine/platform/platform/gate/policy';
 
 
 /**

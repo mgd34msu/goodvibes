@@ -2,7 +2,7 @@
 import { chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { BigIntStats } from 'node:fs';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 const unavailable = () => new Error('Private SQLite storage path is unavailable');
 function synchronous(check: () => void): void { assertSynchronousJudgmentGuard(check, () => unavailable()); }
 

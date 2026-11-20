@@ -33,7 +33,7 @@
  * answer even then leaves the question genuinely unknown.
  */
 
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { assertImapReadingCurrent, imapFailureText, ImapReadingError } from '../imap-readings.js';
 import { CursorWriteError } from './cursor-store.js';
 import {

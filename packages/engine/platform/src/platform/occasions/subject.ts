@@ -14,7 +14,7 @@ import { occasionSubject, occasionEntry } from './readings.js';
 import { normalizeProfileKey } from '../owner-profile/fields.js';
 import { judge } from '../runtime/judge.js';
 import { JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
-import type { EntryType } from '@goodvibes-jev/judgment';
+import type { EntryType } from '@goodvibes/judgment';
 import type { Occasion, OccasionSubject } from './types.js';
 
 /**

@@ -11,7 +11,7 @@
  * Settings lists it.
  */
 
-import type { ConfigKey, ConfigManager, HostBooleanSetting, HostNumberSetting, HostSetting, HostStringSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager, HostBooleanSetting, HostNumberSetting, HostSetting, HostStringSetting } from '@goodvibes/engine/platform/platform/config';
 
 type SettingsReader = Pick<ConfigManager, 'get'>;
 

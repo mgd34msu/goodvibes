@@ -1,6 +1,6 @@
 /** Retained paired-device captures. Bytes are bound by their original native
  * file observation, not a content digest. */
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, chmodSync, unlinkSync, writeFile, type BigIntStats } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { PersistentStore } from '../state/persistent-store.js';

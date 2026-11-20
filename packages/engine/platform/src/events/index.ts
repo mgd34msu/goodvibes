@@ -1,5 +1,5 @@
 /**
- * Event type and guard exports for @goodvibes-jev/engine/platform/events.
+ * Event type and guard exports for @goodvibes/engine/platform/events.
  *
  * Validation helpers:
  * - `isRuntimeEventDomain(value)`, typeguard for the 28 domain names.

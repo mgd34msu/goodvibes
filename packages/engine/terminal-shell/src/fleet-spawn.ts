@@ -17,9 +17,9 @@
  * daemon verb caller (createVerbSpawnGateway).
  */
 
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import type { OperatorMethodOutput } from '@goodvibes/engine/platform';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 /** One discovered third-party ACP agent (acp.agents.list). */
 export type AcpDiscoveredAgent = OperatorMethodOutput<'acp.agents.list'>['agents'][number];

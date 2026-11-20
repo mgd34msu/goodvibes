@@ -21,8 +21,8 @@ import {
   type JsonValue,
   type JudgmentPort,
   type YesNoReading,
-} from '@goodvibes-jev/judgment';
-import { DecisionModelsDisabledError, JudgmentPortMissingError, judgmentPort } from '@goodvibes-jev/engine/errors';
+} from '@goodvibes/judgment';
+import { DecisionModelsDisabledError, JudgmentPortMissingError, judgmentPort } from '@goodvibes/engine/errors';
 import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
 import { isClassicOperation } from '../../runtime/decision-policy.js';
 import { assertCapturedToolAccessCurrent } from '../shared/captured-input-tools.js';

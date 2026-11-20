@@ -60,7 +60,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { normalizeForMatch, SqliteDecisionLog, type DecisionEntry } from '@goodvibes-jev/judgment';
+import { normalizeForMatch, SqliteDecisionLog, type DecisionEntry } from '@goodvibes/judgment';
 import { openContractRunner, readContracts, type HostedContractRunner } from '../platform/src/bin/contract-cli-host.ts';
 import { openEscalation } from '../platform/src/platform/contract/intake-route.ts';
 import { runContractCli, type ContractCliIo } from '../platform/src/platform/contract/cli.ts';

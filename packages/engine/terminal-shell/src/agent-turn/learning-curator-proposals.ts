@@ -1,4 +1,4 @@
-import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
+import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes/engine/platform/platform/runtime/decision-policy';
 import type { AgentNoteRecord } from './note-registry.js';
 import { type AgentResearchRunRecord } from './research-run-registry.js';
 import { previewHarnessText } from './preview-text.js';
@@ -6,14 +6,14 @@ import { acquireLearningCuratorSource, type LearningRecord, type LearningCurator
 import { readLearningDuplicatePair, readLearningGrade, readLearningProposalTarget, readLearningMemoryClass, readLearningSurvivor } from './learning-curator-readings.js';
 import { captureCatalogData } from './catalog-data.js';
 import type { CatalogRankingOptions } from './catalog-ranking.js';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import { logger, mapWithConcurrency } from '@goodvibes-jev/engine/platform/platform/utils';
-import { maxParallelToolCalls } from '@goodvibes-jev/engine/platform/platform/core';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import { logger, mapWithConcurrency } from '@goodvibes/engine/platform/platform/utils';
+import { maxParallelToolCalls } from '@goodvibes/engine/platform/platform/core';
 import type { LearningCandidate, LearningCandidateDraft, LearningProposalTarget, VibeCandidateKind, LocalLearningCandidateDomain } from './learning-curator-types.js';
 import { candidateBase, isMemoryPromptEligible, isReviewed, MIN_PROMPT_MEMORY_CONFIDENCE, learningPromotionReference, recordedPromotionReferences, localRegistryModelRoute, localRegistryRoute, missingRequirementCount } from './learning-curator-common.js';
 import { CONSOLIDATION_DOMAINS, consolidationCandidateForGroup, consolidationGroups, duplicatePairKey, identicalGroupSurvivor, identicalLearningRecords, liveGroupMembers, shortlistDuplicatePairs, survivorGroupKey } from './learning-curator-consolidation.js';
 import { LearningCurationStore, learningContentHash, type StoredLearningGrade, type StoredLearningProposal } from './learning-curation-store.js';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 function captureCandidate(): LearningCandidateDraft {
   return {
     id: 'capture:reviewed-lesson',

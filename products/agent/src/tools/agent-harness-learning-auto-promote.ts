@@ -1,24 +1,24 @@
-import { learningPromotionReference } from '@goodvibes-jev/engine/terminal-shell/agent-turn/learning-curator-common';
-import { MIN_PROMPT_MEMORY_CONFIDENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/memory-prompt';
-import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import { AgentNoteRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/note-registry';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { planMemoryRecord } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { learningPromotionReference } from '@goodvibes/engine/terminal-shell/agent-turn/learning-curator-common';
+import { MIN_PROMPT_MEMORY_CONFIDENCE } from '@goodvibes/engine/terminal-shell/agent-turn/memory-prompt';
+import type { MemoryAccess } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
+import { AgentNoteRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/note-registry';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
+import { planMemoryRecord } from '@goodvibes/engine/platform/platform/knowledge';
+import type { MemoryApi } from '@goodvibes/engine/platform/platform/knowledge';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
-import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
-import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
+import { AgentPersonaRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/persona-registry';
+import { AgentRoutineRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/routine-registry';
+import { AgentSkillRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
 import { runSkillDraftProposer, assertSkillDraftRunResultCurrent, type SkillDraftRunResult } from '../agent/skill-draft-runner.ts';
-import { buildLearningCandidates, assertLearningCandidateCollection, recordLearningPromotion, runLearningCurationPass } from '@goodvibes-jev/engine/terminal-shell/agent-turn/learning-curator-proposals';
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import type { LearningCandidate } from '@goodvibes-jev/engine/terminal-shell/agent-turn/learning-curator-types';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { buildLearningCandidates, assertLearningCandidateCollection, recordLearningPromotion, runLearningCurationPass } from '@goodvibes/engine/terminal-shell/agent-turn/learning-curator-proposals';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes/engine/platform/platform/runtime';
+import type { LearningCandidate } from '@goodvibes/engine/terminal-shell/agent-turn/learning-curator-types';
+import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureModelReadingSnapshotGuard, modelReadingServicePath } from './agent-harness-model-reading-source.ts';
-import type { LearningCandidateCollection, LearningCuratorNativeContext } from '@goodvibes-jev/engine/terminal-shell/agent-turn/learning-curator-source';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import type { LearningCandidateCollection, LearningCuratorNativeContext } from '@goodvibes/engine/terminal-shell/agent-turn/learning-curator-source';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 
 
 // ---------------------------------------------------------------------------

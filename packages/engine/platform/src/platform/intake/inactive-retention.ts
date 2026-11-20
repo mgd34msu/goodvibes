@@ -8,7 +8,7 @@
  * back over the file. */
 import { chmodSync, lstatSync, opendirSync, realpathSync, type Dir } from 'node:fs';
 import { join } from 'node:path';
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import { capturePrivateSqliteDirectory } from '../state/private-sqlite-path.js';
 import { openSqliteFile, type SqliteFile } from '../state/sqlite-file.js';
 import { fileObservationIdentity } from '../utils/file-observation.js';

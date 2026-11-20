@@ -1,3 +1,3 @@
-import { wireSpokenTurnRuntime as wire, type WireSpokenTurnRuntimeOptions } from '@goodvibes-jev/engine/terminal-shell/spoken-turn-wiring';
-export * from '@goodvibes-jev/engine/terminal-shell/spoken-turn-wiring';
+import { wireSpokenTurnRuntime as wire, type WireSpokenTurnRuntimeOptions } from '@goodvibes/engine/terminal-shell/spoken-turn-wiring';
+export * from '@goodvibes/engine/terminal-shell/spoken-turn-wiring';
 export const wireSpokenTurnRuntime = (options: WireSpokenTurnRuntimeOptions) => wire(options, 'goodvibes-agent');

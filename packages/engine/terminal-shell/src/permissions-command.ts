@@ -11,7 +11,7 @@ import {
   showPermissionSettings,
   showRememberedRules,
   type PermissionsCommandContext,
-} from '@goodvibes-jev/engine/platform/platform/gate/policy';
+} from '@goodvibes/engine/platform/platform/gate/policy';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';

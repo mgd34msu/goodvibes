@@ -1,10 +1,10 @@
-import { createCardEntryPrompter, createPaymentCardHost, renderCardList, describeCard, describeCardFailure, CARD_ENTRY_FIELDS, CardHostError, type CardField } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
-import { createPaymentWindowCommand } from '@goodvibes-jev/engine/terminal-shell/payment-window-command';
-import { registerPaymentsCommand } from '@goodvibes-jev/engine/terminal-shell/payments-command';
-import { paymentsAddressConfigKey, type PaymentsAddressKind } from '@goodvibes-jev/engine/terminal-shell/payments-settings';
-import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
-import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
-import { bindCredential, daemonTarget } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
+import { createCardEntryPrompter, createPaymentCardHost, renderCardList, describeCard, describeCardFailure, CARD_ENTRY_FIELDS, CardHostError, type CardField } from '@goodvibes/engine/terminal-shell/card-field-prompts';
+import { createPaymentWindowCommand } from '@goodvibes/engine/terminal-shell/payment-window-command';
+import { registerPaymentsCommand } from '@goodvibes/engine/terminal-shell/payments-command';
+import { paymentsAddressConfigKey, type PaymentsAddressKind } from '@goodvibes/engine/terminal-shell/payments-settings';
+import { OwnedSelectionObservation } from '@goodvibes/engine/platform/platform/runtime/client/selection-observation';
+import { parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
+import { bindCredential, daemonTarget } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target';
 /**
  * The terminal app's host for `/payments` (terminal-shell/payments-command.ts):
  * "Add a card" captures a payment card through the composer's concealed input
@@ -52,7 +52,7 @@ import { bindCredential, daemonTarget } from '@goodvibes-jev/engine/platform/pla
 import { isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 import { ownerOperatorConnectionPolicy } from './operator-connection-policy.ts';
 
-import '@goodvibes-jev/engine/platform/platform/payments';
+import '@goodvibes/engine/platform/platform/payments';
 import '../payments-config.ts';
 
 /**

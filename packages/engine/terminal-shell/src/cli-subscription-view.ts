@@ -6,8 +6,8 @@ import {
   type ServiceRegistry,
   type SecretsManager,
   type OAuthProviderConfig,
-} from '@goodvibes-jev/engine/platform/platform/config';
-import { inspectProviderAuth } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+} from '@goodvibes/engine/platform/platform/config';
+import { inspectProviderAuth } from '@goodvibes/engine/platform/platform/runtime/security';
 import { hasCommandFlag } from './cli-arguments.js';
 import { readAuthorizationInput } from './settings-subscriptions.js';
 import { openBrowser } from './cli-environment.js';

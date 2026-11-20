@@ -10,8 +10,8 @@ import { withAdmin } from './auth-helpers.js';
 import { randomUUID } from 'node:crypto';
 import { jsonErrorResponse } from './error-response.js';
 import { agentRetrySpawnInput } from './tasks.js';
-import { EngineErrorCodes, isOperationKey, OPERATION_KEY_RULE } from '@goodvibes-jev/engine/errors';
-import { REASONING_EFFORT_SEVERITY } from '@goodvibes-jev/engine/contracts';
+import { EngineErrorCodes, isOperationKey, OPERATION_KEY_RULE } from '@goodvibes/engine/errors';
+import { REASONING_EFFORT_SEVERITY } from '@goodvibes/engine/contracts';
 import {
   AUTOMATION_SURFACE_KINDS,
   EXECUTION_FILESYSTEM_POLICIES,

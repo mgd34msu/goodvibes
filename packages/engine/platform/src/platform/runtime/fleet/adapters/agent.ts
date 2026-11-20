@@ -7,7 +7,7 @@ import type {
   ProcessUsage,
 } from '../types.js';
 import { contractNodeId, contractUnitNodeId } from './contract.js';
-import { beadArgument, beadName, toolActivityFallback, toolCallActivity } from '@goodvibes-jev/engine/contracts';
+import { beadArgument, beadName, toolActivityFallback, toolCallActivity } from '@goodvibes/engine/contracts';
 import { toolActivityOf } from '../../../tools/registry.js';
 import { archetypeDisplayName } from '../../../agents/archetypes.js';
 

@@ -37,7 +37,7 @@ import { decisionOrClassic } from '../runtime/decision-policy.js';
  *
  * An empty domain is not asked about; there is nothing to read.
  */
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
 import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './checkout-ownership.js';
 import { merchantReading, merchantView, type RecourseKind } from './batteries/merchant.js';
 import type { MarketplaceKind, MerchantJudgeInput, MerchantJudgePort, MerchantJudgement } from './merchant-recourse.js';

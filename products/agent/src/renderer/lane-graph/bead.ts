@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/bead';
+export * from '@goodvibes/engine/terminal-shell/bead';

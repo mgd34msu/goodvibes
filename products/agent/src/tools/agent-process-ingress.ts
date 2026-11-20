@@ -1,5 +1,5 @@
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
-import type { ToolInputProjector, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate/judgment-input';
+import type { ToolInputProjector, ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { createHarnessCatalogInputProjector } from './agent-harness-catalog-ingress.ts';
 
 /** Reuse the complete-input screening lease before generic registry readers. */

@@ -1,6 +1,6 @@
 import { installedDataWriter } from '../runtime/native-data-writer.ts';
-import { ConfigManager, daemonConfigPathForHome, resolveGoodVibesDaemonHome, type ConfigKey, type HostBooleanSetting } from '@goodvibes-jev/engine/platform/platform/config';
-import { NOTIFICATIONS_METADATA_ONLY_KEY, NOTIFICATIONS_METADATA_ONLY_SETTING } from '@goodvibes-jev/engine/platform/platform/runtime/notification-privacy';
+import { ConfigManager, daemonConfigPathForHome, resolveGoodVibesDaemonHome, type ConfigKey, type HostBooleanSetting } from '@goodvibes/engine/platform/platform/config';
+import { NOTIFICATIONS_METADATA_ONLY_KEY, NOTIFICATIONS_METADATA_ONLY_SETTING } from '@goodvibes/engine/platform/platform/runtime/notification-privacy';
 import { MEMORY_SHOW_PROVENANCE_SETTING } from '../core/memory-provenance.ts';
 import { TUI_EXTENSION_SETTINGS } from './tui-extension-settings.ts';
 

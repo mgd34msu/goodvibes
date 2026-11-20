@@ -1,5 +1,5 @@
-import type { CrossSessionTaskRef, TaskHandoffRecord } from '@goodvibes-jev/engine/platform/platform/sessions';
-import type { ShellSessionOrchestrationService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { CrossSessionTaskRef, TaskHandoffRecord } from '@goodvibes/engine/platform/platform/sessions';
+import type { ShellSessionOrchestrationService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { statusBadge } from './task-presentation.js';
 export function flagValue(args: string[], flag: string): string | undefined {
   const idx = args.indexOf(flag);

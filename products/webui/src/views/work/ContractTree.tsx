@@ -1,7 +1,7 @@
 /** Read-only projection of recorded contract evidence. No local judgments or actions. */
 import { useId } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
+import type { OperatorMethodOutput } from '@goodvibes/engine/contracts';
 import { CodeFrame, DetailSection, Disclosure, Facts } from '../../components/data-view/DataView';
 import { NativeContractDetails } from './NativeContractDetails';
 import '../../styles/components/contract-tree.css';

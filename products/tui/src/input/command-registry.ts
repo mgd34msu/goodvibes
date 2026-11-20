@@ -7,28 +7,28 @@ import type {
   TerminalCommandWorkspaceUiServices,
   TerminalCommandPlatformConfigServices,
   TerminalCommandExtensionRegistryServices,
-} from '@goodvibes-jev/engine/terminal-shell/command-context-contracts';
+} from '@goodvibes/engine/terminal-shell/command-context-contracts';
 
-import { createTerminalCommandRegistry, reportDaemonWriteRefusals, type TerminalSlashCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
-import { SHARED_COMMAND_CONFIRMATIONS, withOwnerConfirmation, type ConfirmableCommand } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { assertDescribedCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import type { CommandSubcommandHints } from '@goodvibes-jev/engine/terminal-shell/command-args-hint';
-import type { ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
+import { createTerminalCommandRegistry, reportDaemonWriteRefusals, type TerminalSlashCommand } from '@goodvibes/engine/terminal-shell/command-registry';
+import { SHARED_COMMAND_CONFIRMATIONS, withOwnerConfirmation, type ConfirmableCommand } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { assertDescribedCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import type { CommandSubcommandHints } from '@goodvibes/engine/terminal-shell/command-args-hint';
+import type { ProductInputContext } from '@goodvibes/engine/terminal-shell/native';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
 
 import type { ConversationManager } from '../core/conversation';
 
-import type { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { WorkspaceCheckpointManager } from '@goodvibes/engine/platform/platform/workspace';
+import type { GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
 import type { ViewTarget } from './views.ts';
 import type { KeybindingsManager } from './keybindings.ts';
 import type { OnboardingWizardMode } from './onboarding/onboarding-wizard.ts';
 import type { OpenOnboardingWizardOptions } from './handler-ui-state.ts';
-import type { KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import type { HookApi } from '@goodvibes-jev/engine/platform/platform/hooks';
-import type { McpApi } from '@goodvibes-jev/engine/platform/platform/mcp';
-import type { ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { KnowledgeApi } from '@goodvibes/engine/platform/platform/knowledge';
+import type { MemorySpineClient } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
+import type { HookApi } from '@goodvibes/engine/platform/platform/hooks';
+import type { McpApi } from '@goodvibes/engine/platform/platform/mcp';
+import type { ProviderApi } from '@goodvibes/engine/platform/platform/providers';
 import type { OpsApi } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { OperatorClient } from '@/runtime/index.ts';
@@ -68,7 +68,7 @@ export interface CommandUiActions extends TerminalCommandUiActions<import('./mod
   dispatchNativeIntakeTurn?: (state: NativeConversationIntakeState) => Promise<void>;
   submitInput?: (
     text: string,
-    content?: import('@goodvibes-jev/engine/platform/platform/providers').ContentPart[],
+    content?: import('@goodvibes/engine/platform/platform/providers').ContentPart[],
     context?: ProductInputContext,
   ) => void;
 
@@ -183,7 +183,7 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
    */
   confirm?: (options: import('./confirm-dialog.ts').ConfirmOptions) => Promise<boolean>;
   /** Push a kit modal on the surface's modal stack (a described command's guided panel). */
-  pushSurfaceModal?: (modal: import('@goodvibes-jev/engine/terminal-shell/surface-modal-host').SurfaceModal) => void;
+  pushSurfaceModal?: (modal: import('@goodvibes/engine/terminal-shell/surface-modal-host').SurfaceModal) => void;
   /** Show a toast in the top right corner for five seconds (a colored ┃ on both sides). */
   showToast?: (toast: import('../renderer/surface-kit-parts.ts').ToastSpec) => void;
   /**
@@ -211,7 +211,7 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   /** The Agents modal; `target` selects a process, `hosted` opens the attached hosted session. */
   openAgents?: (options?: { readonly target?: ViewTarget; readonly hosted?: boolean }) => void;
   /** The ask waiting on screen, as Your agents lists it (its card's own words). */
-  waitingAsks?: () => readonly import('@goodvibes-jev/engine/contracts').WorkBoardAsk[];
+  waitingAsks?: () => readonly import('@goodvibes/engine/contracts').WorkBoardAsk[];
   /**
    * Open an agent or a background process full screen (terminal-shell session-focus).
    * False when it is not known here (the caller keeps its own fallback).
@@ -236,7 +236,7 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   /** The notification history. */
 
   /** Open a file in $VISUAL / $EDITOR (at a line when the editor takes one); resolves once the editor exits, true when it exited cleanly. */
-  openFileInEditor?: import('@goodvibes-jev/engine/terminal-shell').FileEditorOpener;
+  openFileInEditor?: import('@goodvibes/engine/terminal-shell').FileEditorOpener;
 
   openOpsView?: () => void;
   openCockpitView?: () => void;
@@ -265,7 +265,7 @@ export interface CommandSessionServices extends TerminalCommandSessionServices {
   readonly conversationManager: ConversationManager;
   readonly runtime: CommandRuntimeState;
 
-  readonly contractRunner?: import('@goodvibes-jev/engine/platform/platform/contract').ContractRunner;
+  readonly contractRunner?: import('@goodvibes/engine/platform/platform/contract').ContractRunner;
 
   /**
    * Recompute the Orchestrator's session-wide usage totals from the
@@ -276,11 +276,11 @@ export interface CommandSessionServices extends TerminalCommandSessionServices {
    */
 
   /** The orchestration engine's command-facing facade, see runtime/workstream-services.ts. */
-  readonly contractOperator?: import('@goodvibes-jev/engine/platform/platform/contract').ContractOperatorService;
+  readonly contractOperator?: import('@goodvibes/engine/platform/platform/contract').ContractOperatorService;
   /** The repo source-tree code index, see runtime/code-index-services.ts. */
-  readonly codeIndexStore?: import('@goodvibes-jev/engine/platform/platform/state').CodeIndexStore;
+  readonly codeIndexStore?: import('@goodvibes/engine/platform/platform/state').CodeIndexStore;
   /** Tool-site reindex scheduler, `/codebase status` reports its last activity. */
-  readonly codeIndexReindexScheduler?: import('@goodvibes-jev/engine/platform/platform/state').CodeIndexReindexScheduler;
+  readonly codeIndexReindexScheduler?: import('@goodvibes/engine/platform/platform/state').CodeIndexReindexScheduler;
   /** Whether the (default-off) `agent-passive-code-injection` flag is on, for `/codebase status`. */
   readonly isPassiveCodeInjectionFlagEnabled?: () => boolean;
   /**
@@ -313,29 +313,29 @@ export interface CommandWorkspaceUiServices extends TerminalCommandWorkspaceUiSe
   workspaceCheckpointManager?: WorkspaceCheckpointManager;
   /** In-process gateway catalog, the /review hunk-revert flow invokes checkpoints.revertHunk(Preview) over it. */
   gatewayMethods?: GatewayMethodCatalog;
-  workspaceTrustManager?: import('@goodvibes-jev/engine/platform/platform/runtime/operations').WorkspaceTrustManager;
-  workspaceRegistrationManager?: import('@goodvibes-jev/engine/platform/platform/runtime/operations').WorkspaceRegistrationManager;
+  workspaceTrustManager?: import('@goodvibes/engine/platform/platform/runtime/operations').WorkspaceTrustManager;
+  workspaceRegistrationManager?: import('@goodvibes/engine/platform/platform/runtime/operations').WorkspaceRegistrationManager;
 }
 
 export interface CommandWorkspaceServices extends CommandWorkspaceUiServices, CommandWorkspaceShellServices {}
 
 export interface CommandPlatformConfigServices extends TerminalCommandPlatformConfigServices {
   /** Per-device pairing tokens, backs the /devices command family. */
-  readonly pairingTokens?: import('@goodvibes-jev/engine/platform/platform/pairing').PairingTokenManager;
+  readonly pairingTokens?: import('@goodvibes/engine/platform/platform/pairing').PairingTokenManager;
   /** The daemon's paired-phone verbs: nodes, grants and retained captures for /devices. */
-  readonly devices?: import('@goodvibes-jev/engine/platform/platform/runtime/client').DevicesClient;
+  readonly devices?: import('@goodvibes/engine/platform/platform/runtime/client').DevicesClient;
   /** Capability gate runtime, feature states derive from domain settings keys; surfaces read live/pending state here. */
   readonly featureFlagManager?: FeatureFlagManager;
   /** The platform's voice setup (`/voice wake-setup`, the wake switch): one owner of the plan and its facts. */
-  readonly voiceSetup?: import('@goodvibes-jev/engine/platform/platform/runtime/voice-setup').VoiceSetupService;
+  readonly voiceSetup?: import('@goodvibes/engine/platform/platform/runtime/voice-setup').VoiceSetupService;
   /** This app's runtime store, read by `/state`. */
   readonly runtimeStore?: { getState(): object };
 
   /** Direct-command consumer (`/web-search`) alongside the existing agent-tool consumer. */
-  readonly webSearchService?: import('@goodvibes-jev/engine/platform/platform/web-search').WebSearchService;
+  readonly webSearchService?: import('@goodvibes/engine/platform/platform/web-search').WebSearchService;
   /** Direct-command consumer (`/media`), first production caller of `.generate()`. */
-  readonly mediaProviders?: import('@goodvibes-jev/engine/platform/platform/media').MediaProviderRegistry;
-  readonly artifactStore?: import('@goodvibes-jev/engine/platform/platform/artifacts').ArtifactStore;
+  readonly mediaProviders?: import('@goodvibes/engine/platform/platform/media').MediaProviderRegistry;
+  readonly artifactStore?: import('@goodvibes/engine/platform/platform/artifacts').ArtifactStore;
   /** Background daemon/HTTP-listener/relay controller. Mutable: main.ts patches it in post-bootstrap (see bootstrap-command-parts.ts ordering note). */
   externalServices?: UiPlatformServices['externalServices'];
 }
@@ -345,7 +345,7 @@ export interface CommandPlatformServices extends CommandPlatformConfigServices, 
 export interface CommandOpsServices extends CommandOpsShellServices {}
 
 export interface CommandExtensionRegistryServices extends TerminalCommandExtensionRegistryServices {
-  readonly evalRegistry?: import('@goodvibes-jev/engine/platform/platform/observe').EvalRegistry;
+  readonly evalRegistry?: import('@goodvibes/engine/platform/platform/observe').EvalRegistry;
 }
 
 export interface CommandExtensionServices extends CommandExtensionRegistryServices, CommandExtensionShellServices {}
@@ -387,7 +387,7 @@ export interface CommandContext extends CommandUiActions, CommandShellUiOpeners 
      * /permissions rules lists and revokes rules that take effect live. Served
      * by the daemon's permissions.rules.list/.delete verbs to other surfaces.
      */
-    readonly userPermissionRuleStore?: import('@goodvibes-jev/engine/platform/platform/permissions').UserPermissionRuleStore;
+    readonly userPermissionRuleStore?: import('@goodvibes/engine/platform/platform/permissions').UserPermissionRuleStore;
   };
 }
 

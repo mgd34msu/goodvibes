@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { JudgmentHeldError } from '../types/judgment-held.js';
 /**
@@ -23,8 +23,8 @@ import { JudgmentHeldError } from '../types/judgment-held.js';
  * the first eligible model in the tier's published-facts order, and the
  * route's reason says no decision model chose it.
  */
-import { NONE, type Candidate, type JsonValue, type Selection } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { NONE, type Candidate, type JsonValue, type Selection } from '@goodvibes/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import type { ModelDefinition } from '../providers/registry-types.js';
 import type { ResolvedModelPricing } from '../providers/model-pricing.js';
 import type { ProviderStatus } from '../providers/provider-health.js';
@@ -70,7 +70,7 @@ export interface RoutePlanRequest extends RoutingRequest {
   /** Captured user selection: all agent routes and fallbacks stay on this provider and model family. */
   readonly selectedModel?: Pick<ModelDefinition, 'id' | 'provider' | 'registryKey' | 'displayName'> | undefined;
   readonly beforeAttempt?: (() => void) | undefined;
-  readonly onRetry?: ((progress: import('@goodvibes-jev/judgment').JudgmentRetryProgress) => void) | undefined;
+  readonly onRetry?: ((progress: import('@goodvibes/judgment').JudgmentRetryProgress) => void) | undefined;
   readonly requires?: RouteRequirements | undefined;
   readonly signal?: AbortSignal | undefined;
 }
@@ -285,7 +285,7 @@ export function createRoutePlanner(deps: RoutePlannerDeps): RoutePlanner {
         const current = () => { request.signal?.throwIfAborted(); assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); if (judgmentPort('routing.route-planner.choice') !== port || port.model !== modelVersion) throw new JudgmentHeldError(); };
         let poolCandidates = candidates;
         let pick: Selection | undefined;
-        const fits: Record<string, import('@goodvibes-jev/judgment').YesNoReading> = {};
+        const fits: Record<string, import('@goodvibes/judgment').YesNoReading> = {};
         while (poolCandidates.length) {
           const winners: Candidate[] = [];
           for (let offset = 0; offset < poolCandidates.length; offset += 64) {

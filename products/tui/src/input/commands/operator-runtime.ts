@@ -1,15 +1,15 @@
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { settingsCommandDescription } from '@goodvibes-jev/engine/terminal-shell/settings-command';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import type { ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { settingsCommandDescription } from '@goodvibes/engine/terminal-shell/settings-command';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import type { ConfigSetting } from '@goodvibes/engine/platform/platform/config';
 import {
   createContextInspectionCommand,
-} from '@goodvibes-jev/engine/terminal-shell/context-inspection-command';
-import { registerInteractionModeCommand } from '@goodvibes-jev/engine/terminal-shell/interaction-mode-command';
-import { settingsTargetNotFoundMessage } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
+} from '@goodvibes/engine/terminal-shell/context-inspection-command';
+import { registerInteractionModeCommand } from '@goodvibes/engine/terminal-shell/interaction-mode-command';
+import { settingsTargetNotFoundMessage } from '@goodvibes/engine/terminal-shell/settings-navigation';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import '@goodvibes-jev/engine/platform/platform/utils';
-import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
+import '@goodvibes/engine/platform/platform/utils';
+import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/core';
 import { handleContextWindowSubcommand } from './context-window.ts';
 import { setSettingValue } from './setting-write.ts';
 

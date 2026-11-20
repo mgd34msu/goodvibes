@@ -1,4 +1,4 @@
-import { defineBattery, yesNo, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, yesNo, STAKES_BANDS } from '@goodvibes/judgment';
 
 /** Select primary evidence without confusing a read ledger with a claim. */
 export const sourceCitationPurpose = defineBattery({

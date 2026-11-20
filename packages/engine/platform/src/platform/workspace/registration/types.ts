@@ -15,7 +15,7 @@
  * (its `workspaces` array drops straight into this store's `workspaces`).
  */
 
-import { refusal, type Refusal } from '@goodvibes-jev/engine/errors';
+import { refusal, type Refusal } from '@goodvibes/engine/errors';
 
 /** An explicitly registered workspace root. Field-compatible with the agent registry record. */
 export interface RegisteredWorkspaceRecord {

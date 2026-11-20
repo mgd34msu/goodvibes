@@ -7,7 +7,7 @@ import { join } from 'node:path';
  * never for `status` or `doctor`, which load none of the ACP code.
  */
 export async function registerSelfAcpCommand(): Promise<void> {
-  const { registerSelfAcpAgentCommand } = await import('@goodvibes-jev/engine/platform/platform/acp');
+  const { registerSelfAcpAgentCommand } = await import('@goodvibes/engine/platform/platform/acp');
   const compiled = import.meta.path.startsWith('/$bunfs/') || /^[A-Za-z]:[\\/]~BUN[\\/]/.test(import.meta.path);
   registerSelfAcpAgentCommand(compiled ? [process.execPath, 'acp'] : [process.execPath, 'run', join(import.meta.dir, 'main.ts'), 'acp']);
 }

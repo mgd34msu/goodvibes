@@ -1,4 +1,4 @@
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 
 /**
  * Builds the process-level unhandledRejection handler for the shell.

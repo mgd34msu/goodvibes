@@ -10,7 +10,7 @@
 import type { TurnFailureReading } from '../core/turn-failure.js';
 import type { ConversationMessageEnvelope } from '../control-plane/conversation-message.js';
 import type { ArtifactDescriptor } from '../artifacts/index.js';
-import type { ToolActivityWords } from '@goodvibes-jev/engine/contracts';
+import type { ToolActivityWords } from '@goodvibes/engine/contracts';
 
 /**
  * Re-export the shared envelope so chat-mode code can import from one place.

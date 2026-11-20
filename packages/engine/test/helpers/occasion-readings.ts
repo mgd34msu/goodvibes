@@ -1,7 +1,7 @@
 /** Recorded synthetic answers for existing occasion fixtures, not a semantic oracle. */
 import { beforeEach, afterEach } from 'bun:test';
-import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes/judgment/testing';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import { securityPort } from './security-readings.ts';
 
 export function useOccasionReadings() {

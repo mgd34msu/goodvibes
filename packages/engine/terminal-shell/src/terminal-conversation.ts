@@ -1,16 +1,16 @@
-import type { RuntimeEventProvenance } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
-import { readTreeGlyphSet, TREE_GLYPHS_CONFIG_KEY } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { RuntimeEventProvenance } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
+import { readTreeGlyphSet, TREE_GLYPHS_CONFIG_KEY } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { InfiniteBuffer } from './conversation-history.js';
-import { createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types/grid';
-import type { Line, Cell } from '@goodvibes-jev/engine/platform/platform/types';
+import { createEmptyLine } from '@goodvibes/engine/platform/platform/types/grid';
+import type { Line, Cell } from '@goodvibes/engine/platform/platform/types';
 import type { SplashOptions } from './splash-lines.js';
-import type { ToolCall, ToolResult } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ProviderMessage, ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { NoticeMeta, TranscriptEventKind, TranscriptReadingOptions } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ToolCall, ToolResult } from '@goodvibes/engine/platform/platform/types';
+import type { ProviderMessage, ContentPart } from '@goodvibes/engine/platform/platform/providers';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { NoticeMeta, TranscriptEventKind, TranscriptReadingOptions } from '@goodvibes/engine/platform/platform/core';
 // SystemMessageKind imported from runtime directly to avoid cycle: conversation.ts → system-message-router.ts → conversation.ts
-import type { SystemMessageKind } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { ConversationManager as PlatformConversationManager, isTranscriptNotice, type BlockMeta as PlatformBlockMeta, } from '@goodvibes-jev/engine/platform/platform/core';
+import type { SystemMessageKind } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { ConversationManager as PlatformConversationManager, isTranscriptNotice, type BlockMeta as PlatformBlockMeta, } from '@goodvibes/engine/platform/platform/core';
 import type { BlockMeta } from './work-tree-types.js';
 import type { ConversationRenderContext } from './conversation-render-context.js';
 import type { createConversationRenderer } from './conversation-rendering.js';
@@ -28,7 +28,7 @@ export interface TerminalConversationPresentation {
     readonly streamThrottleMs: number;
     readonly stickySplash: boolean;
 }
-import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
+import { JudgmentAuthorityRetiredError } from '@goodvibes/engine/errors';
 import { MessageLineCache } from './conversation-line-cache.js';
 import { SplashGateState } from './conversation-splash-state.js';
 import { nearestBlock, resolveTranscriptEventLine, wrapToLine } from './conversation-event-navigation.js';
@@ -48,13 +48,13 @@ import { probeUnicodeSupport } from './renderer/lane-graph-glyphs.js';
  * Line[]-based rendering atop the platform's message management.
  */
 // Re-export platform types for backward compatibility
-export type { TokenUsage, ConversationMessageSnapshot, ConversationTitleSource, } from '@goodvibes-jev/engine/platform/platform/core';
+export type { TokenUsage, ConversationMessageSnapshot, ConversationTitleSource, } from '@goodvibes/engine/platform/platform/core';
 export type { PlatformBlockMeta };
 // BlockMeta is defined in ./conversation-types.ts to avoid a circular dep
 // with conversation-rendering.ts; re-exported here for backward compatibility.
 export type { BlockMeta };
 // Import internal types needed for rendering helpers
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConversationMessageSnapshot } from '@goodvibes/engine/platform/platform/core';
 type Message = ConversationMessageSnapshot;
 /**
  * `Orchestrator.usage`'s own type, re-exported under the name this module's
@@ -62,9 +62,9 @@ type Message = ConversationMessageSnapshot;
  * was an inferred object literal on the class with no name to import; it has
  * one now.
  */
-import type { OrchestratorUsageTotals } from '@goodvibes-jev/engine/platform/platform/core';
+import type { OrchestratorUsageTotals } from '@goodvibes/engine/platform/platform/core';
 export type { OrchestratorUsageTotals };
-export { sumConversationUsage } from '@goodvibes-jev/engine/platform/platform/core';
+export { sumConversationUsage } from '@goodvibes/engine/platform/platform/core';
 export class TerminalConversationManager extends PlatformConversationManager {
     public history = new InfiniteBuffer();
     /** Replacement identity for asynchronous presentation tied to this history. */
@@ -248,7 +248,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
         toolCalls?: ToolCall[] | undefined;
         reasoningContent?: string | undefined;
         reasoningSummary?: string | undefined;
-        usage?: import('@goodvibes-jev/engine/platform/platform/core').TokenUsage | undefined;
+        usage?: import('@goodvibes/engine/platform/platform/core').TokenUsage | undefined;
         model?: string | undefined;
         provider?: string | undefined;
     } | undefined): void {
@@ -547,7 +547,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
         branches?: Record<string, Message[]> | undefined;
         currentBranch?: string | undefined;
         title?: string | undefined;
-        titleSource?: import('@goodvibes-jev/engine/platform/platform/core').ConversationTitleSource | undefined;
+        titleSource?: import('@goodvibes/engine/platform/platform/core').ConversationTitleSource | undefined;
     }): void {
         this.retireNoticePublications();
         this.replacementGeneration++;
@@ -940,4 +940,4 @@ export class TerminalConversationManager extends PlatformConversationManager {
     public markSearchExpanded(key: string): void { this.searchExpansion.markSearchExpanded(key); }
     public restoreSearchExpansions(): void { this.searchExpansion.restoreOnto(this); }
 }
-export { parseDiffForApply } from '@goodvibes-jev/engine/platform/platform/core';
+export { parseDiffForApply } from '@goodvibes/engine/platform/platform/core';

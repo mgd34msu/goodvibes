@@ -3,8 +3,8 @@
  * this result is never consulted by routing, readiness, pricing or payment.
  * Unknown is a complete display result, not permission to guess or act.
  */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import type { YesNoReading } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import type { YesNoReading } from '@goodvibes/judgment';
 import type { ProviderRuntimeMetadata } from './interface.js';
 import { providerSetupReading } from './setup-reading.js';
 import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';

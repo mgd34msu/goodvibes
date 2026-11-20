@@ -1,6 +1,6 @@
 import type { DaemonKnowledgeRouteHandlers } from './context.js';
 import { resolvePrivateHostFetchOptions } from './http-policy.js';
-import { GoodVibesError, DaemonErrorCategory, readRefusal } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError, DaemonErrorCategory, readRefusal } from '@goodvibes/engine/errors';
 import { authenticationRequiredResponse, jsonErrorResponse, missingScopeRefusal, readServiceErrorResponse } from './error-response.js';
 import { decodeCursor, encodeCursor, listingEnvelope } from './pagination.js';
 import { createArtifactFromUploadRequest, isArtifactUploadRequest } from './artifact-upload.js';

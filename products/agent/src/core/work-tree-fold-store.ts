@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/work-tree-fold-store';
+export * from '@goodvibes/engine/terminal-shell/work-tree-fold-store';

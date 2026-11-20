@@ -1,16 +1,16 @@
 import type { ModelPickerTarget } from './model-picker-types.js';
 import type { SettingsTargetOutcome } from './settings-navigation.js';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
-import type { OpenSelection } from '@goodvibes-jev/engine/terminal-shell/selection-modal';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
-import type { DeepReadonly } from '@goodvibes-jev/engine/platform/platform/config';
-import type { GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { VoiceProviderRegistry } from '@goodvibes-jev/engine/platform/platform/voice';
-import type { VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
+import type { PermissionRequestHandler } from '@goodvibes/engine/platform/platform/permissions';
+import type { OpenSelection } from '@goodvibes/engine/terminal-shell/selection-modal';
+import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
+import type { FileUndoManager } from '@goodvibes/engine/platform/platform/state';
+import type { DeepReadonly } from '@goodvibes/engine/platform/platform/config';
+import type { GoodVibesConfig } from '@goodvibes/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { VoiceProviderRegistry } from '@goodvibes/engine/platform/platform/voice';
+import type { VoiceService } from '@goodvibes/engine/platform/platform/voice';
+import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { McpRegistry } from '@goodvibes/engine/platform/platform/mcp';
 /** Shared command capabilities; products extend these contracts with their own policy and UI actions. */
 export interface TerminalCommandRuntimeState {
   model: string;
@@ -24,7 +24,7 @@ export interface TerminalCommandUiActions<Target extends ModelPickerTarget> {
   renderRequest: () => void;
   print: (text: string) => void;
   exit: () => void;
-  submitSpokenInput?: (text: string, content?: import('@goodvibes-jev/engine/platform/platform/providers').ContentPart[]) => void;
+  submitSpokenInput?: (text: string, content?: import('@goodvibes/engine/platform/platform/providers').ContentPart[]) => void;
   /**
    * Send text as a conversation turn exactly as given, with none of the
    * composer's grammar (`!` shell, `# ` note, `!#` pin, `@model:` switch).
@@ -33,7 +33,7 @@ export interface TerminalCommandUiActions<Target extends ModelPickerTarget> {
    */
   submitTurn?: (
     text: string,
-    content?: import('@goodvibes-jev/engine/platform/platform/providers').ContentPart[],
+    content?: import('@goodvibes/engine/platform/platform/providers').ContentPart[],
     context?: import('./native/native-conversation-input.js').ProductInputContext,
   ) => void;
   stopSpokenOutput?: () => void;
@@ -102,31 +102,31 @@ export interface TerminalCommandShellUiOpeners<Target extends ModelPickerTarget>
 }
 
 export interface TerminalCommandSessionServices {
-  readonly sessionManager?: import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager;
-  readonly sessionMemoryStore?: import('@goodvibes-jev/engine/platform/platform/core').SessionMemoryStore;
-  readonly sessionLineageTracker?: import('@goodvibes-jev/engine/platform/platform/core').SessionLineageTracker;
-  readonly changeTracker?: import('@goodvibes-jev/engine/platform/platform/sessions').SessionChangeTracker;
+  readonly sessionManager?: import('@goodvibes/engine/platform/platform/sessions').SessionManager;
+  readonly sessionMemoryStore?: import('@goodvibes/engine/platform/platform/core').SessionMemoryStore;
+  readonly sessionLineageTracker?: import('@goodvibes/engine/platform/platform/core').SessionLineageTracker;
+  readonly changeTracker?: import('@goodvibes/engine/platform/platform/sessions').SessionChangeTracker;
   readonly hydrateSessionUsage?: () => void;
   /** The contract operator `/workstream` lists, inspects, stops, answers, retries and re-budgets contracts through. */
-  readonly contractOperator?: import('@goodvibes-jev/engine/platform/platform/contract').ContractOperatorService;
+  readonly contractOperator?: import('@goodvibes/engine/platform/platform/contract').ContractOperatorService;
   /** Workstream drafts: propose a plan, review and edit it, approve and launch it as a contract (`/workstream propose`). */
-  readonly workstreamDrafts?: import('@goodvibes-jev/engine/platform/platform/orchestration').WorkstreamDraftService;
+  readonly workstreamDrafts?: import('@goodvibes/engine/platform/platform/orchestration').WorkstreamDraftService;
 }
 
 export interface TerminalCommandProviderServices {
   readonly providerRegistry: ProviderRegistry;
-  readonly providerOptimizer?: import('@goodvibes-jev/engine/platform/platform/providers').ProviderOptimizer;
-  readonly favoritesStore?: import('@goodvibes-jev/engine/platform/platform/providers').FavoritesStore;
-  readonly benchmarkStore?: import('@goodvibes-jev/engine/platform/platform/providers').BenchmarkStore;
+  readonly providerOptimizer?: import('@goodvibes/engine/platform/platform/providers').ProviderOptimizer;
+  readonly favoritesStore?: import('@goodvibes/engine/platform/platform/providers').FavoritesStore;
+  readonly benchmarkStore?: import('@goodvibes/engine/platform/platform/providers').BenchmarkStore;
 }
 
 export interface TerminalCommandWorkspaceUiServices {
   fileUndoManager?: FileUndoManager;
-  profileManager?: import('@goodvibes-jev/engine/platform/platform/profiles').ProfileManager;
-  bookmarkManager?: import('@goodvibes-jev/engine/platform/platform/bookmarks').BookmarkManager;
-  projectPlanningService?: import('@goodvibes-jev/engine/platform/platform/knowledge').ProjectPlanningService;
+  profileManager?: import('@goodvibes/engine/platform/platform/profiles').ProfileManager;
+  bookmarkManager?: import('@goodvibes/engine/platform/platform/bookmarks').BookmarkManager;
+  projectPlanningService?: import('@goodvibes/engine/platform/platform/knowledge').ProjectPlanningService;
   projectPlanningProjectId?: string;
-  workPlan?: import('@goodvibes-jev/engine/platform/platform/knowledge').ProjectWorkPlan;
+  workPlan?: import('@goodvibes/engine/platform/platform/knowledge').ProjectWorkPlan;
 }
 
 export interface TerminalCommandPlatformConfigServices {

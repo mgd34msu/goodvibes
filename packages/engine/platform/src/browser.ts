@@ -1,5 +1,5 @@
-import type { FetchLike } from '@goodvibes-jev/engine/transport-core';
-import { ConfigurationError } from '@goodvibes-jev/engine/errors';
+import type { FetchLike } from '@goodvibes/engine/transport-core';
+import { ConfigurationError } from '@goodvibes/engine/errors';
 import {
   createGoodVibesPlatform,
   type GoodVibesPlatformOptions,
@@ -14,8 +14,8 @@ import {
  * - `fetch` and `WebSocketImpl` default to the browser globals.
  *
  * This is the canonical options type for the browser entrypoint
- * (`@goodvibes-jev/engine/platform/browser`). The web entrypoint
- * (`@goodvibes-jev/engine/platform/web`) exposes the same shape as
+ * (`@goodvibes/engine/platform/browser`). The web entrypoint
+ * (`@goodvibes/engine/platform/web`) exposes the same shape as
  * `WebGoodVibesPlatformOptions`, a named alias retained for ergonomic imports.
  */
 export interface BrowserGoodVibesPlatformOptions
@@ -50,7 +50,7 @@ export { forSession } from './companion-realtime.js';
  *
  * @example
  * // Example only: baseUrl defaults to location.origin in a real browser app.
- * import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+ * import { createBrowserGoodVibesPlatform } from '@goodvibes/engine/platform/browser';
  *
  * const platform = createBrowserGoodVibesPlatform({
  *   authToken: sessionStorage.getItem('gv-token') ?? undefined,

@@ -43,8 +43,8 @@
  * it. Unless behavior.notificationsMetadataOnly is explicitly false it carries
  * the tool name and permission category only.
  */
-import { logger, notifyNow, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { PermissionRequestHandler, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { logger, notifyNow, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { PermissionRequestHandler, PermissionPromptRequest } from '@goodvibes/engine/platform/platform/permissions';
 import {
   buildApprovalNotification,
   describeToolTarget,
@@ -52,7 +52,7 @@ import {
   resolveTurnName,
   shouldFireAlert,
   type ConfigGet,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+} from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { FocusTracker } from '@/runtime/index.ts';
 
 import { FOCUS_DISABLE } from '../renderer/terminal-escapes.ts';

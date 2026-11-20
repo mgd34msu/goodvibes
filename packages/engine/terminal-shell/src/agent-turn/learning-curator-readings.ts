@@ -1,10 +1,10 @@
-import { isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { learningProposalQuality } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
-import { learningCuratorScore, learningDuplicateAlignment, learningProposalTarget, learningSurvivorSelection, learningSurvivorEquivalence, memoryClass, assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { isClassicOperation } from '@goodvibes/engine/platform/platform/runtime';
+import { learningProposalQuality } from '@goodvibes/engine/platform/platform/knowledge';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
+import { prepareJudgmentResult } from '@goodvibes/engine/platform/platform/gate';
+import { learningCuratorScore, learningDuplicateAlignment, learningProposalTarget, learningSurvivorSelection, learningSurvivorEquivalence, memoryClass, assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
 import { type CatalogRankingOptions } from './catalog-ranking.js';
-import { type NamedDecision } from '@goodvibes-jev/judgment';
+import { type NamedDecision } from '@goodvibes/judgment';
 import { withModelReadingSource } from './model-reading.js';
 import { personalOpsEntry, personalOpsJson } from './personal-ops-data.js';
 import type { LearningProposalTarget, LearningScores } from './learning-curator-types.js';

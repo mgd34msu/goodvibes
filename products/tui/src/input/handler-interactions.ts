@@ -1,4 +1,4 @@
-import { createHandlerContentBindings } from '@goodvibes-jev/engine/terminal-shell/handler-content-bindings';
+import { createHandlerContentBindings } from '@goodvibes/engine/terminal-shell/handler-content-bindings';
 import { buildProviderAccountSnapshot } from '@/runtime/index.ts';
 import { enrichProviderAccountsSnapshot } from '../runtime/onboarding/provider-key-capture.ts';
 import type { OnboardingWizardMode } from './onboarding/onboarding-wizard.ts';
@@ -16,7 +16,7 @@ import { handleEscape } from './handler-modal-stack.ts';
 import { recordFeatureEnablement } from './onboarding/onboarding-feature-units.ts';
 import { openOnboardingWizardState, type OpenOnboardingWizardOptions } from './handler-ui-state.ts';
 import type { InputHandlerLike as InputHandler } from './handler-types.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 /** The one place the wizard's runtime snapshot is collected, for the open-time and refresh paths alike. */
 export function collectOnboardingSnapshotForHandler(handler: InputHandler): ReturnType<typeof collectOnboardingSnapshot> {

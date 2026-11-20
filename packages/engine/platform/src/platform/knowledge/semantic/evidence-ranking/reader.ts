@@ -1,6 +1,6 @@
 import { activateClassicFallback } from '../../../runtime/decision-policy.js';
-import { DecisionModelsDisabledError, judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { toJson, type JsonValue, type JudgmentPort, type JudgmentRequest, type JudgmentResult, type Questions } from '@goodvibes-jev/judgment';
+import { DecisionModelsDisabledError, judgmentPort, JudgmentPortMissingError } from '@goodvibes/engine/errors';
+import { toJson, type JsonValue, type JudgmentPort, type JudgmentRequest, type JudgmentResult, type Questions } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
 import { freezeSupport } from '../verification/projection.js';
 import { answerEvidenceRelevance } from './battery.js';

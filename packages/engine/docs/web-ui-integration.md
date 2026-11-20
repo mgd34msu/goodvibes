@@ -6,13 +6,13 @@ Web UI apps cannot run the full agentic surface (tool execution, LSP, MCP, workf
 
 Use the narrowest browser entrypoint that matches the app. A normal GoodVibes
 WebUI that presents the base knowledge/wiki system should use
-`@goodvibes-jev/engine/platform/browser/knowledge`; it contains base knowledge routes,
+`@goodvibes/engine/platform/browser/knowledge`; it contains base knowledge routes,
 shared session/auth/provider routes, and realtime domains without loading Home
-Assistant Home Graph route metadata. Use `@goodvibes-jev/engine/platform/browser` only
+Assistant Home Graph route metadata. Use `@goodvibes/engine/platform/browser` only
 when the app intentionally needs the complete operator route contract.
 
 ```ts
-import { createBrowserKnowledgePlatform } from '@goodvibes-jev/engine/platform/browser/knowledge';
+import { createBrowserKnowledgePlatform } from '@goodvibes/engine/platform/browser/knowledge';
 
 const platformClient = createBrowserKnowledgePlatform({
   baseUrl: 'https://goodvibes.example.com',
@@ -71,14 +71,14 @@ For a browser-based web UI:
 
 ## Choosing browser entrypoints
 
-`@goodvibes-jev/engine/platform/browser/knowledge` is the default for the base GoodVibes
-WebUI. `@goodvibes-jev/engine/platform/browser/homeassistant` is for Home Assistant
+`@goodvibes/engine/platform/browser/knowledge` is the default for the base GoodVibes
+WebUI. `@goodvibes/engine/platform/browser/homeassistant` is for Home Assistant
 panels and includes Home Graph routes without pulling the base knowledge/wiki
-route table. `@goodvibes-jev/engine/platform/browser/agent` (via `createBrowserAgentPlatform`)
+route table. `@goodvibes/engine/platform/browser/agent` (via `createBrowserAgentPlatform`)
 scopes to the GoodVibes Agent surface: the agent's own knowledge/wiki space
 served under `/api/goodvibes-agent/knowledge`, plus work-plan, artifact, and
-companion-chat routes. `@goodvibes-jev/engine/platform/browser` and
-`@goodvibes-jev/engine/platform/web` remain full all-method browser clients for
+companion-chat routes. `@goodvibes/engine/platform/browser` and
+`@goodvibes/engine/platform/web` remain full all-method browser clients for
 applications that need the entire operator contract.
 
 See [public-surface.md](./public-surface.md) for the full entry-point reference.
@@ -92,7 +92,7 @@ See [public-surface.md](./public-surface.md) for the full entry-point reference.
 
 ## Companion chat
 
-Use `platformClient.chat` from `@goodvibes-jev/engine/platform/browser/knowledge` for standalone
+Use `platformClient.chat` from `@goodvibes/engine/platform/browser/knowledge` for standalone
 browser chat. These sessions are separate from operator task sessions and do
 not call `sessions.followUp`.
 
@@ -232,7 +232,7 @@ taxonomy.
 ## Observability
 
 Observability works from web UI contexts exactly as on the full surface. Import
-observer helpers from `@goodvibes-jev/engine/platform/observer` so scoped browser bundles
+observer helpers from `@goodvibes/engine/platform/observer` so scoped browser bundles
 stay narrow, and pass `createConsoleObserver()` as the `observer` option when
 creating the platform. See
 [Browser Integration → Observability](./browser-integration.md#observability) for

@@ -1,4 +1,4 @@
-import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
+import type { OperatorMethodInput } from '@goodvibes/engine/platform/contracts';
 import { createConnectedHost, isHostFailure, type ConnectedHostSource, type ConnectedHostUnavailable, type HostCallApplied, type HostFailureKind, type HostRefusal } from './connected-host-client.js';
 import { assertSafeOperatorPathValue, requireOperatorHttpBinding, type JsonRecord } from './operator-contract-routes.js';
 import { scheduleNextRouteLines } from './schedule-next-routes.js';

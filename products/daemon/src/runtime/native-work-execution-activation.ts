@@ -1,12 +1,12 @@
 /** Lazy daemon-owned native graph; ordinary conversations keep their own runner. */
-import { createAgentExecutionGraph } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { WORKSTREAM_CONTAINMENT } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
-import { ProcessManager, cancelAllAgentRuns, type AgentFleetOwnership } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agents';
-import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { NativeWorkExecutionError, type NativeWorkExecutionHost } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution';
+import { createAgentExecutionGraph } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { WORKSTREAM_CONTAINMENT } from '@goodvibes/engine/platform/platform/hosted-sessions';
+import { ProcessManager, cancelAllAgentRuns, type AgentFleetOwnership } from '@goodvibes/engine/platform/platform/tools';
+import type { AgentOrchestrator } from '@goodvibes/engine/platform/platform/agents';
+import type { PermissionManager } from '@goodvibes/engine/platform/platform/permissions';
+import { NativeWorkExecutionError, type NativeWorkExecutionHost } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution';
 import { createDaemonNativeWorkExecutionServices } from './native-work-execution-composition.js';
-import type { ContractOperatorService } from '@goodvibes-jev/engine/platform/platform/contract';
+import type { ContractOperatorService } from '@goodvibes/engine/platform/platform/contract';
 import { createNativeWorkSessionDriver, type NativeSessionDriverOptions } from './native-work-session-driver.js';
 
 type NativeOptions = Parameters<typeof createDaemonNativeWorkExecutionServices>[0];

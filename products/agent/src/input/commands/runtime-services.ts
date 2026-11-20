@@ -2,9 +2,9 @@ import {
   createCommandServiceAccessors,
   createCommandPathAccessors,
   requireContextValue,
-} from '@goodvibes-jev/engine/terminal-shell/command-service-access';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
-export { requireShellPaths, requirePluginPathOptions } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+} from '@goodvibes/engine/terminal-shell/command-service-access';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
+export { requireShellPaths, requirePluginPathOptions } from '@goodvibes/engine/terminal-shell/command-service-access';
 export const {
   requireSession,
   requireProvider,
@@ -57,7 +57,7 @@ import type { CommandContext } from '../command-registry.ts';
 
 
 
-import type { KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { KnowledgeApi } from '@goodvibes/engine/platform/platform/knowledge';
 
 
 

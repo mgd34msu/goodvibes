@@ -2,7 +2,7 @@ import { accessSync, constants } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
-import type { VoiceAudioChunk } from '@goodvibes-jev/engine/platform/platform/voice';
+import type { VoiceAudioChunk } from '@goodvibes/engine/platform/platform/voice';
 
 export interface StreamingAudioPlayerCommand {
   readonly command: string;

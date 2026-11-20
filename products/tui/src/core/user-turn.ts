@@ -11,9 +11,9 @@
  * depends on which wiring subscribed first, on a microtask, or on a grace
  * timer. The turn-end notice and the retry affordance read `onEnd`.
  */
-import type { TurnEvent } from '@goodvibes-jev/engine/platform/events';
+import type { TurnEvent } from '@goodvibes/engine/platform/events';
 import type { UiRuntimeEvents } from '@/runtime/index.ts';
-import { defineLifecycle, logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { defineLifecycle, logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 type TurnErrorEvent = Extract<TurnEvent, { type: 'TURN_ERROR' }>;
 

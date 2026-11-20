@@ -19,17 +19,17 @@ import {
   assertHostedBindingCurrent, currentHostedBinding, hostedAttachmentOrigin,
 } from '../../runtime/client/hosted-attachments.ts';
 import { describeOperatorRpcError } from '../../runtime/client/operator-endpoint.ts';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
 import {
   createDaemonVerbCaller,
   pinDaemonVerbCaller,
   resolveDaemonEndpoint,
   type DaemonEndpoint,
 } from '../../runtime/client/operator-endpoint.ts';
-import type { SessionBinding } from '@goodvibes-jev/engine/platform/platform/runtime/client/session-binding';
-import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { defineCommand, defineList, type CommandDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import type { SessionBinding } from '@goodvibes/engine/platform/platform/runtime/client/session-binding';
+import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { defineCommand, defineList, type CommandDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
 import {
   createHostedSessionsClient,
   describeDetachEffect,

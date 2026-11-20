@@ -12,7 +12,7 @@
 
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
+import type { RuntimeEventDomain } from '@goodvibes/engine/contracts';
 import { getClientLifetime } from '../lib/client-lifetime';
 import { subscribeEvents, useEventStreamState } from '../lib/event-stream';
 import { HOSTED_SESSION_UPDATE_WIRE_EVENT } from '../lib/hosted-sessions';

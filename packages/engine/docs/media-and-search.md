@@ -3,7 +3,7 @@
 GoodVibes exposes media, voice, multimodal analysis, artifact, and web-search
 features through the daemon control plane and platform modules.
 
-Daemon embedders use the dedicated `@goodvibes-jev/engine/platform/platform/multimodal`
+Daemon embedders use the dedicated `@goodvibes/engine/platform/platform/multimodal`
 subpath and explicit daemon/runtime wiring. Consumer apps interact through
 operator methods documented below.
 

@@ -1,10 +1,10 @@
 /**
  * reminder-schedule.ts, a reminder created on this Agent's connected host by
  * the /schedule command. Parsing the arguments and building the request is the
- * shared Agent turn's (`@goodvibes-jev/engine/terminal-shell/agent-turn`),
+ * shared Agent turn's (`@goodvibes/engine/terminal-shell/agent-turn`),
  * re-exported here for this file's importers.
  */
-import { REMINDER_SCHEDULE_METHOD, REMINDER_SCHEDULE_ROUTE, type ReminderSchedulePreview, type ReminderScheduleResult } from '@goodvibes-jev/engine/terminal-shell/agent-turn/reminder-schedule';
+import { REMINDER_SCHEDULE_METHOD, REMINDER_SCHEDULE_ROUTE, type ReminderSchedulePreview, type ReminderScheduleResult } from '@goodvibes/engine/terminal-shell/agent-turn/reminder-schedule';
 import { createConnectedSchedule } from './connected-schedule.ts';
 import {
   resolveAgentConnectedHostConnection,
@@ -12,7 +12,7 @@ import {
   type AgentConnectedHostConnection,
 } from './routine-schedule-promotion.ts';
 
-export { REMINDER_SCHEDULE_METHOD, REMINDER_SCHEDULE_ROUTE, buildReminderSchedulePayload, buildReminderSchedulePreview, buildReminderSchedulePrompt, parseReminderScheduleArgs, type ParsedReminderScheduleArgs, type ReminderScheduleFailure, type ReminderSchedulePreview, type ReminderScheduleResult, type ReminderScheduleSuccess } from '@goodvibes-jev/engine/terminal-shell/agent-turn/reminder-schedule';
+export { REMINDER_SCHEDULE_METHOD, REMINDER_SCHEDULE_ROUTE, buildReminderSchedulePayload, buildReminderSchedulePreview, buildReminderSchedulePrompt, parseReminderScheduleArgs, type ParsedReminderScheduleArgs, type ReminderScheduleFailure, type ReminderSchedulePreview, type ReminderScheduleResult, type ReminderScheduleSuccess } from '@goodvibes/engine/terminal-shell/agent-turn/reminder-schedule';
 
 /**
  * Create the reminder on the connected host, within the connected-host

@@ -1,4 +1,4 @@
-import { WORK_PLAN_TASK_STATUSES as WORK_PLAN_STATUSES } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { WORK_PLAN_TASK_STATUSES as WORK_PLAN_STATUSES } from '@goodvibes/engine/platform/platform/knowledge';
 import { contractHasMethod as hasMethod } from './agent-harness-personal-ops-discovery.ts';
 import type { PersonalOpsLiveRecord } from './agent-harness-personal-ops-types.ts';
 

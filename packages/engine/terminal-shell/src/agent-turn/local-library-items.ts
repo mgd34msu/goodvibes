@@ -3,7 +3,7 @@
  * note, a persona, a skill, a skill bundle, a routine) that the Agent's
  * workspace lists and the learning curator reads, wherever the turn runs.
  */
-import { memoryRecordTemporalStatus, type MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
+import { memoryRecordTemporalStatus, type MemoryRecord } from '@goodvibes/engine/platform/platform/state';
 import type { AgentNoteRecord } from './note-registry.js';
 import type { AgentPersonaRecord } from './persona-registry.js';
 import { formatAgentRecordOrigin } from './record-labels.js';

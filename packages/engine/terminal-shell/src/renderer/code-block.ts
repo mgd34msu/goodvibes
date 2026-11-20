@@ -1,8 +1,8 @@
-import { requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
-import { createStyledCell, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types/grid';
-import type { Line, Cell } from '@goodvibes-jev/engine/platform/platform/types';
-import { BODY_TAB_WIDTH, getDisplayWidth, wrapPreservingIndentRows } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
-import type { WrappedRow } from '@goodvibes-jev/engine/platform/platform/utils';
+import { requireDefined } from '@goodvibes/engine/platform/platform/utils';
+import { createStyledCell, createEmptyLine } from '@goodvibes/engine/platform/platform/types/grid';
+import type { Line, Cell } from '@goodvibes/engine/platform/platform/types';
+import { BODY_TAB_WIDTH, getDisplayWidth, wrapPreservingIndentRows } from '@goodvibes/engine/platform/platform/utils/terminal-width';
+import type { WrappedRow } from '@goodvibes/engine/platform/platform/utils';
 import { TRANSCRIPT_LAYOUT as LAYOUT } from '../transcript-layout.js';
 import { SyntaxHighlighter, type SyntaxToken as HLToken } from './syntax-highlighter.js';
 import { activeTokens } from './theme.js';

@@ -10,4 +10,4 @@ export {
   splitAtModelDirectives,
   type ComposerCaptureDeps,
   type ComposerCaptureResult,
-} from '@goodvibes-jev/engine/terminal-shell/submission-router';
+} from '@goodvibes/engine/terminal-shell/submission-router';

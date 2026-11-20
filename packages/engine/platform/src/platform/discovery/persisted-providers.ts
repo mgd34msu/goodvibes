@@ -4,7 +4,7 @@
  * only names the saved servers (`status`) does not load the scanner.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { isLoopbackHost } from '@goodvibes-jev/engine/transport-http/paths';
+import { isLoopbackHost } from '@goodvibes/engine/transport-http/paths';
 import type { ShellPathService } from '../runtime/shell-paths.js';
 import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
 import { logger } from '../utils/logger.js';

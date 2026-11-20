@@ -7,9 +7,9 @@
  * looks for the schedule a lost earlier answer already made (`findSameSchedule`,
  * the matcher the model's schedule tools use too).
  */
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import { createConnectedHost, isHostFailure, type HostFailureKind } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
-import { findSameSchedule } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
+import { createConnectedHost, isHostFailure, type HostFailureKind } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
+import { findSameSchedule } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-delivery-targets';
 import type { AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
 export type ScheduleCreateInput = OperatorMethodInput<'automation.schedules.create'>;

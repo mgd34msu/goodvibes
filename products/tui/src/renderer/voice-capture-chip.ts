@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/voice-capture-chip';
+export * from '@goodvibes/engine/terminal-shell/voice-capture-chip';

@@ -1,13 +1,13 @@
-import { captureOnboardingReadFacts } from '@goodvibes-jev/engine/terminal-shell/onboarding-read-facts';
-import { collectTerminalOnboardingSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-snapshot-collector';
+import { captureOnboardingReadFacts } from '@goodvibes/engine/terminal-shell/onboarding-read-facts';
+import { collectTerminalOnboardingSnapshot } from '@goodvibes/engine/terminal-shell/onboarding-snapshot-collector';
 import {
   createOnboardingSnapshotReadHelpers,
   captureOnboardingConfigSnapshot,
-} from '@goodvibes-jev/engine/terminal-shell/onboarding-snapshot-reads';
-import '@goodvibes-jev/engine/terminal-shell/onboarding-read-facts';
-import '@goodvibes-jev/engine/terminal-shell/onboarding-read-facts';
+} from '@goodvibes/engine/terminal-shell/onboarding-snapshot-reads';
+import '@goodvibes/engine/terminal-shell/onboarding-read-facts';
+import '@goodvibes/engine/terminal-shell/onboarding-read-facts';
 
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn/provider-model';
+import { getProviderIdFromModel } from '@goodvibes/engine/terminal-shell/agent-turn/provider-model';
 import { summarizeAgentBehaviorDiscovery } from '../../agent/behavior-discovery-summary.ts';
 import { readOnboardingRuntimeState } from './state.ts';
 import { captureNativeReadRestrictions } from '../read-restrictions.ts';

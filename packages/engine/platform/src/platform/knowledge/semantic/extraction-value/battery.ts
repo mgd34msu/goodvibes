@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 const state = (text: string) => ({ source: { title: 'AC-7 source', sourceType: 'manual', status: 'indexed',
   summary: '', description: '', uri: 'manual://ac-7', trust: 'untrusted reference material', claimedProvenance: { reason: '', domain: '' } },

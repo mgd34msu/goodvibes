@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/concealed-input';
+export * from '@goodvibes/engine/terminal-shell/concealed-input';

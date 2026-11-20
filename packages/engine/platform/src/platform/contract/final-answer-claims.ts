@@ -1,4 +1,4 @@
-import { hashState, type NoulQuestion, type YesNoReading } from '@goodvibes-jev/judgment';
+import { hashState, type NoulQuestion, type YesNoReading } from '@goodvibes/judgment';
 
 interface ClaimRange { readonly start: number; readonly end: number }
 /** Compatibility-only saved passage binding. Fresh scopes use the complete

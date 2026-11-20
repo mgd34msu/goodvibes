@@ -6,7 +6,7 @@
  * stand-ins. Measured: one wake of the held IDLE connection with nothing new.
  */
 import { join } from 'node:path';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort } from '@goodvibes/engine/errors';
 import {
   createInboundMailIntake,
   imapMailboxConnectionPort,

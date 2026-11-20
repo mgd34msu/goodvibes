@@ -1,11 +1,11 @@
-import type { ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
+import type { ChannelDeliveryRouter } from '@goodvibes/engine/platform/platform/channels';
 import { lstatSync, realpathSync } from 'node:fs';
-import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { Tool, ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolEffect, assertCurrentToolExecution, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
-import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { resolveAndValidatePath } from '@goodvibes/engine/platform/platform/utils';
+import type { Tool, ToolExecuteOptions } from '@goodvibes/engine/platform/platform/types';
+import { assertCurrentToolEffect, assertCurrentToolExecution, ToolInputProjectionError, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate/judgment-input';
+import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes/engine/platform/platform/security';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import {
   buildAgentChannelDeliveryPreview,
   deliverAgentChannelMessage,

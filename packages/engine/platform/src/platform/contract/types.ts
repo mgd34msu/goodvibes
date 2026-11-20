@@ -18,7 +18,7 @@ import type { DurableContractAdmission } from './durable-admission.js';
 import type { ContractInputSnapshot } from './input-snapshot.js';
 
 import type { NativeContractDecisionState, NativeContractProgress, NativeContractTransportProgress } from './native-decisions.js';
-import type { JsonValue, Outcome, ReplyReadingName } from '@goodvibes-jev/judgment';
+import type { JsonValue, Outcome, ReplyReadingName } from '@goodvibes/judgment';
 import type {
   CheckResult,
   CheckTrigger,
@@ -141,7 +141,7 @@ export type ContractRouteSelector = (request: {
   readonly purpose: 'planner' | 'unit' | 'fresh-unit' | 'integration';
   readonly signal?: AbortSignal | undefined;
   readonly beforeAttempt?: (() => void) | undefined;
-  readonly onRetry?: ((progress: import('@goodvibes-jev/judgment').JudgmentRetryProgress) => void) | undefined;
+  readonly onRetry?: ((progress: import('@goodvibes/judgment').JudgmentRetryProgress) => void) | undefined;
   readonly contract: ContractRouteSubject;
   readonly unit?: ContractRouteUnit | undefined;
 }) => Promise<UnitRoute>;

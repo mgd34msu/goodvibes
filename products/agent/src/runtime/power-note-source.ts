@@ -1,4 +1,4 @@
-import { createDaemonPowerStateSource, type DaemonPowerEventHandlers, type DaemonPowerEventWatch, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
+import { createDaemonPowerStateSource, type DaemonPowerEventHandlers, type DaemonPowerEventWatch, type PowerState } from '@goodvibes/engine/platform/platform/power';
 import { describePowerChip } from '../renderer/power-status.ts';
 
 /**

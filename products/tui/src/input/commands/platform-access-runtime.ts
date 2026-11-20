@@ -1,15 +1,15 @@
-import { revealOrNull } from '@goodvibes-jev/engine/platform/platform/security';
-import { createAuthCommand } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
-import type { ServiceSignIn, ServiceSignOut } from '@goodvibes-jev/engine/terminal-shell/provider-account-commands';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
-import { buildUrl } from '@goodvibes-jev/engine/transport-http';
-import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
-import { readDaemonSessionToken, writeDaemonSessionToken } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-credentials';
+import { revealOrNull } from '@goodvibes/engine/platform/platform/security';
+import { createAuthCommand } from '@goodvibes/engine/terminal-shell/auth-review-command';
+import type { ServiceSignIn, ServiceSignOut } from '@goodvibes/engine/terminal-shell/provider-account-commands';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { readRefusal } from '@goodvibes/engine/errors';
+import { buildUrl } from '@goodvibes/engine/transport-http';
+import { isLoopbackHost } from '@goodvibes/engine/platform/platform/utils/reachable-base-url';
+import { readDaemonSessionToken, writeDaemonSessionToken } from '@goodvibes/engine/platform/platform/runtime/client/daemon-credentials';
 import { daemonTokenOverride, resolveControlPlaneBaseUrl } from '../../runtime/client/operator-endpoint.ts';
-import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
+import { parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import '@goodvibes-jev/engine/platform/platform/config';
+import '@goodvibes/engine/platform/platform/config';
 import { registerUpdateCommand } from './update-runtime.ts';
 import '@/runtime/index.ts';
 import {

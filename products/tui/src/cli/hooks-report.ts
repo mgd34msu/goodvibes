@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { createHookDispatcher, createHookWorkbench, getHookPointContract, hookDefinitionProblem, hooksFileRefusal } from '@goodvibes-jev/engine/platform/platform/hooks';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { HookDefinition, HookEventPath, HookPointContract, HookType } from '@goodvibes-jev/engine/platform/platform/hooks';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createHookDispatcher, createHookWorkbench, getHookPointContract, hookDefinitionProblem, hooksFileRefusal } from '@goodvibes/engine/platform/platform/hooks';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { HookDefinition, HookEventPath, HookPointContract, HookType } from '@goodvibes/engine/platform/platform/hooks';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 // ---------------------------------------------------------------------------
 // Shared hooks validation core. The single source of truth for both

@@ -8,7 +8,7 @@
  * chord (the chord that opened the dialog) pressed again also confirms.
  */
 
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from './surface-modal-host.js';
 import type { SurfaceLayer } from './renderer/surface-kit.js';
 import { renderConfirmDialog } from './renderer/confirm-dialog.js';

@@ -4,10 +4,10 @@ This is the **companion surface** for React Native (Hermes). See [Published Surf
 
 React Native apps cannot run the full agentic surface (tool execution, LSP, MCP, workflows, daemon HTTP). Those require Bun. This guide covers auth, transport, realtime events, and error handling for the companion surface.
 
-Use `@goodvibes-jev/engine/platform/react-native` for Android and iOS apps.
+Use `@goodvibes/engine/platform/react-native` for Android and iOS apps.
 
 ```ts
-import { createReactNativeGoodVibesPlatform } from '@goodvibes-jev/engine/platform/react-native';
+import { createReactNativeGoodVibesPlatform } from '@goodvibes/engine/platform/react-native';
 
 const platformClient = createReactNativeGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',
@@ -18,7 +18,7 @@ const platformClient = createReactNativeGoodVibesPlatform({
 ## Installation
 
 ```bash
-npm install @goodvibes-jev/engine
+npm install @goodvibes/engine
 ```
 
 See [Getting started](./getting-started.md#install) for the canonical install command and version. For persistent secure token storage on bare React Native, also install the optional peer dependency [`react-native-keychain`](https://github.com/oblador/react-native-keychain) (`>=8.0.0`); it is only needed when you use `createIOSKeychainTokenStore` / `createAndroidKeystoreTokenStore`.
@@ -52,10 +52,10 @@ The factory applies React-Native-tuned defaults that you can override through `G
 - `retry` (HTTP): `{ maxAttempts: 3, baseDelayMs: 250, maxDelayMs: 2000 }`
 - `realtime.onError`: called when the realtime transport hits an unrecoverable error
 
-To scope a feed to a single session, wrap it with `forSession` (re-exported from `@goodvibes-jev/engine/platform/react-native`):
+To scope a feed to a single session, wrap it with `forSession` (re-exported from `@goodvibes/engine/platform/react-native`):
 
 ```ts
-import { createReactNativeGoodVibesPlatform, forSession } from '@goodvibes-jev/engine/platform/react-native';
+import { createReactNativeGoodVibesPlatform, forSession } from '@goodvibes/engine/platform/react-native';
 
 const sessionEvents = forSession(platformClient.realtime.runtime(), sessionId);
 sessionEvents.agents.on('AGENT_COMPLETED', (event) => console.log(event));
@@ -63,13 +63,13 @@ sessionEvents.agents.on('AGENT_COMPLETED', (event) => console.log(event));
 
 ## Token storage
 
-Pass a `tokenStore` to persist and rotate the bearer token. `tokenStore` is the highest-precedence auth option. It overrides both `getAuthToken` and the static `authToken`. Use `createIOSKeychainTokenStore` (iOS Keychain) or `createAndroidKeystoreTokenStore` (Android Keystore), both exported from `@goodvibes-jev/engine/platform/react-native`, rather than rolling a custom `GoodVibesTokenStore`:
+Pass a `tokenStore` to persist and rotate the bearer token. `tokenStore` is the highest-precedence auth option. It overrides both `getAuthToken` and the static `authToken`. Use `createIOSKeychainTokenStore` (iOS Keychain) or `createAndroidKeystoreTokenStore` (Android Keystore), both exported from `@goodvibes/engine/platform/react-native`, rather than rolling a custom `GoodVibesTokenStore`:
 
 ```ts
 import {
   createReactNativeGoodVibesPlatform,
   createIOSKeychainTokenStore,
-} from '@goodvibes-jev/engine/platform/react-native';
+} from '@goodvibes/engine/platform/react-native';
 
 const platformClient = createReactNativeGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',
@@ -84,7 +84,7 @@ On Android, use `createAndroidKeystoreTokenStore()` in place of the Keychain sto
 All platform errors extend `GoodVibesError`. See [Error Kinds](./error-kinds.md) for the full taxonomy.
 
 ```ts
-import { GoodVibesError } from '@goodvibes-jev/engine/platform/errors';
+import { GoodVibesError } from '@goodvibes/engine/platform/errors';
 
 try {
   await platformClient.operator.control.snapshot();
@@ -112,10 +112,10 @@ try {
 
 ## Observability
 
-`PlatformObserver` and `createConsoleObserver` work from React Native exactly like from the full surface. They are imported from `@goodvibes-jev/engine/platform` root, which is companion-safe. See [Observability](./observability.md) for the full observer API.
+`PlatformObserver` and `createConsoleObserver` work from React Native exactly like from the full surface. They are imported from `@goodvibes/engine/platform` root, which is companion-safe. See [Observability](./observability.md) for the full observer API.
 
 ```ts
-import { createConsoleObserver } from '@goodvibes-jev/engine/platform';
+import { createConsoleObserver } from '@goodvibes/engine/platform';
 
 const platformClient = createReactNativeGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',

@@ -8,7 +8,7 @@
 import { mkdirSync, realpathSync } from 'node:fs';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sweepStaleTmpDirs } from '@goodvibes-jev/engine/toolchain/test-runner';
+import { sweepStaleTmpDirs } from '@goodvibes/engine/toolchain/test-runner';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 

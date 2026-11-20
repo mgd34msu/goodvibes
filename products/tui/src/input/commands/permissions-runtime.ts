@@ -1,4 +1,4 @@
-import { registerPermissionsCommand } from '@goodvibes-jev/engine/terminal-shell/permissions-command';
+import { registerPermissionsCommand } from '@goodvibes/engine/terminal-shell/permissions-command';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 
 /**

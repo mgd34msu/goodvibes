@@ -1,4 +1,4 @@
-import { RefusalError, readRefusal, refusal, type TargetChange } from '@goodvibes-jev/engine/errors';
+import { RefusalError, readRefusal, refusal, type TargetChange } from '@goodvibes/engine/errors';
 
 /**
  * What a slash command throws when it did not do what was asked: an unknown id,

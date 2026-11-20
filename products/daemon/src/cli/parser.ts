@@ -1,7 +1,7 @@
 /**
  * parser.ts, this binary's command line, read by the shared argument engine.
  *
- * The engine is `parseWithCatalog` in @goodvibes-jev/engine/terminal-shell: tokens,
+ * The engine is `parseWithCatalog` in @goodvibes/engine/terminal-shell: tokens,
  * values, arity, `--`, refusals, and no knowledge of any product's commands.
  * Everything daemon-shaped is in ./command-catalog.ts, and this file is the two
  * lines that put them together.
@@ -19,8 +19,8 @@
  *    each produces an error line, and the caller exits 2 with the help. Nothing
  *    is accepted-and-ignored.
  */
-import { findCatalogFlagArityConflicts as findConflictsIn } from '@goodvibes-jev/engine/terminal-shell/cli-catalog-types';
-import { parseWithCatalog } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
+import { findCatalogFlagArityConflicts as findConflictsIn } from '@goodvibes/engine/terminal-shell/cli-catalog-types';
+import { parseWithCatalog } from '@goodvibes/engine/terminal-shell/cli-parser-engine';
 import { DAEMON_CLI_CATALOG } from './command-catalog.ts';
 import type { DaemonCliParseResult } from './types.ts';
 

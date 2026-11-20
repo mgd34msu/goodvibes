@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, toJson, yesNo, type JsonValue } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, toJson, yesNo, type JsonValue } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
 import { judgeSome } from '../../../runtime/judge.js';
 import { KnowledgeRepairFactUsefulnessHeldError as Held } from './types.js';

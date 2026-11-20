@@ -4,14 +4,14 @@
  * An ordinary enum select ('stored' | 'prompt'), with one addition: while 'prompt'
  * is the stored mode, or is being saved, it shows CVV_PROMPT_TRADEOFF_WARNING, the
  * platform's own wording, imported directly from
- * `@goodvibes-jev/engine/platform/platform/payments/browser` (that subpath has no node-only
+ * `@goodvibes/engine/platform/platform/payments/browser` (that subpath has no node-only
  * dependencies, so it is safe to import at runtime, unlike `platform/config`,
  * which generate-config-schema.ts snapshots at build time instead). Selecting
  * 'stored' shows no warning: 'stored' is the owner's settled default, not
  * something this surface argues against.
  */
 import { useState } from 'react';
-import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes/engine/platform/platform/payments/browser';
 import { Select } from '../ui/Select';
 
 export interface CvvHandlingFieldProps {

@@ -1,10 +1,10 @@
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 type ProjectCatalogContext = { readonly workspace: Pick<CommandContext['workspace'], 'shellPaths'> };
-import { discoverProjectContextFiles, type AgentProjectContextSnapshot, type AgentProjectContextFile, type BlockedAgentProjectContextFile } from '@goodvibes-jev/engine/terminal-shell/agent-turn/project-context-files';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
+import { discoverProjectContextFiles, type AgentProjectContextSnapshot, type AgentProjectContextFile, type BlockedAgentProjectContextFile } from '@goodvibes/engine/terminal-shell/agent-turn/project-context-files';
+import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
 
 interface AgentHarnessProjectContextArgs {
   readonly contextFileId?: unknown;

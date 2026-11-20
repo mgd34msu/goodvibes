@@ -56,9 +56,9 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { captureProfileDelegation } from '@goodvibes-jev/engine/platform/platform/owner-profile';
-import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { captureProfileDelegation } from '@goodvibes/engine/platform/platform/owner-profile';
+import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { captureCatalogData } from './catalog-data.js';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './local-state-admission.js';
 import { captureOccasionsGatewayCurrent, captureOccasionsGatewayLocalState } from './occasions-gateway.js';

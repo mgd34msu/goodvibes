@@ -1,8 +1,8 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { defineCommand, type FixedChoice } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { choiceInput, doAction, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { BUDGET_ALERT_USD_CONFIG_KEY } from '@goodvibes-jev/engine/platform/platform/providers';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { defineCommand, type FixedChoice } from '@goodvibes/engine/terminal-shell/command-actions';
+import { choiceInput, doAction, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { BUDGET_ALERT_USD_CONFIG_KEY } from '@goodvibes/engine/platform/platform/providers';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
 import {
   COST_ATTRIBUTION_OPTIONAL_DIMENSIONS,

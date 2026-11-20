@@ -1,4 +1,4 @@
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import type { JudgmentPort } from '@goodvibes/judgment';
 import type { OwnedJudgmentWork } from '../owned-judgment-work.js';
 
 export class CompactionReadingError extends Error {

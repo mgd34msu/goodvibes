@@ -1,4 +1,4 @@
-import { matchesJudgmentModel, defineBattery, type JudgmentPort, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
+import { matchesJudgmentModel, defineBattery, type JudgmentPort, type JudgmentRetryProgress } from '@goodvibes/judgment';
 import { captureScreeningSource } from './proposal.js';
 import { askEach } from '../batteries/ask-each.js';
 import { SOURCE_SCREENING_LIMITS as LIMITS } from './types.js';

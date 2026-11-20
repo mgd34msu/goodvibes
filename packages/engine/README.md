@@ -3,7 +3,7 @@
 [![CI](https://github.com/mgd34msu/goodvibes/actions/workflows/ci.yml/badge.svg)](https://github.com/mgd34msu/goodvibes/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-The engine is the typed TypeScript platform layer behind the GoodVibes products: sessions, provider/model routing, in-process agents, a knowledge and memory store, a control-plane HTTP and realtime API, and the transports that carry it all. The daemon is its own product, built on the engine. Full-surface consumers embed runtime behavior in a Bun process and connect to daemon services as clients. Companion consumers, including the WebUI and mobile clients, use HTTP, SSE and WebSocket. The workspace package `@goodvibes-jev/engine` carries the platform through explicit subpaths such as `@goodvibes-jev/engine/platform`, `@goodvibes-jev/engine/contracts` and `@goodvibes-jev/engine/errors`.
+The engine is the typed TypeScript platform layer behind the GoodVibes products: sessions, provider/model routing, in-process agents, a knowledge and memory store, a control-plane HTTP and realtime API, and the transports that carry it all. The daemon is its own product, built on the engine. Full-surface consumers embed runtime behavior in a Bun process and connect to daemon services as clients. Companion consumers, including the WebUI and mobile clients, use HTTP, SSE and WebSocket. The workspace package `@goodvibes/engine` carries the platform through explicit subpaths such as `@goodvibes/engine/platform`, `@goodvibes/engine/contracts` and `@goodvibes/engine/errors`.
 
 This page is for developers building on the engine. To install and use
 GoodVibes itself, start at the [repository README](../../README.md) and the
@@ -18,10 +18,10 @@ Public contract, config keys, route paths, event shapes, and file layouts follow
 ```mermaid
 flowchart LR
     subgraph pkg["packages/engine (one workspace package)"]
-        platform["@goodvibes-jev/engine/platform<br/>facade: platform runtime + daemon + clients"]
-        contracts["@goodvibes-jev/engine/contracts"]
+        platform["@goodvibes/engine/platform<br/>facade: platform runtime + daemon + clients"]
+        contracts["@goodvibes/engine/contracts"]
         siblings["errors, transport-core/-http/-realtime,<br/>daemon-api, operator-client, peer-client"]
-        toolchain["@goodvibes-jev/engine/toolchain<br/>CI/CD tools"]
+        toolchain["@goodvibes/engine/toolchain<br/>CI/CD tools"]
     end
     platform --> contracts
     platform --> siblings
@@ -56,13 +56,13 @@ bun install
 bun run build
 ```
 
-Products depend on `@goodvibes-jev/engine` through `workspace:*`; import only
+Products depend on `@goodvibes/engine` through `workspace:*`; import only
 declared entry points. For a Bun host (terminal app, agent, CLI, daemon), the platform
 client factory talks to a reachable GoodVibes daemon:
 
 ```ts
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
-import { createMemoryTokenStore } from '@goodvibes-jev/engine/platform/auth';
+import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
+import { createMemoryTokenStore } from '@goodvibes/engine/platform/auth';
 
 const platformClient = createGoodVibesPlatform({
   baseUrl: process.env.GOODVIBES_BASE_URL ?? 'http://127.0.0.1:3421',
@@ -75,8 +75,8 @@ const snapshot = await platformClient.operator.control.snapshot();
 Building a browser or web UI client instead, the companion entry point carries no Bun globals and bundles cleanly with Vite, webpack, and esbuild:
 
 ```ts
-import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
-import { createBrowserTokenStore } from '@goodvibes-jev/engine/platform/auth';
+import { createBrowserGoodVibesPlatform } from '@goodvibes/engine/platform/browser';
+import { createBrowserTokenStore } from '@goodvibes/engine/platform/auth';
 
 const platformClient = createBrowserGoodVibesPlatform({
   baseUrl: 'https://goodvibes.example.com',
@@ -96,25 +96,25 @@ React Native, Expo, and Cloudflare Worker bridges follow the same pattern from t
 
 | Entry point | What it is |
 | --- | --- |
-| [`@goodvibes-jev/engine/platform`](./platform) | The full platform runtime (sessions, agents, providers, knowledge, control plane, daemon route handlers) plus thin client factories for Bun, browser, React Native, Expo, and Cloudflare Workers. |
-| [`@goodvibes-jev/engine/toolchain`](./toolchain) | The CI/CD toolchain: release cut, npm publish, per-job-green verification, and coverage checks. Invoked as `bunx @goodvibes-jev/engine/toolchain <tool>` from every GoodVibes repo's release workflow. |
-| [`@goodvibes-jev/engine/contracts`](./contracts) | Runtime-neutral operator and peer contract artifacts, generated method IDs, and lookup helpers that the `platform` entry points and every client surface share. |
+| [`@goodvibes/engine/platform`](./platform) | The full platform runtime (sessions, agents, providers, knowledge, control plane, daemon route handlers) plus thin client factories for Bun, browser, React Native, Expo, and Cloudflare Workers. |
+| [`@goodvibes/engine/toolchain`](./toolchain) | The CI/CD toolchain: release cut, npm publish, per-job-green verification, and coverage checks. Invoked as `bunx @goodvibes/engine/toolchain <tool>` from every GoodVibes repo's release workflow. |
+| [`@goodvibes/engine/contracts`](./contracts) | Runtime-neutral operator and peer contract artifacts, generated method IDs, and lookup helpers that the `platform` entry points and every client surface share. |
 
-The same install also carries `errors`, `transport-core`, `transport-http`, `transport-realtime`, `daemon-api`, `operator-client`, `peer-client`, and `terminal-shell`, each imported as `@goodvibes-jev/engine/<name>`; none is a separate install step. The full entry-point matrix is [docs/packages.md](./docs/packages.md).
+The same install also carries `errors`, `transport-core`, `transport-http`, `transport-realtime`, `daemon-api`, `operator-client`, `peer-client`, and `terminal-shell`, each imported as `@goodvibes/engine/<name>`; none is a separate install step. The full entry-point matrix is [docs/packages.md](./docs/packages.md).
 
 ### Entry points at a glance
 
 | Entry point | Use it for |
 | --- | --- |
-| `@goodvibes-jev/engine/platform` | Full Bun platform: client factory plus contracts, daemon, auth, operator, peer, and transports |
-| `@goodvibes-jev/engine/platform/daemon` | Daemon route dispatch and embedding helpers for a Bun server host |
-| `@goodvibes-jev/engine/platform/browser`, `/web` | Full browser and web UI client factories with the complete operator contract |
-| `@goodvibes-jev/engine/platform/react-native`, `/expo` | React Native and Expo client factories with mobile secure token stores |
-| `@goodvibes-jev/engine/platform/workers` | Cloudflare Worker bridge for daemon batch endpoints |
-| `@goodvibes-jev/engine/platform/contracts` | Runtime-neutral contract types, schemas, and method IDs |
-| `@goodvibes-jev/engine/platform/auth` | Token stores, login, and OAuth helpers, shared by every surface |
+| `@goodvibes/engine/platform` | Full Bun platform: client factory plus contracts, daemon, auth, operator, peer, and transports |
+| `@goodvibes/engine/platform/daemon` | Daemon route dispatch and embedding helpers for a Bun server host |
+| `@goodvibes/engine/platform/browser`, `/web` | Full browser and web UI client factories with the complete operator contract |
+| `@goodvibes/engine/platform/react-native`, `/expo` | React Native and Expo client factories with mobile secure token stores |
+| `@goodvibes/engine/platform/workers` | Cloudflare Worker bridge for daemon batch endpoints |
+| `@goodvibes/engine/platform/contracts` | Runtime-neutral contract types, schemas, and method IDs |
+| `@goodvibes/engine/platform/auth` | Token stores, login, and OAuth helpers, shared by every surface |
 
-This is a starting point, not the full list. There is no root `@goodvibes-jev/engine/platform/platform` entry and no `platform/*` wildcard export. The canonical, stability-leveled reference for every entry point is [docs/public-surface.md](./docs/public-surface.md).
+This is a starting point, not the full list. There is no root `@goodvibes/engine/platform/platform` entry and no `platform/*` wildcard export. The canonical, stability-leveled reference for every entry point is [docs/public-surface.md](./docs/public-surface.md).
 
 ---
 

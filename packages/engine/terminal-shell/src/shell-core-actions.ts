@@ -1,6 +1,6 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { OpenSelection } from './selection-modal.js';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand } from './command-actions/define.js';

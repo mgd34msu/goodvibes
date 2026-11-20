@@ -93,8 +93,8 @@ import { decisionOrClassic } from '../runtime/decision-policy.js';
  * owner about it (confirmation-report.ts) and settles nothing on its own. The
  * confirmation facts are then all null and a refund is never recognised.
  */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import type { Selector } from '@goodvibes-jev/judgment';
+import { judgmentPort } from '@goodvibes/engine/errors';
+import type { Selector } from '@goodvibes/judgment';
 import { redactCardShapes } from '../security/card-shapes.js';
 import { registrableDomain } from '../security/public-suffix.js';
 import { sanitizeNoticeField } from '../security/notice-text.js';

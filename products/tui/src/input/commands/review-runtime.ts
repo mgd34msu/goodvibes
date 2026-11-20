@@ -1,7 +1,7 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
+import { doAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import type { ReviewHunk } from '../../views/diff-review-model.ts';
 import { hunkPatchText, buildHunkRevertReceiptBlock } from '../../views/diff-review-model.ts';
 

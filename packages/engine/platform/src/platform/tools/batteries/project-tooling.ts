@@ -27,7 +27,7 @@ import { completeJudgmentView } from './complete-view.js';
  * that does not act leaves the field as the report's unknown value (a file
  * is listed as an entry point only on a yes that acts).
  */
-import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 export const PROJECT_TYPE_OPTIONS = {
   nodejs: 'A JavaScript or TypeScript project run with Node, Bun or Deno.',

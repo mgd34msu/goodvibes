@@ -10,7 +10,7 @@ import { currentProcessSignals, resolveDaemonExecInvocation } from './daemon-exe
 import { buildManagedDaemonServiceDefinition } from './managed-service-definition.js';
 export { MANAGED_SERVICE_DESCRIPTION } from './managed-service-definition.js';
 import { resolveGoodVibesHomeOwnership } from '../config/goodvibes-home.js';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 
 export type ManagedServicePlatform = 'systemd' | 'launchd' | 'windows' | 'manual';
 

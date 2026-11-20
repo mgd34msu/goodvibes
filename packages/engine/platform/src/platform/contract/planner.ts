@@ -23,8 +23,8 @@ import { assertContractInputView, contractInputPath } from './input-snapshot.js'
 import type { ReadAccessFilter } from '../tools/shared/read-access.js';
 import { ownerEvidenceForModel, type OwnerEvidenceReader } from './owner-evidence.js';
 
-import { JudgmentPortMissingError, judgmentPort } from '@goodvibes-jev/engine/errors';
-import { JudgmentError } from '@goodvibes-jev/judgment';
+import { JudgmentPortMissingError, judgmentPort } from '@goodvibes/engine/errors';
+import { JudgmentError } from '@goodvibes/judgment';
 import type { ContractEvent } from '../../events/contract.js';
 import type { DecompositionBounds, DecompositionRunner, DecompositionRunResult } from '../core/plan-decomposition.js';
 import { emptyWorkItemUsage } from '../orchestration/types.js';
@@ -821,7 +821,7 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
       const decisionIds = [...contract.shape!.decisionIds, ...(checked.verdict?.decisionIds ?? [])];
       const decision = await decideNativeContract(contract, deps.native, { stage: 'plan', targetId: contract.id,
         action: 'Accept this exact checked plan and schedule its derived units against the immutable original roots', allowAct: valid,
-        state: () => ({ plan: checked.plan ?? null, problems: checked.problems, attempts: nativeSpent(contract, budgetKey), limit: context.config.planRepairLimit === 0 ? null : context.config.planRepairLimit + 1 }) as unknown as import('@goodvibes-jev/judgment').EntryType,
+        state: () => ({ plan: checked.plan ?? null, problems: checked.problems, attempts: nativeSpent(contract, budgetKey), limit: context.config.planRepairLimit === 0 ? null : context.config.planRepairLimit + 1 }) as unknown as import('@goodvibes/judgment').EntryType,
         continuations: canRepair ? [{ id: 'repair-plan', kind: 'revise-action', description: 'Use one remaining planner attempt to revise the derived plan while preserving all original roots.' }] : [], decisionIds, signal });
       await admitted.assertCurrent();
       decision.assertCurrent();

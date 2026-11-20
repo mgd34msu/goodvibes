@@ -1,8 +1,8 @@
 /** Trusted legacy-import composition. Recorded decisions are evidence, never serialized capabilities. */
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { canonicalJson, JudgmentError, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
-import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
+import { canonicalJson, JudgmentError, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes/judgment';
+import type { JevDecision } from '@goodvibes/judgment/decisions';
 import { decideAutonomous } from '../../gate/autonomous-decision.js';
 import { captureLegacyImportAction } from './import-action-binding.js';
 import { assertLegacyWorkLedgerSourcesCurrent, legacyMigrationPreparationRevision, validateLegacyWorkLedgerManifest, type LegacyMigrationManifest } from './legacy-import.js';

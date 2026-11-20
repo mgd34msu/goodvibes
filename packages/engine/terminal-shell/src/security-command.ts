@@ -11,10 +11,10 @@
  * have is refused with where it is.
  */
 import { existsSync } from 'node:fs';
-import { buildMcpAttackPathReview } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import type { ApiTokenAuditor } from '@goodvibes-jev/engine/platform/platform/security';
-import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
-import { dispatchPolicyCommand, type PolicyCommandContext } from '@goodvibes-jev/engine/platform/platform/gate/policy';
+import { buildMcpAttackPathReview } from '@goodvibes/engine/platform/platform/runtime/operations';
+import type { ApiTokenAuditor } from '@goodvibes/engine/platform/platform/security';
+import { listBuiltinSubscriptionProviders } from '@goodvibes/engine/platform/platform/config';
+import { dispatchPolicyCommand, type PolicyCommandContext } from '@goodvibes/engine/platform/platform/gate/policy';
 import {
   buildSandboxReview,
   inspectSandboxProbe,
@@ -27,8 +27,8 @@ import {
   renderSandboxSessions,
   type ConfigManagerLike,
   type SandboxSessionRegistry,
-} from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+} from '@goodvibes/engine/platform/platform/runtime/sandbox';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';

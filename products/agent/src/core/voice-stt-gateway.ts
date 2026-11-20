@@ -1,4 +1,4 @@
-import type { SpeechTranscriptionGateway, SpeechTranscriptionResolution } from '@goodvibes-jev/engine/terminal-shell/voice-stt-contract';
+import type { SpeechTranscriptionGateway, SpeechTranscriptionResolution } from '@goodvibes/engine/terminal-shell/voice-stt-contract';
 /**
  * voice-stt-gateway.ts, speech-to-text for captured audio.
  *
@@ -26,7 +26,7 @@ import type { SpeechTranscriptionGateway, SpeechTranscriptionResolution } from '
  * notification that scrolls away.
  */
 
-import { GoodVibesError } from '@goodvibes-jev/engine/platform';
+import { GoodVibesError } from '@goodvibes/engine/platform';
 import {
   recordVoiceDiagnostic,
   transcribeThroughBestRoute,
@@ -34,8 +34,8 @@ import {
   type SttRouteCandidate,
   type VoiceProviderRegistry,
   type VoiceService,
-} from '@goodvibes-jev/engine/platform/platform/voice';
-import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+} from '@goodvibes/engine/platform/platform/voice';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 
 /** The narrow verb surface a capture consumer needs. */
 export interface VoiceSttGateway extends SpeechTranscriptionGateway {

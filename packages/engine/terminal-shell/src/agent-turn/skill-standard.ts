@@ -1,4 +1,4 @@
-import { parseMarkdownFrontmatter } from '@goodvibes-jev/engine/terminal-shell/markdown-frontmatter';
+import { parseMarkdownFrontmatter } from '@goodvibes/engine/terminal-shell/markdown-frontmatter';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { assertNoSecretLikeText } from './persona-registry.js';

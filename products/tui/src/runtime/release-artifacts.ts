@@ -21,7 +21,7 @@ export {
   verifyChecksum,
   type ReleaseArtifactNames,
   type SqliteVecAsset,
-} from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+} from '@goodvibes/engine/platform/platform/runtime/self-update';
 
 export type SupportedPlatform = 'linux' | 'darwin';
 export type SupportedArch = 'x64' | 'arm64';

@@ -21,17 +21,17 @@ import {
   withAnswerDelivery,
   type AnswerDeliveringInbox,
   type OwnerInboxClient,
-} from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { OWNER_ASKER_SESSION_FILE_METADATA, handleOwnerDecisions } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { bridgeContractQuestionsToInbox, type ContractRunner } from '@goodvibes-jev/engine/platform/platform/contract';
-import { bridgeJevDecisionsToInbox, processJevDecisions, type JevDecisionUndo } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { watchSessionAnswers, type SessionAnswerWatch } from '@goodvibes-jev/engine/platform/platform/agents';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
-import { sessionIdentityFile, type SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
-import { whenSessionOpens } from '@goodvibes-jev/engine/terminal-shell/session-resume';
-import { createConnectedHost, type ConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
+} from '@goodvibes/engine/platform/platform/runtime/client';
+import { OWNER_ASKER_SESSION_FILE_METADATA, handleOwnerDecisions } from '@goodvibes/engine/platform/platform/control-plane';
+import { bridgeContractQuestionsToInbox, type ContractRunner } from '@goodvibes/engine/platform/platform/contract';
+import { bridgeJevDecisionsToInbox, processJevDecisions, type JevDecisionUndo } from '@goodvibes/engine/platform/platform/permissions';
+import { watchSessionAnswers, type SessionAnswerWatch } from '@goodvibes/engine/platform/platform/agents';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { SessionManager } from '@goodvibes/engine/platform/platform/sessions';
+import { sessionIdentityFile, type SessionSurface } from '@goodvibes/engine/platform/platform/runtime/operations';
+import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes/engine/platform/contracts';
+import { whenSessionOpens } from '@goodvibes/engine/terminal-shell/session-resume';
+import { createConnectedHost, type ConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
 import { findSessionConversation, onSessionConversationChange } from '../conversation-rewind-port.ts';
 
 export interface ConnectedHostInboxOptions {

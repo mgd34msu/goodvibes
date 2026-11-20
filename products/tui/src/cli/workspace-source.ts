@@ -15,9 +15,9 @@ export function isPrivateWorkspaceSource(directory: string): boolean {
   if (basename(product) !== 'tui' || basename(dirname(product)) !== 'products') return false;
   const pkg = manifest(join(product, 'package.json'));
   const dependencies = pkg?.dependencies;
-  if (pkg?.name !== '@goodvibes-jev/tui' || pkg.private !== true
+  if (pkg?.name !== '@goodvibes/tui' || pkg.private !== true
     || dependencies === null || typeof dependencies !== 'object' || Array.isArray(dependencies)
-    || (dependencies as Record<string, unknown>)['@goodvibes-jev/engine'] !== 'workspace:*') return false;
+    || (dependencies as Record<string, unknown>)['@goodvibes/engine'] !== 'workspace:*') return false;
   const root = dirname(dirname(product));
   const workspace = manifest(join(root, 'package.json'));
   if (workspace?.private !== true || !Array.isArray(workspace.workspaces)
@@ -25,5 +25,5 @@ export function isPrivateWorkspaceSource(directory: string): boolean {
     || !(workspace.workspaces.includes('packages/*') || workspace.workspaces.includes('packages/engine')))
     return false;
   if (!existsSync(join(root, '.git')) && !existsSync(join(root, 'bun.lock'))) return false;
-  return manifest(join(root, 'packages', 'engine', 'package.json'))?.name === '@goodvibes-jev/engine';
+  return manifest(join(root, 'packages', 'engine', 'package.json'))?.name === '@goodvibes/engine';
 }

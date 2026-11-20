@@ -1,8 +1,8 @@
-# @goodvibes-jev/engine/transport-core
+# @goodvibes/engine/transport-core
 
 Public GoodVibes transport-core package for shared transport, event-feed, observer, and middleware primitives.
 
-Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/platform/transport-core`. These modules are subpath exports of the engine package.
+Most applications should install `@goodvibes/engine` and import `@goodvibes/engine/platform/transport-core`. These modules are subpath exports of the engine package.
 
 Use this surface only when you are composing your own transport/client abstraction.
 
@@ -16,13 +16,13 @@ Key exports:
 - W3C trace propagation: `injectTraceparent` (sync, `require`-based OTel detection) and `injectTraceparentAsync` (async, dynamic `import`). Both are no-ops without `@opentelemetry/api` installed or an active span.
 - Utilities: `createUuidV4`.
 
-A `./relay` subpath (`@goodvibes-jev/engine/platform/transport-core/relay`) exports the runtime-neutral building blocks for the zero-knowledge, self-hostable relay, including ECDH key exchange, AEAD framing, handshake, pairing payload encoding, and the secure channel used by the relay client (`transport-realtime`), the relay server, and daemon-side termination. It is kept out of the main entry point on purpose, so most consumers never pull in the crypto primitives; import it directly only when implementing relay transport or tooling.
+A `./relay` subpath (`@goodvibes/engine/platform/transport-core/relay`) exports the runtime-neutral building blocks for the zero-knowledge, self-hostable relay, including ECDH key exchange, AEAD framing, handshake, pairing payload encoding, and the secure channel used by the relay client (`transport-realtime`), the relay server, and daemon-side termination. It is kept out of the main entry point on purpose, so most consumers never pull in the crypto primitives; import it directly only when implementing relay transport or tooling.
 
 ```ts
 import {
   createEventEnvelope,
   createUuidV4,
-} from '@goodvibes-jev/engine/platform/transport-core';
+} from '@goodvibes/engine/platform/transport-core';
 
 const envelope = createEventEnvelope(
   'TURN_SUBMITTED',
@@ -31,4 +31,4 @@ const envelope = createEventEnvelope(
 );
 ```
 
-Most consumers should use `@goodvibes-jev/engine/platform`, `@goodvibes-jev/engine/platform/operator`, or `@goodvibes-jev/engine/platform/peer` instead.
+Most consumers should use `@goodvibes/engine/platform`, `@goodvibes/engine/platform/operator`, or `@goodvibes/engine/platform/peer` instead.

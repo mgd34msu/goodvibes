@@ -21,7 +21,7 @@ import {
   BatteryRegistry, CALIBRATION_SITE, calibrate, calibrationRecord, createSystemOnePort, formatReport, judgmentConfigFromEnv, readingsOf,
   SqliteDecisionLog, withDecisionLog,
   type CalibrationReport, type DecisionReport, type NamedDecision,
-} from '@goodvibes-jev/judgment';
+} from '@goodvibes/judgment';
 import { ENGINE_ROOT, loadEngineRegistries } from './judgment-registries.ts';
 import { observeProjectSource, sameProjectSource } from './project-source-observation.ts';
 
@@ -34,7 +34,7 @@ const GATE_RECORD_MODULE = 'platform/src/platform/gate/gate-calibration-record.t
 /** The record as the module the product imports: the same type and export name, with this run's values. */
 function gateRecordModule(record: unknown): string {
   return [
-    "import type { CalibrationRecord } from '@goodvibes-jev/judgment';",
+    "import type { CalibrationRecord } from '@goodvibes/judgment';",
     '',
     '/** A calibration record as the calibration script writes it: the run\'s measurements, the source it measured and the endpoint it asked. */',
     'export type GateCalibrationRecord = CalibrationRecord & { readonly source?: string; readonly endpoint?: string };',

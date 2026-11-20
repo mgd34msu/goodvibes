@@ -38,8 +38,8 @@
  * before a later step freed the room comes back when it fits (the model, then
  * the context, the branch, the cost, the menu keycap).
  */
-import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
+import { type Line, createEmptyLine } from '@goodvibes/engine/platform/platform/types';
+import { getDisplayWidth, truncateDisplay } from '@goodvibes/engine/platform/platform/utils';
 import { activeTokens } from './theme.js';
 import { keycapHintsWidth, paintKeycapHints } from './surface-kit-parts.js';
 import type { KitHint } from './surface-kit.js';

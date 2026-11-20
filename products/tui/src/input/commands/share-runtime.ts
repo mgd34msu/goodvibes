@@ -1,4 +1,4 @@
-import { writeJsonFileAtomic } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
+import { writeJsonFileAtomic } from '@goodvibes/engine/platform/platform/state/durable-file-io';
 import { getSharedNotificationFeed } from '../../views/notifications-feed.ts';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -10,11 +10,11 @@ import {
   exportToHTML,
   exportToJSON,
   exportToMarkdownExtended,
-} from '@goodvibes-jev/engine/platform/platform/export';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { calcSessionCost, isModelPriced } from '@goodvibes-jev/engine/platform/platform/providers';
+} from '@goodvibes/engine/platform/platform/export';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { calcSessionCost, isModelPriced } from '@goodvibes/engine/platform/platform/providers';
 import {
   GistUploadTarget,
   NO_TOKEN_GUIDANCE,

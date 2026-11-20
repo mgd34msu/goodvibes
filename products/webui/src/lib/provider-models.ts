@@ -1,4 +1,4 @@
-import { declaredProviderCatalogId } from '@goodvibes-jev/engine/contracts';
+import { declaredProviderCatalogId } from '@goodvibes/engine/contracts';
 import { asRecord, bestId, bestTitle, firstArrayAtPath, firstString, readPath } from './object';
 import { deriveProviderStatus } from './provider-status';
 

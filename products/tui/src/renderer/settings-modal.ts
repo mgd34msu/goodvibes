@@ -1,8 +1,8 @@
-import { settingCategoryLabel } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
-import { createSettingsRows, settingsNavigationHints } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-rows';
-import { createSettingsLayout, settingsCategoryRows } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-layout';
-import '@goodvibes-jev/engine/terminal-shell/renderer/mcp-form-rows';
-import { createSettingsDocumentation, fitValue } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-documentation';
+import { settingCategoryLabel } from '@goodvibes/engine/terminal-shell/renderer/settings-metadata';
+import { createSettingsRows, settingsNavigationHints } from '@goodvibes/engine/terminal-shell/renderer/settings-rows';
+import { createSettingsLayout, settingsCategoryRows } from '@goodvibes/engine/terminal-shell/renderer/settings-layout';
+import '@goodvibes/engine/terminal-shell/renderer/mcp-form-rows';
+import { createSettingsDocumentation, fitValue } from '@goodvibes/engine/terminal-shell/renderer/settings-documentation';
 /**
  * renderSettingsModal, the settings modal drawn with the surface kit.
  *
@@ -29,7 +29,7 @@ import { createSettingsDocumentation, fitValue } from '@goodvibes-jev/engine/ter
 
 import type { SettingsModal, SettingEntry } from '../input/settings-modal.ts';
 import { SETTINGS_CATEGORIES, SETTINGS_CATEGORY_GROUPS } from '../input/settings-modal.ts';
-import { isFeatureValueEnabled } from '@goodvibes-jev/engine/terminal-shell';
+import { isFeatureValueEnabled } from '@goodvibes/engine/terminal-shell';
 import { CATEGORY_LABELS, getSettingLabel, valueColor } from './settings-modal-helpers.ts';
 import { connectionRows } from './settings-modal-connections.ts';
 import { categoryItemCount, currentSettingValue, settingContextLines } from './settings-modal-context.ts';

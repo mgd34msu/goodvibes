@@ -26,11 +26,11 @@ import {
   describeSenderClaimNeutrally,
   type EmailSenderClaim,
   type EmailSenderConfidence,
-} from '@goodvibes-jev/engine/platform/platform/email';
+} from '@goodvibes/engine/platform/platform/email';
 import type {
   SenderAuthenticationChecks as PlatformSenderAuthenticationChecks,
   SenderProtocolResult as PlatformSenderProtocolResult,
-} from '@goodvibes-jev/engine/platform/platform/google';
+} from '@goodvibes/engine/platform/platform/google';
 
 /**
  * A message from outside, with where it came from attached.

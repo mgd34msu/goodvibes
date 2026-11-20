@@ -1,4 +1,4 @@
-import { validateContextBudget } from '@goodvibes-jev/judgment';
+import { validateContextBudget } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 /**
  * `engine.tools.page-content`: which blocks of a fetched web page are part of
@@ -40,7 +40,7 @@ import {
   type NoulResponse,
   type Question,
   type YesNoReading,
-} from '@goodvibes-jev/judgment';
+} from '@goodvibes/judgment';
 
 export const PAGE_CONTENT_BAND = STAKES_BANDS.medium.yesNo;
 

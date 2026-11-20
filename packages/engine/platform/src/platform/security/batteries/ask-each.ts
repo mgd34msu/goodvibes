@@ -13,7 +13,7 @@ import {
   askAs, noul, readYesNo, recordReadings, toJson,
   type Battery, type BatteryItems, type CallOptions, type EntryType, type JudgmentPort, type JudgmentResult,
   type NoulQuestion, type NoulResponse, type Questions, type YesNoItem, type YesNoReading,
-} from '@goodvibes-jev/judgment';
+} from '@goodvibes/judgment';
 
 export interface AskEachOptions extends CallOptions {
   /** Most subjects in one request. */

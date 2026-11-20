@@ -5,7 +5,7 @@ import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { WatcherKind, WatcherRecord, WatcherSourceStatus, WatcherState } from '../runtime/store/domains/watchers.js';
 import type { AutomationSourceRecord } from '../automation/sources.js';
 import type { WatcherSourceKind } from '../../events/watchers.js';
-import { GoodVibesError, RefusalError, classifyFailure, refusal } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError, RefusalError, classifyFailure, refusal } from '@goodvibes/engine/errors';
 import { summarizeError } from '../utils/error-display.js';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import { logger } from '../utils/logger.js';

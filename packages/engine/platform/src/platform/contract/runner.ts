@@ -1,6 +1,6 @@
 import { captureAutonomousSource, retainAutonomousSource } from '../permissions/autonomous.js';
-import { assertNeverObserved, RefusalError, refusal } from '@goodvibes-jev/engine/errors';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertNeverObserved, RefusalError, refusal } from '@goodvibes/engine/errors';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { getContractActionSource, getContractActionSignal } from '../tools/agent/contract-binding.js';
 import { bindOwnedContractSource, assertOwnedContractSource } from './owned-source.js';
 import { pinContractInputAdmission } from './input-authority.js';
@@ -121,7 +121,7 @@ export interface ContractRunnerDeps {
    * model, which is refused until its provider is registered.
    */
   readonly providersReady?: (() => Promise<void>) | undefined;
-  readonly judgmentLog?: Pick<import('@goodvibes-jev/judgment').DecisionLog, 'get'> | undefined;
+  readonly judgmentLog?: Pick<import('@goodvibes/judgment').DecisionLog, 'get'> | undefined;
   readonly readOwnerEvidence?: OwnerEvidenceReader | undefined;
   readonly getSelectedModel?: (() => Pick<import('../providers/registry-types.js').ModelDefinition, 'id' | 'provider' | 'registryKey' | 'displayName'>) | undefined;
   readonly nativeDecisions?: NativeContractDecisionHost | undefined;

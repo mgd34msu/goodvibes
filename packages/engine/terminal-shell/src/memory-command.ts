@@ -8,10 +8,10 @@
  * search index stay on this app's own store, as before.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { atomicWriteFileSync, type ConfigKey, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { atomicWriteFileSync, type ConfigKey, type ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { MemoryApi } from '@goodvibes/engine/platform/platform/knowledge';
+import type { MemorySpineClient } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import {
   buildIncidentMemoryAddOptions,
   buildMcpSecurityMemoryAddOptions,
@@ -32,8 +32,8 @@ import {
   type MemorySearchFilter,
   type MemorySnapshotInfo,
   type ProvenanceLink,
-} from '@goodvibes-jev/engine/platform/platform/state';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+} from '@goodvibes/engine/platform/platform/state';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';

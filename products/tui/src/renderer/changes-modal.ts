@@ -1,4 +1,4 @@
-import { DIFF_GUTTER as GUTTER } from '@goodvibes-jev/engine/terminal-shell/diff-rows';
+import { DIFF_GUTTER as GUTTER } from '@goodvibes/engine/terminal-shell/diff-rows';
 /**
  * renderChangesModal, files, a tinted diff and review actions (replaces the
  * Git, Diff and Review views).
@@ -28,7 +28,7 @@ import { beginModal, finishModal, clipText, scrollCountText, wrapLines, type Kit
 import { drawList, type KitRow } from './surface-kit-list.ts';
 import { button, buttonWidth, inset, type KitInset } from './surface-kit-parts.ts';
 import { drawTextBlock, splitListDetail } from './surface-kit-extra.ts';
-import type { SemanticDiff } from '@goodvibes-jev/engine/terminal-shell/semantic-diff';
+import type { SemanticDiff } from '@goodvibes/engine/terminal-shell/semantic-diff';
 import { getDisplayWidth } from '../utils/terminal-width.ts';
 import { type ChangeFile } from '../input/changes-model.ts';
 
@@ -76,8 +76,8 @@ export interface ChangesModalView {
   readonly scrollOwner: object;
 }
 
-import { buildDiffRows, drawDiffRow, semanticChips, type DiffRow } from '@goodvibes-jev/engine/terminal-shell/diff-rows';
-export { buildDiffRows, drawDiffRow, semanticChips, type DiffRow } from '@goodvibes-jev/engine/terminal-shell/diff-rows';
+import { buildDiffRows, drawDiffRow, semanticChips, type DiffRow } from '@goodvibes/engine/terminal-shell/diff-rows';
+export { buildDiffRows, drawDiffRow, semanticChips, type DiffRow } from '@goodvibes/engine/terminal-shell/diff-rows';
 function buildRows(view: ChangesModalView, codeWidth: number): { rows: DiffRow[]; hunkStarts: number[] } {
   return buildDiffRows(view.diffFiles, codeWidth, view.fileHeaders);
 }

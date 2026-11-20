@@ -1,6 +1,6 @@
-import type { RuntimeEventProvenance } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { NoticeLevel, NoticeMeta } from '@goodvibes-jev/engine/platform/platform/core';
+import type { RuntimeEventProvenance } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import type { NoticeLevel, NoticeMeta } from '@goodvibes/engine/platform/platform/core';
 import {
   classifySystemMessageKind,
   defaultSystemMessageTarget,
@@ -8,9 +8,9 @@ import {
   type SystemMessageActivity,
   type SystemMessageKind,
   type SystemMessageTarget,
-} from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+} from '@goodvibes/engine/platform/platform/runtime/shell';
 import { classifyNoise, foldProviderReplayLines, providerNameFromReplay, type NoiseGateDeps } from './system-message-noise.js';
-export type { SystemMessageActivity, SystemMessageKind, SystemMessageTarget } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+export type { SystemMessageActivity, SystemMessageKind, SystemMessageTarget } from '@goodvibes/engine/platform/platform/runtime/shell';
 export type SystemMessagePriority = 'high' | 'low';
 export interface SystemMessageActivityFeed {
   /** `activity` is the Activity category the router states for the line; the feed stores it as given. */

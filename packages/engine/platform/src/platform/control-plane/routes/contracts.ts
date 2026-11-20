@@ -9,7 +9,7 @@
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
-import { formatRefusal, isOperationKey, OPERATION_KEY_RULE, RefusalError } from '@goodvibes-jev/engine/errors';
+import { formatRefusal, isOperationKey, OPERATION_KEY_RULE, RefusalError } from '@goodvibes/engine/errors';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
 import { ContractOperatorError, projectContractOperatorView, type ContractOperatorService } from '../../contract/operator-service.js';

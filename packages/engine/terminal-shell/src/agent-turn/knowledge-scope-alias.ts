@@ -1,7 +1,7 @@
 import {
   DEFAULT_KNOWLEDGE_SPACE_ID,
   goodVibesAgentKnowledgeSpaceId,
-} from '@goodvibes-jev/engine/platform/platform/knowledge';
+} from '@goodvibes/engine/platform/platform/knowledge';
 
 type JsonRecord = Record<string, unknown>;
 

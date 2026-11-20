@@ -8,7 +8,7 @@ import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import type { ContractInputAuthority } from '../../contract/input-authority.js';
 import type { AgentRecord } from './record.js';
 import type { AutonomousToolSource } from '../../permissions/autonomous.js';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import type { JudgmentPort } from '@goodvibes/judgment';
 
 const actionSignals = new WeakMap<object, AbortSignal>();
 const checkedPlanConsumers = new WeakSet<object>();

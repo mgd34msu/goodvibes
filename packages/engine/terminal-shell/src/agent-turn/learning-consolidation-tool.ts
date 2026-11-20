@@ -1,12 +1,12 @@
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
+import { resolveAndValidatePath } from '@goodvibes/engine/platform/platform/utils';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolExecution, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { MemoryBundle, MemoryRecord, MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
-import { createLocalMemoryAccess, type MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { assertCurrentToolExecution, ToolInputProjectionError, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { MemoryBundle, MemoryRecord, MemoryRegistry } from '@goodvibes/engine/platform/platform/state';
+import { createLocalMemoryAccess, type MemoryAccess } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { AgentPersonaRegistry } from './persona-registry.js';
 import { AgentRoutineRegistry } from './routine-registry.js';
 import { AgentSkillRegistry } from './skill-registry.js';

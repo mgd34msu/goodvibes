@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/shell-passthrough';
+export * from '@goodvibes/engine/terminal-shell/shell-passthrough';

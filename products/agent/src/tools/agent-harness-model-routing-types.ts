@@ -1,4 +1,4 @@
-import type { ArtifactDescriptor, ArtifactContentRead } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ArtifactDescriptor, ArtifactContentRead } from '@goodvibes/engine/platform/platform/artifacts';
 
 export interface AgentHarnessModelRoutingArgs {
   readonly modelRouteId?: unknown;

@@ -5,7 +5,7 @@ domain. There is no separate enablement namespace: turning a feature on, off, or
 into one of its modes is done through the same settings keys that tune it
 (`behavior.compactionStrategy`, `sandbox.enabled`, `notifications.adaptiveSuppression`,
 `web.enabled`, ...). Surfaces render the per-feature metadata exported as
-`FEATURE_SETTINGS` from `@goodvibes-jev/engine/platform/platform/runtime/feature-flags`:
+`FEATURE_SETTINGS` from `@goodvibes/engine/platform/platform/runtime/feature-flags`:
 each feature's domain, enablement shape (boolean or enum with its active
 values), associated tuning keys, real behavior description, restart
 requirement, and stock default.

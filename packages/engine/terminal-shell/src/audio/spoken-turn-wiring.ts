@@ -1,9 +1,9 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { UiRuntimeEvents } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
-import type { VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { UiRuntimeEvents } from '@goodvibes/engine/platform/platform/runtime/ui';
+import type { VoiceService } from '@goodvibes/engine/platform/platform/voice';
 import type { StreamingAudioPlayer } from './player.js';
 import { sharedStreamingAudioPlayer } from './player.js';
-import { SpokenTurnController } from '@goodvibes-jev/engine/platform/platform/voice';
+import { SpokenTurnController } from '@goodvibes/engine/platform/platform/voice';
 export interface SpokenTurnRuntime {
     readonly unsubs: readonly (() => void)[];
     /** Returns whether speech was actually active (see controller.stop). */

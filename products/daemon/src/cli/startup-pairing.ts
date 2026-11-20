@@ -1,7 +1,7 @@
 /** Credential-bearing local pairing output, separate from startup diagnostics. */
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { availablePairingOffers, resolvePairingWebOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { availablePairingOffers, resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
+import { resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell';
 import { renderPairingBanner } from '../core/pairing-banner.js';
 import { localOnlyNotice } from '../daemon/pair-command.js';
 import { SHIPPED_PUBLIC_BASE_URL, hasReadableWebuiBundle } from '../config/webui-bundle.js';

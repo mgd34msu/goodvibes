@@ -9,9 +9,9 @@
  * dependencies as explicit arguments rather than accessing class-level state.
  */
 
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { FlagEntry, SettingEntry } from './settings-modal-types.ts';
 import { deepEqual, readSettingsPolicy, refreshHostSettingEntry, type SettingsPolicyRead } from './settings-modal-data.ts';

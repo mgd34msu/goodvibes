@@ -1,6 +1,6 @@
 /** Provider output-cap readings and deterministic chat-capability lookup. */
 import { knownCatalogChatCapability } from '../providers/model-catalog-facts.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes/engine/errors';
 import {
   anthropicOutputCap,
   type AnthropicOutputCapRow,

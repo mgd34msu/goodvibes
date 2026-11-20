@@ -4,7 +4,7 @@ import {
   readPowerKeepAwakeEnabled,
   type ForwardKeepAwakeDeps,
   type KeepAwakeForwarder,
-} from '@goodvibes-jev/engine/platform/platform/power';
+} from '@goodvibes/engine/platform/platform/power';
 
 export interface AgentKeepAwakeForwarderDeps {
   /** The current `power.keepAwake` value, read when a re-send's turn comes. */

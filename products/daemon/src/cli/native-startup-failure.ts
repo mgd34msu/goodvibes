@@ -1,5 +1,5 @@
 /** Fixed first-failure diagnostics; never print exception text or values. */
-import { RefusalError } from '@goodvibes-jev/engine/errors';
+import { RefusalError } from '@goodvibes/engine/errors';
 
 export type NativeStartupStage = 'sqlite' | 'darwin-original';
 const ioCodes = new Set(['ENOENT', 'ENOTDIR', 'EISDIR', 'EACCES', 'EPERM', 'EBADF', 'EIO', 'ELOOP', 'ERR_DLOPEN_FAILED']);

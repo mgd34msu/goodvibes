@@ -1,4 +1,4 @@
-import { admitRegex, compileLegacyRegex } from '@goodvibes-jev/engine/errors';
+import { admitRegex, compileLegacyRegex } from '@goodvibes/engine/errors';
 const DEFAULT_MAX_INPUT_CHARS = 50_000;
 export interface SafeRegExpOptions {
   readonly operation: string;

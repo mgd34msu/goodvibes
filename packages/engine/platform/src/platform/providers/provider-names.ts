@@ -12,7 +12,7 @@
  * ones; a provider sharing its model catalog with another) it returns null and
  * the caller asks the registry.
  */
-import { CATALOG_PROVIDER_NAME_ALIASES } from '@goodvibes-jev/engine/contracts';
+import { CATALOG_PROVIDER_NAME_ALIASES } from '@goodvibes/engine/contracts';
 import { BUILTIN_COMPAT_PROVIDERS } from './builtin-catalog.js';
 import type { CustomProviderName } from './custom-provider-files.js';
 

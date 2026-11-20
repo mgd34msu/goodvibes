@@ -8,12 +8,12 @@ import {
   captureMouseFeedState,
   captureShortcutFeedState,
   refreshCommandAutocomplete,
-} from '@goodvibes-jev/engine/terminal-shell/input-feed-adapters';
-import { createFeedInputTokens } from '@goodvibes-jev/engine/terminal-shell/input-feed-pipeline';
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
+} from '@goodvibes/engine/terminal-shell/input-feed-adapters';
+import { createFeedInputTokens } from '@goodvibes/engine/terminal-shell/input-feed-pipeline';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
+import type { InfiniteBuffer } from '@goodvibes/engine/terminal-shell';
 import type { CommandContext, CommandRegistry } from './command-registry.ts';
-import type { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
+import type { SurfaceModalHost } from '@goodvibes/engine/terminal-shell/surface-modal-host';
 import { AutocompleteEngine } from './autocomplete.ts';
 import { FilePickerModal } from './file-picker.ts';
 import { ModelPickerModal } from './model-picker.ts';
@@ -29,7 +29,7 @@ import { SettingsModal } from './settings-modal.ts';
 import type { McpWorkspace } from './mcp-workspace.ts';
 import { SessionPickerModal } from './session-picker-modal.ts';
 import type { ConfigModal } from './config-modal.ts';
-import { ProfilePickerModal } from '@goodvibes-jev/engine/terminal-shell/profile-picker-state';
+import { ProfilePickerModal } from '@goodvibes/engine/terminal-shell/profile-picker-state';
 import type { OnboardingWizardController } from './onboarding/onboarding-wizard.ts';
 import type { OnboardingWizardAction } from './onboarding/onboarding-wizard.ts';
 import { handleIndicatorFocusToken, handleMouseToken, handlePromptKeyToken, handlePromptTextToken } from './handler-feed-routes.ts';
@@ -41,11 +41,11 @@ import { expandTextPastes } from './handler-content-actions.ts';
 import { handleModalTokenRoutes } from './handler-modal-token-routes.ts';
 import { handleCommandModeToken } from './handler-command-route.ts';
 import { handleGlobalShortcutToken } from './handler-shortcuts.ts';
-import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
+import { SelectionManager } from '@goodvibes/engine/terminal-shell';
 import type { KeybindingsManager } from './keybindings.ts';
 import type { ModelPickerTarget } from './model-picker.ts';
 import type { KillRing } from './kill-ring.ts';
-import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
 
 /**
  * InputFeedContext, The single long-lived context object passed to feedInputTokens
@@ -159,7 +159,7 @@ export interface InputFeedContext {
   readonly handleBlockToggle: () => void;
   readonly findMarkerAtPos: (pos: number) => { start: number; end: number } | null;
   readonly cleanupMarkerRegistry: (text: string) => void;
-  readonly expandPrompt: (text: string) => string | import('@goodvibes-jev/engine/platform/platform/providers').ContentPart[];
+  readonly expandPrompt: (text: string) => string | import('@goodvibes/engine/platform/platform/providers').ContentPart[];
   readonly openModelPickerWithTarget: (target: ModelPickerTarget, source?: 'settings' | 'onboarding') => boolean;
   readonly openProviderModelPickerWithTarget: (target: ModelPickerTarget, source?: 'settings' | 'onboarding') => boolean;
   readonly onModelPickerCommit: () => boolean;

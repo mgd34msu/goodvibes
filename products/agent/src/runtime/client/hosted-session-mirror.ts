@@ -22,8 +22,8 @@
  * conversation is finished and belongs in the store) and reconnect (this
  * process died mid-turn and is now catching up on what happened without it).
  */
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { OwnerStamp } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { OwnerStamp } from '@goodvibes/engine/platform/platform/utils';
 
 /**
  * The stamp a mirror carries: the hosted session it copies and the host's

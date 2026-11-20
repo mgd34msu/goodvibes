@@ -16,7 +16,7 @@ import { completeJudgmentView } from './complete-view.js';
  * Band: low stakes. The reading only decides what a model is shown first when
  * it looks for a capability; nothing runs on the strength of it.
  */
-import { defineRerank, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineRerank, STAKES_BANDS } from '@goodvibes/judgment';
 
 /** What the rerank sees of a skill, agent or tool: its kind, name and description. */
 export function registryCandidateView(item: {

@@ -29,7 +29,7 @@
 import {
   provisionWakeWordModelsAtInstall,
   resolveManagedVoiceRoot,
-} from '@goodvibes-jev/engine/platform/platform/voice';
+} from '@goodvibes/engine/platform/platform/voice';
 
 export interface ProvisionWakeModelResult {
   readonly exitCode: number;

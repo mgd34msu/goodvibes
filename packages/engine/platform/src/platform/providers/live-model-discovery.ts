@@ -17,7 +17,7 @@
  */
 
 import fs from 'node:fs';
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import { dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';

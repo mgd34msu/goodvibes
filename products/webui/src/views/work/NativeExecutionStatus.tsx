@@ -1,4 +1,4 @@
-import type { NativeWorkExecutionRevision } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
+import type { NativeWorkExecutionRevision } from "@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client";
 import type { NativeExecutionObservation } from "../../lib/native-execution";
 import { DetailSection, Facts } from "../../components/data-view/DataView";
 

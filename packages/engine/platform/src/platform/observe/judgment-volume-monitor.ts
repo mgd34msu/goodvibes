@@ -1,4 +1,4 @@
-import type { DecisionLog } from '@goodvibes-jev/judgment';
+import type { DecisionLog } from '@goodvibes/judgment';
 import { boolean, number, strictObject, unknown } from 'zod/v4';
 import {
   captureJudgmentVolumeBudgets,

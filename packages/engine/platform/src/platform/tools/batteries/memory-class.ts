@@ -13,7 +13,7 @@
  * the tool call has returned. Only a reading that acts refiles the record; an
  * unsettled one leaves it tagged classification-pending for review.
  */
-import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes/judgment';
 import type { MemoryClass } from '../../state/memory-store.js';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { ToolInputProjectionError } from '../input-projection.js';

@@ -1,4 +1,4 @@
-import { createOrderedShutdown, drainShutdownRegistry } from '@goodvibes-jev/engine/terminal-shell/ordered-shutdown';
+import { createOrderedShutdown, drainShutdownRegistry } from '@goodvibes/engine/terminal-shell/ordered-shutdown';
 /**
  * bootstrap-shutdown.ts, how a session lets go of everything it took.
  *

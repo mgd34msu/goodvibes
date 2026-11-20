@@ -1,4 +1,4 @@
-import { BatteryRegistry } from '@goodvibes-jev/judgment';
+import { BatteryRegistry } from '@goodvibes/judgment';
 import { autonomyIntake } from './autonomy-intake.js';
 import { taskRouteNamedId } from './named-ids.js';
 import { taskRoutePick } from './route-selector.js';

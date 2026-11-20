@@ -1,7 +1,7 @@
 {
-  "packageName": "@goodvibes-jev/webui",
+  "packageName": "@goodvibes/webui",
   "enginePin": {
-    "enginePackage": "@goodvibes-jev/engine",
+    "enginePackage": "@goodvibes/engine",
     "pinSource": "dependencies",
     "lockfile": "../../bun.lock",
     "sourceRoots": ["src", "scripts", "e2e"],

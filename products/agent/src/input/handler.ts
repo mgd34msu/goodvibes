@@ -1,15 +1,15 @@
-import { openHandlerMcpWorkspace } from '@goodvibes-jev/engine/terminal-shell/input-handler-state';
-import { createFeedRenderBuffer, syncFeedContextLiveReferences } from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
-import { TerminalInputHandlerState } from '@goodvibes-jev/engine/terminal-shell/input-handler-state';
+import { openHandlerMcpWorkspace } from '@goodvibes/engine/terminal-shell/input-handler-state';
+import { createFeedRenderBuffer, syncFeedContextLiveReferences } from '@goodvibes/engine/terminal-shell/input-feed-context';
+import { TerminalInputHandlerState } from '@goodvibes/engine/terminal-shell/input-handler-state';
 import {
   projectFeedContextStable,
   projectFeedContextClosures,
-} from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
-import '@goodvibes-jev/engine/terminal-shell/composer-controller';
+} from '@goodvibes/engine/terminal-shell/input-feed-context';
+import '@goodvibes/engine/terminal-shell/composer-controller';
 import 'node:fs';
 import 'node:path';
-import { InputTokenizer, type InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import { reportDroppedPaste } from '@goodvibes-jev/engine/terminal-shell/input-content';
+import { InputTokenizer, type InputToken } from '@goodvibes/engine/platform/platform/core';
+import { reportDroppedPaste } from '@goodvibes/engine/terminal-shell/input-content';
 import { resolveFooterTarget, type FooterTarget } from '../renderer/footer-targets.ts';
 import {
   cleanupMarkerRegistryForHandler,
@@ -27,14 +27,14 @@ import {
   handlePasteForHandler,
   registerPasteForHandler,
 } from './handler-interactions.ts';
-import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
-import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
+import { SelectionManager } from '@goodvibes/engine/terminal-shell';
+import type { InfiniteBuffer } from '@goodvibes/engine/terminal-shell';
 import type { CommandRegistry, CommandContext } from './command-registry.ts';
 import { AutocompleteEngine } from './autocomplete.ts';
 import { FilePickerModal } from './file-picker.ts';
 import { ModelPickerModal } from './model-picker.ts';
 import { SelectionModal } from './selection-modal.ts';
-import { attachSelectionModalQueue, type SelectionModalQueue } from '@goodvibes-jev/engine/terminal-shell/selection-modal-queue';
+import { attachSelectionModalQueue, type SelectionModalQueue } from '@goodvibes/engine/terminal-shell/selection-modal-queue';
 import type { SelectionResult, SelectionOpenOptions } from './selection-modal.ts';
 import { SearchManager } from './search.ts';
 import { InputHistory } from './input-history.ts';
@@ -43,14 +43,14 @@ import { ProcessModal } from '../renderer/process-modal.ts';
 import { LiveTailModal } from '../renderer/live-tail-modal.ts';
 import { BlockActionsMenu } from '../renderer/block-actions.ts';
 import { ContextInspectorModal } from '../renderer/context-inspector.ts';
-import { SurfaceModalHost, isTrackedModal, type TrackedModal } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
+import { SurfaceModalHost, isTrackedModal, type TrackedModal } from '@goodvibes/engine/terminal-shell/surface-modal-host';
 import { BookmarkModal } from './bookmark-modal.ts';
 import { SettingsModal } from './settings-modal.ts';
 import { McpWorkspace } from './mcp-workspace.ts';
 import { AgentWorkspace } from './agent-workspace.ts';
 import { parseSlashCommand } from './slash-command-parser.ts';
 import { captureCommandPrint } from './workspace-command-output.ts';
-import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
+import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import { SessionPickerModal } from './session-picker-modal.ts';
 import { ProfilePickerModal } from './profile-picker-modal.ts';
 import {

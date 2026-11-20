@@ -1,9 +1,9 @@
 import { fileURLToPath } from 'node:url';
-import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { Tool, ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/types';
-import { BrowserSessionError, StaleElementError, UntrustedEffectError } from '@goodvibes-jev/engine/platform/platform/browser';
-import type { BrowserActionLifetime, BrowserExtractField, BrowserTarget } from '@goodvibes-jev/engine/platform/platform/browser';
-import type { DaemonBrowserGatewayService } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import type { Tool, ToolExecuteOptions } from '@goodvibes/engine/platform/platform/types';
+import { BrowserSessionError, StaleElementError, UntrustedEffectError } from '@goodvibes/engine/platform/platform/browser';
+import type { BrowserActionLifetime, BrowserExtractField, BrowserTarget } from '@goodvibes/engine/platform/platform/browser';
+import type { DaemonBrowserGatewayService } from '@goodvibes/engine/platform/platform/control-plane';
 import { captureCatalogSnapshotGuard } from './catalog-data.js';
 import { toolErrorText } from './tool-error-text.js';
 import { readString } from './tool-args.js';

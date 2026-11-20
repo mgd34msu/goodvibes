@@ -1,12 +1,12 @@
-import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import { formatEveryInterval } from '@goodvibes-jev/engine/platform/platform/automation';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { createConnectedHost, isHostFailure } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
+import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@goodvibes/engine/terminal-shell/agent-turn/store-file';
+import type { OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
+import { formatEveryInterval } from '@goodvibes/engine/platform/platform/automation';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { createConnectedHost, isHostFailure } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { isRoutineScheduleDeliverySurfaceKind } from './routine-schedule-args.ts';
-import { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_METHOD, ROUTINE_SCHEDULE_ROUTE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+import { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_METHOD, ROUTINE_SCHEDULE_ROUTE } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-delivery-targets';
 import { connectedHostOf, connectionUnavailableKind, connectionUnavailableMessage } from './routine-schedule-promotion.ts';
 import type { AgentConnectedHostConnection, RoutineScheduleCorrelation, RoutineScheduleCorrelationFailure, RoutineScheduleCorrelationResult, RoutineScheduleCorrelationSuccess, RoutineScheduleDeliveryKind, RoutineScheduleKind, RoutineScheduleLiveRecord, RoutineSchedulePromotionPreview, RoutineSchedulePromotionResult, RoutineScheduleReceipt, RoutineScheduleReceiptDeliveryTarget, RoutineScheduleReceiptSnapshot } from './routine-schedule-promotion.ts';
 

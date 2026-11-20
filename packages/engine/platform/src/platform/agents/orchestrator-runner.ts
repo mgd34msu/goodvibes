@@ -25,7 +25,7 @@ import { createVerificationWriter, reportVerificationUsage } from '../core/verif
 import { VerificationStore } from '../core/verification/store.js';
 import { appendVerificationObservation, beginVerificationConversation } from '../core/verification/archive.js';
 import { isContextSizeExceededError } from '../types/errors.js';
-import { httpStatusOf } from '@goodvibes-jev/engine/errors';
+import { httpStatusOf } from '@goodvibes/engine/errors';
 import { AgentSession } from './session.js';
 import {
   estimateTokens,
@@ -36,7 +36,7 @@ import { moveAgentRun } from '../tools/agent/record.js';
 import type { LLMProvider, StreamDelta } from '../providers/interface.js';
 import type { ToolResult } from '../types/tools.js';
 import { emitAgentAwaitingTool, emitCommunicationConsumed } from '../runtime/emitters/index.js';
-import { toolCallFileCounts } from '@goodvibes-jev/engine/contracts';
+import { toolCallFileCounts } from '@goodvibes/engine/contracts';
 import { compactAgentConversation, maybeCompactAfterModelContextWarning, setAgentProgress, summarizeToolArgs } from './orchestrator-utils.js';
 import { assertOrchestratorKnowledgeCurrent, buildLayeredOrchestratorSystemPrompt, buildOrchestratorSystemPrompt, permissionModeLine, prepareOrchestratorPromptContext, resolveSpawnKnowledgeInjections, withOpenTierProfileBlock } from './orchestrator-prompts.js';
 import { completeOrRegenerate, recoverEmptyConversationalReply } from './conversational-reply-recovery.js';

@@ -1,5 +1,5 @@
-import { createCloudflareCommand } from '@goodvibes-jev/engine/terminal-shell/cloudflare-command';
-import { createCloudflareRouteClient, type CloudflareDaemonEndpoint } from '@goodvibes-jev/engine/terminal-shell/cloudflare-control-plane';
+import { createCloudflareCommand } from '@goodvibes/engine/terminal-shell/cloudflare-command';
+import { createCloudflareRouteClient, type CloudflareDaemonEndpoint } from '@goodvibes/engine/terminal-shell/cloudflare-control-plane';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { resolveConnectedHostConnection } from '../connected-host-routes.ts';
 

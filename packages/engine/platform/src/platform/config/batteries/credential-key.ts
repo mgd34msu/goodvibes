@@ -21,7 +21,7 @@
  * stored as a secret reference its readers cannot parse. Only an acted yes
  * counts as a credential at a runtime site.
  */
-import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes/judgment';
 
 /** A type alias rather than an interface, so it is assignable to the port's JSON state type. */
 export type CredentialKeyState = {

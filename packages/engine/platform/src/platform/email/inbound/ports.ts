@@ -26,7 +26,7 @@
  * effects the ports below describe, a store write, a delivered notice, a
  * status change, and no others, because there is nothing else to call.
  */
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import type { ImapBodyProbe } from '../imap-body-probe.js';
 
 import { IMAP_MAX_FETCH_UIDS } from '../imap-client.js';

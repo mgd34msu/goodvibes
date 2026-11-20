@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
 
 /** The artifact purpose a Personal Ops effect receipt is saved under; the lanes list artifacts by it. */
 export const PERSONAL_OPS_EFFECT_RECEIPT_PURPOSE = 'personal-ops-effect-receipt';

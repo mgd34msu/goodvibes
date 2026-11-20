@@ -18,7 +18,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { reasoningEffortSpecFromLevels } from '../providers/reasoning-effort.js';
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
-import { EngineErrorCodes, formatRefusal, refusal, type Refusal } from '@goodvibes-jev/engine/errors';
+import { EngineErrorCodes, formatRefusal, refusal, type Refusal } from '@goodvibes/engine/errors';
 import { createOwnedPluginCapabilities } from './owned-capabilities.js';
 import { PluginClosedError, PluginQuiescingError, type PluginInFlightTracker } from './in-flight.js';
 import { enforceBundleCapability, type BundleCapabilityGuard } from '../runtime/ecosystem/bundle-manifest.js';

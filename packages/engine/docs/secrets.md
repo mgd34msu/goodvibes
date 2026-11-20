@@ -3,7 +3,7 @@
 GoodVibes config values can point at secrets without embedding secret material
 directly in config files. The platform-owned URI form is `goodvibes://`.
 
-**Public subpath:** `@goodvibes-jev/engine/platform/platform/config` (daemon embedders).
+**Public subpath:** `@goodvibes/engine/platform/platform/config` (daemon embedders).
 
 ## Supported sources
 

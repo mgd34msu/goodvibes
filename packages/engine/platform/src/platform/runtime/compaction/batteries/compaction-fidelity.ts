@@ -13,7 +13,7 @@
  * Band: low stakes. A low score only re-runs a compaction strategy or keeps
  * the full conversation, both reversible.
  */
-import { defineFidelityChecker, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineFidelityChecker, STAKES_BANDS } from '@goodvibes/judgment';
 
 const BUGFIX_SOURCE = [
   '#1 user: The CSV export in reports/export.ts drops the last row when the file has no trailing newline. Fix it and add a test.',

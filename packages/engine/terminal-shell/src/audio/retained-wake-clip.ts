@@ -5,7 +5,7 @@ import {
   resolveManagedWakePaths,
   retainedClipFileName,
   type CapturedUtterance,
-} from '@goodvibes-jev/engine/platform/platform/voice';
+} from '@goodvibes/engine/platform/platform/voice';
 export function retainWakeClip(
   deps: {
     readonly managedRoot: string;

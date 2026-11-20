@@ -17,9 +17,9 @@ import {
   type WorkLedgerSnapshot,
   type WorkLedgerState,
   type WorkLedgerStorage,
-} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
-import * as engineCheckoutRoot from '@goodvibes-jev/engine/platform';
-import * as workflow from '@goodvibes-jev/engine/platform/platform/workflow';
+} from '@goodvibes/engine/platform/platform/workflow/work-ledger';
+import * as engineCheckoutRoot from '@goodvibes/engine/platform';
+import * as workflow from '@goodvibes/engine/platform/platform/workflow';
 
 declare const storage: WorkLedgerStorage;
 declare const clock: WorkLedgerClock;
@@ -88,7 +88,7 @@ import {
   type WorkLedgerReadBinding,
   type WorkLedgerReadClient,
   type WorkLedgerReadSnapshot,
-} from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+} from '@goodvibes/engine/platform/platform/workflow/work-ledger';
 const readBinding: WorkLedgerReadBinding = createLocalWorkLedgerReadBinding({
   available: true, projectId: initial.projectId, actorId: 'reader', service, authority,
 });

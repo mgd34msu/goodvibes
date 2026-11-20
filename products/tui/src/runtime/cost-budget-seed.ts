@@ -8,7 +8,7 @@
  * The variable therefore seeds the key only when nothing was ever stored for it;
  * a stored 0 is the owner's choice and stays.
  */
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 
 const BUDGET_ALERT_KEY = 'behavior.budgetAlertUsd';
 

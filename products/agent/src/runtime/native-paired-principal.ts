@@ -1,1 +1,1 @@
-export * from '@goodvibes-jev/engine/terminal-shell/native-paired-principal';
+export * from '@goodvibes/engine/terminal-shell/native-paired-principal';

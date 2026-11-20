@@ -1,4 +1,4 @@
-import { defineCompositeScore, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineCompositeScore, STAKES_BANDS } from '@goodvibes/judgment';
 
 export const learningProposalQuality = defineCompositeScore({
   name: 'engine.knowledge.learning-proposal-quality', version: 1, accuracyFloor: 0.9,

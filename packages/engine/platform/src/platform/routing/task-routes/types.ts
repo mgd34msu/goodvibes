@@ -2,9 +2,9 @@
  * Shapes shared by the task route catalog, the planner and the route tool.
  * The candidate and plan shapes match the agent's planAgentTaskRoute output.
  */
-import type { Outcome, Ranked, Reading, Selection } from '@goodvibes-jev/judgment';
+import type { Outcome, Ranked, Reading, Selection } from '@goodvibes/judgment';
 import type { NamedIdSources } from './named-ids.js';
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import type { ProtectedSourceOwner } from '../../security/source-screening/types.js';
 
 export interface TaskRouteReadOptions extends JudgmentReadingOptions {

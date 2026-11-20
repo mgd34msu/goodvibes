@@ -1,11 +1,11 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
-import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
-import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
-import { isThisMachineHost } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target-resolver';
-import { bindCredential, daemonAuthHeaders, daemonTarget, type BoundCredentialSource, type DaemonTarget } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
+import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
+import { operatorTokenPath } from '@goodvibes/engine/platform/platform/pairing/companion-token';
+import { parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
+import { isThisMachineHost } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
+import { bindCredential, daemonAuthHeaders, daemonTarget, type BoundCredentialSource, type DaemonTarget } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target';
 export type LiveVerificationStatus = 'pass' | 'warn' | 'fail' | 'skip';
 export interface LiveVerificationCheck {
   id: string;

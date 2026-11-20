@@ -4,8 +4,8 @@
  * `automation.schedules.create` body. Sending it is the caller's: the
  * `agent_autonomy_schedule` tool sends it under its own effect admission.
  */
-import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import { buildAutonomySchedulePrompt } from '@goodvibes-jev/engine/platform/platform/automation';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
+import { buildAutonomySchedulePrompt } from '@goodvibes/engine/platform/platform/automation';
 import {
   deliveryModeFromTargets,
   normalizeProviderModel,

@@ -8,9 +8,9 @@
 import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveDaemonServiceDefault } from '@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default';
-import { MANAGED_SERVICE_DESCRIPTION as PLATFORM_SERVICE_DESCRIPTION, PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon/service-manager';
+import { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { resolveDaemonServiceDefault } from '@goodvibes/engine/platform/platform/daemon/daemon-service-default';
+import { MANAGED_SERVICE_DESCRIPTION as PLATFORM_SERVICE_DESCRIPTION, PlatformServiceManager } from '@goodvibes/engine/platform/platform/daemon/service-manager';
 
 /** Structurally derived from `PlatformServiceManager`'s own constructor, the
  * platform's public `platform/daemon` entry point only re-exports the class and

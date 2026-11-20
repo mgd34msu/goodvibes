@@ -32,7 +32,7 @@ import { ntfyOutboundDedup } from '../platform/src/platform/integrations/ntfy.ts
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { PersistentStore } from '../platform/src/platform/state/persistent-store.ts';
 import type { AgentRecord } from '../platform/src/platform/tools/agent/record.ts';
-import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => {

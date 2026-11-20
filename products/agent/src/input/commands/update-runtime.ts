@@ -1,14 +1,14 @@
 /** Agent command composition over the platform's complete suite updater. */
 import { installedSuiteNeedsRepair, applySuiteUpdate, rollbackSuiteUpdate, captureUpdateFileIo, realUpdateFileIo,
-  type SuiteUpdateResult, type UpdateFileIo } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import { DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+  type SuiteUpdateResult, type UpdateFileIo } from '@goodvibes/engine/platform/platform/runtime/self-update';
+import { DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '@goodvibes/engine/platform/platform/runtime/client';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { checkReleaseUpdate, prepareReleaseUpdate, requireBinaryUpdateInstall, createSelfUpdateCommand,
   retainSuiteUpdateConfiguration, formatSuiteUpdateReport,
   type ReleaseUpdateCheck, type SuiteUpdateConfigurationSource,
-} from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
+} from '@goodvibes/engine/terminal-shell/release-update-preflight';
 import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../../runtime/workspace-update-policy.ts';
-import { recordSwapFailure, type UpdateSwapProgress } from '@goodvibes-jev/engine/terminal-shell/launch-auto-update';
+import { recordSwapFailure, type UpdateSwapProgress } from '@goodvibes/engine/terminal-shell/launch-auto-update';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
 import { requireShellPaths } from './runtime-services.ts';
@@ -18,7 +18,7 @@ import { fallbackUpdateCommand, type UpdateFetchLike } from '../../runtime/updat
 
 const REPO_RELEASES_LATEST_URL = DAEMON_REPO_RELEASES_LATEST_URL;
 const releaseDownloadBaseUrl = (tag: string) => daemonReleaseDownloadBaseUrl(tag);
-export { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+export { PREVIOUS_FILE_SUFFIX } from '@goodvibes/engine/platform/platform/runtime/self-update';
 export type CheckForUpdateResult = ReleaseUpdateCheck;
 export async function checkForUpdate(fetchImpl: UpdateFetchLike, currentVersion: string): Promise<CheckForUpdateResult> {
   return checkReleaseUpdate(fetchImpl, currentVersion, REPO_RELEASES_LATEST_URL);

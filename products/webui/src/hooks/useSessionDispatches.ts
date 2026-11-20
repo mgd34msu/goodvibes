@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
+import type { OperatorMethodOutput } from '@goodvibes/engine/contracts';
 import { isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../lib/client-lifetime';
 import { hasSignInSync, client as platformClient } from '../lib/goodvibes';
 import { formatError, isDefiniteRefusal, isSessionClosedError, serializeError } from '../lib/errors';

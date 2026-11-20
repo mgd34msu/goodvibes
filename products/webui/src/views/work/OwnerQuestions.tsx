@@ -17,7 +17,7 @@
  */
 import { useState } from 'react';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { OperatorMethodInput } from '@goodvibes-jev/engine/contracts';
+import type { OperatorMethodInput } from '@goodvibes/engine/contracts';
 import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { useEventStreamState } from '../../lib/event-stream';

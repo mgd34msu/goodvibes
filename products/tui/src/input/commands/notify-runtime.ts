@@ -1,4 +1,4 @@
-import { registerNotifyCommands } from '@goodvibes-jev/engine/terminal-shell/notify-runtime-commands';
+import { registerNotifyCommands } from '@goodvibes/engine/terminal-shell/notify-runtime-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireWebhookNotifier } from './runtime-services.ts';
 

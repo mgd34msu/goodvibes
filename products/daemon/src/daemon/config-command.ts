@@ -27,14 +27,14 @@
  * visible on purpose: it is a pointer, not a secret, and hiding it would make
  * the indirection impossible to verify.
  */
-import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
-import { ConfigError, isDeclaredSecretBearingConfigKey, isSecretRefInput } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes/engine/platform/platform/config';
+import { ConfigError, isDeclaredSecretBearingConfigKey, isSecretRefInput } from '@goodvibes/engine/platform/platform/config';
 import {
   REDACTED_VALUE,
   isSensitiveConfigPath,
   parseConfigValueText,
   redactConfig,
-} from '@goodvibes-jev/engine/terminal-shell';
+} from '@goodvibes/engine/terminal-shell';
 import { isKnownConfigKey } from '../config/config-key-guard.js';
 import { isSecretConfigKey, persistSecretBackedConfigValue, type SecretBackedSecretStore } from '../config/secret-config.js';
 

@@ -11,7 +11,7 @@ approval authorises no work. Their write routes answer `410` with code
 `PLANNING_STATE_READ_ONLY`. New planning starts from native intake and the work
 plan; decision records are still written.
 
-Accessible via `@goodvibes-jev/engine/platform/platform/knowledge` (daemon embedders). Consumer apps interact through operator methods documented below.
+Accessible via `@goodvibes/engine/platform/platform/knowledge` (daemon embedders). Consumer apps interact through operator methods documented below.
 
 ## Work plans
 

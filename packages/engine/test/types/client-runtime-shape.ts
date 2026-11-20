@@ -26,9 +26,9 @@
  * Everything resolves through the package NAME so the exports map is exercised
  * exactly as a consumer install would (checked by `bun run types:check`).
  */
-import type { bootstrap } from '@goodvibes-jev/engine/platform/platform/runtime';
-import type { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { UserPermissionRuleStore } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { bootstrap } from '@goodvibes/engine/platform/platform/runtime';
+import type { SharedSessionBroker } from '@goodvibes/engine/platform/platform/control-plane';
+import type { UserPermissionRuleStore } from '@goodvibes/engine/platform/platform/permissions';
 
 declare function stub<T>(): T;
 
@@ -37,7 +37,7 @@ declare const full: bootstrap.RuntimeServices;
 const sharedView: bootstrap.ClientRuntimeServicesFromHost = full;
 
 // ...and the runtime helper agrees (it is the same assignment, given a name).
-declare const asView: typeof import('@goodvibes-jev/engine/platform/platform/runtime').bootstrap.asClientRuntimeView;
+declare const asView: typeof import('@goodvibes/engine/platform/platform/runtime').bootstrap.asClientRuntimeView;
 const sharedViewViaHelper: bootstrap.ClientRuntimeServicesFromHost = asView(full);
 
 // (2) The client shape carries none of the daemon furniture. Each of these is a

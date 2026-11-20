@@ -1,6 +1,6 @@
 /** Selected-command network ownership; never install or mutate global trust. */
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { createNetworkFetch } from '@goodvibes-jev/engine/platform/platform/runtime/network/outbound';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { createNetworkFetch } from '@goodvibes/engine/platform/platform/runtime/network/outbound';
 
 /**
  * Everything a command needs to reach a daemon: one fetch carrying the

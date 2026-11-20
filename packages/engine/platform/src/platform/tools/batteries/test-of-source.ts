@@ -18,7 +18,7 @@ import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-inp
  * not cover the source; a missed test leads it to write a second one. A pick
  * that acts or confirms is reported as the test, with the outcome beside it.
  */
-import { defineSelector, NONE, STAKES_BANDS, type Candidate, type JsonValue } from '@goodvibes-jev/judgment';
+import { defineSelector, NONE, STAKES_BANDS, type Candidate, type JsonValue } from '@goodvibes/judgment';
 
 /** Importers offered to one selection. */
 export const TEST_CANDIDATES_PER_READING = 16;

@@ -22,9 +22,9 @@
 
 import type { ConfigManager } from '../config/index.ts';
 import type { ConversationManager } from '../core/conversation.ts';
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { createOccasionsGatewayInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn/occasions-gateway';
-import { connectedHostFamilyRemote } from '@goodvibes-jev/engine/terminal-shell/agent-turn/family-remote';
+import type { GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
+import { createOccasionsGatewayInvoke } from '@goodvibes/engine/terminal-shell/agent-turn/occasions-gateway';
+import { connectedHostFamilyRemote } from '@goodvibes/engine/terminal-shell/agent-turn/family-remote';
 import {
   createOccasionsNudgeSurface,
   type OccasionsNudgeSurface,

@@ -11,7 +11,7 @@
  * companion.chat.sessions.delete).
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
-import { OPERATION_KEY_SCHEMA } from '@goodvibes-jev/engine/errors';
+import { OPERATION_KEY_SCHEMA } from '@goodvibes/engine/errors';
 import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,

@@ -1,5 +1,5 @@
-import { defineBattery, oneOf, yesNo, STAKES_BANDS } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { defineBattery, oneOf, yesNo, STAKES_BANDS } from '@goodvibes/judgment';
+import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { snapshotJudgmentEvidence } from '../gate/judgment-input.js';
 import { prepareJudgmentResult, retainStrictJudgmentJson } from '../gate/judgment-result.js';
 import type { ExecutionIntent } from '../runtime/execution-intents.js';

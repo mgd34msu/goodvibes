@@ -4,14 +4,14 @@
  * This file imports `node:fs` and nothing more, deliberately, because
  * `bin/goodvibes-agent.ts` routes through it and that shim must keep working
  * on a real npm install. This package declares NO runtime dependencies,
- * `@goodvibes-jev/engine/platform` is a devDependency and reaches an installed user
+ * `@goodvibes/engine/platform` is a devDependency and reaches an installed user
  * only inlined inside the bundled `dist/package/main.js`, so any module the
  * shim imports that statically reaches the platform would fail to resolve on the
  * exact installs the shim exists to explain.
  *
  * The platform-dependent half this file does not carry, `reportFatalBootFailure`,
  * previously mirrored locally in `utils/fatal-boot-report.ts`, is the platform's
- * own `@goodvibes-jev/engine/platform/platform/daemon` export, which adopted this
+ * own `@goodvibes/engine/platform/platform/daemon` export, which adopted this
  * file's own byte-accepting write loop as the shared implementation. Every
  * non-`bin/` caller of `writeFatalLine`/`writeExitingStdoutLine` imports them
  * from here directly.

@@ -1,7 +1,7 @@
 import { promisify } from 'node:util';
 import { crc32, deflateRaw } from 'node:zlib';
-import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { redactStructuredDataAsync, type StructuredRedactionOptions } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
+import { redactStructuredDataAsync, type StructuredRedactionOptions } from '@goodvibes/engine/platform/platform/utils';
 
 export interface ArtifactPackageEntry {
   readonly path: string;

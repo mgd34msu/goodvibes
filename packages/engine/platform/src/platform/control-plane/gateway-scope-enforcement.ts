@@ -15,7 +15,7 @@
 
 import type { RuntimeEventDomain } from '../runtime/events/index.js';
 import { OWN_SESSIONS_SCOPE, builtinGatewayEventDescriptors, gatewayEventAccess } from './method-catalog-events.js';
-import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
+import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
 
 /** The subset of a live client this decision needs. */
 export interface ScopedClientView {

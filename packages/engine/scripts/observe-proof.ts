@@ -28,7 +28,7 @@ import {
   judgmentConfigFromEnv,
   withDecisionLog,
   type NamedDecision,
-} from '@goodvibes-jev/judgment';
+} from '@goodvibes/judgment';
 import { failureReading } from '../errors/src/failure-reading.ts';
 import { analyzeDecisionLog, JUDGMENT_EVAL_SUITE, judgmentEvalScenarios } from '../platform/src/platform/observe/index.ts';
 import { EvalRunner } from '../platform/src/platform/runtime/eval/index.ts';

@@ -20,13 +20,13 @@ import {
   type SecretsManager,
   type SubscriptionGrant,
   type SubscriptionManager,
-} from '@goodvibes-jev/engine/platform/platform/config';
-import type { ProviderApi, ProviderOptimizer, ProviderRegistry, RouteExplanation } from '@goodvibes-jev/engine/platform/platform/providers';
-import { formatProviderModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
-import { inspectProviderAuth } from '@goodvibes-jev/engine/platform/platform/runtime/security';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { openExternalUrl, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+} from '@goodvibes/engine/platform/platform/config';
+import type { ProviderApi, ProviderOptimizer, ProviderRegistry, RouteExplanation } from '@goodvibes/engine/platform/platform/providers';
+import { formatProviderModel } from '@goodvibes/engine/platform/platform/providers/provider-model';
+import { inspectProviderAuth } from '@goodvibes/engine/platform/platform/runtime/security';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { openExternalUrl, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { readRefusal } from '@goodvibes/engine/errors';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';

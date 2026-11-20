@@ -41,13 +41,13 @@
  * handlers get registered, what the agent writes to stderr on the way out, and
  * the order the three sinks are attempted in.
  */
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 import {
   appendCrashRecord,
   buildCrashRecord,
   CRASH_LOG_FILENAME,
   crashRecordLine,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+} from '@goodvibes/engine/platform/platform/runtime/operations';
 import { createUnhandledRejectionHandler } from './unhandled-rejection-guard.ts';
 import { writeFatalLine } from '../utils/fatal-boot-write.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';

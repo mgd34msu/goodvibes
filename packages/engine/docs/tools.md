@@ -5,7 +5,7 @@ contracts, and remote surfaces. Tools are registered through
 `registerAllTools()` and guarded by config permissions plus feature-flagged
 contract checks.
 
-Accessible via `@goodvibes-jev/engine/platform/platform/tools` (daemon embedders). Consumer apps interact through sessions and operator methods.
+Accessible via `@goodvibes/engine/platform/platform/tools` (daemon embedders). Consumer apps interact through sessions and operator methods.
 
 For how tool-call arguments are parsed, validated, and dropped when malformed, see [Tool Safety](./tool-safety.md).
 

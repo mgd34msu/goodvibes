@@ -4,7 +4,7 @@ import { getCorrelationContext } from '../correlation.js';
 import type { PlatformErrorSource } from '../../types/errors.js';
 import type { NormalizedError } from '../../utils/error-display.js';
 import { projectSafeTelemetryEventPayload, projectSafeTelemetryValue, safeTelemetryText } from './event-content.js';
-import { RUNTIME_EVENT_DOMAINS } from '@goodvibes-jev/engine/contracts';
+import { RUNTIME_EVENT_DOMAINS } from '@goodvibes/engine/contracts';
 import type {
   AnyRuntimeEvent,
   RuntimeEventDomain,

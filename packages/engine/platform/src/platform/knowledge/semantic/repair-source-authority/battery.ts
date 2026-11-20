@@ -1,4 +1,4 @@
-import { defineBattery, oneOf, STAKES_BANDS, type JsonValue } from '@goodvibes-jev/judgment';
+import { defineBattery, oneOf, STAKES_BANDS, type JsonValue } from '@goodvibes/judgment';
 const state = (source: Readonly<Record<string, JsonValue>>, text: string, claimedProvenance: Readonly<Record<string, JsonValue>> = {}) => ({
   reference: 'source-1', query: 'What are the AC-7 specifications?',
   subjects: [{ title: 'AC-7', identity: { manufacturer: 'Acme', model: 'AC-7' } }],

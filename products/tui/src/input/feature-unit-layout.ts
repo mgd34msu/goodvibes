@@ -19,10 +19,10 @@
  * description, and state, all reading the same underlying key.
  */
 
-import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import type { FeatureSetting } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import type { ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
-import { getConfigSchemaSetting } from '@goodvibes-jev/engine/terminal-shell';
+import { FEATURE_SETTINGS } from '@goodvibes/engine/platform/platform/runtime/state';
+import type { FeatureSetting } from '@goodvibes/engine/platform/platform/runtime/state';
+import type { ConfigSetting } from '@goodvibes/engine/platform/platform/config';
+import { getConfigSchemaSetting } from '@goodvibes/engine/terminal-shell';
 import type { FlagEntry, SettingEntry, SettingsCategory } from './settings-modal-types.ts';
 
 /** Every enablement key, these rows render as feature headers, never as plain sub-rows. */

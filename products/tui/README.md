@@ -357,7 +357,7 @@ Some decisions worth knowing before you read the source:
 - **Crash recovery.** A crash snapshot written when a prompt is accepted and after each tool batch, offered at the next start.
 - **Render coalescing and a per-message line cache.** Same-tick render requests collapse into one composite frame, and transcript growth re-renders only the appended message instead of rebuilding the whole conversation.
 
-The TUI consumes `@goodvibes-jev/engine` and `@goodvibes-jev/daemon` through `workspace:*` dependencies for shared runtime behavior, contracts and transports, and keeps terminal rendering, input and product composition here. Reference clients written only against the published engine entry points live under `examples/`: [`reference-http-client`](examples/reference-http-client/README.md) talks to a running daemon, [`reference-operator-client`](examples/reference-operator-client/README.md) makes the same calls against the generated fixture daemon.
+The TUI consumes `@goodvibes/engine` and `@goodvibes/daemon` through `workspace:*` dependencies for shared runtime behavior, contracts and transports, and keeps terminal rendering, input and product composition here. Reference clients written only against the published engine entry points live under `examples/`: [`reference-http-client`](examples/reference-http-client/README.md) talks to a running daemon, [`reference-operator-client`](examples/reference-operator-client/README.md) makes the same calls against the generated fixture daemon.
 
 Source layout, in brief:
 

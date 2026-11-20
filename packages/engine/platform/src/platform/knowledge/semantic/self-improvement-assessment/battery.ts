@@ -1,4 +1,4 @@
-import { defineBattery, STAKES_BANDS, yesNo, type JsonValue } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo, type JsonValue } from '@goodvibes/judgment';
 
 // Each battery owns its interpretation bands; freezing them must not mutate shared calibration.
 const high = () => ({ yes: { ...STAKES_BANDS.high.yesNo.yes }, no: { ...STAKES_BANDS.high.yesNo.no } });

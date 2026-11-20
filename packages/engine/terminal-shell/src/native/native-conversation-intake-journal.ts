@@ -1,6 +1,6 @@
-import { nativeWorkExecutionIdentitySchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
-import { BoundedJsonFile, type BoundedJsonFileIO, type BoundedJsonFileTransaction } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
-import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeSourceRefSchema, type NativeConversationIntakeSourceRef, type NativeConversationIntakeCaptureRequest, } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
+import { nativeWorkExecutionIdentitySchema } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import { BoundedJsonFile, type BoundedJsonFileIO, type BoundedJsonFileTransaction } from '@goodvibes/engine/platform/platform/state/durable-file-io';
+import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeSourceRefSchema, type NativeConversationIntakeSourceRef, type NativeConversationIntakeCaptureRequest, } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-intake-client';
 /**
  * A sanity bound on the file, not a capacity: the journal holds only inputs in
  * flight (one per host, project, workspace and principal), each bounded by the

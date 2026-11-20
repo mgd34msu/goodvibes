@@ -14,8 +14,8 @@ import {
   withSurfaceEmailConfig,
   type EmailServiceDeps,
   type SurfaceEmailSettings,
-} from '@goodvibes-jev/engine/platform/platform/email';
-import type { Secret } from '@goodvibes-jev/engine/platform/platform/security';
+} from '@goodvibes/engine/platform/platform/email';
+import type { Secret } from '@goodvibes/engine/platform/platform/security';
 import type { ConfigKey } from '../../config/index.ts';
 import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
 

@@ -14,7 +14,7 @@ import {
   statedRetryable,
   structuredTransience,
   type StructuredDaemonErrorBody,
-} from '@goodvibes-jev/engine/errors';
+} from '@goodvibes/engine/errors';
 import { missingScopes } from './route-helpers.js';
 
 /** Options for `jsonErrorResponse` and `buildErrorResponseBody`. */

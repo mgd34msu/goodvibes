@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { WorkspaceCheckpointManager, checkpointEligibilityRefusal } from '@goodvibes-jev/engine/platform/platform/workspace';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { WorkspaceCheckpointManager, checkpointEligibilityRefusal } from '@goodvibes/engine/platform/platform/workspace';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { RuntimeEventBus, SessionSurface } from './index.js';
-import { createSessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { createSessionSurface } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../config/checkpoint-settings.js';
 import { createWorkspaceRegistrationLiveChecker, type StoreShellPaths } from './trust/checkpoint-eligibility.js';
 

@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { basename, delimiter, join } from 'node:path';
-import { sweepStaleTmpDirs, testTempRoot } from '@goodvibes-jev/engine/toolchain/test-runner';
+import { sweepStaleTmpDirs, testTempRoot } from '@goodvibes/engine/toolchain/test-runner';
 
 /**
  * These directories live inside the checkout (`<product>/.test-tmp/run-…`), not

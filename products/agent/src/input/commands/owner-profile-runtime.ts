@@ -8,10 +8,10 @@
  * `goodvibes-agent owner-profile` runs the same daemon methods
  * (cli/owner-profile-command.ts).
  */
-import { createProfileGatewayInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn/profile-gateway';
-import { connectedHostFamilyRemote } from '@goodvibes-jev/engine/terminal-shell/agent-turn/family-remote';
-import { PROFILE_RECORDING_SURFACE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/profile-types';
-import { registerAboutMeCommand } from '@goodvibes-jev/engine/terminal-shell/about-me-command';
+import { createProfileGatewayInvoke } from '@goodvibes/engine/terminal-shell/agent-turn/profile-gateway';
+import { connectedHostFamilyRemote } from '@goodvibes/engine/terminal-shell/agent-turn/family-remote';
+import { PROFILE_RECORDING_SURFACE } from '@goodvibes/engine/terminal-shell/agent-turn/profile-types';
+import { registerAboutMeCommand } from '@goodvibes/engine/terminal-shell/about-me-command';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { commandRefusal } from './confirmation.ts';
 import { requireShellPaths } from './runtime-services.ts';

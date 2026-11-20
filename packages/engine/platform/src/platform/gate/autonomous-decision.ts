@@ -10,8 +10,8 @@
  * port's `beforeAttempt`) and after every answer, and once more when the act
  * is claimed. Nothing in between can change it: there is no other await.
  */
-import { JudgmentError, type EntryType, type JsonValue, type JudgmentPort, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
-import { captureJevDecisionContext, JEV_DECISION_BINDING_KEYS, validateJevDecision, type JevContinuation, type JevDecision, type JevDecisionBinding, type JevDecisionContext, type JevVersionRef } from '@goodvibes-jev/judgment/decisions';
+import { JudgmentError, type EntryType, type JsonValue, type JudgmentPort, type JudgmentRetryProgress } from '@goodvibes/judgment';
+import { captureJevDecisionContext, JEV_DECISION_BINDING_KEYS, validateJevDecision, type JevContinuation, type JevDecision, type JevDecisionBinding, type JevDecisionContext, type JevVersionRef } from '@goodvibes/judgment/decisions';
 import { snapshotJudgmentEntry, snapshotJudgmentInput } from './judgment-input.js';
 import { autonomousCriteria, autonomousDisposition, autonomousDispositionState, autonomousRefusal, autonomousRefusalState } from './batteries/autonomous.js';
 

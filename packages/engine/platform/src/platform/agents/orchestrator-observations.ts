@@ -2,8 +2,8 @@ import { activateClassicFallback, isClassicOperation } from '../runtime/decision
 /** Run-owned semantic observations. Neither reading grants tool authority. */
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort } from '@goodvibes/engine/errors';
+import type { JudgmentPort } from '@goodvibes/judgment';
 import { assertJudgmentInput, captureOwnedJson } from '../gate/judgment-input.js';
 import type { AgentRecord } from '../tools/agent/index.js';
 import type { AgentOrchestratorRunContext } from './orchestrator-run-context.js';

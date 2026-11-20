@@ -19,17 +19,17 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ProcessNode, SteerResult } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import type { WorkBoardAsk, WorkBoardSession } from '@goodvibes-jev/engine/contracts';
-import type { SurfaceModal, SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
-import { renderWorkBoardPanel, type PanelDetail, type PanelText, type WorkBoardPanelView } from '@goodvibes-jev/engine/terminal-shell/work-board';
-import { boardAskDetail, WorkBoardList } from '@goodvibes-jev/engine/terminal-shell/work-board-input';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { ContractView } from '@goodvibes/engine/platform/platform/contract';
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
+import type { ConversationMessageSnapshot } from '@goodvibes/engine/platform/platform/core';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { ProcessNode, SteerResult } from '@goodvibes/engine/platform/platform/runtime/fleet';
+import type { Line } from '@goodvibes/engine/platform/platform/types';
+import type { WorkBoardAsk, WorkBoardSession } from '@goodvibes/engine/contracts';
+import type { SurfaceModal, SurfaceModalHost } from '@goodvibes/engine/terminal-shell/surface-modal-host';
+import { renderWorkBoardPanel, type PanelDetail, type PanelText, type WorkBoardPanelView } from '@goodvibes/engine/terminal-shell/work-board';
+import { boardAskDetail, WorkBoardList } from '@goodvibes/engine/terminal-shell/work-board-input';
 import type { KitHint, SurfaceLayer } from '../renderer/surface-kit.ts';
 import { fleetNodeAttention, isRunningProcessState, isTerminalProcessState, type FleetReadModel, type FleetSnapshot } from '../views/fleet-read-model.ts';
 import type { FleetActs } from '../views/fleet-acts.ts';
@@ -49,7 +49,7 @@ import type { ViewTarget } from './views.ts';
 import { hostedHeaderTexts, hostedRowTexts, transcriptTail } from './agents-modal-text.ts';
 import { HostedTranscriptViewport } from './hosted-transcript-viewport.ts';
 import { currentHostedBinding } from '../runtime/client/hosted-attachments.ts';
-import type { SessionBinding } from '@goodvibes-jev/engine/platform/platform/runtime/client/session-binding';
+import type { SessionBinding } from '@goodvibes/engine/platform/platform/runtime/client/session-binding';
 
 /** What the panel can do to a process (the process registry, through the fleet read model). */
 export interface FleetActionCallbacks {

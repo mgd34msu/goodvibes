@@ -3,7 +3,7 @@
  * actually installed the agent.
  *
  * This exists because every driver-missing message in 1.18.1 said `bun add -g
- * @goodvibes-jev/agent`. That command does work, the npm package carries
+ * @goodvibes/agent`. That command does work, the npm package carries
  * playwright-core, but telling someone who downloaded a release binary to
  * install the npm package silently changes their install method, and it is not
  * the fix for their situation. The fix has to name the thing they did.
@@ -22,9 +22,9 @@ import {
   type BrowserDriverInstallKind,
   type BrowserDriverInstallProfile,
   type DriverRemediationOptions,
-} from '@goodvibes-jev/engine/platform/platform/browser';
-import { DAEMON_REPO_RELEASES_LATEST_URL } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/install-kind';
+} from '@goodvibes/engine/platform/platform/browser';
+import { DAEMON_REPO_RELEASES_LATEST_URL } from '@goodvibes/engine/platform/platform/runtime/client';
+import { detectInstallKind } from '@goodvibes/engine/platform/platform/runtime/install-kind';
 import { BROWSER_DRIVER_ARCHIVE_NAME, BROWSER_DRIVER_DIR_NAME } from './release-artifacts.ts';
 
 export const RELEASES_LATEST_URL = DAEMON_REPO_RELEASES_LATEST_URL;
@@ -47,7 +47,7 @@ export const AGENT_BROWSER_DRIVER_PROFILE: BrowserDriverInstallProfile = {
   directoryName: BROWSER_DRIVER_DIR_NAME,
   releasesUrl: RELEASES_LATEST_URL,
   installerCommand: 'curl -fsSL https://goodvibes.sh/install.sh | sh',
-  globalPackageCommand: 'bun add -g @goodvibes-jev/agent',
+  globalPackageCommand: 'bun add -g @goodvibes/agent',
   sourceInstallCommand: 'bun install',
   // The agent's own voice, restored: the hoist's neutral default said
   // "the driver is then installed automatically", which tells the reader

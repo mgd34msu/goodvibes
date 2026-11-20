@@ -1,4 +1,4 @@
-import { createWakeProvisionPresentation } from '@goodvibes-jev/engine/terminal-shell/audio/wake-provision-presentation';
+import { createWakeProvisionPresentation } from '@goodvibes/engine/terminal-shell/audio/wake-provision-presentation';
 // ---------------------------------------------------------------------------
 // wake-provision-status.ts, the surface-facing projection of wake-word
 // provisioning and of the `voice.wake.*` rows that are or are not in force.
@@ -14,9 +14,9 @@ import { createWakeProvisionPresentation } from '@goodvibes-jev/engine/terminal-
 // it here, so every builder is testable against fixture shapes.
 // ---------------------------------------------------------------------------
 
-import type { WakeSurfaceCapabilities } from '@goodvibes-jev/engine/platform/platform/voice';
-import { resolveWakeVadThreshold, WAKE_VAD_MODEL } from '@goodvibes-jev/engine/platform/platform/voice';
-import { SPEEXDSP_PREPROCESS } from '@goodvibes-jev/engine/platform/platform/voice/capture';
+import type { WakeSurfaceCapabilities } from '@goodvibes/engine/platform/platform/voice';
+import { resolveWakeVadThreshold, WAKE_VAD_MODEL } from '@goodvibes/engine/platform/platform/voice';
+import { SPEEXDSP_PREPROCESS } from '@goodvibes/engine/platform/platform/voice/capture';
 
 /**
  * What the configured gate threshold does, in the head's own measured numbers.

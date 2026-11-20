@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { writeStoreJson } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
+import { writeStoreJson } from '@goodvibes/engine/terminal-shell/agent-turn/store-file';
 
 interface LastSeenFile {
   readonly version: 1;

@@ -26,7 +26,7 @@
  * (RFC 6154), which is the only answer that is right by construction.
  */
 
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { assertImapReadingCurrent, ImapReadingError, imapReadingLease, readImapDrafts, type ImapReadingLease } from './imap-readings.js';
 import type { ImapFetchFrame } from './imap-fetch-response.js';

@@ -21,11 +21,11 @@
  * (OSC 9, desktop, webhook) sends the tool name and permission category only,
  * never a command, a path or the turn's name.
  */
-import { notifyNow } from '@goodvibes-jev/engine/platform/platform/utils';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import type { PermissionRequestHandler, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
-import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { notifyNow } from '@goodvibes/engine/platform/platform/utils';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
+import type { WebhookNotifier } from '@goodvibes/engine/platform/platform/integrations';
+import type { PermissionRequestHandler, PermissionPromptRequest } from '@goodvibes/engine/platform/platform/permissions';
+import type { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
 import {
   shouldFireAlert,
   NOTIFICATION_TEXT_LIMITS,
@@ -36,7 +36,7 @@ import {
   resolveTurnName,
   type ConfigGet,
   type ApprovalNotificationFacts,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+} from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { TerminalNotifier } from './terminal-notifier.ts';
 
 export interface ApprovalAlertDeps {

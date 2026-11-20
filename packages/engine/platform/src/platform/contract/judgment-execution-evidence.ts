@@ -1,4 +1,4 @@
-import type { DecisionLog, JsonValue } from '@goodvibes-jev/judgment';
+import type { DecisionLog, JsonValue } from '@goodvibes/judgment';
 import type { ContractView } from './types.js';
 
 /** Read the actual recorded API identity behind host check references. This

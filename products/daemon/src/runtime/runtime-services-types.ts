@@ -1,4 +1,4 @@
-import type { BrowserJudgmentService } from '@goodvibes-jev/engine/platform/platform/judgment-browser';
+import type { BrowserJudgmentService } from '@goodvibes/engine/platform/platform/judgment-browser';
 /**
  * runtime-services-types.ts, the public contract createRuntimeServices() takes
  * and returns.
@@ -12,65 +12,65 @@ import type { BrowserJudgmentService } from '@goodvibes-jev/engine/platform/plat
  * anywhere else in the app had to change.
  */
 
-import type { ConfigManager, HelperModel, ServiceRegistry, SubscriptionManager, ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager, HelperModel, ServiceRegistry, SubscriptionManager, ToolLLM } from '@goodvibes/engine/platform/platform/config';
 import type { SecretsManager } from '../config/secrets.js';
-import type { AutomationDeliveryManager, AutomationManager } from '@goodvibes-jev/engine/platform/platform/automation';
-import type { ChannelDeliveryRouter, ChannelPolicyManager, ChannelPluginRegistry, RouteBindingManager, SurfaceRegistry } from '@goodvibes-jev/engine/platform/platform/channels';
-import type { ApprovalBroker, GatewayMethodCatalog, SessionLiveTurnControlsHolder, SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { PowerManager } from '@goodvibes-jev/engine/platform/platform/power';
+import type { AutomationDeliveryManager, AutomationManager } from '@goodvibes/engine/platform/platform/automation';
+import type { ChannelDeliveryRouter, ChannelPolicyManager, ChannelPluginRegistry, RouteBindingManager, SurfaceRegistry } from '@goodvibes/engine/platform/platform/channels';
+import type { ApprovalBroker, GatewayMethodCatalog, SessionLiveTurnControlsHolder, SharedSessionBroker } from '@goodvibes/engine/platform/platform/control-plane';
+import type { PowerManager } from '@goodvibes/engine/platform/platform/power';
 
-import type { StepUpService } from '@goodvibes-jev/engine/platform/daemon';
-import type { PairingTokenManager } from '@goodvibes-jev/engine/platform/platform/pairing';
-import type { WatcherRegistry } from '@goodvibes-jev/engine/platform/platform/watchers';
-import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { HomeGraphService, KnowledgeService, ProjectPlanningService } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import type { MediaProviderRegistry } from '@goodvibes-jev/engine/platform/platform/media';
-import type { MultimodalService } from '@goodvibes-jev/engine/platform/platform/multimodal';
-import type { AgentMessageBus, AgentOrchestrator, ArchetypeLoader } from '@goodvibes-jev/engine/platform/platform/agents';
-import type { AgentManager, ContextAccountingHolder, OverflowHandler, ProcessManager, WorkflowServices } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { FileUndoManager, MemoryConsolidationScheduler, MemoryUsageTracker, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore, ModeManager, ProjectIndex, CodeIndexStore, CodeIndexReindexScheduler } from '@goodvibes-jev/engine/platform/platform/state';
-import type { StoreSnapshotScheduler } from '@goodvibes-jev/engine/platform/platform/state/store-snapshots';
-import type { PermissionManager, UserPermissionRuleStore } from '@goodvibes-jev/engine/platform/platform/permissions';
-import type { buildExecPromptAnswerHandler } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/exec-prompt-wiring';
-import type { buildLocalhostFetchApproval } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/localhost-fetch-approval';
-import type { operations } from '@goodvibes-jev/engine/platform/platform/runtime';
-import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import type { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
-import type { DomainDispatch, RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
-import type { DevicePostureRuntime } from '@goodvibes-jev/engine/platform/platform/devices';
-import type { RuntimeHealthAggregator } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
+import type { StepUpService } from '@goodvibes/engine/platform/daemon';
+import type { PairingTokenManager } from '@goodvibes/engine/platform/platform/pairing';
+import type { WatcherRegistry } from '@goodvibes/engine/platform/platform/watchers';
+import type { ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
+import type { HomeGraphService, KnowledgeService, ProjectPlanningService } from '@goodvibes/engine/platform/platform/knowledge';
+import type { MediaProviderRegistry } from '@goodvibes/engine/platform/platform/media';
+import type { MultimodalService } from '@goodvibes/engine/platform/platform/multimodal';
+import type { AgentMessageBus, AgentOrchestrator, ArchetypeLoader } from '@goodvibes/engine/platform/platform/agents';
+import type { AgentManager, ContextAccountingHolder, OverflowHandler, ProcessManager, WorkflowServices } from '@goodvibes/engine/platform/platform/tools';
+import type { FileUndoManager, MemoryConsolidationScheduler, MemoryUsageTracker, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore, ModeManager, ProjectIndex, CodeIndexStore, CodeIndexReindexScheduler } from '@goodvibes/engine/platform/platform/state';
+import type { StoreSnapshotScheduler } from '@goodvibes/engine/platform/platform/state/store-snapshots';
+import type { PermissionManager, UserPermissionRuleStore } from '@goodvibes/engine/platform/platform/permissions';
+import type { buildExecPromptAnswerHandler } from '@goodvibes/engine/platform/platform/runtime/permissions/exec-prompt-wiring';
+import type { buildLocalhostFetchApproval } from '@goodvibes/engine/platform/platform/runtime/permissions/localhost-fetch-approval';
+import type { operations } from '@goodvibes/engine/platform/platform/runtime';
+import type { MemorySpineClient } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
+import type { WorkspaceCheckpointManager } from '@goodvibes/engine/platform/platform/workspace';
+import type { DomainDispatch, RuntimeStore } from '@goodvibes/engine/platform/platform/runtime/store';
+import type { DevicePostureRuntime } from '@goodvibes/engine/platform/platform/devices';
+import type { RuntimeHealthAggregator } from '@goodvibes/engine/platform/platform/runtime/observability';
 import type { RuntimeEventBus, DistributedRuntimeManager, RemoteBackendHost, RemoteRunnerRegistry, RemoteSupervisor, IntegrationHelperService, PanelManagerLike, KeybindingsManagerLike, IdempotencyStore, WorktreeRegistry, SandboxSessionRegistry, ShellPathService, FeatureFlagManager, PolicyRuntimeState, SessionSurface } from './index.js';
-import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
-import type { CacheRegistry, PauseController, MemoryGovernor } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
-import type { WebSearchProviderRegistry, WebSearchService } from '@goodvibes-jev/engine/platform/platform/web-search';
-import type { HookActivityTracker } from '@goodvibes-jev/engine/platform/platform/hooks';
-import type { HookDispatcher, HookWorkbench } from '@goodvibes-jev/engine/platform/platform/hooks';
-import type { PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
-import type { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
-import type { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
-import type { SessionManager, CrossSessionTaskRegistry, SessionChangeTracker } from '@goodvibes-jev/engine/platform/platform/sessions';
-import type { ApiTokenAuditor, UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
-import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
-import type { BenchmarkStore, CacheHitTracker, FavoritesStore, ModelLimitsService, ProviderCapabilityRegistry, ProviderOptimizer, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { AdaptivePlanner, DeterministicReplayEngine, ExecutionPlanManager, SessionLineageTracker, SessionMemoryStore } from '@goodvibes-jev/engine/platform/platform/core';
-import type { ArchivableProcessRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import type { ProjectWorkPlan } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import type { WorkLedgerService } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import type { VoiceProviderRegistry, VoiceService } from '@goodvibes/engine/platform/platform/voice';
+import type { CacheRegistry, PauseController, MemoryGovernor } from '@goodvibes/engine/platform/platform/runtime/memory';
+import type { WebSearchProviderRegistry, WebSearchService } from '@goodvibes/engine/platform/platform/web-search';
+import type { HookActivityTracker } from '@goodvibes/engine/platform/platform/hooks';
+import type { HookDispatcher, HookWorkbench } from '@goodvibes/engine/platform/platform/hooks';
+import type { PluginManager } from '@goodvibes/engine/platform/platform/plugins';
+import type { BookmarkManager } from '@goodvibes/engine/platform/platform/bookmarks';
+import type { ProfileManager } from '@goodvibes/engine/platform/platform/profiles';
+import type { SessionManager, CrossSessionTaskRegistry, SessionChangeTracker } from '@goodvibes/engine/platform/platform/sessions';
+import type { ApiTokenAuditor, UserAuthManager } from '@goodvibes/engine/platform/platform/security';
+import type { WebhookNotifier } from '@goodvibes/engine/platform/platform/integrations';
+import type { McpRegistry } from '@goodvibes/engine/platform/platform/mcp';
+import type { BenchmarkStore, CacheHitTracker, FavoritesStore, ModelLimitsService, ProviderCapabilityRegistry, ProviderOptimizer, ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
+import type { AdaptivePlanner, DeterministicReplayEngine, ExecutionPlanManager, SessionLineageTracker, SessionMemoryStore } from '@goodvibes/engine/platform/platform/core';
+import type { ArchivableProcessRegistry } from '@goodvibes/engine/platform/platform/runtime/fleet';
+import type { ProjectWorkPlan } from '@goodvibes/engine/platform/platform/knowledge';
+import type { WorkLedgerService } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
 import type { DaemonHandlerSurfaces } from '../daemon/handlers/index.js';
 import type { ClusterGroupComposition } from './cluster-group-composition.js';
-import type { ClusterCoordinator } from '@goodvibes-jev/engine/platform/platform/cluster';
+import type { ClusterCoordinator } from '@goodvibes/engine/platform/platform/cluster';
 
-import type { ContractRunner, ContractOperatorService } from '@goodvibes-jev/engine/platform/platform/contract';
-import type { JudgmentServices } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import type { SessionSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { ContractRunner, ContractOperatorService } from '@goodvibes/engine/platform/platform/contract';
+import type { JudgmentServices } from '@goodvibes/engine/platform/platform/runtime/operations';
+import type { SessionSnapshot } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
-import type { TriggerManager } from '@goodvibes-jev/engine/platform/platform/triggers';
-import type { WorkspaceSwapManager } from '@goodvibes-jev/engine/platform/platform/workspace';
+import type { TriggerManager } from '@goodvibes/engine/platform/platform/triggers';
+import type { WorkspaceSwapManager } from '@goodvibes/engine/platform/platform/workspace';
 import type { DaemonBootController, DaemonBootOperations } from './boot-tasks.js';
 
 export interface RuntimeServicesOptions {
-  readonly nativeDataWriter?: import('@goodvibes-jev/engine/platform/platform/runtime/self-update').NativeDataWriteOwner | undefined;
+  readonly nativeDataWriter?: import('@goodvibes/engine/platform/platform/runtime/self-update').NativeDataWriteOwner | undefined;
   readonly capturedBunRuntimeExecutable?: string | undefined;
   /**
    * Explicit boot composition, constructed synchronously without starting its
@@ -134,8 +134,8 @@ export interface RuntimeServicesOptions {
 }
 
 export interface RuntimeServices {
-  readonly nativeDataWriter?: import('@goodvibes-jev/engine/platform/platform/runtime/self-update').NativeDataWriteOwner | undefined;
-  readonly nativeMutationHost?: import('@goodvibes-jev/engine/platform/platform/control-plane').NativeMutationHost | undefined;
+  readonly nativeDataWriter?: import('@goodvibes/engine/platform/platform/runtime/self-update').NativeDataWriteOwner | undefined;
+  readonly nativeMutationHost?: import('@goodvibes/engine/platform/platform/control-plane').NativeMutationHost | undefined;
   /** Absent when the host did not supply the pending product boot composition. */
   readonly bootTasks?: DaemonBootController | undefined;
   readonly workingDirectory: string;
@@ -165,9 +165,9 @@ export interface RuntimeServices {
   readonly watcherRegistry: WatcherRegistry;
   readonly approvalBroker: ApprovalBroker;
   /** The one owner inbox: approvals, questions, claims, purchase windows and queued actions. */
-  readonly ownerInbox?: import('@goodvibes-jev/engine/platform/platform/control-plane').OwnerInbox | undefined;
+  readonly ownerInbox?: import('@goodvibes/engine/platform/platform/control-plane').OwnerInbox | undefined;
   /** Where the email inbox meets the one mailbox reader the daemon facade composes. */
-  readonly mailboxReaders?: import('@goodvibes-jev/engine/platform/platform/email').MailboxReaders | undefined;
+  readonly mailboxReaders?: import('@goodvibes/engine/platform/platform/email').MailboxReaders | undefined;
   /** Loopback-fetch approval that rides the approval broker; shared by the tool registry and orchestrator so every surface asks the same way. */
   readonly localhostFetchApproval: ReturnType<typeof buildLocalhostFetchApproval>;
   /** Terminal prompt-answer handler that rides the approval broker; shared by the tool registry and orchestrator so an interactive command's prompt gets an ask/card on every surface. */
@@ -271,11 +271,11 @@ export interface RuntimeServices {
   readonly contractRunner: ContractRunner;
   readonly contractOperator: ContractOperatorService;
   /** Joins the hosted-session floors' workers into this runtime's fleet (the composed graph's own). */
-  readonly attachHostedFleetAgents: import('@goodvibes-jev/engine/platform/platform/runtime/bootstrap').RuntimeServices['attachHostedFleetAgents'];
+  readonly attachHostedFleetAgents: import('@goodvibes/engine/platform/platform/runtime/bootstrap').RuntimeServices['attachHostedFleetAgents'];
   readonly judgment: JudgmentServices;
   readonly browserJudgment?: BrowserJudgmentService | undefined;
   /** The daemon's `browser.*` service; absent when the composition had no home directory for a browser. */
-  readonly browserGateway?: import('@goodvibes-jev/engine/platform/platform/control-plane').DaemonBrowserGatewayService | undefined;
+  readonly browserGateway?: import('@goodvibes/engine/platform/platform/control-plane').DaemonBrowserGatewayService | undefined;
   /** Canonical saved conversation plus its contract trees. */
   sessionSnapshot(sessionId: string, conversation: Omit<SessionSnapshot, 'contracts'>): SessionSnapshot;
   readonly processManager: ProcessManager;
@@ -300,7 +300,7 @@ export interface RuntimeServices {
   /** Controller the governor uses to pause/resume the deferrable background jobs under pressure. */
   readonly pauseController: PauseController;
   /** Whether the daemon takes new work (the graph's one admission): closed for a self-update's restart; the hook listener asks it too. */
-  readonly workAdmission?: import('@goodvibes-jev/engine/platform/platform/runtime/bootstrap').ComposedRuntimeServices['workAdmission'];
+  readonly workAdmission?: import('@goodvibes/engine/platform/platform/runtime/bootstrap').ComposedRuntimeServices['workAdmission'];
   readonly sessionLiveTurnControls: SessionLiveTurnControlsHolder;
   /** Unified live process registry (agents, WRFC chains, workflows, watchers, background processes) backing the Fleet panel; archive-aware, finished subtrees can be moved to the session archive view. */
   readonly processRegistry: ArchivableProcessRegistry;

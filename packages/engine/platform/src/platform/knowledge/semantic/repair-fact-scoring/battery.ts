@@ -1,4 +1,4 @@
-import { defineBattery, rated, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { defineBattery, rated, STAKES_BANDS } from '@goodvibes/judgment';
 
 function freezeLocal<T>(value: T): T {
   if (value && typeof value === 'object') { for (const child of Object.values(value)) freezeLocal(child); Object.freeze(value); }

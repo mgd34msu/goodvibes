@@ -26,7 +26,7 @@ import type { SharedSessionBroker } from '../session-broker.js';
 import type { SharedSessionKind, SharedSessionRecord, SharedSessionStatus } from '../session-types.js';
 import type { SurfaceKind } from '../../../events/surfaces.js';
 import { SURFACE_KINDS } from '../../../events/surfaces.js';
-import { paginateItems } from '@goodvibes-jev/engine/daemon-api';
+import { paginateItems } from '@goodvibes/engine/daemon-api';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 

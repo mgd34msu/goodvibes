@@ -27,10 +27,10 @@ function workspaceEnginePlugin(): Plugin {
       const manifest = JSON.parse(readFileSync(join(CONFIG_DIR, 'package.json'), 'utf8')) as {
         dependencies?: Record<string, string>;
       };
-      if (manifest.dependencies?.['@goodvibes-jev/engine'] !== 'workspace:*') {
-        this.error('WebUI must consume @goodvibes-jev/engine from this workspace');
+      if (manifest.dependencies?.['@goodvibes/engine'] !== 'workspace:*') {
+        this.error('WebUI must consume @goodvibes/engine from this workspace');
       }
-      const installed = realpathSync(require.resolve('@goodvibes-jev/engine/package.json'));
+      const installed = realpathSync(require.resolve('@goodvibes/engine/package.json'));
       const expected = realpathSync(join(CONFIG_DIR, '../../packages/engine/package.json'));
       if (installed !== expected) this.error('WebUI resolved an engine outside this checkout');
     },
@@ -196,7 +196,7 @@ return {
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('/packages/engine/') || id.includes('@goodvibes-jev/engine/')) return 'goodvibes-engine';
+          if (id.includes('/packages/engine/') || id.includes('@goodvibes/engine/')) return 'goodvibes-engine';
           if (!id.includes('node_modules')) return undefined;
           if (
             id.includes('react-markdown')

@@ -1,5 +1,5 @@
 import { judgeSome } from '../runtime/judge.js';
-import { mapLimit } from '@goodvibes-jev/judgment';
+import { mapLimit } from '@goodvibes/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { ENTITY_ALIAS_SLOTS, entityAlias } from './batteries/entity-alias.js';
 import { splitKnowledgePassages } from './passages.js';

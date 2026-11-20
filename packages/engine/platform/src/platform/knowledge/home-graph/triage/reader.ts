@@ -1,6 +1,6 @@
 import { requireSemanticKnowledge } from '../../decision-policy.js';
-import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
-import { checkAnswers, toJson, type JudgmentPort, type YesNoReading, type JsonValue } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes/engine/errors';
+import { checkAnswers, toJson, type JudgmentPort, type YesNoReading, type JsonValue } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
 import { freezeSupport } from '../../semantic/verification/projection.js';
 import { homeGraphTriageApplicability, homeGraphBatteryFacts, homeGraphManualFact } from './batteries.js';

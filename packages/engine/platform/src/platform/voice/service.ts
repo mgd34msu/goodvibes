@@ -1,7 +1,7 @@
 import { VoiceProviderRegistry, captureVoiceProviderReadSource } from './provider-registry.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { DaemonErrorCategory, GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { DaemonErrorCategory, GoodVibesError } from '@goodvibes/engine/errors';
 import type {
   VoiceDescriptor,
   VoiceRealtimeSession,

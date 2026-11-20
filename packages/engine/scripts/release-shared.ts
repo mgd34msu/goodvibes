@@ -13,7 +13,7 @@ export const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
 const ENGINE_TEMP_ROOT = resolve(REPO_ROOT, '.tmp');
 // The engine is one package: every old workspace package is a subpath of it.
 // The judgment package it depends on is released with it, so a packed engine
-// always has the judgment tarball it resolves `@goodvibes-jev/judgment` to.
+// always has the judgment tarball it resolves `@goodvibes/judgment` to.
 // Dirs are relative to the engine root. Order is publish order: a package is
 // listed after every package it depends on, so a publish that stops part-way
 // can never leave the engine on the registry pointing at a missing judgment version.

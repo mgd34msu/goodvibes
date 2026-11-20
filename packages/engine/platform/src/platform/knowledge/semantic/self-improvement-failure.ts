@@ -1,6 +1,6 @@
 import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
-import { categoryForCode, categoryForStatus, failureState, GoodVibesError, isKnownErrorCode, judgmentPort, JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { categoryForCode, categoryForStatus, failureState, GoodVibesError, isKnownErrorCode, judgmentPort, JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes/engine/errors';
+import type { JudgmentPort } from '@goodvibes/judgment';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { isKnowledgeSourceQualityFailure } from '../source-quality.js';
 import { repairFailureCause } from './self-improvement-failure-battery.js';

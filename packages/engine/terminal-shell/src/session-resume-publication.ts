@@ -1,14 +1,14 @@
-import type { SessionMeta } from '@goodvibes-jev/engine/platform/platform/sessions';
-import type { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
-import type { ConfigManager, HelperModel } from '@goodvibes-jev/engine/platform/platform/config';
+import type { SessionMeta } from '@goodvibes/engine/platform/platform/sessions';
+import type { SharedSessionBroker } from '@goodvibes/engine/platform/platform/control-plane';
+import type { HookDispatcher } from '@goodvibes/engine/platform/platform/hooks';
+import type { ConfigManager, HelperModel } from '@goodvibes/engine/platform/platform/config';
 import {
   formatReturnContextForDisplay,
   getReturnContextMode,
   maybeAssistReturnContextSummary,
   type SessionReturnContextSummary,
-} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+} from '@goodvibes/engine/platform/platform/runtime/operations';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { activeTokens } from './renderer/theme.js';
 interface ResumePublicationOptions {
   readonly runtime: { readonly sessionId: string };

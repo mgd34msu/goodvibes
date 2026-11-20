@@ -7,7 +7,7 @@
  */
 import { useState } from 'react';
 import { MoreHorizontal } from 'lucide-react';
-import { actionButton, riskWords } from '@goodvibes-jev/engine/terminal-shell/command-actions/data';
+import { actionButton, riskWords } from '@goodvibes/engine/terminal-shell/command-actions/data';
 import { asActionShape, type ActionData } from '../../lib/command-actions-types';
 import { Button } from '../ui/Button';
 import { IconButton } from '../ui/IconButton';

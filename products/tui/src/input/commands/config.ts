@@ -1,8 +1,10 @@
-import { createConfigWorkspaceCommand } from '@goodvibes-jev/engine/terminal-shell/entry-workspace-commands';
+import { createConfigCommand } from '@goodvibes-jev/engine/terminal-shell/entry-workspace-commands';
 // The same text reader `--config key=value` and the daemon's `config set` use, so one line stores one value everywhere.
 import { parseConfigValueText } from '@goodvibes-jev/engine/terminal-shell/cli-config-overrides';
 import { TUI_NOTIFICATIONS_METADATA_ONLY_KEY } from '../../config/host-settings.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { setActiveThemeMode, setActiveThemeName, type ThemeMode } from '../../renderer/theme.ts';
 import {
@@ -12,7 +14,6 @@ import {
   persistSecretBackedConfigValue,
 } from '../../config/secret-config.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { secretArg } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 
 export function registerConfigCommand(registry: CommandRegistry): void {
   registry.register(configWorkspaceCommand);
@@ -35,12 +36,10 @@ async function handleSecretConfigSet(ctx: CommandContext, key: ConfigKey, value:
   const secretKey = buildGoodVibesSecretKey(key);
   const secretsManager = ctx.platform?.secretsManager;
   if (!secretsManager) {
-    ctx.print(
-      `${key} holds a credential, and this runtime has no secret store to put it in; ` +
-        `refusing rather than writing it in cleartext into a config file.\n` +
-        `  Store it with: /secrets set ${secretKey} <value>`,
+    throw commandRefusal(
+      `${key} holds a credential, and this runtime has no secret store to put it in; refusing rather than writing it in cleartext into a config file.`,
+      `Store it with: /secrets set ${secretKey}`,
     );
-    return;
   }
   try {
     const configValue = await persistSecretBackedConfigValue(ctx.platform.configManager, secretsManager, key, value);
@@ -51,31 +50,18 @@ async function handleSecretConfigSet(ctx: CommandContext, key: ConfigKey, value:
         (scope === 'daemon' ? '\n  The daemon reads that tier, so this keeps working with this client closed.' : ''),
     );
   } catch (e) {
-    ctx.print(`Could not set ${key}: ${summarizeError(e)}`);
+    throw commandRefusal(`Could not set ${key}; nothing was stored: ${summarizeError(e)}`);
   }
 }
 
-const configWorkspaceCommand = createConfigWorkspaceCommand<CommandContext>({
-  description: 'Open the fullscreen configuration workspace, or set a key directly',
-  usage: '[category|key] | set <key> <value>',
-  argsHint: '[category|key] | set <key> <value>',
-  async set(args, ctx) {
-    const key = args[1];
-    const value = args.slice(2).join(' ');
-    if (!key || value === '') {
-      ctx.print('Usage: /config set <key> <value>; e.g. /config set display.themeMode light');
-      return;
-    }
+const configWorkspaceCommand = createConfigCommand<CommandContext>({
+  async set(key, value, ctx) {
     // A credential key must never take the generic path below: setDynamic
-    // writes the value it is handed straight into a settings JSON file, so
-    // `/config set surfaces.email.password hunter2` used to put the mailbox
-    // password in cleartext on disk. The settings modal already routes these
-    // keys through the secret manager (settings-modal-secrets.ts); this
-    // command has to route them the same way, or the two ways of setting the
-    // same key disagree about where the value lands.
+    // writes the value it is handed straight into a settings JSON file. The
+    // settings modal routes these keys through the secret manager
+    // (settings-modal-secrets.ts); this command routes them the same way.
     if (isSecretConfigKey(key)) {
-      // The value is a declared secret position (secretArgs), masked in the input history.
-      await handleSecretConfigSet(ctx, key as ConfigKey, secretArg(2).reveal('store-write'));
+      await handleSecretConfigSet(ctx, key as ConfigKey, value);
       return;
     }
     try {
@@ -95,8 +81,7 @@ const configWorkspaceCommand = createConfigWorkspaceCommand<CommandContext>({
       // A daemon setting is written by the daemon: wait for its answer.
       const refused = (await ctx.platform.configManager.settleDaemonWrites()).find((entry) => entry.key === key);
       if (refused) {
-        ctx.print(`Not set: the daemon refused ${key}, and nothing was changed: ${refused.error instanceof Error ? refused.error.message : String(refused.error)}`);
-        return;
+        throw commandRefusal(`Not set: the daemon refused ${key}, and nothing was changed: ${refused.error instanceof Error ? refused.error.message : String(refused.error)}`);
       }
       const after = ctx.platform.configManager.get(key as ConfigKey);
       ctx.print(`Set ${key}: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
@@ -119,8 +104,8 @@ const configWorkspaceCommand = createConfigWorkspaceCommand<CommandContext>({
         }
       }
     } catch (e) {
-      ctx.print(`Could not set ${key}: ${e instanceof Error ? e.message : String(e)}`);
+      if (readRefusal(e)) throw e;
+      throw commandRefusal(`Could not set ${key}; nothing was changed: ${e instanceof Error ? e.message : String(e)}`);
     }
-    return;
   },
 });

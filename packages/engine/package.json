@@ -2988,6 +2988,26 @@
       "types": "./terminal-shell/dist/ci-command.d.ts",
       "import": "./terminal-shell/dist/ci-command.js"
     },
+    "./terminal-shell/agents-command": {
+      "bun": "./terminal-shell/src/agents-command.ts",
+      "types": "./terminal-shell/dist/agents-command.d.ts",
+      "import": "./terminal-shell/dist/agents-command.js"
+    },
+    "./terminal-shell/about-me-command": {
+      "bun": "./terminal-shell/src/about-me-command.ts",
+      "types": "./terminal-shell/dist/about-me-command.d.ts",
+      "import": "./terminal-shell/dist/about-me-command.js"
+    },
+    "./terminal-shell/knowledge-command": {
+      "bun": "./terminal-shell/src/knowledge-command.ts",
+      "types": "./terminal-shell/dist/knowledge-command.d.ts",
+      "import": "./terminal-shell/dist/knowledge-command.js"
+    },
+    "./terminal-shell/intelligence-command": {
+      "bun": "./terminal-shell/src/intelligence-command.ts",
+      "types": "./terminal-shell/dist/intelligence-command.d.ts",
+      "import": "./terminal-shell/dist/intelligence-command.js"
+    },
     "./terminal-shell/permissions-command": {
       "bun": "./terminal-shell/src/permissions-command.ts",
       "types": "./terminal-shell/dist/permissions-command.d.ts",

@@ -96,7 +96,7 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
     const chain = (pinChains.get(picker) ?? Promise.resolve()).then(async () => {
       let done = false;
       try {
-        done = (await context.executeCommand?.(pinned ? 'pin' : 'unpin', [model.registryKey])) ?? false;
+        done = (await context.executeCommand?.('pin', [pinned ? 'add' : 'remove', model.registryKey])) ?? false;
       } catch (error) {
         logger.warn('model picker: pin command failed', { model: model.registryKey, error: summarizeError(error) });
       }

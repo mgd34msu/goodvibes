@@ -276,7 +276,7 @@ const BASIC_OWN_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceBasic
 
 function modelPinUnpin(editor: AgentWorkspaceLocalEditor, readField: AgentWorkspaceFieldReader): AgentWorkspaceCommandEditorSubmission {
   const pinning = editor.kind === 'model-pin';
-  const command = `/${pinning ? 'pin' : 'unpin'} ${quoteSlashCommandArg(readField('model'))}`;
+  const command = `/pin ${pinning ? 'add' : 'remove'} ${quoteSlashCommandArg(readField('model'))}`;
   return dispatchCommandEditorSubmission(
     command,
     pinning ? 'Opening model pin action' : 'Opening model unpin action',

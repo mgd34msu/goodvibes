@@ -1,82 +1,61 @@
 // ---------------------------------------------------------------------------
-// acp-runtime.ts, `/agents`. Bare `/agents` opens the Your agents panel
-// (`--target <id>[:<kind>]` selects a process in it). The scripted path for
-// hosting third-party coding agents drives the SAME verbs the Agents modal's
-// n key does (acp.agents.list / acp.sessions.create). `/agents list` shows what the daemon discovered
-// (read-only, quiet when none); `/agents host <agentId> [dir]` spawns one as a
-// long-lived daemon session that shows up as an acp-agent fleet row. A working
-// directory defaults to the current one; a known workspace root can be named
-// instead, but no path is ever required beyond what the operator already has.
+// acp-runtime.ts, the terminal app's host for `/agents`
+// (terminal-shell/agents-command.ts): the Your agents panel, third-party
+// coding agents hosted through the daemon's acp.* methods (the same verbs the
+// Agents modal's n key uses), team modes and recipes (teamwork-runtime.ts),
+// and work contracts (control-room-runtime.ts). Handing work to the terminal
+// app is the Agent's; here it is refused with the reason.
 //
 // A structured spawn failure ({binary, stage, message}) is printed verbatim,
 // never left as a hung row: the daemon bounds the handshake and returns a
 // 'failed' record with its three honest fields.
 // ---------------------------------------------------------------------------
 
-import type { CommandRegistry } from '../command-registry.ts';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
-import { takeTargetFlag } from '../views.ts';
-import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { registerAgentsCommand } from '@goodvibes-jev/engine/terminal-shell/agents-command';
+import { describeOperatorRpcError, getOperatorRpc, type OperatorRpcAvailable } from './operator-rpc.ts';
+import { parseViewTarget } from '../views.ts';
+import { teamHost } from './teamwork-runtime.ts';
+import { contractsHost } from './control-room-runtime.ts';
+
+function rpcOf(ctx: CommandContext): OperatorRpcAvailable {
+  const rpc = getOperatorRpc(ctx);
+  if (!rpc.available) throw commandRefusal(rpc.reason);
+  return rpc;
+}
 
 export function registerAcpRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'agents',
-    aliases: ['acp'],
-    description: 'Open Your agents: what is running, what waits for you, what is scheduled; list or host third-party coding agents',
-    usage: '[--target <id>[:<kind>]] | list | host <agentId> [directory]',
-    argsHint: '[list|host|--target <id>]',
-    async handler(args, ctx) {
-      const rest = [...args];
-      const target = takeTargetFlag(rest);
-      if (rest.length === 0) {
-        // Bare /agents (or /agents --target <id>) opens the Your agents panel.
-        if (ctx.openAgents) ctx.openAgents({ target });
-        else ctx.print('Your agents is not available in this session; /agents list prints the hostable agents.');
-        return;
-      }
-      const sub = (rest[0] ?? 'list').toLowerCase();
-      const rpc = getOperatorRpc(ctx);
-      if (!rpc.available) { ctx.print(`[agents] ${rpc.reason}`); return; }
-
-      if (sub === 'list') {
-        try {
-          const { agents } = await rpc.platformClient.operator.invoke('acp.agents.list', {});
-          if (agents.length === 0) {
-            ctx.print('[agents] No third-party ACP agents discovered. Install Claude Code, Codex, or opencode on PATH to host one.');
-            return;
-          }
-          ctx.print([
-            'Discovered ACP agents (host with /agents host <id> [directory]):',
-            ...agents.map((a) => `  ${a.id}: ${a.title}  (${a.binaryPath})`),
-          ].join('\n'));
-        } catch (error) {
-          ctx.print(`[agents list] ${describeOperatorRpcError(error)}`);
-        }
-        return;
-      }
-
-      if (sub === 'host') {
-        const agentId = rest[1];
-        if (!agentId) {
-          ctx.print('Usage: /agents host <agentId> [directory]  (agentId from /agents list; directory defaults to the current one)');
-          return;
-        }
-        const cwd = rest[2] ?? requireShellPaths(ctx).workingDirectory;
-        try {
-          const { hosted, started } = await rpc.platformClient.operator.invoke('acp.sessions.create', { agentId, cwd });
-          if (hosted.error) {
-            // Structured failure, verbatim, never a hung row.
-            ctx.print(`[agents host] Could not host ${hosted.title || agentId}: ${hosted.error.stage} stage failed for ${hosted.error.binary}; ${hosted.error.message}`);
-            return;
-          }
-          ctx.print(`[agents host] Hosting ${hosted.title || agentId} in ${cwd}${started ? '' : ' (queued)'}; it appears as an acp-agent row in the fleet; steer and stop it like any agent.`);
-        } catch (error) {
-          ctx.print(`[agents host] ${describeOperatorRpcError(error)}`);
-        }
-        return;
-      }
-
-      ctx.print('Usage: /agents list | /agents host <agentId> [directory]');
+  registerAgentsCommand<CommandContext>(registry, {
+    openPanel(ctx, target) {
+      if (!ctx.openAgents) throw commandRefusal('Your agents is not available in this session.', '/agents hostable lists the coding agents you can host.');
+      ctx.openAgents({ target: target ? parseViewTarget(target) : undefined });
     },
+    coding: {
+      async list(ctx) {
+        try {
+          return (await rpcOf(ctx).platformClient.operator.invoke('acp.agents.list', {})).agents;
+        } catch (error) {
+          throw commandRefusal(describeOperatorRpcError(error));
+        }
+      },
+      async host(ctx, agentId, directory) {
+        const cwd = directory ? requireShellPaths(ctx).resolveWorkspacePath(directory) : requireShellPaths(ctx).workingDirectory;
+        let answer;
+        try {
+          answer = await rpcOf(ctx).platformClient.operator.invoke('acp.sessions.create', { agentId, cwd });
+        } catch (error) {
+          throw commandRefusal(describeOperatorRpcError(error));
+        }
+        const { hosted, started } = answer;
+        // Structured failure, verbatim, never a hung row.
+        if (hosted.error) throw commandRefusal(`Could not host ${hosted.title || agentId}: the ${hosted.error.stage} stage failed for ${hosted.error.binary}; ${hosted.error.message}`);
+        return `Hosting ${hosted.title || agentId} in ${cwd}${started ? '' : ' (queued)'}; it shows as a row in Your agents, where you steer and stop it.`;
+      },
+    },
+    handOff: { unavailable: 'This is the terminal app: it does coding work itself. Ask for it in the chat, or start an agent with /agents start.' },
+    contracts: contractsHost(),
+    team: teamHost(),
   });
 }

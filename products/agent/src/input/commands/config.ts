@@ -1,13 +1,7 @@
-import { createConfigWorkspaceCommand } from '@goodvibes-jev/engine/terminal-shell/entry-workspace-commands';
+import { createConfigCommand } from '@goodvibes-jev/engine/terminal-shell/entry-workspace-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 
+/** `/config` is one description shared with the terminal app; the Agent changes a setting on its settings screen. */
 export function registerConfigCommand(registry: CommandRegistry): void {
-  registry.register(configWorkspaceCommand);
+  registry.register(createConfigCommand<CommandContext>({}));
 }
-
-const configWorkspaceCommand = createConfigWorkspaceCommand<CommandContext>({
-  description: 'Open the fullscreen configuration workspace',
-  hidden: true,
-  usage: '[category|key]',
-  argsHint: '[category|key]',
-});

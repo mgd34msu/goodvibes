@@ -17,6 +17,7 @@ import { withGuestTurn } from '../security/turn-boundary.js';
 import { conversationalTurnConfigReaderFrom, conversationalTurnSpawnOptions } from '../personal-capture/spawn-contract.js';
 import { logger } from '../utils/logger.js';
 import { existsSync } from 'node:fs';
+import { readHeldCompanionTurn } from './held-companion-turn.js';
 import { daemonOperationLog, daemonOperationsPath } from './operations-log.js';
 import { startOwedGitHubEvents, type GitHubReplyOperation } from '../adapters/github/index.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -938,7 +939,7 @@ export function configureDaemonSessionContinuation(options: {
    * `continuationContractOptions` below. A continuation never starts a contract
    * just because nobody installed a gate.
    */
-  readonly surfaceActionHelper?: Pick<DaemonSurfaceActionHelper, 'conversationGateDeps' | 'senderIsGuest'> | undefined;
+  readonly surfaceActionHelper?: Pick<DaemonSurfaceActionHelper, 'conversationGateDeps' | 'senderIsGuest' | 'runHeldCompanionTurn'> | undefined;
   /** Reads `conversationGate.*` so both halves of the gate obey one configuration. */
   readonly configReader?: ConversationGateConfigReader | undefined;
   /**
@@ -949,6 +950,14 @@ export function configureDaemonSessionContinuation(options: {
 }): void {
   const readingInputs = new Set<string>();
   options.sessionBroker.setContinuationRunner(async ({ sessionId, input, task, routeBinding }) => {
+    // A companion chat turn kept through a self-update's restart (held-companion-turn.ts) runs as the turn it was.
+    const heldTurn = readHeldCompanionTurn(input.metadata);
+    if (heldTurn && options.surfaceActionHelper) {
+      const outcome = await options.surfaceActionHelper.runHeldCompanionTurn(heldTurn);
+      return outcome === 'held'
+        ? { disposition: 'capacity', reason: 'the daemon is not taking new work until its restart' }
+        : { disposition: 'transferred', requestId: input.id };
+    }
     const readingKey = JSON.stringify([sessionId, input.id]);
     if (readingInputs.has(readingKey)) return { disposition: 'held', reason: 'continuation-reading-in-progress' };
     readingInputs.add(readingKey);

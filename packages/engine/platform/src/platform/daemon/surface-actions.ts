@@ -30,6 +30,7 @@ import {
 import type { CompanionChatManager } from '../companion/companion-chat-manager.js';
 import { resolveSecretInput } from '../config/secret-refs.js';
 import { logger } from '../utils/logger.js';
+import { holdCompanionTurn, type HeldCompanionTurn } from './held-companion-turn.js';
 import { agentRetrySpawnInput } from '@goodvibes-jev/engine/daemon-api/tasks';
 import { toAgentSpawnInput } from './http/runtime-routes.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -968,6 +969,11 @@ export class DaemonSurfaceActionHelper {
     readonly title?: string | undefined;
     readonly messageId?: string | undefined;
   }): Promise<{ readonly sessionId: string; readonly messageId: string; readonly delivered: boolean; readonly error?: string }> {
+    // A self-update's restart holds admission: the message is kept (a held broker input) and answered after it.
+    if (this.context.workAdmission?.open === false) {
+      const held = await holdCompanionTurn(this.context, { kind: 'ntfy-remote', input });
+      if (held) return { sessionId: held.sessionId, messageId: '', delivered: true };
+    }
     // What the reply announces: the answer to this inbound message. Two
     // messages answered with the same words are two notifications.
     const replyIdentity = `ntfy:${input.messageId ?? randomUUID()}`;
@@ -1078,7 +1084,32 @@ export class DaemonSurfaceActionHelper {
   private async postHomeAssistantChatMessage(
     input: HomeAssistantSurfaceChatInput,
   ): Promise<HomeAssistantSurfaceChatResult> {
+    // A self-update's restart holds admission: the message is kept (a held broker input) and its reply is
+    // published to Home Assistant as an event after the restart.
+    if (this.context.workAdmission?.open === false) {
+      const held = await holdCompanionTurn(this.context, { kind: 'homeassistant', input });
+      if (held) return { sessionId: held.sessionId, routeId: held.routeId, messageId: input.messageId, delivered: true };
+    }
     return postHomeAssistantSurfaceChatMessage(this.context, input);
+  }
+
+  /**
+   * Run a companion chat turn held through a restart (held-companion-turn.ts),
+   * called by the broker's continuation runner for its input. `held` while
+   * admission is still closed; otherwise the turn is started (its reply goes
+   * out as it always does) and the input is consumed.
+   */
+  async runHeldCompanionTurn(turn: HeldCompanionTurn): Promise<'started' | 'held'> {
+    if (this.context.workAdmission?.open === false) return 'held';
+    if (turn.kind === 'ntfy-remote') {
+      await this.postNtfyRemoteChatMessage(turn.input);
+      return 'started';
+    }
+    // The Home Assistant caller is gone: the reply reaches it only as the published event, so the wait is not awaited.
+    void this.postHomeAssistantChatMessage(turn.input).catch((error: unknown) => {
+      logger.warn('A Home Assistant message held for a restart could not be answered', { error: summarizeError(error) });
+    });
+    return 'started';
   }
 
   /** `announces` names what the reply answers, so ntfy suppresses only a repeat of the same reply. */

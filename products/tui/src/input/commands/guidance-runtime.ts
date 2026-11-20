@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { createWelcomeCommand } from '@goodvibes-jev/engine/terminal-shell/entry-workspace-commands';
 import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines, getGuidanceMode } from '@/runtime/index.ts';
 import { dismissGuidance, evaluateContextualGuidance, formatGuidanceItems, resetGuidance } from '@/runtime/index.ts';
@@ -55,8 +54,6 @@ function currentGuidance(ctx: CommandContext, guidanceOptions: GuidancePersisten
 }
 
 export function registerGuidanceRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(welcomeCommand);
-
   registry.register({
     name: 'guidance',
     description: 'Review contextual operational guidance without interrupting the main conversation flow',
@@ -160,25 +157,3 @@ export function wireGuidanceNotices(
   });
 }
 
-const welcomeCommand = createWelcomeCommand<CommandContext>({
-  description: 'Open /setup: the topics for models, sign-in, keys, access, chat apps and features',
-  open(ctx) {
-    if (ctx.executeCommand) {
-      void ctx.executeCommand('setup', []);
-      return;
-    }
-    ctx.print('Use /setup to set GoodVibes up, one topic at a time.');
-    return;
-  },
-  lines: [
-    'Welcome To GoodVibes',
-    '  /onboarding         - open the onboarding wizard with current settings preloaded',
-    '  /setup onboarding   - open the same onboarding wizard from setup workflows',
-    '  /health review      - unified startup, service, and sandbox posture',
-    '  /sandbox review     - inspect VM isolation posture',
-    '  /marketplace open   - browse curated plugins, skills, hook packs, and policy packs',
-    '  /remote setup       - review bridge, tunnel, env, and bootstrap flows',
-    '  /security           - review trust posture, policy pressure, and incidents',
-    '  /cockpit            - unified operator control room',
-  ],
-});

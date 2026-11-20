@@ -7,6 +7,10 @@ import type { TerminalSlashCommand } from './command-registry.js';
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import { MAX_IMAGE_ATTACH_BYTES } from './modal-input-routes.js';
 import { commandRefusal } from './command-confirmation.js';
+import { defineCommand } from './command-actions/define.js';
+import { defineList, type ListRow } from './command-actions/lists.js';
+import type { CommandActionContext } from './command-actions/types.js';
+import { listInput, readAction } from './described-command-kit.js';
 export interface LocalCommandContext {
   readonly print: (message: string) => void;
   readonly renderRequest: () => void;
@@ -18,6 +22,23 @@ export interface LocalCommandContext {
   readonly session: { readonly conversationManager: TerminalConversationManager };
 }
 /** Shared local operations; products provide presentation and explicit discovery policy. */
+interface PinListContext { readonly clients?: { readonly providerApi?: Pick<ProviderApi, 'getFavorites'> | undefined } | undefined; readonly provider: { readonly providerRegistry: { listModels(): readonly { readonly registryKey: string; readonly displayName: string }[] } } }
+const PIN_MODELS = defineList<PinListContext>({
+  name: 'models.all',
+  async read(ctx) {
+    return ctx.provider.providerRegistry.listModels().map((model): ListRow => ({ value: model.registryKey, label: model.displayName, detail: model.registryKey }));
+  },
+  operator: { terminalOnly: 'The model list is the terminal app\'s.' },
+});
+const PINNED_MODELS = defineList<PinListContext>({
+  name: 'models.pinned',
+  async read(ctx) {
+    const favorites = await ctx.clients?.providerApi?.getFavorites();
+    return (favorites?.pinned ?? []).map((entry): ListRow => ({ value: entry.registryKey ?? entry.modelId, label: entry.registryKey ?? entry.modelId }));
+  },
+  operator: { terminalOnly: 'Pins are kept by the terminal app.' },
+});
+
 export function createLocalCommandActions<Context extends LocalCommandContext>(
   requireProviderApi: (context: Context) => ProviderApi,
   policy: {
@@ -199,62 +220,49 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
         if (!catalogOk || !benchmarksOk || !limitsOk || !discoveryOk) throw commandRefusal(policy.partialRefresh);
       },
     } satisfies TerminalSlashCommand<Context>,
-    pin: {
-      name: 'pin',
-      effect: 'local-state',
-      firstScreen: !policy.hidden,
-      description: 'Pin a model to the favorites list',
-      usage: '<model-id>',
-      argsHint: '<model-id>',
-      async handler(args: string[], ctx: Context) {
-        const providerApi = requireProviderApi(ctx);
-        const modelId = args[0];
-        if (!modelId) {
-          const favorites = await providerApi.getFavorites();
-          ctx.print(
-            favorites.pinned.length === 0
-              ? 'No pinned models. Use /pin <model-id> to pin one.'
-              : `Pinned models:\n${favorites.pinned.map((entry) => `  ★ ${entry.registryKey ?? entry.modelId}`).join('\n')}`,
-          );
-          return;
-        }
-        const favorites = await providerApi.getFavorites();
-        if (favorites.pinned.some((entry) => entry.modelId === modelId || entry.registryKey === modelId)) {
-          ctx.print(policy.imageFailure('Model already pinned', modelId));
-          return;
-        }
-        try {
-          await providerApi.pinModel(modelId);
-          ctx.print(`Pinned: ${modelId}`);
-        } catch (e) {
-          ctx.print(policy.error(summarizeError(e)));
-          // The model picker undoes its optimistic star only when the command fails.
-          throw e;
-        }
-      },
-    } satisfies TerminalSlashCommand<Context>,
-    unpin: {
-      name: 'unpin',
-      effect: 'local-state',
-      firstScreen: !policy.hidden,
-      description: 'Unpin a model from the favorites list',
-      usage: '<model-id>',
-      argsHint: '<model-id>',
-      async handler(args: string[], ctx: Context) {
-        const providerApi = requireProviderApi(ctx);
-        const modelId = args[0];
-        if (!modelId) throw commandRefusal('Usage: /unpin <model-id>');
-        const favorites = await providerApi.getFavorites();
-        const pinned = favorites.pinned.find(
-          (entry) => entry.registryKey === modelId || (policy.unpinByModelId && entry.modelId === modelId),
-        );
-        if (!pinned) {
-          ctx.print(`Model is not pinned: ${modelId}`);
-          return;
-        }
-        await providerApi.unpinModel(pinned.registryKey);
-        ctx.print(`Unpinned: ${modelId}`);
-      },
-    } satisfies TerminalSlashCommand<Context>,
+    // `/pin`: pin and unpin models in the favourites the model picker shows first (command-actions/).
+    pin: defineCommand<Context & CommandActionContext>({
+      name: 'pin', title: 'Pinned models', summary: 'Keep models you use at the top of the model picker', group: 'Models', report: 'see-pinned',
+      actions: [
+        readAction<Context & CommandActionContext>({
+          id: 'see-pinned', label: 'See pinned models', word: 'list',
+          sentence: 'Lists the models pinned to the top of the model picker.',
+          operator: { terminalOnly: 'Pins are kept by the terminal app.' },
+          async run(_values, ctx) {
+            const favorites = await requireProviderApi(ctx).getFavorites();
+            return favorites.pinned.length === 0 ? 'No pinned models yet.' : `Pinned models:\n${favorites.pinned.map((entry) => `  ★ ${entry.registryKey ?? entry.modelId}`).join('\n')}`;
+          },
+        }),
+        {
+          id: 'pin-model', label: 'Pin a model', word: 'add',
+          inputs: [listInput({ id: 'model', label: 'Model', help: 'The models you can use', list: PIN_MODELS, other: 'a model id' })],
+          sentence: '{model} will be kept at the top of the model picker until you change it.', done: 'Pinned {model}.',
+          touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'unpin-model',
+          operator: { terminalOnly: 'Pins are kept by the terminal app.' }, example: { model: 'openrouter:openrouter/free' },
+          async run(values, ctx) {
+            const providerApi = requireProviderApi(ctx);
+            const modelId = values.model!;
+            const favorites = await providerApi.getFavorites();
+            if (favorites.pinned.some((entry) => entry.modelId === modelId || entry.registryKey === modelId)) throw commandRefusal(`${modelId} is pinned already.`);
+            // The model picker undoes its optimistic star only when this fails.
+            await providerApi.pinModel(modelId);
+          },
+        },
+        {
+          id: 'unpin-model', label: 'Unpin a model', word: 'remove',
+          inputs: [listInput({ id: 'model', label: 'Model', help: 'The pinned models', list: PINNED_MODELS })],
+          sentence: '{model} will no longer be kept at the top of the model picker, until you change it.', done: 'Unpinned {model}.',
+          touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'pin-model',
+          operator: { terminalOnly: 'Pins are kept by the terminal app.' }, example: { model: 'openrouter:openrouter/free' },
+          async run(values, ctx) {
+            const providerApi = requireProviderApi(ctx);
+            const modelId = values.model!;
+            const pinned = (await providerApi.getFavorites()).pinned.find((entry) => entry.registryKey === modelId || (policy.unpinByModelId && entry.modelId === modelId));
+            if (!pinned) throw commandRefusal(`${modelId} is not pinned.`, '/pin list shows the pinned models.');
+            await providerApi.unpinModel(pinned.registryKey);
+          },
+        },
+      ],
+    }),
   };
 }

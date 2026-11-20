@@ -48,18 +48,6 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
 
   registry.register(navigation.shortcuts);
 
-  registry.register({
-    name: 'find',
-    aliases: ['findtext'],
-    description: 'Search THIS conversation transcript (same as Ctrl+F). Searching the web instead? Use /search',
-    handler(_args, ctx) {
-      if (ctx.openTranscriptSearch) {
-        ctx.openTranscriptSearch();
-        return;
-      }
-      ctx.print('Transcript search is not available in this context; try Ctrl+F.');
-    },
-  });
 
   registry.register(coreActions.keybindings);
 

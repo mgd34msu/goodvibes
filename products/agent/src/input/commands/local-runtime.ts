@@ -288,5 +288,4 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
 
   registry.register(localActions['pin']);
 
-  registry.register(localActions['unpin']);
 }

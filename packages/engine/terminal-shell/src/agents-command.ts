@@ -10,7 +10,7 @@ import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
-import type { ActionDescription, ActionValues, CommandActionContext, CommandDescription, FixedChoice, InputDescription } from './command-actions/types.js';
+import type { ActionDescription, CommandActionContext, CommandDescription, FixedChoice, InputDescription } from './command-actions/types.js';
 import { choiceInput, doAction, listInput, readAction, textInput } from './described-command-kit.js';
 
 /** A reason this app cannot do a group of actions, shown when one of them is asked for. */
@@ -312,4 +312,3 @@ export function registerAgentsCommand<Ctx extends CommandActionContext>(registry
   registry.register(AGENTS_SLASH_COMMAND as never);
 }
 
-export type { ActionValues };

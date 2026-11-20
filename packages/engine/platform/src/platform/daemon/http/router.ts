@@ -97,6 +97,7 @@ import { dispatchCompanionChatRoutes, isCompanionChatPath } from '../../companio
 import { dispatchModelRoutes } from './model-routes.js';
 import { dispatchBatchRoutes } from './batch-routes.js';
 import { gateGatewayBinding } from './gateway-binding-gate.js';
+import { assertDaemonRouteManifest } from './route-manifest.js';
 import { IdempotentReplayStore, replayKeyedRequest, takesIdempotencyKey } from '../../control-plane/idempotent-replay.js';
 import { deriveRequestWithBody } from '../derived-request.js';
 import { configuredBrowserOrigins, refuseCookieWriteFromOtherOrigin } from './browser-origin.js';
@@ -291,6 +292,8 @@ export class DaemonHttpRouter {
   private readonly requests: DaemonRequestRouter;
 
   constructor(private readonly context: DaemonHttpRouterContext) {
+    // Every uncataloged route is declared with its effect or its reason; a manifest that is not sound stops the router here.
+    assertDaemonRouteManifest(context.gatewayMethods);
     this.requests = new DaemonRequestRouter({
       authenticate: (req) => context.authenticateRequest(req),
       // Built by the first request that reaches the table, then kept for the

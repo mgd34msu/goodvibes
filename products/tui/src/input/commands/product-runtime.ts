@@ -2,7 +2,6 @@ import { createTrustReviewTools, createTrustCommandFlow, trustBundleExportConfir
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { runnerToolsText } from './remote-ceiling-text.ts';
 import { listInstalledEcosystemEntries, loadEcosystemCatalog } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
 import { discoverTasks } from '@/runtime/index.ts';
 import { DEFAULT_TASK_SUITE_DIR } from './eval.ts';
@@ -167,124 +166,6 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
       ctx.print('Usage: /trust [review|bundle export <path>|bundle inspect <path>]');
     },
   });
-  registry.register({
-    name: 'bridge',
-    description: 'Review and operate self-hosted bridge and remote runner flows',
-    usage: '[status|pools|assign <pool> <runner>|runner <id>|review <artifactId>|export <artifactId> [path]|import <path>]',
-    async handler(args, ctx) {
-      const shellPaths = requireShellPaths(ctx);
-      if (!ctx.ops.remoteRuntime) {
-        ctx.print('Remote runner registry is not available in this runtime.');
-        return;
-      }
-      const remoteRegistry = ctx.ops.remoteRuntime;
-      const sub = args[0] ?? 'status';
-      if (sub === 'status') {
-        const remote = requireReadModels(ctx).remote.getSnapshot();
-        ctx.print(
-          [
-            'Bridge Status',
-            `  remote pools: ${remote.pools.length}`,
-            `  runner contracts: ${remote.contracts.length}`,
-            `  review artifacts: ${remote.artifacts.length}`,
-          ].join('\n'),
-        );
-        return;
-      }
-      if (sub === 'pools') {
-        const pools = remoteRegistry.listPools();
-        ctx.print(
-          pools.length > 0
-            ? ['Bridge Pools', ...pools.map((pool) => `  ${pool.id}  runners=${pool.runnerIds.length}  trust=${pool.trustClass}`)].join(
-                '\n',
-              )
-            : 'Bridge Pools\n  No runner pools registered yet.',
-        );
-        return;
-      }
-      if (sub === 'assign') {
-        const poolId = args[1];
-        const runnerId = args[2];
-        if (!poolId || !runnerId) {
-          ctx.print('Usage: /bridge assign <pool> <runner>');
-          return;
-        }
-        const pool = remoteRegistry.assignRunnerToPool(poolId, runnerId);
-        if (!pool) {
-          ctx.print(`Unable to assign runner ${runnerId} to pool ${poolId}.`);
-          return;
-        }
-        ctx.print(`Assigned runner ${runnerId} to bridge pool ${poolId}.`);
-        return;
-      }
-      if (sub === 'runner') {
-        const runnerId = args[1];
-        if (!runnerId) {
-          ctx.print('Usage: /bridge runner <id>');
-          return;
-        }
-        const contract = remoteRegistry.getContract(runnerId);
-        if (!contract) {
-          ctx.print(`Unknown runner contract: ${runnerId}`);
-          return;
-        }
-        ctx.print(
-          [
-            `Bridge Runner ${runnerId}`,
-            `  template: ${contract.template}`,
-            `  trustClass: ${contract.trustClass}`,
-            `  transport: ${contract.transport ? `${contract.sourceTransport}/${contract.transport.state}` : 'none (local runner in this process)'}`,
-            `  tools: ${runnerToolsText(contract)}`,
-            `  pool: ${contract.poolId ?? '(unassigned)'}`,
-          ].join('\n'),
-        );
-        return;
-      }
-      if (sub === 'review') {
-        const artifactId = args[1];
-        if (!artifactId) {
-          ctx.print('Usage: /bridge review <artifactId>');
-          return;
-        }
-        const summary = remoteRegistry.buildReviewSummary(artifactId);
-        ctx.print(summary ?? `Unknown remote artifact: ${artifactId}`);
-        return;
-      }
-      if (sub === 'export') {
-        const artifactId = args[1];
-        if (!artifactId) {
-          ctx.print('Usage: /bridge export <artifactId> [path]');
-          return;
-        }
-        const exported = await remoteRegistry.exportArtifact(artifactId, args[2] ? shellPaths.resolveWorkspacePath(args[2]) : undefined);
-        if (!exported) {
-          ctx.print(`Unknown remote artifact: ${artifactId}`);
-          return;
-        }
-        ctx.print(`Exported remote bridge artifact to ${exported.path}`);
-        return;
-      }
-      if (sub === 'import') {
-        const pathArg = args[1];
-        if (!pathArg) {
-          ctx.print('Usage: /bridge import <path>');
-          return;
-        }
-        // The same registry import as /remote import, with its capability-ceiling refusal.
-        try {
-          const artifact = await remoteRegistry.importArtifact(shellPaths.resolveWorkspacePath(pathArg));
-          ctx.print(`Imported remote bridge artifact ${artifact.id} for runner ${artifact.runnerId}. Review it with /bridge review ${artifact.id}.`);
-        } catch (error) {
-          ctx.print(`Bridge import refused: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        return;
-      }
-      ctx.print(
-        'Usage: /bridge [status|pools|assign <pool> <runner>|runner <id>|review <artifactId>|export <artifactId> [path]|import <path>]',
-      );
-    },
-  });
-
   registry.register({
     name: 'release',
     description: 'Package certification and release-readiness operations',

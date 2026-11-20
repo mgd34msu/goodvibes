@@ -22,7 +22,7 @@ import { renderMcpWorkspace } from './mcp-workspace.ts';
 import { renderSessionPickerModal } from './session-picker-modal.ts';
 import { renderProfilePickerModal } from './profile-picker-modal.ts';
 import { renderBookmarkModal } from './bookmark-modal.ts';
-import { renderHelpOverlay, renderShortcutsOverlay } from './help-overlay.ts';
+import { renderShortcutsOverlay } from './shortcuts-overlay.ts';
 import { renderAutocompleteOverlay } from './autocomplete-overlay.ts';
 import { renderAgentWorkspace } from './agent-workspace.ts';
 import { renderBlockActionsMenu } from './block-actions-overlay.ts';
@@ -127,19 +127,6 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
     ['liveTail', input.liveTailModal.active, () => renderLiveTailModal(input.liveTailModal, w, h)],
     ['blockActions', input.blockActionsMenu.active, () => renderBlockActionsMenu(input.blockActionsMenu, w, h)],
     ['selection', input.selectionModal.active, () => renderSelectionModalOverlay(input.selectionModal, w, h)],
-    [
-      'help',
-      input.helpOverlayActive,
-      () =>
-        renderHelpOverlay(
-          w,
-          h,
-          context.keybindingsManager,
-          context.commandRegistry.getVisible(),
-          input.helpScrollOffset,
-          input.overlayFilters.help,
-        ),
-    ],
     [
       'shortcuts',
       input.shortcutsOverlayActive,

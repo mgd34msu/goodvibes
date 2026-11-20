@@ -30,7 +30,7 @@
  * elsewhere clears it just as fast. While the stream is open nothing re-reads
  * the list: it is read once when the stream opens or reopens (frames are not
  * replayed, so that read is what reconciles a gap), and every frame and row is
- * applied only when its `revision` is higher than the one already held for
+ * applied only when its `sequence` is higher than the one already held for
  * that approval (keyed by its node and id), so a late or repeated frame never
  * brings a settled ask back. The 15-second re-read is the fallback only: the
  * stream can be refused (no daemon, a 401, a proxy that will not hold a
@@ -165,8 +165,9 @@ function approvalRefKey(record: SharedApprovalRecord): string {
   return `${record.id}@${typeof record.homeNode === 'string' ? record.homeNode : ''}`;
 }
 
+/** Every write of a record moves its sequence: rows and frames are ordered by it. */
 function revisionOf(record: SharedApprovalRecord): number {
-  return typeof record.revision === 'number' ? record.revision : 0;
+  return typeof record.sequence === 'number' ? record.sequence : 0;
 }
 
 function isApprovalRecord(value: unknown): value is SharedApprovalRecord {
@@ -246,7 +247,7 @@ export function describeApprovalsUnavailable(snapshot: ApprovalsPanelSnapshot): 
 
 export function createApprovalsView(options: ApprovalsViewOptions): ApprovalsView {
   const pollIntervalMs = options.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;
-  /** The newest revision seen per approval, waiting or not: a frame at or below it is stale even after its row left. */
+  /** The newest sequence seen per approval, waiting or not: a frame at or below it is stale even after its row left. */
   const seen = new Map<string, number>();
   const fresh = (record: SharedApprovalRecord): boolean => {
     const revision = revisionOf(record);

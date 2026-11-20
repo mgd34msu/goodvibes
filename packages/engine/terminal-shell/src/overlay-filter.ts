@@ -1,6 +1,6 @@
 /**
- * overlay-filter.ts, the always-live search row state for the help and
- * keyboard-shortcuts overlays. Their visibility and scroll offsets are plain
+ * overlay-filter.ts, the always-live search row state for the
+ * keyboard-shortcuts overlay. Their visibility and scroll offsets are plain
  * handler fields copied through the feed context; the query lives in these
  * long-lived objects instead, shared by reference between the input route
  * (which types into it) and the renderer (which filters with it and records
@@ -21,6 +21,5 @@ export class OverlayFilter {
 
 /** One filter per overlay. */
 export class OverlayFilters {
-  public readonly help = new OverlayFilter();
   public readonly shortcuts = new OverlayFilter();
 }

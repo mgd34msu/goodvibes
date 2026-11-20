@@ -4,6 +4,7 @@ import { declaredNoticePresentation, storedRuntimeEvent } from '../runtime/runti
 import type { SystemMessagePresentation } from '../runtime/system-message-presentation.js';
 import type { SystemMessageKind, SystemMessagePriorityLevel } from '../runtime/system-message-policy.js';
 import type { RuntimeEventProvenance } from '../../events/occurrence.js';
+import { turnFailureText, type TurnFailureReading } from './turn-failure.js';
 import type { ProviderMessage, ContentPart } from '../providers/interface.js';
 import type { ToolCall, ToolHostEvidence, ToolResult } from '../types/tools.js';
 import type { ProviderRegistry } from '../providers/registry.js';
@@ -98,7 +99,9 @@ export type ConversationMessageSnapshot =
   | AssistantMessage
   | { role: 'system'; content: string; runtimeEvent?: RuntimeEventProvenance | undefined; presentation?: SystemMessagePresentation | undefined;
     /** Present when the writer declared the notice (addNotice); absent on older lines. */
-    notice?: NoticeMeta | undefined }
+    notice?: NoticeMeta | undefined;
+    /** On a turn's failure line (addTurnFailure): the reading its row is drawn from (core/turn-failure.ts). */
+    turnFailure?: TurnFailureReading | undefined }
   | {
     role: 'tool';
     callId: string;
@@ -477,10 +480,30 @@ export class ConversationManager {
    * Why a turn ended without an answer, with what to do. Stored like any
    * error notice, and declared as the turn's TURN_ERROR so the transcript
    * draws it under the turn it ended instead of only a toast or a
-   * notification. Display only; never sent to the model.
+   * notification. A reading (core/turn-failure.ts) is kept on the line, so
+   * its row is drawn from it after a restore too; its text is the line's
+   * content. The turn's retry line, when it is the last line, becomes the
+   * failure in place: the failure says how many requests failed. Display
+   * only; never sent to the model.
    */
-  public addTurnFailure(content: string): void {
-    this.addTurnStateNotice(content, 'error', TURN_FAILURE_EVENT);
+  public addTurnFailure(failure: string | TurnFailureReading): void {
+    if (typeof failure === 'string') {
+      this.addTurnStateNotice(failure, 'error', TURN_FAILURE_EVENT);
+      return;
+    }
+    const notice: NoticeMeta = Object.freeze({ level: 'error' });
+    const line: Message = { role: 'system', content: turnFailureText(failure), notice, presentation: noticePresentation(notice),
+      runtimeEvent: { type: TURN_FAILURE_EVENT }, turnFailure: structuredClone(failure) };
+    const last = this.messages.length - 1;
+    const tail = this.messages[last];
+    if (tail?.role === 'system' && tail.runtimeEvent?.type === TURN_RETRY_EVENT) {
+      this.messages[last] = line;
+      this._messagesRevision++;
+      return;
+    }
+    this.messages.push(line);
+    this._messagesRevision++;
+    this._noticeRevisions++;
   }
 
   /** Why a turn's model request failed while it is retried, with what the person can do; drawn under the turn like a failure. */

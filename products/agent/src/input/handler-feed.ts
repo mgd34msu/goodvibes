@@ -56,7 +56,6 @@ import type { FocusTracker } from '@/runtime/index.ts';
  * edit is seen by every route at once):
  *   - `prompt`, `cursorPos`, current text buffer state
  *   - `commandMode`, `indicatorFocused`, focus-mode flags
- *   - `helpOverlayActive`, `helpScrollOffset`, help overlay visibility and scroll
  *   - `shortcutsOverlayActive`, `shortcutsScrollOffset`, shortcuts overlay state
  *   - `nextPasteId`, `nextImageId`, monotonically increasing ID counters
  *   - `mouseDownRow`, `mouseDownCol`, drag-tracking coordinates
@@ -101,8 +100,6 @@ export interface InputFeedContext {
   inputScrollTop: number;
   commandMode: boolean;
   indicatorFocused: boolean;
-  helpOverlayActive: boolean;
-  helpScrollOffset: number;
   shortcutsOverlayActive: boolean;
   shortcutsScrollOffset: number;
   nextPasteId: number;

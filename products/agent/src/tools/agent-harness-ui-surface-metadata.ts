@@ -579,30 +579,6 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     },
   },
   {
-    id: 'command-browser',
-    label: 'Command Browser',
-    kind: 'picker',
-    summary: 'Searchable slash-command browser opened by commands or help.',
-    command: '/commands',
-    preferredModelRoute: `Use ${agentHarnessModes('commands', 'command')} for model-readable slash-command discovery and mode:"run_command" for confirmed command execution.`,
-    available: (context) => typeof context.executeCommand === 'function',
-    open: async (context, _args, assertCurrent) => {
-      assertCurrent?.();
-      const surface = findSurfaceById('command-browser')!;
-      if (!context.executeCommand) return routeUnavailable(surface);
-      const handled = await context.executeCommand('commands', []);
-      return handled
-        ? opened(surface, { command: '/commands' })
-        : {
-          status: 'not_opened',
-          done: false,
-          surface: surface.id,
-          kind: surface.kind,
-          note: 'The slash-command registry did not handle /commands in the current runtime.',
-        };
-    },
-  },
-  {
     id: 'file-picker',
     label: 'File Picker',
     kind: 'picker',
@@ -648,13 +624,13 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
   },
   {
     id: 'help-overlay',
-    label: 'Help Overlay',
-    kind: 'overlay',
-    summary: 'Registry-driven command and shortcut help overlay.',
+    label: 'Help',
+    kind: 'picker',
+    summary: 'Every command and keyboard shortcut in one searchable list (?, /help, /commands, Ctrl+P); Enter runs a command.',
     command: '/help',
-    preferredModelRoute: `Use ${agentHarnessModes('commands', 'command', 'shortcuts')} for model-readable discovery.`,
-    available: (context) => typeof context.openHelpOverlay === 'function',
-    open: (context) => openSimpleContextSurface(context, 'help-overlay', 'openHelpOverlay'),
+    preferredModelRoute: `Use ${agentHarnessModes('commands', 'command', 'shortcuts')} for model-readable discovery and mode:"run_command" for confirmed command execution.`,
+    available: (context) => typeof context.openCommandPalette === 'function',
+    open: (context) => openSimpleContextSurface(context, 'help-overlay', 'openCommandPalette'),
   },
   {
     id: 'shortcuts-overlay',
@@ -735,7 +711,6 @@ function uiSurfaceModelRoute(surface: UiSurfaceDefinition): string {
     case 'bookmark-modal':
     case 'context-inspector':
     case 'slash-command-mode':
-    case 'command-browser':
     case 'block-actions':
       return 'workspace action:"commands|run_command"';
     case 'process-monitor':
@@ -758,7 +733,7 @@ const UI_CALLBACK_NAMES = ['openAgentWorkspace', 'openWorkspacePicker', 'openSec
   'openSubscriptionWorkspace', 'openSettingsModal', 'openMcpWorkspace', 'openModelPicker', 'openModelPickerWithTarget',
   'openProviderPicker', 'openProviderModelPickerWithTarget', 'openReasoningEffortPicker', 'openSelection', 'openSessionPicker',
   'openProfilePicker', 'openBookmarkModal', 'openContextInspector', 'openProcessModal', 'openLiveTail', 'openConversationSearch',
-  'openPromptHistorySearch', 'openSlashCommandMode', 'executeCommand', 'openFilePicker', 'openBlockActions', 'openHelpOverlay',
+  'openPromptHistorySearch', 'openSlashCommandMode', 'executeCommand', 'openFilePicker', 'openBlockActions', 'openCommandPalette',
   'openShortcutsOverlay', 'print', 'renderRequest'] as const;
 
 function captureUiRequest(context: CommandContext, args: AgentHarnessUiSurfaceArgs, options: CatalogRankingOptions) {

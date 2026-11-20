@@ -134,11 +134,13 @@ export async function finalizeKnowledgeIngestedSource(
       const extraction = stage.extractions[0]!;
       committed = { source, extraction };
       const check = () => { assertPrepared(); stage.assertCurrent(); };
-      const draft = stagedCompileWriter(context, check);
+      // This ingest's source revision: the edges it compiles carry it, and those an older revision compiled go.
+      const from = compiledFromStamp(source, extraction);
+      const draft = stagedCompileWriter(context, check, source.id, from);
       await compileKnowledgeSourceRecords(context, source, extraction, entityHints, draft.writer, uris);
       check();
       compiled = { nodeCount: draft.nodes.size, edgeCount: draft.edges.length };
-      return { nodes: [...draft.nodes.values()], edges: draft.edges, issues: [], assertCurrent: assertPrepared };
+      return { nodes: [...draft.nodes.values()], edges: draft.edges, issues: [], assertCurrent: assertPrepared, supersedes: from };
     }, { signal }, () => {
       published = true;
       notifyKnowledgeCommitted(() => ownership.onCommitted?.(input.sourceId));
@@ -261,8 +263,7 @@ async function commitKnowledgeCompilation(context: KnowledgeIngestContext, sourc
     check();
     // The source's revision this compilation reads: every edge it writes from the
     // source carries it, and a full compilation removes what an older one wrote.
-    const from: OwnerStamp = { owner: knowledgeSourceCompileOwner(source.id),
-      revision: `${source.updatedAt}:${nextExtraction?.id ?? ''}:${nextExtraction?.updatedAt ?? ''}` };
+    const from = compiledFromStamp(source, nextExtraction);
     const draft = stagedCompileWriter(context, check, source.id, from);
     if (structuredOnly) await writeKnowledgeStructuredEntityHints(context, source, hints, draft.writer);
     else await compileKnowledgeSourceRecords(context, source, nextExtraction, hints, draft.writer, uris);
@@ -274,6 +275,11 @@ async function commitKnowledgeCompilation(context: KnowledgeIngestContext, sourc
   context.emitIfReady((bus, ctx) => emitKnowledgeCompileCompleted(bus, ctx, {
     sourceId: source.id, ...compiled,
   }), source.sessionId);
+}
+
+/** The owner and revision a source's compilation stamps on the edges it writes. */
+function compiledFromStamp(source: KnowledgeSourceRecord, extraction: KnowledgeExtractionRecord | null | undefined): OwnerStamp {
+  return { owner: knowledgeSourceCompileOwner(source.id), revision: `${source.updatedAt}:${extraction?.id ?? ''}:${extraction?.updatedAt ?? ''}` };
 }
 
 interface KnowledgeCompileWriter {

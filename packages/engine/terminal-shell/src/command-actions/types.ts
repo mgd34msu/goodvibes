@@ -60,7 +60,8 @@ export interface InputDescription {
   readonly typed:
     | { readonly position: 1 | 2 }
     /** Not typed: read from whether another input was given (a web address given means "start it at an address"). */
-    | { readonly impliedBy: { readonly input: string; readonly ifGiven: string; readonly ifNot: string } }
+    /** `orIfGiven`: further inputs, each meaning its own value when given (the first given wins; `input` is tried first). */
+    | { readonly impliedBy: { readonly input: string; readonly ifGiven: string; readonly ifNot: string; readonly orIfGiven?: readonly { readonly input: string; readonly value: string }[] | undefined } }
     /** `switchOn`: the option is a bare switch (`--keep`) whose presence means that value. `repeats`: given once per value. */
     | { readonly flag: `--${string}`; readonly repeats?: true | undefined; readonly switchOn?: string | undefined }
     | { readonly tail: true };

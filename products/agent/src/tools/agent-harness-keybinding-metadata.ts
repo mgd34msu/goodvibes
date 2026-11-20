@@ -25,7 +25,7 @@ const FIXED_KEYS: readonly { readonly key: string; readonly description: string;
   { key: 'Up / Down', description: 'Navigate input history, lists, and scrollable overlays', chords: [{ key: 'up' }, { key: 'down' }] },
   { key: 'Tab', description: 'Autocomplete slash command or file mention', chords: [{ key: 'tab' }] },
   { key: 'Esc', description: 'Close overlays, pickers, and transient input modes', chords: [{ key: 'escape' }] },
-  { key: '? / F1', description: 'Toggle help overlay', chords: [{ key: '?' }, { key: 'f1' }] },
+  { key: '?', description: 'Open help: every command and keyboard shortcut in one list', chords: [{ key: '?' }] },
   { key: 'F2', description: 'Open runtime activity monitor', chords: [{ key: 'f2' }] },
   { key: '/shortcuts', description: 'Open keyboard shortcut reference', chords: [] },
   { key: '/keybindings', description: 'List configurable keybindings and config path', chords: [] },
@@ -393,6 +393,15 @@ function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
         confirmation: 'Direct user interaction only.',
         note: 'Opens the Activity modal (running work, what needs you, what is coming up, recent activity).',
       };
+    case 'command-palette':
+      return {
+        supported: true,
+        effect: 'visible-ui-navigation',
+        preferredMode: 'run_keybinding',
+        surfaceId: 'help-overlay',
+        confirmation: 'agent_harness mode:"run_keybinding" requires current recorded Jev effect admission.',
+        note: 'Opens help: every command and keyboard shortcut in one searchable list.',
+      };
     case 'workspace-picker':
       return {
         supported: true,
@@ -518,7 +527,7 @@ function fixedShortcutModelRoute(shortcut: Record<string, string>): string {
   switch (shortcut.key) {
     case '/shortcuts': return 'workspace action:"shortcuts"';
     case '/keybindings': return 'workspace action:"keybindings"';
-    case '? / F1': return 'workspace action:"open" surfaceId:"help-overlay"';
+    case '?': return 'workspace action:"open" surfaceId:"help-overlay"';
     case 'F2': return 'workspace action:"open" surfaceId:"process-monitor"';
     case 'Tab': return 'workspace action:"commands"';
     case 'Enter':
@@ -655,6 +664,10 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
       if (!context.clearScreen) return runUnavailable(resolved.action, route, 'Clear-screen route is unavailable.');
       context.clearScreen();
       return { status: 'executed', done: true, action: resolved.action, effect: 'screen-clear', keybinding: descriptor };
+    case 'command-palette':
+      if (!context.openCommandPalette) return runUnavailable(resolved.action, route, 'Command palette route is unavailable.');
+      context.openCommandPalette();
+      return { status: 'executed', done: true, action: resolved.action, effect: 'help-opened', route: 'openCommandPalette', keybinding: descriptor };
     case 'workspace-picker':
       if (context.openWorkspacePicker) {
         context.openWorkspacePicker();

@@ -1,7 +1,6 @@
 import { createShellCoreActions } from '@goodvibes-jev/engine/terminal-shell/shell-core-actions';
 import { createBasicShellCommands, createShellNavigationCommands } from '@goodvibes-jev/engine/terminal-shell/basic-shell-commands';
 import type { CommandContext, CommandRegistry, SlashCommand } from '../command-registry.ts';
-import { runPickedCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 import type { SelectionItem } from '../selection-modal.ts';
 import { compactConversation, requireKeybindingsManager, requireProviderApi } from './runtime-services.ts';
 import { startFreshConversation } from './fresh-conversation.ts';
@@ -123,21 +122,6 @@ function registeredCommandListText(registry: CommandRegistry): string {
   ].join('\n');
 }
 
-function openRegisteredCommandSelection(registry: CommandRegistry, ctx: CommandContext, options: { includeHidden: boolean }): void {
-  const items = listRegisteredCommandItems(registry, options);
-  ctx.openSelection?.('Help  -  Commands', items, { allowSearch: true }, (result) => {
-    if (!result) return;
-    const command = result.item.id;
-    if (command.startsWith('/')) {
-      const parts = command.slice(1).trim().split(/\s+/);
-      const name = parts[0];
-      const cmdArgs = parts.slice(1);
-      // A command that needs arguments refuses with its usage; that is printed, not left unhandled.
-      void runPickedCommand(ctx.executeCommand ?? ((command, args) => registry.execute(command, args, ctx)), name, cmdArgs, (message) => ctx.print(message));
-    }
-  });
-}
-
 const coreActions = createShellCoreActions<CommandContext>(
   { requireProviderApi, requireKeybindingsManager, startFreshConversation },
   {
@@ -160,13 +144,8 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
   const basicCommands = createBasicShellCommands<CommandContext>();
   const navigation = createShellNavigationCommands<CommandContext>({
     shortcutsHidden: true,
-    shortcutsFallback: 'Use ? key or /help for shortcuts',
+    shortcutsFallback: 'Press ? for every command and keyboard shortcut.',
     quitAliases: [':q', ':wq'],
-    beforeCommands: (ctx) => {
-      if (!ctx.openSelection) return false;
-      openRegisteredCommandSelection(registry, ctx, { includeHidden: true });
-      return true;
-    },
   });
 
   registry.register(coreActions.model);
@@ -183,7 +162,7 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
     name: 'help',
     effect: 'ui-navigation',
     aliases: ['h', '?'],
-    description: 'Show available commands and keyboard shortcuts',
+    description: 'Open help: every command and keyboard shortcut in one searchable list; picking a command runs it. /help <command> shows one command\'s actions and lines',
     argsHint: '[command]',
     handler(args, ctx) {
       const named = args[0]?.replace(/^\//, '');
@@ -193,8 +172,10 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
         ctx.print(helpForCommand(command));
         return;
       }
-      if (ctx.openSelection) {
-        openRegisteredCommandSelection(registry, ctx, { includeHidden: false });
+      // `?`, /help, /commands and Ctrl+P open the same palette, built live from
+      // the registry and the key table (terminal-shell/command-palette.ts).
+      if (ctx.openCommandPalette) {
+        ctx.openCommandPalette();
         return;
       }
       ctx.print(registeredCommandListText(registry));

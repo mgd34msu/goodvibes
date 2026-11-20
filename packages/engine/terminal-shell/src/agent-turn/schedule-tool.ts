@@ -51,8 +51,8 @@ interface AgentScheduleToolArgs {
 
 const LIFECYCLE_ACTIONS: Readonly<Record<'run' | 'pause' | 'resume' | 'delete', string>> = {
   run: 'automation.schedules.run',
-  pause: 'automation.schedules.disable',
-  resume: 'automation.schedules.enable',
+  pause: 'automation.schedules.pause',
+  resume: 'automation.schedules.resume',
   delete: 'automation.schedules.delete',
 };
 

@@ -38,13 +38,15 @@ interface SplashAdditionsState extends SplashAdditionsInstall {
   drawn: { readonly prompts: readonly string[]; readonly rows: readonly { readonly row: number; readonly prompt: string }[] } | null;
   /** The next prompt Tab puts in the composer. */
   nextPrompt: number;
+  /** "You're set" was said on the status bar because its line did not fit. */
+  setFlashed: boolean;
 }
 
 let state: SplashAdditionsState | null = null;
 
 export function installSplashAdditions(install: SplashAdditionsInstall): void {
   state?.words?.stop();
-  state = { ...install, firstRun: state?.firstRun, words: null, drawn: null, nextPrompt: 0 };
+  state = { ...install, firstRun: state?.firstRun, words: null, drawn: null, nextPrompt: 0, setFlashed: false };
 }
 
 export function setFirstRunScreen(screen: FirstRunScreen | undefined): void {
@@ -77,6 +79,22 @@ export function readSplashAdditions(): SplashAdditionsView | null {
     asksBefore: firstRun?.kind === 'set' ? state.words?.current().asksBefore : undefined,
     setupCommand: state.setupCommand,
   };
+}
+
+/**
+ * The "You're set" line did not fit under the splash: the line the status bar
+ * flashes instead, once per first run (null after that, or when there is none).
+ */
+export function takeSetFlash(): string | null {
+  if (!state || state.setFlashed || state.firstRun?.kind !== 'set') return null;
+  state.setFlashed = true;
+  return `You're set: answering with ${state.firstRun.model}`;
+}
+
+/** Ask for a frame (after the one being drawn). */
+export function requestSplashRender(): void {
+  const render = state?.renderRequest;
+  if (render) queueMicrotask(render);
 }
 
 /** Record what the last frame drew (the prompts and the viewport row of each), or null when none. */

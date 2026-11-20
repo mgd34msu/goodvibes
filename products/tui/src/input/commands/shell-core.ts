@@ -1,8 +1,6 @@
 import { createShellCoreActions } from '@goodvibes-jev/engine/terminal-shell/shell-core-actions';
 import { createBasicShellCommands, createShellNavigationCommands } from '@goodvibes-jev/engine/terminal-shell/basic-shell-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { runPickedCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
-import type { SelectionItem } from '../selection-modal.ts';
 import { executeCommitAll } from './quit-shared.ts';
 import { startFreshConversation } from './fresh-conversation.ts';
 import { CompactBusyError, compactConversation, requireKeybindingsManager, requireProviderApi, requireSessionMemoryStore } from './runtime-services.ts';
@@ -43,7 +41,7 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
   const basicCommands = createBasicShellCommands<CommandContext>();
   const navigation = createShellNavigationCommands<CommandContext>({
     shortcutsHidden: false,
-    shortcutsFallback: 'Use /commands for shortcuts',
+    shortcutsFallback: 'Press ? for every command and keyboard shortcut.',
     quitAliases: [':q', ':wq', 'exit'],
   });
 
@@ -108,7 +106,7 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'help',
     aliases: ['h', '?'],
-    description: 'Browse every command with its description; picking one runs it. /help <command> shows one command\'s actions and lines',
+    description: 'Open help: every command and keyboard shortcut in one searchable list; picking a command runs it. /help <command> shows one command\'s actions and lines',
     argsHint: '[command]',
     handler(args, ctx) {
       const named = args[0]?.replace(/^\//, '');
@@ -118,38 +116,16 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
         ctx.print(helpForCommand(command));
         return;
       }
-      // Generated live from the command registry, never a hand-maintained
-      // list, so /help can never drift from the real command set. Category
-      // labels come from the same single source of truth as the generated
-      // reference and the palette (ctx.getCommandCategories; see its doc for
-      // why it is threaded through the context rather than imported here).
+      // `?`, /help, /commands and Ctrl+P open the same palette, built live from
+      // the registry and the key table (terminal-shell/command-palette.ts).
+      if (ctx.openCommandPalette) {
+        ctx.openCommandPalette();
+        return;
+      }
       const commands = registry
         .getAll()
         .slice()
         .sort((a, b) => a.name.localeCompare(b.name));
-      if (ctx.openSelection) {
-        const categoryByName = ctx.getCommandCategories?.() ?? new Map<string, string>();
-        const items: SelectionItem[] = commands.map((cmd) => {
-          const argsHint = cmd.argsHint ?? cmd.usage;
-          const aliases = cmd.aliases ?? [];
-          return {
-            id: cmd.name,
-            label: argsHint ? `/${cmd.name} ${argsHint}` : `/${cmd.name}`,
-            detail: aliases.length > 0 ? `${cmd.description} [aka ${aliases.map((a) => `/${a}`).join(', ')}]` : cmd.description,
-            category: categoryByName.get(cmd.name) ?? 'Other',
-          };
-        });
-        // every item here is a command, and picking one RUNS it, label
-        // the verb "Run" (matching the slash-command palette) instead of the
-        // generic "Select" default.
-        ctx.openSelection('Help: Commands', items, { allowSearch: true, primaryVerbLabel: 'Run' }, (result) => {
-          if (!result) return;
-          const name = result.item.id;
-          // A command that needs arguments refuses with its usage; that is printed, not left unhandled.
-          void runPickedCommand(ctx.executeCommand ?? ((command, args) => registry.execute(command, args, ctx)), name, [], (message) => ctx.print(message));
-        });
-        return;
-      }
       ctx.print(
         [
           'Commands:',

@@ -19,7 +19,8 @@ import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/t
 import { SurfaceCanvas } from './surface-kit.js';
 import { activeTokens } from './theme.js';
 import { drawSegments, wrapSegments, type StyledSegment } from './first-run.js';
-import { readSplashAdditions, recordDrawnPrompts } from '../first-run/splash-state.js';
+import { readSplashAdditions, recordDrawnPrompts, requestSplashRender, takeSetFlash } from '../first-run/splash-state.js';
+import { getSharedModeFlash } from '../session-permission-mode.js';
 
 const isBlank = (line: Line): boolean => line.every((cell) => cell.char === ' ' || cell.char === '');
 
@@ -98,8 +99,15 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
   let y = last + 1;
   const t = activeTokens();
   const drawnPrompts: { row: number; prompt: string }[] = [];
-  for (const block of blocks) {
-    if (block.rows.length > room) continue;
+  for (const [index, block] of blocks.entries()) {
+    if (block.rows.length > room) {
+      // "You're set" left out: the status bar says it once instead (the mode segment's flash).
+      if (index === 0 && firstRun?.kind === 'set') {
+        const message = takeSetFlash();
+        if (message) { getSharedModeFlash().start(message); requestSplashRender(); }
+      }
+      continue;
+    }
     for (const row of block.rows) {
       const canvas = new SurfaceCanvas(width, 1);
       const end = drawSegments(canvas, left + (row.indent ?? 0), 0, row.segments);

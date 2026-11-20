@@ -223,6 +223,8 @@ export async function executeNativeHeadless(options: NativeHeadlessOptions, poli
                     // file the interactive app reads, so no stale record holds the next message back.
                     ...(journal.remove ? { remove: journal.remove.bind(journal) } : {}),
                     ...(journal.releaseTurnClaim ? { releaseTurnClaim: journal.releaseTurnClaim.bind(journal) } : {}),
+                    // A turn that ran settles its record as the interactive app does, so no claim or record is left behind.
+                    ...(journal.finishTurn ? { finishTurn: journal.finishTurn.bind(journal) } : {}),
                     ...(journal.discardUncaptured ? { discardUncaptured: journal.discardUncaptured.bind(journal) } : {}),
                     saveExecutionIntent: (binding, command, intent) => journal.saveExecutionIntent(binding, command, intent),
                     // A hosted reply needs its durable source identity recorded, as in the interactive app.

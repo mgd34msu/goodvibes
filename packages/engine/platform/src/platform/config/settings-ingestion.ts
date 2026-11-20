@@ -480,9 +480,23 @@ export function screenSettingsForIngestion(
  * full-screen renderer to capture them. The boot-exit owner reports fatal
  * failures separately through its synchronous descriptor writer.
  */
+/** Set when a full-screen app will show this process's skipped settings itself (deferIngestionNoticesToApp). */
+let shownByApp = false;
+
+/**
+ * Called by a full-screen app before its settings load: it shows every skipped
+ * setting on its own screen (announceSettingsIngestionNotices), so the stderr
+ * copy, which the full screen covers and which would read as a second notice
+ * after exit, is not written. A refusal still goes to stderr: it stops the app
+ * before any screen exists.
+ */
+export function deferIngestionNoticesToApp(): void {
+  shownByApp = true;
+}
+
 export function announceIngestionNotice(
   entry: SettingsIngestionNotice,
-  write: (line: string) => void = line => { process.stderr.write(line); },
+  write?: (line: string) => void,
 ): void {
   const fields = { file: entry.file, key: entry.key, reason: entry.reason, remedy: entry.remedy };
   if (entry.action === 'refused') logger.error('goodvibes settings: a setting could not be ingested', fields);
@@ -490,9 +504,9 @@ export function announceIngestionNotice(
   // A refusal stops the program, so it is said every time, with its remedy.
   // A skipped setting is said once per tree, in one short line: not
   // again by the next command, the next program or the next settings reload.
-  if (entry.action !== 'refused' && !firstMention(entry)) return;
+  if (entry.action !== 'refused' && (write === undefined && shownByApp || !firstMention(entry))) return;
   try {
-    write(`${describeIngestionNotice(entry)}\n`);
+    (write ?? (line => { process.stderr.write(line); }))(`${describeIngestionNotice(entry)}\n`);
   } catch {
     // A closed or unwritable stderr must never turn a bad setting into a crash.
   }

@@ -30,6 +30,7 @@ import { renderGoodVibesCommandHelp, renderGoodVibesHelp, renderGoodVibesVersion
 import { ensureGoodvibesGitignore } from './ensure-goodvibes-gitignore.ts';
 import { parseDeepLink } from '../input/commands/deep-link.ts';
 import { registerSelfAcpCommand } from '../self-acp-command.ts';
+import { deferIngestionNoticesToApp } from '@goodvibes-jev/engine/platform/platform/config';
 
 export type PreparedShellCliRuntime = {
   readonly cli: ReturnType<typeof parseGoodVibesCli>;
@@ -106,6 +107,8 @@ export async function prepareShellCliRuntime(
       "[goodvibes] git now ignores '.goodvibes/' in this clone (.git/info/exclude; your .gitignore is unchanged): it holds transient TUI state (logs, session cache, exec output), not project source.",
     );
   }
+  // The full-screen app shows skipped settings itself; stderr would repeat them under it.
+  if (cli.command === 'tui') deferIngestionNoticesToApp();
   const configManager = new TuiConfigManager({
     workingDir: bootstrapWorkingDir,
     homeDir: bootstrapHomeDirectory,

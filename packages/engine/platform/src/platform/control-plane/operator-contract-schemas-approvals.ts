@@ -68,6 +68,7 @@ const APPROVAL_ACTION_NAMES = ['claim', 'approve', 'deny', 'amend', 'cancel'] as
 export const APPROVAL_READING_SCHEMA = objectSchema({
   ref: objectSchema({ node: STRING_SCHEMA, id: STRING_SCHEMA }, ['node', 'id']),
   revision: NUMBER_SCHEMA,
+  sequence: NUMBER_SCHEMA,
   phase: enumSchema(['waiting', 'decided', 'ended']),
   status: APPROVAL_STATUS_SCHEMA,
   reason: enumSchema([
@@ -105,7 +106,7 @@ export const APPROVAL_READING_SCHEMA = objectSchema({
   }, ['kind', 'mine']),
   work: objectSchema({ state: enumSchema(['not-reported']), callId: STRING_SCHEMA, sessionId: STRING_SCHEMA }, ['state', 'callId']),
   next: arraySchema(objectSchema({ move: enumSchema(['wait', 'decide', 'refresh', 'raise-again', 'nothing']), text: STRING_SCHEMA }, ['move', 'text'])),
-}, ['ref', 'revision', 'phase', 'status', 'reason', 'allowedActions', 'refusedActions', 'receipt', 'requester', 'work', 'next']);
+}, ['ref', 'revision', 'sequence', 'phase', 'status', 'reason', 'allowedActions', 'refusedActions', 'receipt', 'requester', 'work', 'next']);
 
 // Why an approval action was not applied: a stable code (APPROVAL_SETTLED,
 // APPROVAL_CHANGED, APPROVAL_EXPIRED, OWNER_DECISION_REQUIRED, ILLEGAL_TRANSITION,
@@ -142,8 +143,10 @@ const SHARED_APPROVAL_RECORD_PROPERTIES = {
   //, a daemon-hosted run's workspace-trust question is raised with a timeout,
   // so the first hosted ask made every surface's approvals list unreadable.
   expiresAt: NUMBER_SCHEMA,
-  // 1 when raised, +1 on every applied transition: an action sends the revision it read as `expectedRevision`.
+  // 1 when raised, +1 on a claim, a decision or an end (never on a note or a hold): an action sends it as `expectedRevision`.
   revision: NUMBER_SCHEMA,
+  // 1 when raised, +1 on every write of the record, notes and holds included: update frames are ordered by it.
+  sequence: NUMBER_SCHEMA,
   // The node whose broker owns and decides the record: the daemon's cluster node id.
   homeNode: STRING_SCHEMA,
   requester: APPROVAL_REQUESTER_SCHEMA,
@@ -152,7 +155,7 @@ const SHARED_APPROVAL_RECORD_PROPERTIES = {
   metadata: METADATA_SCHEMA,
   audit: arraySchema(SHARED_APPROVAL_AUDIT_SCHEMA),
 };
-const SHARED_APPROVAL_RECORD_REQUIRED = ['id', 'callId', 'status', 'request', 'createdAt', 'updatedAt', 'revision', 'homeNode', 'requester', 'metadata', 'audit'];
+const SHARED_APPROVAL_RECORD_REQUIRED = ['id', 'callId', 'status', 'request', 'createdAt', 'updatedAt', 'revision', 'sequence', 'homeNode', 'requester', 'metadata', 'audit'];
 
 export const SHARED_APPROVAL_RECORD_SCHEMA = objectSchema(SHARED_APPROVAL_RECORD_PROPERTIES, SHARED_APPROVAL_RECORD_REQUIRED);
 

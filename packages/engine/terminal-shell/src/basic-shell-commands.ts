@@ -33,11 +33,10 @@ export function createShellNavigationCommands<
   Context extends {
     print(text: string): void;
     exit(): void;
-    readonly openHelpOverlay?: (() => void) | undefined;
+    readonly openCommandPalette?: (() => void) | undefined;
     readonly openShortcutsOverlay?: (() => void) | undefined;
   },
 >(policy: {
-  readonly beforeCommands?: ((context: Context) => boolean) | undefined;
   readonly shortcutsHidden: boolean;
   readonly shortcutsFallback: string;
   readonly quitAliases: string[];
@@ -47,14 +46,13 @@ export function createShellNavigationCommands<
       name: 'commands',
       effect: 'ui-navigation',
       aliases: ['cmds'],
-      description: 'Browse all commands in a scrollable list',
+      description: 'Open help: every command and keyboard shortcut in one searchable list (the same list as ? and /help)',
       handler(_args, context) {
-        if (policy.beforeCommands?.(context)) return;
-        if (context.openHelpOverlay) {
-          context.openHelpOverlay();
+        if (context.openCommandPalette) {
+          context.openCommandPalette();
           return;
         }
-        context.print('Use /help for interactive command list');
+        context.print('Use /help <command> for one command\'s actions and lines.');
       },
     },
     shortcuts: {

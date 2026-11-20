@@ -79,7 +79,6 @@ export interface TerminalCommandShellUiOpeners<Target extends ModelPickerTarget>
   openBookmarkModal?: () => void;
   jumpToBookmark?: (key: string) => void;
   scrollToLine?: (line: number) => void;
-  openHelpOverlay?: () => void;
   openSelection?: OpenSelection;
   /** Opens settings at `target`; the outcome says where it landed (`not-found`: the text became the search). */
   openSettingsModal?: (target?: string) => SettingsTargetOutcome | 'unreported' | void;

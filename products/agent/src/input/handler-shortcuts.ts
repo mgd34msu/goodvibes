@@ -35,6 +35,11 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
           state.requestRender();
           return true;
 
+        case 'command-palette':
+          state.commandContext?.openCommandPalette?.();
+          state.requestRender();
+          return true;
+
         case 'workspace-picker':
           state.commandContext?.openWorkspacePicker?.();
           state.requestRender();

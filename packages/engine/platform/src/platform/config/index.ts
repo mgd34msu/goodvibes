@@ -64,6 +64,7 @@ export {
   SAFETY_GATE_CONFIG_PREFIXES,
   SettingsIngestionRefusal,
   announceIngestionNotice,
+  deferIngestionNoticesToApp,
   describeIngestionNotice,
   ingestSettingsFile,
   isSafetyGateConfigKey,

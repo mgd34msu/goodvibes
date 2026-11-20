@@ -93,8 +93,6 @@ export function handleSearchModeToken(state: SearchRouteState, token: InputToken
     return true;
 }
 type OverlayRouteState = {
-    helpOverlayActive: boolean;
-    helpScrollOffset: number;
     shortcutsOverlayActive: boolean;
     shortcutsScrollOffset: number;
     /** The overlays' always-live search rows (absent in minimal test states). */
@@ -126,25 +124,6 @@ function routeFilteredOverlayKey(token: InputToken, offset: number, filter: Over
     return offset;
 }
 export function handleOverlayToken(state: OverlayRouteState, token: InputToken): boolean {
-    if (state.helpOverlayActive) {
-        const filter = state.overlayFilters?.help;
-        if (token.type === 'key' && token.logicalName === 'escape') {
-            state.handleEscape();
-            return true;
-        }
-        // '?' toggles help closed, but only while the query is empty; once
-        // something is typed, '?' is just another character.
-        if (token.type === 'text' && token.value === '?' && (!filter || filter.query.length === 0)) {
-            state.helpOverlayActive = false;
-            state.helpScrollOffset = 0;
-            filter?.clear();
-        }
-        else {
-            state.helpScrollOffset = routeFilteredOverlayKey(token, state.helpScrollOffset, filter);
-        }
-        state.requestRender();
-        return true;
-    }
     if (state.shortcutsOverlayActive) {
         if (token.type === 'key' && token.logicalName === 'escape') {
             state.handleEscape();

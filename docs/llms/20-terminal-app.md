@@ -1835,7 +1835,7 @@ Records that match a turn can be added to the model's context; `/recall explain 
 | `add <class> <summary> [--scope <scope>] [--detail <text>] [--tags <t,t>] [--session <id>] [--task <id>] [--file <path>]` | Add a record: `[recall] Added decision: <id>`. |
 | `capture incident <id\|latest>`, `capture policy`, `capture mcp <server>`, `capture plugin <name>` | Store a forensics incident, the latest policy review, or an MCP server's or plugin's trust posture as a record. |
 | `search [query] [--semantic] [--cls <class>] [--scope <scope>] [--limit <n>]` | Full-text search, or vector search with `--semantic`. |
-| `vector [status\|doctor\|rebuild]` | Inspect or rebuild the vector index. |
+| `vector [status\|doctor\|rebuild]` | Inspect or rebuild the vector index. Each stored vector records the embedding space it was made in (provider, model and width); a search compares only vectors of the current space, so after `provider.embeddingProvider` or its model changes, `status` shows `awaiting re-embedding: <n>` and semantic search says how many memories it left out until `rebuild` re-embeds them. |
 | `get <id>` | One record with provenance and links. |
 | `edit <id> [--summary <text>] [--detail <text>] [--tags <t,t>] [--scope <session\|project\|team>]` | Correct a record in place: each option given replaces that field, the rest (class, provenance, links, review state) stay. `[recall] Edited <id> (summary, tags): <summary>`; an unknown id: `[recall] Record not found: <id>. Nothing was changed.` |
 | `link <fromId> <toId> <relation>` | Link two records. |

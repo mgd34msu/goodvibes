@@ -21,7 +21,7 @@ import { renderMcpWorkspace } from './mcp-workspace.ts';
 import { renderSessionPickerModal } from './session-picker-modal.ts';
 import { renderProfilePickerModal } from './profile-picker-modal.ts';
 import { renderBookmarkModal } from './bookmark-modal.ts';
-import { renderHelpOverlay, renderShortcutsOverlay } from './help-overlay.ts';
+import { renderShortcutsOverlay } from './shortcuts-overlay.ts';
 import { renderBlockActionsMenu } from './block-actions-overlay.ts';
 import { renderAutocompleteOverlay } from './autocomplete-overlay.ts';
 import { renderOnboardingWizard } from './onboarding/onboarding-wizard.ts';
@@ -127,19 +127,6 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
       () => renderContextInspector(context.conversation, w, h, context.contextWindow, input.contextInspectorModal, context.providerInputTokens ?? 0),
     ],
     ['selection', input.selectionModal.active, () => renderSelectionModalOverlay(input.selectionModal, w, h)],
-    [
-      'help',
-      input.helpOverlayActive,
-      () =>
-        renderHelpOverlay(
-          w,
-          h,
-          context.keybindingsManager,
-          context.commandRegistry.getAll(),
-          input.helpScrollOffset,
-          input.overlayFilters.help,
-        ),
-    ],
     [
       'shortcuts',
       input.shortcutsOverlayActive,

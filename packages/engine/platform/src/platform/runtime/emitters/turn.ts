@@ -11,7 +11,7 @@
 import { createEventEnvelope } from '../events/envelope.js';
 import type { RuntimeEventBus } from '../events/index.js';
 import type { EmitterContext } from './index.js';
-import type { TurnInputOrigin } from '../../../events/turn.js';
+import type { TurnEvent, TurnInputOrigin } from '../../../events/turn.js';
 import type { PartialToolCall } from '../../providers/interface.js';
 import { getCostOrigin } from '../cost/cost-origin.js';
 
@@ -201,20 +201,7 @@ export function emitTurnCompleted(
 export function emitTurnError(
   bus: RuntimeEventBus,
   ctx: EmitterContext,
-  data: {
-    turnId: string;
-    error: string;
-    status?: number | undefined;
-    code?: string | undefined;
-    stopReason:
-      | 'preflight_failed'
-      | 'context_overflow'
-      | 'provider_exhausted'
-      | 'provider_error'
-      | 'hook_denied'
-      | 'tool_loop_circuit_breaker'
-      | 'unexpected_error';
-  }
+  data: Omit<Extract<TurnEvent, { type: 'TURN_ERROR' }>, 'type'>,
 ): void {
   bus.emit('turn', createEventEnvelope('TURN_ERROR', { type: 'TURN_ERROR', ...data }, ctx));
 }

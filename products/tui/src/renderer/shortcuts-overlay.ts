@@ -29,7 +29,7 @@ const HARDCODED_ROWS: ReadonlyArray<readonly [string, string]> = [
   ['Esc', 'Close overlay / clear prompt / leave an agent or process view / interrupt main'],
   ['Shift+Tab', 'Cycle permission mode; with session chips showing and an empty composer, the previous session'],
   ['F2', 'Open Agents'],
-  ['?  or  /help', 'Open the command browser (search & run any command)'],
+  ['?  or  /help', 'Help: every command and keyboard shortcut'],
   // Precedence: a partial path under the cursor claims Tab for completion,
   // otherwise it collapses or expands the nearest block.
   ['Tab', 'Path-complete, else collapse/expand block; with session chips showing and an empty composer, the next session'],
@@ -46,8 +46,8 @@ const VIEW_ROWS: ReadonlyArray<readonly [string, string]> = [
   ['ctrl+x in view', 'Stop the agent or process shown (press twice)'],
 ];
 
-/** Every shortcut group, generated from the live keybindings table where it can be. */
-function shortcutGroups(keybindingsManager: KeybindingsManager): ShortcutGroup[] {
+/** Every shortcut group, generated from the live keybindings table where it can be; the help palette lists them last. */
+export function shortcutGroups(keybindingsManager: KeybindingsManager): ShortcutGroup[] {
   const all = keybindingsManager.getAll();
   const combos = (entry: (typeof all)[number]): string => entry.combos.map((c) => keybindingsManager.formatCombo(c)).join(', ');
   return [

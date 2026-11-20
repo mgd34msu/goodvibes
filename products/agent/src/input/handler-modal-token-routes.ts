@@ -49,8 +49,6 @@ export type ModalTokenRouteState = {
   agentWorkspace: AgentWorkspace;
   sessionPickerModal: SessionPickerModal;
   profilePickerModal: ProfilePickerModal;
-  helpOverlayActive: boolean;
-  helpScrollOffset: number;
   shortcutsOverlayActive: boolean;
   shortcutsScrollOffset: number;
   historySearch: HistorySearch;

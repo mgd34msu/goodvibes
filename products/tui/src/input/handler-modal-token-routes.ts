@@ -52,8 +52,6 @@ export type ModalTokenRouteState = {
   profilePickerModal: ProfilePickerModal;
   configModal: ConfigModal;
   onboardingWizard: OnboardingWizardController;
-  helpOverlayActive: boolean;
-  helpScrollOffset: number;
   shortcutsOverlayActive: boolean;
   shortcutsScrollOffset: number;
   historySearch: HistorySearch;

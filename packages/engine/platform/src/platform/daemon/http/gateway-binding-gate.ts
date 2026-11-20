@@ -3,7 +3,8 @@ import { grantedGatewayScopes } from '../../control-plane/method-catalog.js';
 import { missingScopeRefusal } from '@goodvibes-jev/engine/daemon-api/error-response';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import { actorHoldsScope, type Actor } from '../http-policy.js';
-import { EFFECTS, admitRules, declaredAccessRules, type EffectAdmission, type EffectId, type EffectRule } from '../../security/effect-authority.js';
+import { EFFECTS, admitRules, declaredAccessRules, type EffectAdmission, type EffectRule } from '../../security/effect-authority.js';
+import { declaredRouteDescriptor } from './route-manifest.js';
 
 type GatewayRefusal = { status: number; ok: false; body: Record<string, unknown> };
 
@@ -146,54 +147,6 @@ export function pairingTokenCaller(
   };
 }
 
-/**
- * Authenticated routes the router serves that have no catalog binding of
- * their own, each held to an effect: an alias of a cataloged path is held to
- * that path's method (`aliasOf`), anything else to the effects named here.
- * Enumerated from the router's route modules (operator.ts and the families
- * route-table.ts composes); the routes not listed need no row:
- *  - `/login`, `/logout`, `/health`, `/status`: sign-in and liveness, public by design;
- *  - `/webhook`, `/webhook/github`: authenticated by the webhook's own secret or signature;
- *  - `POST /api/v1/telemetry/otlp/v1/{logs,traces,metrics}`: authenticated by the
- *    telemetry ingest credential (telemetry-routes.ts `authenticateTelemetryIngest`),
- *    which an exporter holds instead of an operator credential, like a peer route;
- *  - `POST /api/projects/planning/{state,evaluate}`: answer 410 to everyone, nothing runs.
- */
-const UNBOUND_ROUTE_RULES: readonly {
-  readonly method: string;
-  readonly path: RegExp;
-  readonly id: string;
-  readonly aliasOf?: { readonly method: string; readonly path: string };
-  readonly effects?: readonly EffectId[];
-}[] = [
-  { method: 'GET', path: /^\/api\/control-plane\/recent-events$/, id: 'route GET /api/control-plane/recent-events', effects: ['events.control-plane'] },
-  { method: 'GET', path: /^\/api\/events$/, id: 'route GET /api/events', aliasOf: { method: 'GET', path: '/api/control-plane/events' } },
-  { method: 'GET', path: /^\/api\/sessions\/[^/]+\/events$/, id: 'route GET /api/sessions/:id/events', effects: ['sessions.inspect'] },
-  { method: 'PATCH', path: /^\/api\/channels\/policies\/[^/]+$/, id: 'route PATCH /api/channels/policies/:surface', aliasOf: { method: 'POST', path: '/api/channels/policies/x' } },
-  { method: 'GET', path: /^\/api\/knowledge\/graphql$/, id: 'route GET /api/knowledge/graphql', aliasOf: { method: 'POST', path: '/api/knowledge/graphql' } },
-  { method: 'POST', path: /^\/api\/mcp\/config\/servers\/[^/]+\/tools\/[^/]+\/(?:allow|deny)$/, id: 'route POST /api/mcp/config/servers/:server/tools/:tool/(allow|deny)', effects: ['mcp.administer', 'owner.act'] },
-  { method: 'GET', path: /^\/api\/homeassistant\/home-graph\/map$/, id: 'route GET /api/homeassistant/home-graph/map', aliasOf: { method: 'POST', path: '/api/homeassistant/home-graph/map' } },
-  { method: 'GET', path: /^\/api\/homeassistant$/, id: 'route GET /api/homeassistant', aliasOf: { method: 'GET', path: '/api/homeassistant/health' } },
-  { method: 'GET', path: /^\/api\/batch(?:\/config)?$/, id: 'route GET /api/batch', aliasOf: { method: 'GET', path: '/api/batch/runtime' } },
-  { method: 'GET', path: /^\/api\/cloudflare$/, id: 'route GET /api/cloudflare', aliasOf: { method: 'GET', path: '/api/cloudflare/status' } },
-  { method: 'GET', path: /^\/api\/cloudflare\/token\/requirements$/, id: 'route GET /api/cloudflare/token/requirements', aliasOf: { method: 'POST', path: '/api/cloudflare/token/requirements' } },
-  // The older settings and task paths, served beside their /api forms.
-  { method: 'GET', path: /^\/config(?:\/credentials)?$/, id: 'route GET /config', effects: ['config.inspect'] },
-  { method: 'POST', path: /^\/config(?:\/many|\/reset)?$/, id: 'route POST /config', effects: ['config.administer'] },
-  { method: 'GET', path: /^\/task(?:\/[^/]+)?$/, id: 'route GET /task', effects: ['tasks.read'] },
-  { method: 'POST', path: /^\/task$/, id: 'route POST /task', effects: ['tasks.administer'] },
-];
-
-/** The rules an unbound route is held to, or null when it has no row (public, own-credential or unknown). */
-function unboundRouteDescriptor(
-  catalog: Pick<GatewayMethodCatalog, 'findByHttpBinding'>, method: string, pathname: string,
-): Pick<GatewayMethodDescriptor, 'id' | 'access' | 'scopes' | 'ownerOnly' | 'effects'> | null {
-  const row = UNBOUND_ROUTE_RULES.find((entry) => entry.method === method && entry.path.test(pathname));
-  if (!row) return null;
-  if (row.aliasOf) return catalog.findByHttpBinding(row.aliasOf.method, row.aliasOf.path);
-  return { id: row.id, access: 'authenticated', scopes: [], ownerOnly: false, effects: [...(row.effects ?? [])] };
-}
-
 interface GatewayBindingGateDeps {
   readonly gatewayMethods: Pick<GatewayMethodCatalog, 'findByHttpBinding'>;
   /** The request's principal, authenticated once at the router's auth gate. */
@@ -214,7 +167,7 @@ interface GatewayBindingGateDeps {
 export function gateGatewayBinding(req: Request, deps: GatewayBindingGateDeps): Response | null {
   const pathname = new URL(req.url).pathname;
   const descriptor = deps.gatewayMethods.findByHttpBinding(req.method, pathname)
-    ?? unboundRouteDescriptor(deps.gatewayMethods, req.method, pathname);
+    ?? declaredRouteDescriptor(deps.gatewayMethods, req.method, pathname);
   if (!descriptor || descriptor.access === 'remote-peer') return null;
   const principal = deps.authenticateRequest(req)?.principal ?? null;
   // The auth gate already accepted the credential; a kind this resolver cannot describe is left to the route's own check.

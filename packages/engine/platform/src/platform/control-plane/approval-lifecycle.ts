@@ -178,7 +178,10 @@ export type ApprovalNextMove = 'wait' | 'decide' | 'refresh' | 'raise-again' | '
 /** The one reading every surface renders and every agent reads. Computed per viewer. */
 export interface ApprovalReading {
   readonly ref: ApprovalRef;
+  /** What an action names as `expectedRevision`: moves on a claim, a decision or an end, never on a note or a hold. */
   readonly revision: number;
+  /** Moves on every write of the record: what frames are ordered by. */
+  readonly sequence: number;
   /** `waiting` (pending or claimed), `decided` (approved or denied), `ended` (cancelled or expired). */
   readonly phase: 'waiting' | 'decided' | 'ended';
   readonly status: SharedApprovalStatus;
@@ -339,6 +342,7 @@ export function readApproval(record: SharedApprovalRecord, viewer: ApprovalViewe
   return {
     ref: { node: record.homeNode, id: record.id },
     revision: record.revision,
+    sequence: record.sequence,
     phase,
     status: record.status,
     reason: reasonOf(record, viewer),

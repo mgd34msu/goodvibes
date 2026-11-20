@@ -39,6 +39,12 @@ const DEFAULT_PROJECTION_SCOPES: readonly MemoryScope[] = ['project', 'team'];
 export interface MemoryProjectionOptions {
   /** Restrict projection to these scopes; defaults to project + team. */
   readonly scopes?: readonly MemoryScope[];
+  /**
+   * False when the records given are not the whole store (a capped read): a
+   * record missing from them is then not known to be gone, so no file is
+   * removed for it and no file is called an orphan. Default true.
+   */
+  readonly complete?: boolean | undefined;
 }
 
 /**
@@ -159,6 +165,8 @@ export interface MemoryProjectionWriteReport {
   readonly removed?: readonly string[] | undefined;
   /** Ids whose record is gone but whose file the user edited: the file is kept, and review lists it as an orphan. */
   readonly orphaned?: readonly string[] | undefined;
+  /** Files of records the read did not include (it was not the whole store): left as they are, not checked. */
+  readonly unchecked?: number | undefined;
   readonly committed: boolean;
 }
 
@@ -325,10 +333,17 @@ export function projectMemoryToFiles(
   const standingIds = new Set(standing.map((record) => record.id));
   const removed: string[] = [];
   const orphaned: string[] = [];
+  let unchecked = 0;
   for (const [id, lastHash] of Object.entries(previous)) {
     if (standingIds.has(id)) continue;
     const path = join(dir, recordFileName(id));
     if (!existsSync(path)) continue;
+    if (options.complete === false) {
+      // A record outside a capped read may still exist: its file is not known to be stale.
+      next[id] = lastHash;
+      unchecked += 1;
+      continue;
+    }
     if (contentHash(readFileSync(path, 'utf-8')) === lastHash) {
       unlinkSync(path);
       removed.push(id);
@@ -359,6 +374,7 @@ export function projectMemoryToFiles(
     ...(kept.length > 0 ? { kept } : {}),
     ...(removed.length > 0 ? { removed } : {}),
     ...(orphaned.length > 0 ? { orphaned } : {}),
+    ...(unchecked > 0 ? { unchecked } : {}),
     committed,
   };
 }
@@ -478,6 +494,10 @@ export function getMemoryProjection(
 export type ProjectedMemoryFiles = MemoryProjectionFile[] & {
   /** From the directory's manifest; null when it has none. Read by `diffProjectionToProposals`. */
   readonly projectedIds?: ReadonlySet<string> | null;
+  /** Ids whose file is byte for byte what the last sync wrote (by the manifest's hash): nobody edited it. */
+  readonly untouchedIds?: ReadonlySet<string>;
+  /** Ids the last sync projected whose file is there but cannot be read as a memory file (its front matter was broken). */
+  readonly unreadableIds?: ReadonlySet<string>;
 };
 
 /**
@@ -488,15 +508,25 @@ export type ProjectedMemoryFiles = MemoryProjectionFile[] & {
  */
 export function readProjectedMemoryFiles(dir: string): ProjectedMemoryFiles {
   const files: MemoryProjectionFile[] = [];
+  const manifest = existsSync(dir) ? readManifest(dir) : null;
+  const idByName = new Map(Object.keys(manifest ?? {}).map((id) => [recordFileName(id), id]));
+  const untouched = new Set<string>();
+  const unreadable = new Set<string>();
   if (existsSync(dir)) {
     for (const name of readdirSync(dir)) {
       if (!name.endsWith('.md')) continue;
       const path = join(dir, name);
-      const parsed = parseProjectedMemoryFile(path, readFileSync(path, 'utf-8'));
+      const content = readFileSync(path, 'utf-8');
+      const parsed = parseProjectedMemoryFile(path, content);
+      const projectedId = idByName.get(name);
+      if (projectedId !== undefined && manifest?.[projectedId] === contentHash(content)) untouched.add(projectedId);
       if (parsed) files.push(parsed);
+      else if (projectedId !== undefined) unreadable.add(projectedId);
     }
   }
-  return Object.defineProperty(files, 'projectedIds', { value: readProjectedMemoryIds(dir), enumerable: false });
+  Object.defineProperty(files, 'untouchedIds', { value: untouched, enumerable: false });
+  Object.defineProperty(files, 'unreadableIds', { value: unreadable, enumerable: false });
+  return Object.defineProperty(files, 'projectedIds', { value: manifest ? new Set(Object.keys(manifest)) : null, enumerable: false });
 }
 
 export type MemoryProjectionProposalKind = 'update' | 'delete';
@@ -549,13 +579,18 @@ export function diffProjectionToProposals(
   const scopes = new Set(options.scopes ?? DEFAULT_PROJECTION_SCOPES);
   const filesById = new Map(files.map((file) => [file.id, file]));
   const projectedIds = options.projectedIds !== undefined ? options.projectedIds : (files as ProjectedMemoryFiles).projectedIds;
+  // Three-way: a file still as the last sync wrote it is not an edit, however the record moved since;
+  // a file that is there but cannot be read is not a deletion.
+  const untouchedIds = (files as ProjectedMemoryFiles).untouchedIds;
+  const unreadableIds = (files as ProjectedMemoryFiles).unreadableIds;
   const proposals: MemoryProjectionProposal[] = [];
 
   for (const record of records) {
     if (!scopes.has(record.scope)) continue;
+    if (untouchedIds?.has(record.id)) continue;
     const file = filesById.get(record.id);
     if (!file) {
-      if (!projectedIds?.has(record.id)) continue;
+      if (!projectedIds?.has(record.id) || unreadableIds?.has(record.id)) continue;
       proposals.push({
         kind: 'delete',
         id: record.id,
@@ -614,6 +649,8 @@ export function findOrphanedProjectionFiles(
   files: readonly MemoryProjectionFile[],
   options: MemoryProjectionOptions = {},
 ): MemoryProjectionFile[] {
+  // A capped read cannot tell a gone record from one past the cap.
+  if (options.complete === false) return [];
   const standingIds = new Set(selectStandingRecords(records, options).map((record) => record.id));
   return files.filter((file) => !standingIds.has(file.id));
 }

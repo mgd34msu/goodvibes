@@ -20,7 +20,6 @@ type ModalRoute =
   | 'process';
 /** The key route of each tracked modal, by its name. Command mode has none: the composer routes it. */
 const MODAL_ROUTES: Readonly<Partial<Record<string, ModalRoute>>> = {
-  help: 'handleOverlayToken',
   shortcuts: 'handleOverlayToken',
   bookmark: 'handleBookmarkModalToken',
   liveTail: 'live-tail',
@@ -159,8 +158,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
     ) => boolean;
     handleOverlayToken: (
       value: {
-        helpOverlayActive: State['helpOverlayActive'];
-        helpScrollOffset: State['helpScrollOffset'];
         shortcutsOverlayActive: State['shortcutsOverlayActive'];
         shortcutsScrollOffset: State['shortcutsScrollOffset'];
         overlayFilters: State['overlayFilters'];
@@ -339,8 +336,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
   }
   function handleOverlayToken(state: State, token: InputToken): ModalTokenResult | undefined {
     const overlayState = {
-      helpOverlayActive: state.helpOverlayActive,
-      helpScrollOffset: state.helpScrollOffset,
       shortcutsOverlayActive: state.shortcutsOverlayActive,
       shortcutsScrollOffset: state.shortcutsScrollOffset,
       overlayFilters: state.overlayFilters,

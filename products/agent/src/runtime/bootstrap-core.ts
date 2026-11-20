@@ -328,7 +328,7 @@ export async function initializeBootstrapCore(
   // A rejected load must be seen: later approval operations rethrow the same
   // error with no hint of the cause, and a discarded promise reaches only the log.
   startupNotices.guard(
-    `Saved approvals could not be loaded from ${services.shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'approvals.json')}; approval requests will fail until the file is repaired or removed`,
+    `Saved approvals could not be loaded from ${services.shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'approvals.jsonl')}; approval requests will fail until the file is repaired or removed`,
     () => approvalBroker.start(),
   );
   // The session's one Google connection (made when the google tool was

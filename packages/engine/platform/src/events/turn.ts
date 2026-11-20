@@ -188,6 +188,29 @@ export type TurnEvent =
     status?: number | undefined;
     /** Machine code of the failure (a connection errno such as ECONNREFUSED), when it had one. */
     code?: string | undefined;
+    /** Requests made to the provider that failed last, for the request that failed (retries included). */
+    attempts?: number | undefined;
+    /** When each of those requests was sent, epoch ms. */
+    attemptTimes?: readonly number[] | undefined;
+    /** The display name of the provider that failed last ("OpenAI"). */
+    providerName?: string | undefined;
+    /** The provider id and model id that failed last. */
+    provider?: string | undefined;
+    model?: string | undefined;
+    /** Files the turn's successful tool calls changed before it stopped (empty: none). */
+    changedFiles?: readonly string[] | undefined;
+    /** A tool that may change things without naming files (a command) ran before it stopped. */
+    changedUnknown?: boolean | undefined;
+    /** Whether provider.fallbackModels names any model. */
+    fallbackOrderSet?: boolean | undefined;
+    /** Why the fallback order did not move the turn, when it was consulted. */
+    fallbackNote?: string | undefined;
+    /**
+     * Set when the turn was refused before any request was made (no model set
+     * up). The turn still ends with this TURN_ERROR, so every reader of how a
+     * turn ended settles it the same way (transport-core/turn-settlement.ts).
+     */
+    refusal?: 'no-provider' | 'no-model' | 'daemon-unreachable' | 'workspace-not-registered' | undefined;
   }
   /**
    * Turn was cancelled by the user or system. `requestedAt` (epoch ms) is when

@@ -5,8 +5,8 @@ import type { captureOperatorConnection } from './operator-connection-owner.js';
 const CREATED_METHODS = new Set(['automation.jobs.create', 'automation.schedules.create']);
 const SELECTED_TARGETS: Readonly<Record<string, 'jobId' | 'scheduleId'>> = {
   'automation.jobs.update': 'jobId', 'automation.jobs.enable': 'jobId', 'automation.jobs.disable': 'jobId',
-  'automation.jobs.delete': 'jobId', 'automation.schedules.enable': 'scheduleId',
-  'automation.schedules.disable': 'scheduleId', 'automation.schedules.delete': 'scheduleId',
+  'automation.jobs.delete': 'jobId', 'automation.schedules.resume': 'scheduleId',
+  'automation.schedules.pause': 'scheduleId', 'automation.schedules.delete': 'scheduleId',
 };
 export interface OperatorAutomationTarget {
   readonly wireFields: Record<string, unknown>;

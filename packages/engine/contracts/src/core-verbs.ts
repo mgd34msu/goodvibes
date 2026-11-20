@@ -85,14 +85,16 @@ export type CoreVerb = typeof CORE_VERBS[number];
  *   (PATCH) instead of the operator-method vocabulary in these three places,
  *   the HTTP method on the descriptor is unaffected, only the id's verb tail
  *   changed.
- * - `pause` / `resume`, retired as a byte-identical redundant lifecycle pair
- *   with `enable`/`disable` (automation.jobs.pause/resume -> deleted;
- *   same `{id, enabled}` output shape, same semantics). A caller-facing
- *   "pause"/"resume" user verb for that toggle should map onto
- *   `disable`/`enable` at the wire. Exact durable native recovery is a different
- *   operation, documented below; it does not enable a record or replay a run.
+ *
+ * `pause` / `resume` are not core verbs: automation.jobs.pause/resume were a
+ * byte-identical redundant pair with `enable`/`disable` and stay retired. A
+ * schedule, though, is paused and resumed in the words of `/schedule`, so the
+ * two are granted to `automation.schedules` alone (SCOPED_EXEMPT_VERB_CATEGORIES,
+ * 'schedule-actions'); anywhere else they fail the conformance lint. Exact
+ * durable native recovery is a different operation, documented below; it does
+ * not enable a record or replay a run.
  */
-export const BANNED_VERBS = ['patch', 'pause', 'resume'] as const;
+export const BANNED_VERBS = ['patch'] as const;
 
 export type BannedVerb = typeof BANNED_VERBS[number];
 
@@ -490,6 +492,13 @@ export const SCOPED_EXEMPT_VERB_CATEGORIES: Readonly<Record<string, ScopedVerbEx
     // The existing mcp.servers.remove API deletes a server registration.
     // Retain this public verb for compatibility; its alias grant applies only
     // to the MCP server registry and does not authorize removal elsewhere.
+  },
+  'schedule-actions': {
+    namespaces: ['automation.schedules'],
+    verbs: ['pause', 'resume'],
+    // automation.schedules.pause|resume carry the /schedule actions' own words
+    // ("Pause one", "Resume one"), so the terminal, the web UI and the contract
+    // say the same thing. The jobs family keeps enable/disable.
   },
   'mcp-server-actions': {
     namespaces: ['mcp.servers'],

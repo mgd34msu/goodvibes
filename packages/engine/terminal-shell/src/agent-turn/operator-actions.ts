@@ -11,8 +11,8 @@ export type AutomationActionId =
   | 'automation.runs.cancel'
   | 'automation.runs.retry'
   | 'automation.schedules.delete'
-  | 'automation.schedules.disable'
-  | 'automation.schedules.enable'
+  | 'automation.schedules.pause'
+  | 'automation.schedules.resume'
   | 'automation.schedules.run';
 export type OperatorActionId = ApprovalActionId | AutomationActionId;
 export type OperatorActionHttpMethod = 'POST' | 'DELETE';
@@ -113,8 +113,8 @@ const OPERATOR_ACTION_SPECS: Record<OperatorActionId, OperatorActionSpec> = {
   'automation.runs.cancel': { label: 'cancel automation run', targetField: 'runId' },
   'automation.runs.retry': { label: 'retry automation run', targetField: 'runId' },
   'automation.schedules.run': { label: 'run schedule', targetField: 'scheduleId' },
-  'automation.schedules.enable': { label: 'enable schedule', targetField: 'scheduleId' },
-  'automation.schedules.disable': { label: 'disable schedule', targetField: 'scheduleId' },
+  'automation.schedules.resume': { label: 'resume schedule', targetField: 'scheduleId' },
+  'automation.schedules.pause': { label: 'pause schedule', targetField: 'scheduleId' },
   'automation.schedules.delete': { label: 'delete schedule', targetField: 'scheduleId' },
 };
 

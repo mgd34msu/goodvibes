@@ -24,7 +24,7 @@ import { beginModal, finishModal, scrollCountText, type KitHint, type SurfaceLay
 import { drawList, type KitRow } from '../renderer/surface-kit-list.js';
 import { activeTokens } from '../renderer/theme.js';
 import { listByName } from './lists.js';
-import { fixedChoices, isShown, listChoices, renderTypedLine, riskWords, withoutSecrets } from './typed-line.js';
+import { fixedChoices, impliedValue, isShown, listChoices, renderTypedLine, riskWords, withoutSecrets } from './typed-line.js';
 import type { ActionDescription, ActionValues, CommandActionContext, CommandDescription, FirstScreenGroup, InputDescription } from './types.js';
 
 export type PanelResult =
@@ -136,10 +136,7 @@ export class GuidedPanel implements SurfaceModal {
       if (text !== undefined && text !== '') values[input.id] = valueFromText(input, text);
     }
     for (const input of action.inputs) {
-      if ('impliedBy' in input.typed && values[input.id] === undefined) {
-        const by = input.typed.impliedBy;
-        values[input.id] = values[by.input] ? by.ifGiven : by.ifNot;
-      }
+      if ('impliedBy' in input.typed && values[input.id] === undefined) values[input.id] = impliedValue(input.typed.impliedBy, values);
     }
     for (const input of action.inputs) {
       if (values[input.id] === undefined) {

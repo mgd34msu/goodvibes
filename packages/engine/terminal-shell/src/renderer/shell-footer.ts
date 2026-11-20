@@ -5,6 +5,7 @@ import type { ShellFooterView } from '../shell-footer-view.js';
 import { activeTokens } from './theme.js';
 import { renderComposer, COMPOSER_FIXED_ROWS } from './composer.js';
 import { renderStatusLine, type StatusAsks, type StatusChip } from './status-line.js';
+import { getSharedModeFlash } from '../session-permission-mode.js';
 import { renderThrobberLine, type ThrobberState } from './throbber.js';
 import { renderBackToBottomPill, type BackToBottomState } from './back-to-bottom.js';
 import { voiceCaptureChip } from './voice-capture-chip.js';
@@ -194,7 +195,7 @@ export function createShellFooter<Options extends SharedShellFooterOptions>(port
     // width; the composer flags are dropped first.
     const words = options.modeWords ?? null;
     const asks: StatusAsks | null = words
-      ? { chosen: words.chosen, inForce: words.inForce, because: words.because, key: options.modeKey, flash: options.modeFlash }
+      ? { chosen: words.chosen, inForce: words.inForce, because: words.because, key: options.modeKey, flash: options.modeFlash, flashMessage: getSharedModeFlash().message() ?? undefined }
       : null;
     const saysYolo = words !== null && [words.chosen, words.inForce ?? ''].some((text) => text.includes('YOLO'));
     const chips = [...safetyChips(options, !saysYolo), ...ports.flags(options)];

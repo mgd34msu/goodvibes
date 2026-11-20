@@ -65,8 +65,14 @@
   display: none;
 }
 
-.shell-header--phone .mode-chip__short {
+.shell-header--phone .status-strip__segment--button.mode-chip .mode-chip__short {
   display: inline;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shell-header--phone .mode-chip {
+  max-width: 100%;
 }
 
 .mode-chip--differs {
@@ -172,8 +178,9 @@
   }
 }
 
-/* On a phone the header is narrow: the decision-model chip keeps its icon (its name
-   is in its label and its menu) so the title is not squeezed to a letter. */
+/* On a phone the header is narrow: a menu chip keeps its icon (its name is in its
+   label and its menu) so the title is not squeezed to a letter. The mode chip
+   keeps its short words (above). */
 .shell-header--phone .status-strip__segment--button .status-strip__label {
   display: none;
 }

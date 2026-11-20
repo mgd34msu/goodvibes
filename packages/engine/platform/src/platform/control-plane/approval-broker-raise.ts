@@ -255,6 +255,7 @@ export async function raiseSharedApproval(
     createdAt: now,
     updatedAt: now,
     revision: 1,
+    sequence: 1,
     homeNode: deps.homeNode(),
     requester,
     ...(input.timeoutMs && input.timeoutMs > 0 ? { expiresAt: now + input.timeoutMs } : {}),

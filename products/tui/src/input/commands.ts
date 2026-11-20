@@ -40,7 +40,6 @@ import { registerMarketplaceRuntimeCommands } from './commands/marketplace-runti
 import { registerGuidanceRuntimeCommands } from './commands/guidance-runtime.ts';
 import { registerStateRuntimeCommands } from './commands/state-runtime.ts';
 import { registerRemoteRuntimeCommands } from './commands/remote-runtime.ts';
-import { registerTeleportRuntimeCommands } from './commands/teleport-runtime.ts';
 import { registerSubscriptionRuntimeCommands } from './commands/subscription-runtime.ts';
 import { registerHooksRuntimeCommands } from './commands/hooks-runtime.ts';
 import { registerEditorRuntimeCommands } from './commands/editor-runtime.ts';
@@ -140,7 +139,6 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Guidance', register: registerGuidanceRuntimeCommands },
   { category: 'Diagnostics', register: registerStateRuntimeCommands },
   { category: 'Remote', register: registerRemoteRuntimeCommands },
-  { category: 'Remote', register: registerTeleportRuntimeCommands },
   { category: 'Subscriptions', register: registerSubscriptionRuntimeCommands },
   { category: 'Hooks', register: registerHooksRuntimeCommands },
   { category: 'Editor', register: registerEditorRuntimeCommands },

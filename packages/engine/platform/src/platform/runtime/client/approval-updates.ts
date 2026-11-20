@@ -32,8 +32,9 @@
  *
  * ── Order and gaps ─────────────────────────────────────────────────────────
  *
- * Every record carries `revision`; a frame at or below the revision this
- * subscription already delivered for that approval is dropped. Frames are not
+ * Every record carries `sequence` (one more on every write of it); a frame at
+ * or below the sequence this subscription already delivered for that approval
+ * is dropped. Frames are not
  * replayed: after a gap or a reconnect the stream ends (`onTerminate`) and the
  * caller reads `approvals.list` once, which is the snapshot it reconciles from.
  */
@@ -57,8 +58,10 @@ export const APPROVAL_UPDATE_DOMAIN = 'gate';
 export interface ApprovalUpdateRecord {
   readonly id: string;
   readonly status?: string | undefined;
-  /** +1 on every applied transition: a frame at or below the revision already held is stale. */
+  /** What an action names as `expectedRevision`. */
   readonly revision?: number | undefined;
+  /** +1 on every write of the record: a frame at or below the sequence already held is stale. */
+  readonly sequence?: number | undefined;
   readonly decision?: {
     readonly approved?: boolean | undefined;
     readonly remember?: boolean | undefined;
@@ -147,7 +150,7 @@ export async function watchApprovalUpdates(
     // Set once the stream has ended (a gap, the source, a failure): onTerminate is told once.
     let ended = false;
     let handle: (() => void) | undefined;
-    // The newest revision delivered per approval: a frame at or below it is a late or repeated one and is
+    // The newest sequence delivered per approval: a frame at or below it is a late or repeated one and is
     // dropped, so a stale notice can never make a settled approval actionable again.
     const held = new Map<string, number>();
     const terminate = (error: unknown): void => {
@@ -164,10 +167,10 @@ export async function watchApprovalUpdates(
           if (eventName !== APPROVAL_UPDATE_WIRE_EVENT) return;
           const notice = readApprovalUpdateNotice(payload);
           if (!notice) return;
-          const revision = notice.approval.revision;
-          if (typeof revision === 'number') {
-            if ((held.get(notice.approval.id) ?? 0) >= revision) return;
-            held.set(notice.approval.id, revision);
+          const sequence = notice.approval.sequence;
+          if (typeof sequence === 'number') {
+            if ((held.get(notice.approval.id) ?? 0) >= sequence) return;
+            held.set(notice.approval.id, sequence);
           }
           try {
             options.onUpdate(notice);

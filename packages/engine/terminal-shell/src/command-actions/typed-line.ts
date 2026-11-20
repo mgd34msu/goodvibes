@@ -41,14 +41,17 @@ export function fixedChoices(input: InputDescription): readonly FixedChoice[] | 
   return Array.isArray(input.choices) ? (input.choices as readonly FixedChoice[]) : undefined;
 }
 
+/** The value an implied input takes from what was given: the first given input's meaning, else `ifNot`. */
+export function impliedValue(by: { readonly input: string; readonly ifGiven: string; readonly ifNot: string; readonly orIfGiven?: readonly { readonly input: string; readonly value: string }[] | undefined }, values: ActionValues): string {
+  if (values[by.input]) return by.ifGiven;
+  return by.orIfGiven?.find((entry) => values[entry.input])?.value ?? by.ifNot;
+}
+
 /** The values with every implied input read from what was given (a web address given means "start it at an address"). */
 export function withImplied(action: Pick<ActionShape, 'inputs'>, values: ActionValues): ActionValues {
   const out: Record<string, string> = { ...values };
   for (const input of action.inputs) {
-    if ('impliedBy' in input.typed && out[input.id] === undefined) {
-      const by = input.typed.impliedBy;
-      out[input.id] = out[by.input] ? by.ifGiven : by.ifNot;
-    }
+    if ('impliedBy' in input.typed && out[input.id] === undefined) out[input.id] = impliedValue(input.typed.impliedBy, out);
   }
   return out;
 }
@@ -108,10 +111,7 @@ export function parseTypedLine<Ctx>(description: CommandDescription<Ctx>, args: 
   const done = (): ParsedLine => {
     const given = Object.keys(values);
     for (const input of action.inputs) {
-      if ('impliedBy' in input.typed) {
-        const by = input.typed.impliedBy;
-        values[input.id] = values[by.input] ? by.ifGiven : by.ifNot;
-      }
+      if ('impliedBy' in input.typed) values[input.id] = impliedValue(input.typed.impliedBy, values);
     }
     for (const input of action.inputs) {
       if (values[input.id] === undefined && input.required !== true) values[input.id] = input.required.default;

@@ -362,7 +362,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   scope.registry.add('config hook attachment', configManager.attachHookDispatcher(hookDispatcher));
   const hookWorkbench = createHookWorkbench({ hookDispatcher, configManager });
   const approvalBroker = new ApprovalBroker({
-    storePath: resolveStatePath('control-plane', 'approvals.json'),
+    storePath: resolveStatePath('control-plane', 'approvals.jsonl'),
   });
   const sessionBroker = new SharedSessionBroker({
     storePath: roots.sessionStorePath ?? controlPlaneStorePath(shellPaths, surfaceRoot, 'sessions.json'),

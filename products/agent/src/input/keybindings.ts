@@ -8,6 +8,7 @@ export type KeyAction =
   | 'copy-selection'
   | 'clear-cancel'
   | 'screen-clear'
+  | 'command-palette'
   | 'workspace-picker'
   | 'workspace-close'
   | 'workspace-close-all'
@@ -34,6 +35,7 @@ export type KeyAction =
   | 'failure-details';
 
 export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION_DESCRIPTIONS,
+  'command-palette':       'Open help: every command and keyboard shortcut in one searchable list',
   'workspace-picker':      'Open the Agent operator workspace',
   'workspace-close':       'Close the Agent workspace',
   'workspace-close-all':   'Close the Agent workspace (alias: also bound to Ctrl+Shift+X)',
@@ -50,7 +52,7 @@ export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION
 };
 
 export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindingDefaults<KeyAction>([
-  'copy-selection', 'clear-cancel', 'screen-clear', 'workspace-picker',
+  'copy-selection', 'clear-cancel', 'screen-clear', 'command-palette', 'workspace-picker',
   'workspace-close', 'workspace-close-all', 'workspace-tab-next', 'workspace-tab-prev',
   'activity-open', 'history-search', 'search', 'block-copy',
   'bookmark', 'block-save', 'delete-word', 'line-start',
@@ -58,7 +60,9 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   'redo', 'paste', 'focus-work-tree', 'cycle-permission-mode',
   'open-notifications', 'failure-other-model', 'failure-details',
 ], {
-  'workspace-picker':      [{ key: 'p', ctrl: true }],
+  // Ctrl+P: the same help list as ? and /help, in both terminal programs.
+  'command-palette':       [{ key: 'p', ctrl: true }],
+  'workspace-picker':      [{ key: 'g', ctrl: true }],
   'workspace-close':       [{ key: 'x', ctrl: true }],
   'workspace-close-all':   [{ key: 'x', ctrl: true, shift: true }],
   'workspace-tab-next':    [{ key: ']', ctrl: true }],

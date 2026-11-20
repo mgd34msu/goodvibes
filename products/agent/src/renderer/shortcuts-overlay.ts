@@ -15,116 +15,41 @@
 import type { KeybindingsManager } from '../input/keybindings.ts';
 import type { OverlayFilter } from '../input/overlay-filter.ts';
 import { renderShortcutsOverlay as render, type ShortcutGroup } from '@goodvibes-jev/engine/terminal-shell/shortcuts-overlay';
-/** The static strings this surface can show (checked by package verification through help-overlay.ts). */
-export const SHORTCUT_OVERLAY_STATIC_TEXT = [
-  'Keyboard shortcuts',
-  'customize with /keybindings',
-  'Filter shortcuts',
-  'No shortcuts match "<query>".',
-  'Navigation',
-  'Scroll / history recall',
-  'Scroll by full page',
-  'Jump to start / end of line',
-  'Search conversation',
-  'Scroll conversation or hovered panel',
-  'Editing',
-  'Submit message',
-  'Insert newline',
-  'Open file picker',
-  'Slash command mode',
-  'Paste (image priority)',
-  'Undo / redo',
-  'Clear prompt',
-  'Delete word backward',
-  'Kill to end of line',
-  'Move to start of line',
-  'Next error / line end',
-  'Actions',
-  'Collapse/expand block',
-  'Bookmark block',
-  'Copy block to clipboard',
-  'Block file save disabled; copy or export',
-  'Copy selection',
-  'Process monitor',
-  'Help overlay',
-  'Exit',
-  'Workspace',
-  'Swap focus between input and active Agent workspace',
-  'Open the Agent operator workspace',
-  'Cycle Agent workspace category forward',
-  'Cycle Agent workspace category backward',
-  'Config: /keybindings to list and customize',
-  'Sessions',
-  'Open that agent; typing steers it',
-  "Open that process's live output",
-  'Next / prev session (empty composer)',
-  'Go up one level; stops nothing',
-  'Stop what the view shows (twice)',
-] as const;
+/** Keys that are real but are not key-table actions (context chords, literal characters). */
+const FIXED_ROWS: ReadonlyArray<readonly [string, string]> = [
+  ['Up / Down', 'Scroll / history recall'],
+  ['PageUp / PageDn', 'Scroll by full page'],
+  ['Home / End', 'Jump to start / end of line'],
+  ['Mouse wheel', 'Scroll conversation or hovered panel'],
+  ['Enter', 'Submit message'],
+  ['Shift+Enter', 'Insert newline'],
+  ['@', 'Open file picker'],
+  ['/', 'Slash command mode'],
+  ['?', 'Help: every command and keyboard shortcut'],
+  ['Tab', 'Collapse/expand block; swap focus between input and the Agent workspace'],
+  ['F2', 'Process monitor'],
+];
 
-/** Every shortcut group, from the live keybindings table (user overrides included). */
-function shortcutGroups(keybindingsManager: KeybindingsManager): ShortcutGroup[] {
-  const kb = (action: Parameters<typeof keybindingsManager.getComboLabel>[0]) => keybindingsManager.getComboLabel(action);
+/** Agent and process views (shell/session-views.ts); these keys are fixed. */
+const SESSION_ROWS: ReadonlyArray<readonly [string, string]> = [
+  ['Enter on lane', 'Open that agent; typing steers it'],
+  ['Enter on ▶ bead', "Open that process's live output"],
+  ['Tab / Shift+Tab', 'Next / prev session (empty composer)'],
+  ['Esc in a view', 'Go up one level; stops nothing'],
+  ['ctrl+x in view', 'Stop what the view shows (twice)'],
+];
+
+/**
+ * Every shortcut group, from the live keybindings table (user overrides
+ * included). The help palette lists the same groups as its last section.
+ */
+export function shortcutGroups(keybindingsManager: KeybindingsManager): ShortcutGroup[] {
+  const all = keybindingsManager.getAll();
+  const combos = (entry: (typeof all)[number]): string => entry.combos.map((c) => keybindingsManager.formatCombo(c)).join(', ');
   return [
-    {
-      title: 'Navigation',
-      items: [
-        ['Up / Down', 'Scroll / history recall'],
-        ['PageUp / PageDn', 'Scroll by full page'],
-        ['Home / End', 'Jump to start / end of line'],
-        [kb('search'), 'Search conversation'],
-        ['Mouse wheel', 'Scroll conversation or hovered panel'],
-      ],
-    },
-    {
-      title: 'Editing',
-      items: [
-        ['Enter', 'Submit message'],
-        ['Shift+Enter', 'Insert newline'],
-        ['@', 'Open file picker'],
-        ['/', 'Slash command mode'],
-        [kb('paste'), 'Paste (image priority)'],
-        [`${kb('undo')} / ${kb('redo')}`, 'Undo / redo'],
-        [kb('clear-prompt'), 'Clear prompt'],
-        [kb('delete-word'), 'Delete word backward'],
-        [kb('kill-line'), 'Kill to end of line'],
-        [kb('line-start'), 'Move to start of line'],
-        [kb('next-error-line-end'), 'Next error / line end'],
-      ],
-    },
-    {
-      title: 'Actions',
-      items: [
-        ['Tab', 'Collapse/expand block'],
-        [kb('bookmark'), 'Bookmark block'],
-        [kb('block-copy'), 'Copy block to clipboard'],
-        [kb('block-save'), 'Save block to file'],
-        [kb('copy-selection'), 'Copy selection'],
-        ['F2', 'Process monitor'],
-        ['?', 'Help overlay'],
-        [`${kb('clear-cancel')} x2`, 'Exit'],
-      ],
-    },
-    {
-      title: 'Workspace',
-      items: [
-        ['Tab', 'Swap focus between input and active Agent workspace'],
-        [kb('workspace-picker'), 'Open the Agent operator workspace'],
-        [kb('workspace-tab-next'), 'Cycle Agent workspace category forward'],
-        [kb('workspace-tab-prev'), 'Cycle Agent workspace category backward'],
-      ],
-    },
-    {
-      // Agent and process views (shell/session-views.ts); these keys are fixed.
-      title: 'Sessions',
-      items: [
-        ['Enter on lane', 'Open that agent; typing steers it'],
-        ['Enter on ▶ bead', "Open that process's live output"],
-        ['Tab / Shift+Tab', 'Next / prev session (empty composer)'],
-        ['Esc in a view', 'Go up one level; stops nothing'],
-        ['ctrl+x in view', 'Stop what the view shows (twice)'],
-      ],
-    },
+    { title: 'Navigation & editing', items: FIXED_ROWS },
+    { title: 'Actions', items: all.filter((e) => e.combos.length > 0).map((e) => [combos(e), e.description] as const) },
+    { title: 'Sessions', items: SESSION_ROWS },
   ];
 }
 

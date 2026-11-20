@@ -231,7 +231,7 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
 
         {pairingError != null && (
           <div className="banner warning" role="alert">
-            That code didn&rsquo;t work. It may have expired; run <code>goodvibes pair</code> again.
+            <span>That code didn&rsquo;t work. It may have expired; run <code>goodvibes pair</code> again.</span>
           </div>
         )}
 
@@ -306,7 +306,7 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
               {tokenError != null && (
                 <div className="banner warning" role="alert">
                   {isAuthExpiredError(tokenError)
-                    ? <>That code didn&rsquo;t work. It may have expired; run <code>goodvibes pair</code> again.</>
+                    ? <span>That code didn&rsquo;t work. It may have expired; run <code>goodvibes pair</code> again.</span>
                     : `Couldn't check that code: ${formatError(tokenError)}. Try again.`}
                 </div>
               )}

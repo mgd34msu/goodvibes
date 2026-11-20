@@ -115,7 +115,7 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
       }
     }));
   }
-  for (const method of ['automation.jobs.enable', 'automation.jobs.disable', 'automation.jobs.delete', 'automation.schedules.enable', 'automation.schedules.disable', 'automation.schedules.delete']) {
+  for (const method of ['automation.jobs.enable', 'automation.jobs.disable', 'automation.jobs.delete', 'automation.schedules.resume', 'automation.schedules.pause', 'automation.schedules.delete']) {
     disposals.push(registerCatalogHandler<unknown, unknown>(catalog, method, async ({ body, context }) => {
       const key = method.startsWith('automation.jobs.') ? 'jobId' : 'scheduleId';
       if (!isRecord(body) || typeof body[key] !== 'string' || !body[key].trim()) throw new HandlerError('An automation job id is required.', 'INVALID_ARGUMENT', 400);
@@ -137,7 +137,7 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
               if (!removed) throw new HandlerError('Automation job not found.', 'NOT_FOUND', 404);
               return { id: jobId, removed };
             }
-            const enabled = method.endsWith('.enable');
+            const enabled = method.endsWith('.enable') || method.endsWith('.resume');
             const updated = await manager.setEnabled(jobId, enabled, options);
             if (!updated) throw new HandlerError('Automation job not found.', 'NOT_FOUND', 404);
             return { id: jobId, enabled };

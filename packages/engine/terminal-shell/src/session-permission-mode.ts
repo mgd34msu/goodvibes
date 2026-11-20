@@ -67,18 +67,25 @@ const defaultScheduler: ModeFlashScheduler = (run, delayMs) => {
 /** The mode segment's flash after a change. */
 export class ModeFlash {
   private until = 0;
+  private text: string | null = null;
   /** Called when the flash ends (wired to the render request). */
   onChange: (() => void) | null = null;
   constructor(private readonly clock: () => number = Date.now, private readonly schedule: ModeFlashScheduler = defaultScheduler) { }
-  start(): void {
+  /** Flash the mode segment; with `message`, the segment shows that one line instead of the mode's words while it flashes. */
+  start(message?: string): void {
     const until = this.clock() + MODE_FLASH_MS;
     this.until = until;
+    this.text = message ?? null;
     this.schedule(() => {
       if (this.until === until) this.onChange?.();
     }, MODE_FLASH_MS);
   }
   active(): boolean {
     return this.clock() < this.until;
+  }
+  /** The line shown while the flash lasts, when it carries one. */
+  message(): string | null {
+    return this.active() ? this.text : null;
   }
 }
 

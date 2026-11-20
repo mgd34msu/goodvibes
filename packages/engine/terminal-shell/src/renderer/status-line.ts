@@ -78,6 +78,8 @@ export interface StatusAsks {
     readonly key?: string | undefined;
     /** Drawn inverse: the mode just changed (a short flash, never a transcript line). */
     readonly flash?: boolean | undefined;
+    /** While flashing, this one line replaces the words (first run's "You're set: answering with rt-1"). */
+    readonly flashMessage?: string | undefined;
 }
 /** Unread notices and the key that opens them. */
 export interface StatusNotices {
@@ -219,6 +221,7 @@ function asksWordRuns(asks: StatusAsks, form: AsksForm): Run[] {
     const paint = (text: string, fg: string, bold?: boolean): Run => flash
         ? { text, fg: t.backgroundPanel, bg: t.text, bold: true }
         : { text, fg, bold };
+    if (flash && asks.flashMessage) return [paint(asks.flashMessage, t.text, true)];
     const runs: Run[] = [paint('Asks: ', t.textFaint), paint(asks.chosen, t.textMuted, false)];
     if (asks.inForce) {
         runs.push(paint(' · ', t.textFaint), paint(asks.inForce, t.warning, true));

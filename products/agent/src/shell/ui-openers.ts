@@ -1,5 +1,7 @@
 import { createModelPickerCommandOpeners } from '@goodvibes-jev/engine/terminal-shell/model-picker-open';
-import { openCommandPaletteOn } from '@goodvibes-jev/engine/terminal-shell/command-palette';
+import { shortcutGroups } from '../renderer/shortcuts-overlay.ts';
+import { openCommandPaletteOn, type PaletteShortcut } from '@goodvibes-jev/engine/terminal-shell/command-palette';
+import type { KeybindingsManager } from '../input/keybindings.ts';
 import { runPickedCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn/provider-model';
 import { createSettingsWorkspaceOpener } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
@@ -312,6 +314,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     modals: input.surfaceModals,
     commands: () => input.commandRegistry?.getAll(),
     categories: () => new Map((input.commandRegistry?.getAll() ?? []).flatMap((command) => command.described ? [[command.name, command.described.group] as const] : [])),
+    // The keyboard shortcuts, the list's last group, from the live key table.
+    shortcuts: () => paletteShortcuts(commandContext.keybindingsManager),
     run: (name) => runPickedCommand(commandContext.executeCommand, name, [], (message) => commandContext.print(message)),
     fill: (name) => {
       input.prompt = `/${name} `;
@@ -373,4 +377,10 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
 
   // System notices: toasts plus the /notifications history (notification-surfaces.ts).
   wireNotificationSurfaces({ commandContext, input, render });
+}
+
+/** Every row of the shortcut groups, as the help palette lists them. */
+function paletteShortcuts(keybindingsManager: KeybindingsManager | undefined): readonly PaletteShortcut[] {
+  if (!keybindingsManager) return [];
+  return shortcutGroups(keybindingsManager).flatMap((group) => group.items.map(([key, description]) => ({ key, description })));
 }

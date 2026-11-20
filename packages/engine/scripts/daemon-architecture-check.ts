@@ -309,16 +309,68 @@ export function programSpawnProblems(root: string): string[] {
   return problems;
 }
 
+
+/** A path a route regex matches, for each alternative of a `(a|b)` group: `([^/]+)` becomes `x1`. */
+function routeSamples(source: string): string[] {
+  const alternation = /\(((?:[a-z-]+\|)+[a-z-]+)\)/.exec(source);
+  if (alternation) return alternation[1]!.split('|').flatMap((option) => routeSamples(source.replace(alternation[0], option)));
+  return [source.replace(/^\^/, '').replace(/\$$/, '').replace(/\\\//g, '/').replace(/\(\[\^\/\]\+\)/g, 'x1')
+    .replace(/\(\?:[^)]*\)\??/g, '').replace(/\(\.\+\)/g, 'x1/x2').replace(/\\\./g, '.')];
+}
+
+/** Every method and path the daemon's route dispatchers match: literal `pathname === '...'` tests and `pathname.match(/.../)` patterns with the methods tested beside them. */
+export function dispatchedDaemonRoutes(root: string): { readonly method: string; readonly path: string; readonly at: string }[] {
+  const engine = resolve(root, 'packages/engine');
+  const files = [resolve(engine, 'daemon-api/src'), resolve(engine, 'platform/src/platform/daemon/http'), resolve(engine, 'platform/src/platform/daemon')]
+    .flatMap((dir) => readdirSync(dir).filter((name) => name.endsWith('.ts')).map((name) => resolve(dir, name)));
+  const routes: { method: string; path: string; at: string }[] = [];
+  for (const file of files) {
+    const lines = readFileSync(file, 'utf8').split('\n');
+    const patterns = new Map<string, string[]>();
+    lines.forEach((text, index) => {
+      const at = `${relative(root, file)}:${index + 1}`;
+      // A prefix test (`=== '/api/x' || startsWith('/api/x/')`) hands a family to its own dispatcher, whose routes are read there.
+      const familyGate = /startsWith\(/.test(text) && !/method ===/.test(text);
+      for (const match of familyGate ? [] : text.matchAll(/pathname === '(\/[^']*)'(?:\s*&&\s*(?:req\.)?method === '([A-Z]+)')?/g)) {
+        const methods = match[2] ? [match[2]] : [...text.matchAll(/method === '([A-Z]+)'/g)].map((m) => m[1]!);
+        for (const method of methods.length ? methods : ['*']) routes.push({ method, path: match[1]!, at });
+      }
+      const declared = /const (\w+) = (?:url\.)?pathname\.match\(\/(.*)\/\);?/.exec(text);
+      if (declared) patterns.set(declared[1]!, routeSamples(declared[2]!));
+      for (const [name, paths] of patterns) {
+        if (declared?.[1] === name || !new RegExp(`\\b${name}\\b`).test(text)) continue;
+        for (const method of [...text.matchAll(/method === '([A-Z]+)'/g)].map((m) => m[1]!)) for (const path of paths) routes.push({ method, path, at });
+      }
+    });
+  }
+  return routes;
+}
+
+/** Routes the dispatchers serve that are neither a catalog method's binding nor declared in daemon/http/route-manifest.ts. */
+export async function undeclaredRouteProblems(root: string): Promise<string[]> {
+  const { GatewayMethodCatalog } = await import(resolve(root, 'packages/engine/platform/src/platform/control-plane/method-catalog.ts'));
+  const { declaredRoute } = await import(resolve(root, 'packages/engine/platform/src/platform/daemon/http/route-manifest.ts'));
+  const catalog = new GatewayMethodCatalog();
+  const problems = new Set<string>();
+  for (const route of dispatchedDaemonRoutes(root)) {
+    const methods = route.method === '*' ? ['GET', 'POST'] : [route.method];
+    if (methods.every((method) => catalog.findByHttpBinding(method, route.path) || declaredRoute(method, route.path))) continue;
+    problems.add(`route ${route.method} ${route.path} (${route.at}) has no catalog method and no entry in platform/src/platform/daemon/http/route-manifest.ts; bind it to a method or declare its effect or the reason it needs none`);
+  }
+  return [...problems];
+}
+
 if (import.meta.main) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
   const input = daemonArchitecture(root);
   const tui = tuiArchitecture(root);
-  const problems = [...runtimeArchitectureProblems(input), ...clusterPackageImportProblems(root), ...agentArchitectureProblems(root), ...tuiArchitectureProblems(root), ...programSpawnProblems(root)];
+  const problems = [...runtimeArchitectureProblems(input), ...clusterPackageImportProblems(root), ...agentArchitectureProblems(root), ...tuiArchitectureProblems(root), ...programSpawnProblems(root), ...await undeclaredRouteProblems(root)];
   if (problems.length) { console.error(problems.join('\n')); process.exitCode = 1; }
   else {
     console.log(`Daemon architecture: ${input.files.length} runtime files, four non-vacuous boundaries (the cluster one also checked through the package specifier), no relative runtime cycles.`);
     console.log(`Agent architecture: ${agentArchitecture(root).files.length} runtime files, four non-vacuous layer boundaries, no TUI source imports.`);
     console.log(`TUI architecture: ${tui.files.length} runtime files, ${tui.rules.length} non-vacuous layer boundaries, no runtime cycles (relative or @/ imports).`);
     console.log(`Process spawns: ${PRODUCT_PROGRAM_SPAWN_FILES.size} reviewed platform files; every other program starts through runContained.`);
+    console.log(`Daemon routes: ${dispatchedDaemonRoutes(root).length} dispatched; each is a catalog method or declared in route-manifest.ts.`);
   }
 }

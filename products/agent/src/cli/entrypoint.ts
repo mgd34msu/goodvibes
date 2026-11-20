@@ -31,6 +31,7 @@ import { renderGoodVibesCommandHelp, renderGoodVibesHelp, renderGoodVibesVersion
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { writeExitingStdoutLine, writeFatalLine } from '../utils/fatal-boot-write.ts';
 import { AgentProfileUsageError, resolveAgentRuntimeProfileHome, resolveSelectedAgentRuntimeProfileHome } from '../agent/runtime-profile.ts';
+import { deferIngestionNoticesToApp } from '@goodvibes-jev/engine/platform/platform/config';
 
 function readEnvRuntimeUrl(): { readonly source: string; readonly value: string } | null {
   const runtimeUrl = process.env['GOODVIBES_AGENT_RUNTIME_URL'];
@@ -106,6 +107,8 @@ export async function prepareShellCliRuntime(
   }
   const { workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory } = ownership;
   configureActivityLogger(join(bootstrapWorkingDir, '.goodvibes', 'logs'));
+  // The full-screen app shows skipped settings itself; stderr would repeat them under it.
+  if (cli.command === 'tui') deferIngestionNoticesToApp();
   const configManager = new AgentConfigManager({
     workingDir: bootstrapWorkingDir,
     homeDir: bootstrapHomeDirectory,

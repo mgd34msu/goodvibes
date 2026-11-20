@@ -7,8 +7,6 @@ export interface FeedContextMutableInit {
   inputScrollTop: number;
   commandMode: boolean;
   indicatorFocused: boolean;
-  helpOverlayActive: boolean;
-  helpScrollOffset: number;
   shortcutsOverlayActive: boolean;
   shortcutsScrollOffset: number;
   nextPasteId: number;
@@ -82,8 +80,6 @@ const MUTABLE_KEYS = [
   'inputScrollTop',
   'commandMode',
   'indicatorFocused',
-  'helpOverlayActive',
-  'helpScrollOffset',
   'shortcutsOverlayActive',
   'shortcutsScrollOffset',
   'nextPasteId',

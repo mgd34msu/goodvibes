@@ -70,7 +70,7 @@ export interface RetainedAutomationJobTarget {
 
 const SELECTED_JOB_METHODS = new Set([
   'automation.jobs.update', 'automation.jobs.enable', 'automation.jobs.disable', 'automation.jobs.delete',
-  'automation.schedules.enable', 'automation.schedules.disable', 'automation.schedules.delete',
+  'automation.schedules.resume', 'automation.schedules.pause', 'automation.schedules.delete',
 ]);
 
 /**

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { PersistentStore } from '../state/persistent-store.js';
+import { openRecordLog, type RecordLog } from '../state/record-log.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
 import { WITHHELD_PROMPT_ANSWER, type PermissionPromptDecision, type PermissionPromptRequest, type PermissionRequestHandler } from '../permissions/prompt.js';
 import { buildDurableRuleForDecision, compileRules, type CompiledRuleMatch } from '../permissions/approval-rules.js';
@@ -56,8 +56,15 @@ export interface SharedApprovalRecord {
   readonly requiresOwnerDecision?: true | undefined;
   readonly createdAt: number;
   readonly updatedAt: number;
-  /** 1 when raised, +1 on every applied transition. An action presents the revision it read (`expectedRevision`). */
+  /**
+   * 1 when raised, +1 on every change of what can be decided (a claim, a
+   * decision, an end). An action presents the revision it read
+   * (`expectedRevision`). A note about the ask (a prompt that could not be
+   * delivered, a remote run's report) or a raiser's hold does not move it.
+   */
   readonly revision: number;
+  /** 1 when raised, +1 on every write of the record, notes and holds included: what update frames are ordered by. */
+  readonly sequence: number;
   /** The node whose broker owns this record and decides it: the daemon's cluster node id, `local` outside a daemon. */
   readonly homeNode: string;
   /** Who waits for the answer; what the reading's receipt is read from. */
@@ -81,9 +88,6 @@ export interface SharedApprovalRecord {
   readonly audit: readonly SharedApprovalAuditRecord[];
 }
 
-interface SharedApprovalStoreSnapshot extends Record<string, unknown> {
-  readonly approvals: readonly SharedApprovalRecord[];
-}
 
 export interface RequestSharedApprovalInput {
   readonly request: PermissionPromptRequest;
@@ -243,6 +247,7 @@ function decodeStoredApproval(value: unknown): SharedApprovalRecord {
     || !isFiniteNumber(value['createdAt'])
     || !isFiniteNumber(value['updatedAt'])
     || !Number.isInteger(value['revision']) || (value['revision'] as number) < 1
+    || !Number.isInteger(value['sequence']) || (value['sequence'] as number) < 1
     || typeof value['homeNode'] !== 'string' || value['homeNode'].length === 0
     || !isRecord(value['metadata'])
     || !Array.isArray(value['audit'])
@@ -360,8 +365,28 @@ interface PlannedTransition {
   readonly ownerCheck?: (() => void) | undefined;
 }
 
+/**
+ * When the log holds this many lines more than the records it keeps, it is
+ * compacted to one line per kept record (one temp file, one rename), inside
+ * the write that crossed it.
+ */
+const COMPACT_SLACK = 1_000;
+
+/** The log at `storePath` (`approvals.jsonl`); a `.json` name is read as the `.jsonl` beside it. */
+function approvalLogPath(storePath: string): string {
+  return storePath.endsWith('.jsonl') ? storePath : storePath.endsWith('.json') ? `${storePath}l` : `${storePath}.jsonl`;
+}
+
 export class ApprovalBroker {
-  private readonly store: PersistentStore<SharedApprovalStoreSnapshot>;
+  /**
+   * The approvals log: one line per change of one record (the record as
+   * stored), appended and synced in one write; the newest line per id is the
+   * record. Opened on first load.
+   */
+  private log: RecordLog<Record<string, unknown>> | null = null;
+  private readonly logPath: string;
+  /** Deny-direction records applied in memory after a failed write: written ahead of the next record. */
+  readonly #unsaved = new Set<string>();
   private readonly approvals = new Map<string, SharedApprovalRecord>();
   private readonly pendingResolvers = new Map<string, PendingApprovalEntry>();
   /** Raises being written, by coalesce key: an identical raise waits for the first one's write instead of making its own record. */
@@ -380,18 +405,15 @@ export class ApprovalBroker {
 
   constructor(
     options: {
-      readonly store?: PersistentStore<SharedApprovalStoreSnapshot> | undefined;
-      readonly storePath?: string | undefined;
+      /** Where approvals are kept: a `.jsonl` log (a `.json` name is read as the `.jsonl` beside it). */
+      readonly storePath: string;
       /** This broker's node: the daemon's cluster node id (read on first raise), `local` elsewhere. */
       readonly nodeId?: string | (() => string) | undefined;
     },
   ) {
-    if (!options.store && !options.storePath) {
-      throw new Error('ApprovalBroker requires an explicit store or storePath.');
-    }
-    const storePath = options.storePath;
-    this.store = options.store ?? new PersistentStore<SharedApprovalStoreSnapshot>(storePath as string);
-    this.storeFile = storePath ?? 'the approvals store';
+    if (!options.storePath) throw new Error('ApprovalBroker requires a storePath.');
+    this.logPath = approvalLogPath(options.storePath);
+    this.storeFile = this.logPath;
     this.#homeNode = options.nodeId ?? LOCAL_APPROVAL_NODE;
   }
 
@@ -446,11 +468,17 @@ export class ApprovalBroker {
    * watching it and dropping it would leave that waiter with no answer.
    */
   private async load(): Promise<void> {
-    const snapshot: unknown = await this.store.load();
-    if (snapshot !== null && (!isRecord(snapshot) || !Array.isArray(snapshot['approvals']))) {
-      throw new Error(`${this.storeFile} is not an approvals store. Move it aside to start with no recorded approvals.`);
+    this.log?.close();
+    const log = openRecordLog<Record<string, unknown>>(this.logPath, { fsync: 'each' });
+    this.log = log;
+    // The newest line of each id is its record.
+    const newest = new Map<string, unknown>();
+    let position = 0;
+    for (const line of log.scan()) {
+      position += 1;
+      newest.set(typeof line['id'] === 'string' ? line['id'] : `at line ${position}`, line);
     }
-    const stored: readonly unknown[] = snapshot === null ? [] : snapshot['approvals'] as unknown[];
+    const stored = [...newest.values()];
     this.approvals.clear();
     stored.forEach((value, index) => {
       let approval: SharedApprovalRecord;
@@ -467,8 +495,35 @@ export class ApprovalBroker {
       this.approvals.set(approval.id, approval);
     });
     this.pruneTerminalApprovals();
+    // A log that grew far past what it keeps (settled records pruned, many lines per record) is compacted now.
+    if (log.size > this.approvals.size + COMPACT_SLACK) await this.#compact();
     this.loaded = true;
     this.rearmRestoredTimers();
+  }
+
+  /**
+   * Append these records' lines, each one write and one sync, after any
+   * deny-direction record a failed write left unsaved; then compact when the
+   * log holds far more lines than records. Runs inside a write-queue unit.
+   */
+  async #append(records: readonly SharedApprovalRecord[]): Promise<void> {
+    const log = this.log;
+    if (!log) throw new Error('The approvals log is not open.');
+    for (const id of [...this.#unsaved]) {
+      const record = this.approvals.get(id);
+      if (record && !records.some((entry) => entry.id === id)) log.append(encodeStoredApproval(record) as Record<string, unknown>);
+      this.#unsaved.delete(id);
+    }
+    for (const record of records) log.append(encodeStoredApproval(record) as Record<string, unknown>);
+    if (log.size > this.approvals.size + records.length + COMPACT_SLACK) await this.#compact(records);
+  }
+
+  /** One line per kept record: the newest line of every record the map holds (or is about to hold). */
+  async #compact(pending: readonly SharedApprovalRecord[] = []): Promise<void> {
+    const keep = new Map<string, number>();
+    for (const record of this.approvals.values()) keep.set(record.id, record.sequence);
+    for (const record of pending) keep.set(record.id, record.sequence);
+    await this.log!.compact((line) => typeof line['id'] === 'string' && keep.get(line['id']) === line['sequence']);
   }
 
   /**
@@ -809,10 +864,8 @@ export class ApprovalBroker {
         }
       }
       this.pruneTerminalApprovals();
-      const snapshot = sortApprovals([...this.approvals.values()].map((record) => working.get(record.id) ?? record)
-        .concat([...working.values()].filter((record) => !this.approvals.has(record.id))));
       try {
-        await this.store.persist({ approvals: snapshot.map(encodeStoredApproval) as SharedApprovalRecord[] });
+        await this.#append(changing.map((plan) => plan.next!));
       } catch (error) {
         ended.failed = { error };
         // Deny direction: a refusal can never do what nobody agreed to, so its
@@ -820,6 +873,7 @@ export class ApprovalBroker {
         for (const plan of changing) {
           if (!plan.next || !denyDirection(plan.next.status)) continue;
           this.approvals.set(plan.next.id, plan.next);
+          this.#unsaved.add(plan.next.id);
           committed.push(plan);
         }
         for (const plan of changing) if (plan.ownerCheck) this.#ownerApprovals.settle(plan.request.id);
@@ -936,12 +990,14 @@ export class ApprovalBroker {
     // Another surface that raised it still waits: it stays open for them.
     if (!open || holds.some((entry) => entry.releasedAt === undefined)) return { request, current, next: released };
     const cancelled = this.#next(released, { to: 'cancelled', actor: transition.actor, cause: 'requester-left', note: 'every surface that asked stopped waiting' }, now);
-    return { request, current, next: { ...cancelled, revision: current.revision + 1 } };
+    return { request, current, next: { ...cancelled, sequence: current.sequence + 1 } };
   }
 
   /** The record after one transition: revision + 1, updated now, one audit entry. */
   #next(current: SharedApprovalRecord, transition: ApprovalTransition, now: number, cause?: ApprovalCause, requester?: ApprovalRequester): SharedApprovalRecord {
-    const base = { ...current, revision: current.revision + 1, updatedAt: now };
+    // Every write moves the sequence; only a change of what can be decided moves the revision.
+    const decides = transition.to !== 'updated' && transition.to !== 'released';
+    const base = { ...current, revision: decides ? current.revision + 1 : current.revision, sequence: current.sequence + 1, updatedAt: now };
     switch (transition.to) {
       case 'claimed':
         return { ...base, status: 'claimed', claimedBy: transition.actor.id, claimedAt: now,
@@ -976,8 +1032,7 @@ export class ApprovalBroker {
   async #create(record: SharedApprovalRecord): Promise<void> {
     await this.writes.run(async () => {
       this.pruneTerminalApprovals();
-      const snapshot = sortApprovals([record, ...this.approvals.values()]);
-      await this.store.persist({ approvals: snapshot.map(encodeStoredApproval) as SharedApprovalRecord[] });
+      await this.#append([record]);
       this.approvals.set(record.id, record);
     });
   }

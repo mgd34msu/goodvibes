@@ -180,6 +180,7 @@
  *   reply queue in any signature in this file.
  */
 
+import { createHash } from 'node:crypto';
 import {
   deliveredRecipientFromAliasMailbox,
   deliveredRecipientFromDeliveryHeaders,
@@ -270,9 +271,17 @@ export interface InboundMailNoticeRoute {
   send(notice: StructuredNotice, binding: NoticeRouteBinding | null, announces: string): Promise<SurfaceNoticeDelivery>;
 }
 
-/** What a message's owner notice announces, the same for every attempt at it: `mail:<message key>:notice` (a long one is split into `:partN`). */
-export function mailNoticeAnnounces(messageKey: string): string {
-  return `mail:${messageKey}:notice`;
+/**
+ * What a message's owner notice announces, the same for every attempt at it:
+ * `mail:<digest of the message key>:notice` (a long one is split into
+ * `:partN`). A digest, so the identity is safe as a header value whatever the
+ * account, mailbox or provider id holds.
+ */
+export function mailNoticeAnnounces(key: InboundMailMessageKey): string {
+  const parts = key.source === 'gmail'
+    ? ['gmail', key.account, key.mailbox, key.resourceId]
+    : ['imap', key.account, key.mailbox, key.uidValidity, key.uid];
+  return `mail:${createHash('sha256').update(JSON.stringify(parts)).digest('base64url').slice(0, 24)}:notice`;
 }
 
 export interface InboundMailIntakeDeps {

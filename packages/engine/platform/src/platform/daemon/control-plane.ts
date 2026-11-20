@@ -29,6 +29,7 @@ import type { DistributedRuntimeManager } from '../runtime/remote/index.js';
 import { extractForwardedClientIp } from '../runtime/network/index.js';
 import { clientAddressOf, isLocalOrigin, resolveClientAddress } from './client-address.js';
 import { requestTransport } from '../runtime/network/request-transport.js';
+import { describeCardTransportRefusal, mayCrossWithCardDetails } from '../payments/entry-policy.js';
 import { resolveGatewayPathTemplate } from './helpers.js';
 import { catalogGrantedScopes, narrowGatewayGrant, pairingTokenCaller, refuseGatewayInvocation } from './http/gateway-binding-gate.js';
 import { browserOriginAllowed, originNotAllowedResponse } from './http/browser-origin.js';
@@ -1320,6 +1321,10 @@ export class DaemonControlPlaneHelper {
         ...(principal.credentialKind ? { credentialKind: principal.credentialKind } : {}),
         actor: this.callActor(principal, admin, scopes),
       };
+    }
+    // card.enter crosses only this machine, TLS or the tailnet: refused before any other check reads the body.
+    if (descriptor.effects?.includes('card.enter') && !mayCrossWithCardDetails(authenticated?.transport)) {
+      return { status: 403, ok: false, body: refusalBody(describeCardTransportRefusal(), 'CARD_ENTRY_TRANSPORT', 403) };
     }
     const denied = this.validateGatewayInvocation(descriptor, context);
     if (denied) return denied;

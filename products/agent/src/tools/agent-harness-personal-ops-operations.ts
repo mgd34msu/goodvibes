@@ -181,12 +181,12 @@ export function reminderOperationRecords(deliveryConfigured: boolean): readonly 
       confirmationRequired: true,
     });
   }
-  if (hasMethod('automation.schedules.disable')) {
+  if (hasMethod('automation.schedules.pause')) {
     records.push({
       id: 'schedule-pause',
       label: 'Pause connected schedule',
       status: 'ready',
-      summary: 'Disable one exact connected schedule id after reviewing current state.',
+      summary: 'Pause one exact connected schedule id after reviewing current state.',
       userRoute: 'Agent Workspace -> Automation -> Pause job',
       modelRoute: 'schedule action:"pause" scheduleId:"..."',
       tags: ['schedule', 'schedule-write'],
@@ -196,12 +196,12 @@ export function reminderOperationRecords(deliveryConfigured: boolean): readonly 
       confirmationRequired: true,
     });
   }
-  if (hasMethod('automation.schedules.enable')) {
+  if (hasMethod('automation.schedules.resume')) {
     records.push({
       id: 'schedule-resume',
       label: 'Resume connected schedule',
       status: 'ready',
-      summary: 'Enable one exact connected schedule id after reviewing current state.',
+      summary: 'Resume one exact connected schedule id after reviewing current state.',
       userRoute: 'Agent Workspace -> Automation -> Resume job',
       modelRoute: 'schedule action:"resume" scheduleId:"..."',
       tags: ['schedule', 'schedule-write'],

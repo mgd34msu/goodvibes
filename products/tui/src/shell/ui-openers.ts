@@ -1,4 +1,5 @@
 import { createModelPickerCommandOpeners } from '@goodvibes-jev/engine/terminal-shell/model-picker-open';
+import { shortcutGroups } from '../renderer/shortcuts-overlay.ts';
 import { createSettingsWorkspaceOpener } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
 import { modelPickerCatalogServices } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
 import { createCommonShellUiOpeners } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
@@ -25,7 +26,8 @@ import type { SecretsManager } from '@goodvibes-jev/engine/platform/platform/con
 import type { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import type { EmbeddingProviderPickerEntry, ModelPickerTargetInfo } from '../input/model-picker.ts';
-import { openCommandPaletteOn } from '../input/command-palette.ts';
+import { openCommandPaletteOn, type PaletteShortcut } from '@goodvibes-jev/engine/terminal-shell/command-palette';
+import type { KeybindingsManager } from '../input/keybindings.ts';
 import { AGENT_VIEW_NAMES, CHANGES_VIEW_NAMES, USAGE_VIEW_NAMES } from '../input/views.ts';
 import { confirmThrough } from '../input/confirm-dialog.ts';
 import { getSharedToastCenter } from '../renderer/toast-center.ts';
@@ -400,6 +402,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       commands: () => input.commandRegistry?.getAll(),
       categories: getCommandCategoryMap,
       extraKeywords: PALETTE_VIEW_KEYWORDS,
+      // The keyboard shortcuts, the list's last group, from the live key table.
+      shortcuts: () => paletteShortcuts(commandContext.keybindingsManager),
       describe: (id) => (id === 'model' ? commandContext.session.runtime.model || undefined : undefined),
       // A command gone since the palette opened, or one that refuses, says so like a typed one.
       run: (name) => runPickedCommand(commandContext.executeCommand, name, [], (message) => commandContext.print(message)),
@@ -416,4 +420,10 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   };
 
   wireViewOpeners({ commandContext, input, views, viewPanelAdapter, render });
+}
+
+/** Every row of the shortcut groups, as the help palette lists them. */
+function paletteShortcuts(keybindingsManager: KeybindingsManager | undefined): readonly PaletteShortcut[] {
+  if (!keybindingsManager) return [];
+  return shortcutGroups(keybindingsManager).flatMap((group) => group.items.map(([key, description]) => ({ key, description })));
 }

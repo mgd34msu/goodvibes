@@ -15,8 +15,6 @@ export abstract class TerminalInputHandlerState extends TerminalComposerControll
   public lastCtrlCTime = 0;
   public bodyTopRow = 2;
   public modalReturnFocus: 'prompt' | 'indicator' = 'prompt';
-  public helpOverlayActive = false;
-  public helpScrollOffset = 0;
   public shortcutsOverlayActive = false;
   public shortcutsScrollOffset = 0;
   public inputHistory: InputHistory | null = null;

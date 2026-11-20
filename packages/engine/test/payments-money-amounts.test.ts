@@ -7,13 +7,24 @@
  * direction. Pure functions over the real parsers and the real settings manager.
  */
 import { describe, expect, test } from 'bun:test';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { readBudgetLimits } from '../platform/src/platform/payments/payments-config.ts';
 import { extractCheckout } from '../platform/src/platform/payments/checkout-extraction.ts';
 import { parseMinorUnits } from '../platform/src/platform/payments/money-parsing.ts';
 import { parseCurrencyCode } from '../platform/src/platform/payments/types.ts';
 
-function budgetReader(values: Record<string, unknown>): { get(key: string): unknown } {
-  return { get: (key: string): unknown => values[key] };
+/** The daemon's settings manager over a scratch home whose daemon settings file holds `budget`, as an owner's hand edit would. */
+function settingsWithBudget(budget: Record<string, unknown>): ConfigManager {
+  const home = makeProjectTempDir('gv-money-amounts');
+  const daemonTierPath = join(home, '.goodvibes', 'daemon', 'settings.json');
+  mkdirSync(join(home, '.goodvibes', 'daemon'), { recursive: true });
+  mkdirSync(join(home, '.goodvibes', 'goodvibes'), { recursive: true });
+  writeFileSync(daemonTierPath, JSON.stringify({ payments: { budget } }));
+  return new ConfigManager({ configDir: join(home, '.goodvibes', 'goodvibes'), homeDir: home, surfaceRoot: 'goodvibes',
+    daemonTierPath, ownsDaemonTier: true });
 }
 
 function currency(code: string) {
@@ -26,8 +37,8 @@ function currency(code: string) {
 describe('enforcement reads the new form', () => {
   test('an unreadable setting falls back to nothing-allowed rather than being coerced', () => {
     const limits = readBudgetLimits(
-      budgetReader({ 'payments.budget.dailyItem': 'lots', 'payments.budget.dailyOverage': -5 }),
-      'USD',
+      settingsWithBudget({ dailyItem: 'lots', dailyOverage: -5 }),
+      currency('USD'),
     );
     expect(limits.dailyItemMinorUnits).toBe(0);
     expect(limits.dailyOverageMinorUnits).toBe(0);

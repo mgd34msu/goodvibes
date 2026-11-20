@@ -35,7 +35,7 @@ export function verifyPortableFetchConsumers(relay: RelayClient): void {
     createEventSourceConnector(baseUrl, null, fetchImpl);
     createFetch(fetchImpl, hostFetch);
     void requestJsonRaw(fetchImpl, baseUrl);
-    void openRawServerSentEventStream(fetchImpl, baseUrl, {});
+    void openRawServerSentEventStream(fetchImpl, baseUrl, { onEvent() {}, onGap() {}, onEnd() {} });
     void fetchImpl(baseUrl);
     void fetchImpl(new URL(baseUrl), { method: 'GET' });
     void fetchImpl(new Request(baseUrl), { signal: new AbortController().signal });

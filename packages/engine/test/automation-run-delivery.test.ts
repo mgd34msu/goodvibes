@@ -32,6 +32,7 @@ import { ntfyOutboundDedup } from '../platform/src/platform/integrations/ntfy.ts
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { PersistentStore } from '../platform/src/platform/state/persistent-store.ts';
 import type { AgentRecord } from '../platform/src/platform/tools/agent/record.ts';
+import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
@@ -75,7 +76,7 @@ async function automation(ntfyUrl: string, outcome: AgentRecord['status']) {
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
   cleanups.push(configureDecisionModelPolicy(() => 'No Decision Model'));
   const configManager = new ConfigManager({ surfaceRoot: 'tui', workingDir: root, configDir: join(root, 'config') });
-  configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfyUrl }], { kind: 'owner', surface: 'fixture' });
+  configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfyUrl }], localOwnerActor());
   const secretsManager = new SecretsManager({ surfaceRoot: 'goodvibes', globalHome: join(root, 'home'), projectRoot: root });
   const subscriptionManager = new SubscriptionManager(join(root, 'home', 'subscriptions.json'), { secrets: secretsManager });
   const serviceRegistry = new ServiceRegistry({ user: join(root, 'home', 'services.json'), project: join(root, 'services.json') }, { secretsManager, subscriptionManager });

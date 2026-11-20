@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { AgentWorktree } from '../platform/src/platform/agents/worktree.ts';
-import { commitPhaseWork } from '../platform/src/platform/orchestration/phase-runner.ts';
+import { commitPhaseWork, phaseFence } from '../platform/src/platform/orchestration/phase-runner.ts';
 import { createWorktreeIsolationManager } from '../platform/src/platform/orchestration/worktree-isolation.ts';
 import type { OrchestrationEvent, Phase, PhaseCommitOutcome, WorkItem, Workstream } from '../platform/src/platform/orchestration/types.ts';
 
@@ -74,7 +74,7 @@ test('a phase commit the repository refused keeps the branch off the base and th
   writeFileSync(hook, '#!/bin/sh\necho "refused by policy" >&2\nexit 1\n');
   chmodSync(hook, 0o755);
   const commitOptions = { projectRoot: root, itemWorktree };
-  lastCommit = (await commitPhaseWork(item, PHASE, new AgentWorktree(root), commitOptions)).commit;
+  lastCommit = (await commitPhaseWork(phaseFence(item, PHASE, undefined), item, PHASE, new AgentWorktree(root), commitOptions)).commit;
   expect(lastCommit.status).toBe('failed');
 
   await manager.enqueueIntegration(workstream, item);
@@ -86,7 +86,7 @@ test('a phase commit the repository refused keeps the branch off the base and th
 
   // The commit is retried once the repository accepts it; the lane then merges the work into the base branch.
   rmSync(hook);
-  lastCommit = (await commitPhaseWork(item, PHASE, new AgentWorktree(root), commitOptions)).commit;
+  lastCommit = (await commitPhaseWork(phaseFence(item, PHASE, undefined), item, PHASE, new AgentWorktree(root), commitOptions)).commit;
   expect(lastCommit.status).toBe('committed');
   await manager.enqueueIntegration(workstream, item);
   expect(item.mergeState).toBe('merged');

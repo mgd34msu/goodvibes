@@ -1,5 +1,7 @@
 // Proves: A starting app sends the operator token to whatever answers the daemon's port.
 // Red when: The token is sent before the daemon's identity answer is verified for the dialled port.
+// Proves: A client sends this machine's daemon token, or the token stored for one daemon, to another daemon it was not issued for.
+// Red when: The target resolver falls back to this machine's token for a connected or typed daemon that is not this machine's, or the one header builder attaches a bound credential to a URL on another origin.
 /**
  * A terminal app that finds something listening on the daemon's port asks it to
  * prove it holds the operator token before it sends that token. The stand-in is
@@ -23,6 +25,13 @@ import {
 } from '../platform/src/platform/daemon/identity-proof.ts';
 import { HookDispatcher } from '../platform/src/platform/hooks/dispatcher.ts';
 import { startHostServices } from '../platform/src/platform/runtime/bootstrap-services.ts';
+import { resolveDaemonTarget } from '../platform/src/platform/runtime/client/daemon-target-resolver.ts';
+import { daemonAuthHeaders } from '../platform/src/platform/runtime/client/daemon-target.ts';
+import { writeConnectedDaemonToken } from '../platform/src/platform/runtime/client/daemon-credentials.ts';
+import { getOrCreateCompanionToken } from '../platform/src/platform/pairing/companion-token.ts';
+import { resolveGoodVibesDaemonHome } from '../platform/src/platform/config/goodvibes-home.ts';
+import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import type { ConfigKey } from '../platform/src/platform/config/schema-types.ts';
 import type { RuntimeServices } from '../platform/src/platform/runtime/services.ts';
 
 const TOKEN = 'operator-token-held-by-the-daemon';
@@ -78,4 +87,38 @@ test('the token is sent only to an answer that proves it is the daemon on the di
     'proof for another port': { mode: 'blocked', authorizations: [] },
     'proof for this port': { mode: 'external', authorizations: [`Bearer ${TOKEN}`] },
   });
+});
+
+test('a credential goes only to the daemon it was issued for: this machine\'s token never to another daemon, a stored token never to a third', () => {
+  const home = mkdtempSync(join(tmpdir(), 'gv-bound-credential-'));
+  cleanups.push(() => rmSync(home, { recursive: true, force: true }));
+  const machineToken = getOrCreateCompanionToken('tui', { daemonHomeDir: resolveGoodVibesDaemonHome(home) }).token;
+  const configManager = new ConfigManager({ configDir: join(home, 'config') });
+  const thisMachine = `http://127.0.0.1:${String(configManager.get('controlPlane.port' as ConfigKey))}`;
+  const otherOnThisHost = 'http://127.0.0.1:4555', otherDaemon = 'http://192.0.2.10:3421', storedDaemon = 'http://192.0.2.20:3421';
+  writeConnectedDaemonToken(home, storedDaemon, 'token-issued-by-the-stored-daemon');
+  const connectTo = (url: string | null) => {
+    const set = configManager.setMany([{ key: 'daemon.connectedHost.url' as ConfigKey, value: url ?? '' }], localOwnerActor());
+    if (!set.ok) throw new Error(`the connected host could not be set to ${url}`);
+  };
+  /** Which token a request to `url` would carry, built by the one header builder, or the refusal code. */
+  const sent = (url: string, explicit?: { readonly url: string }) => {
+    try {
+      const resolution = resolveDaemonTarget({ configManager, homeDirectory: home, ...(explicit ? { explicit } : {}) });
+      if (!resolution.ok) return `refused ${resolution.refusal.code}`;
+      const authorization = daemonAuthHeaders(resolution.target, `${url}/api/control-plane/status`).Authorization ?? '';
+      return authorization === `Bearer ${machineToken}` ? 'this machine\'s token' : authorization.replace(/^Bearer /, '');
+    } catch (error) {
+      return `refused ${(error as { code?: string }).code}`;
+    }
+  };
+  const rows: Array<readonly [string, () => string, string]> = [
+    ['the connected host is another daemon on this host with nothing stored', () => { connectTo(otherOnThisHost); return sent(otherOnThisHost); }, 'refused CREDENTIAL_NOT_FOR_TARGET'],
+    ['an address typed for another daemon, no token', () => { connectTo(null); return sent(otherDaemon, { url: otherDaemon }); }, 'refused CREDENTIAL_NOT_FOR_TARGET'],
+    ['a stored daemon\'s credential on a request to another daemon', () => { connectTo(storedDaemon); return sent(otherDaemon); }, 'refused CREDENTIAL_NOT_FOR_TARGET'],
+    // The controls: each daemon gets the token issued for it.
+    ['the connected host with its own stored token', () => { connectTo(storedDaemon); return sent(storedDaemon); }, 'token-issued-by-the-stored-daemon'],
+    ['this machine\'s daemon', () => { connectTo(null); return sent(thisMachine); }, 'this machine\'s token'],
+  ];
+  for (const [name, run, expected] of rows) expect(`${name}: ${run()}`).toBe(`${name}: ${expected}`);
 });

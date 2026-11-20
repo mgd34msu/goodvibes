@@ -24,6 +24,7 @@ import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/d
 import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.ts';
 import { trustGatedAsk, WorkspaceTrustManager, type WorkspaceTrustLevel } from '../platform/src/platform/runtime/workspace-trust.ts';
 import { forgetGateReadings, gateReadingsPort } from './_helpers/gate-readings.ts';
+import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'gv-workspace-trust-')));
 afterAll(() => { rmSync(root, { recursive: true, force: true }); });
@@ -56,7 +57,7 @@ test('a shipped trust.json is not honoured; answered restricted, writes and comm
     expect(trust.isDecided()).toBe(false);
 
     const config = new ConfigManager({ surfaceRoot: 'goodvibes', workingDir: project, homeDir: home, configDir: join(root, 'config'), ownsDaemonTier: true });
-    const owner = { kind: 'owner', surface: 'fixture' } as const;
+    const owner = localOwnerActor();
     expect(config.setMany([{ key: 'permissions.mode' as ConfigKey, value: 'ask-me' }], owner).ok).toBe(true);
     let ownerPrompts = 0;
     let trustQuestions = 0;

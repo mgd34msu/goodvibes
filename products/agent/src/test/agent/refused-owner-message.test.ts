@@ -9,12 +9,18 @@
  * `!` output taken for it goes back to the buffer.
  *
  * The app's real owner-turn path (shell/owner-turn-sender.ts, as main() builds
- * it) over the real hosted route (shell/remote-conversation-wiring.ts) and a
- * real ShellPassthrough. The stand-in is the host's intake: it records what
+ * it) over the real hosted route (shell/remote-conversation-wiring.ts), the
+ * Agent's real settings manager in a scratch folder with conversation turns
+ * routed to the host, and a real ShellPassthrough. The stand-in is the host's
+ * intake: it records what
  * was submitted and answers as the host would (taken, or refused with nothing
  * sent), when the test says so.
  */
 import { afterEach, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { AgentConfigManager } from '../../config/host-settings.ts';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../../runtime/native-conversation-intake.ts';
 import type { BootstrapContext } from '../../runtime/bootstrap.ts';
 import { ShellContextHold, ShellPassthrough } from '../../input/shell-passthrough.ts';
@@ -33,6 +39,10 @@ async function settle(): Promise<void> {
 }
 
 function agent() {
+  const dir = mkdtempSync(join(tmpdir(), 'refused-owner-message-'));
+  disposers.push(() => rmSync(dir, { recursive: true, force: true }));
+  const configManager = new AgentConfigManager({ configDir: join(dir, 'surface'), daemonTierPath: join(dir, 'daemon', 'settings.json'), ownsDaemonTier: true });
+  configManager.set('hostedSessions.routeConversationTurns', true);
   const submitted: string[] = [];
   const answers: Array<NativeConversationIntakeState | Promise<NativeConversationIntakeState>> = [];
   const intake: NativeConversationIntakeActions = {
@@ -54,7 +64,7 @@ function agent() {
     runtime: { sessionId: 'agent-session', model: 'model', provider: 'provider' },
     runtimeBus: {},
     services: {
-      configManager: { get: () => undefined },
+      configManager,
       daemonVerbs: { invoke: () => Promise.reject(new Error('no host listing in this proof')) },
       resolveConnectedHost: () => ({ reason: 'no connection in this proof' }),
       sessionManager: { list: () => [], getMeta: () => undefined },

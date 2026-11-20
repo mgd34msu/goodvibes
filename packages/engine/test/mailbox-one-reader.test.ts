@@ -35,7 +35,6 @@ import {
   resolveWatcherSettings,
   type InboundMailboxMessage,
   type InboundMailNote,
-  type InboundMailSupervisorDeps,
 } from '../platform/src/platform/email/inbound/index.ts';
 import { holdProcessLock } from '../platform/src/platform/utils/process-lock.ts';
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
@@ -44,11 +43,19 @@ import { acquireAccountInboxIdentity } from '../platform/src/platform/intake/pro
 import { createOwnedInboxSource, type OwnedInboxSource } from '../platform/src/platform/intake/registration.ts';
 import { makeFakeMailbox, openMailboxSocket, type FakeMailboxOptions, type FakeMailboxServer } from './_helpers/fake-imap-mailbox.ts';
 import { FakeClock, fixedRandom } from './_helpers/inbound-watcher-harness.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
+import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 
 const KEY = 'reader-key';
 const ACCOUNT = 'primary';
 const MAILBOX = 'INBOX';
 const ON = { 'surfaces.email.inbound.enabled': true, 'surfaces.email.inbound.source': 'imap' };
+
+/** This machine's daemon settings, as a daemon reads them from its settings file. */
+function daemonSettings(): ConfigManager {
+  return new ConfigManager({ configDir: join(dir, 'config'), daemonTierPath: join(dir, 'daemon', 'settings.json'), ownsDaemonTier: true });
+}
 
 let dir: string;
 let previousPort: ReturnType<typeof installJudgmentPort>;
@@ -70,6 +77,8 @@ afterEach(async () => {
 async function machine(server: FakeMailboxOptions = {}) {
   const mailbox = await makeFakeMailbox(server);
   cleanups.push(() => mailbox.close());
+  // The owner turns inbound mail on, over IMAP.
+  expect(daemonSettings().setMany(Object.entries(ON).map(([key, value]) => ({ key: key as ConfigKey, value })), localOwnerActor()).ok).toBe(true);
   const clock = new FakeClock();
   const cursors = new MailboxCursorStore(join(dir, 'cursors.json'), { isAccountConfigured: () => true });
   const records = new InboundMailStore(join(dir, 'records.json'));
@@ -81,7 +90,7 @@ async function machine(server: FakeMailboxOptions = {}) {
   /** The owner's notice channel; while `down` it refuses every notice as a transport failure. */
   const route = { down: false };
   const noticeRoute: Parameters<typeof createInboundMailIntake>[0]['notices'] = {
-    resolveBinding: () => ({ kind: 'bound', binding: { surfaceKind: 'telegram' } }),
+    resolveBinding: () => ({ kind: 'bound', binding: { id: 'binding-owner', surfaceKind: 'telegram' } }),
     send: async (notice) => {
       if (route.down) return { delivered: false, reason: 'delivery-failed', error: 'the notice channel is down' };
       const text = JSON.stringify(notice);
@@ -124,7 +133,7 @@ async function machine(server: FakeMailboxOptions = {}) {
       await intake(message);
     }, { takeSpentOutcome: (message: InboundMailboxMessage) => intake.takeSpentOutcome(message) });
     const supervisor: InboundMailSupervisor = new InboundMailSupervisor({
-      config: { get: (key: string) => (ON as Record<string, unknown>)[key] } as unknown as InboundMailSupervisorDeps['config'],
+      config: daemonSettings(),
       reviveDelayMs: 0,
       leaseRetryMs: 3_600_000,
       account: ACCOUNT,

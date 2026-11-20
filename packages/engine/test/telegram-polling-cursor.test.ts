@@ -30,6 +30,7 @@ import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 import { ServiceRegistry } from '../platform/src/platform/config/service-registry.ts';
 import { SubscriptionManager } from '../platform/src/platform/config/subscriptions.ts';
 import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
+import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 
 const TOKEN = '7000001:fixture-token';
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -146,7 +147,7 @@ test('a stop part-way through a batch resumes at the first update that did not s
     { key: 'surfaces.telegram.enabled' as ConfigKey, value: true },
     { key: 'surfaces.telegram.mode' as ConfigKey, value: 'polling' },
     { key: 'surfaces.telegram.botUsername' as ConfigKey, value: 'gv_fixture_bot' },
-  ], { kind: 'owner', surface: 'fixture' });
+  ], localOwnerActor());
   expect((await first.supervisor.start()).mode).toBe('polling');
 
   // Update 1 is processed; update 2 finds no free agent and waits to be tried again. The daemon stops in that wait.

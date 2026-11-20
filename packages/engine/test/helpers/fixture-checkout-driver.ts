@@ -32,6 +32,7 @@ import type { CardFieldKind } from '../../platform/src/platform/payments/card-re
 import { extractCheckout, type RawCheckoutReading } from '../../platform/src/platform/payments/checkout-extraction.js';
 import { CheckoutSubmitRefused, type CheckoutChallenge, type CheckoutPageDriver, type CheckoutTerms, type PageIdentity } from '../../platform/src/platform/payments/checkout-page.js';
 import { parseMinorUnits } from '../../platform/src/platform/payments/money-parsing.js';
+import { money } from '../../platform/src/platform/payments/money.js';
 import { detectRecurringCharge } from '../../platform/src/platform/payments/cart.js';
 import type { FixtureMerchant } from './fixture-merchant.js';
 
@@ -232,10 +233,10 @@ export class FixtureCheckoutDriver implements CheckoutPageDriver {
     const current = (): void => { owner.signal?.throwIfAborted(); owner.assertCurrent(); };
     current(); const html = await this.options.merchant.checkoutHtml(); current();
     const reading = await readFixtureCheckoutHtml(this.options.merchant.shape, html); current();
-    const extraction = extractCheckout(reading, original.terms.currency);
+    const extraction = extractCheckout(reading, original.terms.total.currency);
     if (!extraction.ok || reading.statedTotal === null) return null;
     const checkout = extraction.checkout;
-    if (checkout.currency !== original.terms.currency || checkout.lines.length !== original.terms.lines.length
+    if (checkout.currency !== original.terms.total.currency || checkout.lines.length !== original.terms.lines.length
       || checkout.lines.some((line, index) => line.label !== original.terms.lines[index]?.label || line.quantity !== original.terms.lines[index]?.quantity)
       || checkout.shippingOptions.length !== original.reading.shippingOptions.length
       || checkout.shippingOptions.some((option, index) => option.rawLabel !== original.reading.shippingOptions[index]?.label)) return null;
@@ -244,7 +245,7 @@ export class FixtureCheckoutDriver implements CheckoutPageDriver {
     const total = checkout.subtotalMinorUnits + shipping.costMinorUnits;
     if (!Number.isSafeInteger(total) || parseMinorUnits(reading.statedTotal, checkout.currency) !== total) return null;
     const expected: CheckoutTerms = { ...original.terms, lines: checkout.lines, taxMinorUnits: checkout.taxMinorUnits,
-      feesMinorUnits: checkout.feesMinorUnits, feeLabels: checkout.feeLabels, shippingMinorUnits: shipping.costMinorUnits, totalMinorUnits: total };
+      feesMinorUnits: checkout.feesMinorUnits, feeLabels: checkout.feeLabels, shippingMinorUnits: shipping.costMinorUnits, total: money(total, original.terms.total.currency) };
     const valid = await this.verifyTerms(expected, owner); current();
     this.verifiedTerms = null;
     return valid ? reading : null;
@@ -256,7 +257,7 @@ export class FixtureCheckoutDriver implements CheckoutPageDriver {
     const current = (): void => { owner?.signal?.throwIfAborted(); owner?.assertCurrent(); };
     current(); const html = await this.options.merchant.checkoutHtml(); current();
     const reading = await readFixtureCheckoutHtml(this.options.merchant.shape, html); current();
-    const extracted = extractCheckout(reading, expected.currency);
+    const extracted = extractCheckout(reading, expected.total.currency);
     if (!extracted.ok || reading.statedTotal === null) return false;
     const checkout = extracted.checkout;
     const recurring = await detectRecurringCharge(checkout.orderSummaryText, owner); current();
@@ -268,13 +269,13 @@ export class FixtureCheckoutDriver implements CheckoutPageDriver {
     const index = (this.options.merchant.shape === 'alpha' ? ['standard', 'two-day', 'overnight'] : ['post', 'express']).indexOf(selected ?? '');
     const shipping = checkout.shippingOptions[index];
     const same = expected.submitTarget === (this.options.merchant.shape === 'alpha' ? 'place' : 'kaufen')
-      && checkout.currency === expected.currency && checkout.lines.length === expected.lines.length
+      && checkout.currency === expected.total.currency && checkout.lines.length === expected.lines.length
       && checkout.lines.every((line, position) => line.label === expected.lines[position]?.label
         && line.quantity === expected.lines[position]?.quantity && line.unitMinorUnits === expected.lines[position]?.unitMinorUnits)
       && checkout.taxMinorUnits === expected.taxMinorUnits && checkout.feesMinorUnits === expected.feesMinorUnits
       && JSON.stringify(checkout.feeLabels) === JSON.stringify(expected.feeLabels)
       && shipping?.rawLabel === expected.shippingLabel && shipping.costMinorUnits === expected.shippingMinorUnits
-      && parseMinorUnits(reading.statedTotal, checkout.currency) === expected.totalMinorUnits;
+      && parseMinorUnits(reading.statedTotal, checkout.currency) === expected.total.minor;
     if (same) this.verifiedTerms = expected;
     return same;
   }

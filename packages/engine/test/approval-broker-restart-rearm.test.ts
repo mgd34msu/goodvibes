@@ -1,5 +1,7 @@
 // Proves: An approval outlives its deadline across a daemon restart, so a purchase or action waiting on it can be approved long after the window the owner was given; or an approval already given is lost by the restart.
 // Red when: The start-up pass stops expiring an approval whose deadline passed while the daemon was down, a restart loses an approval already given, or a deadline still ahead is not re-armed or expires on sight.
+// Proves: Two people answer one approval at once and the waiting command runs with the typed answer of one whose decision did not stand, or a decision given to a revision that has since changed is applied.
+// Red when: The broker applies a second decision to a settled approval or one given to a stale revision, or hands the waiting command an answer other than the applied one.
 /**
  * A pending approval survives a daemon restart and is never left hanging.
  *
@@ -23,6 +25,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ApprovalBroker, type SharedApprovalRecord } from '../platform/src/platform/control-plane/approval-broker.ts';
 import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
+import { buildExecPromptAnswerHandler } from '../platform/src/platform/runtime/permissions/exec-prompt-wiring.ts';
 
 /** Far longer than the file may run, so no timer of the first broker fires during it. */
 const WINDOW_MS = 10 * 60_000;
@@ -90,7 +93,7 @@ test('a deadline that passed while the daemon was down is denied at start-up; an
   await first.start();
   await raise(first, 'lapsed', { timeoutMs: WINDOW_MS });
   const given = await raise(first, 'given', { timeoutMs: WINDOW_MS });
-  await first.resolveApproval(given.id, { approved: true, actor: 'owner', actorSurface: 'tui' });
+  expect((await first.resolveApproval(given.id, { approved: true, actor: 'owner', actorSurface: 'tui', expectedRevision: given.revision })).applied).toBe(true);
 
   moveClock(WINDOW_MS + 1_000);
   const second = await restart();
@@ -111,4 +114,33 @@ test('a deadline still ahead is kept and fires after the restart', async () => {
 
   await until(() => record(second, 'ahead')?.status === 'expired', 'the re-armed deadline to fire', () => record(second, 'ahead')?.status);
   expect(record(second, 'ahead')?.decision?.approved).toBe(false);
+});
+
+test('two approvers at once: one decision stands, the command gets only its typed answer, and a stale revision is refused', async () => {
+  const broker = new ApprovalBroker({ storePath });
+  await broker.start();
+  // A command stopped on its terminal asks for a passphrase through the broker, as exec does.
+  const answerPrompt = buildExecPromptAnswerHandler({ attended: () => true, requestApproval: (input) => broker.requestApproval(input) });
+  const command = answerPrompt({ command: 'gpg --sign release.tar', prompt: 'Passphrase:', recentOutput: '' });
+  await until(() => broker.listApprovals().length === 1, 'the prompt to be raised', () => broker.listApprovals());
+  const raised = broker.listApprovals()[0]!;
+
+  // A stale revision: another surface claimed it after this approver was shown it.
+  expect((await broker.claimApproval(raised.id, { actor: 'operator', actorSurface: 'web', expectedRevision: raised.revision })).applied).toBe(true);
+  const stale = await broker.resolveApproval(raised.id, { approved: true, actor: 'owner', actorSurface: 'tui', expectedRevision: raised.revision, modifiedArgs: { answer: 'stale-typed' } });
+  expect(stale.applied ? 'applied' : stale.refusal.code).toBe('APPROVAL_CHANGED');
+
+  // Both approvers were shown the current revision and answer at once with different typed answers.
+  const shown = broker.getApproval(raised.id)!.revision;
+  const [tui, web] = await Promise.all([
+    broker.resolveApproval(raised.id, { approved: true, actor: 'owner', actorSurface: 'tui', expectedRevision: shown, modifiedArgs: { answer: 'typed-in-tui' } }),
+    broker.resolveApproval(raised.id, { approved: true, actor: 'owner', actorSurface: 'web', expectedRevision: shown, modifiedArgs: { answer: 'typed-in-web' } }),
+  ]);
+  // Each decision is checked and written in turn: exactly one stands, the other is refused.
+  expect([tui.applied, web.applied]).toContain(false);
+  expect([tui.applied, web.applied]).toContain(true);
+  const stood = tui.applied ? 'typed-in-tui' : 'typed-in-web';
+  const answered = await command;
+  expect(answered).toEqual({ answered: true, text: stood });
+  expect(broker.getApproval(raised.id)?.audit.filter((entry) => entry.action === 'approved').length).toBe(1);
 });

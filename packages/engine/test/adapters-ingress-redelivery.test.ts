@@ -7,8 +7,9 @@
  * failure status) for an ordinary refusal so the provider does not stall its
  * queue redelivering it, and no stale or foreign callback or session.
  *
- * The adapters and their shared delivery claim are real; the daemon context
- * around them only records what the adapter asked it to do.
+ * The adapters, their shared delivery claim and the settings (with the secret
+ * store their credentials resolve against) are real; the rest of the daemon
+ * context around them only records what the adapter asked it to do.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -21,18 +22,26 @@ import { handleNtfySurfacePayload } from '../platform/src/platform/adapters/ntfy
 import { handleWhatsAppSurfaceWebhook } from '../platform/src/platform/adapters/whatsapp/index.ts';
 import { handleTelephonySurfaceWebhook } from '../platform/src/platform/adapters/telephony/index.ts';
 import { handleGenericWebhookSurface } from '../platform/src/platform/adapters/webhook/index.ts';
+import { scratchSettings } from './_helpers/scratch-settings.ts';
 
 type Call = { kind: string; input: unknown };
 
-afterEach(() => { surfaceInboundDedup.clear(); ntfyInboundDedup.clear(); });
+const settingsRoots: string[] = [];
+afterEach(() => {
+  surfaceInboundDedup.clear(); ntfyInboundDedup.clear();
+  for (const root of settingsRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
-function sharedContext(config: Record<string, unknown>, overrides: Record<string, unknown> = {}) {
+async function sharedContext(config: Record<string, unknown>, overrides: Record<string, unknown> = {}) {
   const calls: Call[] = [];
+  const { root, configManager, secretsManager } = await scratchSettings(config);
+  settingsRoots.push(root);
   const bindings = new Map<string, { id: string; metadata: Record<string, unknown> } & Record<string, unknown>>();
   let agents = 0;
   const context = {
     serviceRegistry: { resolveSecret: async () => null },
-    configManager: { get: (key: string) => config[key] },
+    configManager,
+    secretsManager,
     // Merges metadata over the previous call's, as the real binding manager does.
     routeBindings: {
       upsertBinding: async (input: { surfaceKind: string; externalId: string; metadata?: Record<string, unknown> }) => {
@@ -77,7 +86,7 @@ describe('whatsapp', () => {
   }), context);
 
   test('a refused sender in the same payload does not fail it, and a redelivery does not run the allowed message again', async () => {
-    const { context, calls } = sharedContext(config, {
+    const { context, calls } = await sharedContext(config, {
       authorizeSurfaceIngress: async (input: { userId?: string }) => (input.userId === '222' ? { allowed: false, reason: 'user-not-allowlisted' } : { allowed: true }),
     });
     const messages = [{ id: 'wamid.A', from: '111', text: { body: 'hello' } }, { id: 'wamid.B', from: '222', text: { body: 'hello' } }];
@@ -91,7 +100,7 @@ describe('whatsapp', () => {
 
   test('a message whose handling failed is run again on redelivery while the one already handled is not', async () => {
     let spawnCount = 0;
-    const { context, calls } = sharedContext(config, {
+    const { context, calls } = await sharedContext(config, {
       // The second spawn overall (message B on first delivery) is refused.
       trySpawnAgent: (input: unknown) => {
         calls.push({ kind: 'trySpawnAgent', input });
@@ -114,7 +123,7 @@ describe('whatsapp', () => {
 test('ntfy: one message that arrives by both routes starts one agent, and one whose start failed is started when it arrives again', async () => {
   const topic = 'gv-agent-fixture-redelivery';
   let refuseNext = false;
-  const { context, calls } = sharedContext({ 'surfaces.ntfy.agentTopic': topic }, {
+  const { context, calls } = await sharedContext({ 'surfaces.ntfy.agentTopic': topic }, {
     sessionBroker: {
       getSession: () => null,
       findPreferredSession: async () => null,
@@ -153,7 +162,7 @@ describe('telephony', () => {
   }), context);
 
   test('each spoken turn of one call is its own message; a redelivered text message is run once', async () => {
-    const { calls, context } = sharedContext(config);
+    const { calls, context } = await sharedContext(config);
     await send(context, { From: '+1999', CallSid: 'CA1', SpeechResult: 'first turn' });
     await send(context, { From: '+1999', CallSid: 'CA1', SpeechResult: 'second turn' });
     await send(context, { From: '+1999', MessageSid: 'SM1', Body: 'a text' });
@@ -175,7 +184,7 @@ describe('generic webhook', () => {
     const routeBindings = new RouteBindingManager({ store: new AutomationRouteStore(join(root, 'bindings.json')) });
     const binding = () => routeBindings.listBindings().find((entry) => entry.surfaceKind === 'webhook' && entry.externalId === 'webhook')!;
     try {
-      const { context } = sharedContext(config, { routeBindings });
+      const { context } = await sharedContext(config, { routeBindings });
       await post(context, { task: 'X', callbackUrl: 'https://a.example.com/hook', correlationId: 'c1', callbackSignature: 'shared-secret' });
       expect(binding().metadata.callbackUrl).toBe('https://a.example.com/hook');
       await post(context, { task: 'Y' });
@@ -187,7 +196,7 @@ describe('generic webhook', () => {
   });
 
   test('platform markers in caller metadata are dropped, and a session from another surface cannot be entered', async () => {
-    const { context, calls } = sharedContext(config, {
+    const { context, calls } = await sharedContext(config, {
       sessionBroker: {
         getSession: (id: string) => (id === 'telegram-session' ? { id, surfaceKinds: ['telegram'] } : null),
         submitMessage: async (input: unknown) => {

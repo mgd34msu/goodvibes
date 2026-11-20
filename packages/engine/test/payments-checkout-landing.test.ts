@@ -9,7 +9,7 @@ describe('the page a submitted checkout landed on', () => {
   });
 
   test('a card-shaped number is never taken as the order number', () => {
-    expect(readOrderConfirmation('Order confirmed. Order number 4111111111111111', true)).toEqual({ orderId: null, challenge: null, confirmed: true });
+    expect(readOrderConfirmation('Order confirmed. Order number 4111111111111111', true)).toEqual({ orderId: null, challenge: null, confirmed: true, totalShown: false });
   });
 
   test('a page that cannot be read leaves the purchase unverified rather than failing the submit', async () => {

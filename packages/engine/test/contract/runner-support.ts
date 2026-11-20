@@ -24,7 +24,8 @@ import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { ContractEvent } from '../../platform/src/events/contract.js';
 import { AgentMessageBus } from '../../platform/src/platform/agents/message-bus.js';
-import type { ConfigManager } from '../../platform/src/platform/config/manager.js';
+import { ConfigManager } from '../../platform/src/platform/config/manager.js';
+import type { ConfigKey } from '../../platform/src/platform/config/schema-types.js';
 import type { DecompositionRunner } from '../../platform/src/platform/core/plan-decomposition.js';
 import { createOrchestrationEngine } from '../../platform/src/platform/orchestration/engine.js';
 import { emitAgentCompleted, emitAgentFailed, emitAgentRunning } from '../../platform/src/platform/runtime/emitters/agents.js';
@@ -215,13 +216,12 @@ export interface HarnessOptions {
 
 const ROUTE: UnitRoute = { model: 'provider-a:model-a', provider: 'provider-a', reason: 'test tier' };
 
-function configManager(contract: Record<string, unknown>): Pick<ConfigManager, 'get' | 'getCategory'> {
+/** The real settings manager over a scratch settings folder, with the contract settings written as an owner writes them. */
+function configManager(home: string, root: string, contract: Record<string, unknown>): ConfigManager {
+  const config = new ConfigManager({ configDir: join(home, 'config'), workingDir: root, surfaceRoot: 'goodvibes' });
   const values: Record<string, unknown> = { isolation: 'shared', gates: [], transportRetryDelayMs: 0, ...contract };
-  // The real reader is typed per key; a test reader over plain values cannot be, hence the widening.
-  return {
-    get: (key: string): unknown => (key.startsWith('contract.') ? values[key.slice('contract.'.length)] : undefined),
-    getCategory: (name: string): unknown => (name === 'contract' ? values : undefined),
-  } as unknown as Pick<ConfigManager, 'get' | 'getCategory'>;
+  for (const [key, value] of Object.entries(values)) config.setDynamic(`contract.${key}` as ConfigKey, value);
+  return config;
 }
 
 export function makeHarness(options: HarnessOptions): Harness {
@@ -231,7 +231,8 @@ export function makeHarness(options: HarnessOptions): Harness {
   const events: ContractEvent[] = [];
   const holds: { agentId: string; outcome: ContractHoldOutcome }[] = [];
   const runs = new Map<string, number>();
-  const config = configManager(options.contract ?? {});
+  const home = mkdtempSync(join(tmpdir(), 'contract-runner-home-'));
+  const config = configManager(home, root, options.contract ?? {});
   const ctx = { sessionId: 'test', traceId: 'test', source: 'test' };
   let runner: ReturnType<typeof createContractRunner>;
 
@@ -303,7 +304,7 @@ export function makeHarness(options: HarnessOptions): Harness {
   }
 
   const manager: AgentManager = new AgentManager({
-    configManager: { get: () => null } as unknown as Pick<ConfigManager, 'get'>,
+    configManager: config,
     messageBus,
     archetypeLoader: { loadArchetype: () => null },
     executor: { runAgent: (record): Promise<void> => options.executeAgent ? options.executeAgent(record, { root, runner, manager, bus, messageBus }) : execute(record) },
@@ -376,6 +377,7 @@ export function makeHarness(options: HarnessOptions): Harness {
       // The fixture's log and directory belong to that work until join.
       const cleanup = () => {
         ownedLog?.[Symbol.dispose]();
+        rmSync(home, { recursive: true, force: true });
         if (options.root === undefined) rmSync(root, { recursive: true, force: true });
       };
       const draining = Promise.allSettled(ids.map(id => runner.join(id))).then(results => {

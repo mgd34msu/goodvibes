@@ -219,7 +219,7 @@ export class DurableBudgetLedger extends BudgetLedger {
     // An existing v2 hold can have been imported from another supported
     // installation. Admit its reader requirement before exposing accounting,
     // even when neither migration nor pruning needs to rewrite the file.
-    try { this.assertAvailable(); this.declareRetainedHolds(); this.declareReconciliations(); }
+    try { this.assertAvailable(); const state = super.state(); this.declareRetainedHolds(state); this.declareReconciliations(state); }
     catch { this.unavailable = true; return; }
     const before = super.state().spend.length;
     try { super.prune(now(), this.retainPendingSpend); }
@@ -287,8 +287,8 @@ export class DurableBudgetLedger extends BudgetLedger {
     super.settleReconciliation(receipt, owner);
   }
 
-  protected override persistSettlement(owner?: CheckoutBudgetSettlementOwner): void {
-    this.writeToDisk(owner ? () => owner.assertCurrent() : undefined);
+  protected override persistSettlement(next: BudgetStateSnapshot, owner?: CheckoutBudgetSettlementOwner): void {
+    this.writeToDisk(owner ? () => owner.assertCurrent() : undefined, next);
   }
 
   override reserve(input: {
@@ -414,15 +414,16 @@ export class DurableBudgetLedger extends BudgetLedger {
     }
   }
 
-  private writeToDisk(assertCurrent?: () => void): void {
+  /** `next` is a settlement's ledger written before memory adopts it; every other write saves memory as it stands. */
+  private writeToDisk(assertCurrent?: () => void, next?: BudgetStateSnapshot): void {
+    const state = next ?? super.state();
     // Ordinary spend rows are readable by v1. The incompatible fact is a
     // hold that must survive expiry/day rollover; publish its reader floor
     // before that fact can reach disk. Early compatible writes keep rollback.
-    this.declareRetainedHolds();
-    this.declareReconciliations();
+    this.declareRetainedHolds(state);
+    this.declareReconciliations(state);
     const current = () => { this.assertAvailable(); assertCurrent?.(); this.assertAvailable(); };
     current();
-    const state = super.state();
     const contents: BudgetFile = { version: state.reconciliations?.length ? 3 : BUDGET_FILE_VERSION, ...state };
     const bytes = `${JSON.stringify(contents, null, 2)}\n`;
     atomicWriteFileSync(this.filePath, bytes, { mode: 0o600, mkdirp: true, assertCurrent: current,
@@ -437,12 +438,12 @@ export class DurableBudgetLedger extends BudgetLedger {
     this.persistPending = false;
   }
 
-  private declareRetainedHolds(): void {
-    if (!super.state().reservations.some(reservation => reservation.retainUntilSettled === true)) return;
+  private declareRetainedHolds(state: BudgetStateSnapshot): void {
+    if (!state.reservations.some(reservation => reservation.retainUntilSettled === true)) return;
     assertSynchronousJudgmentGuard(() => this.beforeFormatWrite?.(), () => new PaymentBudgetUnavailableError());
   }
-  private declareReconciliations(): void {
-    if (!super.state().reconciliations?.length) return;
+  private declareReconciliations(state: BudgetStateSnapshot): void {
+    if (!state.reconciliations?.length) return;
     assertSynchronousJudgmentGuard(() => this.beforeReconciliationWrite?.(), () => new PaymentBudgetUnavailableError());
   }
 }

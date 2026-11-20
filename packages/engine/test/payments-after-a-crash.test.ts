@@ -33,7 +33,7 @@ import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests, type CurrencyCode }
 
 const usd = parseCurrencyCode('USD') as CurrencyCode;
 const NOW = Date.parse('2026-11-17T12:00:00Z');
-const LIMITS: BudgetLimits = { dailyItemMinorUnits: 100_000, dailyOverageMinorUnits: 10_000,
+const LIMITS: BudgetLimits = { currency: usd, dailyItemMinorUnits: 100_000, dailyOverageMinorUnits: 10_000,
   perPurchaseCeiling: { enabled: false, minorUnits: 0 }, overageTolerance: { enabled: false, dailyAllowanceMinorUnits: 0 } };
 const DRAW = { itemMinorUnits: 4_000, overageMinorUnits: 500, toleranceMinorUnits: 0, totalMinorUnits: 4_500 };
 

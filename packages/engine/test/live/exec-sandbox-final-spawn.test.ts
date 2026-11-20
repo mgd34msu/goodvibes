@@ -28,8 +28,9 @@ requireLiveHost('PTY', pty.available);
 let root: string | undefined;
 afterEach(() => { if (root) rmSync(root, { recursive: true, force: true }); root = undefined; });
 for (const mode of ['foreground', 'progress', 'until', 'pty'] as const) {
-  for (const revoked of [true]) {
-    test(`${mode} claims exact admission at final spawn; revoked=${revoked}`, async () => {
+  // Revoked, nothing is spawned; the control, not revoked, spawns once and runs, so a spawn refused for any other reason fails the case too.
+  test(`${mode} claims exact admission at final spawn, revoked and not`, async () => {
+    for (const revoked of [true, false]) {
       root = mkdtempSync(join(tmpdir(), 'sandbox-final-spawn-'));
       const controller = new AbortController();
       let claims = 0; let closes = 0; let spawns = 0;
@@ -58,13 +59,14 @@ for (const mode of ['foreground', 'progress', 'until', 'pty'] as const) {
       try {
         const result = await tool.execute({ commands: [{ cmd: command, timeout_ms: 1000, interactive: mode === 'pty',
           progress: mode === 'progress', ...(mode === 'until' ? { until: { pattern: 'owned-final-spawn', kill_after: true } } : {}) }] });
-        expect(claims).toBe(1); expect(closes).toBe(1); expect(spawns).toBe(revoked ? 0 : 1);
-        if (revoked) expect(result.success).toBe(false);
-        else {
+        expect({ revoked, claims, closes, spawns, success: result.success }).toEqual({ revoked, claims: 1, closes: 1, spawns: revoked ? 0 : 1, success: !revoked });
+        if (!revoked) {
           const output = JSON.parse(result.output!);
           expect(output.sandboxed).toBe(true); expect(output.sandbox_network).toBe('enabled');
         }
       } finally { spy.mockRestore(); await manager.close(); }
-    });
-  }
+      rmSync(root, { recursive: true, force: true });
+      root = undefined;
+    }
+  });
 }

@@ -1,5 +1,5 @@
 // Proves: The Agent does an act that is the owner's alone through its operator tools: approves or answers a purchase, writes a standing authorisation, answers an approval put to the owner, mints a device token, approves a peer, revokes the shared token, deletes a saved rule.
-// Red when: An owner-only operator method reaches the host from agent_operator_method or agent_operator_action, or is put to Jev or the owner's prompt instead of being refused, because the method lost its owner-only mark or a tool stopped honouring it.
+// Red when: The gate stops refusing an owner act outright: a tool's declared owner acts (the owner-only methods and actions) are no longer recognised as owner acts, or the owner-act step of the call classifier no longer refuses them, so the call reaches the host or Jev or the owner's prompt settles it.
 /**
  * The Agent's two operator tools, registered as a daemon-hosted Agent turn
  * registers them (with their input projectors and the in-process host), in a
@@ -28,6 +28,7 @@ import { createAgentInProcessHost } from '../terminal-shell/src/agent-turn/in-pr
 import { registerAgentOperatorActionTool } from '../terminal-shell/src/agent-turn/operator-action-tool.ts';
 import { registerAgentOperatorMethodTool } from '../terminal-shell/src/agent-turn/operator-method-tool.ts';
 import { forgetGateReadings, gateReadingsPort } from './_helpers/gate-readings.ts';
+import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 
 let dir: string;
 let restorePort: () => void;
@@ -61,7 +62,7 @@ test('every owner act is refused by both operator tools with nothing sent and no
     { key: 'judgment.endpoint' as ConfigKey, value: 'http://127.0.0.1:9/v1' },
     { key: 'judgment.model' as ConfigKey, value: 'fixture-model' },
     { key: 'judgment.keySource' as ConfigKey, value: 'secret' },
-  ], { kind: 'owner', surface: 'fixture' }).ok).toBe(true);
+  ], localOwnerActor()).ok).toBe(true);
   let ownerPrompts = 0;
   const manager = new PermissionManager(async () => { ownerPrompts++; return { approved: true }; },
     createPermissionConfigReader(config), new PolicyRuntimeState(), null, null, null, {});

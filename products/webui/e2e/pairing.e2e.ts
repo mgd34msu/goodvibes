@@ -1,27 +1,36 @@
 // Proves: A pairing link signs the device in and the operator token does not stay in the address bar or history.
 // Red when: Opening #pair=<token> does not sign in, or the token is still in the URL afterwards.
+
 /**
- * QR pairing hand-off: opening a `#pair=<token>` link (what the terminal's
- * `goodvibes pair` QR encodes) signs the device in and scrubs the token from the
- * URL, so the credential never lingers in the address bar or history; and a late
- * refusal of the anonymous probe cannot sign the paired device back out.
+ * QR pairing hand-off against a real daemon started from source: the owner's
+ * pairing link (pairing.handoff.create, what the terminal's pairing QR encodes)
+ * opened in the web UI the daemon serves signs the device in, and the token is
+ * in neither the address bar nor any entry of the tab's history.
  */
 import { test, expect } from '@playwright/test';
-import { installMockDaemon } from './support/mock-daemon';
+import { ownerPairingLink, startRealDaemon } from './support/daemon';
 
 test('a pairing link signs in and strips the token from the URL', async ({ page }) => {
-  // Boot signed OUT (no seeded token): the fragment is the only way in.
-  await installMockDaemon(page, { signedIn: false });
+  const daemon = await startRealDaemon();
+  try {
+    const link = await ownerPairingLink(daemon);
+    // With a view the start-up URL rewrite keeps the fragment, so only the hand-off's own scrub can remove the token.
+    await page.goto(`${daemon.baseUrl}/?view=chat${link.fragment}`);
 
-  // With a view the start-up URL rewrite keeps the fragment, so only the hand-off's own scrub can remove the token.
-  await page.goto('/?view=chat#pair=paired-operator-token');
+    await expect(page.locator('.app-shell')).toBeVisible();
+    await expect(page.locator('.signed-out-gate')).toHaveCount(0);
 
-  // The shell reveals (the mock daemon reports the token as authenticated).
-  await expect(page.locator('.app-shell')).toBeVisible();
-  await expect(page.locator('.signed-out-gate')).toHaveCount(0);
-
-  // The one-time token is gone from the URL fragment (history.replaceState).
-  await expect
-    .poll(() => new URL(page.url()).hash)
-    .not.toContain('pair=');
+    await expect.poll(() => page.url()).not.toContain('pair=');
+    expect(page.url()).not.toContain(encodeURIComponent(link.token));
+    // Every entry of the tab's history as Chromium keeps it, not only the address bar.
+    const cdp = await page.context().newCDPSession(page);
+    const { entries } = await cdp.send('Page.getNavigationHistory');
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
+      expect(entry.url).not.toContain('pair=');
+      expect(entry.url).not.toContain(encodeURIComponent(link.token));
+    }
+  } finally {
+    await daemon.stop();
+  }
 });

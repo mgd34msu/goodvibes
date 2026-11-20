@@ -22,7 +22,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ContractStoreVersionError, contractCheckpointsDir, contractPath, serializeContract } from '../platform/src/platform/contract/store.js';
 import type { ContractView } from '../platform/src/platform/contract/types.js';
-import { firstLine, paths, progressContract, progressStep, quarantined, restart, saved, storeAt } from './contract-progress-support.js';
+import { firstLine, loaded, paths, progressContract, progressStep, quarantined, restart, saved, storeAt } from './contract-progress-support.js';
 import { makeHarness, makeRepo, startContract, twoUnitPlan, type AgentScript, type Harness } from './contract/runner-support.js';
 
 const roots: string[] = [];
@@ -49,7 +49,7 @@ describe('restart at every save point', () => {
     for (let step = 1; step <= 12; step++) {
       // Each step runs in a process that has just restarted from the last save.
       store = storeAt(root);
-      contract = store.load(first.id)!;
+      contract = loaded(store, first.id);
       store.hold(contract);
       progressStep(contract, step);
       expect(store.write(contract.id)).toBe(true);
@@ -95,7 +95,7 @@ test('a version-6 single-file checkpoint loads, resumes, and after conversion st
   writeFileSync(contractPath(root, original.id), serializeContract(original, 5)!);
 
   const store = storeAt(root);
-  const contract = store.load(original.id)!;
+  const contract = loaded(store, original.id);
   expect(saved(contract)).toEqual(saved(original));
   expect(store.listStoredIds()).toEqual([original.id]);
   store.hold(contract);
@@ -117,7 +117,7 @@ describe('one writer per contract', () => {
     first.dispose();
 
     // This process reads the contract, then another process takes it and saves.
-    const local = storeAt(root), mine = local.load(contract.id)!;
+    const local = storeAt(root), mine = loaded(local, contract.id);
     local.hold(mine);
     const child = Bun.spawn([process.execPath, join(import.meta.dir, 'contract-progress-child.ts'), 'hold', root, contract.id], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
     expect(await firstLine(child.stdout)).toBe('saved');
@@ -136,7 +136,7 @@ describe('one writer per contract', () => {
     local.dispose();
 
     // A process that reads the contract now continues it.
-    const fresh = storeAt(root), current = fresh.load(contract.id)!;
+    const fresh = storeAt(root), current = loaded(fresh, contract.id);
     fresh.hold(current);
     progressStep(current, 2);
     expect(fresh.write(current.id)).toBe(true);
@@ -233,7 +233,7 @@ describe('a process killed during a save', () => {
 
     // Half a record on disk; the next process saves again: its record stands alone.
     writeFileSync(log, Buffer.concat([prefix, record.subarray(0, record.length >> 1)]));
-    const next = storeAt(root), resumed = next.load(contract.id)!;
+    const next = storeAt(root), resumed = loaded(next, contract.id);
     next.hold(resumed);
     progressStep(resumed, 2);
     progressStep(resumed, 3);

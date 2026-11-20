@@ -11,7 +11,7 @@
 // was sent.
 import { afterEach, describe, expect, test } from 'bun:test';
 import { executeFetchInput, FetchRuntimeService } from '../platform/src/platform/tools/fetch/runtime.ts';
-import type { HostResolver } from '../platform/src/platform/tools/fetch/pinned-request.ts';
+import type { HostResolver } from '../platform/src/platform/runtime/network/destination.ts';
 
 const DNS: Readonly<Record<string, readonly string[]>> = {
   'loopback.test': ['127.0.0.1'],

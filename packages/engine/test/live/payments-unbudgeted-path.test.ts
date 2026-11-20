@@ -36,6 +36,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
+import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { ConfigManager } from '../../platform/src/platform/config/manager.ts';
@@ -138,7 +139,7 @@ async function startShopper(): Promise<void> {
 
   // The owner chose yolo: the gate admits every browser call and asks no one.
   const config = new ConfigManager({ surfaceRoot: 'goodvibes', workingDir: join(root, 'workspace'), homeDir: homeDirectory, configDir: join(root, 'config'), ownsDaemonTier: true });
-  expect(config.setMany([{ key: 'permissions.mode' as ConfigKey, value: 'yolo' }], { kind: 'owner', surface: 'fixture' }).ok).toBe(true);
+  expect(config.setMany([{ key: 'permissions.mode' as ConfigKey, value: 'yolo' }], localOwnerActor()).ok).toBe(true);
   const permissions = new PermissionManager(async () => { ownerAsked++; return { approved: false }; },
     createPermissionConfigReader(config), new PolicyRuntimeState(), null, null, null, { heldForOwner: new HeldForOwnerLedger(), surfaceOf: () => undefined });
   const registry = new ToolRegistry(permissions);

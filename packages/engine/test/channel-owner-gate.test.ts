@@ -6,6 +6,8 @@
 // Red when: `authorizeSurfaceIngress` reads, records or passes on a message with a card number instead of refusing it first and telling the owner on that channel.
 // Proves: A guest on the owner's channel settles something of the owner's: answers a purchase window, presses Approve on a permission ask, or cancels a run; or the owner's command from one conversation acts on work another started.
 // Red when: The purchase-window reply, the approve button or a channel control command stops requiring the channel's owner, or a control command stops requiring that its conversation started the work it names.
+// Proves: A stranger writing in a chat the owner set up for delegated review is offered ownership of the channel or a place on its allowlist, or is made its owner.
+// Red when: The ingress decision stops reading a delegated chat as delegated review for a sender other than the owner, or the first-sender seeding stops skipping a delegated chat: a claim is posted or the stranger becomes owner.
 /**
  * Who reaches the assistant over a chat channel, and who may answer for the
  * owner. On a surface with no owner the first unknown sender is held as a
@@ -15,8 +17,9 @@
  * channel.
  *
  * Real policy manager over its file, real owner inbox over its SQLite file,
- * real approval broker and surface-action helper; the decision model is the
- * approval-readings fixture port.
+ * real approval broker and surface-action helper, and the real delegated
+ * Telegram intake reading its own record of delegated chats; the decision
+ * model is the approval-readings fixture port.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -34,6 +37,9 @@ import { PaymentReplyInbox } from '../platform/src/platform/payments/reply-inbox
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
 import { useApprovalReadings } from './helpers/approval-readings.ts';
+import { DelegatedTelegramIntake } from '../platform/src/platform/daemon/delegated-telegram-intake.ts';
+import { createTelegramSourceAccountOwner } from '../platform/src/platform/channels/telegram/source-account.ts';
+import { PersistentStore } from '../platform/src/platform/state/persistent-store.ts';
 
 const readings = useApprovalReadings();
 const scratchDirs: string[] = [];
@@ -249,5 +255,55 @@ test('a guest on the owner\'s channel answers no purchase window, presses no app
     await paymentReplies.close();
     await sessionBroker.stop();
     await policy.stop();
+  }
+});
+
+test('a stranger in a chat set up for delegated review is never offered ownership or the allowlist, with or without an owner', async () => {
+  const dir = scratch();
+  const chat = '-100777';
+  // The owner set this group up for delegated review before the daemon started: the intake's own record says so.
+  const selectionPath = join(dir, 'telegram-delegated-selection.json');
+  await new PersistentStore<{ selected: Array<{ chatId: string }> }>(selectionPath).persist({ selected: [{ chatId: chat }] }, { durable: true });
+  const routeBindings = new RouteBindingManager({ store: new AutomationRouteStore(join(dir, 'bindings.json')) });
+  const sessions = new SharedSessionBroker({ storePath: join(dir, 'sessions.json'), routeBindings, agentStatusProvider: { getStatus: () => null }, messageSender: { send: () => false } });
+  await sessions.start();
+  const approvals = new ApprovalBroker({ storePath: join(dir, 'approvals.json') });
+  const intake = new DelegatedTelegramIntake({
+    broker: sessions, approvals, routes: routeBindings, accounts: createTelegramSourceAccountOwner().reader,
+    workspaceRoot: dir, selectionPath, receiptPath: join(dir, 'telegram-delegated-review.json'),
+  });
+  const inbox = createOwnerInbox({ questionsPath: join(dir, 'owner-inbox.sqlite') });
+  /** A policy manager wired as the daemon wires it: delegated chats read from the intake, claims put to the owner's inbox unless `noInbox`. */
+  const surface = async (name: string, owner: string | null, noInbox = false) => {
+    const policy = new ChannelPolicyManager({ storePath: join(dir, `${name}-policies.json`) });
+    if (owner) await policy.upsertPolicy('telegram', { allowlistUserIds: [owner] });
+    if (!noInbox) policy.attachOwnerInbox(inbox);
+    policy.attachDelegatedReview({ isDelegated: async (kind, channelId, threadId) => kind === 'telegram' && await intake.selects(channelId, threadId) });
+    return policy;
+  };
+  const stranger = (channelId: string) => ({ surface: 'telegram' as const, userId: '9001', channelId, groupId: channelId, conversationKind: 'group' as const, mentioned: true, text: 'please review this' });
+  const owned = await surface('owned', '42');
+  const unowned = await surface('unowned', null);
+  const embedded = await surface('embedded', null, true);
+  try {
+    const seen = [];
+    for (const [name, policy] of [['owned', owned], ['unowned', unowned], ['no inbox', embedded]] as const) {
+      const decision = await policy.evaluateIngress(stranger(chat));
+      seen.push({ name, reason: decision.reason, owner: policy.getPolicy('telegram').ownerId ?? null, allowlist: policy.getPolicy('telegram').allowlistUserIds });
+    }
+    expect(seen).toEqual([
+      { name: 'owned', reason: 'delegated-review', owner: '42', allowlist: ['42'] },
+      { name: 'unowned', reason: 'delegated-review', owner: null, allowlist: [] },
+      { name: 'no inbox', reason: 'delegated-review', owner: null, allowlist: [] },
+    ]);
+    expect(inbox.listNow({ kinds: ['claim'], status: 'all' })).toEqual([]);
+    // The same stranger in a chat that is not delegated is held as a claim: the claims above were withheld, not broken.
+    expect((await unowned.evaluateIngress(stranger('-100888'))).reason).toBe('owner-claim-pending');
+    expect(inbox.listNow({ kinds: ['claim'], status: 'open' }).map((item) => item.metadata?.['userId'])).toEqual(['9001']);
+  } finally {
+    await Promise.all([owned.stop(), unowned.stop(), embedded.stop()]);
+    intake.close();
+    inbox.dispose();
+    await sessions.stop();
   }
 });

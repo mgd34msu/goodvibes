@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, expect, type Browser, type Page } from '@playwright/test';
 import { installTestTempRoot } from './test-temp-root';
-import { installFakeAudio } from '../e2e/support/voice-mock';
+import { installFakeAudio } from './fake-audio';
 
 // Chromium creates a Unix-domain socket below TMPDIR; the checked-out path
 // can exceed its native length limit. Only Chromium uses the original OS base.

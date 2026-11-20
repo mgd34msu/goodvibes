@@ -17,6 +17,7 @@ import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-m
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { isSurfaceDeliveryEnabled, isSurfaceIngressEnabled } from '../platform/src/platform/daemon/surface-policy.ts';
+import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -37,7 +38,7 @@ test('a channel policy switched off refuses its own owner', async () => {
 test('a surface the owner switched off in settings neither receives nor sends while its credential stays stored', () => {
   const dir = scratch();
   const config = new ConfigManager({ configDir: join(dir, 'config'), daemonTierPath: join(dir, 'daemon', 'settings.json'), ownsDaemonTier: true });
-  const owner = { kind: 'owner', surface: 'fixture' } as const;
+  const owner = localOwnerActor();
   // A credential-only install: each surface has its credential (or its target) and `enabled` was never set.
   config.setMany([
     { key: 'surfaces.telegram.botToken' as ConfigKey, value: 'goodvibes://secrets/goodvibes/TELEGRAM_BOT_TOKEN' },

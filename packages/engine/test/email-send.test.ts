@@ -35,6 +35,7 @@ import { withSurfaceEmailConfig } from '../platform/src/platform/email/surface-c
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { resolveOwnerAddresses } from '../platform/src/platform/security/owner-identity.ts';
 import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.ts';
+import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 
 const OWNER = 'owner@example.test';
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -107,7 +108,7 @@ async function emailSend(ledger: UntrustedContentLedger) {
   configManager.setMany([
     { key: 'surfaces.email.host' as ConfigKey, value: 'smtp.test' },
     { key: 'surfaces.email.user' as ConfigKey, value: OWNER },
-  ], { kind: 'owner', surface: 'fixture' });
+  ], localOwnerActor());
   const secretsManager = new SecretsManager({ surfaceRoot: 'goodvibes', globalHome: join(root, 'home'), projectRoot: root, policy: 'plaintext_allowed' });
   await secretsManager.set(daemonSecretKeyFor('surfaces.email.password'), 'mail-app-password', { scope: 'user' });
   const service = new EmailService(withSurfaceEmailConfig({

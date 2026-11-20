@@ -19,12 +19,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { choiceAnswer, startScriptedDecisionServer, type ScriptedDecisionServer } from '@goodvibes-jev/judgment/testing';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { createPermissionConfigReader, PermissionManager } from '../platform/src/platform/permissions/manager.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 import { composeJudgment } from '../platform/src/platform/runtime/judgment-services.ts';
 import { forgetGateReadings, gateReadingAnswers } from './_helpers/gate-readings.ts';
 import { syntheticCredential } from '../platform/src/platform/utils/fixture-credentials.ts';
+import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 
 // Credential-shaped values are assembled at run time (utils/fixture-credentials.ts), so no
 // file holds a whole shape a secret scanner reports.
@@ -56,9 +58,10 @@ test('no secret in a call reaches the decision model and the call is not approve
     { key: 'judgment.endpoint' as ConfigKey, value: model.baseURL },
     { key: 'judgment.model' as ConfigKey, value: 'fixture-model' },
     { key: 'judgment.keySource' as ConfigKey, value: 'secret' },
-  ], { kind: 'owner', surface: 'fixture' }).ok).toBe(true);
-  composeJudgment({ config, env: {}, stateRoot: join(dir, 'state'),
-    secrets: { get: async (key) => (key === 'TYPESAFE_API_KEY' ? 'fixture-decision-key' : null) },
+  ], localOwnerActor()).ok).toBe(true);
+  const store = new SecretsManager({ surfaceRoot: 'agent', globalHome: join(dir, 'home'), projectRoot: join(dir, 'workspace'), policy: 'plaintext_allowed' });
+  await store.set('TYPESAFE_API_KEY', 'fixture-decision-key', { scope: 'user' });
+  composeJudgment({ config, env: {}, stateRoot: join(dir, 'state'), secrets: store,
     disposal: { add: (_label, dispose) => { teardowns.push(dispose); } } });
   const reader = createPermissionConfigReader(config);
   expect(reader.isDecisionModelReady?.()).toBe(true);

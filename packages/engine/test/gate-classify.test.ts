@@ -32,6 +32,7 @@ import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 import { createGoodVibesSettingsTool } from '../platform/src/platform/tools/goodvibes-runtime/index.ts';
 import { executeToolCalls, type ToolExecutionDeps } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 
 const ROOT = '/synthetic/classify';
 const facts = (over: Partial<CallFacts> = {}): CallFacts => ({
@@ -139,7 +140,7 @@ afterEach(() => {
 function machine() {
   const workspace = join(dir, 'workspace');
   const config = new ConfigManager({ surfaceRoot: 'agent', workingDir: workspace, homeDir: join(dir, 'home'), configDir: join(dir, 'config'), ownsDaemonTier: true });
-  const owner = { kind: 'owner', surface: 'fixture' } as const;
+  const owner = localOwnerActor();
   const set = config.setMany([
     { key: 'permissions.mode' as ConfigKey, value: 'jev-decides' },
     { key: 'judgment.endpoint' as ConfigKey, value: 'http://127.0.0.1:9/v1' },
@@ -191,7 +192,7 @@ test('an agent\'s settings write that loosens a payments key goes to the owner, 
   for (const [key, value] of writes) {
     const { deps, prompts, ran, config } = machine();
     const before = config.get(key as ConfigKey);
-    const [result] = await executeToolCalls(deps, 'turn', [{ id: key, name: 'goodvibes_settings', arguments: { mode: 'set', key, value, confirm: true } }]);
+    const [result] = await executeToolCalls(deps, 'turn', [{ id: key, name: 'goodvibes_settings', arguments: { mode: 'set', key, value } }]);
     expect(`${key}: ${jevQuestions} questions to Jev, ${prompts.length} to the owner, ran ${ran.length}`).toBe(`${key}: 0 questions to Jev, 1 to the owner, ran 0`);
     expect(result?.decision).toMatchObject({ state: 'refused', decidedBy: 'owner' });
     expect(config.get(key as ConfigKey)).toEqual(before);

@@ -7,8 +7,9 @@
  * spoken-input port; the same text typed into the composer does run.
  *
  * The app's real submission routing (shell/owner-submission.ts, as main()
- * builds it) and a real ShellPassthrough running bash. The turn is the
- * stand-in: it records what would have gone to the model. "Did not run" is a
+ * builds it), a real ShellPassthrough running bash and the real session memory
+ * store. The turn is the stand-in: it records what would have gone to the
+ * model. "Did not run" is a
  * marker file the command would have created, read after every command
  * started here has finished.
  */
@@ -16,6 +17,7 @@ import { afterAll, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { SessionMemoryStore } from '@goodvibes-jev/engine/platform/platform/core';
 import { ShellPassthrough } from '@goodvibes-jev/engine/terminal-shell/shell-passthrough';
 import { createShellSubmissionPorts } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
 import { createOwnerSubmission } from '../../shell/owner-submission.ts';
@@ -29,7 +31,7 @@ function shell() {
   const submission = createOwnerSubmission({
     shellPassthrough: passthrough,
     workingDir: dir,
-    sessionMemoryStore: { add: () => 'm-1' },
+    sessionMemoryStore: new SessionMemoryStore(),
     begin: () => {},
     switchModels: () => {},
     answerOptions: () => ({}),

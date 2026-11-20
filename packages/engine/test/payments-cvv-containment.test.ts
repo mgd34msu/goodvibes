@@ -64,7 +64,7 @@ test('a stored security code is encrypted on disk and still readable by the daem
   const files = everyFile(home);
   expect(files.length).toBeGreaterThan(0);
   expect(files.filter(file => file.text.includes(CVV_SENTINEL)).map(file => file.path)).toEqual([]);
-  expect(await manager.get(key)).toBe(CVV_SENTINEL);
+  expect((await manager.get(key))?.reveal('dispatch')).toBe(CVV_SENTINEL);
 });
 
 test('under "prompt" the security code is neither kept nor supplied, and a deleted card leaves no secret behind', async () => {

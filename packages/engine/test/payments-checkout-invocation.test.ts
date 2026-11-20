@@ -7,22 +7,45 @@
  * transport, may not. Once started, any change to the authority, settings or
  * browser owner retires the purchase's authority.
  *
- * Real `checkout-invocation.ts` and `window-handlers.ts`; the transport's
- * authority and the operations store are stand-ins that record what reached them.
+ * Real `checkout-invocation.ts`, `window-handlers.ts` and the payment host's
+ * `CheckoutOperations` over its real operations store, journal and purchase
+ * ledger, reading the real settings manager, all in temp folders. Stand-in:
+ * the transport's authority, and the admitted purchase's checkout run, which
+ * waits until it is stopped.
  */
-import { expect, test } from 'bun:test';
+import { afterEach, expect, test } from 'bun:test';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { retainCheckoutInvocation, retainDetachedCheckout } from '../platform/src/platform/payments/host/checkout-invocation.js';
 import { purchaseWindowAnswerHandler } from '../platform/src/platform/payments/host/window-handlers.js';
 import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
-import type { CheckoutOperations } from '../platform/src/platform/payments/host/checkout-operations.js';
+import { CheckoutOperations } from '../platform/src/platform/payments/host/checkout-operations.js';
+import { DurablePaymentOperations } from '../platform/src/platform/payments/host/operation-store.js';
+import { DurableCheckoutJournal } from '../platform/src/platform/payments/host/checkout-journal-store.js';
+import { DaemonPurchaseLedger } from '../platform/src/platform/payments/host/purchase-ledger.js';
+import type { BeginCheckoutInput } from '../platform/src/platform/payments/payments-gateway-service.js';
 import { HandlerError, type HandlerContextEnvelope } from '../platform/src/platform/payments/host/handler-plumbing.js';
 import type { PaymentsHandlerDeps } from '../platform/src/platform/payments/host/register.js';
 import type { BrowserCheckoutSeam } from '../platform/src/platform/control-plane/routes/browser-composition.js';
 import type { NativeExecutionAuthority, NativePairedSnapshot } from '../platform/src/platform/security/http-auth.js';
 
+/** The daemon's settings manager over a temp folder, with payments turned on. */
+function settings(): ConfigManager {
+  const home = makeProjectTempDir('gv-payments-invocation');
+  const configDir = join(home, '.goodvibes', 'goodvibes');
+  mkdirSync(configDir, { recursive: true });
+  const manager = new ConfigManager({ configDir, homeDir: home, surfaceRoot: 'goodvibes',
+    daemonTierPath: join(home, '.goodvibes', 'daemon', 'settings.json'), ownsDaemonTier: true });
+  manager.set('payments.enabled', true);
+  return manager;
+}
+
 function fixture() {
   let allowed = true;
-  const values = new Map<string, unknown>([['payments.enabled', true]]);
+  const config = settings();
   const seam = {} as BrowserCheckoutSeam;
   const paired: NativePairedSnapshot = { kind: 'pairing-token', tokenId: 'owner', principalId: 'pairing:owner', authorityId: 'pairing:owner',
     authorityRevision: 'original', scopes: ['write:payments'] };
@@ -34,17 +57,17 @@ function fixture() {
     admin: true, scopes: ['write:payments'], explicitUserRequest: true, authToken: 'private-fixture-bearer',
     nativeExecutionAuthority: native, isAuthorized: () => allowed };
   // Only the actual dependencies used by this restriction are supplied.
-  const deps = { config: { get: (key: string) => values.get(key) }, isPaymentsLeader: () => true,
+  const deps = { config, isPaymentsLeader: () => true,
     checkout: { seam: () => seam } } as unknown as PaymentsHandlerDeps;
   const owner = retainCheckoutInvocation(deps, seam, context);
-  return { owner, context, values, abort, deps, seam, revoke: () => { allowed = false; } };
+  return { owner, context, config, abort, deps, seam, revoke: () => { allowed = false; } };
 }
 
 test.each(['revocation', 'budget'] as const)(
   '%s changes retire checkout authority without exposing private transport state', kind => {
     const f = fixture();
     if (kind === 'revocation') f.revoke();
-    if (kind === 'budget') f.values.set('payments.budget.dailyItem', 2);
+    if (kind === 'budget') f.config.set('payments.budget.dailyItem', 2);
     const error = (() => { try { f.owner.assertCurrent(); } catch (error) { return error; } return null; })();
     expect(error).toBeInstanceOf(HandlerError);
     expect(String(error)).not.toContain('private-fixture-bearer');
@@ -52,49 +75,73 @@ test.each(['revocation', 'budget'] as const)(
 );
 
 type OwnerKind = 'local' | 'pairing-token';
-function owner(kind: OwnerKind | null, explicitUserRequest = true) {
+/** A request as the transport presents it: `kind` null is a caller it gave no owner authority. */
+function caller(kind: OwnerKind | null, explicitUserRequest = true): HandlerContextEnvelope {
   const principalId = kind === 'local' ? 'local-owner' : 'pairing:owner';
   const snapshot: NativePairedSnapshot = { kind: kind ?? 'pairing-token', tokenId: 'owner', principalId, authorityId: principalId,
     authorityRevision: 'original', scopes: ['write:payments'] };
   const native: NativeExecutionAuthority = {
     current: () => snapshot,
     async withCurrent(_expected, work) { return work(() => snapshot); },
-    issueContinuation: () => ({ binding: 'grant' }) as never,
+    issueContinuation: binding => ({ id: `continuation-${randomUUID()}`, binding }),
     revokeContinuation: () => {},
   };
-  const context: HandlerContextEnvelope = { principalId, principalKind: 'token', admin: true, scopes: ['write:payments'],
+  return { principalId, principalKind: 'token', admin: true, scopes: ['write:payments'],
     explicitUserRequest, authToken: 'private-fixture-bearer', isAuthorized: () => true,
     ...(kind === null ? {} : { nativeExecutionAuthority: native }) };
+}
+
+const hosts: Array<() => Promise<void>> = [];
+afterEach(async () => { for (const close of hosts.splice(0)) await close(); });
+
+/**
+ * The payment host's own operations over its real store, journal and purchase
+ * ledger in a temp folder. The purchase it admits runs until it is stopped, as
+ * a checkout waiting on its page does.
+ */
+async function paymentHost(kind: OwnerKind | null, explicitUserRequest = true) {
+  const context = caller(kind, explicitUserRequest);
   const seam = {} as BrowserCheckoutSeam;
-  const values = new Map<string, unknown>([['payments.enabled', true]]);
-  const deps = { config: { get: (key: string) => values.get(key) }, isPaymentsLeader: () => true,
+  const deps = { config: settings(), isPaymentsLeader: () => true,
     checkout: { seam: () => seam, untrusted: new UntrustedContentLedger() } } as unknown as PaymentsHandlerDeps;
-  const cancelled: string[] = [];
-  const operations: Pick<CheckoutOperations, 'cancel'> = { cancel: ((purchaseId: string, operationId: string) => {
-    cancelled.push(`${purchaseId}/${operationId}`); return { cancelled: true };
-  }) as unknown as CheckoutOperations['cancel'] };
-  const cancel = () => purchaseWindowAnswerHandler({}, 'cancel', operations)({
-    body: { confirm: true, purchaseId: 'pur-1', operationId: 'op-1' }, query: {}, context });
-  return { start: () => retainDetachedCheckout(deps, seam, context), cancel, cancelled };
+  const home = makeProjectTempDir('gv-payments-invocation-host');
+  const store = new DurablePaymentOperations(join(home, 'payments-operations'));
+  const operations = new CheckoutOperations(store, new DurableCheckoutJournal(join(home, 'payments-checkout-journal.json')),
+    new DaemonPurchaseLedger({ filePath: join(home, 'payments-purchases.json') }),
+    (_input, _id, run) => new Promise((_resolve, reject) => { run.signal.addEventListener('abort', () => reject(run.signal.reason), { once: true }); }));
+  hosts.push(() => operations.close());
+  await operations.recover();
+  const start = () => retainDetachedCheckout(deps, seam, context);
+  /** Admit purchase pur-1 on `source`: the caller's own start, or the local owner's when the caller may not start one. */
+  const begin = (source = start()) => operations.admit('pur-1', {} as BeginCheckoutInput, source, () => {}, () => {});
+  const ownerBegins = () => begin(retainDetachedCheckout(deps, seam, caller('local')));
+  const cancel = (operationId: string) => purchaseWindowAnswerHandler({}, 'cancel', operations)({
+    body: { confirm: true, purchaseId: 'pur-1', operationId }, query: {}, context });
+  // Closing the host joins its work: the stopped purchase has settled. Without the owner's stop it would end interrupted.
+  return { start, begin, ownerBegins, cancel, settle: () => operations.close(), state: () => store.get('pur-1')?.state };
 }
 
 test.each(['local', 'pairing-token'] as const)('the owner on %s authority can start and cancel a purchase', async kind => {
-  const f = owner(kind);
+  const f = await paymentHost(kind);
   expect(f.start().principalId).toBe(kind === 'local' ? 'local-owner' : 'pairing:owner');
-  await f.cancel();
-  expect(f.cancelled).toEqual(['pur-1/op-1']);
+  const begun = await f.begin();
+  await f.cancel(begun.operationId);
+  await f.settle();
+  expect(f.state()).toBe('cancelled');
 });
 
 test('without the owner\'s explicit request a purchase can be neither started nor cancelled', async () => {
-  const f = owner('local', false);
+  const f = await paymentHost('local', false);
   expect(() => f.start()).toThrow(HandlerError);
-  await expect(f.cancel()).rejects.toBeInstanceOf(HandlerError);
-  expect(f.cancelled).toEqual([]);
+  const begun = await f.ownerBegins(), before = f.state();
+  await expect(f.cancel(begun.operationId)).rejects.toBeInstanceOf(HandlerError);
+  expect(f.state()).toBe(before);
 });
 
 test('a caller the transport gave no owner authority can neither start nor cancel', async () => {
-  const f = owner(null);
+  const f = await paymentHost(null);
   expect(() => f.start()).toThrow(HandlerError);
-  await expect(f.cancel()).rejects.toBeInstanceOf(HandlerError);
-  expect(f.cancelled).toEqual([]);
+  const begun = await f.ownerBegins(), before = f.state();
+  await expect(f.cancel(begun.operationId)).rejects.toBeInstanceOf(HandlerError);
+  expect(f.state()).toBe(before);
 });

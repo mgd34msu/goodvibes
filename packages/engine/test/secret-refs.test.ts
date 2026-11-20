@@ -37,14 +37,14 @@ describe('a reference resolves from the store it names', () => {
     const previous = process.env['GV_SECRET_REF_FIXTURE'];
     process.env['GV_SECRET_REF_FIXTURE'] = 'from-environment';
     try {
-      expect((await resolveSecretRef('goodvibes://secrets/env/GV_SECRET_REF_FIXTURE')).value).toBe('from-environment');
+      expect((await resolveSecretRef('goodvibes://secrets/env/GV_SECRET_REF_FIXTURE')).value?.reveal('dispatch')).toBe('from-environment');
       const local = await resolveSecretRef('goodvibes://secrets/goodvibes/GV_SECRET_REF_FIXTURE', {
         resolveLocalSecret: async (key) => (key === 'GV_SECRET_REF_FIXTURE' ? 'from-local-store' : null),
       });
-      expect(local.value).toBe('from-local-store');
+      expect(local.value?.reveal('dispatch')).toBe('from-local-store');
       // With no local store there is no answer: the environment variable of the same name is not read instead.
       await expect(resolveSecretRef('goodvibes://secrets/goodvibes/GV_SECRET_REF_FIXTURE')).rejects.toThrow();
-      expect(await resolveSecretInput('goodvibes://secrets/goodvibes/GV_SECRET_REF_FIXTURE')).toBeNull();
+      expect(await resolveSecretInput('goodvibes://secrets/goodvibes/GV_SECRET_REF_FIXTURE', undefined, 'dispatch')).toBeNull();
     } finally {
       if (previous === undefined) delete process.env['GV_SECRET_REF_FIXTURE'];
       else process.env['GV_SECRET_REF_FIXTURE'] = previous;
@@ -55,7 +55,7 @@ describe('a reference resolves from the store it names', () => {
 describe('a reference cannot choose the program, server or token variable', () => {
   test('1Password: the owner\'s program runs, whatever program the reference names', async () => {
     const { runner, ran } = recordingRunner('op-secret');
-    const value = await resolveSecretInput('goodvibes://secrets/1password?vault=V&item=I&field=F&cli=%2Ftmp%2Fplanted', { runCommand: runner, providers: OWNER });
+    const value = await resolveSecretInput('goodvibes://secrets/1password?vault=V&item=I&field=F&cli=%2Ftmp%2Fplanted', { runCommand: runner, providers: OWNER }, 'dispatch');
     expect(value).toBe('op-secret');
     expect(ran.map((call) => call.command)).toEqual(['/opt/owner/op']);
     expect(JSON.stringify(ran)).not.toContain('/tmp/planted');
@@ -68,7 +68,7 @@ describe('a reference cannot choose the program, server or token variable', () =
       const { runner, ran } = recordingRunner('bw-secret');
       const value = await resolveSecretInput(
         'goodvibes://secrets/bitwarden/item-1/password?cli=%2Ftmp%2Fplanted&appDataDir=%2Ftmp%2Fplanted-data&sessionEnv=GV_PLANTED_SESSION&syncBeforeRead=false',
-        { runCommand: runner, providers: OWNER },
+        { runCommand: runner, providers: OWNER }, 'dispatch',
       );
       expect(value).toBe('bw-secret');
       expect(ran.length).toBeGreaterThan(0);
@@ -89,7 +89,7 @@ describe('a reference cannot choose the program, server or token variable', () =
       const { runner, ran } = recordingRunner(JSON.stringify({ value: 'bws-secret' }));
       const value = await resolveSecretInput(
         'goodvibes://secrets/bws/secret-123?serverUrl=https%3A%2F%2Fattacker.example&cli=%2Ftmp%2Fplanted&accessTokenEnv=GV_PLANTED_TOKEN&configFile=%2Ftmp%2Fplanted.conf',
-        { runCommand: runner, providers: OWNER },
+        { runCommand: runner, providers: OWNER }, 'dispatch',
       );
       expect(value).toBe('bws-secret');
       expect(ran).toHaveLength(1);
@@ -116,6 +116,6 @@ describe('a failed or mistyped reference yields no credential', () => {
     );
     expect(failure).toBeDefined();
     expect(failure).not.toContain('half-printed-secret');
-    expect(await resolveSecretInput({ source: 'exec', command: 'secret-tool' }, { runCommand: runner })).toBeNull();
+    expect(await resolveSecretInput({ source: 'exec', command: 'secret-tool' }, { runCommand: runner }, 'dispatch')).toBeNull();
   });
 });

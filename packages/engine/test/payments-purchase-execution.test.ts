@@ -10,19 +10,22 @@
  * merchant and cart the purchase was decided for; a general execution mode
  * never lifts the payment rules.
  *
- * Real `runCheckout`, budget ledger, registry, card fill and redactor. The
+ * Real `runCheckout`, budget ledger, registry, card fill, redactor, the
+ * daemon's card store over its secret store, and its purchase ledger. The
  * merchants are two loopback stores with unrelated markup whose "place order"
  * endpoint records every POST it receives; Jev's readings come from a fixture
  * port. The card is a Luhn-valid test number that belongs to no issuer.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
+import { DaemonCardStore } from '../platform/src/platform/payments/host/card-store.js';
+import { DaemonPurchaseLedger } from '../platform/src/platform/payments/host/purchase-ledger.js';
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 
 import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.js';
-import type {
-  CardMaterial,
-  CardMaterialStore,
-} from '../platform/src/platform/payments/card-material.js';
+import type { CardMaterial } from '../platform/src/platform/payments/card-material.js';
 import { CheckoutRegistry, MemoryCheckoutJournal } from '../platform/src/platform/payments/checkout-registry.js';
 import {
   fillCard,
@@ -33,13 +36,11 @@ import {
   type CheckoutControls,
   type CheckoutFlowDeps,
   type CheckoutOutcome,
-  type PurchaseLedger,
   type PurchaseRecord,
   type PurchaseRequest,
 } from '../platform/src/platform/payments/checkout-flow.js';
 import { extractCheckout } from '../platform/src/platform/payments/checkout-extraction.js';
 import { BudgetLedger, type BudgetLimits } from '../platform/src/platform/payments/budget.js';
-import type { CardMetadata } from '../platform/src/platform/payments/types.js';
 /**
  * `OwnerSuppliedText` and `CurrencyCode` are branded, so a plain string literal
  * satisfies neither, the brands exist precisely so text that did not come from
@@ -110,28 +111,22 @@ const SENTINEL_SPELLINGS: readonly string[] = [
   `${SENTINEL.expiryMonth}/${SENTINEL.expiryYear}`,
 ];
 
-const CARD_METADATA: CardMetadata = {
-  id: 'card-1',
-  label: 'Test card',
-  brand: 'visa',
-  last4: '1881',
-  kind: 'virtual',
-  expiryMonth: 7,
-  expiryYear: 2029,
-  issuerCapMinorUnits: null,
-  addedAt: '2026-07-01T00:00:00.000Z',
-};
-
-class SentinelCardStore implements CardMaterialStore {
-  constructor(private readonly material: CardMaterial | null = SENTINEL) {}
-
-  async metadata(): Promise<CardMetadata | null> {
-    return CARD_METADATA;
-  }
-
-  async read(): Promise<CardMaterial | null> {
-    return this.material;
-  }
+/**
+ * The daemon's card store over the real secret store in a temp folder, holding
+ * the sentinel card, through the adapter the daemon composes
+ * (products/daemon/src/runtime/payments-composition.ts).
+ */
+async function sentinelCards(): Promise<{ readonly cards: DaemonCardStore; readonly cardId: string; readonly home: string }> {
+  const home = makeProjectTempDir('gv-payments-execution');
+  const secrets = new SecretsManager({ projectRoot: join(home, 'project'), globalHome: home, surfaceRoot: 'goodvibes', policy: 'require_secure' });
+  const cards = new DaemonCardStore({ filePath: join(home, 'payments-cards.json'), cvvHandling: () => 'stored', secrets: {
+    get: key => secrets.get(key),
+    set: async (key, value) => { await secrets.set(key, value, { scope: 'daemon', medium: 'secure' }); },
+    delete: async key => { await secrets.delete(key, { scope: 'daemon' }); },
+  } });
+  const card = await cards.create({ label: 'Test card', kind: 'virtual', number: SENTINEL.number, expiryMonth: Number(SENTINEL.expiryMonth),
+    expiryYear: Number(SENTINEL.expiryYear), cvv: SENTINEL.cvv, cardholderName: SENTINEL.cardholderName, issuerCapMinorUnits: null });
+  return { cards, cardId: card.id, home };
 }
 
 /**
@@ -172,7 +167,6 @@ interface HarnessOptions {
   readonly rejectField?: string;
   readonly throwOnField?: string;
   readonly storefrontHost?: string;
-  readonly material?: CardMaterial | null;
 }
 
 interface Harness {
@@ -182,7 +176,8 @@ interface Harness {
   readonly registry: CheckoutRegistry;
   readonly journal: MemoryCheckoutJournal;
   readonly ledger: BudgetLedger;
-  readonly recorded: PurchaseRecord[];
+  /** What the purchase ledger file holds. */
+  readonly recorded: () => readonly PurchaseRecord[];
   readonly notices: { kind: 'approval' | 'veto' | 'notice'; message: string }[];
   readonly request: PurchaseRequest;
   readonly controls: CheckoutControls;
@@ -214,7 +209,7 @@ const CARD_TARGETS: Record<FixtureShape, CheckoutControls> = {
   },
 };
 
-function buildHarness(options: HarnessOptions): Harness {
+async function buildHarness(options: HarnessOptions): Promise<Harness> {
   const origin = options.origin ?? RECOGNISED_ORIGIN;
   const merchant = options.merchant;
   const driver = new FixtureCheckoutDriver({
@@ -229,16 +224,14 @@ function buildHarness(options: HarnessOptions): Harness {
   const journal = new MemoryCheckoutJournal();
   const registry = new CheckoutRegistry(journal);
   const ledger = new BudgetLedger();
-  const recorded: PurchaseRecord[] = [];
   const notices: { kind: 'approval' | 'veto' | 'notice'; message: string }[] = [];
+  const { cards, cardId, home } = await sentinelCards();
+  const purchases = new DaemonPurchaseLedger({ filePath: join(home, 'payments-purchases.json') });
+  const recorded = (): readonly PurchaseRecord[] => purchases.list({ limit: 100, dayKey: undefined }).purchases;
 
-  const purchases: PurchaseLedger = {
-    async record(entry) {
-      recorded.push(entry);
-    },
-  };
-
+  const budgetCurrency = currency(merchant.currency === 'EUR' ? 'EUR' : 'USD');
   const limits: BudgetLimits = {
+    currency: budgetCurrency,
     dailyItemMinorUnits: options.dailyItemMinorUnits ?? 500_000,
     dailyOverageMinorUnits: options.dailyOverageMinorUnits ?? 500_000,
     perPurchaseCeiling: { enabled: false, minorUnits: 0 },
@@ -266,7 +259,7 @@ function buildHarness(options: HarnessOptions): Harness {
 
   const deps: CheckoutFlowDeps = {
     registry,
-    cards: new SentinelCardStore(options.material === undefined ? SENTINEL : options.material),
+    cards,
     redactor,
     driver,
     ledger,
@@ -289,7 +282,7 @@ function buildHarness(options: HarnessOptions): Harness {
     untrusted: new UntrustedContentLedger(),
     merchantJudge,
     limits,
-    budgetCurrency: currency(merchant.currency === 'EUR' ? 'EUR' : 'USD'),
+    budgetCurrency,
     timezone: 'UTC',
     gates: {
       enabled: true,
@@ -316,7 +309,7 @@ function buildHarness(options: HarnessOptions): Harness {
         quantity: 1,
       },
     ],
-    cardId: 'card-1',
+    cardId,
     preferredTier: 'normal',
     ...(options.storefrontHost === undefined ? {} : { storefrontHost: options.storefrontHost }),
   };
@@ -360,7 +353,7 @@ const ALPHA: { name: string; get: () => FixtureMerchant } = { name: 'alpha (US t
 const BETA: { name: string; get: () => FixtureMerchant } = { name: 'beta (German div markup, 1.234,56 €)', get: () => beta };
 for (const shape of [ALPHA]) for (const phase of ['before-card', 'before-submit'] as const)
   test(`a changed live ${shape.name} total ${phase} never reaches the merchant submit endpoint`, async () => {
-    const merchant = shape.get(), harness = buildHarness({ merchant });
+    const merchant = shape.get(), harness = await buildHarness({ merchant });
     let changed = false;
     const changeTotal = (): void => {
       merchant.rewriteCheckout(html => {
@@ -376,14 +369,14 @@ for (const shape of [ALPHA]) for (const phase of ['before-card', 'before-submit'
     }
     const result = await runOn(harness, merchant);
     expect(changed).toBe(true); expect(result).toMatchObject({ kind: 'refused', code: 'total-changed' });
-    expect(merchant.submissions).toEqual([]); expect(harness.recorded).toEqual([]);
+    expect(merchant.submissions).toEqual([]); expect(harness.recorded()).toEqual([]);
     expect(harness.ledger.state().reservations).toEqual([]); expect(await harness.journal.list()).toEqual([]);
     // The terms are read once, after the card: the page still holds it, so redaction stays armed.
     expect(harness.redactor.hasLiveMaterial('session-1', 'page-1')).toBe(true);
   });
 
 for (const shape of [ALPHA]) test(`new recurring terms in the live ${shape.name} page cannot reuse an earlier one-off notice`, async () => {
-  const merchant = shape.get(), harness = buildHarness({ merchant });
+  const merchant = shape.get(), harness = await buildHarness({ merchant });
   harness.deps.notifier.awaitAnswer = async () => {
     merchant.rewriteCheckout(html => html.replace('</body>', '<p>Your card will be charged monthly for future replenishments.</p></body>'));
     return null;
@@ -396,7 +389,7 @@ for (const shape of [ALPHA]) test(`new recurring terms in the live ${shape.name}
 for (const [shape, answer] of [[ALPHA, 'deny'], [BETA, 'approve']] as const)
   test(`verified live repricing at ${shape.name} requires its own new approval (${answer})`, async () => {
     const merchant = shape.get();
-    const harness = buildHarness({ merchant, dailyItemMinorUnits: merchant.shape === 'alpha' ? 15_000 : 150_000 });
+    const harness = await buildHarness({ merchant, dailyItemMinorUnits: merchant.shape === 'alpha' ? 15_000 : 150_000 });
     let windows = 0;
     harness.deps.notifier.awaitAnswer = async input => {
       if (++windows === 1) {
@@ -411,15 +404,15 @@ for (const [shape, answer] of [[ALPHA, 'deny'], [BETA, 'approve']] as const)
         return { answer: 'acknowledge', channel: 'tui' };
       }
       expect(windows).toBe(2); expect(input.kind).toBe('approval');
-      expect(merchant.submissions).toEqual([]); expect(harness.recorded).toEqual([]);
+      expect(merchant.submissions).toEqual([]); expect(harness.recorded()).toEqual([]);
       return { answer, channel: 'tui' };
     };
     const outcome = await runOn(harness, merchant);
     expect(windows).toBe(2); expect(harness.notices.map(notice => notice.kind)).toEqual(answer === 'approve' ? ['veto', 'approval', 'notice'] : ['veto', 'approval']);
     if (answer === 'approve') {
       expect(outcome.kind).toBe('purchased'); expect(merchant.submissions).toHaveLength(1);
-      expect(harness.recorded[0]?.totalMinorUnits).toBe(merchant.shape === 'alpha' ? 22_649 : 238_690);
-    } else { expect(outcome.kind).toBe('refused'); expect(merchant.submissions).toEqual([]); expect(harness.recorded).toEqual([]); }
+      expect(harness.recorded()[0]?.totalMinorUnits).toBe(merchant.shape === 'alpha' ? 22_649 : 238_690);
+    } else { expect(outcome.kind).toBe('refused'); expect(merchant.submissions).toEqual([]); expect(harness.recorded()).toEqual([]); }
     expect(harness.ledger.state().reservations).toEqual([]); expect(await harness.journal.list()).toEqual([]);
     expectNoCardMaterial('repriced owner notices', JSON.stringify(harness.notices));
   });
@@ -428,7 +421,7 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
   for (const shape of [ALPHA]) {
     test(`an in-budget total at a recognised retailer submits after the veto window on ${shape.name}`, async () => {
       const merchant = shape.get();
-      const harness = buildHarness({ merchant });
+      const harness = await buildHarness({ merchant });
       const outcome = await runOn(harness, merchant);
 
       expect(outcome.kind).toBe('purchased');
@@ -450,7 +443,7 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
   }
 
   test('an over-budget total asks, and silence does not submit', async () => {
-    const harness = buildHarness({ merchant: alpha, dailyItemMinorUnits: 5_000, answer: null });
+    const harness = await buildHarness({ merchant: alpha, dailyItemMinorUnits: 5_000, answer: null });
     const outcome = await runOn(harness, alpha);
 
     expect(harness.notices.length).toBe(1);
@@ -459,7 +452,7 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
     if (outcome.kind !== 'refused') throw new Error('unreachable');
     expect(outcome.code).toBe('item-budget-exceeded-expired');
     expect(alpha.submissions.length).toBe(0);
-    expect(harness.recorded.length).toBe(0);
+    expect(harness.recorded().length).toBe(0);
     // The money it was holding went back.
     expect(harness.ledger.state().reservations.length).toBe(0);
   });
@@ -468,15 +461,15 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
     const retire = configureDecisionModelPolicy(() => 'No Decision Model');
     try {
       // In budget at a recognised retailer, which would otherwise be a veto window where silence buys.
-      const silent = buildHarness({ merchant: alpha, answer: null });
+      const silent = await buildHarness({ merchant: alpha, answer: null });
       const unanswered = await runOn(silent, alpha);
       expect(silent.notices.map(notice => notice.kind)).toEqual(['approval']);
       expect(silent.notices[0]?.message).toContain('no decision model is in use');
       expect(unanswered).toMatchObject({ kind: 'refused', code: 'not-checked-unapproved' });
-      expect(alpha.submissions).toEqual([]); expect(silent.recorded).toEqual([]);
+      expect(alpha.submissions).toEqual([]); expect(silent.recorded()).toEqual([]);
       expect(silent.ledger.state().reservations).toEqual([]); expect(await silent.journal.list()).toEqual([]);
 
-      const approved = buildHarness({ merchant: beta, answer: { answer: 'approve' } });
+      const approved = await buildHarness({ merchant: beta, answer: { answer: 'approve' } });
       const bought = await runOn(approved, beta);
       expect(approved.notices[0]?.kind).toBe('approval');
       expect(bought.kind).toBe('purchased'); expect(beta.submissions).toHaveLength(1);
@@ -488,7 +481,7 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
     // storefront a page claims to be affiliated with is merchant-authored text,
     // and this is the case where believing it would matter: a checkout on
     // jeffsgadgets.biz asserting it is really Best Buy.
-    const harness = buildHarness({
+    const harness = await buildHarness({
       merchant: alpha,
       origin: UNRECOGNISED_ORIGIN,
       storefrontHost: 'www.bestbuy.com',
@@ -501,7 +494,7 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
     expect(alpha.submissions.length).toBe(0);
 
     // A shop the owner said always to ask about gets the approval window however established the reading calls it.
-    const excluded = buildHarness({ merchant: alpha, answer: null });
+    const excluded = await buildHarness({ merchant: alpha, answer: null });
     const unanswered = await runCheckout(excluded.request, await readFixtureCheckout(alpha), excluded.controls,
       { ...excluded.deps, merchantPolicy: { excluded: 'bestbuy.com' } });
     expect(excluded.notices[0]?.kind).toBe('approval');
@@ -510,7 +503,7 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
   });
 
   test('a 3-D Secure challenge pauses with nothing submitted and the money still held', async () => {
-    const harness = buildHarness({
+    const harness = await buildHarness({
       merchant: alpha,
       challenge: {
         kind: '3d-secure',
@@ -526,7 +519,7 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
     expect(alpha.submissions.length).toBe(0);
     // Nothing recorded as a purchase, and the money stays held, because the
     // order may still complete once he answers.
-    expect(harness.recorded.length).toBe(0);
+    expect(harness.recorded().length).toBe(0);
     expect(harness.ledger.state().reservations.length).toBe(1);
     // Regression: the redactor stays ARMED, not disarmed, while a
     // challenge is pending. He is about to be sent back to this very page to
@@ -544,7 +537,7 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
   });
 
   test('a submit that fails is recorded as possibly submitted and never retried', async () => {
-    const harness = buildHarness({ merchant: alpha, failSubmit: true });
+    const harness = await buildHarness({ merchant: alpha, failSubmit: true });
     const outcome = await runOn(harness, alpha);
 
     expect(outcome.kind).toBe('refused');
@@ -558,13 +551,13 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
     expect(interrupted[0]?.verdict).toBe('possibly-submitted');
     // The budget stays held: it may well have been spent.
     expect(harness.ledger.state().reservations.length).toBe(1);
-    expect(harness.recorded.length).toBe(0);
+    expect(harness.recorded().length).toBe(0);
     // Exactly one attempt reached the driver: a second call would be a retry of an order that may have been placed.
     expect(harness.driver.submitAttempts).toBe(1);
   });
 
   test('two purchases cannot drive the same page at once', async () => {
-    const harness = buildHarness({ merchant: alpha, challenge: { kind: 'otp', step: 'x', url: 'https://x.test/' } });
+    const harness = await buildHarness({ merchant: alpha, challenge: { kind: 'otp', step: 'x', url: 'https://x.test/' } });
     await runOn(harness, alpha);
     // The first is paused mid-flight and still owns the page.
     await expect(runOn(harness, alpha)).rejects.toThrow();
@@ -577,16 +570,17 @@ describe('the card goes only to the merchant and cart the purchase was decided f
     const fillOn = async (pageUrl: string): Promise<{ driver: FixtureCheckoutDriver; thrown: unknown }> => {
       const registry = new CheckoutRegistry(new MemoryCheckoutJournal());
       const driver = new FixtureCheckoutDriver({ merchant: alpha, pageUrl });
+      const { cards, cardId } = await sentinelCards();
       await registry.open({
         purchaseId: 'p-1', sessionId: 'session-1', pageId: 'page-1',
-        merchantDomain: 'bestbuy.com', cardId: 'card-1', item: unsafeOwnerSuppliedTextForTests('thing'), currency: currency('USD'),
+        merchantDomain: 'bestbuy.com', cardId, item: unsafeOwnerSuppliedTextForTests('thing'), currency: currency('USD'),
         phase: 'arming-payment', startedAtMs: 0, updatedAtMs: 0, draw: null, reservationId: null,
         shippingTierRequested: 'normal', shippingTierUsed: null, stepDown: null, totalMinorUnits: null,
       });
       try {
         await fillCard(
           { sessionId: 'session-1', pageId: 'page-1', targets: [{ field: 'number', target: 'ccnum' }] },
-          { registry, cards: new SentinelCardStore(), redactor: new CardMaterialRedactor(), driver },
+          { registry, cards, redactor: new CardMaterialRedactor(), driver },
         );
         return { driver, thrown: null };
       } catch (error) {
@@ -631,7 +625,7 @@ describe('payment guardrails', () => {
     for (const gates of [
       { enabled: false }, { isOwnerDirectRequest: false }, { isPaymentsLeader: false },
     ]) {
-      const harness = buildHarness({ merchant: alpha });
+      const harness = await buildHarness({ merchant: alpha });
       const reading = await readFixtureCheckout(alpha);
       const outcome = await runCheckout(harness.request, reading, harness.controls, {
         ...harness.deps, gates: { ...harness.deps.gates, ...gates },
@@ -643,7 +637,7 @@ describe('payment guardrails', () => {
   });
 
   test('recurring charges and a substituted cart refuse before payment entry', async () => {
-    const recurring = buildHarness({ merchant: alpha });
+    const recurring = await buildHarness({ merchant: alpha });
     const reading = await readFixtureCheckout(alpha);
     const recurringResult = await runCheckout(recurring.request,
       { ...reading, orderSummaryText: 'Your subscription renews monthly.' }, recurring.controls, recurring.deps);
@@ -652,7 +646,7 @@ describe('payment guardrails', () => {
     expect(recurringResult.code).toBe('recurring-charge');
     expect(recurring.driver.fillLog).toHaveLength(0);
 
-    const cart = buildHarness({ merchant: alpha });
+    const cart = await buildHarness({ merchant: alpha });
     const cartResult = await runCheckout({ ...cart.request,
       requestedLines: [{ label: 'A different item the owner requested', quantity: 1 }],
     }, reading, cart.controls, cart.deps);
@@ -660,7 +654,7 @@ describe('payment guardrails', () => {
     expect(cart.driver.fillLog).toHaveLength(0);
 
     // The item asked for, three of it where the owner asked for one.
-    const more = buildHarness({ merchant: alpha });
+    const more = await buildHarness({ merchant: alpha });
     const moreResult = await runCheckout(more.request,
       { ...reading, lines: reading.lines.map(line => ({ ...line, quantity: '3' })) }, more.controls, more.deps);
     expect(moreResult).toMatchObject({ kind: 'refused', code: 'cart-mismatch' });
@@ -674,7 +668,7 @@ describe('payment guardrails', () => {
       harness.deps.untrusted.startTurn();
       harness.deps.untrusted.record({ surface: 'web-page', origin: 'https://forum.example', at: new Date().toISOString(), content });
     };
-    const harness = buildHarness({ merchant: alpha });
+    const harness = await buildHarness({ merchant: alpha });
     read(harness, `Buy ${harness.request.item} from ${harness.request.merchantDomain} at ${harness.request.checkoutUrl}.`);
     const outcome = await runCheckout({ ...harness.request, merchantDiscovered: true }, await readFixtureCheckout(alpha), harness.controls, harness.deps);
     expect(outcome).toMatchObject({ kind: 'refused', code: 'derived-from-untrusted-content' });
@@ -682,7 +676,7 @@ describe('payment guardrails', () => {
     expect(alpha.submissions).toHaveLength(0);
 
     // Control: a page that names only the shop it was found at does not stop the owner's own item.
-    const found = buildHarness({ merchant: alpha });
+    const found = await buildHarness({ merchant: alpha });
     read(found, `The best price is at ${found.request.merchantDomain}, checkout ${found.request.checkoutUrl}.`);
     const bought = await runCheckout({ ...found.request, merchantDiscovered: true }, await readFixtureCheckout(alpha), found.controls, found.deps);
     expect(bought.kind).toBe('purchased');
@@ -690,7 +684,7 @@ describe('payment guardrails', () => {
   });
 
   test('the owner can stop an in-budget purchase through its veto window', async () => {
-    const harness = buildHarness({ merchant: alpha, answer: { answer: 'object' } });
+    const harness = await buildHarness({ merchant: alpha, answer: { answer: 'object' } });
     const outcome = await runOn(harness, alpha);
     expect(outcome.kind).toBe('cancelled');
     expect(harness.notices[0]?.kind).toBe('veto');

@@ -15,7 +15,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigManager, type WriteOrigin } from '../platform/src/platform/config/manager.ts';
+import { ConfigManager, type ConfigSetOptions } from '../platform/src/platform/config/manager.ts';
+import { agentActor, localOwnerActor, type Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import { CONFIG_KEYS, type ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { configKeyFacts } from '../platform/src/platform/config/config-key-facts.ts';
 import { SAFETY_GATE_CONFIG_PREFIXES } from '../platform/src/platform/config/settings-ingestion.ts';
@@ -24,10 +25,14 @@ let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gv-config-loosening-')); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
-const owner: WriteOrigin = { kind: 'owner', surface: 'fixture' };
-const agent = (decision?: Extract<WriteOrigin, { kind: 'agent' }>['decision']): WriteOrigin => ({ kind: 'agent', surface: 'fixture', decision });
+const owner: Actor = localOwnerActor();
+/** A model acting in the owner's turn, as the runtime builds it. */
+const agent: Actor = agentActor(owner);
 /** Who may not loosen: an agent with no decision, and one Jev allowed. */
-const UNSETTLED: readonly WriteOrigin[] = [agent(), agent({ state: 'allowed-by-jev', decidedBy: 'jev', reason: 'fixture' })];
+const UNSETTLED: readonly { readonly name: string; readonly options: ConfigSetOptions }[] = [
+  { name: 'agent', options: {} },
+  { name: 'jev', options: { decision: { state: 'allowed-by-jev', decidedBy: 'jev', reason: 'fixture' } } },
+];
 
 function manager(): ConfigManager {
   return new ConfigManager({ configDir: join(dir, 'surface'), daemonTierPath: join(dir, 'daemon', 'settings.json'), ownsDaemonTier: true });
@@ -75,14 +80,13 @@ test('an agent write that widens the sandbox or loosens a payments key is refuse
   const revision = config.revisionSource.revision();
   for (const row of LOOSENING) {
     for (const by of UNSETTLED) {
-      const result = config.setMany([{ key: row.key as ConfigKey, value: row.value }], by);
+      const result = config.setMany([{ key: row.key as ConfigKey, value: row.value }], agent, by.options);
       const code = result.ok ? 'saved' : result.refusal.code;
-      expect(`${row.key} by ${by.kind === 'agent' ? by.decision?.decidedBy ?? 'agent' : by.kind}: ${code}`)
-        .toBe(`${row.key} by ${by.kind === 'agent' ? by.decision?.decidedBy ?? 'agent' : by.kind}: OWNER_ONLY`);
+      expect(`${row.key} by ${by.name}: ${code}`).toBe(`${row.key} by ${by.name}: OWNER_ONLY`);
     }
   }
   // Several together are refused whole.
-  expect(config.setMany(LOOSENING.slice(0, 3).map((row) => ({ key: row.key as ConfigKey, value: row.value })), agent()).ok).toBe(false);
+  expect(config.setMany(LOOSENING.slice(0, 3).map((row) => ({ key: row.key as ConfigKey, value: row.value })), agent).ok).toBe(false);
   expect(config.revisionSource.revision()).toBe(revision);
   const disk = reopened();
   for (const row of LOOSENING) {

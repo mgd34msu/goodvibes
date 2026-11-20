@@ -35,6 +35,7 @@ import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { ntfyOutboundDedup } from '../platform/src/platform/integrations/ntfy.ts';
 import type { PendingSurfaceReply } from '../platform/src/platform/daemon/types.ts';
+import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
@@ -122,7 +123,7 @@ test('an answer is sent once across a restart, and one first reported after the 
   const first = await daemon(root);
   let firstRunning = true;
   cleanups.push(async () => { if (firstRunning) await first.stop(); });
-  first.configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], { kind: 'owner', surface: 'fixture' });
+  first.configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], localOwnerActor());
 
   const answered = await conversation(first, 'topic-answered', 'agent-answered');
   const later = await conversation(first, 'topic-later', 'agent-later');
@@ -158,7 +159,7 @@ test('an answer stored but not yet sent when the daemon stopped is sent after th
   const first = await daemon(root, { dies: () => reachedSend() });
   let firstRunning = true;
   cleanups.push(async () => { if (firstRunning) await first.stop(); });
-  first.configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], { kind: 'owner', surface: 'fixture' });
+  first.configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], localOwnerActor());
   const session = await conversation(first, 'topic-owed', 'agent-owed');
 
   // The answer is stored, then the daemon stops inside the send.
@@ -201,7 +202,7 @@ test('an answer refused once by a rate limit still arrives once, and a retried p
   });
   const d = await daemon(root);
   cleanups.push(() => d.stop());
-  d.configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], { kind: 'owner', surface: 'fixture' });
+  d.configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], localOwnerActor());
 
   const short = await conversation(d, 'topic-short', 'agent-short');
   await d.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-short', sessionId: short, body: 'a short answer' });

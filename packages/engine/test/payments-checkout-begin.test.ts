@@ -15,8 +15,9 @@
  * approval and standing stores over a temp folder. Stand-ins: the merchant (a
  * loopback store that records each order POST), the browser page (the fixture
  * checkout driver), the transport's owner authority, the owner's side of the
- * notices (records each notice; silence answers every window), the card store's
- * secret tier, and Jev's readings (a fixture port).
+ * notices (records each notice; silence answers every window), and Jev's
+ * readings (a fixture port). The card store keeps its numbers in the real
+ * secret store in the temp folder.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -24,6 +25,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
@@ -103,11 +105,14 @@ async function paymentHost(config: ConfigManager, options: { failSubmit?: boolea
   };
   const driver = new FixtureCheckoutDriver({ merchant, pageUrl: `https://${CHECKOUT_HOST}/checkout`, ...(options.failSubmit ? { failSubmit: true } : {}) });
   const seam: BrowserCheckoutSeam = { cardFieldGuard: new CardMaterialRedactor(), driverFor: () => driver, async armSubmitApproval() {} };
-  const secrets = new Map<string, string>();
+  const secrets = new SecretsManager({ projectRoot: join(dir, 'project'), globalHome: dir, surfaceRoot: 'goodvibes', policy: 'require_secure' });
   const operations = new DurablePaymentOperations(join(dir, 'payments-operations'));
   const purchases = new DaemonPurchaseLedger({ filePath: join(dir, 'payments-purchases.json') });
+  // The daemon's own adapter over its secret store (products/daemon/src/runtime/payments-composition.ts).
   const cards = new DaemonCardStore({ filePath: join(dir, 'payments-cards.json'), cvvHandling: () => 'stored', secrets: {
-    async get(key) { return secrets.get(key) ?? null; }, async set(key, value) { secrets.set(key, value); }, async delete(key) { secrets.delete(key); },
+    get: key => secrets.get(key),
+    set: async (key, value) => { await secrets.set(key, value, { scope: 'daemon', medium: 'secure' }); },
+    delete: async key => { await secrets.delete(key, { scope: 'daemon' }); },
   } });
   const approvals = new DaemonApprovalStore(join(dir, 'payments-approvals.json'));
   const budget = new DurableBudgetLedger(join(dir, 'payments-budget.json'));

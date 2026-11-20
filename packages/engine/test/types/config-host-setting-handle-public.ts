@@ -3,7 +3,7 @@ import { getSettingsControlPlaneSnapshot } from '@goodvibes-jev/engine/platform/
 
 const config = new ConfigManager({
   configDir: '/tmp/compile-only-host-setting',
-  hostSettings: [{ key: 'behavior.consumerPrivacy', type: 'boolean', default: true, description: 'Synthetic host preference' }],
+  hostSettings: [{ key: 'behavior.consumerPrivacy', type: 'boolean', default: true, label: 'Consumer privacy', description: 'Synthetic host preference' }],
 });
 const handle: HostBooleanSettingHandle = config.getHostBooleanSetting('behavior.consumerPrivacy');
 const value: boolean = handle.get();

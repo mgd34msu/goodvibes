@@ -1,17 +1,20 @@
 // Proves: The owner's answer is changed after the fact, lost on restart, never reaches the waiting call, or is inverted for an approval.
-// Red when: A second answer overwrites the first or the answer is not on disk when `answer` returns, approve and deny map wrongly to the broker, or another process's answer never reaches the waiting call.
+// Red when: A second answer overwrites the first or the answer is not on disk when `answer` returns, approve and deny map wrongly to the broker or a stale revision is applied, another process's answer never reaches the waiting call, or a reopen trims an answered item or a decided approval.
+// Proves: An owner's answer to an agent is counted delivered before the model request carrying it was accepted, or vanishes when the process that took it dies.
+// Red when: Taking an answer marks it delivered, a second taker gets it while the first lives, or a dead taker's answer is never handed to the next one.
 /**
  * The owner inbox: the first answer wins and survives a restart, an approval
- * answered there reaches the waiting call once, and an answer written by
- * another process (a terminal app on the same store) wakes a call waiting in
- * this one.
+ * answered there reaches the waiting call once, an answer written by another
+ * process (a terminal app on the same store) wakes a call waiting in this one,
+ * the owner's answers outlast the trim of old history, and an answer an agent
+ * took is delivered only on confirmation, or handed again when its taker died.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.js';
-import { createOwnerInbox, type OwnerInbox } from '../platform/src/platform/control-plane/owner-inbox.js';
+import { createOwnerInbox, listEveryOwnerItem, OWNER_ANSWER_AGENT_METADATA, type OwnerInbox } from '../platform/src/platform/control-plane/owner-inbox.js';
 import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
 
 const roots: string[] = [];
@@ -59,8 +62,8 @@ async function answerInAnotherProcess(root: string, questionsPath: string, id: s
   return JSON.parse(out.trim()) as boolean;
 }
 
-function request(): PermissionPromptRequest {
-  return { callId: 'call-1', tool: 'exec', args: { cmd: 'make release' }, category: 'execute', analysis: { classification: 'command', riskLevel: 'high', summary: 'Run make release', reasons: ['publishes a build'] } };
+function request(n = 1): PermissionPromptRequest {
+  return { callId: `call-${n}`, tool: 'exec', args: { cmd: n === 1 ? 'make release' : `make release-${n}` }, category: 'execute', analysis: { classification: 'command', riskLevel: 'high', summary: 'Run make release', reasons: ['publishes a build'] } };
 }
 
 test('the first answer wins, a later one is refused, and the answer and who gave it survive a restart', async () => {
@@ -95,12 +98,22 @@ test('an approval answered through the inbox reaches the waiting call once', asy
   const raised = await broker.raiseApproval({ request: request(), sessionId: 'session-1' });
   const listed = inbox.listNow({ kinds: ['approval'] });
   expect(listed.map((item) => [item.id, item.status, item.options])).toEqual([[raised.approval.id, 'open', ['approve', 'deny']]]);
+  const shown = listed[0]!.revision!;
 
-  const answered = await inbox.answer(raised.approval.id, { option: 'approve' }, { actor: 'owner', surface: 'web' });
+  // Another surface claims it after the owner was shown it: his answer to the revision he saw is refused, nothing is decided.
+  expect((await broker.claimApproval(raised.approval.id, { actor: 'operator', actorSurface: 'web', expectedRevision: shown })).applied).toBe(true);
+  const stale = await inbox.answer(raised.approval.id, { option: 'approve', expectedRevision: shown }, { actor: 'owner', surface: 'web' });
+  expect(stale.applied).toBe(false);
+  if (stale.applied) throw new Error('unreachable');
+  expect(stale.refusal.code).toBe('APPROVAL_CHANGED');
+  expect(broker.getApproval(raised.approval.id)?.status).toBe('claimed');
+
+  const current = inbox.get(raised.approval.id)!.revision!;
+  const answered = await inbox.answer(raised.approval.id, { option: 'approve', expectedRevision: current }, { actor: 'owner', surface: 'web' });
   expect(answered.applied).toBe(true);
   expect((await raised.decision).approved).toBe(true);
 
-  const late = await inbox.answer(raised.approval.id, { option: 'deny' }, { actor: 'owner', surface: 'tui' });
+  const late = await inbox.answer(raised.approval.id, { option: 'deny', expectedRevision: current }, { actor: 'owner', surface: 'tui' });
   expect(late.applied).toBe(false);
   if (late.applied) throw new Error('unreachable');
   expect(late.refusal.code).toBe('ALREADY_ANSWERED');
@@ -119,4 +132,99 @@ test('an answer written by another process wakes the call waiting in this one, a
   expect(heard.status).toBe('answered');
   expect(heard.answer?.option).toBe('yes');
   expect(heard.answeredBy).toEqual({ actor: 'owner', surface: 'tui' });
+});
+
+test('answered items and decided approvals past five hundred survive a reopen; only undecided closed ones are trimmed', async () => {
+  const { root, questionsPath, broker, open } = fixture();
+  const inbox = open();
+  const owner = { actor: 'owner', surface: 'tui' };
+  // The owner's own answers first, so they are the oldest history when the trim runs.
+  for (let n = 0; n < 505; n += 1) {
+    const posted = inbox.postNow({ kind: 'question', title: `Answered ${n}?`, options: ['yes', 'no'] });
+    expect((await inbox.answer(posted.item.id, { option: n % 2 === 0 ? 'yes' : 'no' }, owner)).applied).toBe(true);
+    const raised = await broker.raiseApproval({ request: request(1000 + n) });
+    expect((await inbox.answer(raised.approval.id, { option: n % 2 === 0 ? 'approve' : 'deny', expectedRevision: raised.approval.revision }, owner)).applied).toBe(true);
+    await raised.decision;
+  }
+  for (let n = 0; n < 501; n += 1) {
+    const posted = inbox.postNow({ kind: 'question', title: `Dropped ${n}?`, options: ['yes', 'no'] });
+    expect(inbox.withdraw(posted.item.id, 'no longer needed').applied).toBe(true);
+    const raised = await broker.raiseApproval({ request: request(5000 + n) });
+    void raised.decision.catch(() => undefined);
+    expect((await broker.cancelApproval(raised.approval.id, { actor: 'owner', expectedRevision: raised.approval.revision })).applied).toBe(true);
+  }
+  inbox.dispose();
+  inboxes.splice(inboxes.indexOf(inbox), 1);
+
+  // The restart: a new broker over the same log, a new inbox over the same store.
+  const restarted = new ApprovalBroker({ storePath: join(root, 'approvals.json') });
+  await restarted.start();
+  const reopened = createOwnerInbox({ approvals: restarted, questionsPath });
+  inboxes.push(reopened);
+  const closed = await listEveryOwnerItem(reopened, { status: 'closed' });
+  const count = (kind: string, status: string) => closed.filter((item) => item.kind === kind && item.status === status).length;
+  expect({
+    answeredQuestions: count('question', 'answered'),
+    withdrawnQuestions: count('question', 'withdrawn'),
+    decidedApprovals: count('approval', 'answered'),
+    cancelledApprovals: count('approval', 'withdrawn'),
+  }).toEqual({ answeredQuestions: 505, withdrawnQuestions: 500, decidedApprovals: 505, cancelledApprovals: 500 });
+  expect(closed.filter((item) => item.kind === 'question' && item.status === 'answered' && item.answer?.option === 'yes').length).toBe(253);
+});
+
+/**
+ * A second process takes the answer, as an agent's turn does when it puts it on
+ * a model request, prints whether it got it, and stays until it is killed: it
+ * never confirms, as a process that died before the provider accepted.
+ */
+function takeInAnotherProcess(root: string, questionsPath: string, id: string) {
+  const script = join(root, 'take.ts');
+  writeFileSync(script, [
+    `import { createOwnerInbox } from ${JSON.stringify(INBOX_MODULE)};`,
+    'const [path, id] = process.argv.slice(2);',
+    'const inbox = createOwnerInbox({ questionsPath: path! });',
+    'console.log(JSON.stringify(inbox.take(id!)));',
+    'for await (const _ of Bun.stdin.stream()) { /* held open until killed */ }',
+    '',
+  ].join('\n'));
+  const child = Bun.spawn(['bun', script, questionsPath, id], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+  const firstLine = (async () => {
+    const reader = child.stdout.getReader();
+    let text = '';
+    while (!text.includes('\n')) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += new TextDecoder().decode(value);
+    }
+    reader.releaseLock();
+    return text.trim();
+  })();
+  return { child, firstLine };
+}
+
+test('an answer an agent took is delivered only when its request was accepted; a taker killed before that leaves it to the next', async () => {
+  const { root, questionsPath, open } = fixture();
+  const inbox = open();
+  const posted = inbox.postNow({ kind: 'question', title: 'Which region?', options: ['eu', 'us'], metadata: { [OWNER_ANSWER_AGENT_METADATA]: 'agent-7' } });
+  expect((await inbox.answer(posted.item.id, { option: 'eu' }, { actor: 'owner', surface: 'tui' })).applied).toBe(true);
+  const pending = () => inbox.pendingFor({ agent: 'agent-7' }).map((item) => item.id);
+
+  const taker = takeInAnotherProcess(root, questionsPath, posted.item.id);
+  try {
+    expect(await taker.firstLine).toBe('true');
+    // Taken, not accepted: still owed to the agent, not delivered, and no second taker gets it while the first lives.
+    expect(inbox.get(posted.item.id)?.delivery?.state).not.toBe('delivered');
+    expect(pending()).toEqual([posted.item.id]);
+    expect(inbox.take(posted.item.id)).toBe(false);
+  } finally {
+    taker.child.kill('SIGKILL');
+    await taker.child.exited;
+  }
+
+  // The taker died before its request was accepted: the answer is handed to the next taker, and delivered on its confirmation.
+  expect(inbox.take(posted.item.id)).toBe(true);
+  expect(pending()).toEqual([posted.item.id]);
+  inbox.confirmDelivered([posted.item.id]);
+  expect(inbox.get(posted.item.id)?.delivery?.state).toBe('delivered');
+  expect(pending()).toEqual([]);
 });

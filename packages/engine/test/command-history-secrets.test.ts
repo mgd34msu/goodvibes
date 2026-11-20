@@ -21,13 +21,10 @@ import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 import { createCommandModeTokenHandler, type CommandRouteContext } from '../terminal-shell/src/command-mode-route.ts';
 import { createTerminalCommandRegistry } from '../terminal-shell/src/command-registry.ts';
 import { InputHistory } from '../terminal-shell/src/input-history.ts';
-import { createSecretsCommand } from '../terminal-shell/src/secrets-command.ts';
+import { createSecretsCommand, type SecretsCommandContext } from '../terminal-shell/src/secrets-command.ts';
 import { splitSlashCommand } from '../terminal-shell/src/slash-command-parser.ts';
 
-interface Ctx extends CommandRouteContext {
-  readonly print: (message: string) => void;
-  readonly invokedByModel?: boolean | undefined;
-}
+interface Ctx extends CommandRouteContext, SecretsCommandContext {}
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -44,16 +41,15 @@ function terminal() {
   const secrets = new SecretsManager({ surfaceRoot: 'goodvibes', globalHome: home, projectRoot: project });
   const { CommandRegistry } = createTerminalCommandRegistry<Ctx>();
   const registry = new CommandRegistry();
-  registry.register(createSecretsCommand<Ctx>(() => secrets, {
-    hidden: false, description: 'secrets', concealedEntry: false,
+  registry.register(createSecretsCommand<Ctx>({
     writeScope: (_key, requested) => requested, deleteScope: (_key, requested) => requested, relocationNote: () => '',
-    resolved: (ref, status) => `${ref}: ${status}`, failed: (ref, error) => `${ref} failed: ${error}`, deleted: (key) => `deleted ${key}`,
   }));
 
   let settled: () => void = () => {};
   const done = new Promise<void>((resolve) => { settled = resolve; });
   const context: Ctx = {
     workspace: { shellPaths: { workingDirectory: project, homeDirectory: home } },
+    platform: { secretsManager: secrets },
     print: () => settled(),
     executeCommand: async () => false,
   };
@@ -98,7 +94,7 @@ function remembered(historyPath: string): string {
 
 test('a value given to /secrets set is not written to history; the command line is', async () => {
   const term = terminal();
-  await term.enter('/secrets set OPENAI_API_KEY sk-typed-secret-4f9a2c --user --plaintext');
+  await term.enter('/secrets set OPENAI_API_KEY sk-typed-secret-4f9a2c --scope user');
   const kept = remembered(term.historyPath);
   expect(kept).not.toContain('sk-typed-secret-4f9a2c');
   expect(kept).toContain('/secrets set OPENAI_API_KEY');

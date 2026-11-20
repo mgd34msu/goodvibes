@@ -34,7 +34,6 @@ test('a model call of agent_harness runs and answers on the registry the shipped
   const { toolRegistry, dispose } = composeAgentToolRegistry({
     services, configManager, homeDirectory: homeDir,
     resolveSessionId: () => 'shipped-composition',
-    currentOwnerMessage: () => 'What can you do?',
     researchReportSourceOwner: services.researchReportSourceOwner,
     researchSourceOwner: services.localReadSourceOwner,
   });
@@ -54,10 +53,8 @@ test('a model call of agent_harness runs and answers on the registry the shipped
       toolRegistry, permissionManager: services.permissionManager, hookDispatcher: services.hookDispatcher, runtimeBus: services.runtimeBus,
       sessionId: 'shipped-composition', emitterContext: (turn) => createEmitterContext('shipped-composition', turn), workingDirectory: workspace,
     }, id, [{ id, name: 'agent_harness', arguments: { mode: 'summary' } }]);
-    // The model saw agent_harness as one line: its first call is answered with the full schema, and the call sent again runs.
-    const [schemaAnswer] = await run('first-call');
-    expect(schemaAnswer?.success).toBe(false);
-    const [result] = await run('second-call');
+    // The model saw agent_harness as one line; a call whose arguments fit its full schema runs at once.
+    const [result] = await run('first-call');
     expect(result?.success, String(result?.error ?? '')).toBe(true);
   } finally {
     try { await dispose(); } finally { await services.close(); }

@@ -51,7 +51,7 @@ test('a store this process cannot decrypt is refused for writing and left byte f
     writeFileSync(keyFile(), originalKey, { mode: 0o600 });
   }
 
-  expect(await open().get('GV_FIXTURE_CREDENTIAL_A')).toBe('credential-a');
+  expect((await open().get('GV_FIXTURE_CREDENTIAL_A'))?.reveal('owner-screen')).toBe('credential-a');
 });
 
 test('two managers over one home each keep the credential the other wrote', async () => {
@@ -59,13 +59,13 @@ test('two managers over one home each keep the credential the other wrote', asyn
   const two = open();
   await one.set('GV_FIXTURE_CREDENTIAL_A', 'credential-a', { scope: 'user', medium: 'secure' });
   // Both have read the store; each then writes after the other's write.
-  expect(await one.get('GV_FIXTURE_CREDENTIAL_A')).toBe('credential-a');
-  expect(await two.get('GV_FIXTURE_CREDENTIAL_A')).toBe('credential-a');
+  expect((await one.get('GV_FIXTURE_CREDENTIAL_A'))?.reveal('owner-screen')).toBe('credential-a');
+  expect((await two.get('GV_FIXTURE_CREDENTIAL_A'))?.reveal('owner-screen')).toBe('credential-a');
   await two.set('GV_FIXTURE_CREDENTIAL_B', 'credential-b', { scope: 'user', medium: 'secure' });
   await one.set('GV_FIXTURE_CREDENTIAL_C', 'credential-c', { scope: 'user', medium: 'secure' });
 
   const fresh = open();
-  expect(await fresh.get('GV_FIXTURE_CREDENTIAL_A')).toBe('credential-a');
-  expect(await fresh.get('GV_FIXTURE_CREDENTIAL_B')).toBe('credential-b');
-  expect(await fresh.get('GV_FIXTURE_CREDENTIAL_C')).toBe('credential-c');
+  expect((await fresh.get('GV_FIXTURE_CREDENTIAL_A'))?.reveal('owner-screen')).toBe('credential-a');
+  expect((await fresh.get('GV_FIXTURE_CREDENTIAL_B'))?.reveal('owner-screen')).toBe('credential-b');
+  expect((await fresh.get('GV_FIXTURE_CREDENTIAL_C'))?.reveal('owner-screen')).toBe('credential-c');
 });

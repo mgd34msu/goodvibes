@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { createPermissionConfigReader, PermissionManager } from '../platform/src/platform/permissions/manager.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
-import { startTurnForOwnerInput, withTurnSurface } from '../platform/src/platform/security/turn-boundary.ts';
+import { startTurnForOwnerInput, turnSurfaceOf, withTurnSurfaceId } from '../platform/src/platform/security/turn-boundary.ts';
 import type { TurnInputOrigin } from '../platform/src/events/turn.ts';
 import { evaluateOutwardEffect, UntrustedContentLedger, withUntrustedContentScope } from '../platform/src/platform/security/untrusted-content.ts';
 import { grantOwnerApproval } from '../platform/src/platform/security/owner-approval.ts';
@@ -32,7 +32,12 @@ afterEach(() => { retirePolicy(); });
 const page = (ledger: UntrustedContentLedger, name: string) => ledger.record({
   surface: 'web-page', origin: `https://${name}.example`, at: '2026-11-04T00:00:00Z', content: `text of ${name}`,
 });
-const origins = (ledger: UntrustedContentLedger, scope: string) => withUntrustedContentScope(scope, () => ledger.originsThisTurn());
+/** The origins this turn read; a read that failed shows as its kind, never as "nothing was read". */
+const readThisTurn = (ledger: UntrustedContentLedger): readonly string[] | string => {
+  const read = ledger.taintOriginsThisTurn();
+  return read.kind === 'present' ? read.value : read.kind;
+};
+const origins = (ledger: UntrustedContentLedger, scope: string) => withUntrustedContentScope(scope, () => readThisTurn(ledger));
 
 test("another scope's turn start does not erase what this scope read", () => {
   const ledger = new UntrustedContentLedger();
@@ -75,7 +80,7 @@ test('only the owner\'s own input starts a turn; channel, schedule and unknown i
   for (const [origin, owner] of rows) {
     const ledger = new UntrustedContentLedger();
     page(ledger, 'read-before');
-    expect(`${JSON.stringify(origin)}: ${startTurnForOwnerInput(origin, ledger)} ${ledger.originsThisTurn().length}`)
+    expect(`${JSON.stringify(origin)}: ${startTurnForOwnerInput(origin, ledger)} ${readThisTurn(ledger).length}`)
       .toBe(`${JSON.stringify(origin)}: ${owner} ${owner ? 0 : 1}`);
   }
   const dir = mkdtempSync(join(tmpdir(), 'gv-turn-surface-'));
@@ -83,8 +88,8 @@ test('only the owner\'s own input starts a turn; channel, schedule and unknown i
     const config = new ConfigManager({ configDir: join(dir, 'config'), workingDir: dir, surfaceRoot: 'goodvibes' });
     const manager = new PermissionManager(async () => ({ approved: true }), createPermissionConfigReader(config), new PolicyRuntimeState());
     const write = { path: join(dir, 'note.txt'), content: 'from the turn' };
-    expect(await withTurnSurface({ source: 'email' }, () => manager.checkDetailed('write', write)))
+    expect(await withTurnSurfaceId(turnSurfaceOf({ source: 'email' }), () => manager.checkDetailed('write', write)))
       .toMatchObject({ approved: false, reasonCode: 'boundary_surface_authority' });
-    expect((await withTurnSurface({ source: 'operator' }, () => manager.checkDetailed('write', write))).reasonCode).not.toBe('boundary_surface_authority');
+    expect((await withTurnSurfaceId(turnSurfaceOf({ source: 'operator' }), () => manager.checkDetailed('write', write))).reasonCode).not.toBe('boundary_surface_authority');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

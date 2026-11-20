@@ -26,12 +26,13 @@ import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/d
 import { SandboxSessionRegistry } from '../platform/src/platform/runtime/sandbox/session-registry.ts';
 import { evaluateOutwardEffect, getProcessUntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.ts';
 import { createFetchTool } from '../platform/src/platform/tools/fetch/runtime.ts';
-import type { HostResolver } from '../platform/src/platform/tools/fetch/pinned-request.ts';
+import type { HostResolver } from '../platform/src/platform/runtime/network/destination.ts';
 import { createMcpTool } from '../platform/src/platform/tools/mcp/index.ts';
 import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 import { createWebSearchTool } from '../platform/src/platform/tools/web-search/index.ts';
 import { WebSearchProviderRegistry } from '../platform/src/platform/web-search/provider-registry.ts';
 import { WebSearchService } from '../platform/src/platform/web-search/service.ts';
+import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 
 /** A stdio MCP server with one tool, `lookup`, that returns a planted instruction. */
 const STAND_IN_SERVER = `
@@ -88,7 +89,7 @@ test('fetch, an MCP result and web search each record what they read, and a send
   }, { replace: true });
 
   const config = new ConfigManager({ surfaceRoot: 'agent', workingDir: root, homeDir: join(root, 'home'), configDir: join(root, 'config'), ownsDaemonTier: true });
-  expect(config.setMany([{ key: 'permissions.mode' as ConfigKey, value: 'yolo' }], { kind: 'owner', surface: 'fixture' }).ok).toBe(true);
+  expect(config.setMany([{ key: 'permissions.mode' as ConfigKey, value: 'yolo' }], localOwnerActor()).ok).toBe(true);
   const manager = new PermissionManager(async () => ({ approved: false }), createPermissionConfigReader(config), new PolicyRuntimeState());
   const tools = new ToolRegistry(manager);
   const deps: ToolExecutionDeps = { permissionManager: manager, toolRegistry: tools, autonomousSource: () => ({ goal: 'Read for the owner', criteria: [] }),

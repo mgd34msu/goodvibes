@@ -46,7 +46,7 @@ beforeEach(() => {
 afterEach(() => { for (const close of closers.splice(0)) close(); });
 
 function ledger(): DurableBudgetLedger { return new DurableBudgetLedger(budgetFile, () => NOW); }
-function limits(): BudgetLimits { return readBudgetLimits(manager, 'USD'); }
+function limits(): BudgetLimits { return readBudgetLimits(manager, usd); }
 
 /** Item 10.00, tax 1.00, fee 0.50, standard delivery 2.00: 13.50 in all. `bare` has no tax, fee or delivery charge. */
 function quote(itemMinorUnits = 1_000, extra: Partial<DecisionInput> = {}, bare = false): DecisionInput {

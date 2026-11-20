@@ -17,9 +17,12 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { BudgetLimits } from '../platform/src/platform/payments/budget.js';
 import { DurableBudgetLedger, PaymentBudgetUnavailableError } from '../platform/src/platform/payments/host/budget-store.js';
+import { parseCurrencyCode, type CurrencyCode } from '../platform/src/platform/payments/types.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
+const usd = parseCurrencyCode('USD') as CurrencyCode;
 const LIMITS: BudgetLimits = {
+  currency: usd,
   dailyItemMinorUnits: 10_000,
   dailyOverageMinorUnits: 2_000,
   perPurchaseCeiling: { enabled: false, minorUnits: 0 },
@@ -72,7 +75,7 @@ function expectNothingFunded(ledger: DurableBudgetLedger): void {
 }
 
 describe('a hold for a checkout not yet settled', () => {
-  const limits: BudgetLimits = { dailyItemMinorUnits: 10_000, dailyOverageMinorUnits: 2_000,
+  const limits: BudgetLimits = { currency: usd, dailyItemMinorUnits: 10_000, dailyOverageMinorUnits: 2_000,
     perPurchaseCeiling: { enabled: false, minorUnits: 0 }, overageTolerance: { enabled: true, dailyAllowanceMinorUnits: 1_000 } };
   const started = Date.parse('2026-11-07T23:00:00Z');
   const later = started + 7 * 24 * 60 * 60 * 1_000;

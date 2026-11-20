@@ -6,9 +6,10 @@
  * way the product records them: the adapters write the route bindings from the
  * messages they receive, and the channel policies name each surface's owner.
  *
- * Real route bindings over their file, real channel policies, the real
- * Telegram, Slack and generic webhook adapters; the delivery port records the
- * conversation it was asked to send on and the receipt it was asked to keep.
+ * Real route bindings over their file, real channel policies, real settings
+ * and secret store, the real Telegram, Slack and generic webhook adapters; the
+ * delivery port records the conversation it was asked to send on and the
+ * receipt it was asked to keep.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -24,6 +25,7 @@ import { RouteBindingManager } from '../platform/src/platform/channels/route-man
 import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-manager.ts';
 import type { ChannelSurface } from '../platform/src/platform/channels/types.ts';
 import { deliverOwnerAlert, type OwnerAlertDelivery } from '../platform/src/platform/daemon/owner-alert.ts';
+import { scratchSettings } from './_helpers/scratch-settings.ts';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -41,11 +43,12 @@ test('an owner alert is offered only to the owner\'s own private chat, never to 
   await policy.upsertPolicy('slack', { allowlistUserIds: ['U-OWNER'] });
   await policy.upsertPolicy('webhook', { allowlistUserIds: ['hook-owner'] });
 
-  const config: Record<string, unknown> = { 'surfaces.webhook.enabled': true, 'surfaces.webhook.secret': 'hook-secret' };
+  const { configManager, secretsManager } = await scratchSettings({ 'surfaces.webhook.enabled': true, 'surfaces.webhook.secret': 'hook-secret' }, join(dir, 'home'));
   let agents = 0;
   const context = {
     serviceRegistry: { resolveSecret: async () => null },
-    configManager: { get: (key: string) => config[key] },
+    configManager,
+    secretsManager,
     routeBindings,
     sessionBroker: {
       getSession: () => null,

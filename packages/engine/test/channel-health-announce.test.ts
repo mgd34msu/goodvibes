@@ -45,8 +45,8 @@ test('a failing channel is announced once, offered again after the spacing when 
   };
 
   const working = await sweepAt(0);
-  alarm.recordFailure('telegram', 'the agent runtime refused the message');
-  alarm.recordFailure('slack', 'the session store could not be written');
+  alarm.recordFailure('telegram', 'the agent runtime refused the message', 'skipped');
+  alarm.recordFailure('slack', 'the session store could not be written', 'redelivered');
   const failing = await sweepAt(1);
   const telegramReason = describeIngressFailure(alarm.failure('telegram'));
   const slackReason = describeIngressFailure(alarm.failure('slack'));

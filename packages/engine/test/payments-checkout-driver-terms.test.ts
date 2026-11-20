@@ -13,13 +13,14 @@
 import { expect, test } from 'bun:test';
 import { createBrowserCheckoutDriverFactory, type CheckoutBrowserEngine } from '../platform/src/platform/payments/browser-checkout-driver.ts';
 import type { CheckoutTerms } from '../platform/src/platform/payments/checkout-page.ts';
+import { money } from '../platform/src/platform/payments/money.ts';
 import { parseCurrencyCode, type CurrencyCode } from '../platform/src/platform/payments/types.ts';
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 
 const TERMS: CheckoutTerms = {
-  submitTarget: 'place', merchantDomain: 'shop.example', currency: parseCurrencyCode('USD') as CurrencyCode,
+  submitTarget: 'place', merchantDomain: 'shop.example',
   lines: [{ label: 'Kettle', quantity: 1, unitMinorUnits: 1_099 }], taxMinorUnits: 0, feesMinorUnits: 0, feeLabels: [],
-  shippingLabel: 'Standard', shippingMinorUnits: 200, totalMinorUnits: 1_299,
+  shippingLabel: 'Standard', shippingMinorUnits: 200, total: money(1_299, parseCurrencyCode('USD') as CurrencyCode),
 };
 
 function driverOn(page: { url: string; submit: string; text: string }) {

@@ -4,9 +4,10 @@ import {
   type AtRestCipher,
   type DaemonCredentialStore,
 } from '@goodvibes-jev/engine/platform/platform/config';
+import type { Secret } from '@goodvibes-jev/engine/platform/platform/security';
 
 const credentials: DaemonCredentialStore = createDaemonCredentialStore({
-  async get(_key: string): Promise<string | null> { return null; },
+  async get(_key: string): Promise<Secret | null> { return null; },
   async set(_key: string, _value: string): Promise<void> {},
 });
 const cipher: AtRestCipher = createAtRestCipher(credentials, 'FIXTURE_DRAFT_KEY');

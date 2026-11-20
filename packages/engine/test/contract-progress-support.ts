@@ -105,11 +105,16 @@ export function saved(contract: Contract): unknown {
   return (JSON.parse(serializeContract(contract, 0)!) as { contract: unknown }).contract;
 }
 
+/** The contract a store's load read; an absent or refused checkpoint stops the case. */
+export function loaded(store: ContractStore, id: string): Contract {
+  const read = store.load(id);
+  if (read.kind !== 'present') throw new Error(`the contract did not load: ${JSON.stringify(read)}`);
+  return read.value;
+}
+
 /** What a restarted process reads: a new store's load. */
 export function restart(root: string, id: string): Contract {
-  const contract = storeAt(root).load(id);
-  if (contract === null) throw new Error('the contract did not load');
-  return contract;
+  return loaded(storeAt(root), id);
 }
 
 export function paths(root: string, id: string) {

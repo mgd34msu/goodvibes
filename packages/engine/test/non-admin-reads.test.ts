@@ -234,8 +234,9 @@ test('a non-admin user reads task counts and states but not an agent task\'s pro
 
 test('every method open to a non-admin user is on the reviewed list, and the list names nothing that is not', () => {
   const d = daemon();
+  // The actor the daemon builds for the viewer's credential, as the request path admits it.
   const principal = d.helper.describeRequestPrincipal(d.viewer)!;
-  const open = d.catalog.list().filter((descriptor) => refuseGatewayAccess(descriptor, principal) === null).map((descriptor) => descriptor.id);
+  const open = d.catalog.list().filter((descriptor) => refuseGatewayAccess(descriptor, principal.actor) === null).map((descriptor) => descriptor.id);
   expect(open.filter((id) => !OPEN_TO_NON_ADMIN.has(id))).toEqual([]);
   expect([...OPEN_TO_NON_ADMIN.keys()].filter((id) => !open.includes(id))).toEqual([]);
 });
@@ -244,7 +245,7 @@ test('a contract is shown only to the principal that started it, also after the 
   const d = daemon();
   const root = makeRepo();
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
-  const harness: Harness = makeHarness({ root, contract: { maxActiveContracts: 0 }, plan: oneUnitPlan(), scripts: {} });
+  const harness: Harness = makeHarness({ root, plan: oneUnitPlan(), scripts: { u1: () => [{ text: '', stop: { kind: 'hang' } }] } });
   cleanups.push(async () => {
     const ids = harness.runner.list({ includeTerminal: true }).map((row) => row.id);
     await Promise.resolve(harness.dispose()).catch(() => undefined);

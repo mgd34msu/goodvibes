@@ -5,13 +5,12 @@
  *     contract's writer until its standard input closes.
  */
 import { ContractStore } from '../platform/src/platform/contract/store.js';
-import { progressStep } from './contract-progress-support.js';
+import { loaded, progressStep } from './contract-progress-support.js';
 
 const [mode, projectRoot, contractId] = process.argv.slice(2);
 if (projectRoot === undefined || contractId === undefined) throw new Error('usage: hold <projectRoot> <contractId>');
 const store = new ContractStore({ projectRoot, sweepIntervalMs: 0 });
-const contract = store.load(contractId);
-if (contract === null) throw new Error('the contract is not saved');
+const contract = loaded(store, contractId);
 store.hold(contract);
 
 if (mode === 'hold') {

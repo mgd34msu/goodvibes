@@ -41,6 +41,7 @@ import { UserPermissionRuleStore } from '../platform/src/platform/permissions/us
 import { configureDecisionModelPolicy, withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { withExecutionModeOwner } from '../platform/src/platform/gate/execution-context.ts';
 import type { GatePresetName } from '../platform/src/platform/gate/presets.ts';
+import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 
 let dir: string;
 let jevQuestions = 0;
@@ -71,7 +72,7 @@ function gate(mode: GatePresetName, options: { readonly decisionModel?: boolean;
       { key: 'judgment.keySource' as ConfigKey, value: 'secret' },
     );
   }
-  expect(config.setMany(settings, { kind: 'owner', surface: 'fixture' }).ok).toBe(true);
+  expect(config.setMany(settings, localOwnerActor()).ok).toBe(true);
   let ownerAsked = 0;
   const held = new HeldForOwnerLedger();
   const manager = new PermissionManager(async () => { ownerAsked++; return { approved: options.ownerApproves?.() ?? false }; },

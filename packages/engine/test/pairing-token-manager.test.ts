@@ -1,5 +1,5 @@
 // Proves: A device token is readable from disk, a revoked device still signs in, or a token it handed off outlives it.
-// Red when: The plain token is stored or listed, a revoked token or a token it handed off still authenticates (now or after a reload), or the legacy revocation flag is lost on a restart.
+// Red when: The plain token is stored or listed, a revoked token or a token it handed off still authenticates (now or after a reload), the legacy revocation flag is lost on a restart, or the terminal's token store accepts a folder above the home that someone else can write.
 // Proves: Revoking the shared operator token ends the value in use every time, the replacement included.
 // Red when: A second revoke leaves the first replacement accepted: a copy of it taken off the machine could never be ended.
 // Proves: A pairing code nobody used stays a live credential, or a device token past the rotation age still works.
@@ -14,13 +14,15 @@
  * hand-off verb is revoked with that device.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, type Stats } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.ts';
 import { getOrCreateCompanionToken, readCompanionTokenValue, replaceCompanionToken } from '../platform/src/platform/pairing/companion-token.ts';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import { registerPairingHandoffGatewayMethods } from '../platform/src/platform/control-plane/routes/pairing-handoff.ts';
+import { readAgentHostPairing } from '../terminal-shell/src/agent-turn/connected-host-pairing-store.ts';
+import { isTrustedAncestorDirectory } from '../terminal-shell/src/host-pairing-store.ts';
 
 const dirs: string[] = [];
 function tempFile(): string {
@@ -186,5 +188,43 @@ describe('a token that is too old', () => {
       device: [null, 'PAIRING_TOKEN_ROTATION_DUE'],
       deviceWithoutLimit: device.id,
     });
+  });
+});
+
+describe('the folders above a saved device token', () => {
+  /**
+   * Anyone who can write a folder above the home can swap the store's folder
+   * for one he controls, then read the device token or plant his own. The
+   * terminal's pairing store reads every folder above the home first. A
+   * folder owned by the namespace's overflow user (real root's folders seen
+   * from a rootless container) cannot be changed by anyone here, so it is
+   * accepted, only while nobody else can write it.
+   */
+  test('a device token store under a folder others can write is refused; one owned by the overflow user only when nobody else can write it', () => {
+    const base = mkdtempSync(join(tmpdir(), 'pairing-ancestor-'));
+    dirs.push(base);
+    const store = (mode: number): string => {
+      const folder = join(base, `mode-${mode.toString(8)}`);
+      const home = join(folder, 'home');
+      mkdirSync(home, { recursive: true, mode: 0o700 });
+      // Bun's chmod drops the sticky bit, so the system's chmod sets the mode.
+      expect(Bun.spawnSync(['chmod', mode.toString(8), folder]).exitCode).toBe(0);
+      const read = readAgentHostPairing(home, 'http://127.0.0.1:3421');
+      return read.status === 'unavailable' ? read.cause : read.status;
+    };
+    const onDisk = { world: store(0o777), group: store(0o775), sticky: store(0o1777), private: store(0o755) };
+    expect(onDisk).toEqual({ world: 'ancestor-unsafe', group: 'ancestor-unsafe', sticky: 'missing', private: 'missing' });
+
+    // Ownership this account cannot give a folder on disk: the same check, given the folder's facts.
+    const overflow = Number(readFileSync('/proc/sys/kernel/overflowuid', 'utf8').trim());
+    const folder = (uid: number, mode: number): Stats => ({ ...lstatSync(base), uid, mode: 0o040000 | mode, isDirectory: () => true, isSymbolicLink: () => false }) as Stats;
+    const me = process.geteuid!();
+    expect({
+      overflowPrivate: isTrustedAncestorDirectory(folder(overflow, 0o755), me),
+      overflowWorldWritable: isTrustedAncestorDirectory(folder(overflow, 0o777), me),
+      overflowGroupWritable: isTrustedAncestorDirectory(folder(overflow, 0o775), me),
+      overflowSticky: isTrustedAncestorDirectory(folder(overflow, 0o1777), me),
+      anotherUser: isTrustedAncestorDirectory(folder(me + 4242, 0o755), me),
+    }).toEqual({ overflowPrivate: true, overflowWorldWritable: false, overflowGroupWritable: false, overflowSticky: true, anotherUser: false });
   });
 });

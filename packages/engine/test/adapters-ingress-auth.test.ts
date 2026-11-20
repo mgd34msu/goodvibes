@@ -9,12 +9,14 @@
  * starts), with none and with a wrong one (401, and the daemon is asked
  * nothing). Signature surfaces are signed in the test with keys made here.
  *
- * The adapters and the Teams token verifier are real; the daemon context only
- * records what an adapter asked of it, and Microsoft's key server is the
- * injected fetch.
+ * The adapters, the Teams token verifier, the settings and the secret store
+ * are real; the rest of the daemon context only records what an adapter asked
+ * of it, and Microsoft's key server is the injected fetch.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { createHmac, generateKeyPairSync, sign, webcrypto, type KeyObject } from 'node:crypto';
+import { rmSync } from 'node:fs';
+import { scratchSettings } from './_helpers/scratch-settings.ts';
 import { ntfyInboundDedup, surfaceInboundDedup } from '../platform/src/platform/adapters/inbound-dedup.ts';
 import { handleBlueBubblesSurfaceWebhook } from '../platform/src/platform/adapters/bluebubbles/index.ts';
 import { handleDiscordSurfaceWebhook } from '../platform/src/platform/adapters/discord/index.ts';
@@ -37,15 +39,28 @@ import { handleWhatsAppSurfaceWebhook } from '../platform/src/platform/adapters/
 type Call = { kind: string; input: unknown };
 type Credential = 'right' | 'wrong' | 'none';
 
-afterEach(() => { surfaceInboundDedup.clear(); ntfyInboundDedup.clear(); });
+const settingsRoots: string[] = [];
+afterEach(() => {
+  surfaceInboundDedup.clear(); ntfyInboundDedup.clear();
+  for (const root of settingsRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
-/** A daemon context that records what the adapter asked of it; the channel policy refuses every sender. */
-function recordingContext(config: Record<string, unknown>, secrets: Record<string, string> = {}) {
+/** The daemon's real settings and secret store for one row, in a scratch home removed after the case. `github.secret` is the GitHub hook's own secret, not a setting. */
+async function settings(values: Record<string, unknown>) {
+  const scratch = await scratchSettings(Object.fromEntries(Object.entries(values).filter(([key]) => key !== 'github.secret')));
+  settingsRoots.push(scratch.root);
+  return scratch;
+}
+
+/** A daemon context over real settings that records what the adapter asked of it; the channel policy refuses every sender. */
+async function recordingContext(config: Record<string, unknown>, secrets: Record<string, string> = {}) {
   const calls: Call[] = [];
+  const { configManager, secretsManager } = await settings(config);
   const record = (kind: string) => (input: unknown) => { calls.push({ kind, input }); };
   const context = {
     serviceRegistry: { resolveSecret: async (service: string, field: string) => secrets[`${service}.${field}`] ?? null },
-    configManager: { get: (key: string) => config[key] },
+    configManager,
+    secretsManager,
     routeBindings: {
       upsertBinding: async (input: { surfaceKind: string; externalId: string; metadata?: Record<string, unknown> }) => {
         record('upsertBinding')(input);
@@ -238,7 +253,7 @@ test('every webhook adapter answers 401 to a missing, wrong or replayed credenti
   const outcomes: Array<Record<string, unknown>> = [];
   for (const row of ADAPTERS) {
     for (const credential of ['right', 'wrong', 'none'] as const) {
-      const { calls, context } = recordingContext(row.config, row.secrets);
+      const { calls, context } = await recordingContext(row.config, row.secrets);
       const response = await row.handle(await row.request(credential), context);
       const asked = calls.map((call) => call.kind);
       outcomes.push({
@@ -269,7 +284,7 @@ test('every webhook adapter answers 401 to a missing, wrong or replayed credenti
         send: (ctx) => handleSignalSurfaceWebhook(post('http://localhost/webhook/signal', json({ source: '+15550002', message: 'hello' }), { 'x-goodvibes-signal-token': 'env-token' }), ctx) },
     ];
     for (const row of extra) {
-      const { calls, context } = recordingContext(row.config, row.secrets);
+      const { calls, context } = await recordingContext(row.config, row.secrets);
       const response = await row.send(context);
       outcomes.push({ surface: row.name, credential: 'right', status: response.status, reached: calls.length === 0 });
     }

@@ -98,7 +98,7 @@ function daemon(now: () => number) {
     notifier: withOwnerInbox(notifier, inbox, kind => kind === 'approval' ? 60 : 10),
     untrusted: new UntrustedContentLedger(),
     merchantJudge: { judge: async () => ({ qualifies: true, confident: true, recourse: 'established retailer with a returns process' }) },
-    limits: { dailyItemMinorUnits: 500_000, dailyOverageMinorUnits: 500_000,
+    limits: { currency: usd, dailyItemMinorUnits: 500_000, dailyOverageMinorUnits: 500_000,
       perPurchaseCeiling: { enabled: false, minorUnits: 0 }, overageTolerance: { enabled: false, dailyAllowanceMinorUnits: 0 } },
     budgetCurrency: usd, timezone: 'UTC',
     gates: { enabled: true, hasUsableCard: true, hasShippingAddress: true, isOwnerDirectRequest: true, isPaymentsLeader: true },
@@ -207,7 +207,7 @@ function restartedDaemon(now: () => number, checkpoint: CheckoutWindowCheckpoint
 
 function budget(now: () => number) {
   const ledger = new DurableBudgetLedger(join(dir, 'budget.json'), now);
-  const limits = { dailyItemMinorUnits: 500_000, dailyOverageMinorUnits: 500_000,
+  const limits = { currency: usd, dailyItemMinorUnits: 500_000, dailyOverageMinorUnits: 500_000,
     perPurchaseCeiling: { enabled: false, minorUnits: 0 }, overageTolerance: { enabled: false, dailyAllowanceMinorUnits: 0 } };
   const pools = ledger.snapshot(limits, now(), 'UTC');
   return { spent: pools.item.spent + pools.overage.spent, reserved: pools.item.reserved + pools.overage.reserved };

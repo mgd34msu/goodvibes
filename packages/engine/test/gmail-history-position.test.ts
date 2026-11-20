@@ -93,7 +93,7 @@ test('a message Google would not hand over keeps the position below it, is read 
     const intake = createInboundMailIntake({
       expectations: expectations.matcher, records,
       notices: {
-        resolveBinding: () => ({ kind: 'bound', binding: { surfaceKind: 'telegram' } }),
+        resolveBinding: () => ({ kind: 'bound', binding: { id: 'binding-owner', surfaceKind: 'telegram' } }),
         send: async (notice) => { notices.push(JSON.stringify(notice)); return { delivered: true }; },
       },
       noticeMode: () => 'all',

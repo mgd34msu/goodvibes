@@ -323,7 +323,7 @@ The answer is the watcher record: `id`, `label`, `kind`, `state`, `source`, `las
 
 ## Proactive check-ins
 
-On a cadence, the daemon assembles a briefing and the decision model judges whether anything needs the owner now; only then is a message delivered. The briefing holds: approvals and questions waiting in the owner inbox (and for how long), contracts waiting for the owner's decision (with their question), automation runs that failed since the last check-in, and messages a session has not picked up yet. It does not read mail, calendar or channels. With no decision model in use (none set, `No Decision Model`, or `Hybrid` after the set model failed), the check-in takes its fallback without a model request for the decision: when something waits for the owner (an approval, question or report in the owner inbox, a contract waiting for his decision, a failed run) it contacts him with the note the conversation model writes, sent as written and marked `(Not independently checked: no decision model is in use.)`, and its receipt's reason reads `Decided from the current state (no decision model is in use): <n> items are waiting for you; the note was not independently checked`; when nothing waits it records `quiet` (`Nothing needs the owner: ...`) and sends nothing. With none set or `No Decision Model` chosen this is silent; under `Hybrid` with a set model failing, the same fallback runs and the model's failure is reported as everywhere else. The outcome `skipped-decision-models-disabled` ("Decision models are unavailable; automatic check-in contact and note verification were not completed.") is recorded only when a decision the check-in needs has no fallback and fails with decision models off. Inside quiet hours it is recorded as `skipped-quiet-hours`. Each receipt's summary states how many items wait for the owner (the same count the decision reads), then only the counts that are not zero: sessions running, sessions with messages not yet picked up, channel messages not yet picked up, runs finished recently (`11 items waiting for you.`).
+On a cadence, the daemon assembles a briefing and the decision model judges whether anything needs the owner now; only then is a message delivered. The briefing holds: approvals and questions waiting in the owner inbox (and for how long), contracts waiting for the owner's decision (with their question), automation runs that failed since the last check-in, and messages a session has not picked up yet. It does not read mail, calendar or channels. With no decision model in use (none set, `No Decision Model`, or `Hybrid` after the set model failed), the check-in takes its fallback without a model request for the decision: when something waits for the owner (an approval, question or report in the owner inbox, a contract waiting for his decision, a failed run) it contacts him with the note the conversation model writes, sent as written and marked `(Not independently checked: no decision model is in use.)`, and its receipt's reason reads `Decided from the current state (no decision model is in use): <n> items are waiting for you; the note was not independently checked`; when nothing waits it records `quiet` (`Nothing needs the owner: ...`) and sends nothing. With none set or `No Decision Model` chosen this is silent; under `Hybrid` with a set model failing, the same fallback runs and the model's failure is reported as everywhere else. The outcome `skipped-decision-models-disabled` ("Decision models are unavailable; automatic check-in contact and note verification were not completed.") is recorded only when a decision the check-in needs has no fallback and fails with decision models off. Inside quiet hours it is recorded as `skipped-quiet-hours`. A note too long for one message on its channel goes out as several; when only some of them arrive, the receipt is `partial` with `partsSent` and `partsTotal` and says how many did not arrive (the run reports `partly delivered`; it is not sent again, since the owner already has the start). Each receipt's summary states how many items wait for the owner (the same count the decision reads), then only the counts that are not zero: sessions running, sessions with messages not yet picked up, channel messages not yet picked up, runs finished recently (`11 items waiting for you.`).
 
 ```text
 /config set checkin.enabled true
@@ -347,13 +347,14 @@ Agent and workstream outcomes, approvals waiting and budget alerts are announced
 /notify clear
 /notify test
 /notify failed          notifications this app could not deliver
-/notify resend <id|all>
+/notify resend <id|all> [--to-current]
 /notifications          open the notification history view
 ```
 
 - `/notify add` keeps the URLs in `notifications.webhookUrls`. Each URL carries its own key, so the list is masked and stored as a credential. The setting applies at the next start.
 - Slack and Discord carry notifications only when they have somewhere to post: an incoming-webhook URL (`SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`) or a bot token with `surfaces.slack.defaultChannel` / `surfaces.discord.defaultChannelId`.
 - A notification that fails is retried, then kept in a failed list. The daemon keeps its own list on disk (operator methods `notifications.deadLetters.list` and `notifications.deadLetters.replay`).
+- A notification is sent only to the destination it was queued for: a retry waiting while the Slack or Discord webhook or default channel changed ends in the failed list with the reason instead of going to the new place. `/notify resend` (and `notifications.deadLetters.replay`) refuses one whose channel now posts somewhere else, naming the old and new destination (`destination-changed`), and leaves it in the list; `--to-current` (`toCurrent: true`) sends it to where the channel posts now.
 - `notifications.pushApproval`, `notifications.pushNeedsInput` and `notifications.pushCompletion` decide which events go to paired devices as push notifications. `notifications.adaptiveSuppression` and `notifications.burstThreshold` quiet bursts. `notifications.blockedEscalation*` decide when a blocked approval is raised again.
 
 ## Mail
@@ -479,7 +480,8 @@ The daemon can watch mailboxes and tell the owner when mail arrives. Arrival is 
 - Changing the IMAP host, port or TLS, `inbound.enabled`, `inbound.source`, a corrected credential, or the accounts takes effect without a restart. Changing the first mailbox's user, its folder or the first account name needs a daemon restart; the status says so.
 - `surfaces.email.imap.authservIds` names the authserv-ids your receiving server writes in `Authentication-Results`, for a provider that is not built in (Gmail, Fastmail, Zoho, Yahoo and AOL are). Without it, senders on such a mailbox read as unverified.
 - `surfaces.email.inboxTagging` (default off) lets the inbox write its spam, priority and normal labels back to the mailbox as IMAP keywords.
-- Operator methods: `email.inbound.status`, `email.inbox.list`, `email.inbox.read`, `email.inbox.update`, `email.send`, `email.draft.create`, `email.drafts.list`, `email.attachment.get`, `email.expectation.open`, `email.expectation.wait`, `email.expectation.list`, `email.expectation.cancel`.
+- Operator methods: `email.inbound.status`, `email.inbox.list`, `email.inbox.read`, `email.inbox.update`, `email.send`, `email.draft.create`, `email.draft.update`, `email.drafts.list`, `email.attachment.get`, `email.expectation.open`, `email.expectation.wait`, `email.expectation.list`, `email.expectation.cancel`.
+- A message UID names a message only within its mailbox generation: `email.inbox.list` and `email.inbox.read` return `uidValidity`, and `email.inbox.update` requires it, so a mailbox the server reset refuses the change instead of changing whichever message now holds the number. In the same way `email.drafts.list` and `email.draft.create` return the Drafts folder's `uidValidity`, and `email.draft.update` replaces a saved draft (by `uid` and `uidValidity`) so the folder keeps one copy instead of two.
 
 ## Calendar
 
@@ -1125,7 +1127,7 @@ The model may start a purchase (`payments.checkout.begin`) and cancel one, and r
 4. Budget: the item price against what is left of `budget.dailyItem` (over it, the purchase needs approval: "This item costs USD 40.00 and only USD 25.00 is left in today's item budget, USD 15.00 short."; it is not refused for that); tax, mandatory fees and delivery against `budget.dailyOverage`, stepping delivery down from `payments.shipping.preferredTier` (`normal`, `fast`, `fastest`) one tier at a time until it fits; then the overage tolerance pool if `budget.overageToleranceEnabled`; otherwise refused. The full total is checked against the card's declared issuer cap (over it is refused), the per-purchase ceiling (over it needs approval) and the maximum the owner asked for (over it needs approval). A checkout in another currency is refused.
 5. The pools are reserved before the owner is asked.
 6. One notification goes out with what was chosen and what it will cost:
-   - Veto window (within budget, recourse established): silence for `payments.windows.vetoMinutes` (10) proceeds; an objection cancels.
+   - Veto window (within budget, recourse established): silence for `payments.windows.vetoMinutes` (10) proceeds; an objection cancels. An answer that could not be read (an unreadable owner inbox) is not silence: nothing is bought, and the purchase is refused `answer-unreadable`.
    - Approval window (over budget, over the requested maximum, or no recourse): silence for `payments.windows.approvalMinutes` (60) denies; only an explicit approve proceeds. When the notice cannot be delivered, a within-budget purchase proceeds and an over-budget one is refused.
    - `payments.confirmEveryPurchase` `true` makes every purchase need the owner's approval.
 7. The card is filled and the order submitted. A card security code, 3-D Secure or CAPTCHA pauses for the owner (`/payments pending`). With `payments.cvvHandling` `prompt`, the security code is not stored and is asked every time.
@@ -1217,7 +1219,7 @@ Both are written in the owner profile, `~/.goodvibes/daemon/owner-profile.md` (a
 - Lisbon · 2026-09-12..2026-09-19 · away · in Lisbon
 ```
 
-Segments after the title may be in any order; `|` may be used instead of `·`. A date `MM-DD` is annual and `YYYY-MM-DD` is a one-off unless `annual` or `once` says otherwise. The kind is `gift-giving` (offers a gift conversation), `remember-only` (no gift) or `neither`, and is always the owner's choice; nothing infers it. `for <name>` says who it is about; `for me` marks the owner's own date (a `remember-only` date of his own is listed but never pushed at him). `lead <n>` overrides the lead time for one occasion. A line that cannot be read is reported with a reason and never rewritten; you may also edit the file by hand.
+Segments after the title may be in any order; `|` may be used instead of `·`. A date `MM-DD` is annual and `YYYY-MM-DD` is a one-off unless `annual` or `once` says otherwise; `once` needs a year, so a `MM-DD` line marked `once` is reported as unreadable. The kind is `gift-giving` (offers a gift conversation), `remember-only` (no gift) or `neither`, and is always the owner's choice; nothing infers it. `for <name>` says who it is about; `for me` marks the owner's own date (a `remember-only` date of his own is listed but never pushed at him). `lead <n>` overrides the lead time for one occasion. A line that cannot be read is reported with a reason and never rewritten; you may also edit the file by hand.
 
 ### Where occasions are managed
 
@@ -1243,8 +1245,8 @@ Each call names an `action`:
 | `interview` | Resume a gift interview at its unanswered question. | `interviewId` |
 | `interview_answer` | Record one answer and return the next question. | `interviewId`, `stepId`, `text` |
 | `interview_record` | Close the interview with what the owner settled on; written to gift history. | `interviewId`, `landedOn` |
-| `remove` | Remove an occasion and every record against it, after asking the owner once. | `occasionId`, `confirmed: true` |
-| `resolve_conflict` | Two dates for one thing: with `keep`, keep that date and remove the other lines; without it, return the recorded dates to ask about. | `occasionId`, `keep` |
+| `remove` | Remove an occasion's line (named in the answer as `removedLine`) and every record against it, after asking the owner once. When other lines still declare the same occasion, only the first line goes and its records stay. | `occasionId`, `confirmed: true` |
+| `resolve_conflict` | Two lines for one thing: with `keep`, keep the first line with that date and remove the others; without it, return the recorded dates to ask about (lines that agree on the date need no `keep`). | `occasionId`, `keep` |
 | `sweep` | Run one pass now. | |
 
 A date heard in conversation is confirmed with the owner once, at the time ("Noted your anniversary as 12 September, right?"), then written.
@@ -1262,7 +1264,7 @@ A date heard in conversation is confirmed with the owner once, at the time ("Not
 - Pushes go to `occasions.nudgeChannel` (default `telegram`; a comma list of `surface` or `surface:address`, for example `telegram:12345,agent`; empty makes it pull-only). `agent` means the Agent reads outstanding items at the end of each turn and when the daemon says one is waiting.
 - Nothing is pushed outside `occasions.activeHours` (default `08:00-22:00`, in `daemon.timezone`); it waits.
 - A plan with `away` moves a nudge due during the trip to the day before departure (`occasions.awayAdjust`).
-- Two different dates for one thing are raised at once and again every `occasions.cadenceDays` (3) days until resolved.
+- Two lines for one thing (different dates, or the same date written twice) are raised at once and again every `occasions.cadenceDays` (3) days until resolved.
 - `occasions.calendarMirror` copies occasions into the calendar; `occasions.suppressMirroredNudges` then avoids a second reminder.
 - The daemon checks every `occasions.sweepIntervalMinutes` (60); a sweep runs soon after start when the last one is older than that.
 

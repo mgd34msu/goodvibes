@@ -214,9 +214,8 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
           // Each workspace floor owns its own contract store and runner.
           contractRunner: floor.contractRunner,
           execPosture: hostedExecPosture,
-          dispose: (): void => {
-            floor.dispose();
-          },
+          // Resolves once every owner the floor started has drained (its background processes included).
+          dispose: (): Promise<void> => floor.close(),
         };
       } catch (error) {
         // Until publication, this factory owns its returned client graph. The

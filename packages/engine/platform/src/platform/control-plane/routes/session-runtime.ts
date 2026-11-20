@@ -39,6 +39,7 @@ import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { PermissionMode } from '../../config/schema-types.js';
 import { effectivePermissionMode, GATE_PRESETS, isSettableGatePresetName, normalizePermissionMode, type GatePresetName, type SettableGatePresetName } from '../../gate/presets.js';
 import { deriveContextUsage } from '../../runtime/context-usage.js';
+import type { ModeInForceWords } from '../../permissions/decision-model-readiness.js';
 import type { InboundIntakeBroker } from '../../channel-profiles/install-inbound-intake.js';
 import { readCurrentContextWindow } from '../../providers/context-window-reading.js';
 import type { ContextWindowOrigin, ContextWindowProvenance } from '../../providers/registry-types.js';
@@ -164,7 +165,13 @@ export interface SessionRuntimeControls {
    * with why they differ. Absent on controls that cannot say; the get verb then
    * reports the mode in force alone.
    */
-  getPermissionModeReport?(sessionId?: string): { readonly chosen: PermissionMode; readonly mode: PermissionMode; readonly reason?: string | undefined };
+  getPermissionModeReport?(sessionId?: string): {
+    readonly chosen: PermissionMode;
+    readonly mode: PermissionMode;
+    readonly reason?: string | undefined;
+    /** The same report in plain words (permissions/decision-model-readiness.ts ModeInForceWords) for the web UI's mode chip and settings. */
+    readonly words?: ModeInForceWords | undefined;
+  };
   setPermissionMode(mode: PermissionMode, sessionId?: string): void | Promise<void>;
   getContextUsage(sessionId: string): SessionContextUsage;
   /**
@@ -200,7 +207,8 @@ export function createSessionPermissionModeGetHandler(controls: SessionRuntimeCo
     if (!report) return { sessionId, mode: toOperatorPermissionMode(controls.getPermissionMode(sessionId)) };
     // The mode in force, and when it is not the chosen one, the chosen mode and why (no decision model set, none answering, ...).
     return { sessionId, mode: toOperatorPermissionMode(report.mode), chosenMode: toOperatorPermissionMode(report.chosen),
-      ...(report.reason !== undefined && report.mode !== report.chosen ? { reason: report.reason } : {}) };
+      ...(report.reason !== undefined && report.mode !== report.chosen ? { reason: report.reason } : {}),
+      ...(report.words !== undefined ? { words: report.words } : {}) };
   };
 }
 
@@ -401,6 +409,8 @@ export function createSessionRuntimeControls(deps: {
   readonly modeInForce?: ((chosen: GatePresetName, explicitlyChosen?: boolean) => GatePresetName) | undefined;
   /** Why the mode in force differs from a chosen mode (PermissionManager.describeModeInForce); absent: no reason is given. */
   readonly modeInForceReason?: ((chosen: GatePresetName, explicitlyChosen?: boolean) => string | undefined) | undefined;
+  /** The mode in force for a chosen mode in plain words (describeModeInForceWords); absent: no words are reported. */
+  readonly modeInForceWords?: ((chosen: GatePresetName, explicitlyChosen?: boolean) => ModeInForceWords) | undefined;
 }): SessionRuntimeControls {
   const inForce = (chosen: GatePresetName, explicitlyChosen = false): GatePresetName => deps.modeInForce?.(chosen, explicitlyChosen) ?? chosen;
   /** The chosen mode of a session (or the saved one) and whether it was chosen for that session rather than read from settings. */
@@ -447,7 +457,8 @@ export function createSessionRuntimeControls(deps: {
       const chosen = chosenMode(sessionId);
       const mode = inForce(chosen.mode, chosen.explicitlyChosen);
       const reason = mode === chosen.mode ? undefined : deps.modeInForceReason?.(chosen.mode, chosen.explicitlyChosen);
-      return { chosen: chosen.mode, mode, ...(reason !== undefined ? { reason } : {}) };
+      const words = deps.modeInForceWords?.(chosen.mode, chosen.explicitlyChosen);
+      return { chosen: chosen.mode, mode, ...(reason !== undefined ? { reason } : {}), ...(words !== undefined ? { words } : {}) };
     },
     setPermissionMode(mode: PermissionMode, sessionId?: string): void | Promise<void> {
       const hosted = sessionId && deps.liveTurnHolder?.getSession(sessionId);

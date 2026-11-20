@@ -264,6 +264,8 @@ config: could not write controlPlane.port: expected number (integer port in [1, 
 
 A key that does not exist is refused the same way with `not a settings key. Run \`goodvibes-daemon config list\` to see them.` Values are read as JSON first, then `true`, `false` or a number, then as plain text: `config set judgment.policy "No Decision Model"` stores the text, `config set display.stream false` stores the boolean. A daemon-owned key (`controlPlane.port`) goes to the daemon file; any other key (`display.stream`) goes to `~/.goodvibes/daemon-host/settings.json` and changes only the daemon's own value.
 
+When the terminal app or Agent writes a daemon-owned key while a daemon runs, the write goes to that daemon. A daemon that cannot be reached (refused connection, unknown host) gets nothing: the message says the setting was NOT applied. A write that was sent but whose answer was lost or could not be read (a timeout, a dropped connection, an answer this version cannot read) may have been applied, so the app reads the key back once from the daemon: the value it sent is there, and the write is reported done; otherwise the message says the outcome is not known, what the daemon holds now, and to read it back with `goodvibes config get <key>` before setting it again. Several keys sent as one update are settled the same way, and the update reports the value the daemon holds for each key.
+
 Inside the terminal app:
 
 - `/settings` opens the settings screen; `/settings <category|key>` opens it at a category or a key.

@@ -347,7 +347,7 @@ export const builtinGatewayEventDescriptors: readonly GatewayEventDescriptor[] =
     title: 'Own Session Activity',
     description:
       'What a credential without the admin role holding `read:own-sessions` receives of the sessions '
-      + 'its own principal created or attached to (sessions.hosted.create, sessions.hosted.attach): '
+      + 'its own principal created or an owner shared with it (sessions.hosted.create, sessions.hosted.share): '
       + 'their `turn`, `tools`, `gate` and `session` runtime frames (streamed text, tool calls and '
       + 'results, permission decisions, turn transitions), their `approval-update` events and their '
       + '`hosted-session-update` notices. Frames of every other session, and frames naming no session, '

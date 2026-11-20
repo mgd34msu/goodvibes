@@ -12,6 +12,12 @@
  *     (node_modules/.bin first, then PATH), in the project directory, on the
  *     file's real path, so the project's configuration applies; and they run
  *     asynchronously, so the terminal keeps responding
+ *   - A project's formatter or linter is a program the project chose, so it
+ *     runs contained (runContained, origin `project`): no network, a scrubbed
+ *     environment, and nothing writable but the one hidden copy a configured
+ *     language tool edits (prettier, biome and eslint read stdin and write
+ *     stdout). Where no boundary with its own network exists, the stage is
+ *     skipped with a warning that says why
  *   - Every stage starts from the content the agent wrote: a stage whose
  *     change was not accepted hands nothing on, so an accepted repair differs
  *     from what the agent wrote only by that stage's fix, and `method` names it
@@ -40,6 +46,7 @@ import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { hasCapturedToolInvocation } from './captured-input-tools.js';
 import { healAcceptance } from '../batteries/heal-acceptance.js';
 import { languageToolArgv, type CommandSpec, type ResolvedLanguages } from '../../intelligence/config.js';
+import { runContained } from '../../runtime/sandbox/contained-spawn.js';
 
 const HEAL_ACCEPTANCE_SITE = 'tools.auto-heal.acceptance';
 
@@ -106,18 +113,25 @@ export class AutoHealer {
     return Bun.which(name, root ? { cwd: root } : undefined);
   }
 
-  /** Runs a tool asynchronously in the project directory; stdin when given. Aborts with the heal. */
-  private async runTool(argv: readonly string[], stdin?: string): Promise<{ readonly exitCode: number; readonly stdout: string }> {
+  /**
+   * Runs a tool contained, in the project directory (read-only); stdin when
+   * given; `writable` names the only files it may change. Aborts with the
+   * heal. Rejects with ContainmentUnavailableError where no boundary without a
+   * network can be built (the stage reports it and is skipped).
+   */
+  private async runTool(argv: readonly string[], stdin?: string, writable: readonly string[] = []): Promise<{ readonly exitCode: number; readonly stdout: string }> {
     const signal = this.execution?.signal ?? this.invocationSignal;
-    const root = this.projectRoot?.();
-    const proc = Bun.spawn([...argv], {
-      ...(root ? { cwd: root } : {}),
-      stdin: stdin === undefined ? 'ignore' : new Blob([stdin]),
-      stdout: 'pipe', stderr: 'pipe',
+    const result = await runContained({
+      argv,
+      cwd: this.projectRoot?.() ?? process.cwd(),
+      env: 'scrubbed',
+      ...(stdin !== undefined ? { stdin } : {}),
       ...(signal ? { signal } : {}),
+      origin: 'project',
+      // Network off is never met by a host process, so a boundary is required whatever the composition's exec posture.
+      containment: { boundary: 'required', network: 'off', writable, reason: 'a project formatter or linter is repairing a file the agent wrote' },
     });
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    return { exitCode, stdout };
+    return { exitCode: result.exitCode ?? -1, stdout: result.stdout };
   }
 
   /**
@@ -129,7 +143,7 @@ export class AutoHealer {
     this.checkSynchronous();
     await writeFile(copy, content, 'utf-8');
     try {
-      const run = await this.runTool(languageToolArgv(spec, copy));
+      const run = await this.runTool(languageToolArgv(spec, copy), undefined, [copy]);
       return { exitCode: run.exitCode, output: await readFile(copy, 'utf-8') };
     } finally {
       await unlink(copy).catch(() => undefined);

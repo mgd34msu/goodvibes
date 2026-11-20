@@ -104,17 +104,20 @@ export type OperatorApiClient =
 export function createOperatorApiClient(options: OperatorApiClientOptions): OperatorApiClient {
   const transport = createHttpTransport(options);
   const contract = getOperatorContract();
+  // Owns every stream this client opens: dispose() ends the open ones and refuses the rest.
+  const lifetime = new AbortController();
   const remote = createOperatorRemoteClient(transport, contract, {
     validateResponses: options.validateResponses !== false,
+    streamSignal: lifetime.signal,
   });
   return {
     ...remote,
     getOperation(methodId: OperatorMethodId): OperatorMethodContract {
       return remote.getOperation(methodId);
     },
+    /** Ends every stream this client opened (and any still opening); later stream() calls are refused. */
     dispose(): void {
-      // HTTP transports do not hold sockets today, but exposing disposal on the
-      // platform object gives callers a stable lifecycle hook as transports evolve.
+      if (!lifetime.signal.aborted) lifetime.abort(new Error('The operator client was disposed.'));
     },
     async asyncDispose(): Promise<void> {
       this.dispose();

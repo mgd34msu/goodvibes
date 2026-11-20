@@ -10,6 +10,7 @@ import { createSimpleGit } from '../git/optional-simple-git.js';
 import { GitService, readGitWorktreeCreation, type GitWorktreeCreationObservation } from '../git/service.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { done, failedOutcome, observe, refusal, type EffectOutcome } from '@goodvibes-jev/engine/errors';
 
 
 /**
@@ -351,8 +352,13 @@ export class AgentWorktree {
 export type IntegrationOutcome =
   /** Clean merge, `hash` is the merge commit on the base branch. */
   | { readonly status: 'merged'; readonly hash: string }
-  /** The base merge conflicted; `files` names the conflicting paths. The base tree is restored (merge --abort) so the lane can continue. */
-  | { readonly status: 'conflict'; readonly files: readonly string[] }
+  /**
+   * The base merge conflicted; `files` names the conflicting paths. `base` says
+   * whether the root tree was seen restored after `merge --abort` (MERGE_HEAD
+   * gone and no unmerged paths): `done` when it was, `failed` when the base
+   * checkout is still mid-merge, and the lane must stop until it is aborted.
+   */
+  | { readonly status: 'conflict'; readonly files: readonly string[]; readonly base: EffectOutcome }
   /** The item branch carried no commits beyond base, nothing to merge (an honest no-op, not a failure). */
   | { readonly status: 'empty' };
 
@@ -529,8 +535,38 @@ export class IsolatedWorktree {
     } catch (err) {
       logger.warn('IsolatedWorktree.integrate: merge --abort did not complete after conflict', { branch: this.branch, error: summarizeError(err) });
     }
-    logger.debug('IsolatedWorktree.integrate: conflict, base restored', { branch: this.branch, files });
-    return { status: 'conflict', files };
+    const base = await this.observeBaseRestored();
+    if (base.state === 'done') logger.debug('IsolatedWorktree.integrate: conflict, base restored', { branch: this.branch, files });
+    else logger.warn('IsolatedWorktree.integrate: conflict, base checkout still mid-merge', { branch: this.branch, files, root: this.rootGit.getCwd() });
+    return { status: 'conflict', files, base };
+  }
+
+  /**
+   * Whether the root (base) checkout is out of a merge: MERGE_HEAD gone and no
+   * unmerged paths, as seen by git now. `done` only on that observation; a
+   * checkout still mid-merge, or one git cannot read, is `failed` naming the path.
+   */
+  async observeBaseRestored(): Promise<EffectOutcome> {
+    const root = this.rootGit.getCwd();
+    const stuck = (why: string): EffectOutcome => failedOutcome(refusal({
+      code: 'BASE_MID_MERGE',
+      state: `the base checkout is mid-merge at ${root}`,
+      reason: `The base checkout at ${root} was not restored after a conflicted merge (${why}), so no further item is merged into it.`,
+      next: [`Run \`git merge --abort\` in ${root}, then retry the integration.`],
+      retryable: false,
+    }));
+    try {
+      const wgit = await createSimpleGit({ baseDir: root });
+      const seen = await observe('MERGE_HEAD gone and no unmerged paths', async () => {
+        const mergeHead = resolve(root, (await wgit.raw(['rev-parse', '--git-path', 'MERGE_HEAD'])).trim());
+        if (existsSync(mergeHead)) return undefined;
+        const unmerged = (await wgit.raw(['ls-files', '--unmerged'])).trim();
+        return unmerged.length === 0 ? true : undefined;
+      });
+      return seen === undefined ? stuck('MERGE_HEAD or unmerged paths remain') : done({ value: undefined, observed: seen.observed });
+    } catch (error) {
+      return stuck(`git could not be read: ${summarizeError(error)}`);
+    }
   }
 
   /**

@@ -1,4 +1,4 @@
-import { observeImportFile, assertImportFileCurrent, isSecretBearingConfigKey, type SubscriptionImportEntry } from '@goodvibes-jev/engine/platform/platform/config';
+import { observeImportFile, assertImportFileCurrent, configKeyFacts, displaySettingValue, isSecretBearingConfigKey, isSecretReferenceValue, type SubscriptionImportEntry } from '@goodvibes-jev/engine/platform/platform/config';
 import { captureStrictJudgmentJson, judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 import { containsIssuerCredential, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -246,20 +246,31 @@ function valuesMatch(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function isSecretLikeSettingKey(key: string): boolean {
-  const normalized = key.replace(/([a-z0-9])([A-Z])/g, '$1.$2').toLowerCase();
-  if (normalized.endsWith('secret.policy')) return false;
-  return /(?:secret|token|password|api[-_.]?key|api\.key|signing)/i.test(normalized);
+/**
+ * Whether a setting's value is credential or card material, from the
+ * platform's one declaration (`configKeyFacts`), never from the key's spelling:
+ * a webhook URL that carries its token (`surfaces.webhook.defaultTarget`,
+ * `surfaces.googleChat.webhookUrl`, `notifications.webhookUrls`) is one.
+ */
+function isCredentialSettingKey(key: string): boolean {
+  const facts = configKeyFacts(key);
+  return facts.secret || facts.cardMaterial;
 }
 
+/**
+ * A setting's value as every row, receipt and import summary shows it. A
+ * credential goes through the platform's one projection
+ * (`displaySettingValue`): `(secret)`, or the `goodvibes://secrets/` reference
+ * that is stored in its place. Anything else is shortened to fit a row.
+ */
 function compactSettingValue(key: string, value: unknown): string {
   if (value === undefined || value === null) return '(unset)';
-  if (isSecretLikeSettingKey(key)) return value === '' ? '(empty)' : '(secret)';
+  if (isCredentialSettingKey(key)) return displaySettingValue(key, value);
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '(invalid)';
   if (typeof value === 'string') {
     if (value.length === 0) return '(empty)';
-    if (value.startsWith('goodvibes://secrets/')) return '(secret)';
+    if (isSecretReferenceValue(value)) return value.trim();
     return value.length > 36 ? `${value.slice(0, 33)}...` : value;
   }
   if (Array.isArray(value)) return `[${value.length} item${value.length === 1 ? '' : 's'}]`;
@@ -268,12 +279,8 @@ function compactSettingValue(key: string, value: unknown): string {
 }
 
 function redactImportValue(key: string, value: unknown): unknown {
-  if (typeof value !== 'string') return value;
-  if (!value) return value;
-  if (isSecretLikeSettingKey(key)) {
-    return value.startsWith('goodvibes://secrets/') ? '<secret-ref>' : '<redacted>';
-  }
-  return value;
+  if (value === undefined || value === null || value === '') return value;
+  return isCredentialSettingKey(key) ? displaySettingValue(key, value) : value;
 }
 
 function readRecordMap(record: Record<string, unknown>, key: string): readonly unknown[] {
@@ -542,7 +549,7 @@ export async function applyAgentWorkspaceSettingValue(
       result: {
         kind: 'refreshed',
         title: `${result.key} updated`,
-        detail: `Current value: ${String(result.current)}`,
+        detail: `Current value: ${compactSettingValue(setting.key, result.current)}`,
         safety: 'safe',
       },
     };
@@ -952,14 +959,20 @@ export async function applyAgentWorkspaceTuiSettingsImport(
   const changing = plan.settings.filter((entry) => entry.status === 'would_import');
   const undoPath = shellPaths.resolveUserPath('agent', 'settings-import-undo.json');
   if (changing.length > 0) {
-    // Previous values of secret-bearing keys are not written to a plain file.
+    // A credential's previous value is kept only as the goodvibes://secrets/
+    // reference that was stored in its place; a credential that was not a
+    // reference is never written to this plain file and is marked not restorable.
     // Without the undo file nothing is written: an import that cannot be reversed does not start.
     try {
       writeDocument(undoPath, {
         createdAt: new Date().toISOString(),
-        settings: changing.map((entry) => isSecretLikeSettingKey(entry.key)
-          ? { key: entry.key, previous: null, restorable: false }
-          : { key: entry.key, previous: configManager.get(entry.key as Parameters<typeof configManager.get>[0]) ?? null, restorable: true }),
+        settings: changing.map((entry) => {
+          const previous: unknown = configManager.get(entry.key as Parameters<typeof configManager.get>[0]) ?? null;
+          if (!isCredentialSettingKey(entry.key)) return { key: entry.key, previous, restorable: true };
+          return previous === null || previous === '' || isSecretReferenceValue(previous)
+            ? { key: entry.key, previous, restorable: true }
+            : { key: entry.key, previous: null, restorable: false };
+        }),
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -1071,7 +1084,7 @@ function createSettingEditor(setting: AgentConfigSetting, currentValue: string, 
         required: false,
         multiline: false,
         hint: action.settingValueHint ?? valueHint,
-        redact: /(?:secret|token|password|api[-_.]?key|signing)/i.test(setting.key),
+        redact: isCredentialSettingKey(setting.key),
       },
     ],
   };

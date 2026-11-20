@@ -48,6 +48,8 @@ import {
 import { deriveControlPlaneBaseUrl, type ControlPlaneBinding } from './control-plane-base-url.js';
 import { DAEMON_CHALLENGE_HEADER, dialledPort, verifyDaemonIdentityAnswer } from '../daemon/identity-proof.js';
 import { randomBytes } from 'node:crypto';
+import { fetchFailurePhase } from '../state/operation.js';
+import { readDotPath } from './shared-config-tier.js';
 
 /** How to reach a daemon's control plane for config reads and writes. */
 export interface DaemonConfigEndpoint {
@@ -100,6 +102,36 @@ export class DaemonConfigUnreachableError extends Error {
     this.name = 'DaemonConfigUnreachableError';
     this.key = key;
     this.endpoint = endpoint;
+  }
+}
+
+/**
+ * Thrown when a write reached the daemon (or may have) but its answer was lost
+ * or unreadable, and reading the value back could not settle it: the daemon may
+ * have applied it. Never "not applied": the caller reads the key back
+ * (`readBack`) before setting it again.
+ */
+export class DaemonConfigOutcomeUnknownError extends Error {
+  readonly code = 'OUTCOME_UNKNOWN';
+  readonly key: string;
+  readonly endpoint: string;
+  /** The command that reads the daemon's value of the key now. */
+  readonly readBack: string;
+  /** Why the answer is missing ("no answer came (...)", "its answer could not be read"). */
+  readonly lostBecause: string;
+  constructor(key: string, endpoint: string, cause: string, settled?: string | undefined) {
+    const firstKey = key.split(', ')[0] ?? key;
+    const readBack = `goodvibes config get ${firstKey}`;
+    super(
+      `${key}: the write was sent to the daemon at ${endpoint}, but ${cause}, so whether it was applied is not known; it may have been applied. `
+      + (settled ? `${settled} ` : '')
+      + `Read it back with \`${readBack}\` before setting it again.`,
+    );
+    this.name = 'DaemonConfigOutcomeUnknownError';
+    this.key = key;
+    this.endpoint = endpoint;
+    this.readBack = readBack;
+    this.lostBecause = cause;
   }
 }
 
@@ -522,7 +554,14 @@ export async function applyConfigWrite(
 
   const route = await resolveLiveConfigWriteRoute(key, deps);
   if (route.mode === 'local') return writeLocally(key, value, local, route);
-  const applied = await postDaemonConfig(key, value, route.endpoint, deps);
+  let applied: DaemonConfigSetResponse;
+  try {
+    applied = await postDaemonConfig(key, value, route.endpoint, deps);
+  } catch (error) {
+    if (!(error instanceof DaemonConfigOutcomeUnknownError)) throw error;
+    // The answer was lost: one read of the daemon's value says whether the write took (one GET, only after an unknown).
+    applied = await settleByReadingBack(key, value, route.endpoint, deps, error);
+  }
   return {
     key,
     scope: 'daemon',
@@ -533,9 +572,16 @@ export async function applyConfigWrite(
   };
 }
 
+/** One key of a daemon's receipt for a set of writes: the value it holds now, and the file it is kept in. */
+export interface DaemonHeldConfigEntry {
+  readonly key: string;
+  readonly value: unknown;
+  readonly persistedTo?: string | undefined;
+}
+
 /** What a set of daemon-owned writes did: taken by the daemon as one update, or no daemon to send them to. */
 export type DaemonConfigWritesOutcome =
-  | { readonly appliedBy: 'daemon'; readonly persistedTo: string; readonly reason: string }
+  | { readonly appliedBy: 'daemon'; readonly persistedTo: string; readonly reason: string; readonly entries: readonly DaemonHeldConfigEntry[] }
   | { readonly appliedBy: 'none'; readonly reason: string };
 
 /**
@@ -567,19 +613,94 @@ export async function applyDaemonConfigWrites(
       signal: AbortSignal.timeout(deps.timeoutMs ?? 10_000),
     });
   } catch (error) {
-    throw new DaemonConfigUnreachableError(keys, route.endpoint.baseUrl, describeCause(error));
+    if (fetchFailurePhase(error) === 'before-send') throw new DaemonConfigUnreachableError(keys, route.endpoint.baseUrl, describeCause(error));
+    return await settleManyByReadingBack(entries, route.endpoint, deps,
+      new DaemonConfigOutcomeUnknownError(keys, route.endpoint.baseUrl, `no answer came (${describeCause(error)})`), route.reason);
+  }
+  let text: string;
+  try { text = await response.text(); } catch (error) {
+    if (!response.ok) throw new DaemonConfigRejectedError(keys, response.status, response.statusText);
+    return await settleManyByReadingBack(entries, route.endpoint, deps,
+      new DaemonConfigOutcomeUnknownError(keys, route.endpoint.baseUrl, `its answer (HTTP ${response.status}) could not be read (${describeCause(error)})`), route.reason);
   }
   if (!response.ok) {
-    const text = await response.text().catch(() => '');
     throw new DaemonConfigRejectedError(keys, response.status, text.slice(0, 400) || response.statusText);
   }
   if (response.status === 202) {
-    const approvalId = pendingOwnerApproval(await response.text().catch(() => ''));
+    const approvalId = pendingOwnerApproval(text);
     if (approvalId !== undefined) throw new DaemonConfigOwnerApprovalPendingError(keys, approvalId);
-  } else {
-    await response.body?.cancel().catch(() => undefined);
   }
-  return { appliedBy: 'daemon', persistedTo: route.endpoint.baseUrl, reason: route.reason };
+  // The daemon's receipt: what it now holds per key. An answer this build cannot read is not a receipt.
+  const held = readHeldEntries(text);
+  if (!held) {
+    return await settleManyByReadingBack(entries, route.endpoint, deps,
+      new DaemonConfigOutcomeUnknownError(keys, route.endpoint.baseUrl, `its answer (HTTP ${response.status}) is not the receipt this build reads`), route.reason);
+  }
+  return { appliedBy: 'daemon', persistedTo: route.endpoint.baseUrl, reason: route.reason, entries: held };
+}
+
+/** The `entries` of a `config.setMany` receipt (key, value held now, file), or undefined when the answer is not one. */
+function readHeldEntries(text: string): readonly DaemonHeldConfigEntry[] | undefined {
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return undefined; }
+  const list = parsed !== null && typeof parsed === 'object' ? (parsed as { readonly entries?: unknown }).entries : undefined;
+  if (!Array.isArray(list)) return undefined;
+  const held: DaemonHeldConfigEntry[] = [];
+  for (const item of list as unknown[]) {
+    if (item === null || typeof item !== 'object' || typeof (item as { key?: unknown }).key !== 'string') return undefined;
+    const entry = item as { readonly key: string; readonly value?: unknown; readonly persistedTo?: unknown };
+    held.push({ key: entry.key, value: entry.value, ...(typeof entry.persistedTo === 'string' ? { persistedTo: entry.persistedTo } : {}) });
+  }
+  return held;
+}
+
+/** Two config values are the same setting (JSON equality, object keys in any order). */
+function sameConfigValue(left: unknown, right: unknown): boolean {
+  const canonical = (value: unknown): string => {
+    if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+    if (value && typeof value === 'object') {
+      return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(',')}}`;
+    }
+    return JSON.stringify(value ?? null);
+  };
+  return canonical(left) === canonical(right);
+}
+
+/**
+ * After an unknown outcome: read the daemon's config once. The value sent is
+ * there: the write took, and that is the answer. Anything else (a different
+ * value, or no answer to the read) stays unknown: the write may still be
+ * waiting for the owner's approval, or the read missed it.
+ */
+async function settleByReadingBack(
+  key: string,
+  value: unknown,
+  endpoint: DaemonConfigEndpoint,
+  deps: DaemonConfigRouterDeps,
+  unknown: DaemonConfigOutcomeUnknownError,
+): Promise<DaemonConfigSetResponse> {
+  let config: Record<string, unknown>;
+  try { config = await readDaemonConfig(endpoint, deps); } catch { throw unknown; }
+  const hit = readDotPath(config, key);
+  if (hit.present && sameConfigValue(hit.value, value)) return { value: hit.value };
+  throw new DaemonConfigOutcomeUnknownError(key, endpoint.baseUrl, unknown.lostBecause,
+    `Read back just now, the daemon holds ${hit.present ? JSON.stringify(hit.value) : 'no value'} for it, not the value sent: it is not in effect now; a write put to the owner for approval applies when approved.`);
+}
+
+async function settleManyByReadingBack(
+  entries: readonly { readonly key: string; readonly value: unknown }[],
+  endpoint: DaemonConfigEndpoint,
+  deps: DaemonConfigRouterDeps,
+  unknown: DaemonConfigOutcomeUnknownError,
+  reason: string,
+): Promise<DaemonConfigWritesOutcome> {
+  let config: Record<string, unknown>;
+  try { config = await readDaemonConfig(endpoint, deps); } catch { throw unknown; }
+  const held = entries.map(({ key }) => ({ key, ...readDotPath(config, key) }));
+  if (held.every((entry, index) => entry.present && sameConfigValue(entry.value, entries[index]!.value))) {
+    return { appliedBy: 'daemon', persistedTo: endpoint.baseUrl, reason, entries: held.map(({ key, value }) => ({ key, value })) };
+  }
+  throw unknown;
 }
 
 function writeLocally(
@@ -625,23 +746,31 @@ async function postDaemonConfig(
       signal: AbortSignal.timeout(deps.timeoutMs ?? 10_000),
     });
   } catch (error) {
-    throw new DaemonConfigUnreachableError(key, endpoint.baseUrl, describeCause(error));
+    // Refused or unreachable: nothing left this process. Anything later (a timeout, a dropped connection) may have reached the daemon.
+    if (fetchFailurePhase(error) === 'before-send') throw new DaemonConfigUnreachableError(key, endpoint.baseUrl, describeCause(error));
+    throw new DaemonConfigOutcomeUnknownError(key, endpoint.baseUrl, `no answer came (${describeCause(error)})`);
   }
-  const text = await response.text().catch(() => '');
+  let text: string;
+  try { text = await response.text(); } catch (error) {
+    if (!response.ok) throw new DaemonConfigRejectedError(key, response.status, response.statusText);
+    throw new DaemonConfigOutcomeUnknownError(key, endpoint.baseUrl, `its answer (HTTP ${response.status}) could not be read (${describeCause(error)})`);
+  }
   if (!response.ok) {
     throw new DaemonConfigRejectedError(key, response.status, text.slice(0, 400) || response.statusText);
   }
   const approvalId = response.status === 202 ? pendingOwnerApproval(text) : undefined;
   if (approvalId !== undefined) throw new DaemonConfigOwnerApprovalPendingError(key, approvalId);
-  try {
-    const parsed = JSON.parse(text) as Record<string, unknown>;
-    return {
-      value: parsed['value'],
-      persistedTo: typeof parsed['persistedTo'] === 'string' ? parsed['persistedTo'] : undefined,
-    };
-  } catch {
-    throw new DaemonConfigRejectedError(key, response.status, 'the daemon returned a non-JSON response');
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { parsed = undefined; }
+  // A success the daemon answered in a shape this build cannot read is not a refusal: the write may have been applied.
+  if (parsed === null || typeof parsed !== 'object' || (parsed as { readonly success?: unknown }).success !== true) {
+    throw new DaemonConfigOutcomeUnknownError(key, endpoint.baseUrl, `its answer (HTTP ${response.status}) is not the receipt this build reads`);
   }
+  const receipt = parsed as Record<string, unknown>;
+  return {
+    value: receipt['value'],
+    persistedTo: typeof receipt['persistedTo'] === 'string' ? receipt['persistedTo'] : undefined,
+  };
 }
 
 /**

@@ -118,7 +118,7 @@ interface ReplyPipelineDeps {
    */
   readonly recordFinalOwed?: ((reply: { readonly sessionId: string; readonly agentId: string }) => Promise<void>) | undefined;
   /** Called once the final was handed to the channel (accepted or not), or found to have nothing to send: the owed record is settled. */
-  readonly recordFinalHanded?: ((reply: { readonly sessionId: string; readonly agentId: string }) => Promise<void>) | undefined;
+  readonly recordFinalHanded?: ((reply: { readonly sessionId: string; readonly agentId: string; readonly routeId: string }) => Promise<void>) | undefined;
 }
 
 /** Pauses before the second and third attempt at a final reply a channel refused with a transient error. */
@@ -560,7 +560,7 @@ export class ChannelReplyPipeline {
   private async settleFinalRecord(state: ReplyBufferState): Promise<void> {
     const sessionId = state.pending.sessionId;
     if (!this.recordFinalHanded || !sessionId || !state.pending.routeId || state.pending.parentAgentId) return;
-    try { await this.recordFinalHanded({ sessionId, agentId: state.pending.agentId }); }
+    try { await this.recordFinalHanded({ sessionId, agentId: state.pending.agentId, routeId: state.pending.routeId }); }
     catch (error) {
       logger.warn('A sent channel answer could not be marked sent; a restart may send it again', {
         surface: state.pending.surfaceKind, agentId: state.pending.agentId, sessionId, reason: summarizeError(error),

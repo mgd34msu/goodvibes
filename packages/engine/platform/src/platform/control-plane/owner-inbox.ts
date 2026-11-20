@@ -735,7 +735,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
 
   /**
    * Post an item for the owner. A post under a key that already has an open item
-   * returns that item with `created: false`, so a retried post never asks twice.
+   * the same poster posted returns that item with `created: false`, so a retried
+   * post never asks twice; another poster's item is never returned.
    */
   async post(input: NewOwnerItem, postedBy?: string): Promise<OwnerPostOutcome> {
     return this.postNow(input, postedBy);

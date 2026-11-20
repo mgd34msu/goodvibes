@@ -1247,6 +1247,9 @@ recorded it; `failed` is left for stops with no refusal code (no decision
 models, the reply channel could not be verified). Other
 refusals name their own cause: `card-fill-failed`, `owner-changed` (the stored
 address, payment settings, pairing or page changed), `notice-unavailable`,
+`answer-unreadable` (the owner's answer to the window could not be read, for
+example an unreadable owner inbox; it is never taken as silence, so nothing
+is bought),
 `budget-held` (another purchase holds the budget), `refused:page-in-use`
 (another checkout still owns that browser page), and `refused:reply-unsettled`
 (a reply arrived before the deadline but was still being read when the window

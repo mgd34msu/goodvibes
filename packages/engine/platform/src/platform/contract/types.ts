@@ -610,10 +610,12 @@ export type CriterionView = DeepReadonly<Criterion>;
  * Legal contract status moves. Every non-terminal status may fail (a judgment
  * outage, a zombie, a planning failure) or be cancelled. `queued` is both the
  * wait for an active-contract slot and where a resumed contract waits when the
- * cap is full, so a resumed contract leaves it for the step it was on.
+ * cap is full, so a resumed contract leaves it for the step it was on; one
+ * that was waiting on its owner (a failure pause) waits for its slot queued and
+ * goes back to waiting on its owner when it gets one.
  */
 export const CONTRACT_TRANSITIONS: Readonly<Record<ContractStatus, readonly ContractStatus[]>> = {
-  queued: ['shaping', 'planning', 'running', 'judging', 'fixing', 'committing', 'failed', 'cancelled'],
+  queued: ['shaping', 'planning', 'running', 'judging', 'fixing', 'committing', 'awaiting-owner', 'failed', 'cancelled'],
   shaping: ['planning', 'awaiting-owner', 'queued', 'failed', 'cancelled'],
   planning: ['checking-plan', 'queued', 'failed', 'cancelled'],
   'checking-plan': ['planning', 'running', 'awaiting-owner', 'queued', 'failed', 'cancelled'],
@@ -621,7 +623,7 @@ export const CONTRACT_TRANSITIONS: Readonly<Record<ContractStatus, readonly Cont
   judging: ['committing', 'fixing', 'awaiting-owner', 'queued', 'failed', 'cancelled'],
   fixing: ['judging', 'awaiting-owner', 'queued', 'failed', 'cancelled'],
   committing: ['judging', 'passed', 'queued', 'failed', 'cancelled'],
-  'awaiting-owner': ['planning', 'running', 'judging', 'fixing', 'failed', 'cancelled'],
+  'awaiting-owner': ['planning', 'running', 'judging', 'fixing', 'queued', 'failed', 'cancelled'],
   passed: [],
   failed: [],
   cancelled: [],

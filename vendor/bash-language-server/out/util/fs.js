@@ -38,7 +38,9 @@ function getFilePaths(_a) {
             absolute: true,
             onlyFiles: true,
             cwd: rootPath,
-            followSymbolicLinks: true,
+            // GoodVibes patch: never walk or list through a symbolic link, so the
+            // background analysis reads only files that are inside the workspace.
+            followSymbolicLinks: false,
             suppressErrors: true,
         });
         // NOTE: we use a stream here to not block the event loop

@@ -17,6 +17,7 @@ import type { CommandContext } from '../command-registry.ts';
 import { requireSecretsManager } from './runtime-services.ts';
 import { CalendarOAuthService, type CalendarConfigReader, type CalendarSecretSlice, type ConnectResult } from '../../agent/calendar/calendar-oauth-service.ts';
 import { commandRefusal } from './confirmation.ts';
+import { secretArg } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 
 /** Factory seam: production builds the real service from context; tests inject a fake. */
 export type CalendarServiceFactory = (ctx: CommandContext) => CalendarOAuthService;
@@ -135,7 +136,8 @@ export async function runCalendarConnect(
   const word = provider === 'google' ? 'google' : 'outlook';
 
   if (codeIndex >= 0) {
-    const pasted = args.slice(codeIndex + 1).join(' ').trim();
+    // Read through the declared secret positions (calendarConnectCodePositions), which the input history masked.
+    const pasted = args.slice(codeIndex + 1).map((_, offset) => secretArg(codeIndex + 1 + offset).reveal('dispatch')).join(' ').trim();
     if (!pasted) {
       throw commandRefusal(`Usage: /calendar connect ${word} --code <address the browser landed on, or the code>`);
     }

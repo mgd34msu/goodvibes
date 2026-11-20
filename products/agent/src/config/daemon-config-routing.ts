@@ -46,6 +46,7 @@ import {
   type LocalConfigWriter,
 } from '@goodvibes-jev/engine/platform/platform/config';
 import type { DaemonConfigClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { bearerFor, type DaemonTarget } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
 import { readOperatorTokenFile, resolveDaemonHomeDir } from '@goodvibes-jev/engine/platform/platform/workspace/daemon-home';
 import { join } from 'node:path';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -140,10 +141,12 @@ export interface AgentConfigRoutingOptions {
    */
   readonly homeDir?: string | undefined;
   /**
-   * An explicitly configured daemon base URL, required when the daemon runs on
-   * another machine, where no local file or runtime record exists to discover.
+   * The daemon on another machine, as the one daemon target resolver chose it
+   * (daemon-target-resolver.ts): its address and the credential bound to it.
+   * No local file or runtime record exists to discover such a daemon, and this
+   * machine's operator token is never presented to it.
    */
-  readonly baseUrl?: string | undefined;
+  readonly target?: DaemonTarget | undefined;
   /** Override the daemon home (honors GOODVIBES_DAEMON_HOME by default). */
   readonly daemonHomeDir?: string | undefined;
   /** True only when THIS process hosts the daemon. The agent normally does not. */
@@ -159,7 +162,7 @@ export interface AgentConfigRoutingOptions {
 export function buildAgentConfigRouting(options: AgentConfigRoutingOptions = {}): DaemonConfigRouterDeps {
   const daemonHomeDir = options.daemonHomeDir ?? resolveAgentDaemonHome(options.homeDir);
   const token = readOperatorToken(daemonHomeDir);
-  const trimmedBaseUrl = options.baseUrl?.trim();
+  const target = options.target;
   return {
     hostsDaemon: options.hostsDaemon ?? false,
     daemonHomeDir,
@@ -201,8 +204,9 @@ export function buildAgentConfigRouting(options: AgentConfigRoutingOptions = {})
     ...(installedConfigClient
       ? { readDaemonSnapshot: async () => await (agentDaemonConfigClient()?.snapshot() ?? null) }
       : {}),
-    ...(trimmedBaseUrl
-      ? { endpoint: { baseUrl: trimmedBaseUrl, token, source: 'configured controlPlane base URL' } }
+    // A named daemon gets only its own bound credential, never this machine's token.
+    ...(target
+      ? { endpoint: { baseUrl: target.origin.baseUrl, token: target.credential ? bearerFor(target.credential, target.origin.baseUrl) : undefined, source: `the daemon at ${target.origin.baseUrl}` } }
       : {}),
   };
 }

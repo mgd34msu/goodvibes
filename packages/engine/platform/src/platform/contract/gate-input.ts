@@ -15,6 +15,7 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, rea
 import { join } from 'node:path';
 import { CONTRACT_INPUT_EXCLUSIONS, listContractInputPaths } from './input-snapshot.js';
 import { workingTreeIdentity } from './tree-identity.js';
+import { canonicalJson } from '../utils/target-ref.js';
 
 export interface GateSourceInputIdentity {
   /** `tree:<id>` or `paths:<sha256>` (content), or outside git `stat:<sha256>` of the files' stat facts. */
@@ -57,15 +58,21 @@ function pathsIdentity(root: string, paths: readonly string[]): string | null {
 
 /**
  * The source identity of `cwd`. With `scope`, only those paths (relative to
- * `cwd`) are identified; package.json is always read for the scripts a gate
- * selects. Outside git, falls back to the stat walk. `_previous` is accepted
+ * `cwd`) and the package.json scripts a gate selects are identified (without
+ * a scope the tree id already covers package.json). Outside git, falls back to the stat walk. `_previous` is accepted
  * from callers that hold an earlier identity; identities compare as strings.
  */
 export function captureGateInput(cwd: string, _previous?: GateSourceInputIdentity, scope?: readonly string[]): GateSourceInputIdentity {
   const root = realpathSync(cwd);
   const content = scope === undefined ? workingTreeIdentity(root) : isGitWorkTree(root) ? pathsIdentity(root, scope) : null;
   if (content !== null) {
-    return Object.freeze({ source: scope === undefined ? `tree:${content}` : `paths:${content}`, packageScripts: readPackageScripts(root) });
+    const scripts = readPackageScripts(root);
+    if (scope === undefined) return Object.freeze({ source: `tree:${content}`, packageScripts: scripts });
+    // The scripts are what a gate runs, and with a scope package.json is not
+    // one of the identified paths: they are part of the identity, so a gate
+    // that passed stops being current when the script it ran is changed.
+    const source = createHash('sha256').update(JSON.stringify([content, canonicalJson(scripts)])).digest('hex');
+    return Object.freeze({ source: `paths:${source}`, packageScripts: scripts });
   }
   return captureStatIdentity(cwd);
 }

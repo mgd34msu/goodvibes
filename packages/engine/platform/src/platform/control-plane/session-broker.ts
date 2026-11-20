@@ -1096,10 +1096,10 @@ export class SharedSessionBroker {
    * channel rows say so on disk, so a report of the same answer repeated after
    * a restart does not send it again. Writes only when a row changed.
    */
-  async settleChannelReply(sessionId: string, agentId: string): Promise<void> {
+  async settleChannelReply(sessionId: string, agentId: string, routeId?: string): Promise<void> {
     await this.start();
     await this.completionsInFlight.get(agentId)?.catch(() => undefined);
-    if (settleChannelReplyInputs(this.sessionInputStore(), sessionId, agentId)) await this.persist();
+    if (settleChannelReplyInputs(this.sessionInputStore(), sessionId, agentId, routeId)) await this.persist();
   }
 
   /**
@@ -1122,14 +1122,18 @@ export class SharedSessionBroker {
    * with work owed); no session history is loaded for it. Each entry carries
    * the stored answer, the newest message of that agent.
    */
-  listOwedChannelReplies(): Array<{ readonly sessionId: string; readonly agentId: string; readonly routeId: string; readonly task: string; readonly body: string }> {
+  listOwedChannelReplies(only?: { readonly sessionId: string; readonly agentId: string }): Array<{ readonly sessionId: string; readonly agentId: string; readonly routeId: string; readonly task: string; readonly body: string }> {
     const owed: Array<{ sessionId: string; agentId: string; routeId: string; task: string; body: string }> = [];
     for (const session of this.sessions.values()) {
-      if (session.routeIds.length === 0) continue;
+      if (session.routeIds.length === 0 || (only && session.id !== only.sessionId)) continue;
+      // One answer per agent and route: an agent that answers two conversations owes each its own send.
       const seen = new Set<string>();
       for (const row of this.inputs.peek(session.id) ?? []) {
-        if (row.metadata?.[CHANNEL_REPLY_METADATA_KEY] !== 'owed' || !row.activeAgentId || !row.routeId || seen.has(row.activeAgentId)) continue;
-        seen.add(row.activeAgentId);
+        if (row.metadata?.[CHANNEL_REPLY_METADATA_KEY] !== 'owed' || !row.activeAgentId || !row.routeId) continue;
+        if (only && row.activeAgentId !== only.agentId) continue;
+        const key = `${row.activeAgentId}\u0000${row.routeId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
         const answer = [...(this.messages.peek(session.id) ?? [])].reverse()
           .find((message) => message.agentId === row.activeAgentId && (message.role === 'assistant' || message.role === 'system'));
         owed.push({ sessionId: session.id, agentId: row.activeAgentId, routeId: row.routeId, task: row.body, body: answer?.body ?? '' });

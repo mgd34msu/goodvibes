@@ -93,6 +93,7 @@ import { registerEmailExpectationGatewayMethods } from '../control-plane/routes/
 import { registerEmailInboundStatusGatewayMethod } from '../control-plane/routes/email-inbound-status.js';
 import { logger } from '../utils/logger.js';
 import type { AutomationRouteBinding } from '../automation/routes.js';
+import { isOwnerConversation } from './owner-alert.js';
 import type { GatewayMethodCatalog } from '../control-plane/index.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { RouteBindingManager } from '../channels/index.js';
@@ -132,6 +133,11 @@ export interface InboundMailCompositionOptions {
     binding: AutomationRouteBinding | undefined,
     notice: StructuredNotice,
   ) => Promise<SurfaceNoticeDelivery>;
+  /**
+   * The owner user id of a channel surface (`DaemonSurfaceDeliveryHelper.channelOwner`),
+   * so the default notice route is one of the owner's own one-to-one conversations.
+   */
+  readonly channelOwner: (surface: string) => string | undefined;
   /**
    * How this machine's Google credential is turned into Gmail-reading I/O.
    *
@@ -217,6 +223,7 @@ type NoticeRouteAnswer =
 function resolveNoticeRoute(
   configManager: ConfigManager,
   routeBindings: InboundMailCompositionOptions['routeBindings'],
+  channelOwner: InboundMailCompositionOptions['channelOwner'],
 ): NoticeRouteAnswer {
   if (!routeBindings.isRouteBindingEnabled()) {
     return {
@@ -241,11 +248,32 @@ function resolveNoticeRoute(
         + '"default" to use the route you most recently reached the daemon on.',
     };
   }
+  // The default is the owner's own: the newest one-to-one conversation with
+  // the owner (or a private-by-nature surface), never a group or a shared
+  // channel, however recently it was used. A shared one is used only when
+  // notice.route names it.
+  const bindings = routeBindings.listBindings();
+  const owners = new Map<string, string | undefined>();
+  const ownerOf = (surface: string): string | undefined => {
+    if (!owners.has(surface)) owners.set(surface, channelOwner(surface));
+    return owners.get(surface);
+  };
   let newest: AutomationRouteBinding | null = null;
-  for (const binding of routeBindings.listBindings()) {
+  for (const binding of bindings) {
+    if (!isOwnerConversation(binding, ownerOf(binding.surfaceKind))) continue;
     if (newest === null || binding.lastSeenAt > newest.lastSeenAt) newest = binding;
   }
   if (newest !== null) return { kind: 'bound', binding: newest };
+  if (bindings.length > 0) {
+    return {
+      kind: 'unavailable',
+      reason: 'no-owner-route',
+      detail: 'none of the connected conversations is a one-to-one conversation with the owner, and arriving '
+        + 'mail is announced by default only there, never in a group or shared channel.',
+      fix: 'Message the daemon directly from your own account on a connected channel, or point '
+        + 'surfaces.email.inbound.notice.route at the route binding (shared or not) that should hear about it.',
+    };
+  }
   return {
     kind: 'unavailable',
     reason: 'no-route-binding',
@@ -260,8 +288,9 @@ function resolveNoticeRoute(
 function noticeBindingFor(
   configManager: ConfigManager,
   routeBindings: InboundMailCompositionOptions['routeBindings'],
+  channelOwner: InboundMailCompositionOptions['channelOwner'],
 ): AutomationRouteBinding | undefined {
-  const route = resolveNoticeRoute(configManager, routeBindings);
+  const route = resolveNoticeRoute(configManager, routeBindings, channelOwner);
   return route.kind === 'bound' ? route.binding : undefined;
 }
 
@@ -396,7 +425,7 @@ export function composeInboundMail(
   // the reconnect fetches everything above the cursor.
   const announcer = createInboundTerminalFailureAnnouncer({
     send: (notice) => options.deliverStructuredNotice(
-      noticeBindingFor(configManager, options.routeBindings),
+      noticeBindingFor(configManager, options.routeBindings, options.channelOwner),
       notice,
     ),
   });
@@ -508,9 +537,10 @@ export function composeInboundMail(
     expectations: expectations.matcher,
     records,
     notices: {
-      resolveBinding: () => resolveNoticeRoute(configManager, options.routeBindings),
-      send: (notice) => options.deliverStructuredNotice(
-        noticeBindingFor(configManager, options.routeBindings),
+      resolveBinding: () => resolveNoticeRoute(configManager, options.routeBindings, options.channelOwner),
+      // The binding the route was resolved to, by its id: never a second resolution that could pick another.
+      send: (notice, binding) => options.deliverStructuredNotice(
+        binding ? options.routeBindings.getBinding(binding.id) : undefined,
         notice,
       ),
     },
@@ -624,7 +654,7 @@ export function composeInboundMail(
   // expectations, which the first mailbox can still satisfy.
   const furtherObserver = (): InboundMailObserver => {
     const own = createInboundTerminalFailureAnnouncer({
-      send: (notice) => options.deliverStructuredNotice(noticeBindingFor(configManager, options.routeBindings), notice),
+      send: (notice) => options.deliverStructuredNotice(noticeBindingFor(configManager, options.routeBindings, options.channelOwner), notice),
     });
     return {
       terminalFailure: (failure) => { own.terminalFailure(failure); },

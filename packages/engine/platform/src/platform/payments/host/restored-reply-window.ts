@@ -14,7 +14,8 @@ import type { ChannelDeliveryReceipt } from '../../channels/delivery/types.js';
 import type { PaymentNoticeWindow } from '../payment-ports.js';
 import type { ChannelDelivery } from '../windows.js';
 import type { OwnerItem } from '../../control-plane/owner-inbox.js';
-import { inboxAnswer, purchaseInboxItem, type PaymentOwnerInbox } from './notifier.js';
+import { RefusalError } from '@goodvibes-jev/engine/errors';
+import { inboxAnswer, purchaseInboxItem, unreadableAnswer, type PaymentOwnerInbox } from './notifier.js';
 
 interface OriginalRecipient {
   readonly receipt: ChannelDeliveryReceipt;
@@ -119,7 +120,8 @@ export function prepareRestoredPaymentReplyWindow(input: RestoreReplyWindowInput
         resolve({ answer: readInboxAnswer(settled), channel: 'owner-inbox' });
       }, (error: unknown) => {
         if (stop.signal.aborted) return;
-        clearTimeout(timer); reject(error);
+        // An answer that could not be read is never silence: nothing is bought on it.
+        clearTimeout(timer); reject(signal.aborted ? error : new RefusalError(unreadableAnswer(error)));
       });
     });
   };

@@ -223,9 +223,7 @@ export const PRODUCT_PROGRAM_SPAWN_FILES: ReadonlySet<string> = new Set([
   'platform/hooks/runners/command.ts', // the owner's hook command
   'platform/mcp/client.ts', // a configured MCP server
   'platform/runtime/eval/headless-executor.ts', // the product binary for an eval task
-  'platform/runtime/eval/task-suite.ts', // a task's verify script
   'platform/runtime/remote/host/backends/process-runner.ts', // work a remote peer sent
-  'platform/tools/shared/auto-heal.ts', // a project formatter or linter
   'platform/tools/shared/process-manager.ts', // a background process the exec tool started
   'platform/triggers/hosts.ts', // a command a trigger watches
   'platform/workflow/automation-commands.ts', // an automation command

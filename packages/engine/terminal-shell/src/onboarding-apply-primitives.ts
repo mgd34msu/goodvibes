@@ -16,7 +16,7 @@ export interface OnboardingApplyPrimitiveDependencies {
   readonly clock?: (() => number) | undefined;
   /** The scoped entry reads are what a rollback restores. */
   readonly secrets?:
-    | Pick<SecretsManager, 'set' | 'get' | 'delete' | 'inspect' | 'getWriteScopeEntry' | 'deleteWriteScopeEntry'>
+    | Pick<SecretsManager, 'set' | 'get' | 'delete' | 'inspect' | 'getWriteScopeEntry' | 'deleteWriteScopeEntry' | 'readWriteScopeEntries' | 'restoreWriteScopeEntriesIf'>
     | undefined;
   readonly shellPaths: OnboardingShellPaths;
   readonly acknowledgementScope?: OnboardingStateScope | undefined;
@@ -84,14 +84,17 @@ export function createOnboardingApplyPrimitives(
     validateSecretOperation(deps, operation);
     const secrets = deps.secrets!;
     const scope = operation.scope ?? 'project';
-    const readEntry = secrets.getWriteScopeEntry.bind(secrets);
-    const deleteEntry = secrets.deleteWriteScopeEntry.bind(secrets);
-    // Only this key, in the scope the write targets: a key another window or a
-    // login stores meanwhile is left as it is.
-    const previous = await readEntry(operation.key, scope);
+    // Only this key, in the scope the write targets, and per medium: a value
+    // that was encrypted goes back to the encrypted store (never a plaintext
+    // copy of it), and an entry the apply added is removed from the medium it
+    // was added to. A value another window or a login stores meanwhile is the
+    // newer one and is left as it is.
+    const previous = await secrets.readWriteScopeEntries(operation.key, scope);
     return async () => {
-      if (previous === null) await deleteEntry(operation.key, scope);
-      else await secrets.set(operation.key, previous, { scope, medium: operation.medium });
+      const outcome = await secrets.restoreWriteScopeEntriesIf(operation.key, scope, operation.value, previous);
+      if (outcome === 'newer') {
+        throw new Error(`${operation.key} was left holding a newer value another writer stored after this apply; it was not rolled back.`);
+      }
     };
   }
   function applyAcknowledgementOperation(

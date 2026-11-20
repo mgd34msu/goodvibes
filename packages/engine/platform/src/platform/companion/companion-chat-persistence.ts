@@ -15,7 +15,7 @@
  * Default storage root: ~/.goodvibes/companion-chat/sessions/
  */
 
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { CompanionChatMessage, CompanionChatSession } from './companion-chat-types.js';
@@ -192,6 +192,20 @@ export class CompanionChatPersistence {
       logger.warn('CompanionChatPersistence: rewriting a long transcript failed; it stays as it was', { sessionId, error: summarizeError(err) });
     });
     return transcript;
+  }
+
+  /**
+   * Whether the chat's transcript was written after its summary: the summary's
+   * `messageCount` and `updatedAt` may then be behind (they are derived from
+   * the transcript and written only with other summary changes, when the chat
+   * leaves memory, or at close). Two stats, no read.
+   */
+  summaryBehindTranscript(sessionId: string): boolean {
+    try {
+      return statSync(this.path(sessionId, LOG_SUFFIX)).mtimeMs > statSync(this.path(sessionId, META_SUFFIX)).mtimeMs;
+    } catch {
+      return false;
+    }
   }
 
   /** Replace the chat's summary (one small write and rename). */

@@ -171,9 +171,12 @@ export const APPROVAL_RAISE_INPUT_SCHEMA = objectSchema({
 // wait that ran out reports false with the record still pending, never a
 // decision nobody made.
 export const APPROVAL_RAISE_OUTPUT_SCHEMA = objectSchema({
+  // The id to watch on the approval-update event; always present.
+  approvalId: STRING_SCHEMA,
+  // The record, present when the caller may read it (it holds read:approvals; the ask is always its own).
   approval: SHARED_APPROVAL_RECORD_SCHEMA,
   coalesced: BOOLEAN_SCHEMA,
   decided: BOOLEAN_SCHEMA,
   // Pass back on approvals.cancel with `release: true` so a retried release does not give up another surface's hold.
   holdId: STRING_SCHEMA,
-}, ['approval', 'coalesced', 'decided'], { additionalProperties: false });
+}, ['approvalId', 'coalesced', 'decided'], { additionalProperties: false });

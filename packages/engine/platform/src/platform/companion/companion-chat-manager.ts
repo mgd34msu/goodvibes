@@ -197,6 +197,13 @@ interface InternalSession {
   /** Messages whose save failed after they were already in memory; the next save of this chat writes them. */
   unsaved?: Set<string>;
   metaUnsaved?: boolean;
+  /**
+   * The saved summary's `messageCount` and `updatedAt` are behind memory. Both
+   * are derived from the transcript log (one appended line per message), so a
+   * message does not rewrite the summary; the summary catches up when it is
+   * next written for another reason, when the chat leaves memory, or at close.
+   */
+  countBehind?: boolean;
   /** Why the last of those saves failed. */
   saveError?: unknown;
 }
@@ -398,13 +405,20 @@ export class CompanionChatManager {
       });
     }
     for (const meta of metas) {
-      this.sessions.set(meta.id, {
+      const session: InternalSession = {
         meta,
         messages: null,
         conversation: null,
         abortController: new AbortController(),
         lastActivityAt: meta.updatedAt,
-      });
+      };
+      this.sessions.set(meta.id, session);
+      // A transcript written after its summary (the daemon stopped before the
+      // summary caught up): its count and time are read from the transcript now.
+      if (this.persistence.summaryBehindTranscript(meta.id)) {
+        this.transcript(session);
+        session.lastActivityAt = session.meta.updatedAt;
+      }
     }
 
     this.initCompleted = true;
@@ -567,9 +581,13 @@ export class CompanionChatManager {
       messages.push(failed);
       changed.push(failed);
     }
-    const counted = messages.length !== session.meta.messageCount;
-    if (counted) session.meta = { ...session.meta, messageCount: messages.length };
-    if (changed.length > 0 || counted) this.saveInBackground(session, changed, changed.length > 0 || counted);
+    // The count and the last activity are the transcript's: a summary behind it is corrected in memory and written when it is next saved.
+    const lastAt = messages.reduce((latest, message) => Math.max(latest, message.createdAt), session.meta.updatedAt);
+    if (messages.length !== session.meta.messageCount || lastAt !== session.meta.updatedAt) {
+      session.meta = { ...session.meta, messageCount: messages.length, updatedAt: lastAt };
+      session.countBehind = true;
+    }
+    if (changed.length > 0) this.saveInBackground(session, changed, false);
     return messages;
   }
 
@@ -868,10 +886,12 @@ export class CompanionChatManager {
     const messages = this.transcript(session);
     const meta: CompanionChatSession = { ...session.meta, messageCount: messages.length + 1, updatedAt: now };
     // Saved before it is accepted: a message whose save failed is refused, and
-    // nothing else about the chat changes.
-    this.saveForRequest(session, [userMsg], meta);
+    // nothing else about the chat changes. One appended line; the summary's
+    // count and time are derived from the transcript, so it is not rewritten.
+    this.saveForRequest(session, [userMsg], undefined);
     messages.push(userMsg);
     session.meta = meta;
+    session.countBehind = true;
     session.lastActivityAt = now;
 
     if (options.clientMessageId !== undefined) {
@@ -922,7 +942,8 @@ export class CompanionChatManager {
       await this._brokerSync.flush();
       // One last attempt for changes whose save failed earlier; what still fails is reported.
       const owes = (session: InternalSession): boolean => Boolean(session.unsaved?.size || session.metaUnsaved);
-      for (const session of this.sessions.values()) if (owes(session)) this.saveInBackground(session, [], false);
+      // The summaries whose count and time are behind their transcripts are written once here, not per message.
+      for (const session of this.sessions.values()) if (owes(session) || session.countBehind) this.saveInBackground(session, [], Boolean(session.countBehind));
       const stillUnsaved = [...this.sessions.values()].filter(owes).length;
       try { await this.persistence?.flush(); } finally { this.persistence?.close(); }
       this.sessions.clear();
@@ -1147,7 +1168,8 @@ export class CompanionChatManager {
     this.transcript(session).push(owned);
     session.lastActivityAt = owned.createdAt;
     session.meta = { ...session.meta, messageCount: this.transcript(session).length, updatedAt: owned.createdAt };
-    this.saveInBackground(session, [owned], true);
+    session.countBehind = true;
+    this.saveInBackground(session, [owned], false);
   }
 
   private async _runTurn(
@@ -1616,9 +1638,10 @@ export class CompanionChatManager {
     const messages = branch.messages.map(message => this.normalizeMessage(message));
     const changed = messages.filter((message) => !before.has(message));
     const meta: CompanionChatSession = { ...session.meta, messageCount: messages.length, updatedAt: now };
-    this.saveForRequest(session, changed, meta);
+    this.saveForRequest(session, changed, undefined);
     session.messages = messages;
     session.meta = meta;
+    session.countBehind = true;
     session.lastActivityAt = branch.lastActivityAt;
     session.conversation = null;
     const anchor = messages.find((message) => message.id === anchorUserMessageId);
@@ -1668,6 +1691,11 @@ export class CompanionChatManager {
         case 'evict-memory':
           // A long reply, queued work or a change not yet saved keeps the chat in memory.
           if (session.activeTurn || session.preparingTurns || session.pendingTurns?.length || session.unsaved?.size || session.metaUnsaved) break;
+          // The summary catches up with the transcript once, as the chat leaves memory; a failed write keeps it in memory.
+          if (session.countBehind) {
+            this.saveInBackground(session, [], true);
+            if (session.metaUnsaved) break;
+          }
           session.conversation = null;
           if (this.persistence) {
             session.messages = null;
@@ -1755,12 +1783,12 @@ export class CompanionChatManager {
   // ---------------------------------------------------------------------------
 
   /** Write the chat's changes now, or refuse the request that made them. */
-  private saveForRequest(session: InternalSession, changed: readonly CompanionChatMessage[], meta: CompanionChatSession): void {
+  private saveForRequest(session: InternalSession, changed: readonly CompanionChatMessage[], meta: CompanionChatSession | undefined): void {
     if (!this.persistence) return;
     try {
       this.write(session, changed, meta);
     } catch (error) {
-      logger.warn('[companion-chat] saving a chat change failed; the request was refused', { sessionId: meta.id, error: summarizeError(error) });
+      logger.warn('[companion-chat] saving a chat change failed; the request was refused', { sessionId: session.meta.id, error: summarizeError(error) });
       throw this.saveFailed(error);
     }
   }
@@ -1794,6 +1822,8 @@ export class CompanionChatManager {
     delete session.unsaved;
     delete session.saveError;
     session.metaUnsaved = false;
+    // A summary written from memory carries the current count and time.
+    if (summary) delete session.countBehind;
   }
 
   // ---------------------------------------------------------------------------

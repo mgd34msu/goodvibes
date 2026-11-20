@@ -544,6 +544,7 @@ It imports only values that differ from the current settings.
 It holds back permission, sandbox, listener, service and storage settings unless `--include-security` is given.
 It applies all values or none.
 Without `--yes` it lists each change as `current -> new`, changes nothing and exits `2`.
+With `daemon.connectedHost.url` set, the daemon's settings go to that daemon with the token stored for it (or a `/auth login daemon` session); with none stored, nothing is sent and the import fails with `CREDENTIAL_NOT_FOR_TARGET`. This machine's daemon token is never sent to another daemon.
 
 ```sh
 goodvibes support-bundle export goodvibes-bundle.json
@@ -1092,7 +1093,7 @@ An invalid value prints `Could not set <key>: <reason>`.
 `/profiles` opens the config profile picker; press `s` there to save the current settings as a profile. Without the interface it lists saved profiles or prints `No profiles saved.`
 `/profile-sync [list|export <path>|inspect <path>|import <path> [prefix] [--overwrite]]` (alias `/profilesync`) moves config profiles between machines. `import` refuses a file that is not a profile bundle and changes nothing.
 `/settings-sync [panel|report|review|show <key>|staged|conflicts|resolve <key> <local|synced>|failures|rollback-history|export <path>|inspect <path>|pull <path>|push <path>|lock <key> <source> <reason...>|unlock <key>]` (alias `/settingssync`) opens the settings sync view or works with sync bundles; `resolve <key> local` keeps the local value of a conflict.
-`/managed [review|staged|rollback-history|export <profile> <path>|inspect <path>|stage <path>|apply <path> [key ...]|apply-staged [key ...]|rollback <token>|lock <key> <source> <reason...>|unlock <key>]` applies a managed settings bundle (settings an administrator sets for a machine). `apply` prints a rollback token; `/managed rollback <token>` restores the earlier values. A locked key cannot be changed from Settings or `/config` until `/managed unlock <key>`.
+`/managed [review|staged|rollback-history|export <profile> <path>|inspect <path>|stage <path>|apply <path> [key ...]|apply-staged [--stage <id>] [key ...]|rollback <token>|lock <key> <source> <reason...>|unlock <key>]` applies a managed settings bundle (settings an administrator sets for a machine). `apply` prints a rollback token; `/managed rollback <token>` restores the earlier values. Only the stage that was reviewed is applied: `apply <path>` applies the stage it just made, `apply-staged` the one its confirmation showed or the one `--stage <id>` names (the id is on the `stage:` line of `/managed staged`); a different stage put there since by another window or process is refused with `TARGET_CHANGED` and nothing is applied. A locked key cannot be changed from Settings or `/config` until `/managed unlock <key>`.
 
 `/setup [review|doctor|services|hooks|remote|sandbox|onboarding|support-bundle <dir> [--overwrite]|support-bundle inspect <dir>|export <path> [--overwrite]|transfer <export [--overwrite]|inspect|import> <path>|link <surface> [target]|open-link <uri>]` (alias `/startup`) reviews startup readiness.
 `/setup support-bundle ./bundle` writes a support bundle directory (`Exported support bundle to ./bundle`), masking any literal credential.
@@ -1152,6 +1153,7 @@ A second `/test` while one runs prints `A test run is already going; Esc stops i
 | `gate [suite-dir]` | Run the suite and fail on a failed or regressed task; it creates the baseline when none exists. |
 
 A suite is a directory (default `.goodvibes/eval/tasks`) with one directory per task holding `task.json` (the instruction) and `verify.sh` (exits `0` on pass).
+The run works in a copy of the suite. Before a task's session starts, its `verify.sh` (or the script `task.json` names in `verify`) and any files listed in `task.json` `verifyFiles` are copied out of the task directory and checked against the suite's own files by sha256; a task whose files differ, or are missing, fails without running. The verdict comes from that copy, never from the task directory the session worked in, so a session that edits `verify.sh` cannot change its result. The script runs with the task directory as its working directory, read-only inside a bubblewrap boundary where one is available (otherwise on the host, which the task's output says), and finds its listed files under `$GOODVIBES_EVAL_VERIFY_DIR`.
 `/eval compare` without a baseline prints `[eval] Baseline file not found: <file>` and `[eval] Tip: run /eval gate [suite-dir] to create a baseline.`
 
 `/forensics [latest | show <id> | export <id> [path] [--overwrite]]` (alias `/foren`) lists automatically classified failure reports. `/forensics show <id>` prints one; an unknown id prints `[Forensics] No report found with id "<id>". Use /forensics latest to see the most recent.`
@@ -1226,7 +1228,7 @@ With no daemon: `Routines are kept and run by the GoodVibes daemon, so each runs
 /triggers grant build npm run test
 ```
 
-`/notify add <url> | remove <n|url> | list [--show] | clear | test` manages webhook notification addresses in ntfy.sh format (`/notify add https://ntfy.sh/my-topic`). `/notify failed` lists failed deliveries and `/notify resend <id|all>` sends them again.
+`/notify add <url> | remove <n|url> | list [--show] | clear | test` manages webhook notification addresses in ntfy.sh format (`/notify add https://ntfy.sh/my-topic`). `/notify failed` lists failed deliveries and `/notify resend <id|all>` sends them again; one whose Slack or Discord destination changed since it failed is not sent until you add `--to-current`.
 
 `/channel [pair [surface]|telegram-cursor|status|routes|delivery|policy [surface]|policy set <surface> [flags]|profiles [list|get|set|delete]] [--json]` (alias `/channels`) pairs chat surfaces and inspects routes, deliveries, ingress policies and per-channel profiles. `/channel pair slack` asks for each required value with masked input, then enables the surface; `/channel pair slack verify` sends a real test message. An unknown surface prints `Unknown channel "<name>". Available: ...`.
 `/telegram [list] | configure <chatId>[/<threadId>] <bot> | approve|deny|status|read|cancel <id> | revoke <configurationId> | release <chatId|configurationId>` handles delegated Telegram intake.
@@ -1684,7 +1686,7 @@ What is left behind:
 - A unit that failed or was cancelled: its worktree is removed only when it holds nothing unique (no uncommitted changes, no unmerged commits); otherwise it is kept, and the oldest kept worktrees are removed first when too many are kept.
 - A unit whose merge conflicted: worktree and branch kept.
 - On restart, a passed unit whose branch had not been merged is put back on the integration lane, and worktrees on disk that belong to known units are adopted or reported, never deleted.
-- `/worktree discard <path>` removes a kept worktree (refused with the reason when it holds unique work); `/worktree keep <path>` marks one to keep.
+- `/worktree discard <path>` removes a kept worktree (refused with the reason when it holds unique work); `/worktree keep <path>` marks one to keep. A keep, pause, resume or attach made while the retention sweep is already removing that worktree is refused with the reason, never recorded and then ignored; one made before the sweep claims the tree keeps it.
 
 `/worktree` subcommands:
 

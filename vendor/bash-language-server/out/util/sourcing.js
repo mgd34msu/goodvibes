@@ -14,11 +14,16 @@ const SOURCING_COMMANDS = ['source', '.'];
 function getSourceCommands({ fileUri, rootPath, tree, }) {
     const sourceCommands = [];
     const rootPaths = [path.dirname(fileUri), rootPath].filter(Boolean);
+    // GoodVibes patch: a sourced file is read only when its real path is inside
+    // the workspace root (or, with no workspace, the sourcing file's directory),
+    // so `source /etc/x`, `source ~/.secrets` or a symbolic link out of the
+    // workspace never brings another file's symbols into the analysis.
+    const containmentRoots = [rootPath || path.dirname(fileUri)].filter(Boolean);
     TreeSitterUtil.forEach(tree.rootNode, (node) => {
         const sourcedPathInfo = getSourcedPathInfoFromNode({ node });
         if (sourcedPathInfo) {
             const { sourcedPath, parseError } = sourcedPathInfo;
-            const uri = sourcedPath ? resolveSourcedUri({ rootPaths, sourcedPath }) : null;
+            const uri = sourcedPath ? resolveSourcedUri({ rootPaths, containmentRoots, sourcedPath }) : null;
             sourceCommands.push({
                 range: TreeSitterUtil.range(node),
                 uri,
@@ -110,22 +115,46 @@ function getSourcedPathInfoFromNode({ node, }) {
  * "If filename does not contain a slash, file names in PATH are used to find
  *  the directory containing filename." (see https://ss64.com/osx/source.html)
  */
-function resolveSourcedUri({ rootPaths, sourcedPath, }) {
+function toFsPath(rootPath) {
+    return rootPath.startsWith('file://') ? decodeURIComponent(rootPath.slice('file://'.length)) : rootPath;
+}
+/** The real path of `candidate` when it exists and lies inside one of `containmentRoots` (real paths compared), else null. */
+function containedRealPath(candidate, containmentRoots) {
+    let real;
+    try {
+        real = fs.realpathSync(candidate);
+    }
+    catch (_a) {
+        return null;
+    }
+    for (const root of containmentRoots) {
+        let realRoot;
+        try {
+            realRoot = fs.realpathSync(toFsPath(root));
+        }
+        catch (_b) {
+            continue;
+        }
+        if (real === realRoot || real.startsWith(realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep)) {
+            return real;
+        }
+    }
+    return null;
+}
+function resolveSourcedUri({ rootPaths, containmentRoots, sourcedPath, }) {
     if (sourcedPath.startsWith('~')) {
         sourcedPath = (0, fs_1.untildify)(sourcedPath);
     }
     if (sourcedPath.startsWith('/')) {
-        if (fs.existsSync(sourcedPath)) {
-            return `file://${sourcedPath}`;
-        }
-        return null;
+        const real = containedRealPath(sourcedPath, containmentRoots);
+        return real ? `file://${real}` : null;
     }
     // resolve  relative path
     for (const rootPath of rootPaths) {
-        const potentialPath = path.join(rootPath.replace('file://', ''), sourcedPath);
-        // check if path is a file
-        if (fs.existsSync(potentialPath)) {
-            return `file://${potentialPath}`;
+        const potentialPath = path.join(toFsPath(rootPath), sourcedPath);
+        const real = containedRealPath(potentialPath, containmentRoots);
+        if (real) {
+            return `file://${real}`;
         }
     }
     return null;

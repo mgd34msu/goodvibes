@@ -60,6 +60,7 @@ function statusOf(config: CheckinConfig, schedule: CheckinSchedule | undefined):
 function outcomeLabel(outcome: string): string {
   switch (outcome) {
     case 'delivered': return 'Delivered';
+    case 'partial': return 'Partly delivered';
     case 'quiet': return 'Ran quiet: nothing worth surfacing';
     case 'skipped-disabled': return 'Skipped: check-in is disabled';
     case 'skipped-quiet-hours': return 'Skipped: within quiet hours';
@@ -73,6 +74,7 @@ function outcomeLabel(outcome: string): string {
 function outcomeTone(outcome: string): StatusTone {
   if (outcome === 'delivered') return 'ok';
   if (outcome === 'error') return 'bad';
+  if (outcome === 'partial') return 'warn';
   return 'idle';
 }
 
@@ -165,6 +167,7 @@ function ReceiptRow({ receipt }: { receipt: CheckinReceipt }) {
   const details = [
     receipt.decisionReason ? `Reason: ${receipt.decisionReason}` : '',
     receipt.deliveredMessage ? `Message: ${receipt.deliveredMessage}` : '',
+    receipt.outcome === 'partial' && receipt.error ? receipt.error : '',
   ].filter(Boolean);
   return (
     <li className="gv-row checkin-receipt">

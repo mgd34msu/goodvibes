@@ -1656,8 +1656,14 @@ export class SecretsManager {
     if (policy === 'preferred_secure' && storedRecords.some((record) => !record.secure)) {
       warnings.push('plaintext fallback secrets are present');
     }
-    if (policy === 'require_secure' && storedRecords.some((record) => !record.secure)) {
-      warnings.push('plaintext secrets exist but are ignored by current policy');
+    if (policy === 'require_secure') {
+      // The policy leaves plaintext stores out of every read, so their key names are read here
+      // (values discarded): a store the policy ignores is still reported when it holds keys.
+      const ignored = storeStates.flatMap(({ store, result }) => !store.secure && result.status === 'ok'
+        ? Object.keys(result.secrets).map((key) => `${key} (${store.path})`) : []);
+      if (ignored.length > 0 || storedRecords.some((record) => !record.secure)) {
+        warnings.push(`plaintext secrets exist but are ignored by current policy${ignored.length > 0 ? `: ${ignored.join(', ')}` : ''}`);
+      }
     }
 
     return {
@@ -1697,11 +1703,20 @@ export class SecretsManager {
     return await this.withCredentialMutation(key, () => this.withStoreMutations(stores.map(store => store.path), () => this.deleteOwned(key, stores)));
   }
 
+  /**
+   * Whether a candidate store holds `key`. A store that exists but cannot be
+   * read is never "does not hold it": the delete refuses, naming the file,
+   * because the key may still be there. Re-read under ownership before
+   * changing any selected file, so unrelated writes survive.
+   */
   private storeContainsKey(store: SecretStorePath, key: string): boolean {
-    // Preserve no-op deletion from unrelated/read-only tiers. Re-read under
-    // ownership before changing any selected file, so unrelated writes survive.
-    const values = store.secure ? this.readEncryptedFile(store.path) : this.readPlaintextFile(store.path);
-    return values !== null && Object.hasOwn(values, key);
+    const result = store.secure ? this.readEncryptedStore(store.path) : this.readPlaintextStore(store.path);
+    if (result.status === 'unreadable') {
+      throw new SecretStoreUnreadableError(
+        `Secret ${key} was not deleted: the secrets store at ${store.path} exists but cannot be read (${result.reason}), so the key may still be there; nothing was changed. Restore the file or make it readable, then delete again.`,
+      );
+    }
+    return result.status === 'ok' && Object.hasOwn(result.secrets, key);
   }
 
   private deleteOwned(key: string, stores: readonly SecretStorePath[]): readonly SecretDeletion[] {

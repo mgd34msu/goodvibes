@@ -35,7 +35,11 @@
  * One invariant governs all of it: the split must never EMPTY a reply. A model
  * that writes nothing outside its reasoning has no answer beside it, so the
  * reasoning IS the answer, see the floor in openai-compat.ts, which is what
- * the old folding behaviour was really protecting.
+ * the old folding behaviour was really protecting. The floor says that it
+ * applied (`textSource: 'reasoning'` on the response), and the committed
+ * answer opens with a line saying it is the model's reasoning
+ * (`committedAnswer`, core/orchestrator-turn-helpers.ts), so every screen and
+ * channel shows it as reasoning rather than as an ordinary reply.
  */
 
 /**

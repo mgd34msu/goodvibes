@@ -2068,6 +2068,11 @@
       "types": "./terminal-shell/dist/renderer/status-line.d.ts",
       "import": "./terminal-shell/dist/renderer/status-line.js"
     },
+    "./terminal-shell/session-permission-mode": {
+      "bun": "./terminal-shell/src/session-permission-mode.ts",
+      "types": "./terminal-shell/dist/session-permission-mode.d.ts",
+      "import": "./terminal-shell/dist/session-permission-mode.js"
+    },
     "./terminal-shell/back-to-bottom": {
       "bun": "./terminal-shell/src/renderer/back-to-bottom.ts",
       "types": "./terminal-shell/dist/renderer/back-to-bottom.d.ts",

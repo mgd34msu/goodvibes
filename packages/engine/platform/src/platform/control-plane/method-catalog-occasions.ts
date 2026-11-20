@@ -172,6 +172,10 @@ export const OCCASION_WRITE_OUTCOME_SCHEMA = objectSchema({
   occasionId: STRING_SCHEMA,
   disclosure: STRING_SCHEMA,
   droppedRecords: NUMBER_SCHEMA,
+  /** Removals: the exact profile line taken out (or, unconfirmed, that would be). */
+  removedLine: STRING_SCHEMA,
+  /** Removals: other lines that still declare the occasion; its records are kept while any do. */
+  stillDeclaredBy: NUMBER_SCHEMA,
 }, ['ok', 'reason', 'occasionId', 'disclosure', 'droppedRecords']);
 
 export const OCCASION_SWEEP_REPORT_SCHEMA = objectSchema({
@@ -458,7 +462,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   methodDescriptor({
     id: 'occasions.list',
     title: 'List Important Dates',
-    description: 'Return every occasion declared in the owner profile, with its next occurrence, how many days away it is, the lead it uses, whether it is inside its lead window, and what was answered for that occurrence. Also returns lines under the heading that could not be typed, each with the reason, and any occasion that has two different dates recorded. This carries the dates: it is the owner asking their own system what it holds, which is the explicit ask that unlocks a closed-tier read. A nudge never does.',
+    description: 'Return every occasion declared in the owner profile, with its next occurrence, how many days away it is, the lead it uses, whether it is inside its lead window, and what was answered for that occurrence. Also returns lines under the heading that could not be typed, each with the reason, and any occasion recorded on two lines (two different dates, or the same date written twice). This carries the dates: it is the owner asking their own system what it holds, which is the explicit ask that unlocks a closed-tier read. A nudge never does.',
     category: 'occasions',
     effects: ['occasions.read'],
     http: { method: 'GET', path: '/api/occasions' },
@@ -492,7 +496,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
     repeat: 'safe',
     effects: ['occasions.administer', 'record.destroy'],
     title: 'Remove An Important Date',
-    description: 'Remove one occasion and every record the machine kept against it, answers, gift history, open items, interviews and calendar mirrors. Takes exactly one confirmation: not unquestioned, and not an argument. People divorce and people die. A confirmed:false call returns the sentence to put to the owner and removes nothing.',
+    description: 'Remove one occasion and every record the machine kept against it, answers, gift history, open items, interviews and calendar mirrors. Takes exactly one confirmation: not unquestioned, and not an argument. People divorce and people die. A confirmed:false call returns the sentence to put to the owner, naming the line (removedLine), and removes nothing. The line removed is the occasion\'s first; when other lines still declare the same occasion (stillDeclaredBy above 0) only that line goes and its records are kept, since the next line is now the occasion.',
     category: 'occasions',
     http: { method: 'POST', path: '/api/occasions/remove' },
     inputSchema: OCCASIONS_REMOVE_INPUT_SCHEMA,
@@ -600,7 +604,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
     repeat: 'safe',
     effects: ['occasions.administer'],
     title: 'Resolve A Date Conflict',
-    description: 'Apply the owner\'s answer to "which date is right?": keep names the date to keep, the other lines for that title are removed from the owner profile through the profile write gate (so authority is required with keep), answers and gift history stay, and the conflict is not raised again. Without keep nothing changes and dates lists what is recorded, to put to the owner. A conflict is never resolved automatically: only the owner knows which date was right. When the file already holds one date (the owner fixed it by hand) the reminder is closed and resolved is true.',
+    description: 'Apply the owner\'s answer to "which date is right?": keep names the date to keep, the other lines for that title are removed from the owner profile through the profile write gate (so authority is required with keep), answers and gift history stay, and the conflict is not raised again. Without keep nothing changes and dates lists what is recorded, to put to the owner. A conflict is never resolved automatically: only the owner knows which date was right. Two lines for one occasion are a conflict even when they name the same date (their kind, person or lead time can differ); then keep may be left out, and every line but the first is removed. When the file already holds one line (the owner fixed it by hand) the reminder is closed and resolved is true.',
     category: 'occasions',
     http: { method: 'POST', path: '/api/occasions/conflict/resolve' },
     inputSchema: OCCASIONS_CONFLICT_RESOLVE_INPUT_SCHEMA,

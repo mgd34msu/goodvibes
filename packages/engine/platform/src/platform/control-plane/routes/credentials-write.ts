@@ -71,6 +71,7 @@ import {
   describeSecretWriteScope,
   resolveSecretWriteScope,
   type SecretScope,
+  type WriteScopeEntries,
 } from '../../config/secrets.js';
 import { logger } from '../../utils/logger.js';
 
@@ -89,6 +90,10 @@ export interface CredentialWriteSecrets {
   getWriteScopeEntry(key: string, scope: SecretScope): Promise<string | null>;
   /** Remove the entry from the scope's own stores only. */
   deleteWriteScopeEntry(key: string, scope: SecretScope): Promise<void>;
+  /** The scope's own entries per medium, as stored: what an undo puts back. */
+  readWriteScopeEntries(key: string, scope: SecretScope): Promise<WriteScopeEntries>;
+  /** Put `previous` back only while reads still see `wrote`; a newer writer's value is never rolled back. */
+  restoreWriteScopeEntriesIf(key: string, scope: SecretScope, wrote: string, previous: WriteScopeEntries): Promise<'restored' | 'unchanged' | 'newer'>;
 }
 
 export interface CredentialWriteDeps {
@@ -195,13 +200,14 @@ export function createCredentialSetHandler(deps: CredentialWriteDeps): GatewayMe
     const scope = resolveSecretWriteScope(secretKey);
     const audited = principalFields(invocation);
 
-    // What the written scope holds now, exactly as stored, kept so a failed
-    // write can put it back. Not the resolved value: that may come from the
-    // environment, another tier or a password-manager reference, and writing
-    // it back here would file a plaintext copy that never existed.
-    let previous: string | null;
+    // What the written scope holds now, exactly as stored and per medium, kept
+    // so a failed write can put it back where it was. Not the resolved value:
+    // that may come from the environment, another tier or a password-manager
+    // reference, and writing it back here would file a plaintext copy that
+    // never existed.
+    let previous: WriteScopeEntries;
     try {
-      previous = await deps.secrets.getWriteScopeEntry(secretKey, scope);
+      previous = await deps.secrets.readWriteScopeEntries(secretKey, scope);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       record(deps, { action: 'set', configKey: key, secretKey, scope, outcome: 'refused', ...audited, detail });
@@ -213,19 +219,21 @@ export function createCredentialSetHandler(deps: CredentialWriteDeps): GatewayMe
       );
     }
 
-    // True when the written scope holds what it held before this call.
-    const restorePrevious = async (): Promise<boolean> => {
+    // Puts back what the scope held before this call, but only while it still
+    // holds the value this call wrote: another writer's newer value stays.
+    const restorePrevious = async (): Promise<'restored' | 'newer' | 'failed'> => {
       try {
-        if (previous === null) await deps.secrets.deleteWriteScopeEntry(secretKey, scope);
-        else await deps.secrets.set(secretKey, previous, { scope });
-        return (await deps.secrets.getWriteScopeEntry(secretKey, scope)) === previous;
+        const outcome = await deps.secrets.restoreWriteScopeEntriesIf(secretKey, scope, value, previous);
+        return outcome === 'newer' ? 'newer' : 'restored';
       } catch {
-        return false;
+        return 'failed';
       }
     };
-    const restoredSentence = (restored: boolean): string => restored
+    const restoredSentence = (restored: 'restored' | 'newer' | 'failed'): string => restored === 'restored'
       ? 'The setting and the stored credential were left exactly as they were'
-      : 'The stored credential could not be put back and may have changed, so check it before relying on it';
+      : restored === 'newer'
+        ? 'The stored credential was left holding the newer value another writer stored meanwhile; this call\'s value was not kept and the other value was not rolled back'
+        : 'The stored credential could not be put back and may have changed, so check it before relying on it';
 
     try {
       // The scope is stated at the call site on purpose: it is the platform's

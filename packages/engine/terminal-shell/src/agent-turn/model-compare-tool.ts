@@ -12,7 +12,7 @@ import { createZipArchive } from './artifact-archive.js';
 import type { AgentModelCompareToolArgs, AgentModelCompareToolDeps, CompareCandidateResult, LoadedComparisonJudgment, SavedComparisonArtifact, StoredComparison } from './model-compare-types.js';
 import { BLIND_LABELS, DEFAULT_CANDIDATE_COUNT, DEFAULT_MAX_TOKENS, DEFAULT_SIDE_BY_SIDE_PREVIEW_BYTES, MAX_SIDE_BY_SIDE_PREVIEW_BYTES, MIN_CANDIDATES, MODE_ANALYTICS, MODE_APPLY, MODE_EXPORT, MODE_HANDOFF, MODE_HANDOFF_ARCHIVE, MODE_HANDOFF_DIFF, MODE_JUDGE, MODE_REVEAL, MODE_REVIEW, MODE_ROUTE_DECISION, MODE_RUN, MODE_SIDE_BY_SIDE, MODE_SYNTHESIS } from './model-compare-types.js';
 import { benchmarkRouteConstraint, buildRunPromptFromArtifact, isLocalCompareModel, formatPreview, formatReveal, formatReview, formatRunResult, formatSavedComparisonArtifacts, formatSavedHandoffArtifacts, loadComparisonFromArtifact, parseMode, rememberComparison, resolveComparisonForRead, resolveCurrentModel, runCandidate, saveComparisonArtifact, selectComparisonModels } from './model-compare-run.js';
-import { ensureSelectableWinnerModel, findCandidate, formatApplyPreview, formatApplyResult, formatComparisonAnalytics, formatComparisonSynthesis, formatJudgePreview, formatJudgmentResult, formatRouteDecisionPreview, formatRouteDecisionResult, loadJudgmentFromArtifact, loadSavedJudgments, parseRouteDecision, unreadableJudgmentsNote, readComparisonAnalyticsFilters, saveComparisonJudgmentArtifact, saveRouteDecisionArtifact } from './model-compare-judgment.js';
+import { ensureSelectableWinnerModel, findCandidate, formatApplyPreview, formatApplyResult, formatComparisonAnalytics, formatComparisonSynthesis, formatJudgePreview, formatJudgmentResult, formatRouteDecisionPreview, formatRouteDecisionResult, loadJudgmentFromArtifact, loadSavedJudgments, parseRouteDecision, unreadableJudgmentsNote, readComparisonAnalyticsFilters, saveComparisonJudgmentArtifact, saveRouteDecisionArtifact, unjudgeableWinnerReason } from './model-compare-judgment.js';
 import { comparisonExportMarkdown, comparisonHandoffMarkdown, formatSideBySideReview, judgmentExportMarkdown, loadHandoffRelatedArtifacts, saveComparisonExportArtifact, saveComparisonHandoffArtifact } from './model-compare-export.js';
 import { buildComparisonHandoffArchivePayload, findRouteDecisionArtifactIdsForHandoff, formatExportPreview, formatExportResult, formatHandoffArchivePreview, formatHandoffArchiveResult, formatHandoffDiff, formatHandoffPreview, formatHandoffResult, loadHandoffArchiveArtifacts, loadHandoffDiffArtifact, loadHandoffFromArtifact, saveComparisonHandoffArchiveArtifact } from './model-compare-handoff.js';
 import { clamp, failure, output, previewText, readBenchmarkKind, readComparisonTag, readModelRefs, readNumber, readString, readStringList } from './model-compare-utils.js';
@@ -38,6 +38,8 @@ async function resolveJudgmentWinner(
   if (!source) return { judgment, checked: false };
   const winner = findCandidate(source, judgment.winnerBlindId);
   if (!winner) return `Nothing was changed: the judgment names Candidate ${judgment.winnerBlindId}, which comparison ${judgment.comparisonId} does not have. Judge that comparison again and use the new judgment.`;
+  const unjudgeable = unjudgeableWinnerReason(source, winner);
+  if (unjudgeable) return `Nothing was changed: ${unjudgeable} Judge comparison ${judgment.comparisonId} again and use the new judgment.`;
   if (judgment.winnerModel?.registryKey && judgment.winnerModel.registryKey !== winner.model.registryKey) {
     return `Nothing was changed: the judgment names winner model ${judgment.winnerModel.registryKey}, but Candidate ${judgment.winnerBlindId} of comparison ${judgment.comparisonId} is ${winner.model.registryKey}. Judge that comparison again and use the new judgment.`;
   }
@@ -331,6 +333,8 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           if (!winner) {
             return failure(`Unknown winnerBlindId ${winnerBlindId}. Available candidates: ${comparison.candidates.map((candidate) => candidate.blindId).join(', ')}.`);
           }
+          const unjudgeable = unjudgeableWinnerReason(comparison, winner);
+          if (unjudgeable) return failure(`Nothing was saved: ${unjudgeable}`);
           const artifact = await saveComparisonJudgmentArtifact({
             artifactStore: deps.artifactStore,
             comparison,

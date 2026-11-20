@@ -54,6 +54,37 @@
   outline-offset: 1px;
 }
 
+/* The permission mode chip (ShellHeader's indicators). The full words on a
+ * wide header, the short ones on a phone header; amber while the mode in force
+ * is not the chosen one. */
+.mode-chip__short {
+  display: none;
+}
+
+.shell-header--phone .mode-chip__full {
+  display: none;
+}
+
+.shell-header--phone .mode-chip__short {
+  display: inline;
+}
+
+.mode-chip--differs {
+  color: var(--text);
+  background: var(--warn-soft);
+}
+
+.mode-chip--differs .status-strip__icon {
+  color: var(--warn);
+}
+
+.mode-chip__sentence {
+  display: block;
+  white-space: normal;
+  color: var(--text-2);
+  line-height: var(--leading-ui);
+}
+
 /* Sleep disabled and the reload-to-update warning: an active condition to
  * notice. Same chip, the icon carries the hue. */
 .status-strip__segment--power,

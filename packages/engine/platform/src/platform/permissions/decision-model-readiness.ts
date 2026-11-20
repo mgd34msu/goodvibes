@@ -2,7 +2,7 @@
 
 import type { ConfigManager } from '../config/manager.js';
 import type { ConfigKey } from '../config/schema.js';
-import { decisionModelReady, effectivePermissionMode, normalizePermissionMode, type GatePresetName } from '../gate/presets.js';
+import { decisionModelReady, effectivePermissionMode, gatePresetLabel, GATE_PRESETS, normalizePermissionMode, type GatePresetName } from '../gate/presets.js';
 import { DECISION_MODEL_SET_KEYS, decisionModelSettings, type DecisionModelSettings } from '../config/decision-model-set.js';
 import { requestedDecisionEndpoint, requestedDecisionModel } from '../config/decision-model-request.js';
 import { captureJudgmentFallbackSettings } from '../config/judgment-fallback-settings.js';
@@ -119,4 +119,129 @@ export function describePermissionModeInForce(
         ? 'jev-decides is only the shipped default here and the gate\'s decisions were not measured on this decision model; choose jev-decides yourself (/settings permissions.mode) to use it'
         : `the decision model ${why.model} is not answering (${why.what}, since ${new Date(why.since).toISOString()}); calls Jev would decide ask you until it answers again`;
   return { chosen, mode, reason };
+}
+
+/**
+ * The mode in force in plain words, for the status bar, the web UI's header
+ * chip, first run and the ask card's "Why am I asked?". Every surface renders
+ * these words and builds none of its own.
+ */
+export interface ModeInForceWords {
+  /** The chosen mode's label: "Jev decides". */
+  readonly chosen: string;
+  /** "asking you for now" when the mode in force differs from the chosen one; absent when they are the same. */
+  readonly inForce?: string;
+  /** Why it differs, a few words: "decision model unreachable"; absent when they are the same. */
+  readonly because?: string;
+  /** What the mode in force does, one or two sentences: the explanation behind the chip. */
+  readonly sentence: string;
+  /** What GoodVibes asks you before, in one sentence, true for the mode in force and the per-tool settings. */
+  readonly asksBefore: string;
+}
+
+/**
+ * The words `what` takes (judgment port/model-failure.ts) when the decision
+ * model could not be reached or did not answer at all, as opposed to answering
+ * wrongly or refusing a key.
+ */
+const UNREACHABLE_FAILURE = /could not be reached|did not answer in time|did not answer within the decision deadline|missing the decision deadline|could not answer/;
+
+function becauseWords(why: DecisionModelUnreadyReason): string {
+  switch (why.kind) {
+    case 'selected': return 'no decision model chosen';
+    case 'not-set': return 'no decision model set';
+    case 'uncalibrated': return 'not measured yet';
+    case 'failing': return UNREACHABLE_FAILURE.test(why.what) ? 'decision model unreachable' : 'decision model failing';
+  }
+}
+
+function becauseSentence(why: DecisionModelUnreadyReason): string {
+  switch (why.kind) {
+    case 'selected': return 'decision models are switched off';
+    case 'not-set': return 'no decision model is set up';
+    case 'uncalibrated': return 'Jev\'s decisions have not been measured on your decision model yet';
+    case 'failing': return `the decision model ${why.model} is not answering (${why.what})`;
+  }
+}
+
+type SettingsReader = Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'isExplicitlySet'>>;
+
+function toolSetting(configManager: SettingsReader, tool: 'exec' | 'write' | 'edit'): unknown {
+  try { return configManager.get(`permissions.tools.${tool}` as ConfigKey); } catch { return undefined; }
+}
+
+/**
+ * What ask-me without a working decision model asks before, from the per-tool
+ * settings in force. The gate's no-model path (PermissionManager
+ * assessClassicExecutionSafety) asks for every command and every file change
+ * unless `permissions.tools.<tool>` is `allow`; a change inside the working
+ * folder that can be undone is settled before it asks (the gate's defaults).
+ */
+function askMeWithoutModel(configManager: SettingsReader): string {
+  const commandsAsk = toolSetting(configManager, 'exec') !== 'allow';
+  const writesAsk = toolSetting(configManager, 'write') !== 'allow' || toolSetting(configManager, 'edit') !== 'allow';
+  if (commandsAsk && writesAsk) return 'GoodVibes asks before it runs commands or changes things outside this folder.';
+  if (commandsAsk) return 'GoodVibes asks before it runs commands.';
+  if (writesAsk) return 'GoodVibes asks before it changes things outside this folder.';
+  return 'GoodVibes runs commands and changes files without asking, as your per-tool settings allow.';
+}
+
+const MODE_SENTENCES: Readonly<Record<GatePresetName, string>> = {
+  'ask-me': GATE_PRESETS['ask-me'].summary,
+  'jev-decides': GATE_PRESETS['jev-decides'].summary,
+  'just-vibes': GATE_PRESETS['just-vibes'].summary,
+  yolo: GATE_PRESETS.yolo.summary,
+  plan: GATE_PRESETS.plan.summary,
+};
+
+/**
+ * The mode in force in words (ModeInForceWords), read the way the gate reads
+ * it (describePermissionModeInForce and the readiness reason). A few settings
+ * reads and one memory read; no request. Surfaces call it when the mode
+ * changes (permissions/mode-change-emitter.ts) and when the decision model
+ * fails or answers again, never per frame.
+ */
+export function describeModeInForceWords(
+  configManager: SettingsReader,
+  options: { readonly chosen?: unknown; readonly explicitlyChosen?: boolean | undefined; readonly env?: Readonly<Record<string, string | undefined>> | undefined } = {},
+): ModeInForceWords {
+  const inForce = describePermissionModeInForce(configManager, options);
+  const chosenLabel = gatePresetLabel(inForce.chosen);
+  // jev-decides falls back to ask-me only (effectivePermissionMode); any other difference is the auto-approve switch.
+  const why = inForce.chosen === 'jev-decides' && inForce.mode === 'ask-me'
+    ? readinessReason(configManager, { ...(options.explicitlyChosen === true ? { chosen: true } : {}), ...(options.env ? { env: options.env } : {}) })
+    : undefined;
+  // A model that works but is not ready for jev-decides is still no model for ask-me's purposes:
+  // ask-me reads calls with a decision model only when one is set and answering.
+  const modelWorks = (inForce.mode === 'ask-me' || inForce.mode === 'jev-decides')
+    && readinessReason(configManager, { chosen: true, ...(options.env ? { env: options.env } : {}) }) === undefined;
+  const asksBefore = asksBeforeFor(inForce.mode, modelWorks, configManager);
+  if (inForce.mode === inForce.chosen) {
+    return { chosen: chosenLabel, sentence: MODE_SENTENCES[inForce.chosen], asksBefore };
+  }
+  if (why === undefined) {
+    // The saved auto-approve switch selects YOLO whatever mode was chosen.
+    return {
+      chosen: chosenLabel, inForce: 'YOLO for now', because: 'an old auto-approve setting is on',
+      sentence: `An old auto-approve setting is on, so GoodVibes runs everything without asking. Choose a mode in Settings to clear it.`,
+      asksBefore,
+    };
+  }
+  return {
+    chosen: chosenLabel, inForce: 'asking you for now', because: becauseWords(why),
+    sentence: `You chose ${chosenLabel}, but ${becauseSentence(why)}, so GoodVibes asks you instead for now. ${asksBefore}`,
+    asksBefore,
+  };
+}
+
+function asksBeforeFor(mode: GatePresetName, modelWorks: boolean, configManager: SettingsReader): string {
+  switch (mode) {
+    case 'ask-me': return modelWorks
+      ? 'GoodVibes asks before anything that can\'t be undone, weakens a safety setting, hides what it does or sends secrets out.'
+      : askMeWithoutModel(configManager);
+    case 'jev-decides': return 'Jev decides what is safe to run; GoodVibes asks you about anything that destroys data or weakens a safety setting.';
+    case 'just-vibes': return 'GoodVibes doesn\'t stop to ask; anything that needs you is held and listed at the end of the run.';
+    case 'yolo': return 'GoodVibes runs everything without asking.';
+    case 'plan': return 'GoodVibes only reads and plans; it changes nothing.';
+  }
 }

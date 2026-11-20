@@ -292,8 +292,10 @@ export function collectStartupAnnouncements(deps: {
       suffix = ', listening on every network interface: other devices use this machine\'s address, or set web.publicBaseUrl to announce a fixed URL';
     }
     const text = `Web surface ready: ${url}${suffix}`;
-    // Recording WITH text also enqueues the line for surface delivery.
-    if (deps.store.record(WEB_SURFACE_ANNOUNCEMENT_ID, text)) {
+    // Recorded WITHOUT text: the line goes to the daemon log (the caller) and
+    // `goodvibes status` reports the web surface itself; it is never queued for
+    // surface delivery, so the web UI it describes does not show it as a banner.
+    if (deps.store.record(WEB_SURFACE_ANNOUNCEMENT_ID)) {
       lines.push({ id: WEB_SURFACE_ANNOUNCEMENT_ID, text });
     }
   }

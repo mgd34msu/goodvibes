@@ -46,6 +46,8 @@ import type { RaisedApproval } from '../approval-broker-raise.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { OWNER_ONLY_KINDS } from '../../gate/classify.js';
+import { systemActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { admitEffects } from '../../security/effect-authority.js';
 
 /** The broker surface this verb needs, nothing but raising and reading back. */
 export interface ApprovalRaiseService {
@@ -163,6 +165,9 @@ export function buildRaiseMetadata(
   supplied: unknown,
 ): Record<string, unknown> {
   const base = isRecord(supplied) ? { ...supplied } : {};
+  // Who raised the ask is the daemon's observation alone: a caller's own
+  // claim about it is dropped, so it cannot join another raiser's ask.
+  for (const key of RAISER_METADATA_KEYS) delete base[key];
   return {
     ...base,
     raisedVia: 'approvals.raise',
@@ -171,6 +176,9 @@ export function buildRaiseMetadata(
     ...(invocation.context.clientKind ? { raisedBySurface: invocation.context.clientKind } : {}),
   };
 }
+
+/** Metadata keys only the daemon writes on a raised ask. */
+const RAISER_METADATA_KEYS: readonly string[] = ['raisedVia', 'raisedByPrincipal', 'raisedByPrincipalKind', 'raisedBySurface'];
 
 /** Wait for a decision for at most `waitMs`; resolves false when it runs out. */
 async function awaitDecision(raised: RaisedApproval, waitMs: number, signal?: AbortSignal): Promise<boolean> {
@@ -225,8 +233,15 @@ export function createApprovalRaiseHandler(broker: ApprovalRaiseService): Gatewa
     // decision landed during the wait, the caller should see the resolved
     // record, and the store is the authority on what it says.
     const approval = broker.getApproval(raised.approval.id) ?? raised.approval;
+    // The record goes back only to a caller that may read it: one this raiser
+    // raised (`approval.read`, subject its raiser). A raiser without
+    // read:approvals gets the id to watch and the decision state, not the record.
+    const raiserId = typeof approval.metadata['raisedByPrincipal'] === 'string' ? approval.metadata['raisedByPrincipal'] : undefined;
+    const readable = admitEffects(invocation.context.actor ?? systemActor('in-process'), ['approval.read'],
+      { owners: raiserId === undefined ? [] : [raiserId] }).kind === 'allowed';
     return {
-      approval,
+      approvalId: approval.id,
+      ...(readable ? { approval } : {}),
       coalesced: raised.coalesced,
       decided,
       ...(raised.holdId === undefined ? {} : { holdId: raised.holdId }),

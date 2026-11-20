@@ -22,13 +22,26 @@ export class JudgmentPortMissingError extends Error {
   }
 }
 
+/**
+ * The call belongs to a runtime that has retired its port (it stopped). Its
+ * readings end with it; another runtime's port never answers in its place.
+ */
+export class JudgmentRuntimeRetiredError extends Error {
+  readonly code = 'JUDGMENT_RUNTIME_RETIRED';
+  constructor(site: string) {
+    super(`${site} belongs to a runtime that has stopped, so no judgment port answers it; the reading was not made.`);
+    this.name = 'JudgmentRuntimeRetiredError';
+  }
+}
+
 const installationFor = (port: JudgmentPort): Installation => ({ port, controller: new AbortController(), identities: new WeakMap() });
 
 /**
  * Names the port of the runtime the current call belongs to, when the host can
  * tell (the platform keeps it per async call chain; this package stays free of
- * Node-only modules). Unset, or naming no runtime still installed, the
- * process-current installation answers.
+ * Node-only modules). Unset, the process-current installation answers. Naming
+ * a runtime that has retired its port, the call is refused with
+ * {@link JudgmentRuntimeRetiredError}: it never borrows another runtime's port.
  */
 let runtimeScope: (() => JudgmentPort | undefined) | undefined;
 
@@ -41,11 +54,18 @@ export function installJudgmentRuntimeScope(read: (() => JudgmentPort | undefine
   runtimeScope = read;
 }
 
-/** The installation the current call belongs to: its own runtime's while that runtime is installed, else the current one. */
-function currentInstallation(): Installation | undefined {
+/**
+ * The installation the current call belongs to: its own runtime's while that
+ * runtime is installed; the current one for a call naming no runtime, or one a
+ * port installed by hand displaced while it still runs. A call whose runtime
+ * retired its port is refused.
+ */
+function currentInstallation(site: string): Installation | undefined {
   const scoped = runtimeScope?.();
   if (scoped === undefined || scoped === installed?.port) return installed;
-  return alongside.find((entry) => entry.port === scoped && !entry.controller.signal.aborted) ?? installed;
+  const own = alongside.find((entry) => entry.port === scoped);
+  if (own === undefined) throw new JudgmentRuntimeRetiredError(site);
+  return own.controller.signal.aborted ? installed : own;
 }
 
 /**
@@ -112,7 +132,7 @@ export function judgmentPort(site: string): JudgmentPort {
 
 function requireInstallation(site: string): Installation {
   assertDecisionModelsEnabled(site);
-  const current = currentInstallation();
+  const current = currentInstallation(site);
   if (current === undefined) throw new JudgmentPortMissingError(site);
   return current;
 }

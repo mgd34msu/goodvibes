@@ -406,13 +406,16 @@ export class DeliveryQueue<TPayload = string> {
   replay(
     deliver: (entry: DeadLetterEntry<TPayload>) => Promise<void>,
     ids?: readonly string[],
+    /** The destination the resent entry is for from now on; absent: the one it failed on. */
+    retarget?: (entry: DeadLetterEntry<TPayload>) => string | undefined,
   ): Promise<Array<{ id: string; outcome: DeliveryOutcome }>> {
-    return this._own(() => this._replay(deliver, ids));
+    return this._own(() => this._replay(deliver, ids, retarget));
   }
 
   private async _replay(
     deliver: (entry: DeadLetterEntry<TPayload>) => Promise<void>,
     ids?: readonly string[],
+    retarget?: (entry: DeadLetterEntry<TPayload>) => string | undefined,
   ): Promise<Array<{ id: string; outcome: DeliveryOutcome }>> {
     this._assertOpen();
     const wanted = ids === undefined ? undefined : new Set(ids);
@@ -436,7 +439,7 @@ export class DeliveryQueue<TPayload = string> {
           dlqEntry.event,
           dlqEntry.payload,
           () => deliver(dlqEntry),
-          { target: dlqEntry.target },
+          { target: retarget ? retarget(dlqEntry) : dlqEntry.target },
         );
         results.push({ id: dlqEntry.id, outcome });
       } catch (error) {

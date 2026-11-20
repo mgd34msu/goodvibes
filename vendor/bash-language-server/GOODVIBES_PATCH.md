@@ -42,7 +42,12 @@ Patch:
   spawning anything.
 - `dependencies.editorconfig` is changed from `2.0.1` to `3.0.2`.
 - `out/util/fs.js` imports the checked-in fast-glob source by relative path.
-  Its discovery implementation and matching options remain unchanged.
+  Its discovery walks without following symbolic links (`followSymbolicLinks:
+  false`), so background analysis reads only files inside the workspace.
+- `out/util/sourcing.js` resolves a `source` or `.` path (absolute, `~` or
+  relative) only when its real path is inside the workspace root, or the
+  sourcing file's directory when there is no workspace; anything else is
+  reported as unresolved and never read. Keep both when refreshing.
 - `vendor/fast-glob@3.3.3 -> vendor/micromatch@4.0.8 -> vendor/braces@3.0.3`
   are packaged as source with explicit relative imports between them. Their
   non-vendored leaf dependencies are declared on this package. Braces adds

@@ -10,6 +10,7 @@ import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type {
   NotificationDeadLetter,
   NotificationDeadLetterSource,
+  NotificationReplayOptions,
   NotificationReplayResult,
 } from '../../integrations/notification-dead-letters.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
@@ -28,10 +29,11 @@ export function listNotificationDeadLetters(sources: NotificationDeadLetterSourc
 export async function replayNotificationDeadLetters(
   sources: NotificationDeadLetterSources,
   ids?: readonly string[],
+  options: NotificationReplayOptions = {},
 ): Promise<NotificationReplayResult[]> {
   const settled = new Map<string, NotificationReplayResult>();
   for (const source of sources()) {
-    for (const result of await source.replayDeadLetters(ids)) {
+    for (const result of await source.replayDeadLetters(ids, options)) {
       const known = settled.get(result.id);
       if (!known || known.outcome === 'not-found') settled.set(result.id, result);
     }
@@ -61,7 +63,11 @@ export function createNotificationDeadLettersReplayHandler(sources: Notification
     if (ids !== undefined && (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string' && id.length > 0))) {
       throw new GatewayVerbError('Invalid ids: expected a list of failed-notification ids from notifications.deadLetters.list', 'INVALID_ARGUMENT', 400, 'ids');
     }
-    const results = await replayNotificationDeadLetters(sources, ids as string[] | undefined);
+    const toCurrent = params['toCurrent'];
+    if (toCurrent !== undefined && typeof toCurrent !== 'boolean') {
+      throw new GatewayVerbError('Invalid toCurrent: expected true or false', 'INVALID_ARGUMENT', 400, 'toCurrent');
+    }
+    const results = await replayNotificationDeadLetters(sources, ids as string[] | undefined, { toCurrent: toCurrent === true });
     const count = (outcome: NotificationReplayResult['outcome']) => results.filter((result) => result.outcome === outcome).length;
     return {
       results,
@@ -69,6 +75,7 @@ export function createNotificationDeadLettersReplayHandler(sources: Notification
       retrying: count('retrying'),
       failed: count('dead_letter'),
       notFound: count('not-found'),
+      destinationChanged: count('destination-changed'),
     };
   };
 }

@@ -260,14 +260,15 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
     }
     const sessionId = options.sessionId?.() ?? undefined;
     try {
-      const raised = await options.verbs.invoke<{ approval?: RaisedRecord; coalesced?: unknown; holdId?: unknown }>('approvals.raise', {
+      const raised = await options.verbs.invoke<{ approvalId?: unknown; approval?: RaisedRecord; coalesced?: unknown; holdId?: unknown }>('approvals.raise', {
         request: input.request,
         ...(sessionId ? { sessionId } : {}),
         ...(input.routeId === undefined ? {} : { routeId: input.routeId }),
         ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
         timeoutMs: options.raiseTimeoutMs ?? DEFAULT_RAISE_TIMEOUT_MS,
       });
-      const id = raised?.approval?.id;
+      // approvalId is always sent; the record only to a caller that holds read:approvals.
+      const id = typeof raised?.approvalId === 'string' ? raised.approvalId : raised?.approval?.id;
       if (typeof id !== 'string' || id.length === 0) return null;
       return {
         id,

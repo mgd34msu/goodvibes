@@ -1,5 +1,5 @@
 import { captureAutonomousSource, retainAutonomousSource } from '../permissions/autonomous.js';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { assertNeverObserved, RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { getContractActionSource, getContractActionSignal } from '../tools/agent/contract-binding.js';
 import { bindOwnedContractSource, assertOwnedContractSource } from './owned-source.js';
@@ -66,14 +66,16 @@ import { bindNativeContractSource, captureNativeContractSource, nativeSourceCrit
 import { createContractPlanSync, type ExecutionPlans, type WorkPlanService } from './plan-sync.js';
 import { ContractExecutionWork } from './owned-execution-work.js';
 import { claimContractLease } from './lease.js';
-import { createContractResume, findZombieCause, type ResumeReport } from './resume.js';
+import { createContractResume, findZombieCause, type ContractClaim, type ContractHold, type ResumeReport } from './resume.js';
+import type { CloseReport } from '../utils/owned-work.js';
 import { numberDraft } from './draft-plan.js';
 import { WorktreeRegistry } from '../runtime/worktree/registry.js';
 import { createContractFleetControls, type ContractFleetControls } from './fleet-controls.js';
 import type { OwnerEvidenceReader } from './owner-evidence.js';
 import { ContractRun, failureFromError, type RunEnv } from './run-context.js';
 import { createContractSteps, type ContractSteps, type ContractStepsWithReplies } from './steps.js';
-import { deserializeContract, deserializeOwnedContractCheckpoint, serializeContract, type ContractCreationReservation, type ContractRemoval, type ContractStore } from './store.js';
+import { contractIdempotencyLockPath, deserializeContract, deserializeOwnedContractCheckpoint, serializeContract, type ContractCreationReservation, type ContractRemoval, type ContractStore } from './store.js';
+import { acquireProcessLock, ProcessLockBusyError, type HeldProcessLock } from '../utils/process-lock.js';
 import { retainOriginalReviewDescriptors } from './review-file-observations.js';
 import { captureTreeBaseline, retainOriginalTreeBaselines } from './tree-baseline.js';
 import {
@@ -100,6 +102,10 @@ import type { DurableContractExecution } from './durable-admission.js';
 
 /** The key a session-mode contract's shared-tree lock is held under (a group id otherwise). */
 const SESSION_TREE_HOLDER = 'session';
+
+/** How long a disposed runner waits for its runs to drain before releasing their claims and naming them still running. */
+const DISPOSE_DRAIN_LIMIT_MS = 5_000;
+const EMPTY_CLOSE_REPORT: CloseReport = Object.freeze({ stopped: Object.freeze([]), killed: Object.freeze([]), stillRunning: Object.freeze([]) });
 
 export interface ContractRunnerDeps {
   readonly judgmentLog?: Pick<import('@goodvibes-jev/judgment').DecisionLog, 'get'> | undefined;
@@ -196,6 +202,19 @@ function idempotencyKeyUnrecorded(error: unknown): RefusalError {
     reason: `The Idempotency-Key could not be recorded in the project's contract directory (${summarizeError(error)}), so a retry could not find this start`,
     next: ['Make the project\'s .goodvibes/contracts directory writable and send the same request with the same key again', 'Or send the request without an Idempotency-Key if a second start on retry is acceptable'],
     status: 503,
+    retryable: false,
+  }));
+}
+
+/** Another process is starting a contract with this key and has not published it within the wait. */
+function idempotencyKeyInFlight(): RefusalError {
+  return new RefusalError(refusal({
+    code: 'IDEMPOTENCY_KEY_IN_FLIGHT',
+    state: 'a start with this key is still running in another process',
+    reason: 'A contract start with this Idempotency-Key is still being prepared elsewhere on this project',
+    next: ['Send the same request with the same key again in a few seconds; it returns that contract once it is published'],
+    status: 409,
+    retryable: true,
   }));
 }
 
@@ -328,7 +347,18 @@ export interface ContractRunner {
   /** The fleet operator verbs' controller over every running contract's engine, with contract-qualified ids. */
   fleetControls(): ContractFleetControls;
   on(listener: (event: ContractEvent) => void): () => void;
+  /**
+   * A stored contract this runner holds without running it, with why (its recorded input could not be restored, or
+   * no run claim could be taken); null when it is not held. Optional for custom runners; the factory always supplies it.
+   */
+  held?(contractId: string): ContractHold | null;
   dispose(): void;
+  /**
+   * After `dispose`: resolves once every run's claim is released, each because its work drained or because it is
+   * named in `stillRunning` after the drain deadline. A host that exits awaits it and reports what is still running.
+   * Optional for custom runners; the factory always supplies it.
+   */
+  closed?(): Promise<CloseReport>;
 }
 
 /** `auto` isolation: a worktree when the root is a git repository with at least one commit, else the shared tree. */
@@ -401,19 +431,24 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     processLeases.delete(contractId);
     release?.();
   }
-  function claimProcessLease(contractId: string): boolean {
-    if (processLeases.has(contractId)) return true;
+  /**
+   * Takes this process's run claim on a contract. A claim that cannot be made at all (an unwritable directory, a
+   * filesystem without file locks) is reported as such: the caller does not run a stored contract it could not claim,
+   * because another process may be running it.
+   */
+  function claimProcessLease(contractId: string): ContractClaim {
+    if (processLeases.has(contractId)) return 'claimed';
     let release: (() => void) | null;
     try { release = claimContractLease(deps.store.projectRoot, contractId); }
-    catch (error) {
-      // A claim that cannot be made (unwritable directory) must not stop a contract this process already owns.
-      logger.warn('contract runner: the run claim could not be taken', { contractId, error: summarizeError(error) });
-      return true;
-    }
-    if (release === null) return false;
+    catch (error) { return { unavailable: `the run claim could not be taken: ${summarizeError(error)}` }; }
+    if (release === null) return 'elsewhere';
     processLeases.set(contractId, release);
-    return true;
+    return 'claimed';
   }
+  /** Stored contracts this runner holds without running, with why; the operator's status and cancel read it. */
+  const heldContracts = new Map<string, ContractHold>();
+  /** Resolves once every lease dispose kept for a draining run is released: drained, or named still running. */
+  let closing: Promise<CloseReport> | undefined;
   // Placement is prepared before a ContractRun exists. Disposal still owns
   // those children, and admission awaits their real close before releasing its lease.
   const placementAbort = new AbortController();
@@ -451,6 +486,28 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       for (const entry of report.failed) logger.warn('contract worktree could not be removed', { contractId: contract.id, path: entry.path, error: entry.error });
     }).catch((error: unknown) => {
       logger.warn('contract worktree could not be released', { contractId: contract.id, error: summarizeError(error) });
+    });
+  }
+
+  /**
+   * After dispose: waits up to DISPOSE_DRAIN_LIMIT_MS for each run's work to drain (its settlement releases its
+   * claim once the final checkpoint is written), then releases the claim of each run still going and names it.
+   */
+  async function closeDraining(ids: readonly string[]): Promise<CloseReport> {
+    if (ids.length === 0) return EMPTY_CLOSE_REPORT;
+    const pending = ids.map((id) => ({ id, done: false, settled: settlements.get(id)?.promise ?? Promise.resolve() }));
+    for (const entry of pending) void entry.settled.then(() => { entry.done = true; });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<void>((resolve) => { timer = setTimeout(resolve, DISPOSE_DRAIN_LIMIT_MS); (timer as { unref?: () => void }).unref?.(); });
+    await Promise.race([Promise.all(pending.map((entry) => entry.settled)), deadline]);
+    clearTimeout(timer);
+    const stillRunning = pending.filter((entry) => !entry.done).map((entry) => entry.id);
+    for (const id of stillRunning) releaseProcessLease(id);
+    if (stillRunning.length > 0) logger.warn('contract runner: contracts still running at shutdown; their claims were released so a rebuilt runner can resume them', { stillRunning });
+    return Object.freeze({
+      stopped: Object.freeze(pending.filter((entry) => entry.done).map((entry) => `contract ${entry.id}`)),
+      killed: Object.freeze([]),
+      stillRunning: Object.freeze(stillRunning.map((id) => Object.freeze({ label: `contract ${id}` }))),
     });
   }
 
@@ -808,10 +865,19 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   /**
    * A native contract's latest saved state: its own checkpoint file. The copy
    * in the admission receipt is the first checkpoint, read only when that file
-   * was never published (a crash between the two writes at creation).
+   * was never published (a crash between the two writes at creation). Only an
+   * absent file falls back to it: a checkpoint that was refused (quarantined,
+   * unreadable) throws its refusal, so the contract is never started again
+   * from its first checkpoint.
    */
   function durableCheckpoint(admission: DurableContractAdmission): Contract | null {
-    return deps.store.load(admission.contractId) ?? deserializeOwnedContractCheckpoint(durableAdmissions.checkpointRead(admission.key));
+    const read = deps.store.load(admission.contractId);
+    switch (read.kind) {
+      case 'present': return read.value;
+      case 'absent': return deserializeOwnedContractCheckpoint(durableAdmissions.checkpointRead(admission.key));
+      case 'failed': throw new RefusalError(read.refusal);
+      default: return assertNeverObserved(read);
+    }
   }
 
   function durableResult(admission: DurableContractAdmission): DurableStartedContract {
@@ -911,7 +977,9 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       }
       // Ids from before the index existed have no entry in it; only their checkpoints are read.
       for (const storedId of deps.store.listStoredIds().filter((id) => !isOpaqueContractId(id))) {
-        const stored = deps.store.load(storedId);
+        const read = deps.store.load(storedId);
+        // A refused checkpoint is quarantined and proves nothing either way; the index and receipts still fence.
+        const stored = read.kind === 'present' ? read.value : null;
         const admission = stored?.durableAdmission;
         if (admission !== undefined && (durableKeyIdentity(admission.key) === durableKeyIdentity(frozen.key)
           // A surviving native checkpoint also fences a lost intent/receipt
@@ -1063,10 +1131,11 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     if (disposed) throw new Error('Contract runner is disposed');
     const captured = captureStartInput(input);
     const id = newContractId(), creation = reserveCreation(id);
-    reserved?.(id);
     return (async () => {
       let owner: AgentRecord | undefined;
       try {
+        // Inside the try: a key that cannot be recorded refuses the start and gives the reserved id back.
+        reserved?.(id);
         const prepared = await prepareStart(captured, id, options, creation);
         prepared.current();
         owner = spawnOwner(captured, id); prepared.current();
@@ -1088,31 +1157,50 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       if (first.fingerprint !== fingerprint) throw idempotencyKeyReused(first.started.contract.id);
       return { ...first.started, replayed: true };
     }
-    const known = deps.store.readIdempotentStart(scope);
-    if (known !== undefined) {
-      if (known.fingerprint !== fingerprint) throw idempotencyKeyReused(known.contractId);
-      const contract = deps.store.get(known.contractId) ?? deps.store.ended(known.contractId) ?? deps.store.load(known.contractId);
-      if (contract !== null) return { contract: withCheckpointWarning(structuredClone(contract)), ownerAgentId: contract.ownerAgentId, replayed: true };
-      // The contract the key started is gone (removed by hand): the key starts a new one.
-      deps.store.forgetIdempotentStart(scope);
-    }
     const operation = (async () => {
-      // The key is recorded with the reserved id before the first checkpoint is published, so a daemon
-      // that stops after creating the contract finds it on the retry; a record whose contract was never
-      // published reads as absent above. A key that could not be recorded only means a retry would not find it.
-      let recorded = false;
-      const record = (contractId: string): void => {
-        try { deps.store.recordIdempotentStart(scope, { contractId, fingerprint }); recorded = true; }
-        catch (error) { logger.warn('contract runner: the retry key for a starting contract was not recorded', { contractId, error: summarizeError(error) }); }
-      };
-      let started: StartedContract;
-      try { started = await start(input, options, record); }
+      // One starter per key across every process on this project: the key's lock is held from the read of its
+      // record until the started contract's first checkpoint is published (start resolves after publication). A
+      // second runner with the key waits, then finds that contract and replays it; it never starts a second one.
+      let lock: HeldProcessLock;
+      try { lock = await acquireProcessLock(contractIdempotencyLockPath(deps.store.projectRoot, scope), { signal: options.signal }); }
       catch (error) {
-        // Nothing started: the key is free for the retry.
-        if (recorded) { try { deps.store.forgetIdempotentStart(scope); } catch { /* reads as absent anyway */ } }
-        throw error;
+        if (error instanceof ProcessLockBusyError) throw idempotencyKeyInFlight();
+        if (options.signal?.aborted) throw error;
+        throw idempotencyKeyUnrecorded(error);
       }
-      return { fingerprint, started: { contract: started.contract, ownerAgentId: started.owner.id, replayed: false } };
+      try {
+        const known = deps.store.readIdempotentStart(scope);
+        if (known !== undefined) {
+          if (known.fingerprint !== fingerprint) throw idempotencyKeyReused(known.contractId);
+          let contract = deps.store.get(known.contractId) ?? deps.store.ended(known.contractId);
+          if (contract === null) {
+            const read = deps.store.load(known.contractId);
+            // The key's contract was refused on read (quarantined): it is not replayed and not started again.
+            if (read.kind === 'failed') throw new RefusalError(read.refusal);
+            contract = read.kind === 'present' ? read.value : null;
+          }
+          if (contract !== null) return { fingerprint, started: { contract: withCheckpointWarning(structuredClone(contract)), ownerAgentId: contract.ownerAgentId, replayed: true } };
+          // Under the key's lock nobody is starting it: the start that recorded it ended before publishing, or its
+          // contract was removed by hand. The key starts a new one.
+          try { deps.store.forgetIdempotentStart(scope); } catch (error) { throw idempotencyKeyUnrecorded(error); }
+        }
+        // The key is recorded with the reserved id before anything is prepared or published, so a daemon that stops
+        // after creating the contract finds it on the retry. A key that cannot be recorded refuses the start: an
+        // unkeyed start would run again on the caller's retry.
+        let recorded = false;
+        const record = (contractId: string): void => {
+          try { deps.store.recordIdempotentStart(scope, { contractId, fingerprint }); recorded = true; }
+          catch (error) { throw idempotencyKeyUnrecorded(error); }
+        };
+        let started: StartedContract;
+        try { started = await start(input, options, record); }
+        catch (error) {
+          // Nothing started: the key is free for the retry.
+          if (recorded) { try { deps.store.forgetIdempotentStart(scope); } catch { /* the next start under the lock finds no contract and forgets it */ } }
+          throw error;
+        }
+        return { fingerprint, started: { contract: started.contract, ownerAgentId: started.owner.id, replayed: false } };
+      } finally { lock.release(); }
     })();
     idempotentStarts.set(scope, operation);
     try { return (await operation).started; }
@@ -1311,8 +1399,10 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     }, contract.proposedUnits, new ContractExecutionWork(reserveSettlement(contract.id).promise));
     reserveSettlement(contract.id);
     runs.set(contract.id, run);
-    // A resumed contract already holds its claim; a new contract's id is unused, so this only records it.
-    claimProcessLease(contract.id);
+    // A resumed contract already holds its claim; a new contract's id is unused, so this only records it. A new id is
+    // fresh randomness no other process can be running, so a claim that cannot be made only goes unrecorded.
+    const claim = claimProcessLease(contract.id);
+    if (typeof claim === 'object') logger.warn('contract runner: the run claim could not be taken', { contractId: contract.id, reason: claim.unavailable });
     const sourceSignal = getContractActionSignal(contract);
     if (sourceSignal) {
       // Runner shutdown retires this signal too. Its normal disposal path
@@ -1635,8 +1725,14 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   const resume = createContractResume({
     nativeOnly: deps.nativeDecisions !== undefined,
     store: deps.store,
-    isLive: (contractId) => runs.has(contractId),
+    isLive: (contractId) => runs.has(contractId) || heldContracts.has(contractId),
     claim: claimProcessLease,
+    hold: (contract, code, reason) => {
+      deps.store.hold(contract);
+      heldContracts.set(contract.id, { code, reason, at: now() });
+      // A contract held without its claim is not this process's: nothing keeps a claim it never got.
+      if (code === 'claim-unavailable') releaseProcessLease(contract.id);
+    },
     adopt: (contract) => {
       deps.store.hold(contract);
       const run = newRun(contract);
@@ -1772,8 +1868,17 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     },
     cancel: (contractId, reason) => {
       const run = runs.get(contractId);
-      return run === undefined ? false : cancelRun(run, reason);
+      if (run !== undefined) return cancelRun(run, reason);
+      const hold = heldContracts.get(contractId);
+      const contract = hold === undefined || disposed ? null : deps.store.get(contractId);
+      // Only a hold this process has the run claim for may be settled here; without the claim another process may run it.
+      if (hold === undefined || hold.code !== 'input-unavailable' || contract === null || isTerminalContractStatus(contract.status)) return false;
+      heldContracts.delete(contractId);
+      // The held contract becomes a run of this runner only to end: the ordinary cancel writes it cancelled,
+      // settles its owner record and releases its claim once written.
+      return cancelRun(newRun(contract), `${reason} (it was held: ${hold.reason})`);
     },
+    held: (contractId) => heldContracts.get(contractId) ?? null,
     reply: async (contractId, escalationId, text) => {
       const run = runs.get(contractId);
       if (run === undefined || run.terminal) throw new OwnerReplyRefusedError(`contract ${contractId} is not running`, 'ended');
@@ -1839,10 +1944,15 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         groups.stopRun(run);
         settleWork(run);
       }
-      // A disposed runner no longer drives any contract; one whose work never drains (a planner that does not answer)
-      // would otherwise hold its claim until the process ends and keep a rebuilt runner from resuming it.
-      for (const id of [...processLeases.keys()]) releaseProcessLease(id);
+      // A held contract runs nothing: its claim goes now. A run's claim goes only once its work drained (settleWork
+      // releases it after the final checkpoint), or, for work that does not drain within the deadline (a planner that
+      // does not answer), once the close report names it still running, so a rebuilt runner can resume it.
+      heldContracts.clear();
+      const draining = new Set([...runs.keys(), ...settling.keys()]);
+      for (const id of [...processLeases.keys()]) if (!draining.has(id)) releaseProcessLease(id);
+      closing = closeDraining([...draining]);
       listeners.clear();
     },
+    closed: () => closing ?? Promise.resolve(EMPTY_CLOSE_REPORT),
   };
 }

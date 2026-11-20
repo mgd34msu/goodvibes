@@ -47,7 +47,7 @@ export interface EventGrant {
  * `read:own-sessions` lets a credential without the admin role watch its own
  * work live: the `turn`, `tools`, `gate` and `session` frames, the approvals
  * (`approval-update`) and the hosted-session notices (`hosted-session-update`)
- * of the sessions its principal created or attached to. Every other session's
+ * of the sessions its principal created or was shared (sessions.hosted.share). Every other session's
  * frames stay withheld.
  */
 export { OWN_SESSIONS_SCOPE };

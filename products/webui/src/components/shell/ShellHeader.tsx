@@ -1,8 +1,9 @@
 /**
  * The 48-tall header (52 on phone). Desktop: title on the left, the indicator
- * chips that must stay visible while their condition holds (sleep disabled,
- * wake-word listening, reload to update), then up to three icon buttons with
- * tooltips. Phone: menu button, title, new-chat button.
+ * chips (the permission mode in force, always; sleep disabled, wake-word
+ * listening and reload to update while their condition holds), then up to
+ * three icon buttons with tooltips. Phone: menu button, title, the chips (the
+ * mode chip in its short words), new-chat button.
  */
 import { Menu as MenuIcon, RefreshCw, Search, SquarePen } from 'lucide-react';
 import type { ReactNode } from 'react';

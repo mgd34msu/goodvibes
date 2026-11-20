@@ -272,7 +272,7 @@ export class ChannelDeliveryRouter {
           conversationId: receipt.conversationId, messageId: receipt.messageId,
           ...(receipt.accountId === undefined ? {} : { accountId: receipt.accountId }),
           ...(receipt.threadId === undefined ? {} : { threadId: receipt.threadId }) }) }),
-        ...(outcome.sent > 1 ? { parts: outcome.sent } : {}),
+        ...(parts.length > 1 ? { parts: outcome.sent, partsTotal: parts.length } : {}),
         ...(outcome.truncated ? { truncated: true, ...(outcome.omittedChars > 0 ? { omittedChars: outcome.omittedChars } : {}) } : {}),
         ...(result.suppressed === true ? { suppressed: true } : {}),
       });

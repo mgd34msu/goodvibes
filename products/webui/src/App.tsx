@@ -1,7 +1,7 @@
 import { Plug, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 import AppShell from './components/shell/AppShell';
-import { DecisionPolicyNotice } from './components/DecisionPolicyNotice';
+import { ModeChip } from './components/shell/ModeChip';
 import { ShellLayout } from './components/shell/ShellLayout';
 import { viewTitle } from './components/shell/nav';
 import { PowerChip } from './components/status/PowerChip';
@@ -641,7 +641,7 @@ export default function App() {
         <>
           {/* These chips replace the status strip's must-stay-visible segments:
               each renders nothing unless its condition holds. */}
-          <DecisionPolicyNotice onOpenSettings={openSettings} />
+          <ModeChip onOpenSettings={openSettings} />
           <PowerChip />
           <WakeChip />
           {health.compatibility?.status === 'restart-required' && (

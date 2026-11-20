@@ -171,7 +171,7 @@ export interface RuntimePollerOwners {
    */
   readonly homeGraphService: { dispose(): void | Promise<void> };
   /** The composed contract runner: disposing it stops the runner (each contract's engine with it) and releases its store's writer and sweep. */
-  readonly contractRunner: { dispose(): void; flushWorkPlan?(): Promise<void> };
+  readonly contractRunner: { dispose(): void; flushWorkPlan?(): Promise<void>; closed?(): Promise<import('../utils/owned-work.js').CloseReport> };
   readonly processRegistry: { dispose(): void };
   readonly memoryGovernor: { stop(): void };
   /**
@@ -214,7 +214,11 @@ export function registerRuntimePollers(registry: AsyncDisposalRegistry, owners: 
   // for every product: a product that drains its contract recovery first does so in a scope that unwinds before this.
   registry.add('contract runner', async () => {
     owners.contractRunner.dispose();
-    await owners.contractRunner.flushWorkPlan?.();
+    // Each run's claim is released once its work drained, or once the bounded wait names it still running.
+    const [, report] = await Promise.all([owners.contractRunner.flushWorkPlan?.(), owners.contractRunner.closed?.()]);
+    if (report !== undefined && report.stillRunning.length > 0) {
+      logger.warn('Runtime disposal: contracts still running when the contract runner closed', { stillRunning: report.stillRunning.map((entry) => entry.label) });
+    }
   });
   registry.add('memory governor', () => owners.memoryGovernor.stop());
   registry.add('agent orchestrator tool registries', () => owners.agentOrchestrator.dispose());

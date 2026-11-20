@@ -194,9 +194,10 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
                 `Resend one with /notify resend <id>, or all with /notify resend all.`].join('\n'));
             return;
           }
-          const which = commandArgs[1];
+          const toCurrent = commandArgs.includes('--to-current');
+          const which = commandArgs.slice(1).find((arg) => arg !== '--to-current');
           if (!which) {
-            throw commandRefusal(`Usage: /notify resend <id|all>\nList them with /notify failed.`);
+            throw commandRefusal(`Usage: /notify resend <id|all> [--to-current]\nList them with /notify failed.`);
           }
           const ids = which === 'all'
             ? entries.map((entry) => entry.id)
@@ -207,23 +208,27 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
             return;
           }
           const results = new Map<string, string>();
+          const moved: string[] = [];
           for (const source of sources) {
-            for (const result of await source.replayDeadLetters(ids)) {
+            for (const result of await source.replayDeadLetters(ids, { toCurrent })) {
               if (result.outcome !== 'not-found' || !results.has(result.id)) results.set(result.id, result.outcome);
+              if (result.outcome === 'destination-changed' && result.reason) moved.push(`  ${shortDeadLetterId(result.id)}: ${result.reason}`);
             }
           }
           const count = (outcome: string) => [...results.values()].filter((value) => value === outcome).length;
           const delivered = count('delivered');
           const retrying = count('retrying');
           const failed = count('dead_letter');
+          const changed = count('destination-changed');
           ctx.print([
-            `Resent ${ids.length} notification${ids.length === 1 ? '' : 's'}: ${delivered} delivered, ${retrying} queued for another attempt, ${failed} failed again.`,
+            `Resent ${ids.length - changed} of ${ids.length} notification${ids.length === 1 ? '' : 's'}: ${delivered} delivered, ${retrying} queued for another attempt, ${failed} failed again${changed > 0 ? `, ${changed} not sent because the channel now posts somewhere else` : ''}.`,
             ...(failed > 0 ? ['The ones that failed again are back in /notify failed.'] : []),
+            ...(changed > 0 ? [...moved, `Resend them to where the channel posts now with /notify resend ${which} --to-current.`] : []),
           ].join('\n'));
           return;
         }
 
-        ctx.print('Usage: /notify ' + policy.usage + ' | failed | resend <id|all>');
+        ctx.print('Usage: /notify ' + policy.usage + ' | failed | resend <id|all> [--to-current]');
       },
     });
   }

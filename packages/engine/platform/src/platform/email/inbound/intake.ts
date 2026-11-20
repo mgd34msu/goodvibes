@@ -214,14 +214,16 @@ import type { VerificationMatch } from '../../google/verification-expectations.j
 export type InboundNoticeMode = 'all' | 'expected-only' | 'none';
 
 /**
- * What this module needs from a route binding: the surface it points at.
+ * What this module needs from a route binding: its id (the send goes to the
+ * binding the route was resolved to, never to one resolved again) and the
+ * surface it points at.
  *
  * A `Pick` off the real declaration rather than a restated `{ surfaceKind:
  * string }`. A restated shape would accept a hand-built object whose
  * `surfaceKind` is any string at all, and the whole point of reading the
  * binding is that the value came from the binding.
  */
-export type NoticeRouteBinding = Pick<AutomationRouteBinding, 'surfaceKind'>;
+export type NoticeRouteBinding = Pick<AutomationRouteBinding, 'id' | 'surfaceKind'>;
 
 /**
  * Where the owner's notice goes, or, when there is nowhere, WHY.
@@ -255,8 +257,9 @@ export interface InboundMailNoticeRoute {
   /** The owner's notice route binding, or why there is none. */
   resolveBinding(): NoticeRouteResolution;
   /**
-   * `DaemonSurfaceDeliveryHelper.deliverStructuredNotice`, bound to that
-   * binding.
+   * `DaemonSurfaceDeliveryHelper.deliverStructuredNotice` on `binding`: the one
+   * {@link resolveBinding} answered for this notice (null when it answered
+   * none), so the route that was decided is the route that is used.
    *
    * Takes the STRUCTURE, never a rendered string. The intake therefore cannot
    * pick an escaper, cannot pick the wrong one, and cannot skip escaping, it
@@ -264,7 +267,7 @@ export interface InboundMailNoticeRoute {
    * the producer has, extended across the port: the only code that turns spans
    * into text is the code that knows the destination.
    */
-  send(notice: StructuredNotice): Promise<SurfaceNoticeDelivery>;
+  send(notice: StructuredNotice, binding: NoticeRouteBinding | null): Promise<SurfaceNoticeDelivery>;
 }
 
 export interface InboundMailIntakeDeps {
@@ -726,7 +729,8 @@ export function createInboundMailIntake(deps: InboundMailIntakeDeps): InboundMai
       }
       let delivery: SurfaceNoticeDelivery;
       try {
-        delivery = await deps.notices.send(entry.notice);
+        const route = deps.notices.resolveBinding();
+        delivery = await deps.notices.send(entry.notice, route.kind === 'bound' ? route.binding : null);
       } catch (error) {
         held.set(heldKey, entry);
         if (deps.noticeHealth?.get() === null) routeDown(summarizeError(error), at);
@@ -956,7 +960,7 @@ export function createInboundMailIntake(deps: InboundMailIntakeDeps): InboundMai
       // text, never raw span concatenation.
       //
       // THE LAST STEP THAT MAY THROW.
-      const delivery: SurfaceNoticeDelivery = await deps.notices.send(plan.notice);
+      const delivery: SurfaceNoticeDelivery = await deps.notices.send(plan.notice, plan.binding);
       if (delivery.delivered) {
         status = 'delivered';
       } else if (delivery.reason === 'delivery-failed') {
@@ -1082,7 +1086,7 @@ export function createInboundMailIntake(deps: InboundMailIntakeDeps): InboundMai
 
 /** What this pass intends to do about a notice, decided before anything irreversible runs. */
 type NoticePlan =
-  | { readonly kind: 'send'; readonly notice: StructuredNotice; readonly outcome: OwedNoticeOutcome }
+  | { readonly kind: 'send'; readonly notice: StructuredNotice; readonly outcome: OwedNoticeOutcome; readonly binding: NoticeRouteBinding }
   | {
     readonly kind: 'settled';
     readonly status: InboundNoticeStatus;
@@ -1113,6 +1117,7 @@ async function planFor(
   return {
     kind: 'send',
     outcome,
+    binding: route.binding,
     notice: await renderInboundMailNotice({
       senderDisplay: message.senderDisplay,
       subject: message.subject,

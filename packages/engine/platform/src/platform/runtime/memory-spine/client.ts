@@ -290,6 +290,8 @@ export class MemorySpineClient implements MemoryAccess {
 
   /** Last recall snapshot captured by refreshRecallSnapshot(); null until first refresh. */
   private snapshot: MemoryRecallSnapshot | null = null;
+  /** The route epoch the snapshot was built under; a later activate/deactivate makes it another route's. */
+  private snapshotEpoch = -1;
   private refreshOrder = 0;
   private appliedRefreshOrder = 0;
   /** The local reload started by deactivate(); local operations wait for it. */
@@ -525,13 +527,14 @@ export class MemorySpineClient implements MemoryAccess {
     // The snapshot describes memory as it was when the search began, and the
     // newest search to START wins: a slow earlier one that finishes last must not
     // replace what a later one already stored.
-    const startedAt = Date.now(), order = ++this.refreshOrder;
+    const startedAt = Date.now(), order = ++this.refreshOrder, epoch = this.operationEpoch;
     const result = await awaitMemoryOperation(() => route.honestSearch(filter, { recall }, operation), operation);
     assertMemoryOperationCurrent(operation);
     const captured = buildRecallSnapshot(result, mode, startedAt, this.staleAfterMs);
     if (order > this.appliedRefreshOrder) {
       this.appliedRefreshOrder = order;
       this.snapshot = captured;
+      this.snapshotEpoch = epoch;
     }
     return captured;
   }
@@ -544,7 +547,8 @@ export class MemorySpineClient implements MemoryAccess {
    * that, never a silent empty that reads as "nothing was ever stored."
    */
   recallSnapshot(now: number = Date.now()): MemoryRecallSnapshot {
-    const cached = this.snapshot;
+    // A snapshot from before the route switched describes the other store: never served as this one's.
+    const cached = this.snapshotEpoch === this.operationEpoch ? this.snapshot : null;
     if (cached === null || cached.search === null || cached.capturedAt === null) return emptyRecallSnapshot(this.mode());
     return buildRecallSnapshot(cached.search, cached.mode, cached.capturedAt, this.staleAfterMs, now);
   }

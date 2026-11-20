@@ -197,6 +197,8 @@ export interface RunClusterCommandInput {
   /** Asks the daemon with the configured outbound TLS trust (`createNetworkFetch`); never the bare global fetch. */
   readonly fetchImpl: DaemonFetch;
   readonly readToken?: ((daemonHomeDir: string) => string | undefined) | undefined;
+  /** The client's home, whose per-origin record holds the tokens for other daemons (a terminal app's `/cluster`). */
+  readonly homeDirectory?: string | undefined;
   /** Injected in tests; the real one reads stdin. */
   readonly prompt?: ((question: string) => Promise<string>) | undefined;
   /** Like `prompt`, for a secret: the real one does not echo what is typed. Defaults to `prompt` when that is injected. */
@@ -314,6 +316,7 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
     configManager: input.configManager,
     daemonHomeDir: input.daemonHomeDir,
     ...(input.readToken ? { readToken: input.readToken } : {}),
+    ...(input.homeDirectory ? { homeDirectory: input.homeDirectory } : {}),
   });
   if (!resolved.ok) return refused(resolved, parsed.json);
 

@@ -12,11 +12,20 @@ import {
 } from './payments-channel-guard.js';
 import { parseChannelDeliveryTarget, parseLinkDeliveryTarget, parseRouteDeliveryTarget, type RoutineScheduleDeliveryTargetSpec } from './schedule-delivery-targets.js';
 import { randomUUID } from 'node:crypto';
+import { Secret, isSecret } from '@goodvibes-jev/engine/platform/platform/security';
 
 type AgentChannelDeliveryRouter = Pick<ChannelDeliveryRouter, 'deliver' | 'listStrategies'>;
 type AgentChannelDeliverySurfaceKind = ChannelDeliverySurfaceKind | 'telephony';
-type AgentChannelDeliveryTarget = Omit<ChannelDeliveryTarget, 'surfaceKind'> & {
+type AgentChannelDeliveryTarget = Omit<ChannelDeliveryTarget, 'surfaceKind' | 'address'> & {
   readonly surfaceKind?: AgentChannelDeliverySurfaceKind | undefined;
+  /**
+   * A webhook URL is a `Secret` (an incoming webhook's URL carries its token):
+   * previews, results, receipts and tool output print `addressShown` instead,
+   * and the URL is revealed only for the dispatch itself.
+   */
+  readonly address?: string | Secret | undefined;
+  /** What may be shown of a secret address: its scheme and host. */
+  readonly addressShown?: string | undefined;
 };
 type AgentChannelDeliveryRequest = Omit<ChannelDeliveryRequest, 'target'> & {
   readonly target: AgentChannelDeliveryTarget;
@@ -27,7 +36,8 @@ export interface AgentChannelDeliveryInput {
   readonly title?: string | undefined;
   readonly channel?: string | undefined;
   readonly route?: string | undefined;
-  readonly webhook?: string | undefined;
+  /** A webhook URL; typed by the owner it arrives as a declared secret argument (`Secret`). */
+  readonly webhook?: string | Secret | undefined;
   readonly link?: string | undefined;
   /** Saved artifacts sent with the message, on a surface whose strategy declares supportsAttachments. */
   readonly attachments?: readonly ArtifactReference[] | undefined;
@@ -73,16 +83,31 @@ function parseRouteTarget(raw: string): AgentChannelDeliveryTarget {
   return surfaceTarget(parseRouteDeliveryTarget(raw));
 }
 
-function parseWebhookTarget(raw: string): AgentChannelDeliveryTarget {
-  const normalized = readText(raw);
+function parseWebhookTarget(raw: string | Secret): AgentChannelDeliveryTarget {
+  // Read once to check the address the dispatch will use; kept as a Secret from here on.
+  const normalized = readText(isSecret(raw) ? raw.reveal('dispatch') : raw);
   if (!normalized) throw new Error('Webhook delivery target requires a URL.');
+  let url: URL;
   try {
-    const url = new URL(normalized);
+    url = new URL(normalized);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('bad protocol');
   } catch {
     throw new Error('Webhook delivery target must be a valid http(s) URL.');
   }
-  return { kind: 'webhook', address: normalized };
+  return { kind: 'webhook', address: Secret.of(normalized, 'webhook URL'), addressShown: `${url.protocol}//${url.host}/…` };
+}
+
+/** The target as the router dispatches it: a secret address is revealed here, and only here. */
+function dispatchTarget(target: AgentChannelDeliveryTarget): ChannelDeliveryTarget {
+  const { addressShown: _shown, address, ...rest } = target;
+  return {
+    ...(rest as Omit<ChannelDeliveryTarget, 'address'>),
+    ...(address === undefined ? {} : { address: isSecret(address) ? address.reveal('dispatch') : address }),
+  };
+}
+
+function readTargetText(value: string | Secret | undefined): string | undefined {
+  return isSecret(value) ? (value.empty ? undefined : 'webhook') : readText(value);
 }
 
 // A link target publishes the message as a document and announces its link on
@@ -94,7 +119,7 @@ function parseLinkTarget(raw: string): AgentChannelDeliveryTarget {
 }
 
 function selectedTargetInputs(input: Pick<AgentChannelDeliveryInput, 'channel' | 'route' | 'webhook' | 'link'>): readonly string[] {
-  return [input.channel, input.route, input.webhook, input.link].map(readText).filter((value): value is string => Boolean(value));
+  return [input.channel, input.route, input.webhook, input.link].map(readTargetText).filter((value): value is string => Boolean(value));
 }
 
 /**
@@ -115,7 +140,7 @@ export function buildAgentChannelDeliveryPreview(input: AgentChannelDeliveryInpu
 
   const channel = readText(input.channel);
   const route = readText(input.route);
-  const webhook = readText(input.webhook);
+  const webhook = readTargetText(input.webhook) === undefined ? undefined : input.webhook;
   const link = readText(input.link);
   const target = channel
     ? parseChannelTarget(channel)
@@ -197,6 +222,7 @@ export async function deliverAgentChannelMessage(
     assertCurrent();
 
     responseId = await router.deliver({ ...preview.request,
+      target: dispatchTarget(preview.request.target),
       ...(options.signal ? { signal: options.signal } : {}),
       ...(options.assertCurrent ? { assertCurrent } : {}),
     } as ChannelDeliveryRequest);
@@ -231,6 +257,7 @@ function formatTarget(target: AgentChannelDeliveryTarget): string {
     ].filter(Boolean);
     return `${base}${details.length > 0 ? ` (${details.join(', ')})` : ''}`;
   }
+  if (isSecret(target.address)) return `${target.kind} ${target.addressShown ?? ''} (secret)`.replace('  ', ' ');
   return target.address ? `${target.kind} ${target.address}` : target.kind;
 }
 

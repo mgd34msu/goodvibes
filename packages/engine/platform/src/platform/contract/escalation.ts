@@ -796,19 +796,37 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     if (run.replying.has(escalationId)) throw new OwnerReplyRefusedError(`a reply to ${escalationId} is already being read; wait for its result`, 'already-reading');
     run.replying.add(escalationId);
     try {
+      // A failure pause's answer is checked before anything is taken: a refused reply never takes the tree.
+      if (escalation.failurePause === true) failurePauseAnswer(run, escalation, text);
       // The waiting group gave the shared tree up; it takes it again before the reply acts.
       const waitingGroup = escalation.scope === 'unit' ? run.unit(escalation.targetId)?.groupId
         : escalation.scope === 'group' ? escalation.targetId : undefined;
       if (waitingGroup !== undefined) await retakeSharedTreeAfterOwner(run, waitingGroup);
-      return escalation.failurePause === true ? replyToFailurePause(run, escalation, text) : await replyClaimed(run, escalation, text);
+      try {
+        return escalation.failurePause === true ? replyToFailurePause(run, escalation, text) : await replyClaimed(run, escalation, text);
+      } catch (error) {
+        // Nothing was applied and the question is still open: the waiting group gives the tree up again.
+        if (waitingGroup !== undefined && escalation.resolvedAt === undefined) releaseSharedTreeForOwner(run, waitingGroup);
+        throw error;
+      }
     } finally {
       run.replying.delete(escalationId);
     }
   }
 
-  /** Retry runs the turn (or the publication) again; cancel stops the contract. Any other answer leaves the question open. */
-  function replyToFailurePause(run: ContractRun, escalation: Escalation, text: string): OwnerReplyOutcome {
-    if (isOwnerAcceptance(escalation)) return replyToOwnerAcceptance(run, escalation, text);
+  /**
+   * The answer a failure pause accepts, or the refusal that leaves it open. Reads only: it is checked before the
+   * reply takes anything (the shared tree) and again where the answer is applied.
+   */
+  function failurePauseAnswer(run: ContractRun, escalation: Escalation, text: string):
+    { readonly kind: 'acceptance'; readonly answer: 'accept' | 'cancel' } | { readonly kind: 'failure'; readonly answer: FailurePauseAnswer; readonly publication: boolean; readonly unitFailure: boolean } {
+    if (isOwnerAcceptance(escalation)) {
+      const answer = readAcceptanceAnswer(text);
+      if (answer === undefined) {
+        throw new OwnerReplyRefusedError(`"${titleOf(text)}" is not an answer to ${escalation.id}: it only accepts "accept" (publish the result that was not independently checked) or "cancel" (stop the contract); the question is still open`, 'not-an-answer');
+      }
+      return { kind: 'acceptance', answer };
+    }
     const publication = isPublicationPause(escalation);
     const unitFailure = isUnitFailurePause(run, escalation);
     if (!publication && !unitFailure && (run.contract.nativeSource === undefined || run.contract.sessionMode !== true)) throw new OwnerReplyRefusedError(`${escalation.id} is not a failure pause of a native session contract`, 'unsupported');
@@ -816,6 +834,18 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     if (answer === undefined) {
       throw new OwnerReplyRefusedError(`"${titleOf(text)}" is not an answer to ${escalation.id}: it only accepts ${FAILURE_PAUSE_ANSWERS.map((word) => `"${word}"`).join(' or ')} ("retry" runs the failed work again, "cancel" stops the contract), and nothing here approves the work; the question is still open`, 'not-an-answer');
     }
+    if (unitFailure && answer === 'retry') {
+      const unit = run.unit(escalation.targetId);
+      if (unit === undefined || unit.status !== 'awaiting-owner') throw new OwnerReplyRefusedError(`unit ${escalation.targetId} no longer waits on ${escalation.id}`, 'not-open');
+    }
+    return { kind: 'failure', answer, publication, unitFailure };
+  }
+
+  /** Retry runs the turn (or the publication) again; cancel stops the contract. Any other answer leaves the question open. */
+  function replyToFailurePause(run: ContractRun, escalation: Escalation, text: string): OwnerReplyOutcome {
+    const checked = failurePauseAnswer(run, escalation, text);
+    if (checked.kind === 'acceptance') return replyToOwnerAcceptance(run, escalation, text, checked.answer);
+    const { answer, publication, unitFailure } = checked;
     const { contract } = run;
     if (publication && answer === 'retry') {
       retryPublicationPause(run, escalation, text);
@@ -828,8 +858,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     const reading: OwnerReplyReading = answer === 'cancel' ? 'reject' : 'amend';
     const action: OwnerReplyAction = answer === 'cancel' ? 'stopped' : 'amended';
     if (unitFailure && answer === 'retry') {
-      const unit = run.unit(escalation.targetId);
-      if (unit === undefined || unit.status !== 'awaiting-owner') throw new OwnerReplyRefusedError(`unit ${escalation.targetId} no longer waits on ${escalation.id}`, 'not-open');
+      const unit = run.unit(escalation.targetId)!;
       escalation.reply = { text, reading, outcome: 'act', decisionId: undefined };
       escalation.resolvedAt = run.env.now();
       unit.failureReason = undefined;
@@ -873,11 +902,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
    * unchanged result); "cancel" stops the contract. Any other answer leaves the
    * question open.
    */
-  function replyToOwnerAcceptance(run: ContractRun, escalation: Escalation, text: string): OwnerReplyOutcome {
-    const answer = readAcceptanceAnswer(text);
-    if (answer === undefined) {
-      throw new OwnerReplyRefusedError(`"${titleOf(text)}" is not an answer to ${escalation.id}: it only accepts "accept" (publish the result that was not independently checked) or "cancel" (stop the contract); the question is still open`, 'not-an-answer');
-    }
+  function replyToOwnerAcceptance(run: ContractRun, escalation: Escalation, text: string, answer: 'accept' | 'cancel'): OwnerReplyOutcome {
     const { contract } = run;
     const reading: OwnerReplyReading = answer === 'accept' ? 'approve' : 'reject';
     const action: OwnerReplyAction = answer === 'accept' ? 'approved' : 'stopped';

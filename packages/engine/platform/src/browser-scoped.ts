@@ -30,6 +30,8 @@ import {
   createGoodVibesAuthClient,
 } from './auth.js';
 import type { PlatformObserver } from './observer/index.js';
+import { parseDaemonOrigin } from './platform/config/control-plane-base-url.js';
+import { CredentialOriginError, bindCredential, bearerFor, daemonOriginOfUrl } from './platform/runtime/client/daemon-target.js';
 
 export type BrowserScopedRouteDefinition = {
   readonly method: string;
@@ -243,12 +245,23 @@ function createScopedOperatorClient<TMethodId extends OperatorTypedMethodId>(
       const url = pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')
         ? pathOrUrl
         : buildUrl(baseUrl, pathOrUrl);
+      // The stream carries this daemon's credential and headers: an absolute URL
+      // on any other origin is refused before anything is sent.
+      let origin: ReturnType<typeof parseDaemonOrigin> = null;
+      try { origin = parseDaemonOrigin(new URL(baseUrl).origin); } catch { origin = null; }
+      const requested = daemonOriginOfUrl(url);
+      if (!origin || requested !== origin.baseUrl) throw new CredentialOriginError(origin?.baseUrl ?? baseUrl, requested);
+      const daemon = origin;
       // The transport's default headers, getHeaders and middleware apply to the stream as to every call.
       return await openRawServerSentEventStream(transport.streamFetch, url, handlers, {
         signal: streamOptions.signal,
         headers: streamOptions.headers,
         reconnect: streamOptions.reconnect,
-        getAuthToken: () => transport.getAuthToken(),
+        // The bearer is released only for this daemon's origin (daemon-target.ts).
+        getAuthToken: async () => {
+          const token = await transport.getAuthToken();
+          return token ? bearerFor(bindCredential(daemon, token, 'explicit'), url) : null;
+        },
       });
     },
     getAuthToken: () => transport.getAuthToken(),

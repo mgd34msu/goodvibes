@@ -1,6 +1,19 @@
 import type { TerminalSlashCommand } from './command-registry.js';
 import type { CommandSubcommandHints } from './command-args-hint.js';
 import { settingsTargetNotFoundMessage, type SettingsTargetOutcome } from './settings-navigation.js';
+import { configKeyFacts } from '@goodvibes-jev/engine/platform/platform/config';
+
+/**
+ * Where a `/config set <key> <value>` or `/settings set <key> <value>` line
+ * holds a credential: every word of the value when the key is declared
+ * secret-bearing (`configKeyFacts(key).secret`), else none. The input history
+ * masks these positions and the handler reads them with `secretArg`.
+ */
+export function settingSetSecretPositions(args: readonly string[], skip: (token: string) => boolean = () => false): number[] {
+  const words = args.map((token, index) => ({ token, index })).filter((entry) => !skip(entry.token));
+  if (words[0]?.token !== 'set' || words[1] === undefined || !configKeyFacts(words[1].token).secret) return [];
+  return words.slice(2).map((entry) => entry.index);
+}
 interface EntryContext {
   print(message: string): void;
   readonly openSettingsModal?: ((target?: string) => SettingsTargetOutcome | 'unreported' | void) | undefined;
@@ -49,6 +62,8 @@ export function createConfigWorkspaceCommand<Context extends EntryContext>(polic
     subcommands: policy.set ? { set: '<key> <value>' } : undefined,
     // `set`'s value is taken as typed: a string setting may hold quotes and spaces.
     rawRest: policy.set ? (args) => (args[0] === 'set' ? 2 : undefined) : undefined,
+    // A credential key's value is masked in the input history and read with `secretArg(2)`.
+    secretArgs: policy.set ? { select: (args) => settingSetSecretPositions(args) } : undefined,
     async handler(args, context) {
       if (args[0] === 'set' && policy.set) {
         await policy.set(args, context);

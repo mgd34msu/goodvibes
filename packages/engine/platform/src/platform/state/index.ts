@@ -188,7 +188,7 @@ export type { RecordLog, RecordLogOptions } from './record-log.js';
 // Save, then acknowledge: operation and effect identity, the durable
 // acknowledgement, the one failure classifier, the operation log, and one
 // commit point for a change spread over several writes.
-export { durableAfter, effectKey, newOperationId, operationIdFromClient, outcomeOfFailure } from './operation.js';
+export { durableAfter, effectKey, fetchFailurePhase, newOperationId, operationIdFromClient, outcomeOfFailure } from './operation.js';
 export type { DispatchPhase, Durable, EffectKey, OperationId } from './operation.js';
 export { openOperationLog } from './operation-log.js';
 export type { OperationLine, OperationLog, OperationState } from './operation-log.js';

@@ -122,8 +122,8 @@ export function createProcessIo(options: ProcessIoOptions = {}): ProcessIo {
 export function readContracts(projectRoot: string): ContractView[] {
   const store = new ContractStore({ projectRoot, sweepIntervalMs: 0 });
   return store.listStoredIds().flatMap((id) => {
-    const contract = store.load(id);
-    return contract === null ? [] : [contract];
+    const read = store.load(id);
+    return read.kind === 'present' ? [read.value] : [];
   });
 }
 

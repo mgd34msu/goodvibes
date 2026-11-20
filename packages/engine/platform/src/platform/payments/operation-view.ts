@@ -205,6 +205,7 @@ const REFUSAL_MESSAGES: Readonly<Record<RefusalCode | ExecutionRefusalCode | Ope
   'card-fill-failed': 'The card could not be entered on the checkout page. Nothing was submitted. Check the card fields named for this checkout, then start the purchase again.',
   'owner-changed': 'The stored address, payment settings, pairing, browser page or decision settings changed while the purchase was running. Nothing was submitted. Review them, then start the purchase again.',
   'notice-unavailable': 'The purchase notice could not be prepared or sent. Nothing was submitted. Check the payment notification channels, then start the purchase again.',
+  'answer-unreadable': 'Your answer to the purchase notice could not be read, so it was not taken as silence. Nothing was bought. Check that the owner inbox store is readable, then start the purchase again.',
   'budget-held': 'Another purchase in progress is holding the budget this one needs. Nothing was submitted. Wait for that purchase to finish, then start this one again.',
   'cart-unconfirmed': 'A cart line could not be confirmed as the item you asked for. Nothing was bought. Check the cart, or name the item more exactly, then start the purchase again.',
   'recurring-unconfirmed': 'The checkout could not be confirmed as a single payment. Nothing was bought. Start the purchase again with an order summary that holds only this order.',

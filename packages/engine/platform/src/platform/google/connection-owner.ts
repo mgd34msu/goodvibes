@@ -75,8 +75,12 @@ export class GoogleConnectionOwner {
   readonly #options: GoogleConnectionOwnerOptions;
   readonly #now: () => number;
   #held: GoogleConnection | null = null;
-  /** One resolution at a time, so callers arriving together share one manager. */
-  #pending: Promise<GoogleConnection | null> | null = null;
+  /**
+   * One resolution at a time, so callers arriving together share one manager.
+   * Joined only by a caller at the revision it started at: one that arrives
+   * after a credential change starts its own resolution.
+   */
+  #pending: { readonly promise: Promise<GoogleConnection | null>; readonly revision: number } | null = null;
   /** Moves when a Google credential or client setting changes; a held connection is current while it is unchanged. */
   #revision = 0;
   /** The revision the held connection (or the stored absence) was resolved at; -1 when it must be resolved again. */
@@ -109,23 +113,26 @@ export class GoogleConnectionOwner {
     }
     if (watch && this.#resolvedAt === this.#revision) return this.#held;
     const pending = this.#pending;
-    if (pending !== null) return pending;
+    if (pending !== null && pending.revision === this.#revision) return pending.promise;
     const attempt = this.#resolve(options);
-    this.#pending = attempt;
+    const entry = { promise: attempt, revision: this.#revision };
+    this.#pending = entry;
     try {
       return await attempt;
     } finally {
-      if (this.#pending === attempt) this.#pending = null;
+      if (this.#pending === entry) this.#pending = null;
     }
   }
 
   async #resolve(options: {
     readonly sources?: GoogleConnectionSources;
     readonly signedInAccount?: string | null;
-  }): Promise<GoogleConnection | null> {
+  }, retried = false): Promise<GoogleConnection | null> {
     const sources = options.sources ?? this.#options.sources;
     const revision = this.#revision;
     const credentials = await resolveGoogleCredentials(sources);
+    // A change landed while the store was read: what was read may mix the old and new grant, so read once more.
+    if (this.#revision !== revision && !retried) return this.#resolve(options, true);
     // A change that landed while the store was read leaves this resolution unmarked, so the next call reads again.
     const settle = (): void => { if (this.#revision === revision) this.#resolvedAt = revision; };
     if (credentials === null) {

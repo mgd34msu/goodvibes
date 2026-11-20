@@ -345,6 +345,40 @@ export type ConfigUnsubscribe = () => void;
  * Load order: shipped defaults < frontend defaults < global < project < shared < daemon < invocation overrides
  * API keys are never persisted, loaded from env vars only.
  */
+/** Every leaf of a settings document by dotted path (a non-empty object is a branch; anything else, arrays included, a leaf). */
+function settingsLeaves(document: Record<string, unknown>): Map<string, unknown> {
+  const leaves = new Map<string, unknown>();
+  const walk = (value: unknown, prefix: string): void => {
+    if (value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0) {
+      for (const [field, child] of Object.entries(value)) walk(child, prefix ? `${prefix}.${field}` : field);
+    } else if (prefix) leaves.set(prefix, value);
+  };
+  walk(document, '');
+  return leaves;
+}
+
+/**
+ * Three-way merge of a bulk settings save: `baseline` is what the file held
+ * when the save's snapshot (`ours`) was taken, `theirs` what it holds now.
+ * Per leaf, the side that changed it wins; both changing it to different
+ * values is a conflict, named.
+ */
+function mergeBulkSettingsSave(baseline: Record<string, unknown>, ours: Record<string, unknown>, theirs: Record<string, unknown>):
+  { readonly result: Record<string, unknown>; readonly conflicts: string[] } {
+  const base = settingsLeaves(baseline), mine = settingsLeaves(ours), other = settingsLeaves(theirs);
+  const result: Record<string, unknown> = {};
+  const conflicts: string[] = [];
+  for (const key of new Set([...base.keys(), ...mine.keys(), ...other.keys()])) {
+    const b = base.get(key), o = mine.get(key), t = other.get(key);
+    const chosen = isDeepStrictEqual(o, b) ? { present: other.has(key), value: t }
+      : isDeepStrictEqual(t, b) || isDeepStrictEqual(o, t) ? { present: mine.has(key), value: o }
+        : undefined;
+    if (!chosen) { conflicts.push(key); continue; }
+    if (chosen.present) writeRawDotPath(result, key, structuredClone(chosen.value));
+  }
+  return { result, conflicts };
+}
+
 export class ConfigManager {
   readonly #workspaceOwner: Readonly<{
     workingDirectory: string | null;
@@ -2023,13 +2057,45 @@ export class ConfigManager {
     // A bulk save writes the working view: load any outside edit first, so it is kept, not erased.
     this._fileWatch?.poll();
     this.advanceConfigurationIncarnation();
-    const minimal = this.destinationSnapshot('global', this.configPath);
+    const baseline: Record<string, unknown> = {};
+    const minimal = this.destinationSnapshot('global', this.configPath, baseline);
     this.preserveHostSettingsForBulkSave(minimal, this.configPath);
     const staged = this.runtimeState.fork();
     staged.acceptBulkSnapshot(this.withoutDaemonOwned(minimal), 'global', this.hostSettings.keys());
     const effective = staged.compose();
-    this.#replaceSettingsFile(this.configPath, () => minimal);
+    this.#saveBulkSnapshot(this.configPath, minimal, baseline);
     this.publishState(staged, effective);
+  }
+
+  /**
+   * Write a bulk save's snapshot under the file's lock, compared with what the
+   * file held when the snapshot was taken (`baseline`, read once after the
+   * watcher was polled). Unchanged since: the snapshot replaces it. Changed by
+   * another writer in between: per key, a key this save did not change keeps
+   * the other writer's value, a key only this save changed takes this save's,
+   * and a key both changed differently refuses the whole save, naming it,
+   * with nothing written; the other writer's change is then loaded. Costs no
+   * read beyond the one the lock already does.
+   */
+  #saveBulkSnapshot(path: string, ours: Record<string, unknown>, baseline: Record<string, unknown>): void {
+    let conflicts: string[] = [];
+    try {
+      this.#updateSettingsFile(path, raw => {
+        let next = ours;
+        if (!isDeepStrictEqual(raw, baseline)) {
+          const merged = mergeBulkSettingsSave(baseline, ours, raw);
+          if (merged.conflicts.length > 0) { conflicts = merged.conflicts; throw new Error('bulk save conflict'); }
+          next = merged.result;
+        }
+        for (const key of Object.keys(raw)) delete raw[key];
+        Object.assign(raw, next);
+      });
+    } catch (error) {
+      if (conflicts.length === 0) throw error;
+      this._fileWatch?.poll();
+      throw new Error(`Settings were not saved: another process changed ${conflicts.join(', ')} in ${path} after this one loaded it, and this save changes ${conflicts.length === 1 ? 'it' : 'them'} too. `
+        + 'Nothing was written and the other change is loaded now; set the value again to keep yours.');
+    }
   }
 
   /**
@@ -2041,14 +2107,16 @@ export class ConfigManager {
    * The reader-floor marker and values the loader could not read are kept as
    * they are on disk, so a bulk save never erases what it did not understand.
    */
-  private destinationSnapshot(tier: 'global' | 'project', path: string): Record<string, unknown> {
+  private destinationSnapshot(tier: 'global' | 'project', path: string, baseline: Record<string, unknown>): Record<string, unknown> {
     // Read without quarantining: an unreadable file contributes nothing here, and
-    // the write below replaces it exactly as a bulk save always has.
+    // the write below replaces it exactly as a bulk save always has. What was
+    // read is also `baseline`, the state the save compares with under the lock.
     let disk: Record<string, unknown> = {};
     try {
       const parsed: unknown = existsSync(path) ? JSON.parse(readFileSync(path, 'utf-8')) : {};
       if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) disk = parsed as Record<string, unknown>;
     } catch { /* unreadable: nothing to preserve */ }
+    Object.assign(baseline, structuredClone(disk));
     const snapshot = this.runtimeState.bulkSnapshot();
     // A project save is the explicit "write the effective config here" snapshot,
     // so global values may come along; values owned by the shared and daemon
@@ -2097,12 +2165,13 @@ export class ConfigManager {
     if (!this.projectConfigPath) {
       throw new Error('ConfigManager.saveProject requires an explicit workingDir.');
     }
-    const minimal = this.destinationSnapshot('project', this.projectConfigPath);
+    const baseline: Record<string, unknown> = {};
+    const minimal = this.destinationSnapshot('project', this.projectConfigPath, baseline);
     this.preserveHostSettingsForBulkSave(minimal, this.projectConfigPath);
     const staged = this.runtimeState.fork();
     staged.acceptBulkSnapshot(this.withoutDaemonOwned(minimal), 'project', this.hostSettings.keys());
     const effective = staged.compose();
-    this.#replaceSettingsFile(this.projectConfigPath, () => minimal);
+    this.#saveBulkSnapshot(this.projectConfigPath, minimal, baseline);
     this.publishState(staged, effective);
   }
 

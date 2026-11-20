@@ -273,7 +273,7 @@ On top of the files under "Project instructions", the Agent applies:
 | `setup` / `onboarding` | Opens the Agent workspace instead of the onboarding wizard. `setup pair [--name <device-name>] [--apply]` and `setup unpair` replace `host pair` and `host unpair`. |
 | `auth` | Read only: `auth`, `auth status`, `auth review`, `auth users`, `auth sessions`. User administration is done with `goodvibes auth` or in the daemon. |
 | `tasks` | `tasks list` and `tasks show <taskId>` read the connected host's tasks; submission is refused. |
-| `bundle` | `bundle export [path]`, `bundle inspect <path>`, `bundle import <path> [--yes]`. Import checks every value before changing any and without `--yes` lists what it would set and exits `2`. |
+| `bundle` | `bundle export [path]`, `bundle inspect <path>`, `bundle import <path> [--yes]`. Import checks every value before changing any and without `--yes` lists what it would set and exits `2`. A host on another machine (`controlPlane.host`) gets its settings with its own pairing or `GOODVIBES_CONNECTED_HOST_TOKEN`, never this machine's daemon token; with neither the import is refused and nothing is sent. |
 | `/model`, `/provider` | `/provider add <name> <baseURL> [apiKey]` also takes an API key. |
 | `/settings` | `/settings [category|key|list|get <key>|set <key> <value>|reset <key>]` reads and writes settings directly; `/config` is hidden. |
 | `/memory` (alias `/mem`) | The same command as the terminal app's `/recall`, so every `/recall` subcommand works (`add`, `search`, `get`, `edit`, `list`, `queue`, `review`, `stale`, `contradict`, `promote`, `link`, `remove`, `export`, `import`, `snapshots`, `restore` and the others). Bare `/memory` lists the records instead of opening a view. |

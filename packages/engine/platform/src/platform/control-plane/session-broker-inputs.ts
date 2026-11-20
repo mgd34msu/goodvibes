@@ -448,15 +448,18 @@ export function markChannelReplyOwedInputs(store: SharedSessionInputStore, sessi
 }
 
 /**
- * Record that an agent's answer was handed to the channel its message came
- * from: every channel row of the agent says `sent`, so a report of the same
- * answer repeated after a restart is not sent again. Returns whether a row
- * changed (and so needs writing).
+ * Record that an agent's answer was handed to the channel route it was sent
+ * on: the agent's rows of that route say `sent`, so a report of the same
+ * answer repeated after a restart is not sent again. Rows of another route the
+ * same agent answers stay owed until their own send. Without `routeId`, every
+ * channel row of the agent. Returns whether a row changed (and so needs
+ * writing).
  */
-export function settleChannelReplyInputs(store: SharedSessionInputStore, sessionId: string, agentId: string): boolean {
+export function settleChannelReplyInputs(store: SharedSessionInputStore, sessionId: string, agentId: string, routeId?: string): boolean {
   let changed = false;
   for (const entry of store.inputs.get(sessionId) ?? []) {
     if (entry.activeAgentId !== agentId || entry.routeId === undefined || isDelegatedSessionInput(entry)) continue;
+    if (routeId !== undefined && entry.routeId !== routeId) continue;
     if (entry.metadata?.[CHANNEL_REPLY_METADATA_KEY] === 'sent') continue;
     updateSharedSessionInput(store, sessionId, entry.id, (row) => ({
       ...row, metadata: { ...row.metadata, [CHANNEL_REPLY_METADATA_KEY]: 'sent' },

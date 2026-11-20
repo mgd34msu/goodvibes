@@ -177,15 +177,26 @@ export async function applyRemoteSettingsImportPrecondition(handle: RemoteSettin
   const none = Object.freeze([]) as readonly string[];
   const signal = restriction.signal ? (entry.restriction.signal ? AbortSignal.any([restriction.signal, entry.restriction.signal]) : restriction.signal) : entry.restriction.signal;
   let response: Response;
+  // Set the moment the request is handed to fetch: before it, a cancellation or a stale source means nothing was sent;
+  // after it, the daemon may have received the import and applied it, so a cancellation is not "nothing was applied".
+  let dispatched = false;
   try {
     assertSource(entry); restriction.signal?.throwIfAborted(); assertSynchronous(restriction.assertCurrent);
+    dispatched = true;
     response = await entry.fetchImpl(entry.url, { method: 'POST', headers: entry.headers, redirect: 'error',
       body: JSON.stringify({ settingsImportPrecondition: { version: 1, action: 'apply', reference: entry.reference } }),
       signal: settingsOwnerSignal(entry.timeoutMs, signal) });
   } catch (error) {
-    if (error instanceof SettingsRefusalError || signal?.aborted) {
+    if (!dispatched) {
       return Object.freeze({ status: 'unknown', completedPaths: none, refused: true as const, failure: settingsOwnerRefusal({
         code: 'SETTINGS_IMPORT_CANCELLED', state: 'settings import not sent; nothing was applied', reason: 'The import was cancelled or went stale before it was sent', next: ['Capture the import again'] }).refusal });
+    }
+    if (signal?.aborted) {
+      return Object.freeze({ status: 'unknown', completedPaths: none, failure: settingsOwnerRefusal({
+        code: 'SETTINGS_IMPORT_OUTCOME_UNKNOWN', state: 'the settings import was sent; whether the daemon applied it is not known',
+        reason: `The import was cancelled after it was sent to the daemon (import ${entry.reference}), so its answer was not read`,
+        next: ['Read the imported settings to see which values took effect before importing again', 'Capture the import again to check: a capture that finds every value already in place has nothing left to apply'],
+        retryable: false }).refusal });
     }
     const failure = settingsOwnerTransportFailure(SUBJECT, error, { url: entry.facts.endpoint, applying: true });
     return Object.freeze({ status: 'unknown', completedPaths: none, ...(failure.notSent ? { refused: true as const } : {}), failure: failure.error.refusal });

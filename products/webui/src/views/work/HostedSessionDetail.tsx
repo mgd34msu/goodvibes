@@ -16,7 +16,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { LogOut, OctagonX, Square } from 'lucide-react';
+import { LogOut, OctagonX, Share2, Square } from 'lucide-react';
 import { getClientLifetime, isClientLifetimeCurrent } from '../../lib/client-lifetime';
 import { hostedSessionDetachBeacon, client as platformClient } from '../../lib/goodvibes';
 import type { HostedSessionHistoryMessage, HostedSessionRecord } from '../../lib/goodvibes';
@@ -47,6 +47,7 @@ import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
 import { DetailPane, DetailSection, Facts, SkeletonRows } from '../../components/data-view/DataView';
 import { Button } from '../../components/ui/Button';
+import { Field, Input } from '../../components/ui/Field';
 import { StatusDot } from '../../components/ui/StatusDot';
 import { SteerComposer } from '../sessions/SteerComposer';
 import { sentenceCase } from './work-items';
@@ -368,6 +369,42 @@ export function HostedTurnStop({ sessionId, attachment }: { sessionId: string; a
   );
 }
 
+/**
+ * Share a hosted session with another sign-in or paired device: the daemon
+ * adds it to the session's owners (sessions.hosted.share), so it may attach,
+ * read the transcript and watch the turns live. Attaching alone never does.
+ * Only an owner of the session or an admin may share; the daemon's refusal is
+ * shown as it was said.
+ */
+export function HostedSessionShare({ sessionId }: { sessionId: string }) {
+  const { toast } = useToast();
+  const [principal, setPrincipal] = useState('');
+  const share = useMutation({
+    mutationFn: (principalId: string) => platformClient.operator.sessions.hosted.share(sessionId, principalId),
+    onSuccess: (result, principalId) => {
+      setPrincipal('');
+      toast({ title: result.added ? `Shared with ${principalId}` : `${principalId} already shares this session`, tone: 'info' });
+    },
+    onError: (error: unknown) => {
+      toast({ title: 'Could not share the session', description: formatError(error), tone: 'danger' });
+    },
+  });
+  const trimmed = principal.trim();
+  return (
+    <form
+      className="work-share"
+      onSubmit={(event) => { event.preventDefault(); if (trimmed) share.mutate(trimmed); }}
+    >
+      <Field label="Share with" help="A user name, or pairing:<id> for a paired device. They can then open this session, read it and watch it live.">
+        <Input value={principal} onChange={(event) => setPrincipal(event.target.value)} autoComplete="off" spellCheck={false} />
+      </Field>
+      <Button size="sm" type="submit" icon={<Share2 aria-hidden="true" />} disabled={!trimmed || share.isPending}>
+        {share.isPending ? 'Sharing…' : 'Share'}
+      </Button>
+    </form>
+  );
+}
+
 export function HostedSessionDetail({
   attachment,
   fallbackTitle,
@@ -455,6 +492,11 @@ export function HostedSessionDetail({
             <ul className="work-list" aria-label="Running tools">
               {attachment.activeToolCalls.map((call) => <li key={call.callId}>Running: {call.tool}</li>)}
             </ul>
+          )}
+          {!closed && (
+            <DetailSection title="Share">
+              <HostedSessionShare sessionId={session.id} />
+            </DetailSection>
           )}
           <DetailSection title="Continue session">
             {!closed && session.status === 'running' && <HostedTurnStop sessionId={session.id} attachment={attachment} />}

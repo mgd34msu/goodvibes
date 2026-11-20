@@ -47,6 +47,12 @@ export interface ManagedServiceStatus {
    */
   readonly accepted?: string | undefined;
   /**
+   * The action was handed to the service manager and nothing has seen it
+   * finish yet (launchd runs `kickstart` and `bootout` after this daemon
+   * answers): `check` is the command that tells whether it did.
+   */
+  readonly pending?: { readonly check: string; readonly since: number } | undefined;
+  /**
    * One honest line about login lingering after an install on systemd:
    * verified-on means the daemon starts at boot; anything else names the
    * exact command the user can run once themselves.
@@ -633,6 +639,37 @@ export class PlatformServiceManager {
   }
 
   /**
+   * Whether the service manager has not taken the definition on disk yet, so a
+   * matching file alone does not make it current: systemd has not loaded the
+   * unit, reports a pending `daemon-reload`, or cannot say (the reload runs
+   * again); a Windows logon task is missing. launchd reads the plist when it
+   * loads the job, so nothing is pending there.
+   */
+  registrationPending(): boolean {
+    return this.drive(this.registrationPendingFlow());
+  }
+
+  private *registrationPendingFlow(): ServiceFlow<boolean> {
+    this.assertCurrent();
+    const platform = detectPlatform(String(this.configManager.get('service.platform')));
+    const serviceName = resolveServiceName(this.configManager, this.defaultServiceName);
+    if (platform === 'systemd') {
+      const result = yield { run: ['systemctl', '--user', 'show', '-p', 'NeedDaemonReload', '-p', 'LoadState', `${serviceName}.service`] };
+      if ((result.status ?? 1) !== 0) return true;
+      const properties = new Map((result.stdout ?? '').split('\n').map((line) => {
+        const at = line.indexOf('=');
+        return [line.slice(0, at).trim(), line.slice(at + 1).trim()] as const;
+      }));
+      return properties.get('NeedDaemonReload') !== 'no' || properties.get('LoadState') !== 'loaded';
+    }
+    if (platform === 'windows') {
+      const result = yield { run: ['schtasks', '/Query', '/TN', serviceName] };
+      return (result.status ?? 1) !== 0;
+    }
+    return false;
+  }
+
+  /**
    * Every public method below is written once, as a flow of service-manager
    * commands, and run by one of two drivers: the synchronous one for the
    * terminal apps and the daemon CLI (a separate process, which may wait), and
@@ -865,6 +902,7 @@ export class PlatformServiceManager {
     const status = yield* this.statusFlow();
     let actionError: string | undefined;
     let accepted: string | undefined;
+    let pendingSince: number | undefined;
     if (existsSync(status.path)) {
       const self = fromDaemon && (yield* this.runsThisDaemonFlow(status));
       if (self && status.platform === 'systemd') {
@@ -885,8 +923,12 @@ export class PlatformServiceManager {
         // launchd ends this process the moment the job is booted out, so the file goes first.
         this.assertCurrent();
         rmSync(status.path, { force: true });
-        yield { detach: ['launchctl', 'bootout', launchdTarget(status.serviceName)] };
-        accepted = 'The service was removed and launchd is unloading it: this daemon stops after this answer and will not start at login again.';
+        const detached = yield { detach: ['launchctl', 'bootout', launchdTarget(status.serviceName)] };
+        if (detached.status !== 0) actionError = `the service file was removed, but launchctl bootout could not be started, so this daemon is still running: ${commandFailureText(detached)}`;
+        else {
+          accepted = 'The service file was removed and launchd was asked to unload the job; nothing has seen it unload yet. This daemon stops when it does and will not start at login again.';
+          pendingSince = Date.now();
+        }
       } else {
         // Stop and unregister while the definition still names the service, so
         // removing the file does not leave a running, autostarting daemon behind.
@@ -924,6 +966,7 @@ export class PlatformServiceManager {
       lastAction: 'uninstall',
       ...(actionError === undefined ? {} : { actionError }),
       ...(accepted === undefined ? {} : { accepted }),
+      ...(pendingSince === undefined ? {} : { pending: { check: 'goodvibes service status', since: pendingSince } }),
     };
   }
 
@@ -1118,18 +1161,28 @@ export class PlatformServiceManager {
           // The stop reaches this process after the answer: the manager is asked to queue the job, not to wait for it.
           const queued = yield { run: ['systemctl', '--user', '--no-block', action, `${serviceName}.service`] };
           if ((queued.status ?? 1) !== 0) return { ...before, lastAction: action, actionError: commandFailureText(queued) };
-        } else {
-          // launchd stops and starts the job itself, so nothing depends on this process outliving the stop.
-          yield { detach: action === 'restart'
-            ? ['launchctl', 'kickstart', '-k', launchdTarget(serviceName)]
-            : ['launchctl', 'bootout', launchdTarget(serviceName)] };
+          return {
+            ...before,
+            lastAction: action,
+            accepted: action === 'restart'
+              ? 'The service manager accepted the restart: this daemon stops after this answer and comes back in a few seconds.'
+              : 'The service manager accepted the stop: this daemon stops after this answer.',
+          };
         }
+        // launchd stops and starts the job itself, so nothing depends on this
+        // process outliving the stop; but launchctl answers only after this
+        // daemon has answered, so the receipt says what was asked, not done.
+        const detached = yield { detach: action === 'restart'
+          ? ['launchctl', 'kickstart', '-k', launchdTarget(serviceName)]
+          : ['launchctl', 'bootout', launchdTarget(serviceName)] };
+        if (detached.status !== 0) return { ...before, lastAction: action, actionError: `launchctl could not be started: ${commandFailureText(detached)}` };
         return {
           ...before,
           lastAction: action,
           accepted: action === 'restart'
-            ? 'The service manager accepted the restart: this daemon stops after this answer and comes back in a few seconds.'
-            : 'The service manager accepted the stop: this daemon stops after this answer.',
+            ? 'Asked launchd to restart the service; nothing has seen it come back yet. This daemon stops after this answer.'
+            : 'Asked launchd to stop the service; nothing has seen it stop yet. This daemon stops when launchd stops it.',
+          pending: { check: 'goodvibes service status', since: Date.now() },
         };
       }
     }

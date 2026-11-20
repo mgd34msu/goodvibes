@@ -162,7 +162,10 @@ export interface UnparsedPlanLine {
 export interface OccasionConflict {
   readonly occasionId: string;
   readonly title: string;
-  /** Every distinct date declared for this occasion, in document order. */
+  /**
+   * Every distinct date declared for this occasion, in document order. One
+   * date when the lines agree on it and differ only otherwise (or not at all).
+   */
   readonly dates: readonly string[];
   readonly lineIndexes: readonly number[];
 }

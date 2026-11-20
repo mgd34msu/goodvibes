@@ -78,8 +78,10 @@ export interface ChannelDeliveryResult {
   readonly truncated?: boolean | undefined;
   /** How many characters of the body did not go out, when `truncated`. */
   readonly omittedChars?: number | undefined;
-  /** How many messages the body went out as, when it was longer than one message on the surface. */
+  /** How many messages of the body went out, when it was longer than one message on the surface. */
   readonly parts?: number | undefined;
+  /** How many messages the body was split into, when more than one; `parts` below this means the rest did not arrive. */
+  readonly partsTotal?: number | undefined;
   /**
    * True when nothing new was sent: the same announcement (`announces`) went
    * to this target moments ago, so the recipient already has it.

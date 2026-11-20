@@ -101,6 +101,37 @@ export interface ManagedWorktreeMeta {
    * (worktrees.snapshot). Absent when no setup has ever run for this worktree.
    */
   readonly setup?: WorktreeSetupResult | undefined;
+  /**
+   * The retention sweep's claim on this worktree while it removes it: taken
+   * under the register lock right before the removal, in the same section that
+   * checked nothing protects the tree. While it is live (`expiresAt` ahead), a
+   * keep, pause, resume or attach is refused instead of being written and then
+   * ignored by a removal already under way; an expired claim (the sweeping
+   * process died) is cleared by the next write of the record.
+   */
+  readonly removal?: WorktreeRemovalClaim | undefined;
+}
+
+/** Who is removing a worktree, until when (see {@link ManagedWorktreeMeta.removal}). */
+export interface WorktreeRemovalClaim {
+  /** `${pid}:${startedAt}` of the sweeping process. */
+  readonly owner: string;
+  readonly expiresAt: number;
+}
+
+/** How long a removal claim holds: a `git worktree remove` takes well under this; a dead sweeper's claim lapses after it. */
+const REMOVAL_CLAIM_TTL_MS = 2 * 60_000;
+
+/** The live removal claim on a record, or undefined. */
+function liveRemoval(meta: ManagedWorktreeMeta | undefined, now: number): WorktreeRemovalClaim | undefined {
+  return meta?.removal && meta.removal.expiresAt > now ? meta.removal : undefined;
+}
+
+/** A keep, pause, resume or attach of a tree being removed is refused, saying so. */
+function refuseWhileRemoving(meta: ManagedWorktreeMeta | undefined, normalized: string, action: string): void {
+  if (!liveRemoval(meta, Date.now())) return;
+  throw new Error(`${normalized} is being removed by the worktree retention sweep right now, so it was not ${action}. `
+    + 'Nothing protected it when the removal started (not kept, paused or attached); its branch is kept unless it was merged. /worktree review shows what remains.');
 }
 
 interface WorktreeStore {
@@ -201,6 +232,7 @@ function validateRecord(value: unknown): ManagedWorktreeMeta | null {
   const sessionId = candidate['sessionId'];
   const taskId = candidate['taskId'];
   const setup = candidate['setup'];
+  const removal = candidate['removal'] as Record<string, unknown> | null | undefined;
   return {
     path,
     // Both narrowed above against their closed literal sets, so these are
@@ -214,6 +246,8 @@ function validateRecord(value: unknown): ManagedWorktreeMeta | null {
     // through when it is an object and dropped when it is not, so a malformed
     // receipt cannot make an otherwise-good record unreadable.
     ...(setup !== null && typeof setup === 'object' ? { setup: setup as WorktreeSetupResult } : {}),
+    ...(removal !== null && typeof removal === 'object' && typeof removal['owner'] === 'string' && isFiniteNumber(removal['expiresAt'])
+      ? { removal: { owner: removal['owner'], expiresAt: removal['expiresAt'] } } : {}),
     updatedAt,
   };
 }
@@ -528,6 +562,7 @@ export class WorktreeRegistry {
         ...(meta?.sessionId ? { sessionId: meta.sessionId } : {}),
         ...(meta?.taskId ? { taskId: meta.taskId } : {}),
         ...(meta?.setup ? { setup: meta.setup } : {}),
+        ...(meta?.removal ? { removal: meta.removal } : {}),
         updatedAt: meta?.updatedAt ?? Date.now(),
       };
     });
@@ -557,6 +592,7 @@ export class WorktreeRegistry {
           ...(record.sessionId ? { sessionId: record.sessionId } : {}),
           ...(record.taskId ? { taskId: record.taskId } : {}),
           ...(record.setup ? { setup: record.setup } : {}),
+          ...(record.removal ? { removal: record.removal } : {}),
           updatedAt: record.updatedAt,
         };
       }
@@ -685,6 +721,18 @@ export class WorktreeRegistry {
       if (changed) { keepReason(changed); continue; }
       const kept = await this.prepareRemoval(row.path, evaluation);
       if (kept) { keepReason(kept); continue; }
+      // The claim, right before the removal: checked and written in one register section, so a keep,
+      // pause or attach made while prepareRemoval ran keeps the tree, and one made from now on is refused.
+      let claimed: WorktreeKeepReason | null;
+      try {
+        claimed = this.claimRemoval(storePath, row);
+      } catch (error) {
+        const message = summarizeError(error);
+        report.failed.push({ path: row.path, error: message });
+        logger.warn('worktree retention: a worktree was kept because its removal did not complete', { path: row.path, error: message });
+        continue;
+      }
+      if (claimed) { keepReason(claimed); continue; }
       try {
         // Never forced: git refuses a tree with modified or untracked files, whatever was read before.
         await this.git.worktreeRemove(row.path);
@@ -709,6 +757,8 @@ export class WorktreeRegistry {
       } catch (error) {
         // Another process sweeping at the same moment may have removed it first; that is not a failure here.
         if (!existsSync(row.path)) continue;
+        // The tree stays: the claim goes, so it can be kept, paused or attached again at once.
+        this.releaseRemoval(storePath, row.path);
         const message = summarizeError(error);
         report.failed.push({ path: row.path, error: message });
         logger.warn('worktree retention: a worktree was kept because its removal did not complete', { path: row.path, error: message });
@@ -735,6 +785,49 @@ export class WorktreeRegistry {
     const existing = await runGit(this.workingDirectory, ['rev-parse', '--verify', '-q', `refs/heads/${evaluation.saveAs}^{commit}`]);
     if (existing.ok && existing.out === assessment.head) return null;
     return { why: 'detached', detail: `${assessment.kind === 'unmerged' ? assessment.commits : 0} commit(s) on its detached HEAD are on no branch, and branch ${evaluation.saveAs} to hold them could not be made` };
+  }
+
+  /**
+   * Take the removal claim on `row` if nothing protects it now: the register
+   * read under its lock, compared with the listing the decision used, and the
+   * claim written in the same section. Returns why the tree stays, or null
+   * when the claim was taken. One register write per removed tree.
+   */
+  private claimRemoval(storePath: string, row: WorktreeStatusRecord): WorktreeKeepReason | null {
+    return withRegistryWriteLock<WorktreeKeepReason | null>(storePath, () => {
+      const store = readStore(storePath, true, true);
+      const current = store.records[row.path];
+      const now = Date.now();
+      if (current) {
+        const guardedNow = sweepProtection({ ...row, state: current.state, sessionId: current.sessionId, taskId: current.taskId });
+        if (guardedNow) return guardedNow;
+        if (current.state !== row.state || current.sessionId !== row.sessionId || current.taskId !== row.taskId || current.updatedAt !== row.updatedAt) {
+          return { why: 'protected', detail: 'its register entry changed while it was being assessed; the next sweep decides again' };
+        }
+        const held = liveRemoval(current, now);
+        if (held) return { why: 'protected', detail: `another process (${held.owner}) is removing it` };
+      }
+      const base: ManagedWorktreeMeta = current ?? { path: row.path, kind: row.kind, state: row.state, updatedAt: row.updatedAt };
+      store.records[row.path] = { ...base, removal: { owner: `${process.pid}:${now}`, expiresAt: now + REMOVAL_CLAIM_TTL_MS } };
+      writeStore(store, storePath);
+      return null;
+    });
+  }
+
+  /** Drop this process's removal claim after a removal that did not happen. Best effort: an unreleased claim lapses by itself. */
+  private releaseRemoval(storePath: string, path: string): void {
+    try {
+      withRegistryWriteLock(storePath, () => {
+        const store = readStore(storePath, true, true);
+        const current = store.records[path];
+        if (!current?.removal || !current.removal.owner.startsWith(`${process.pid}:`)) return;
+        const { removal: _released, ...rest } = current;
+        store.records[path] = rest;
+        writeStore(store, storePath);
+      });
+    } catch (error) {
+      logger.warn('worktree retention: a removal claim could not be released; it lapses by itself', { path, error: summarizeError(error) });
+    }
   }
 
   /** The retention decision for one product worktree: the marker says which rule applies. */
@@ -904,6 +997,7 @@ export class WorktreeRegistry {
       if (!existing && !gitKnows) {
         throw new Error(`No worktree exists at ${normalized}, so nothing was attached. List worktrees to see the paths git knows about, then retry with one of those.`);
       }
+      refuseWhileRemoving(existing, normalized, 'attached');
       const classified = classifyWorktreePath(normalized, this.workingDirectory);
       store.records[normalized] = {
         path: normalized,
@@ -943,6 +1037,7 @@ export class WorktreeRegistry {
       if (!existing) {
         throw new Error(`No worktree exists at ${normalized}; nothing was changed. /worktree review lists the worktrees git knows about; retry with one of those paths.`);
       }
+      refuseWhileRemoving(existing, normalized, `marked ${state}`);
       store.records[normalized] = {
         path: normalized,
         kind: existing.kind,
@@ -977,6 +1072,7 @@ export class WorktreeRegistry {
         ...(existing?.sessionId ? { sessionId: existing.sessionId } : {}),
         ...(existing?.taskId ? { taskId: existing.taskId } : {}),
         setup,
+        ...(liveRemoval(existing, Date.now()) ? { removal: existing!.removal } : {}),
         updatedAt: Date.now(),
       };
       writeStore(store, getStorePath(this.workingDirectory));

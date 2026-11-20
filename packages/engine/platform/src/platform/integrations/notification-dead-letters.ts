@@ -5,6 +5,7 @@
  */
 import { NotificationEnvelope, type NotificationPrivacyReader } from '../runtime/notification-envelope.js';
 import { readNotificationsMetadataOnly } from '../runtime/notification-privacy.js';
+import type { TargetChange } from '@goodvibes-jev/engine/errors';
 import type { DeadLetterCodec, DeadLetterEntry, DeliveryOutcome } from './delivery.js';
 
 /** One failed notification, as an operator or the owner sees it. */
@@ -25,13 +26,27 @@ export interface NotificationDeadLetter {
 /** The result of resending one failed notification. */
 export interface NotificationReplayResult {
   readonly id: string;
-  readonly outcome: DeliveryOutcome | 'not-found';
+  /**
+   * `destination-changed`: the channel now posts somewhere other than where
+   * the notification failed, so it was not sent and stays in the list; resend
+   * with `toCurrent` to send it to the destination configured now.
+   */
+  readonly outcome: DeliveryOutcome | 'not-found' | 'destination-changed';
+  /** With `destination-changed`: the destination it failed on and the one configured now. */
+  readonly reason?: string | undefined;
+  readonly changes?: readonly TargetChange[] | undefined;
+}
+
+/** How a resend treats a channel whose destination changed since the notification failed. */
+export interface NotificationReplayOptions {
+  /** Send to the destination configured now instead of refusing. */
+  readonly toCurrent?: boolean | undefined;
 }
 
 /** A notifier whose failed notifications can be listed and resent. */
 export interface NotificationDeadLetterSource {
   listDeadLetters(): readonly NotificationDeadLetter[];
-  replayDeadLetters(ids?: readonly string[]): Promise<readonly NotificationReplayResult[]>;
+  replayDeadLetters(ids?: readonly string[], options?: NotificationReplayOptions): Promise<readonly NotificationReplayResult[]>;
 }
 
 /**

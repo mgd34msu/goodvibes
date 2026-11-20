@@ -4,7 +4,7 @@ import { voiceCaptureRowVisible, type VoiceCaptureIndicatorState } from '../voic
 import type { ShellFooterView } from '../shell-footer-view.js';
 import { activeTokens } from './theme.js';
 import { renderComposer, COMPOSER_FIXED_ROWS } from './composer.js';
-import { renderStatusLine, type StatusChip } from './status-line.js';
+import { renderStatusLine, type StatusAsks, type StatusChip } from './status-line.js';
 import { renderThrobberLine, type ThrobberState } from './throbber.js';
 import { renderBackToBottomPill, type BackToBottomState } from './back-to-bottom.js';
 import { voiceCaptureChip } from './voice-capture-chip.js';
@@ -20,15 +20,29 @@ export interface SharedShellFooterOptions {
   readonly usage: { available?: boolean; up: number; down: number; cacheRead?: number; cacheWrite?: number; fleetCostUsd?: number | null; /** The session cost as spent (each response at its own model's price), when the caller has it. */ costUsd?: number | undefined };
   readonly showExitNotice: boolean;
   readonly lastCopyTime: number;
-  /** The model the session cost is priced against; not drawn (the header names the model). */
+  /** The model the session cost is priced against. */
   readonly model?: string | undefined;
-  readonly workingDir?: string | undefined;
-  /** The home directory, drawn as ~ at the start of the working directory. */
-  readonly homeDirectory?: string | undefined;
+  /** The serving model's display name: the status bar's `model …` segment. */
+  readonly modelLabel?: string | undefined;
   /** An agent or process view is showing (session-focus.ts). */
   readonly view?: (ShellFooterView | null) | undefined;
-  /** The current branch (and dirty marker), shown beside the directory at rest. */
+  /** The current branch: the status bar's `branch …` segment; absent outside a repository. */
   readonly branch?: string | undefined;
+  /** The working tree differs from HEAD: `branch main, changed`. */
+  readonly branchChanged?: boolean | undefined;
+  /**
+   * The mode in force in words (ModeInForceWords' chosen, inForce, because):
+   * the status bar's `Asks:` segment. Absent: no mode segment.
+   */
+  readonly modeWords?: ({ readonly chosen: string; readonly inForce?: string | undefined; readonly because?: string | undefined } | null) | undefined;
+  /** The key that changes the mode, as bound ("shift+tab"). */
+  readonly modeKey?: string | undefined;
+  /** The mode just changed: the `Asks:` segment flashes (session-permission-mode.ts). */
+  readonly modeFlash?: boolean | undefined;
+  /** Notices not yet seen in the notifications view: `2 notices`; none at zero. */
+  readonly unreadNotices?: number | undefined;
+  /** The key that opens the notifications, as bound ("ctrl+n"). */
+  readonly noticesKey?: string | undefined;
   /** The model's context window; null when it is unknown (the meter says "unknown"). */
   readonly contextWindow?: (number | null) | undefined;
   readonly compactThreshold?: number | undefined;
@@ -97,15 +111,6 @@ export function statusCostText(usage: SharedShellFooterOptions['usage'], model: 
   if (includeFleet && typeof fleet === 'number' && fleet > 0) return `you ${main ?? '~n/a'} · fleet ~$${fmtCost(fleet)}`;
   return main;
 }
-function displayDirectory(workingDir: string | undefined, homeDirectory: string | undefined): string | undefined {
-  if (!workingDir) return undefined;
-  const home = homeDirectory ?? (typeof process !== 'undefined' ? (process.env.HOME ?? '') : '');
-  if (!home) return workingDir;
-  if (workingDir === home) return '~';
-  return workingDir.startsWith(home.endsWith('/') ? home : `${home}/`)
-    ? '~' + workingDir.slice(home.replace(/\/$/, '').length)
-    : workingDir;
-}
 export function promptCursorOffset(info: WrappedPromptCursorInfo): number | undefined {
   if (info.visibleCursorLine < 0) return undefined;
   const precedingChars = info.visibleLines.slice(0, info.visibleCursorLine).reduce((sum: number, line: string) => sum + line.length + 1, 0);
@@ -126,7 +131,7 @@ export function createShellFooter<Options extends SharedShellFooterOptions>(port
   readonly decorateStatus?: ((line: Line) => Line) | undefined;
   readonly hints?: ((options: Options) => readonly Line[]) | undefined;
   readonly barColor: (options: Options) => string;
-  readonly modeChips: (options: Options) => StatusChip[];
+  /** Optional chips after the kept ones (an attached image, the composer's intent), dropped first. */
   readonly flags: (options: Options) => StatusChip[];
   readonly powerNote: (options: Options) => string | undefined;
   readonly cost: (options: Options) => string | null;
@@ -184,9 +189,15 @@ export function createShellFooter<Options extends SharedShellFooterOptions>(port
       }),
     );
 
-    // The left end of the status line: mode, auto-approve, microphone and
-    // sleep are kept at any width; the composer flags are dropped first.
-    const chips = [...ports.modeChips(options), ...safetyChips(options, false), ...ports.flags(options)];
+    // The left end of the status line: the mode's words, then auto-approve
+    // (unless the words already say YOLO), microphone and sleep, kept at any
+    // width; the composer flags are dropped first.
+    const words = options.modeWords ?? null;
+    const asks: StatusAsks | null = words
+      ? { chosen: words.chosen, inForce: words.inForce, because: words.because, key: options.modeKey, flash: options.modeFlash }
+      : null;
+    const saysYolo = words !== null && [words.chosen, words.inForce ?? ''].some((text) => text.includes('YOLO'));
+    const chips = [...safetyChips(options, !saysYolo), ...ports.flags(options)];
 
     const copied = Date.now() - options.lastCopyTime < 2000;
     if (view) {
@@ -210,12 +221,14 @@ export function createShellFooter<Options extends SharedShellFooterOptions>(port
       lastRenderedFooterHeight = lines.length;
       return { lines, height: lines.length };
     }
-    // A click anywhere on the status line (the context bar, the cost) opens Usage.
+    // Each segment opens its view on a click (status-line.ts tagRegion); elsewhere on the row, Usage.
     lines.push(
       decorate(
         paint({
           width: options.width,
+          asks,
           chips,
+          notices: options.unreadNotices && options.unreadNotices > 0 ? { count: options.unreadNotices, key: options.noticesKey } : null,
           notice: options.showExitNotice
             ? { text: 'Press Ctrl+C again to exit', tone: 'error' }
             : copied
@@ -227,8 +240,8 @@ export function createShellFooter<Options extends SharedShellFooterOptions>(port
             ? { escAction: options.promptText.trim().length > 0 ? 'clear input' : options.backToBottom ? 'back to bottom' : undefined }
             : null,
           keys: options.workTreeFocused ? WORK_TREE_KEYS : null,
-          directory: displayDirectory(options.workingDir, options.homeDirectory),
-          branch: options.branch,
+          branch: options.branch ? { name: options.branch, changed: options.branchChanged === true } : null,
+          model: options.modelLabel ?? null,
           background: {
             agents: options.runningAgentCount,
             processes: options.runningProcessCount,

@@ -48,12 +48,19 @@ function splitKeyArguments(values: readonly string[]): { requestedKeys: ConfigKe
 
 type PlannedChange = { readonly key: string; readonly previous: unknown; readonly next: unknown };
 
+/** `apply-staged [--stage <id>] [key ...]`: the stage id the person reviewed, and the rest. */
+function splitStageArgument(args: readonly string[]): { readonly stageId?: string | undefined; readonly rest: readonly string[] } {
+  const at = args.indexOf('--stage');
+  if (at < 0) return { rest: args };
+  return { stageId: args[at + 1], rest: [...args.slice(0, at), ...args.slice(at + 2)] };
+}
+
 /**
  * The setting changes an `apply <path>` or `apply-staged` line would make, read
  * from the bundle file or the staged record with no model and no write; undefined
  * for any other line or one the handler will refuse.
  */
-function plannedManagedChanges(args: readonly string[], ctx: CommandContext): readonly PlannedChange[] | undefined {
+function plannedManagedChanges(args: readonly string[], ctx: CommandContext): (readonly PlannedChange[] & { readonly stageId?: string }) | undefined {
   const config = ctx.platform.configManager;
   if (args[0] === 'apply' && args[1]) {
     const { requestedKeys, invalidKeys } = splitKeyArguments(args.slice(2));
@@ -71,12 +78,14 @@ function plannedManagedChanges(args: readonly string[], ctx: CommandContext): re
       .filter((change) => JSON.stringify(change.previous) !== JSON.stringify(change.next));
   }
   if (args[0] === 'apply-staged') {
-    const { requestedKeys, invalidKeys } = splitKeyArguments(args.slice(1));
+    const { stageId, rest } = splitStageArgument(args.slice(1));
+    const { requestedKeys, invalidKeys } = splitKeyArguments(rest);
     const staged = getSettingsControlPlaneSnapshot(config).stagedManagedBundle;
-    if (invalidKeys.length > 0 || !staged) return undefined;
-    return staged.changes
+    if (invalidKeys.length > 0 || !staged || (stageId !== undefined && staged.id !== stageId)) return undefined;
+    // The stage shown is the one applied: its id goes to the handler as what was reviewed.
+    return Object.assign(staged.changes
       .filter((change) => change.changed && (requestedKeys.length === 0 || requestedKeys.includes(change.key)))
-      .map((change) => ({ key: change.key, previous: change.previousValue, next: change.nextValue }));
+      .map((change) => ({ key: change.key, previous: change.previousValue, next: change.nextValue })), { stageId: staged.id });
   }
   return undefined;
 }
@@ -95,7 +104,7 @@ function readBundleFile(sourcePath: string): unknown {
   }
 }
 
-const MANAGED_USAGE_ARGS = '[review|staged|rollback-history|export <profile> <path>|inspect <path>|stage <path>|apply <path> [key ...]|apply-staged [key ...]|rollback <token>|lock <key> <source> <reason...>|unlock <key>]';
+const MANAGED_USAGE_ARGS = '[review|staged|rollback-history|export <profile> <path>|inspect <path>|stage <path>|apply <path> [key ...]|apply-staged [--stage <id>] [key ...]|rollback <token>|lock <key> <source> <reason...>|unlock <key>]';
 const MANAGED_USAGE = `Usage: /managed ${MANAGED_USAGE_ARGS}`;
 
 export function registerManagedRuntimeCommands(registry: CommandRegistry): void {
@@ -116,9 +125,10 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
         title: 'Apply managed settings that change security?',
         detail: [...describeSetupTransferChanges(changes), 'Each applied key is locked as managed; /managed rollback <token> puts the previous values back.'].join('\n'),
         confirmLabel: 'Apply',
+        ...(changes.stageId !== undefined ? { reviewed: changes.stageId } : {}),
       };
     },
-    async handler(args, ctx) {
+    async handler(args, ctx, reviewed?: unknown) {
       const shellPaths = requireShellPaths(ctx);
       const controlPlaneConfigDir = ctx.platform.configManager.getControlPlaneConfigDir();
       const sub = args[0] ?? 'review';
@@ -215,13 +225,20 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
       }
 
       if (sub === 'apply-staged') {
-        const { requestedKeys, invalidKeys } = splitKeyArguments(args.slice(1));
+        const { stageId, rest } = splitStageArgument(args.slice(1));
+        const { requestedKeys, invalidKeys } = splitKeyArguments(rest);
         if (invalidKeys.length > 0) {
           ctx.print(`Unknown config key(s): ${invalidKeys.join(', ')}`);
           return;
         }
+        if (args.includes('--stage') && !stageId) {
+          ctx.print('Usage: /managed apply-staged [--stage <id>] [key ...] (the id is on the stage line of /managed staged)');
+          return;
+        }
         try {
-          const result = await applyStagedManagedBundle(ctx.platform.configManager, requestedKeys);
+          // The stage the confirmation showed, else the one named with --stage: another stage put there since is refused.
+          const reviewedStageId = typeof reviewed === 'string' ? reviewed : stageId;
+          const result = await applyStagedManagedBundle(ctx.platform.configManager, requestedKeys, reviewedStageId);
           ctx.print(`Staged managed settings applied (${result.appliedCount} changes, rollback ${result.rollbackToken}${result.remainingCount > 0 ? `, ${result.remainingCount} still staged` : ''}).`);
         } catch (error) {
           recordSettingsSyncFailure('managed', summarizeError(error), controlPlaneConfigDir);
@@ -280,7 +297,8 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
           return;
         }
 
-        const result = await applyStagedManagedBundle(ctx.platform.configManager, keyArguments.requestedKeys);
+        // Exactly the stage this line made: another process's stage written in between is refused, not applied.
+        const result = await applyStagedManagedBundle(ctx.platform.configManager, keyArguments.requestedKeys, stage.id);
         ctx.print(`Managed settings bundle applied from ${sourcePath} (${result.appliedCount} changes, risk=${stage.risk}, rollback ${result.rollbackToken}${result.remainingCount > 0 ? `, ${result.remainingCount} still staged` : ''}).${ignoredNote}`);
       } catch (error) {
         recordSettingsSyncFailure('managed', summarizeError(error), controlPlaneConfigDir);

@@ -1,3 +1,4 @@
+import type { Observed } from '@goodvibes-jev/engine/errors';
 import { readdirSync, readFileSync, realpathSync, type Dirent } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { isContractId, isTerminalContractStatus, type Contract } from '../../contract/types.js';
@@ -5,7 +6,7 @@ import type { WorktreeOwnerInfo } from './retention.js';
 
 /** The slice of the contract store the owner lookup needs; tests pass a plain object. */
 export interface ContractLookup {
-  load(contractId: string): Pick<Contract, 'status' | 'completedAt' | 'baseBranch' | 'inputSnapshot'> | null;
+  load(contractId: string): Observed<Pick<Contract, 'status' | 'completedAt' | 'baseBranch' | 'inputSnapshot'>>;
 }
 
 /**
@@ -103,7 +104,8 @@ export function createContractOwnerResolver(workingDirectory: string, contracts:
     let owner: WorktreeOwnerInfo & { readonly inputId?: string | undefined } = UNKNOWN;
     if (isContractId(id)) {
       try {
-        const contract = contracts.load(id);
+        const read = contracts.load(id);
+        const contract = read.kind === 'present' ? read.value : null;
         if (contract) {
           const shared = { baseBranch: contract.baseBranch, inputId: contract.inputSnapshot?.id };
           owner = !isTerminalContractStatus(contract.status) ? { state: 'running', ...shared }

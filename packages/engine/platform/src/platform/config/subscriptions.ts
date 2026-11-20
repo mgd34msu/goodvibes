@@ -4,6 +4,7 @@ import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-j
 import { logger } from '../utils/logger.js';
 import { withSyncFileLock } from './sync-file-lock.js';
 import { summarizeError } from '../utils/error-display.js';
+import { injectiveKeyPart } from '../utils/target-ref.js';
 import { captureStrictJudgmentJson } from '../gate/judgment-result.js';
 import { observeImportFile, assertImportFileCurrent, type ImportFileObservation, type PreparedImportTransitionFacts } from './prepared-import.js';
 import type { PreparedConfigMutationReceipt } from './prepared-mutation.js';
@@ -134,9 +135,14 @@ export interface SubscriptionManagerOptions {
 /** The secret-store key family holding each provider's sign-in tokens. */
 export const SUBSCRIPTION_TOKENS_KEY_PREFIX = 'GOODVIBES_SUBSCRIPTION_TOKENS_';
 
-/** The secret-store key holding `provider`'s access and refresh tokens. */
+/**
+ * The secret-store key holding `provider`'s access and refresh tokens. One
+ * key per provider id, never shared: a plain lowercase id is kept as it is
+ * (`openai` is `..._OPENAI`), and any other id gets its digest appended, so
+ * `My-Service` and `my_service` cannot alias one credential.
+ */
 export function subscriptionTokensKey(provider: string): string {
-  return SUBSCRIPTION_TOKENS_KEY_PREFIX + provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+  return SUBSCRIPTION_TOKENS_KEY_PREFIX + injectiveKeyPart(provider, true);
 }
 
 interface TokenEntry {

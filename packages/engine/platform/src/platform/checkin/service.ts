@@ -449,12 +449,18 @@ export class CheckinService {
         // Settles "certainly not sent" before the transport is entered; the router calls it again at its own send boundary.
         beforeSend();
         deliveryEntered = true;
-        const deliveryId = await this.deps.deliverer.deliver(config.deliveryChannel, message, { signal, assertCurrent: beforeSend });
+        const sent = await this.deps.deliverer.deliver(config.deliveryChannel, message, { signal, assertCurrent: beforeSend });
+        const deliveryId = sent.deliveryId;
         confirmedDelivery = { deliveryId };
+        // A note split into several messages of which only some arrived is
+        // partial, with the parts sent: the owner did not get all of it.
+        const partial = sent.partsTotal !== undefined && (sent.partsSent ?? 0) < sent.partsTotal;
         // Once the transport accepted a send, later revocation cannot erase its delivery receipt.
-        return await this.record(trigger, ranAt, 'delivered', briefingSummary, {
+        return await this.record(trigger, ranAt, partial ? 'partial' : 'delivered', briefingSummary, {
           decisionReason: decision.reason, judgment, deliveredMessage: message,
           deliveryChannel: config.deliveryChannel, deliveryId,
+          ...(sent.partsTotal !== undefined ? { partsSent: sent.partsSent ?? 0, partsTotal: sent.partsTotal } : {}),
+          ...(partial ? { error: `Only ${sent.partsSent ?? 0} of ${sent.partsTotal} messages of the note reached ${config.deliveryChannel}; the rest did not arrive.` } : {}),
         });
       } catch (error) {
         // A persistence failure must not erase known acceptance or fabricate an unknown send.
@@ -503,6 +509,8 @@ export class CheckinService {
       readonly deliveredMessage?: string | undefined;
       readonly deliveryChannel?: string | undefined;
       readonly deliveryId?: string | undefined;
+      readonly partsSent?: number | undefined;
+      readonly partsTotal?: number | undefined;
       readonly error?: string | undefined;
     },
   ): Promise<AutomationCheckinOutcome> {
@@ -517,6 +525,7 @@ export class CheckinService {
       ...(extra.deliveredMessage ? { deliveredMessage: extra.deliveredMessage } : {}),
       ...(extra.deliveryChannel ? { deliveryChannel: extra.deliveryChannel } : {}),
       ...(extra.deliveryId ? { deliveryId: extra.deliveryId } : {}),
+      ...(extra.partsTotal !== undefined ? { partsSent: extra.partsSent ?? 0, partsTotal: extra.partsTotal } : {}),
       ...(extra.error ? { error: extra.error } : {}),
     };
     await this.deps.receipts.append(receipt);
@@ -528,6 +537,12 @@ function toOutcome(outcome: CheckinReceiptOutcome, receipt: CheckinReceipt): Aut
   switch (outcome) {
     case 'delivered':
       return { outcome: 'delivered', summary: `delivered: ${receipt.decisionReason ?? 'contacted user'}`, ...(receipt.deliveryId ? { deliveryId: receipt.deliveryId } : {}) };
+    case 'partial':
+      // Part of the note went out: a retry would repeat it, so the run is not an error, but it says what is missing.
+      return {
+        outcome: 'delivered', summary: `partly delivered: ${receipt.partsSent ?? 0} of ${receipt.partsTotal ?? 0} messages`,
+        ...(receipt.deliveryId ? { deliveryId: receipt.deliveryId } : {}), ...(receipt.error ? { error: receipt.error } : {}),
+      };
     case 'quiet':
       return { outcome: 'quiet', summary: `quiet: ${receipt.decisionReason ?? 'nothing warranted contact'}` };
     case 'error':

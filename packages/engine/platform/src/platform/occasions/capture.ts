@@ -154,6 +154,10 @@ export interface OccasionWriteOutcome {
   readonly disclosure: string;
   /** Records dropped because their occasion is gone. Removals only. */
   readonly droppedRecords: number;
+  /** The exact profile line a removal took out (or, unconfirmed, would take out). Removals only. */
+  readonly removedLine?: string;
+  /** Other lines that still declare the occasion after a removal; its records are kept while any do. */
+  readonly stillDeclaredBy?: number;
 }
 
 export interface ProposeOccasionInput {
@@ -214,6 +218,10 @@ export function proposeOccasion(
       `"${input.date}" is not a date I can read. Write it as MM-DD for something annual, or YYYY-MM-DD.`,
     );
   }
+  const recurrence = readRecurrenceWord(input.recurrence, date.kind === 'dated');
+  if (recurrence === 'once' && date.kind !== 'dated') {
+    return refuse('Something that happens once needs a year: write the date as YYYY-MM-DD.');
+  }
   const kindValue = (input.kind ?? '').trim().toLowerCase();
   const kind: OccasionKind | null = isOccasionKind(kindValue) ? kindValue : null;
   const id = occasionIdFor(title);
@@ -227,7 +235,7 @@ export function proposeOccasion(
     id,
     title,
     date,
-    recurrence: readRecurrenceWord(input.recurrence, date.kind === 'dated'),
+    recurrence,
     // Rendered with the kind the owner has chosen so they see exactly what
     // will be written. When they have not chosen one, `needsKind` is true and
     // `confirm` refuses rather than writing this placeholder.
@@ -419,13 +427,22 @@ export async function removeOccasion(
 ): Promise<OccasionWriteOutcome> {
   const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   assertCurrent();
+  const declared = readOccasionDeclarations(source).declarations.filter((entry) => entry.id === input.occasionId);
+  // The line removed is the active one (the first); the outcome names it.
+  const occasion = declared[0];
+  const others = declared.length - 1;
   if (!input.confirmed) {
-    return failed(
-      input.occasionId,
-      'Removing this drops the date and everything recorded against it. Confirm to go ahead.',
-    );
+    if (occasion === undefined) {
+      return failed(input.occasionId, 'Removing this drops the date and everything recorded against it. Confirm to go ahead.');
+    }
+    return {
+      ...failed(input.occasionId, others > 0
+        ? `Removing the line "${occasion.text}" takes out this declaration only: ${String(others)} other line${others === 1 ? '' : 's'} still declare${others === 1 ? 's' : ''} it, so what was recorded against it is kept. Confirm to go ahead.`
+        : `Removing the line "${occasion.text}" drops the date and everything recorded against it. Confirm to go ahead.`),
+      removedLine: occasion.text,
+      stillDeclaredBy: others,
+    };
   }
-  const occasion = readOccasionDeclarations(source).occasions.find((entry) => entry.id === input.occasionId);
   if (occasion === undefined) {
     // Still drop any state, so a line the owner deleted by hand does not leave the
     // machine holding an answer about something that is no longer there.
@@ -448,7 +465,10 @@ export async function removeOccasion(
   }, options);
   assertCurrent();
   if (!result.ok) return failed(input.occasionId, result.reason ?? 'Refused.');
-  const dropped = await dropState(input.occasionId);
+  // Another line that still declares the occasion is now the occasion: what
+  // was recorded against it stays until no line declares it.
+  const remaining = readOccasionDeclarations(source).declarations.filter((entry) => entry.id === input.occasionId).length;
+  const dropped = remaining > 0 ? 0 : await dropState(input.occasionId);
   assertCurrent();
   return {
     ok: true,
@@ -456,6 +476,8 @@ export async function removeOccasion(
     occasionId: input.occasionId,
     disclosure: result.disclosure,
     droppedRecords: dropped,
+    removedLine: occasion.text,
+    stillDeclaredBy: remaining,
   };
 }
 
@@ -477,10 +499,16 @@ export function planConflictResolution(
 ): ConflictResolutionPlan {
   const lines = readOccasionDeclarations(source).declarations.filter((entry) => entry.id === occasionId);
   const dates = [...new Set(lines.map((entry) => renderOccasionDate(entry.date)))];
+  // One line is no conflict, whatever date the caller names.
+  if (lines.length === 1) return { dates, keep: dates[0]!, remove: [] };
   const parsed = keep === undefined ? null : parseOccasionDate(keep);
-  const wanted = parsed === null ? null : renderOccasionDate(parsed);
+  // Lines that agree on the date need no choice: the first one is kept.
+  const wanted = parsed === null ? (keep === undefined && dates.length === 1 ? dates[0]! : null) : renderOccasionDate(parsed);
   if (wanted === null || !dates.includes(wanted)) return { dates, keep: null, remove: [] };
-  return { dates, keep: wanted, remove: lines.filter((entry) => renderOccasionDate(entry.date) !== wanted) };
+  // One line is kept, the first with that date; every other line goes,
+  // a later line with the same date included.
+  const kept = lines.find((entry) => renderOccasionDate(entry.date) === wanted);
+  return { dates, keep: wanted, remove: lines.filter((entry) => entry !== kept) };
 }
 
 /** What `occasions.conflict.resolve` answers. */
@@ -522,9 +550,9 @@ export async function resolveOccasionConflict(
   if (plan.dates.length === 0) {
     return { ...base, resolved: false, reason: 'There is no occasion by that name, so there was no conflict to resolve.' };
   }
-  if (plan.dates.length === 1) {
-    // The file already agrees with itself (the owner fixed it by hand), so
-    // the only thing left is the reminder.
+  if (plan.keep !== null && plan.remove.length === 0) {
+    // The file already holds one line (the owner fixed it by hand), so the
+    // only thing left is the reminder.
     await closeReminder();
     assertCurrent();
     return { ...base, resolved: true, reason: null };

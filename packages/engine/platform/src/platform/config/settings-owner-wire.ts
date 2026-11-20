@@ -10,6 +10,7 @@
  * needs; fields a newer daemon adds are ignored.
  */
 import { RefusalError, formatRefusal, readNextSteps, refusal, type Refusal } from '@goodvibes-jev/engine/errors';
+import { fetchFailurePhase } from '../state/operation.js';
 import { VERSION } from '../version.js';
 import type { DaemonConfigEndpoint } from './daemon-config-route.js';
 import { SettingsRefusalError, refusalReasonOf, refusalText } from './settings-refusal.js';
@@ -74,8 +75,6 @@ export function settingsOwnerHeaders(endpoint: DaemonConfigEndpoint): Readonly<R
   return Object.freeze({ 'content-type': 'application/json', ...(endpoint.token ? { authorization: `Bearer ${endpoint.token}` } : {}) });
 }
 
-/** Connection failures that happen before a request leaves this process. */
-const NOT_SENT_CODES = new Set(['ECONNREFUSED', 'ConnectionRefused', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'FailedToOpenSocket', 'UnableToConnect']);
 
 /**
  * A request that never got an answer. The caller's own abort is rethrown as
@@ -87,8 +86,7 @@ const NOT_SENT_CODES = new Set(['ECONNREFUSED', 'ConnectionRefused', 'ENOTFOUND'
 export function settingsOwnerTransportFailure(subject: SettingsSubject, error: unknown, options: { readonly signal?: AbortSignal | undefined; readonly url: string; readonly applying: boolean }): { readonly error: RefusalError; readonly notSent: boolean } {
   if (options.signal?.aborted) throw options.signal.reason ?? error;
   const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
-  const code = error !== null && typeof error === 'object' ? String((error as { code?: unknown }).code ?? '') : '';
-  const notSent = !timedOut && NOT_SENT_CODES.has(code);
+  const notSent = fetchFailurePhase(error) === 'before-send';
   const uncertain = options.applying && !notSent;
   return {
     notSent,

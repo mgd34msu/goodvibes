@@ -84,7 +84,9 @@ export interface ServerSentEventOptions {
    * frame is treated as lost: the connection is dropped and, with reconnect
    * on, reopened from its last event id. Armed only once a heartbeat arrives,
    * so a server that sends none is never cut off. Defaults to
-   * {@link sseIdleDeadlineMs}; 0 turns it off.
+   * {@link sseIdleDeadlineMs}; 0 turns it off. The same deadline bounds each
+   * open: a server that accepts the request but sends no response headers
+   * within it fails that attempt (retried like any dropped connection).
    */
   readonly idleTimeoutMs?: number | undefined;
 }
@@ -269,6 +271,10 @@ export async function openRawServerSentEventStream(
       activeController = controller;
       const signal = AbortSignal.any([outerController.signal, controller.signal]);
       let response: Response;
+      // The open's deadline: no response headers within the idle deadline is a dead path, not a slow one.
+      let openTimedOut = false;
+      const openTimer = idleTimeoutMs > 0 ? setTimeout(() => { openTimedOut = true; controller.abort(); }, idleTimeoutMs) : undefined;
+      (openTimer as { unref?: () => void } | undefined)?.unref?.();
       try {
         signal.throwIfAborted();
         const token = await resolveAuthToken(options.authToken ?? null, options.getAuthToken);
@@ -288,12 +294,16 @@ export async function openRawServerSentEventStream(
         });
         signal.throwIfAborted();
       } catch (error) {
-        const wrapped = createStreamError(0, url, error instanceof Error ? error.message : String(error));
+        const wrapped = createStreamError(0, url, openTimedOut && !outerController.signal.aborted
+          ? `The server sent no response within ${Math.round(idleTimeoutMs / 1000)}s of the request; the connection is treated as lost`
+          : error instanceof Error ? error.message : String(error));
         if (!readySettled) {
           settleReady(wrapped);
           return false;
         }
         throw wrapped;
+      } finally {
+        clearTimeout(openTimer);
       }
 
       if (!response.ok || !response.body) {

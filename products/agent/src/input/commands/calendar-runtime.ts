@@ -284,6 +284,18 @@ export const CALENDAR_VERBS: CommandVerbs = {
   otherwise: READ_VERB,
 };
 
+/**
+ * Where a `/calendar connect <provider> --code <code or address>` line holds
+ * the pasted authorization code or the redirect address that carries it:
+ * every word after `--code`. The handler reads them with `secretArg`.
+ */
+export function calendarConnectCodePositions(args: readonly string[]): number[] {
+  if ((args[0] ?? '').toLowerCase() !== 'connect') return [];
+  const codeIndex = args.indexOf('--code');
+  if (codeIndex === -1) return [];
+  return args.slice(codeIndex + 1).map((_, offset) => codeIndex + 1 + offset);
+}
+
 /** Where a `/calendar subscribe` line holds the feed address (positional or `--url`). */
 function calendarFeedAddressPositions(args: readonly string[]): number[] {
   if ((args[0] ?? '').toLowerCase() !== 'subscribe') return [];
@@ -301,8 +313,9 @@ export function registerCalendarRuntimeCommands(registry: CommandRegistry): void
     aliases: ['cal'],
     description: 'Manage local calendar events, external calendar subscriptions, and connected calendar accounts',
     usage: '[list|upcoming [--days N]|connect <google|outlook> [--device | --code <address>]|disconnect <google|outlook>|accounts|import <path>|export [--dest <path>]|add --title <title> --start <ISO> [--end <ISO>] [--location <loc>] [--notes <notes>]|delete <id> --yes|subscribe <ics-url> [--name N] [--every MIN] [--yes]|unsubscribe <name> --yes|subscriptions|refresh [name]]',
-    // A feed address can be a private one that grants read access; account sign-in takes no typed secret.
-    secretArgs: { select: (args) => calendarFeedAddressPositions(args) },
+    // A feed address can be a private one that grants read access, and a pasted
+    // sign-in code (or the address carrying it) is the credential that finishes a sign-in.
+    secretArgs: { select: (args) => [...calendarFeedAddressPositions(args), ...calendarConnectCodePositions(args)] },
     handler: async (args: readonly string[], ctx: CommandContext) => {
       const sub = (args[0] ?? 'list').toLowerCase();
       if (CALENDAR_SUBSCRIPTION_VERBS.has(sub)) {

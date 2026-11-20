@@ -46,6 +46,8 @@ import type {
   EmailGatewayMessageUpdateResult,
   EmailGatewayDraftInput,
   EmailGatewayDraftResult,
+  EmailGatewayDraftUpdateInput,
+  EmailGatewayDraftUpdateResult,
   EmailGatewayListInput,
   EmailGatewayListResult,
   EmailGatewayMessageDetail,
@@ -248,7 +250,29 @@ export function createServiceBackedGateway(service: EmailService): EmailGatewayS
           // id that no later fetch could resolve.
           draftId: result.uid === null ? result.mailbox : `${result.mailbox}:${String(result.uid)}`,
           ...(result.uid === null ? {} : { uid: result.uid }),
+          ...(result.uidValidity === null ? {} : { uidValidity: result.uidValidity }),
           mailbox: result.mailbox,
+        };
+      });
+    },
+
+    async updateDraft(input: EmailGatewayDraftUpdateInput): Promise<EmailGatewayDraftUpdateResult> {
+      return guard(async () => {
+        const result = await service.replaceDraft({
+          to: input.to,
+          subject: input.subject,
+          body: input.body,
+          ...(input.inReplyTo === undefined ? {} : { inReplyTo: input.inReplyTo }),
+          ...(input.references === undefined ? {} : { references: input.references }),
+          uid: input.uid,
+          uidValidity: input.uidValidity,
+        });
+        return {
+          draftId: result.uid === null ? result.mailbox : `${result.mailbox}:${String(result.uid)}`,
+          ...(result.uid === null ? {} : { uid: result.uid }),
+          ...(result.uidValidity === null ? {} : { uidValidity: result.uidValidity }),
+          mailbox: result.mailbox,
+          replaced: result.replaced,
         };
       });
     },
@@ -290,7 +314,12 @@ export function createServiceBackedGateway(service: EmailService): EmailGatewayS
     async listDrafts(limit: number): Promise<EmailGatewayDraftList> {
       return guard(async () => {
         const result = await service.listDrafts(limit);
-        return { drafts: result.drafts.map((draft) => ({ ...draft })), total: result.total, mailbox: result.mailbox };
+        return {
+          drafts: result.drafts.map((draft) => ({ ...draft })),
+          total: result.total,
+          mailbox: result.mailbox,
+          ...(result.uidValidity === null ? {} : { uidValidity: result.uidValidity }),
+        };
       });
     },
   };
@@ -379,6 +408,19 @@ export function instrumentEmailGateway(
         await ready();
         const result = await backend.readAttachment!(uid, index);
         if (result) log('email.attachment.get', { uid, index, sizeBytes: result.sizeBytes });
+        return result;
+      },
+    }),
+
+    ...(backend.updateDraft === undefined ? {} : {
+      async updateDraft(input: EmailGatewayDraftUpdateInput): Promise<EmailGatewayDraftUpdateResult> {
+        await ready();
+        const result = await backend.updateDraft!(input);
+        log('email.draft.update', {
+          mailbox: result.mailbox,
+          replaced: result.replaced,
+          ...(result.uid === undefined ? {} : { uid: result.uid }),
+        });
         return result;
       },
     }),

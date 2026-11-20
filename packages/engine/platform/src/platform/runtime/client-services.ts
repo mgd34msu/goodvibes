@@ -634,6 +634,8 @@ function composeClientRuntimeServices(
   );
 
   const processManager = new ProcessManager();
+  // Background processes started through this composition end with it (each owner's bounded stop, drained).
+  disposalScope.registry.add('background processes', () => processManager.close());
   const modeManager = new ModeManager({ featureFlags });
   const fileUndoManager = new FileUndoManager({ onFileChanged: (path) => fileCache.invalidate(path) });
   const overflowHandler = new OverflowHandler({
@@ -643,6 +645,8 @@ function composeClientRuntimeServices(
   });
   const fileCache = new FileStateCache();
   const projectIndex = new ProjectIndex(workingDirectory);
+  // Its debounced flush is written and its timer stopped when the composition closes (after the file watcher stops feeding it).
+  disposalScope.registry.add('project index', () => projectIndex.dispose());
   // Project files changed outside the write and edit tools: the project index
   // forgets deleted ones and Change:file:external hooks fire.
   const fileWatcher = new FileWatcher(projectIndex, { projectRoot: workingDirectory }, hookDispatcher);
@@ -707,7 +711,7 @@ function composeClientRuntimeServices(
   });
 
   // Poll-free runtime event for permission-mode changes so surfaces can render a live mode pill.
-  bindPermissionModeChangeEvent(configManager, options.runtimeBus, 'runtime');
+  disposalScope.registry.add('permission mode change event', bindPermissionModeChangeEvent(configManager, options.runtimeBus, 'runtime'));
   // External config edits apply LIVE through the same subscribe() pipeline an
   // in-process set() uses. The underlying file watchers are unref'd.
   const stopConfigWatch = configManager.watchConfigFiles();

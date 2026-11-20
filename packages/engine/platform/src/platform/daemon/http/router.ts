@@ -11,6 +11,7 @@ import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-key
 import { DECISION_MODEL_POLICY_HEADER, DecisionModelsDisabledError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { DecisionModelPolicyChangedError, withDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { logger } from '../../utils/logger.js';
+import { requireStopped } from '../../utils/owned-work.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { createCredentialStatusProvider } from '../../config/credential-status.js';
 import { buildAutomationEmptyState } from '../../runtime/feature-announcements.js';
@@ -349,10 +350,12 @@ export class DaemonHttpRouter {
       : null;
   }
 
-  dispose(): void {
+  /** Resolves once the tunnel connector's child exited; rejects naming it when its exit could not be seen. */
+  async dispose(): Promise<void> {
     this.telemetryApi?.dispose();
     this.context.batchManager?.dispose();
-    void this.context.cloudflareTunnel?.dispose();
+    const tunnel = await this.context.cloudflareTunnel?.dispose();
+    if (tunnel) requireStopped('The Cloudflare tunnel connector', tunnel);
   }
 
   /**

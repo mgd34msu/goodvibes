@@ -62,7 +62,7 @@ export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCata
       judge: judgeOnlyWhenOwnerNeeded(createProviderBackedCheckinJudge(deps.providerRegistry), stateReader),
       deliverer: {
         deliver: async (channel, message, lifetime) => {
-          return channelDeliveryRouter.deliver({
+          const sent = await channelDeliveryRouter.deliverWithReceipt({
             target: parseChannelDeliveryTarget(channel),
             body: message,
             title: 'Check-in',
@@ -71,6 +71,10 @@ export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCata
             runId: `checkin-${Date.now()}`,
             includeLinks: false,
           });
+          return {
+            ...(sent.responseId !== undefined ? { deliveryId: sent.responseId } : {}),
+            ...(sent.partsTotal !== undefined ? { partsSent: sent.parts ?? 1, partsTotal: sent.partsTotal } : {}),
+          };
         },
       },
       receipts,

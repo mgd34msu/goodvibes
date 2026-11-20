@@ -120,7 +120,7 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
 
   // Every domain the connector's feeds listen to rides one stream; a changed
   // set of domains reopens it from the current position.
-  return createSharedDomainConnector<RuntimeEventDomain, TEvent>(async (domains, sink) => {
+  return createSharedDomainConnector<RuntimeEventDomain, TEvent>(async (domains, sink, opening) => {
     const url = buildEventSourceUrl(baseUrl, domains);
     const carried = new Set<string>(domains);
     let closed = false;
@@ -222,6 +222,9 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
         getAuthToken,
         headers: Object.keys(sseHeaders).length > 0 ? sseHeaders : undefined,
         lastEventId: position,
+        // Aborts only while the connector is still opening this connection (an unsubscribe before
+        // it landed); once the connector holds it, its close() is what ends the stream.
+        signal: opening,
       });
       if (!live()) {
         close();

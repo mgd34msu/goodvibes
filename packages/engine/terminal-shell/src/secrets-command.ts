@@ -12,7 +12,7 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { ConcealedInputRequest } from './concealed-input.js';
-import type { TerminalSlashCommand } from './command-registry.js';
+import { secretArg, type TerminalSlashCommand } from './command-registry.js';
 import { commandRefusal, stripYesFlag, type ConfirmableCommand } from './command-confirmation.js';
 import type { CommandSubcommandHints } from './command-args-hint.js';
 
@@ -21,6 +21,39 @@ interface SecretsCommandContext {
   readonly beginConcealedInput?: ((request: ConcealedInputRequest) => void) | undefined;
 }
 const SET_OPTIONS: ReadonlySet<string> = new Set(['--user', '--project', '--secure', '--plaintext', '--yes']);
+
+/**
+ * The one reading of a `/secrets set|link` line, used both for the input
+ * history's mask (`secretArgs.select`) and by the handler, so what is masked
+ * and what is stored as the secret cannot differ. The subcommand is the first
+ * word that is not `--yes`; after it, options come first and a bare `--` ends
+ * them, so a value may itself start with `--`. Positions index the arguments
+ * as typed.
+ */
+function readSecretsMutationLine(args: readonly string[]): {
+  readonly subcommand: string | undefined;
+  readonly flags: ReadonlySet<string>;
+  readonly positional: readonly { readonly token: string; readonly index: number }[];
+} {
+  const subIndex = args.findIndex((token) => token !== '--yes');
+  const subcommand = subIndex === -1 ? undefined : args[subIndex];
+  const flags = new Set<string>();
+  const positional: { readonly token: string; readonly index: number }[] = [];
+  let optionsEnded = false;
+  for (let index = subIndex + 1; subIndex !== -1 && index < args.length; index++) {
+    const token = args[index]!;
+    if (!optionsEnded && token === '--') optionsEnded = true;
+    else if (!optionsEnded && token.startsWith('--')) flags.add(token);
+    else positional.push({ token, index });
+  }
+  return { subcommand, flags, positional };
+}
+
+/** Where `/secrets set <KEY> <value>` holds the value: every word after the key. */
+function secretsSetValuePositions(args: readonly string[]): number[] {
+  const line = readSecretsMutationLine(args);
+  return line.subcommand === 'set' ? line.positional.slice(1).map((entry) => entry.index) : [];
+}
 /** Values stay redacted; each product supplies its credential ownership and confirmation policy. */
 export function createSecretsCommand<Context extends SecretsCommandContext>(
   manager: (context: Context) => Pick<SecretsManager, 'get' | 'set' | 'delete' | 'listDetailed'> & Partial<Pick<SecretsManager, 'confirmProjectSecret'>>,
@@ -56,7 +89,7 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
     firstScreen: !policy.hidden,
     usage,
     argsHint: '<set|link|get|test|providers|list|trust|delete> [KEY]',
-    secretArgs: { subcommands: { set: { from: 2 } } },
+    secretArgs: { select: secretsSetValuePositions },
     subcommands: {
       set: `<KEY> <value> ${storageFlags}`,
       link: `<KEY> <secret-ref> ${storageFlags}`,
@@ -125,22 +158,19 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
       }
       if (subcommand === 'set' || subcommand === 'link') {
         // Options come first; a bare `--` ends them so a value may itself start
-        // with `--`. The token is never echoed: it may be the secret.
-        const flags = new Set<string>();
-        const positional: string[] = [];
-        let optionsEnded = false;
-        for (const token of rest) {
-          if (!optionsEnded && token === '--') optionsEnded = true;
-          else if (!optionsEnded && token.startsWith('--')) flags.add(token);
-          else positional.push(token);
-        }
+        // with `--` (even `--yes`). The token is never echoed: it may be the
+        // secret. Read from the arguments as typed, the same words the input
+        // history masked (`secretArgs`), so `set`'s value is taken with
+        // `secretArg` at the position the mask covered.
+        const { flags, positional } = readSecretsMutationLine(args);
         const unknownFlags = [...flags].filter((flag) => !SET_OPTIONS.has(flag));
         if (unknownFlags.length) {
           throw commandRefusal(
             `[secrets] An argument starting with -- is not a known option (${[...SET_OPTIONS].join(', ')}). To store a value that starts with --, put it after a bare --.\nUsage: ${mutationUsage(subcommand)}`,
           );
         }
-        const [key, ...parts] = positional;
+        const key = positional[0]?.token;
+        const parts = positional.slice(1);
         if (!key) {
           throw commandRefusal(`[secrets] Usage: ${mutationUsage(subcommand)}`);
         }
@@ -174,10 +204,13 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
         if (parts.length > 1) {
           throw commandRefusal(`[secrets] Nothing was stored: the value for ${key} is more than one word. Put it in quotes ("…") to keep its spaces exactly; inside the quotes write \\\\ for a backslash and \\" for a quote, or run /secrets set ${key} with no value to type it masked where that is offered.\nUsage: ${mutationUsage(subcommand)}`);
         }
-        const value = parts[0] ?? '';
-        if (!value.length) {
+        const typed = parts[0];
+        if (!typed || !typed.token.length) {
           throw commandRefusal(`[secrets] Nothing was stored: no value given for ${key}.\nUsage: ${mutationUsage(subcommand)}`);
         }
+        // A link's value is a reference, not a secret; a set's value is read
+        // only through the declared secret position.
+        const value = subcommand === 'set' ? secretArg(typed.index).reveal('store-write') : typed.token;
         if (
           (subcommand === 'link' && !isGoodVibesSecretRefInput(value)) ||
           (subcommand === 'set' && isMalformedGoodVibesSecretRefInput(value))

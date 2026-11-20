@@ -110,6 +110,8 @@ export interface SurfaceMessageInput {
   readonly signal?: AbortSignal | undefined;
   /** Called once the message is held by a live agent or a new one started: a redelivery must not repeat it. */
   readonly committed?: (() => void) | undefined;
+  /** Called once the message is on disk (its session input row synced), before any agent starts: the moment it may be acknowledged. */
+  readonly saved?: (() => void) | undefined;
   /** The binding the agent's answer goes to, when this message carries a one-shot reply credential. */
   readonly replyBinding?: ((binding: AutomationRouteBinding) => AutomationRouteBinding) | undefined;
   /** Hands the agent's task and contract to the reply queue so a contract's later reports reach this conversation (ntfy). */
@@ -127,6 +129,54 @@ export type SurfaceMessageOutcome =
   | { readonly kind: 'answered'; readonly response: Response; readonly outcome: string }
   /** Nothing was started, for the reason in `error`. */
   | { readonly kind: 'not-started'; readonly response: Response; readonly error: string };
+
+/**
+ * How long a surface with a 3-second acknowledgement deadline (Slack, Discord)
+ * waits for the message to be saved before it answers. A save is milliseconds;
+ * past this the acknowledgement says the save is still running, so the
+ * provider does not drop a late answer.
+ */
+export const SURFACE_ACK_DEADLINE_MS = 2_500;
+
+/** The acknowledgement when the save has not finished by the deadline. A resend is safe: its provider id makes it a no-op once the first is saved. */
+export function surfaceAckStillSaving(task: string): string {
+  return `Received, still saving: _${task}_. If no answer comes, send it again.`;
+}
+
+/**
+ * Whether `saved` settled within `ms`: 'saved', 'failed' (it rejected), or
+ * 'pending' (still running; it goes on after this returns).
+ */
+export async function savedWithin(saved: Promise<unknown>, ms: number): Promise<'saved' | 'failed' | 'pending'> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<'pending'>((resolve) => { timer = setTimeout(() => resolve('pending'), ms); });
+  try {
+    return await Promise.race([saved.then(() => 'saved' as const, () => 'failed' as const), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Starts `submitSurfaceMessage` and returns it with a promise that resolves
+ * once the message is saved, or rejects when the submit ends without saving it
+ * (refused, failed): what a surface acknowledges on.
+ */
+export function submitSurfaceMessageSaved(
+  context: SurfaceMessageDeps,
+  binding: AutomationRouteBinding,
+  input: SurfaceMessageInput,
+): { readonly submitted: Promise<SurfaceMessageOutcome>; readonly saved: Promise<void> } {
+  let markSaved: () => void = () => {};
+  const saved = new Promise<void>((resolve) => { markSaved = resolve; });
+  const submitted = submitSurfaceMessage(context, binding, { ...input, saved: () => { markSaved(); input.saved?.(); } });
+  const savedOrEnded = Promise.race([saved, submitted.then((outcome) => {
+    if (outcome.kind === 'control' || outcome.kind === 'answered') return;
+    throw new Error(outcome.kind === 'not-started' ? outcome.error : 'the message was not saved');
+  })]);
+  savedOrEnded.catch(() => undefined);
+  return { submitted, saved: savedOrEnded };
+}
 
 /** Everything after the route binding, for a message that has text. */
 export async function submitSurfaceMessage(
@@ -165,6 +215,7 @@ export async function submitSurfaceMessage(
     const error = submission.input.error ?? 'The session did not accept the message.';
     return { kind: 'not-started', error, response: Response.json({ error, sessionId: submission.session.id }, { status: 409 }) };
   }
+  input.saved?.();
   if (submission.mode !== 'spawn') {
     input.committed?.();
     return { kind: 'continued', bindingId: binding.id, sessionId: submission.session.id, agentId: submission.activeAgentId ?? null, submission };

@@ -226,6 +226,8 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
   readonly modeInForce?: ((chosen: import('../../gate/presets.js').GatePresetName, explicitlyChosen?: boolean) => import('../../gate/presets.js').GatePresetName) | undefined;
   /** Why the mode in force differs from a chosen mode (the permission manager's describeModeInForce), for sessions.permissionMode.get. */
   readonly modeInForceReason?: ((chosen: import('../../gate/presets.js').GatePresetName, explicitlyChosen?: boolean) => string | undefined) | undefined;
+  /** The mode in force in plain words (permissions/decision-model-readiness.ts describeModeInForceWords), reported by sessions.permissionMode.get. */
+  readonly modeInForceWords?: ((chosen: import('../../gate/presets.js').GatePresetName, explicitlyChosen?: boolean) => import('../../permissions/decision-model-readiness.js').ModeInForceWords) | undefined;
   /**
    * Runtime store backing sessions.contextUsage.get and the local-session
    * resolution the session-runtime verbs gate on (getState().session.id).
@@ -635,6 +637,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
       channelSessions: deps.sessionIntake,
       modeInForce: deps.modeInForce,
       modeInForceReason: deps.modeInForceReason,
+      modeInForceWords: deps.modeInForceWords,
       channelModeChanged: (sessionId, mode, previousMode) => {
         deps.runtimeBus?.emit('gate', createEventEnvelope('PRESET_CHANGED', {
           type: 'PRESET_CHANGED', mode, previousMode, preset: mode, previousPreset: previousMode,

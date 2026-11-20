@@ -8,8 +8,10 @@ import { DeliveryError, DeliveryQueue } from './delivery.js';
 import type { DeliveryQueueConfig, IntegrationQueueStatus } from './delivery.js';
 import {
   describeDeadLetters, notificationDeadLetterCodec,
-  type NotificationDeadLetter, type NotificationDeadLetterSource, type NotificationReplayResult,
+  type NotificationDeadLetter, type NotificationDeadLetterSource, type NotificationReplayOptions, type NotificationReplayResult,
 } from './notification-dead-letters.js';
+import type { TargetChange } from '@goodvibes-jev/engine/errors';
+import { compareTarget, contentDigest, targetRef, type TargetRef } from '../utils/target-ref.js';
 import { snapshotQueueStatus } from './delivery.js';
 import { attachRuntimeNotifications, RUNTIME_NOTIFICATION_EVENTS, type RuntimeNotificationOptions } from './notification-dispatcher.js';
 import { ServiceRegistry } from '../config/service-registry.js';
@@ -39,9 +41,51 @@ export interface NotifierChannelGap {
   readonly next: string;
 }
 
+/** Where a channel posts: its webhook (by digest; the URL is a secret) or the bot's default channel. */
+type NotificationDestination = TargetRef<'notification-destination'>;
+
 interface ChannelTransport {
   readonly channel: NotifierChannel;
   readonly send: (text: string) => Promise<void>;
+  /** Where `send` posts. A queued retry or a resend goes only to this destination. */
+  readonly destination: NotificationDestination;
+}
+
+function destinationOf(channel: NotifierChannel, target: string | undefined, webhookUrl: string | undefined): NotificationDestination {
+  if (target) return targetRef('notification-destination', channel, { mode: 'bot', target }, { destination: `the bot posting into ${target}` });
+  const fingerprint = webhookUrl ? contentDigest(webhookUrl).slice(0, 8) : 'unknown';
+  return targetRef('notification-destination', channel, { mode: 'webhook', url: webhookUrl ?? null },
+    { destination: `incoming webhook ${fingerprint}` });
+}
+
+/** A destination as a dead letter keeps it: its digest and redacted text, never the URL. */
+function encodeDestination(destination: NotificationDestination): string {
+  return JSON.stringify({ digest: destination.digest, shown: destination.shown });
+}
+
+function decodeDestination(channel: string, stored: string | undefined): TargetRef | null {
+  if (!stored) return null;
+  try {
+    const parsed = JSON.parse(stored) as { digest?: unknown; shown?: { destination?: unknown } };
+    if (typeof parsed.digest !== 'string' || typeof parsed.shown?.destination !== 'string') return null;
+    return { kind: 'notification-destination', id: channel, scope: null, digest: parsed.digest, shown: { destination: parsed.shown.destination } };
+  } catch {
+    return null;
+  }
+}
+
+/** The changes between where a notification was for and where its channel posts now. */
+function destinationChanges(channel: string, was: TargetRef | null, now: ChannelTransport | undefined): readonly TargetChange[] {
+  if (!now) return [{ field: 'destination', was: was?.shown.destination ?? `the ${channel} destination`, now: null }];
+  if (!was) return [{ field: 'destination', was: '(not recorded)', now: now.destination.shown.destination ?? 'the current destination' }];
+  if (compareTarget(was, now.destination).length === 0) return [];
+  return [{ field: 'destination', was: was.shown.destination ?? '(as shown)', now: now.destination.shown.destination ?? '(changed)' }];
+}
+
+function describeChanges(channel: string, changes: readonly TargetChange[]): string {
+  return changes.map((change) => change.now === null
+    ? `${channel} has no notification target configured any more (it was ${change.was})`
+    : `${channel} now posts to ${change.now}, not ${change.was}`).join('; ');
 }
 
 /** Where notifications go, as resolved from the services, settings and environment at one moment. */
@@ -54,12 +98,15 @@ export interface NotifierChannelSetup {
   readonly discordChannelId?: string | undefined;
   /** Connected services that have no notification target, reported by {@link Notifier.channelGaps}. */
   readonly gaps?: readonly NotifierChannelGap[] | undefined;
+  /** The incoming-webhook URLs the integrations post to, so a destination change is seen. */
+  readonly slackWebhookUrl?: string | undefined;
+  readonly discordWebhookUrl?: string | undefined;
 }
 
 function transportsFor(setup: NotifierChannelSetup): ChannelTransport[] {
   const transports: ChannelTransport[] = [];
-  if (setup.slack) transports.push(transportFor('slack', setup.slack, setup.slackChannel));
-  if (setup.discord) transports.push(transportFor('discord', setup.discord, setup.discordChannelId));
+  if (setup.slack) transports.push(transportFor('slack', setup.slack, setup.slackChannel, setup.slackWebhookUrl));
+  if (setup.discord) transports.push(transportFor('discord', setup.discord, setup.discordChannelId, setup.discordWebhookUrl));
   return transports;
 }
 
@@ -133,13 +180,16 @@ async function resolveNotifierChannels(
     slackChannel,
     discordChannelId,
     gaps,
+    slackWebhookUrl: slackWebhook || undefined,
+    discordWebhookUrl: discordWebhook || undefined,
   };
 }
 
-function transportFor(channel: NotifierChannel, integration: SlackIntegration | DiscordIntegration, target: string | undefined): ChannelTransport {
+function transportFor(channel: NotifierChannel, integration: SlackIntegration | DiscordIntegration, target: string | undefined, webhookUrl: string | undefined): ChannelTransport {
   // A default channel means the bot posts it; otherwise the incoming webhook.
-  if (target) return { channel, send: (text) => integration.postMessage(target, text) };
-  return { channel, send: (text) => integration.postWebhook(text) };
+  const destination = destinationOf(channel, target, webhookUrl);
+  if (target) return { channel, destination, send: (text) => integration.postMessage(target, text) };
+  return { channel, destination, send: (text) => integration.postWebhook(text) };
 }
 
 // ---------------------------------------------------------------------------
@@ -343,7 +393,12 @@ export class Notifier implements NotificationDeadLetterSource {
     const failures: unknown[] = [];
     for (const transport of this.transports) {
       try {
-        const outcome = await this._queue.enqueue(transport.channel, event, envelope, () => this.postEnvelope(envelope, transport.send));
+        // Each attempt, the first and every retry, posts only to the destination
+        // the notification was queued for: a channel changed or removed meanwhile
+        // ends it in the failed list with the reason, never at the new place.
+        const outcome = await this._queue.enqueue(transport.channel, event, envelope,
+          () => this.sendToDestination(envelope, transport.channel, transport.destination),
+          { target: encodeDestination(transport.destination) });
         if (outcome === 'dead_letter') {
           failures.push(new DeliveryError(`The ${transport.channel} notification could not be delivered and was moved to the failed-notification list; resend it with /notify resend or notifications.deadLetters.replay.`, 'terminal'));
         }
@@ -384,22 +439,66 @@ export class Notifier implements NotificationDeadLetterSource {
   /**
    * Resend failed notifications: all of them, or those named in `ids`. Each is
    * queued again with a fresh retry budget; an id that is not in the list is
-   * reported `not-found`.
+   * reported `not-found`. A notification whose channel now posts somewhere
+   * else than where it failed is not sent: it stays in the list as
+   * `destination-changed`, naming both, unless `toCurrent` sends it to the
+   * destination configured now.
    */
-  async replayDeadLetters(ids?: readonly string[]): Promise<NotificationReplayResult[]> {
-    const results: NotificationReplayResult[] = await this._queue.replay(async (dlqEntry) => {
-      const envelope = this.queuedEnvelope(dlqEntry.payload);
-      const transport = this.transports.find((candidate) => candidate.channel === dlqEntry.channel);
-      if (!transport) {
-        throw new DeliveryError(`${dlqEntry.channel} has no notification target configured any more.`, 'terminal');
+  async replayDeadLetters(ids?: readonly string[], options: NotificationReplayOptions = {}): Promise<NotificationReplayResult[]> {
+    if (this.channelsMayBeStale()) await this.refresh();
+    const wanted = ids === undefined ? undefined : new Set(ids);
+    const refused: NotificationReplayResult[] = [];
+    const sendable: string[] = [];
+    const current = new Map(this.transports.map((transport) => [transport.channel as string, transport]));
+    for (const entry of this._queue.getDlq()) {
+      if (wanted !== undefined && !wanted.has(entry.id)) continue;
+      const now = current.get(entry.channel);
+      const changes = now ? destinationChanges(entry.channel, decodeDestination(entry.channel, entry.target), now) : [];
+      // A channel with no target at all is left to the send below, which ends it as before.
+      if (changes.length > 0 && options.toCurrent !== true) {
+        refused.push({
+          id: entry.id, outcome: 'destination-changed', changes,
+          reason: `${describeChanges(entry.channel, changes)}; it was not sent. Resend it with --to-current (toCurrent: true) to send it there.`,
+        });
+        continue;
       }
-      await this.postEnvelope(envelope, transport.send);
-    }, ids);
+      sendable.push(entry.id);
+    }
+    const results: NotificationReplayResult[] = sendable.length === 0 ? [] : await this._queue.replay(async (dlqEntry) => {
+      const envelope = this.queuedEnvelope(dlqEntry.payload);
+      const reviewed = options.toCurrent === true
+        ? current.get(dlqEntry.channel)?.destination ?? decodeDestination(dlqEntry.channel, dlqEntry.target)
+        : decodeDestination(dlqEntry.channel, dlqEntry.target);
+      await this.sendToDestination(envelope, dlqEntry.channel, reviewed);
+    }, sendable, options.toCurrent === true
+      ? (dlqEntry) => {
+        const now = current.get(dlqEntry.channel);
+        return now ? encodeDestination(now.destination) : dlqEntry.target;
+      }
+      : undefined);
+    results.push(...refused);
     const found = new Set(results.map((result) => result.id));
     for (const id of ids ?? []) {
       if (!found.has(id)) results.push({ id, outcome: 'not-found' });
     }
     return results;
+  }
+
+  /**
+   * Post to `channel` only while it still posts to `reviewed`: the destination
+   * the notification was queued for (or, for a resend to the current one, the
+   * destination it was resent to). Anything else is a terminal failure naming
+   * both, so the queue ends it in the failed list instead of retrying it at a
+   * place nobody chose for it.
+   */
+  private async sendToDestination(envelope: NotificationEnvelope, channel: string, reviewed: TargetRef | null): Promise<void> {
+    if (this.channelsMayBeStale()) await this.refresh();
+    const transport = this.transports.find((candidate) => candidate.channel === channel);
+    const changes = destinationChanges(channel, reviewed, transport);
+    if (changes.length > 0 || !transport) {
+      throw new DeliveryError(`${describeChanges(channel, changes)}; the notification was not sent. Resend it with /notify resend <id> --to-current to send it there.`, 'terminal');
+    }
+    await this.postEnvelope(envelope, transport.send);
   }
 
   private async postEnvelope(envelope: NotificationEnvelope, send: (text: string) => Promise<void>): Promise<void> {

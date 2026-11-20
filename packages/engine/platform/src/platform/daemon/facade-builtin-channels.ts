@@ -70,6 +70,7 @@ export function createBuiltinChannelRuntime(
     routeBindings: runtime.routeBindings,
     gatewayMethods: runtime.gatewayMethods,
     deliverStructuredNotice: (binding, notice) => surfaceDeliveryHelper.deliverStructuredNotice(binding, notice),
+    channelOwner: (surface) => surfaceDeliveryHelper.channelOwner(surface),
     // Resolve adopted Google credentials from the daemon config, secret store
     // and runtime home, matching the calendar service.
     gmailReader: createDaemonGmailInboundReader({

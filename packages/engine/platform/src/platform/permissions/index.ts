@@ -16,4 +16,4 @@ export { decideAutonomousTool, captureAutonomousSource, captureAutonomousChoices
 export type { AutonomousToolSource, AutonomousToolRevision, AutonomousToolChoices, AutonomousToolDecisionInput, AutonomousToolDecision } from './autonomous.js';
 
 export type { AutonomousChoiceProjection } from './autonomous-input-projection.js';
-export { describePermissionModeInForce, permissionDecisionModelReady, type PermissionModeInForce } from './decision-model-readiness.js';
+export { describeModeInForceWords, describePermissionModeInForce, permissionDecisionModelReady, type ModeInForceWords, type PermissionModeInForce } from './decision-model-readiness.js';

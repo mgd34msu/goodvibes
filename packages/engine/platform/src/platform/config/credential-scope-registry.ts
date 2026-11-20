@@ -187,7 +187,7 @@ export const CREDENTIAL_SCOPE_DECLARATIONS: readonly CredentialScopeDeclaration[
     key: 'GOODVIBES_SUBSCRIPTION_TOKENS_',
     match: 'prefix',
     scope: 'daemon-needed',
-    why: 'The access and refresh tokens of a provider sign-in; the daemon hosts the turns that send them and renews them. The suffix is the provider id in upper snake case (subscriptions.ts subscriptionTokensKey); the record that names them is in the shared subscriptions file.',
+    why: 'The access and refresh tokens of a provider sign-in; the daemon hosts the turns that send them and renews them. The suffix is the provider id in upper case, with a digest of the id appended when it is not plain lowercase letters and digits, so two ids never share a key (subscriptions.ts subscriptionTokensKey); the record that names them is in the shared subscriptions file.',
   },
 
   // ── Payments ─────────────────────────────────────────────────────────────

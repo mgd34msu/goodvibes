@@ -686,6 +686,8 @@ The webhook listener receives inbound webhooks from external services. It opens 
 
 The web UI is a built bundle of static files (an `index.html` and its assets). The daemon serves it on the control-plane listener, at the same origin as the API, so the address to open is the control-plane address, `http://127.0.0.1:3421` by default, not `web.port`.
 
+Its pages are sent with `Content-Security-Policy: img-src 'self' data: blob:`. A reply, tool result or data block shows an image inline only when it is a `data:` or `blob:` image or an artifact the daemon serves (`/api/artifacts/...`); any other image URL is shown as a link (`Image: <alt text>`) that opens in a new tab when clicked, so rendering a message never sends a request to a server the message names.
+
 | Command | Effect |
 | --- | --- |
 | `goodvibes-daemon webui status` | What is served, from where, and who can reach it. |
@@ -1506,7 +1508,7 @@ What happens when clients leave is the detach policy:
 
 `hostedSessions.detachPolicy` sets the default; `detachPolicy` on `sessions.hosted.create` overrides it for one session. An attachment is a lease of `hostedSessions.attachmentTtlMs` (default 10 minutes); a client whose control-plane connection is open renews it automatically, and attaching again renews it. A crashed client's lease lapses, and the session then counts as detached.
 
-At most `hostedSessions.maxSessions` (default 8) sessions are live at once; another create is refused with the count and the setting named. Ended sessions are kept, listable with their reason and with their transcript readable through `sessions.hosted.history` (by the credential that created or attached to them, or an admin one), for `hostedSessions.terminatedRetentionMs` (default 24 hours), also across a daemon restart. Each session's newest `hostedSessions.maxMessagesPerSession` messages (default 500) are saved to disk; after a daemon restart, attaching rebuilds the loop and adds a line to the transcript saying the turn that was running did not survive.
+At most `hostedSessions.maxSessions` (default 8) sessions are live at once; another create is refused with the count and the setting named. Ended sessions are kept, listable with their reason and with their transcript readable through `sessions.hosted.history` (by the credential that created them, one an owner shared them with through `sessions.hosted.share`, or an admin one), for `hostedSessions.terminatedRetentionMs` (default 24 hours), also across a daemon restart. Each session's newest `hostedSessions.maxMessagesPerSession` messages (default 500) are saved to disk; after a daemon restart, attaching rebuilds the loop and adds a line to the transcript saying the turn that was running did not survive.
 
 End a session with `goodvibes-daemon sessions kill <id>` or `sessions.hosted.kill`.
 

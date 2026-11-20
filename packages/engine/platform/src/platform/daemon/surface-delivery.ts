@@ -169,6 +169,10 @@ export const ORPHANED_SURFACE_REPLY_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 const UNDELIVERED_BODY_EXCERPT_CHARS = 2000;
 const MAX_RECOVERED_REPLIES = 1_000;
+/** Surfaces whose far side drops a repeat of the same message identity (`announces`): webhook (Idempotency-Key), Discord (nonce). */
+const RESEND_DEDUPED_SURFACES: ReadonlySet<string> = new Set(['webhook', 'discord']);
+/** Appended to a channel answer sent again after a restart on a surface that cannot drop a repeat. */
+export const RESENT_AFTER_RESTART_LINE = '(Sent again after a restart; you may see it twice.)';
 
 function truncateUndeliveredBody(body: string): string {
   return body.length <= UNDELIVERED_BODY_EXCERPT_CHARS
@@ -179,6 +183,8 @@ function truncateUndeliveredBody(body: string): string {
 export class DaemonSurfaceDeliveryHelper {
   /** Agents whose final answer a surface is reporting right now; a retried report waits its turn. */
   private readonly finalizingReplies = new Set<string>();
+  /** Agents whose answer is being sent to their other owed routes (deliverOwedRoutes). */
+  private readonly deliveringOwedRoutes = new Set<string>();
   /** Agents whose answer this process handed to its channel or recovered from the session; see `recoverPendingReply`. */
   private readonly recoveredReplies = new Set<string>();
 
@@ -599,13 +605,110 @@ export class DaemonSurfaceDeliveryHelper {
     this.recoveredReplies.add(input.agentId);
     while (this.recoveredReplies.size > MAX_RECOVERED_REPLIES) this.recoveredReplies.delete(this.recoveredReplies.values().next().value!);
     if (sessionId) {
-      await this.context.sessionBroker.settleChannelReply(sessionId, input.agentId).catch((error: unknown) => {
+      await this.context.sessionBroker.settleChannelReply(sessionId, input.agentId, pending.routeId).catch((error: unknown) => {
         logger.warn('A sent channel answer could not be marked sent; a report repeated after a restart may send it again', {
           agentId: input.agentId, sessionId, error: summarizeError(error),
         });
       });
+      await this.deliverOwedRoutes(sessionId, input.agentId);
     }
     return true;
+  }
+
+  /**
+   * An agent that answers messages from more than one channel route (a second
+   * conversation's message handed to it while it ran) owes each route its own
+   * send. After one route's final was handed and settled, every other route
+   * of that agent still owed gets the same stored answer now, each settled for
+   * its own route only. Nothing to do (no read beyond the session in memory)
+   * for the ordinary agent with one route.
+   */
+  async deliverOwedRoutes(sessionId: string, agentId: string): Promise<void> {
+    if (this.deliveringOwedRoutes.has(agentId)) return;
+    const owed = this.context.sessionBroker.listOwedChannelReplies({ sessionId, agentId });
+    if (owed.length === 0) return;
+    this.deliveringOwedRoutes.add(agentId);
+    try {
+      for (const reply of owed) {
+        const binding = this.context.routeBindings.getBinding(reply.routeId);
+        const refusal = this.describeRefusal(binding);
+        const pending = binding && !refusal ? this.buildPendingSurfaceReply(binding, { agentId, task: reply.task, sessionId }) : null;
+        if (!pending || !reply.body.trim()) {
+          logger.error('A channel answer owed to a second conversation of the same agent cannot be sent', {
+            agentId, sessionId, bindingId: reply.routeId, reason: !reply.body.trim() ? 'no stored answer' : refusal ?? 'no-deliverable-target',
+          });
+          continue;
+        }
+        try {
+          this.context.channelReplyPipeline.trackPending(pending);
+          this.recordReplyPhase(pending, 'started');
+          await this.context.channelReplyPipeline.deliverFinal(agentId, reply.body);
+        } catch (error) {
+          logger.error('A channel answer owed to a second conversation of the same agent could not be sent', {
+            surface: pending.surfaceKind, agentId, sessionId, bindingId: reply.routeId, reason: summarizeError(error),
+          });
+        }
+        await this.context.sessionBroker.settleChannelReply(sessionId, agentId, reply.routeId).catch((error: unknown) => {
+          logger.warn('A sent channel answer could not be marked sent; a restart may send it again', { agentId, error: summarizeError(error) });
+        });
+      }
+    } catch (error) {
+      logger.error('Channel answers owed to other conversations of one agent were not all sent', { agentId, sessionId, reason: summarizeError(error) });
+    } finally {
+      this.deliveringOwedRoutes.delete(agentId);
+    }
+  }
+
+  /**
+   * At start-up: every channel answer that was stored and owed but never marked
+   * sent (the daemon stopped while its send was in flight, or just before) is
+   * sent now, once. Whether the far side got the first send cannot be known, so
+   * a surface that drops a repeat by the message's identity (a webhook's
+   * Idempotency-Key, Discord's nonce) gets the same answer under the same
+   * identity, and any other surface gets it with a line saying it may arrive
+   * twice: a marked duplicate rather than a lost answer. An answer whose
+   * conversation can no longer be reached stays owed and is logged. Returns how
+   * many answers were sent again. Reads only sessions already in memory.
+   */
+  async resendOwedChannelReplies(): Promise<number> {
+    let resent = 0;
+    // Agents whose answer this pass sent: their other owed routes are sent too.
+    const sentHere = new Set<string>();
+    for (const owed of this.context.sessionBroker.listOwedChannelReplies()) {
+      if ((this.recoveredReplies.has(owed.agentId) && !sentHere.has(owed.agentId)) || this.context.pendingSurfaceReplies.has(owed.agentId) || this.finalizingReplies.has(owed.agentId)) continue;
+      sentHere.add(owed.agentId);
+      const binding = this.context.routeBindings.getBinding(owed.routeId);
+      const refusal = this.describeRefusal(binding);
+      const pending = binding && !refusal ? this.buildPendingSurfaceReply(binding, { agentId: owed.agentId, task: owed.task, sessionId: owed.sessionId }) : null;
+      if (!pending || !owed.body.trim()) {
+        logger.error('A channel answer owed before the restart cannot be sent again', {
+          agentId: owed.agentId, sessionId: owed.sessionId, bindingId: owed.routeId,
+          reason: !owed.body.trim() ? 'no stored answer' : refusal ?? 'no-deliverable-target',
+        });
+        continue;
+      }
+      this.recoveredReplies.add(owed.agentId);
+      while (this.recoveredReplies.size > MAX_RECOVERED_REPLIES) this.recoveredReplies.delete(this.recoveredReplies.values().next().value!);
+      const body = RESEND_DEDUPED_SURFACES.has(pending.surfaceKind) ? owed.body : `${owed.body}\n\n${RESENT_AFTER_RESTART_LINE}`;
+      this.finalizingReplies.add(owed.agentId);
+      try {
+        this.context.channelReplyPipeline.trackPending(pending);
+        this.recordReplyPhase(pending, 'started');
+        await this.context.channelReplyPipeline.deliverFinal(owed.agentId, body);
+        resent += 1;
+      } catch (error) {
+        logger.error('A channel answer owed before the restart could not be sent again', {
+          surface: pending.surfaceKind, agentId: owed.agentId, sessionId: owed.sessionId, reason: summarizeError(error),
+        });
+      } finally {
+        this.finalizingReplies.delete(owed.agentId);
+      }
+      // Handed to the channel (accepted or not): the pipeline settled it; this settles a pipeline without the hook.
+      await this.context.sessionBroker.settleChannelReply(owed.sessionId, owed.agentId, owed.routeId).catch((error: unknown) => {
+        logger.warn('A channel answer sent again after a restart could not be marked sent', { agentId: owed.agentId, error: summarizeError(error) });
+      });
+    }
+    return resent;
   }
 
   /**

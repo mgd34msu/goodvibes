@@ -12,8 +12,10 @@
  * them into one 400 is how a caller ends up retrying the one thing that will
  * never work.
  */
+import { systemActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
-import type { GatewayMethodHandler } from '../method-catalog-shared.js';
+import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
+import { admitEffects, type EffectId } from '../../security/effect-authority.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
 import {
@@ -51,6 +53,32 @@ export interface HostedSessionVerbService {
   list(options?: { readonly includeTerminated?: boolean | undefined }): readonly HostedSessionRecord[];
   readHistory(sessionId: string): Promise<{ readonly session: HostedSessionRecord; readonly history: readonly HostedSessionHistoryMessage[] }>;
   isOwnedBy(sessionId: string, principalId: string | undefined): boolean;
+  ownersOf(sessionId: string): readonly string[];
+  share(sessionId: string, principalId: string): Promise<{ readonly session: HostedSessionRecord; readonly owners: readonly string[]; readonly added: boolean }>;
+}
+
+/**
+ * Admit what a call causes on one session for the caller (the effect table,
+ * security/effect-authority.ts): the session's owners are the subject, so a
+ * credential below admin acts only on a session it created or was shared.
+ * A call the daemon makes in-process is the program's own.
+ */
+function admitOnSession(invocation: GatewayMethodInvocation, effects: readonly EffectId[], owners: readonly string[]): void {
+  const admission = admitEffects(invocation.context.actor ?? systemActor('in-process'), effects, { owners });
+  if (admission.kind === 'allowed') return;
+  if (admission.kind === 'ask-owner') {
+    throw new GatewayVerbError(`${admission.reason}; nothing was done.`, 'OWNER_ONLY', 403, 'sessionId');
+  }
+  const next = admission.code === 'NOT_YOURS'
+    ? ' Ask an owner of the session to share it with you (sessions.hosted.share), or use an admin credential.'
+    : ` ${admission.next}`;
+  throw new GatewayVerbError(`${admission.reason} (${admission.effect}; missing ${admission.missing}); nothing was done.${next}`,
+    admission.code, 403, 'sessionId');
+}
+
+/** Whether the caller may read this session's transcript (and so its record, whose title is its first prompt). */
+function mayReadSession(invocation: GatewayMethodInvocation, owners: readonly string[]): boolean {
+  return admitEffects(invocation.context.actor ?? systemActor('in-process'), ['session.transcript.read'], { owners }).kind === 'allowed';
 }
 
 function optionalString(params: Record<string, unknown>, field: string): string | undefined {
@@ -194,11 +222,33 @@ export function createHostedSessionAttachHandler(service: HostedSessionVerbServi
     const leaseMs = optionalPositiveNumber(params, 'leaseMs');
     const principalId = invocation.context.principalId;
     try {
+      const sessionId = requireString(params, 'sessionId');
+      // Joining returns the transcript, so it is both effects, on this session's owners.
+      admitOnSession(invocation, ['session.attach', 'session.transcript.read'], service.ownersOf(sessionId));
       return await service.attach(
-        requireString(params, 'sessionId'),
+        sessionId,
         requireString(params, 'clientId'),
         { ...(leaseMs === undefined ? {} : { leaseMs }), ...(principalId === undefined ? {} : { principalId }) },
       );
+    } catch (error) {
+      return toGatewayVerbError(error);
+    }
+  };
+}
+
+/**
+ * Add a principal to a session's owners, so it may attach, read the
+ * transcript and watch its turns live. Only an owner of the session (or an
+ * admin) shares it.
+ */
+export function createHostedSessionShareHandler(service: HostedSessionVerbService): GatewayMethodHandler {
+  return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    try {
+      const sessionId = requireString(params, 'sessionId');
+      const principalId = requireString(params, 'principalId');
+      admitOnSession(invocation, ['session.share'], service.ownersOf(sessionId));
+      return await service.share(sessionId, principalId);
     } catch (error) {
       return toGatewayVerbError(error);
     }
@@ -220,24 +270,27 @@ export function createHostedSessionKillHandler(service: HostedSessionVerbService
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     try {
-      return { session: await service.kill(requireString(params, 'sessionId')) };
+      const sessionId = requireString(params, 'sessionId');
+      admitOnSession(invocation, ['session.end'], service.ownersOf(sessionId));
+      return { session: await service.kill(sessionId) };
     } catch (error) {
       return toGatewayVerbError(error);
     }
   };
 }
 
+/** The sessions the caller may read: every one for an admin, else those it created or was shared. */
 export function createHostedSessionListHandler(service: HostedSessionVerbService): GatewayMethodHandler {
   return (invocation) => {
     const params = readInvocationParams(invocation);
     const includeTerminated = params['includeTerminated'] === true;
-    return { sessions: service.list({ includeTerminated }) };
+    return { sessions: service.list({ includeTerminated }).filter((session) => mayReadSession(invocation, service.ownersOf(session.id))) };
   };
 }
 
 /**
  * A session's transcript, live or ended. An admin reads any session; any other
- * credential reads only a session its principal started or joined, so a
+ * credential reads only a session its principal created or was shared, so a
  * least-privilege client reads its own reply after the session ended.
  */
 export function createHostedSessionHistoryHandler(service: HostedSessionVerbService): GatewayMethodHandler {
@@ -245,16 +298,15 @@ export function createHostedSessionHistoryHandler(service: HostedSessionVerbServ
     const params = readInvocationParams(invocation);
     const sessionId = requireString(params, 'sessionId');
     try {
-      const read = await service.readHistory(sessionId);
-      if (invocation.context.admin !== true && !service.isOwnedBy(sessionId, invocation.context.principalId)) {
+      if (!mayReadSession(invocation, service.ownersOf(sessionId))) {
         throw new GatewayVerbError(
-          `Hosted session ${sessionId} was not started or joined by this credential, so its transcript is not shown. Read it with an admin credential, or with the credential that created it.`,
+          `Hosted session ${sessionId} was not created by this credential or shared with it, so its transcript is not shown. Ask an owner of the session to share it with you (sessions.hosted.share), or read it with an admin credential.`,
           'HOSTED_SESSION_NOT_OWNED',
           403,
           'sessionId',
         );
       }
-      return read;
+      return await service.readHistory(sessionId);
     } catch (error) {
       return toGatewayVerbError(error);
     }
@@ -269,6 +321,7 @@ export const HOSTED_SESSION_METHOD_IDS: readonly string[] = [
   'sessions.hosted.kill',
   'sessions.hosted.list',
   'sessions.hosted.history',
+  'sessions.hosted.share',
 ];
 
 /**
@@ -294,6 +347,7 @@ export function registerHostedSessionGatewayMethods(
   attach('sessions.hosted.kill', createHostedSessionKillHandler(service));
   attach('sessions.hosted.list', createHostedSessionListHandler(service));
   attach('sessions.hosted.history', createHostedSessionHistoryHandler(service));
+  attach('sessions.hosted.share', createHostedSessionShareHandler(service));
 }
 
 /**

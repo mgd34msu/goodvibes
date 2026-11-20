@@ -20,6 +20,7 @@ import { withRetry } from '../utils/retry.js';
 import { trackDeliveredOutput } from './stream-delivery.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
+import { currentTurn } from '../security/turn-boundary.js';
 import {
   buildHttpError,
   buildResponsesInput,
@@ -54,6 +55,12 @@ export interface LMStudioProviderOptions extends OpenAICompatOptions {
   responsesClient?: LMStudioResponsesClient | undefined;
   compatProvider?: LLMProvider | undefined;
   capabilities?: Partial<ProviderCapability> | undefined;
+}
+
+
+/** The key of one stored LM Studio continuation: the session it belongs to, then its transcript digest. */
+function continuationKey(sessionId: string, transcriptKey: string): string {
+  return `${sessionId}\u0000${transcriptKey}`;
 }
 
 export class LMStudioProvider implements LLMProvider {
@@ -208,7 +215,12 @@ export class LMStudioProvider implements LLMProvider {
     const previousMessages = messages.slice(0, -1);
     let previousResponseId: string | undefined;
     if (previousMessages.length > 0) {
-      const previousKey = makeTranscriptKey(model, systemPrompt, previousMessages);
+      // A continuation belongs to the session that made it: two sessions with
+      // the same visible history never share LM Studio's stored state. With
+      // no session in scope the whole transcript is sent instead.
+      const session = currentTurn()?.sessionId ?? null;
+      if (session === null) return null;
+      const previousKey = continuationKey(session, makeTranscriptKey(model, systemPrompt, previousMessages));
       previousResponseId = this.nativeResponseIds.get(previousKey);
       if (!previousResponseId) return null;
       // Mark as most recently used.
@@ -229,11 +241,12 @@ export class LMStudioProvider implements LLMProvider {
     assistantContent: string,
     responseId: string | undefined,
   ): void {
-    if (!responseId) return;
-    const key = makeTranscriptKey(model, systemPrompt, [
+    const session = currentTurn()?.sessionId ?? null;
+    if (!responseId || session === null) return;
+    const key = continuationKey(session, makeTranscriptKey(model, systemPrompt, [
       ...requestMessages,
       { role: 'assistant', content: assistantContent },
-    ]);
+    ]));
     this.nativeResponseIds.delete(key);
     this.nativeResponseIds.set(key, responseId);
     while (this.nativeResponseIds.size > NATIVE_RESPONSE_ID_LIMIT) {

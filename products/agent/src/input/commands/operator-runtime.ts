@@ -4,6 +4,8 @@ import {
 } from '@goodvibes-jev/engine/terminal-shell/context-inspection-command';
 import { createInteractionModeCommand } from '@goodvibes-jev/engine/terminal-shell/interaction-mode-command';
 import { settingsTargetNotFoundMessage } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
+import { settingSetSecretPositions } from '@goodvibes-jev/engine/terminal-shell/entry-workspace-commands';
+import { secretArg } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
 import { captureTranscriptSource } from './transcript-reading.ts';
 import type { CommandContext, CommandRegistry, SlashCommand } from '../command-registry.ts';
@@ -111,6 +113,10 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
     description: 'Open, inspect, or update Agent settings',
     usage: '[category|key|list|get <key>|set <key> <value>|reset <key>]',
     argsHint: '[list|get|set|reset]',
+    // `set <key> <value>` for a credential key: the value is masked in the input
+    // history and read with `secretArg`, so it reaches the secret store without
+    // ever being kept as typed. `--yes` is not a word of the line.
+    secretArgs: { select: (args) => settingSetSecretPositions(args, (token) => token === '--yes') },
     async handler(args, ctx) {
       const parsed = stripYesFlag(args);
       const commandArgs = [...parsed.rest];
@@ -163,7 +169,10 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
       // security-bearing key is put to the owner.
       if (sub === 'set') {
         const key = commandArgs[1];
-        const rawValue = commandArgs.slice(2).join(' ');
+        const secretPositions = settingSetSecretPositions(args, (token) => token === '--yes');
+        const rawValue = secretPositions.length > 0
+          ? secretPositions.map((position) => secretArg(position).reveal('store-write')).join(' ')
+          : commandArgs.slice(2).join(' ');
         if (!key || rawValue.length === 0) {
           throw commandRefusal('Usage: /settings set <key> <value>');
         }

@@ -28,6 +28,7 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { OwnerReplyRefusedError, type OwnerReplyOutcome } from './escalation.js';
 import type { ContractExternalWorkAdapter } from './external.js';
 import type { ContractRunner, UnitRetryOutcome } from './runner.js';
+import type { ContractHold } from './resume.js';
 import type { BudgetCeiling } from '../orchestration/types.js';
 import { isTerminalContractStatus, type ContractOrigin, type ContractOwnership, type ContractView, type NativeContractSource, type StartContractInput } from './types.js';
 
@@ -35,7 +36,7 @@ import { isTerminalContractStatus, type ContractOrigin, type ContractOwnership, 
 export const OPERATOR_SESSION_ID = 'operator';
 
 /** The runner surface the service reads and acts through. */
-export type OperatorContractRunner = Pick<ContractRunner, 'start' | 'startIdempotent' | 'get' | 'list' | 'cancel' | 'reply' | 'remove' | 'retryUnit' | 'raiseBudget'>;
+export type OperatorContractRunner = Pick<ContractRunner, 'start' | 'startIdempotent' | 'get' | 'list' | 'cancel' | 'reply' | 'remove' | 'retryUnit' | 'raiseBudget' | 'held'>;
 
 /** A live hosted session's floor runner and the workspace its turns work in. */
 export interface HostedSessionContracts {
@@ -245,11 +246,16 @@ export interface ContractSummary {
   readonly completedAt?: number | undefined;
   /** The latest time anything here moved: a decision, a question raised or answered, the end. */
   readonly updatedAt: number;
+  /**
+   * Present when this daemon holds the stored contract without running it: `input-unavailable` (its recorded input
+   * could not be restored; cancel ends it) or `claim-unavailable` (no run claim could be taken; another process may run it).
+   */
+  readonly held?: { readonly code: ContractHold['code']; readonly reason: string; readonly at: number } | undefined;
   readonly revision: string;
 }
 
 /** The summary of one contract (see `ContractSummary`). */
-export function summarizeContract(contract: ContractView): ContractSummary {
+export function summarizeContract(contract: ContractView, hold: ContractHold | null = null): ContractSummary {
   const open = contract.escalations.filter((escalation) => escalation.resolvedAt === undefined).sort((a, b) => b.at - a.at);
   let updatedAt = Math.max(contract.createdAt, contract.completedAt ?? 0);
   for (const decision of contract.decisions) if (decision.at > updatedAt) updatedAt = decision.at;
@@ -285,6 +291,7 @@ export function summarizeContract(contract: ContractView): ContractSummary {
     createdAt: contract.createdAt,
     ...(contract.completedAt === undefined ? {} : { completedAt: contract.completedAt }),
     updatedAt,
+    ...(hold === null ? {} : { held: { code: hold.code, reason: hold.reason, at: hold.at } }),
   };
   // Hashes the summary and the marks (a few hundred bytes), never the tree.
   return { ...fields, revision: createHash('sha256').update(JSON.stringify([fields, marks])).digest('hex').slice(0, 16) };
@@ -351,7 +358,16 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
   let hostedRunners: HostedContractRunners | null = null;
   let nativeRunner: Pick<ContractRunner, 'get' | 'list' | 'reply'> | null = null;
   let dispatcher: OperatorWorkDispatcher | null = null;
-  const runners = (): readonly Pick<ContractRunner, 'get' | 'list' | 'reply'>[] => [deps.runner, ...(nativeRunner === null ? [] : [nativeRunner]), ...(hostedRunners?.runners() ?? [])];
+  const runners = (): readonly Pick<ContractRunner, 'get' | 'list' | 'reply' | 'held'>[] => [deps.runner, ...(nativeRunner === null ? [] : [nativeRunner]), ...(hostedRunners?.runners() ?? [])];
+  /** Why a stored contract is held without running, from the runner holding it; null when none holds it. */
+  const holdOf = (contractId: string): ContractHold | null => {
+    for (const runner of runners()) {
+      const hold = runner.held?.(contractId) ?? null;
+      if (hold !== null) return hold;
+    }
+    return null;
+  };
+  const summaryOf = (contract: ContractView): ContractSummary => summarizeContract(contract, holdOf(contract.id));
 
   /** Whether `caller` may act in session `sessionId`: it is not owned by other identified principals. */
   function sessionOpenTo(sessionId: string, caller: OperatorCaller | undefined): boolean {
@@ -465,7 +481,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
       return visibleContracts(filter, caller).map((contract) => summarized(projectContractOperatorView(contract)));
     },
     summaries(filter = {}, caller) {
-      return visibleContracts(filter, caller).map(summarizeContract);
+      return visibleContracts(filter, caller).map(summaryOf);
     },
     get(contractId, caller, options = {}) {
       for (const runner of runners()) {
@@ -480,7 +496,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
     status(contractId, caller) {
       for (const runner of runners()) {
         const contract = runner.get(contractId);
-        if (contract !== null) return visibleTo(contract, caller) ? summarizeContract(contract) : null;
+        if (contract !== null) return visibleTo(contract, caller) ? summaryOf(contract) : null;
       }
       return null;
     },
@@ -489,6 +505,11 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
       const { runner } = holder(contractId, caller);
       if (runner === nativeRunner) {
         throw new ContractOperatorError(`Contract ${contractId} is native work: stop it through the native work execution, or answer its open question with "cancel".`, 'CONTRACT_NATIVE', 409);
+      }
+      // A contract held because no run claim could be taken may be running in another process: it is not ended here.
+      const hold = holdOf(contractId);
+      if (hold !== null && hold.code === 'claim-unavailable') {
+        throw new ContractOperatorError(`Contract ${contractId} is held and not run here: ${hold.reason}. Another process may be running it, so it is not cancelled from here; make the project's .goodvibes/contracts directory writable and restart, then cancel it.`, 'CONTRACT_HELD', 409);
       }
       if ((runner as OperatorContractRunner).cancel(contractId, reason)) return true;
       // A stored contract that is not ended but has no live run here was left for inspection (another mode's record, or an admission only a durable resume adopts).

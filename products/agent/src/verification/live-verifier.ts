@@ -383,7 +383,12 @@ async function searchKnowledgeProbe(baseUrl: string, routePrefix: string, token:
 
 /** Whether the Agent search route returned the probe. */
 async function agentSearchReturns(baseUrl: string, token: string, probe: KnowledgeProbe, sourceId: string): Promise<ProbeStep<boolean>> {
-  const found = await searchKnowledgeProbe(baseUrl, AGENT_KNOWLEDGE_ROUTE, token, probe, sourceId);
+  return await searchReturns(baseUrl, AGENT_KNOWLEDGE_ROUTE, token, probe, sourceId);
+}
+
+/** Whether a space's search route returned the probe. */
+async function searchReturns(baseUrl: string, routePrefix: string, token: string, probe: KnowledgeProbe, sourceId: string): Promise<ProbeStep<boolean>> {
+  const found = await searchKnowledgeProbe(baseUrl, routePrefix, token, probe, sourceId);
   return found.ok ? { ok: true, value: found.value !== null } : found;
 }
 
@@ -402,9 +407,9 @@ async function ensureKnowledgeProbe(baseUrl: string, routePrefix: string, token:
 /**
  * Keeps one probe in the Agent space and one in the default space (seeded
  * through each ingest route the first time, reused after), then searches for
- * each on the Agent route: the Agent probe must come back and the default
- * probe must not. This is the observation that tells a
- * working split from crossed spaces; an empty store cannot pass it.
+ * each on both routes: each space's search returns its own probe and not the
+ * other space's. This is the observation that tells a working split from
+ * crossed spaces in either direction; an empty store cannot pass it.
  */
 async function checkAgentKnowledgeIsolation(baseUrl: string, token: string | undefined): Promise<LiveVerificationCheck> {
   const id = 'agent-knowledge-search-isolated';
@@ -435,12 +440,29 @@ async function checkAgentKnowledgeIsolation(baseUrl: string, token: string | und
       detail: `Default probe source ${defaultSource.value} appeared in Agent search results.`,
     });
   }
+  // The other direction: default search returns its own probe and not the Agent's.
+  const defaultOwn = await searchReturns(baseUrl, DEFAULT_KNOWLEDGE_ROUTE, token, defaultProbe, defaultSource.value);
+  if (!defaultOwn.ok) return fail(defaultOwn);
+  if (!defaultOwn.value) {
+    return fail({
+      summary: 'The default search route did not return the source seeded through the default ingest route; isolation could not be observed in that direction.',
+      detail: `Default probe source ${defaultSource.value} was not in the default search results.`,
+    });
+  }
+  const agentInDefault = await searchReturns(baseUrl, DEFAULT_KNOWLEDGE_ROUTE, token, agentProbe, agentSource.value);
+  if (!agentInDefault.ok) return fail(agentInDefault);
+  if (agentInDefault.value) {
+    return fail({
+      summary: 'The default search route returned a source seeded through the Agent ingest route: the knowledge spaces are crossed.',
+      detail: `Agent probe source ${agentSource.value} appeared in default search results.`,
+    });
+  }
   return {
     id,
     title,
     status: 'pass',
-    summary: 'Agent search returned the Agent probe and did not return the default-route probe.',
-    detail: `Agent probe ${agentSource.value} found; default probe ${defaultSource.value} absent. Each space keeps one probe source, tagged live-verification, which later runs reuse instead of adding another.`,
+    summary: 'Each search route returned its own probe and not the other space\'s.',
+    detail: `Agent search: Agent probe ${agentSource.value} found, default probe ${defaultSource.value} absent. Default search: default probe found, Agent probe absent. Each space keeps one probe source, tagged live-verification, which later runs reuse instead of adding another.`,
   };
 }
 

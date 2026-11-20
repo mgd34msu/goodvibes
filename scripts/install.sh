@@ -341,12 +341,38 @@ fetch() {
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 180 --retry 3 -o "$2" "$1"
   elif command -v wget >/dev/null 2>&1; then
-    # wget has no switch that restricts redirects to https for a single
-    # download, so only the curl path enforces that; both bound the wait.
-    wget -q --timeout=30 --tries=3 -O "$2" "$1"
+    wget_https_only "$1" "$2"
   else
     fail INSTALL_E004 "need curl or wget"
   fi
+}
+
+wget_https_only() {
+  # wget_https_only <url> <dest>: wget has no switch that limits redirects to
+  # https, so each hop is asked for by hand (headers only, no redirect
+  # followed) and refused unless it stays https; the final URL is then
+  # downloaded with redirects off, so a redirect that appears only then fails
+  # instead of being followed.
+  _wget_url=$1
+  _wget_hops=0
+  while :; do
+    case "$_wget_url" in
+      https://*) : ;;
+      *) fail INSTALL_E131 "a download was redirected to $_wget_url, which is not https; nothing more was downloaded. Install curl, or copy the release files over https into a directory and run the installer with --from-dir" ;;
+    esac
+    _wget_location=$(wget -q -S --spider --max-redirect=0 --timeout=30 --tries=3 "$_wget_url" 2>&1 |
+      awk 'tolower($1) == "location:" { print $2 }' | tr -d '\r' | tail -n 1)
+    [ -n "$_wget_location" ] || break
+    _wget_hops=$((_wget_hops + 1))
+    [ "$_wget_hops" -le 10 ] || fail INSTALL_E131 "a download of $1 was redirected more than 10 times; nothing more was downloaded"
+    case "$_wget_location" in
+      *://*) _wget_url=$_wget_location ;;
+      //*) _wget_url="https:$_wget_location" ;;
+      /*) _wget_url="$(printf '%s' "$_wget_url" | sed 's#^\(https://[^/]*\).*#\1#')$_wget_location" ;;
+      *) _wget_url="${_wget_url%/*}/$_wget_location" ;;
+    esac
+  done
+  wget -q --max-redirect=0 --timeout=30 --tries=3 -O "$2" "$_wget_url"
 }
 
 sha256_of() {

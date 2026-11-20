@@ -168,7 +168,16 @@ async function readRetention(
   requireActingReading(retention.readings.required_targets_lost);
   if (fidelity) requireActingReading(fidelity);
   const obligationsLost = retention.readings.obligations_lost.verdict === 'yes' || retention.readings.required_targets_lost.verdict === 'yes';
-  retention.recordAction(obligationsLost ? 'Reject compaction: a required obligation was lost.' : 'Use settled retention with every required obligation preserved.');
+  // The action says what was reviewed: a source cut for length was read only in part.
+  const cut = [
+    ...(views.sourceOmitted > 0 ? [`${views.sourceOmitted} source message(s) were left out for length`] : []),
+    ...(views.sourceClipped > 0 ? [`${views.sourceClipped} were shortened`] : []),
+  ];
+  retention.recordAction(obligationsLost
+    ? `Reject compaction: a required obligation was lost${cut.length > 0 ? ` in the reviewed portion (${cut.join('; ')})` : ''}.`
+    : cut.length > 0
+      ? `Use settled retention: every required obligation preserved in the reviewed portion; ${cut.join('; ')}.`
+      : 'Use settled retention with every required obligation preserved.');
   fidelity?.recordAction('Use settled fidelity in compaction quality.');
   const substance = Math.min(1, Math.max(0, retention.readings.substance.normalized));
   const contradictionProbability = fidelity?.reading?.probabilities.contradicts ?? 0;

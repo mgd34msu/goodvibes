@@ -136,6 +136,8 @@ export class HostedWorkspaceFloors {
   private readonly entries = new Map<string, FloorEntry>();
   private readonly pending = new Map<string, Promise<FloorEntry>>();
   private readonly retiring = new Set<Promise<void>>();
+  /** A workspace's floor still closing; that workspace's next floor is built only after it. */
+  private readonly retiringByRoot = new Map<string, Promise<void>>();
   private disposed = false;
   private disposal: Promise<void> | null = null;
 
@@ -190,6 +192,10 @@ export class HostedWorkspaceFloors {
     // Publish ownership before entering product code, which may request shutdown.
     const construction = Promise.resolve().then(async (): Promise<FloorEntry> => {
       this.assertUsable();
+      // The previous floor of this workspace still owns its processes and files until its close settles.
+      const previous = this.retiringByRoot.get(workspaceRoot);
+      if (previous) await previous;
+      this.assertUsable();
       const floor = await hostedLifecycleCallbacks.run(this, () => this.factory({ workspaceRoot, liveConversationMessages: this.liveConversationMessages }));
       const entry: FloorEntry = { workspaceRoot, floor, refs: 0 };
       if (this.disposed) {
@@ -222,9 +228,13 @@ export class HostedWorkspaceFloors {
           workspaceRoot: entry.workspaceRoot,
           error: summarizeError(error),
         });
-      }).finally(() => { this.retiring.delete(disposal); });
+      }).finally(() => {
+        this.retiring.delete(disposal);
+        if (this.retiringByRoot.get(entry.workspaceRoot) === disposal) this.retiringByRoot.delete(entry.workspaceRoot);
+      });
     entry.disposal = disposal;
     this.retiring.add(disposal);
+    this.retiringByRoot.set(entry.workspaceRoot, disposal);
     return disposal;
   }
 

@@ -16,6 +16,14 @@
  * runs the task's verification script to decide pass/fail. It reports a
  * per-task result and an aggregate.
  *
+ * The verifier a task is judged by is the suite's, not whatever the session
+ * left in the task directory: before the session runs, the verification
+ * script and the files task.json lists in `verifyFiles` are copied out of the
+ * task directory into a private snapshot (and, when the caller names the
+ * original suite, their sha256 compared with it). Verification runs that
+ * snapshot, contained (runContained, origin `project`) with the task directory
+ * read-only, so a session that rewrites verify.sh to `exit 0` still fails.
+ *
  * SCOPE (honest). This is the adapter CONTRACT plus a default script verifier,
  * not a benchmark import: it does not bundle Terminal-Bench's task corpus, a
  * container runtime, or a specific model harness. The session executor and (if
@@ -23,9 +31,11 @@
  * example suite in tests and a real suite + real session in a consumer.
  */
 
-import { execFile } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
+import { ContainmentUnavailableError, runContained } from '../sandbox/contained-spawn.js';
 import type { EvalRawResult, EvalResult, EvalSuiteResult } from './types.js';
 
 /** One task's on-disk definition (task.json). */
@@ -38,6 +48,8 @@ export interface TaskDefinition {
   readonly verify: string;
   /** Optional per-task wall-clock cap for the session executor, in ms. */
   readonly timeoutMs?: number;
+  /** Files (relative to the task directory) the verifier reads besides its script; snapshotted with it before the session runs. */
+  readonly verifyFiles?: readonly string[];
 }
 
 /** What the session executor is given for one task. */
@@ -63,8 +75,10 @@ export type TaskSessionExecutor = (ctx: TaskExecutionContext) => Promise<TaskSes
 export interface TaskVerifyContext {
   readonly taskId: string;
   readonly taskDir: string;
-  /** Absolute path to the verification script. */
+  /** Absolute path to the verification script: the snapshot taken before the session ran, outside the task directory. */
   readonly verifyScript: string;
+  /** The snapshot directory: the script and its `verifyFiles` at their task-relative paths (GOODVIBES_EVAL_VERIFY_DIR for the default verifier). */
+  readonly verifyDir: string;
   readonly timeoutMs?: number | undefined;
 }
 
@@ -102,6 +116,12 @@ export interface RunTaskSuiteOptions {
   readonly executor: TaskSessionExecutor;
   /** Verification runner. Defaults to {@link defaultShellVerifier} (runs the script, exit 0 = pass). */
   readonly verifier?: TaskVerifier;
+  /**
+   * The original suite when `suiteDir` is a working copy of it: each task's
+   * verification files are compared (sha256) with the original's before the
+   * session runs, and a task whose files differ fails without running.
+   */
+  readonly sourceDir?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -122,7 +142,51 @@ export function loadTaskDefinition(taskDir: string): TaskDefinition {
   const id = typeof parsed.id === 'string' && parsed.id.length > 0 ? parsed.id : dirName;
   const verify = typeof parsed.verify === 'string' && parsed.verify.length > 0 ? parsed.verify : 'verify.sh';
   const timeoutMs = typeof parsed.timeoutMs === 'number' ? parsed.timeoutMs : undefined;
-  return { id, instruction: parsed.instruction, verify, ...(timeoutMs !== undefined ? { timeoutMs } : {}) };
+  const verifyFiles = parsed.verifyFiles === undefined ? undefined
+    : Array.isArray(parsed.verifyFiles) && parsed.verifyFiles.every((entry) => typeof entry === 'string' && entry.length > 0)
+      ? parsed.verifyFiles as string[]
+      : (() => { throw new Error(`task-suite: ${defPath} "verifyFiles" must be a list of paths relative to the task directory`); })();
+  for (const file of [verify, ...(verifyFiles ?? [])]) taskRelativePath(taskDir, file, defPath);
+  return { id, instruction: parsed.instruction, verify, ...(timeoutMs !== undefined ? { timeoutMs } : {}), ...(verifyFiles ? { verifyFiles } : {}) };
+}
+
+/** A path task.json names, which must stay inside the task directory. */
+function taskRelativePath(taskDir: string, file: string, defPath: string): string {
+  const rel = normalize(file);
+  if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
+    throw new Error(`task-suite: ${defPath} names ${file}, which is not inside the task directory`);
+  }
+  return rel;
+}
+
+const sha256File = (path: string): string => createHash('sha256').update(readFileSync(path)).digest('hex');
+
+/**
+ * Copy the task's verification script and its `verifyFiles` out of the task
+ * directory into a private snapshot, before the session can touch them. With
+ * `sourceTaskDir` (the same task in the original suite), every snapshotted
+ * file must have the original's sha256. Throws a named reason otherwise.
+ */
+function snapshotVerifier(taskDir: string, task: TaskDefinition, sourceTaskDir: string | undefined): string {
+  const dir = mkdtempSync(join(tmpdir(), 'goodvibes-eval-verify-'));
+  try {
+    for (const file of [task.verify, ...(task.verifyFiles ?? [])]) {
+      const rel = taskRelativePath(taskDir, file, join(taskDir, 'task.json'));
+      const from = join(taskDir, rel);
+      if (!existsSync(from) || !statSync(from).isFile()) throw new Error(`verification file ${rel} is missing from the task`);
+      const to = join(dir, rel);
+      mkdirSync(dirname(to), { recursive: true });
+      copyFileSync(from, to);
+      if (sourceTaskDir !== undefined) {
+        const original = join(sourceTaskDir, rel);
+        if (!existsSync(original) || sha256File(original) !== sha256File(to)) throw new Error(`verification file ${rel} differs from the suite's`);
+      }
+    }
+    return dir;
+  } catch (error) {
+    rmSync(dir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 /** A discovered task: its parsed definition and the absolute directory it lives in. */
@@ -147,36 +211,50 @@ export function discoverTasks(suiteDir: string): DiscoveredTask[] {
   return tasks.sort((a, b) => a.definition.id.localeCompare(b.definition.id));
 }
 
-/** Default verifier: run the verification script through `bash` and treat exit 0 as pass. */
+const VERIFY_ENV_NAMES = ['PATH', 'LANG', 'LC_ALL', 'TZ', 'TERM'] as const;
+
+/**
+ * Default verifier: run the snapshotted verification script through `bash`,
+ * contained (origin `project`) with the task directory read-only, and treat
+ * exit 0 as pass. Where no boundary exists the script runs on the host and the
+ * output says so.
+ */
 export const defaultShellVerifier: TaskVerifier = async (ctx) => {
   if (!existsSync(ctx.verifyScript)) {
     return { passed: false, output: `verification script not found: ${ctx.verifyScript}` };
   }
   const timeoutMs = ctx.timeoutMs ?? 60_000;
-  return await new Promise((resolveVerdict) => {
-    execFile(
-      'bash',
-      [ctx.verifyScript],
-      { cwd: ctx.taskDir, encoding: 'utf-8', timeout: timeoutMs, windowsHide: true },
-      (error, stdout, stderr) => {
-        const output = `${stdout ?? ''}${stderr ?? ''}`.trim();
-        if (!error) {
-          resolveVerdict({ passed: true, output });
-          return;
-        }
-        const failure = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string | null; code?: number | string | null };
-        // A script that ran and exited non-zero is a verification failure; a
-        // script that never ran or was cut off is a harness fault, said as such.
-        let fault = '';
-        if (failure.killed || failure.signal) {
-          fault = `verification script was stopped after ${timeoutMs} ms (${failure.signal ?? 'killed'})`;
-        } else if (typeof failure.code === 'string') {
-          fault = `verification script could not run: ${failure.message}`;
-        }
-        resolveVerdict({ passed: false, output: fault ? [output, fault].filter(Boolean).join('\n') : output });
+  const env: Record<string, string> = { HOME: tmpdir(), GOODVIBES_EVAL_VERIFY_DIR: ctx.verifyDir };
+  for (const name of VERIFY_ENV_NAMES) {
+    const value = process.env[name];
+    if (value !== undefined) env[name] = value;
+  }
+  const signal = AbortSignal.timeout(timeoutMs);
+  try {
+    const result = await runContained({
+      argv: ['bash', ctx.verifyScript],
+      cwd: ctx.taskDir,
+      env,
+      signal,
+      origin: 'project',
+      containment: {
+        boundary: 'host-allowed',
+        network: 'on',
+        writable: [],
+        readOnly: [ctx.verifyDir],
+        reason: `the verification script of task ${ctx.taskId} reads the task directory without changing it`,
       },
-    );
-  });
+    });
+    const output = `${result.stdout}${result.stderr}`.trim();
+    const host = result.applied.backend === 'host' ? 'verification ran on the host: no boundary is available here, so the task directory was not read-only' : '';
+    if (result.exitCode === 0) return { passed: true, output: [output, host].filter(Boolean).join('\n') };
+    const fault = result.exitCode === null ? `verification script was stopped after ${timeoutMs} ms` : '';
+    return { passed: false, output: [output, fault, host].filter(Boolean).join('\n') };
+  } catch (error) {
+    if (signal.aborted) return { passed: false, output: `verification script was stopped after ${timeoutMs} ms` };
+    const reason = error instanceof ContainmentUnavailableError ? `${error.reason} ${error.next}` : error instanceof Error ? error.message : String(error);
+    return { passed: false, output: `verification script could not run: ${reason}` };
+  }
 };
 
 /**
@@ -186,12 +264,23 @@ export const defaultShellVerifier: TaskVerifier = async (ctx) => {
  */
 export async function runTaskSuite(suiteDir: string, options: RunTaskSuiteOptions): Promise<TaskSuiteResult> {
   const root = resolve(suiteDir);
+  const sourceRoot = options.sourceDir !== undefined ? resolve(options.sourceDir) : undefined;
   const verifier = options.verifier ?? defaultShellVerifier;
   const tasks = discoverTasks(root);
   const results: TaskResult[] = [];
 
   for (const { definition: task, taskDir } of tasks) {
     const startedAt = Date.now();
+
+    // The verifier is taken out of the task directory before the session can change it.
+    let verifyDir: string;
+    try {
+      verifyDir = snapshotVerifier(taskDir, task, sourceRoot !== undefined ? join(sourceRoot, relative(root, taskDir)) : undefined);
+    } catch (err) {
+      const reason = `task was not run: ${err instanceof Error ? err.message : String(err)}`;
+      results.push({ taskId: task.id, passed: false, sessionCompleted: false, verifierPassed: false, verifierOutput: reason, reason, durationMs: Date.now() - startedAt });
+      continue;
+    }
 
     let sessionCompleted = false;
     let sessionSummary = '';
@@ -216,7 +305,8 @@ export async function runTaskSuite(suiteDir: string, options: RunTaskSuiteOption
         const verdict = await verifier({
           taskId: task.id,
           taskDir,
-          verifyScript: join(taskDir, task.verify),
+          verifyScript: join(verifyDir, normalize(task.verify)),
+          verifyDir,
           timeoutMs: task.timeoutMs,
         });
         verifierPassed = verdict.passed;
@@ -227,6 +317,7 @@ export async function runTaskSuite(suiteDir: string, options: RunTaskSuiteOption
         verifierOutput = `verifier threw: ${err instanceof Error ? err.message : String(err)}`;
       }
     }
+    rmSync(verifyDir, { recursive: true, force: true });
 
     const passed = sessionCompleted && verifierPassed;
     results.push({

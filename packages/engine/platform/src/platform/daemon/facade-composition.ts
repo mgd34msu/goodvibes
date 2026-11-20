@@ -623,7 +623,18 @@ export function createDaemonFacadeCollaborators(
     replyStyleOf: (agentId) => runtime.agentManager.getStatus(agentId)?.replyStyle,
     // A workstream is named from its own record, so one started before a restart still reads as its request.
     contractAsk: (contractId) => runtime.runtimeServices.contractRunner.get(contractId)?.ask,
+    // Save, then send: a conversation's answer is recorded owed before its send and sent once it went out,
+    // so a daemon that dies mid-send sends it again after its restart (resendOwedChannelReplies).
+    recordFinalOwed: ({ sessionId, agentId }) => runtime.sessionBroker.markChannelReplyOwed(sessionId, agentId),
+    // Settled per route: another conversation the same agent answers is still owed its own send, made at once.
+    // The other routes' sends are not awaited: this runs inside the agent's own delivery section.
+    recordFinalHanded: async ({ sessionId, agentId, routeId }) => {
+      await runtime.sessionBroker.settleChannelReply(sessionId, agentId, routeId);
+      void surfaceDeliveryHelper.deliverOwedRoutes(sessionId, agentId);
+    },
   });
+  // A completion stored while its channel send is still to come carries the owed mark in the same save.
+  runtime.sessionBroker.setChannelReplyOwedProbe((agentId) => channelReplyPipeline.finalOwner(agentId) !== 'untracked');
   const surfaceDeliveryStartedAt = new Map<string, number>();
   const surfaceDeliveryHelper = new DaemonSurfaceDeliveryHelper({
     pendingSurfaceReplies: options.pendingSurfaceReplies,

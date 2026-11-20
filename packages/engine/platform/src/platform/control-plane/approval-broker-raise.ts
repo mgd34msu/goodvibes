@@ -21,13 +21,15 @@
  *
  * ── The coalescing rule, restated because it is subtle ─────────────────────
  *
- * A second identical in-flight ask (same session, tool and args) does not
- * create a second record or a second prompt: it attaches to the first record's
- * pending promise, so one decision resolves both. The returned `approval` is
- * then the EXISTING record, which is exactly what a wire caller needs, because
- * the id it gets back is the id whose updates it will see on the stream.
- * `coalesced` says which happened, so a caller that raised an ask and got back
- * a record older than its call can tell that from a fresh one.
+ * A second identical in-flight ask (same raiser, session, tool and args) does
+ * not create a second record or a second prompt: it attaches to the first
+ * record's pending promise, so one decision resolves both. The returned
+ * `approval` is then the EXISTING record, which is exactly what a wire caller
+ * needs, because the id it gets back is the id whose updates it will see on
+ * the stream. `coalesced` says which happened, so a caller that raised an ask
+ * and got back a record older than its call can tell that from a fresh one.
+ * Asks of different raisers never coalesce, so no caller is handed a record or
+ * a decision another caller raised (`approvalRaiser`).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -129,6 +131,17 @@ function joinApproval(
   });
 }
 
+/**
+ * Who raised an ask, as the daemon recorded it: the authenticated principal
+ * of an `approvals.raise` call (routes/approvals-raise.ts writes it, never the
+ * caller), or `in-process` for an ask the daemon's own code raised.
+ */
+export function approvalRaiser(metadata: Readonly<Record<string, unknown>> | undefined): string {
+  if (metadata?.['raisedVia'] !== 'approvals.raise') return 'in-process';
+  const principal = metadata['raisedByPrincipal'];
+  return typeof principal === 'string' && principal.length > 0 ? `principal:${principal}` : 'wire:unidentified';
+}
+
 /** Metadata key naming the channel whose guest's turn raised an ask; the ask is the owner's and is delivered to him. */
 export const APPROVAL_GUEST_CHANNEL_METADATA = 'guestChannel';
 
@@ -169,13 +182,18 @@ export async function raiseSharedApproval(
   input.requireOwnerDecision?.assertCurrent();
   const now = Date.now();
 
-  // Duplicate in-flight asks coalesce on (session, tool, args): the second
-  // identical ask attaches to the first's pending record, ONE prompt, and
-  // one decision resolves both. No second record, no second local prompt.
+  // Duplicate in-flight asks coalesce on (raiser, session, tool, args): the
+  // second identical ask attaches to the first's pending record, ONE prompt,
+  // and one decision resolves both. No second record, no second local prompt.
+  // Only the same raiser's asks coalesce: another caller naming the same
+  // session, tool and args raises its own ask and is never handed the first
+  // raiser's record or decision.
   const coalesceKey = deps.coalesceKey(input.sessionId, input.request.tool, input.request.args);
+  const raiser = approvalRaiser(input.metadata);
   for (const existing of deps.approvals.values()) {
     if (!input.requireOwnerDecision && !existing.requiresOwnerDecision
       && (existing.status === 'pending' || existing.status === 'claimed')
+      && approvalRaiser(existing.metadata) === raiser
       && deps.coalesceKey(existing.sessionId, existing.request.tool, existing.request.args) === coalesceKey) {
       const pending = deps.pendingResolvers.get(existing.id);
       if (pending && !pending.retired) {

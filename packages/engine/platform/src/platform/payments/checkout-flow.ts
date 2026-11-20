@@ -186,12 +186,12 @@ export interface PurchaseRequest {
 export type { PurchaseRecord } from './purchase-record.js';
 
 export type { PurchaseLedger, PaymentNotifier, PaymentNoticeWindow } from './payment-ports.js';
-import type { PurchaseLedger, PaymentNotifier, PaymentNoticeWindow } from './payment-ports.js';
+import { PAYMENT_ANSWER_UNREADABLE, type PurchaseLedger, type PaymentNotifier, type PaymentNoticeWindow } from './payment-ports.js';
 import { isDeepStrictEqual } from 'node:util';
 import { retainResumedCheckoutHold } from './resumed-hold.js';
 import { PaymentReplyWindowError } from './reply-inbox.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
-import { JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import { JudgmentPortMissingError, DecisionModelsDisabledError, RefusalError } from '@goodvibes-jev/engine/errors';
 import { captureCheckoutWindowCheckpoint, type CheckoutWindowResumption } from './checkout-window-checkpoint.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 

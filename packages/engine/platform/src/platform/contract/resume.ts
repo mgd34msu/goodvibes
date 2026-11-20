@@ -62,6 +62,20 @@ export interface ResumeReport {
   readonly skipped: readonly string[];
 }
 
+/** The run claim on a stored contract: taken here, held by another live process, or not takeable at all (with why). */
+export type ContractClaim = 'claimed' | 'elsewhere' | { readonly unavailable: string };
+
+/**
+ * Why a stored contract is held without running: its recorded input could not be restored (this process holds its
+ * claim, so cancel may end it), or no run claim could be taken (another process may run it; nothing here touches it).
+ */
+export type ContractHoldCode = 'input-unavailable' | 'claim-unavailable';
+export interface ContractHold {
+  readonly code: ContractHoldCode;
+  readonly reason: string;
+  readonly at: number;
+}
+
 /** Statuses whose work runs on the contract's engine and in its worktree. */
 const WORK_STATUSES: ReadonlySet<ContractStatus> = new Set(['running', 'fixing', 'judging']);
 /** Unit statuses whose work item was in its phase: after a restart its phase waits for the runner before spawning. */
@@ -136,8 +150,10 @@ export interface ContractResumeDeps {
   readonly store: ContractStore;
   /** Whether this runner already runs the contract. */
   readonly isLive: (contractId: string) => boolean;
-  /** Takes this process's claim on the contract; false when another live process holds it. */
-  readonly claim?: ((contractId: string) => boolean) | undefined;
+  /** Takes this process's claim on the contract: `elsewhere` when another live process holds it, `unavailable` when none can be taken. */
+  readonly claim?: ((contractId: string) => ContractClaim) | undefined;
+  /** Holds a stored contract without running it, with why (status reports it; cancel ends an `input-unavailable` hold). */
+  readonly hold?: ((contract: Contract, code: ContractHoldCode, reason: string) => void) | undefined;
   /** Makes a loaded contract a run of this runner (not yet holding a slot). */
   readonly adopt: (contract: Contract) => ContractRun;
   /** Whether an active-contract slot is free. */
@@ -170,6 +186,11 @@ export interface ContractResume {
 }
 
 export function createContractResume(deps: ContractResumeDeps): ContractResume {
+  function holdContract(contract: Contract, code: ContractHoldCode, reason: string): void {
+    if (deps.hold !== undefined) deps.hold(contract, code, reason);
+    else deps.store.hold(contract);
+    logger.warn('contract runner: contract held, not resumed', { contractId: contract.id, code, reason });
+  }
   async function resumeAll(): Promise<ResumeReport> {
     return withConfiguredDecisionModelPolicy(resumeOwned);
   }
@@ -186,8 +207,10 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
       }
       // An ended contract is known from its small summary and stays on disk: its checkpoint is not read.
       if (deps.store.endedSummary(contractId) !== undefined) continue;
-      const contract = deps.store.load(contractId);
-      if (contract === null) continue;
+      const read = deps.store.load(contractId);
+      // A refused checkpoint is quarantined (its path is logged) and never started again from its admission.
+      if (read.kind !== 'present') continue;
+      const contract = read.value;
       if (isTerminalContractStatus(contract.status) && ((deps.nativeOnly === true) !== (contract.nativeSource !== undefined) || contract.durableAdmission !== undefined)) {
         deps.store.noteEnded(contract); continue;
       }
@@ -200,24 +223,33 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
         deps.store.noteEnded(contract);
         continue;
       }
+      // A contract another live process runs is its to continue; two runners over one contract would both drive it.
+      // The claim comes first, so nothing below (input restore, a hold, a cancel of the hold) touches a contract
+      // another process owns.
+      const claim = deps.claim?.(contractId) ?? 'claimed';
+      if (claim === 'elsewhere') {
+        deps.store.hold(contract);
+        skipped.push(contractId);
+        logger.info('contract runner: contract is run by another process, left to it', { contractId });
+        continue;
+      }
+      if (claim !== 'claimed') {
+        // A claim that cannot be made at all does not run the contract: another process may be running it.
+        holdContract(contract, 'claim-unavailable', claim.unavailable);
+        skipped.push(contractId);
+        continue;
+      }
       if (contract.inputSnapshot !== undefined) {
         try {
           contract.inputSnapshot = await restoreContractInputDevice(contract.inputSnapshot);
         } catch (error) {
           // Do not spawn workers with an invalid input lease, or discard their
-          // retained work merely because this startup could not verify it.
-          deps.store.hold(contract);
+          // retained work merely because this startup could not verify it. The
+          // contract is held under this process's claim: its status says so, and cancel ends it.
+          holdContract(contract, 'input-unavailable', `its recorded input could not be restored: ${error instanceof Error ? error.message : String(error)}`);
           skipped.push(contractId);
-          logger.warn('contract runner: input recovery held', { contractId, error: error instanceof Error ? error.message : String(error) });
           continue;
         }
-      }
-      // A contract another live process runs is its to continue; two runners over one contract would both drive it.
-      if (deps.claim !== undefined && !deps.claim(contractId)) {
-        deps.store.hold(contract);
-        skipped.push(contractId);
-        logger.info('contract runner: contract is run by another process, left to it', { contractId });
-        continue;
       }
       const run = deps.adopt(contract);
       try {
@@ -336,6 +368,8 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
   }
   async function continueOwnedResumed(run: ContractRun): Promise<void> {
     const { contract } = run;
+    // A contract that waited queued while it waited on its owner goes back to that wait with its slot.
+    if (contract.status === 'queued' && contract.resumeFrom === 'awaiting-owner') run.moveContract('awaiting-owner');
     const step = resumeStepOf(contract);
     const from = resumeStatus(contract);
     try {

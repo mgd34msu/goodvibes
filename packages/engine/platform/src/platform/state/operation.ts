@@ -74,6 +74,22 @@ export async function durableAfter<R>(record: R, synced: Promise<unknown>): Prom
 /** Where a failed call stood when it failed. */
 export type DispatchPhase = 'before-send' | 'sent';
 
+/** Connection failures that happen before a request leaves this process (Bun's names and Node's errnos). */
+const NOT_SENT_CODES: ReadonlySet<string> = new Set(['ECONNREFUSED', 'ConnectionRefused', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'FailedToOpenSocket', 'UnableToConnect']);
+
+/**
+ * Where a `fetch` that threw stood: `before-send` only for a failure that
+ * cannot have reached the far side (a refused or unreachable connection, a
+ * name that did not resolve); a timeout, an abort, a reset or anything else
+ * after `fetch` was called is `sent`, because the request may have arrived.
+ * A caller that aborts before calling `fetch` knows that itself.
+ */
+export function fetchFailurePhase(error: unknown): DispatchPhase {
+  if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) return 'sent';
+  const code = error !== null && typeof error === 'object' ? String((error as { code?: unknown }).code ?? '') : '';
+  return NOT_SENT_CODES.has(code) ? 'before-send' : 'sent';
+}
+
 /** HTTP answers to a sent request that do not settle whether it took effect: a timeout, a conflict, too early, too many. */
 const UNSETTLED_CLIENT_STATUSES: ReadonlySet<number> = new Set([408, 409, 425, 429]);
 

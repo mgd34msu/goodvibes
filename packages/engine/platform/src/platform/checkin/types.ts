@@ -65,6 +65,8 @@ export interface CheckinDecision {
 /** The outcome recorded on every check-in run receipt. */
 export type CheckinReceiptOutcome =
   | 'delivered'
+  /** The note went out as several messages and only the first `partsSent` of `partsTotal` arrived. */
+  | 'partial'
   | 'quiet'
   | 'skipped-disabled'
   | 'skipped-quiet-hours'
@@ -85,6 +87,9 @@ export interface CheckinReceipt {
   readonly deliveredMessage?: string | undefined;
   readonly deliveryChannel?: string | undefined;
   readonly deliveryId?: string | undefined;
+  /** For a note sent as several messages: how many went out, of how many. */
+  readonly partsSent?: number | undefined;
+  readonly partsTotal?: number | undefined;
   readonly error?: string | undefined;
 }
 
@@ -98,9 +103,17 @@ export interface CheckinJudge {
   decide(briefing: string, options?: CheckinJudgeOptions): Promise<CheckinDecision>;
 }
 
-/** The delivery seam: put a check-in message on a channel, returning a delivery id when known. */
+/** What the channel reported for one check-in send. */
+export interface CheckinDeliveryReceipt {
+  readonly deliveryId?: string | undefined;
+  /** For a note longer than one message: how many messages went out, of how many. */
+  readonly partsSent?: number | undefined;
+  readonly partsTotal?: number | undefined;
+}
+
+/** The delivery seam: put a check-in message on a channel, returning what the channel reported. */
 export interface CheckinDeliverer {
-  deliver(channel: string, message: string, lifetime?: { readonly signal: AbortSignal; readonly assertCurrent: () => void }): Promise<string | undefined>;
+  deliver(channel: string, message: string, lifetime?: { readonly signal: AbortSignal; readonly assertCurrent: () => void }): Promise<CheckinDeliveryReceipt>;
 }
 
 export const CHECKIN_CONFIG_KEYS = {

@@ -312,10 +312,12 @@ export class QuestionStore implements RevisionSource {
   }
 
   /**
-   * Append a new item, or return the open one a producer already posted under
-   * the same key. `stillOpen` says whether that one still counts (an expired
-   * item does not). Checked and written in one transaction, so two processes
-   * posting the same key at once ask once.
+   * Append a new item, or return the open one the same poster already posted
+   * under the same key: the dedupe key is (kind, poster, key), so a post never
+   * hands back an item another principal posted. Posts made in-process (no
+   * `postedBy`) share one poster. `stillOpen` says whether that one still
+   * counts (an expired item does not). Checked and written in one transaction,
+   * so two processes posting the same key at once ask once.
    */
   post(
     item: Omit<StoredOwnerItem, 'id' | 'createdAt'>,
@@ -330,7 +332,7 @@ export class QuestionStore implements RevisionSource {
         ).all(item.kind, item.key);
         for (const row of rows) {
           const existing = this.#decode(row);
-          if (existing && stillOpen(existing)) return { created: false, entry: existing };
+          if (existing && existing.item.postedBy === item.postedBy && stillOpen(existing)) return { created: false, entry: existing };
         }
       }
       // Short enough to type as an answer target; 48 random bits is ample for one owner's inbox.

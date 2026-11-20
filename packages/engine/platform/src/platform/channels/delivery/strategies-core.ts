@@ -7,7 +7,7 @@ import type { SecretsManager } from '../../config/secrets.js';
 import { ServiceRegistry } from '../../config/service-registry.js';
 import { resolveSecretInput } from '../../config/secret-refs.js';
 import { ControlPlaneGateway } from '../../control-plane/gateway.js';
-import { DiscordIntegration, HomeAssistantIntegration, NtfyIntegration, SlackIntegration, resolveNtfyDefaultPriority } from '../../integrations/index.js';
+import { DeliveryError, DiscordIntegration, HomeAssistantIntegration, NtfyIntegration, SlackIntegration, resolveNtfyDefaultPriority } from '../../integrations/index.js';
 import { ownerDeliveryTargetProblem, postToPublicWebhook, validatePublicWebhookUrl } from '../../utils/url-safety.js';
 import type { HostResolver } from '../../runtime/network/destination.js';
 import { resolveReachableBaseUrl } from '../../utils/reachable-base-url.js';
@@ -254,7 +254,9 @@ export function createDiscordDeliveryStrategy(
           // timeout, a reset connection or a 5xx may have applied it: posting as
           // well would show the answer twice, so that failure is reported as is
           // (an edit is safe to repeat, so a retry repeats the edit).
-          const outcome = outcomeOfFailure(error, 'sent', undefined, 'Look at the command\'s original response in Discord');
+          // A DeliveryError with no status is our own check refusing before the request was made.
+          const phase = error instanceof DeliveryError && error.statusCode === undefined ? 'before-send' : 'sent';
+          const outcome = outcomeOfFailure(error, phase, undefined, 'Look at the command\'s original response in Discord');
           if (outcome.state !== 'failed') throw error;
           logger.warn('Discord interaction edit refused; posting the reply to its channel', { channelId: replyChannel, error: summarizeError(error) });
           return false;

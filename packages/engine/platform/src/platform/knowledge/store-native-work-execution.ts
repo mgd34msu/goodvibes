@@ -128,23 +128,28 @@ function sameFacts(a: NativeWorkExecutionIntent | NativeWorkExecutionRecord, b: 
     && Object.keys(a.target).every(key => a.target[key as keyof typeof a.target] === b.target[key as keyof typeof b.target]) && sameScopes(a.authorityScopes, b.authorityScopes);
 }
 /**
- * The last ledger image each project's reads validated, kept deeply frozen.
- * The ledger is validated where it is written; a read of the same bytes reuses
- * that result instead of parsing and replaying every event again. Different
+ * The last ledger image each project's reads validated, kept deeply frozen,
+ * per database: the key is the database handle (one per open store, so two
+ * copies of a knowledge database never share an entry), then the project,
+ * and an entry is reused only for the same format, revision and row text. A
+ * format 3 ledger keeps its events in another table, so the row text alone
+ * does not tell two physical histories apart; the database does. Different
  * bytes (another writer, a restored file) are validated in full.
  */
-const validatedLedgers = new Map<string, { readonly image: string; readonly ledger: WorkLedgerState }>();
+const validatedLedgers = new WeakMap<object, Map<string, { readonly format: unknown; readonly image: string; readonly ledger: WorkLedgerState }>>();
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) { Object.freeze(value); for (const child of Object.values(value)) deepFreeze(child); }
   return value;
 }
 function validatedLedger(db: SqlReader, projectId: string, format: unknown, image: string): WorkLedgerState {
-  const known = validatedLedgers.get(projectId);
-  // A format 3 row names its revision and its events are only appended, so the
-  // same row text is the same ledger.
-  if (known && known.image === image) return known.ledger;
+  let projects = validatedLedgers.get(db);
+  if (projects === undefined) validatedLedgers.set(db, projects = new Map());
+  const known = projects.get(projectId);
+  // A format 3 row names its revision and its events are only appended, so in
+  // one database the same format and row text is the same ledger.
+  if (known && known.format === format && known.image === image) return known.ledger;
   const ledger = deepFreeze(readWorkLedgerState(readKnowledgeWorkLedgerImage(db, projectId, format, image), projectId));
-  validatedLedgers.set(projectId, { image, ledger });
+  projects.set(projectId, { format, image, ledger });
   return ledger;
 }
 /**

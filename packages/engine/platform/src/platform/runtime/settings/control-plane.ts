@@ -6,6 +6,7 @@ import { ProfileManager } from '../../profiles/manager.js';
 import type { ManagedSettingsBundle } from '../sandbox/types.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { ConfigError } from '../../types/errors.js';
+import { TargetChangedError, targetRef } from '../../utils/target-ref.js';
 import {
   SECRET_LITERAL_PLACEHOLDER,
   assertNoCredentialLiterals,
@@ -347,25 +348,42 @@ export async function stageManagedSettingsBundle(
   return stage;
 }
 
+/**
+ * Apply the staged bundle. `reviewedStageId` is the id of the stage the person
+ * reviewed (shown by `/managed staged`, or staged by the same command): a
+ * different stage, put there by another process or window since, is refused
+ * with `TARGET_CHANGED` and nothing is applied, so only a reviewed candidate
+ * ever bypasses the managed locks. Compared under the store lock that reads
+ * the stage, so it costs nothing extra.
+ */
 export async function applyStagedManagedBundle(
   configManager: ConfigManager,
   selectedKeys?: readonly ConfigKey[],
+  reviewedStageId?: string,
 ): Promise<{ rollbackToken: string; appliedCount: number; remainingCount: number }> {
   const configDir = getConfigControlPlaneDir(configManager);
   const selectedSet = selectedKeys && selectedKeys.length > 0
     ? new Set(selectedKeys)
     : null;
-  return withStoreLock(configDir, () => applyStagedManagedBundleLocked(configManager, configDir, selectedSet));
+  return withStoreLock(configDir, () => applyStagedManagedBundleLocked(configManager, configDir, selectedSet, reviewedStageId));
 }
 
 function applyStagedManagedBundleLocked(
   configManager: ConfigManager,
   configDir: string,
   selectedSet: ReadonlySet<ConfigKey> | null,
+  reviewedStageId: string | undefined,
 ): { rollbackToken: string; appliedCount: number; remainingCount: number } {
   // One read under the store lock: what is applied is exactly what is staged now.
   const store = readStoreForWrite(configDir);
   const stage = store.stagedManagedBundle;
+  if (reviewedStageId !== undefined && stage?.id !== reviewedStageId) {
+    throw new TargetChangedError(
+      targetRef('managed-stage', reviewedStageId, {}, {}),
+      [{ field: 'staged bundle', was: reviewedStageId, now: stage ? `${stage.profileName} (${stage.id}, staged ${new Date(stage.importedAt).toISOString()})` : null }],
+      'Review the staged bundle again with /managed staged, then apply it',
+    );
+  }
   if (!stage) {
     throw new Error('No staged managed settings bundle is available.');
   }
@@ -730,6 +748,7 @@ export function formatStagedManagedBundleReview(configManager: ConfigManager): s
   if (!stage) return 'No staged managed settings bundle is available.';
   const lines = [
     'Staged Managed Bundle Review',
+    `  stage: ${stage.id} (apply exactly this one with /managed apply-staged --stage ${stage.id})`,
     `  profileName: ${stage.profileName}`,
     `  importedAt: ${new Date(stage.importedAt).toISOString()}`,
     `  risk: ${stage.risk}`,

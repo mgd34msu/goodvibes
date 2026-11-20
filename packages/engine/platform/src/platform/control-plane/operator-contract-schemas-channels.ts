@@ -160,6 +160,14 @@ const CHANNEL_LIFECYCLE_RESULT_SCHEMA = objectSchema({
   message: STRING_SCHEMA,
   login: CHANNEL_LOGIN_SCHEMA,
   metadata: METADATA_SCHEMA,
+  /** When `ok` is false: what is true now, why, and what to do next. */
+  refusal: objectSchema({
+    code: STRING_SCHEMA,
+    state: STRING_SCHEMA,
+    reason: STRING_SCHEMA,
+    next: arraySchema(STRING_SCHEMA),
+    retryable: BOOLEAN_SCHEMA,
+  }, ['code', 'state', 'reason', 'next', 'retryable']),
 }, ['surface', 'action', 'ok', 'metadata']);
 
 export const CHANNEL_ACCOUNT_ACTION_OUTPUT_SCHEMA = objectSchema({

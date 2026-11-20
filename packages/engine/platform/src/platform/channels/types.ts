@@ -2,6 +2,7 @@
  * Shared channel and route-binding contracts for omnichannel control surfaces.
  */
 
+import type { Refusal } from '@goodvibes-jev/engine/errors';
 import type { ChannelRenderAudience } from './render-audience.js';
 
 export type ChannelSurface =
@@ -320,6 +321,12 @@ export interface ChannelAccountLifecycleResult {
     readonly instructions?: string | undefined;
   };
   readonly metadata: Record<string, unknown>;
+  /**
+   * When `ok` is false: what is true now, why, and what to do next, so a
+   * caller does not read "nothing was changed" into an action that saved part
+   * of what it was given.
+   */
+  readonly refusal?: Refusal | undefined;
 }
 
 export interface ChannelActorAuthorizationRequest {

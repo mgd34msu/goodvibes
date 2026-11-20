@@ -62,7 +62,7 @@ async function runSuite(location: TaskSuiteLocation, context: CommandContext): P
     cpSync(location.dir, copy, { recursive: true });
     context.print(`[eval] Running the task suite ${location.dir}: one goodvibes run per task, then its verify.sh...`);
     const startedAt = Date.now();
-    const result = await runTaskSuite(copy, { executor: createHeadlessRunExecutor() });
+    const result = await runTaskSuite(copy, { executor: createHeadlessRunExecutor(), sourceDir: location.dir });
     context.print([
       formatTaskSuiteResult({ ...result, suiteDir: location.dir }),
       result.total === 0

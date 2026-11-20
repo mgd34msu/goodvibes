@@ -26,6 +26,23 @@ export type ChatResponseWithReasoning = Awaited<ReturnType<LLMProvider['chat']>>
   reasoningSummary?: string | undefined;
 };
 
+/** The line that opens an answer the model wrote only as reasoning. */
+export const REASONING_ONLY_ANSWER_LABEL = '[Reasoning only: the model wrote no answer outside its reasoning, so its reasoning is shown as the answer.]';
+
+/**
+ * The answer as it is committed to the transcript and published with the
+ * turn: the response's text, opened with {@link REASONING_ONLY_ANSWER_LABEL}
+ * when the provider reported that the text is the model's reasoning
+ * (`textSource: 'reasoning'`, the never-empty floor). One owner for every
+ * screen, export and channel that shows the answer, so none can present the
+ * reasoning as an ordinary reply. The reasoning is then not kept a second
+ * time as the message's reasoning content.
+ */
+export function committedAnswer(response: ChatResponseWithReasoning): { readonly text: string; readonly reasoningContent: string | undefined } {
+  if (response.textSource === 'reasoning') return { text: `${REASONING_ONLY_ANSWER_LABEL}\n\n${response.content}`, reasoningContent: undefined };
+  return { text: response.content, reasoningContent: response.reasoning || undefined };
+}
+
 export interface TurnPreparationOptions {
   readonly signal?: AbortSignal;
   /** Capture the transcript boundary before awaiting a reading or cancellation. */
@@ -164,8 +181,9 @@ export function holdSessionFinalResponse(
   response: ChatResponseWithReasoning,
   privateNudge?: (message: string) => void,
 ): Promise<boolean> {
-  return holdSessionCompletion(args, session, response.content, privateNudge ? undefined : () => args.conversation.addAssistantMessage(response.content, {
-    reasoningContent: response.reasoning || undefined,
+  const answer = committedAnswer(response);
+  return holdSessionCompletion(args, session, response.content, privateNudge ? undefined : () => args.conversation.addAssistantMessage(answer.text, {
+    reasoningContent: answer.reasoningContent,
     reasoningSummary: response.reasoningSummary || undefined,
     usage: response.usage,
     model: args.providerRegistry.getCurrentModel().displayName,
@@ -313,8 +331,9 @@ export async function handleFinalResponseOutcome(args: FinalResponseOutcomeArgs)
   args.assertCompletionCurrent?.();
   args.signal?.throwIfAborted();
   args.assertCurrent?.();
-  args.conversation.addAssistantMessage(args.response.content, {
-    reasoningContent: args.response.reasoning || undefined,
+  const answer = committedAnswer(args.response);
+  args.conversation.addAssistantMessage(answer.text, {
+    reasoningContent: answer.reasoningContent,
     reasoningSummary: args.response.reasoningSummary || undefined,
     usage: args.response.usage,
     model: args.providerRegistry.getCurrentModel().displayName,
@@ -330,7 +349,7 @@ export async function handleFinalResponseOutcome(args: FinalResponseOutcomeArgs)
   if (args.runtimeBus) {
     publishTurnTerminal(() => emitTurnCompleted(args.runtimeBus!, args.emitterContext(args.turnId), {
       turnId: args.turnId,
-      response: args.response.content,
+      response: answer.text,
       stopReason: args.response.content.trim().length > 0 ? 'completed' : 'empty_response',
       memoryRecordIds: args.memoryRecordIds,
     }), args.onTurnTerminal);

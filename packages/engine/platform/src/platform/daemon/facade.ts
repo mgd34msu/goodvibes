@@ -170,6 +170,7 @@ export class DaemonServer {
   private readonly deferNativeActivationUntilHostReady: boolean;
   private hostStartupCompleted = false;
   private hostedSessionsRestored = false;
+  private owedChannelRepliesResent = false;
   private unservedMethodsMarked = false;
   private nativeStartupHandover: Exclude<ReturnType<DaemonLifecycleRuntime['activateNativeLifecycle']>, void> | undefined;
   private readonly integrationHelpers: IntegrationHelperService;
@@ -805,6 +806,15 @@ export class DaemonServer {
         this.replySettlement = () => { for (const unsubscribe of unsubscribes) unsubscribe(); };
       }
       this.surfaceRegistry.syncConfiguredSurfaces();
+      // Channel answers whose send the previous process died in are sent now, once per process.
+      if (!this.owedChannelRepliesResent) {
+        this.owedChannelRepliesResent = true;
+        void this.surfaceDeliveryHelper.resendOwedChannelReplies().then((resent) => {
+          if (resent > 0) logger.info('DaemonServer: channel answers owed before the restart were sent again', { resent });
+        }, (error: unknown) => {
+          logger.error('DaemonServer: channel answers owed before the restart could not be sent again', { error: summarizeError(error) });
+        });
+      }
       if (this.configManager.get('watchers.enabled')) {
         registerDaemonHeartbeatWatcher(this.watcherRegistry, this.configManager, () => this.automationManager.reconcileSchedules());
       }
@@ -1296,7 +1306,7 @@ export class DaemonServer {
     this.stopRelayRevocationWatch?.();
     this.stopRelayRevocationWatch = null;
     this.relayCodeStore = null;
-    this.httpRouter.dispose();
+    await close(() => this.httpRouter.dispose());
     this.controlPlaneHelper.dispose();
     this.unbindSharedToken?.();
     this.unbindSharedToken = null;

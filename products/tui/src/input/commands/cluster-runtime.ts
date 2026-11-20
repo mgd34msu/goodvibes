@@ -14,6 +14,7 @@
 import { resolveDaemonHomeDir } from '@goodvibes-jev/engine/platform/platform/workspace/daemon-home';
 import { CLUSTER_SUBCOMMANDS, describeIrreversibleClusterCommand, parseClusterCommand, runClusterCommand } from '@goodvibes-jev/engine/terminal-shell/cluster-commands';
 import type { CommandRegistry } from '../command-registry.ts';
+import { requireShellPaths } from './runtime-services.ts';
 import { createNetworkFetch } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
 
 /** Subcommand → argument hint, surfaced as the operator types. */
@@ -66,6 +67,8 @@ export function registerClusterRuntimeCommands(registry: CommandRegistry): void 
         argv,
         configManager: ctx.platform.configManager,
         daemonHomeDir: resolveDaemonHomeDir(),
+        // Tokens stored for other daemons; this machine's token is never sent to one.
+        homeDirectory: requireShellPaths(ctx).homeDirectory,
         // The configured outbound TLS trust, as the daemon's own cluster command uses.
         fetchImpl: createNetworkFetch(globalThis.fetch, ctx.platform.configManager),
         // A transcript is not a terminal for clipboard purposes: writing an

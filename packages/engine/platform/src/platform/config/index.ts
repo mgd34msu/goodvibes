@@ -92,6 +92,7 @@ export {
   readDaemonTierFile,
 } from './daemon-config-tier.js';
 export {
+  DaemonConfigOutcomeUnknownError,
   DaemonConfigRejectedError,
   DaemonConfigOwnerApprovalPendingError,
   DaemonConfigUnreachableError,
@@ -108,6 +109,7 @@ export type {
   ConfigWriteRoute,
   DaemonConfigEndpoint,
   DaemonConfigWritesOutcome,
+  DaemonHeldConfigEntry,
   DaemonConfigRouterDeps,
   LocalConfigWriter,
 } from './daemon-config-route.js';

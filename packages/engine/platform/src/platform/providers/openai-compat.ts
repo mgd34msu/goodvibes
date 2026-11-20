@@ -565,12 +565,17 @@ export class OpenAICompatProvider implements LLMProvider {
       // The floor: classifying reasoning as reasoning must never EMPTY a reply
       // (see inline-reasoning.ts). Skipped on a tool-call turn, where empty
       // content is normal and means the work is in the calls.
+      // The response says so (`textSource`), and the committed answer is
+      // labelled as reasoning on every screen and channel it reaches.
+      let textSource: 'reasoning' | undefined;
       if (toolCalls.length === 0 && !responseText.trim() && streamedText.reasoning.trim()) {
         responseText = streamedText.reasoning.trim();
+        textSource = 'reasoning';
       }
 
       const response: ChatResponse = {
         content: responseText,
+        ...(textSource ? { textSource } : {}),
         toolCalls,
         usage: {
           inputTokens,

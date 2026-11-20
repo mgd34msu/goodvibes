@@ -710,16 +710,14 @@ export class HostedSessionManager {
     if (live.attached.ownedByAnother(clientId, options?.principalId)) throw new HostedSessionClientOwnerError(sessionId, clientId);
     // Attaching again is how a client renews: the call was always idempotent,
     // and this is the same "polling renews the lease" shape the rewind host
-    // registration uses. See ./attachments.ts.
-    const newOwner = options?.principalId !== undefined && !live.attached.identifiedOwners().includes(options.principalId);
+    // registration uses. See ./attachments.ts. Attaching does not make the
+    // caller an owner: owners grow only by create and share.
     live.attached.renew(clientId, this.now(), clampAttachmentLease(options?.leaseMs, this.attachmentLeaseMs()), options?.principalId);
     live.record = {
       ...live.record,
       attachedClients: live.attached.clientIds(),
       updatedAt: this.now(),
     };
-    // A new owner is saved with the session, so it still owns it (and its contracts) after a restart.
-    if (newOwner) await this.persist(live.record);
     this.publish('hosted-session-attached', live.record, { clientId });
     const history = this.history(live);
     if (live.runtime?.isRunning()) return { session: live.record, history };
@@ -1093,12 +1091,35 @@ export class HostedSessionManager {
   }
 
   /**
-   * Whether `principalId` started or joined this session (its identified
-   * owners, which are saved with it and outlive its end and a restart).
+   * Whether `principalId` started this session or an owner shared it with it
+   * (its identified owners, which are saved with it and outlive its end and a
+   * restart).
    */
   isOwnedBy(sessionId: string, principalId: string | undefined): boolean {
     if (principalId === undefined) return false;
     return this.sessions.get(sessionId)?.attached.identifiedOwners().includes(principalId) === true;
+  }
+
+  /** The session's owners (its creator and whoever it was shared with); throws SESSION_NOT_FOUND for an unknown id. */
+  ownersOf(sessionId: string): readonly string[] {
+    return this.requireKnown(sessionId).attached.identifiedOwners();
+  }
+
+  /**
+   * Add `principalId` to the session's owners: it may then attach, read the
+   * transcript and watch the session's turns live. Who may share is decided by
+   * the caller's route (`session.share`, subject the current owners). The new
+   * owner is saved with the session, so it survives a restart. One write, only
+   * when the principal was not an owner already.
+   */
+  async share(sessionId: string, principalId: string): Promise<{ readonly session: HostedSessionRecord; readonly owners: readonly string[]; readonly added: boolean }> {
+    const live = this.requireKnown(sessionId);
+    const added = live.attached.share(principalId);
+    if (added) {
+      live.record = { ...live.record, updatedAt: this.now() };
+      await this.persist(live.record);
+    }
+    return { session: live.record, owners: live.attached.identifiedOwners(), added };
   }
 
   /**

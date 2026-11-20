@@ -1,3 +1,4 @@
+import { refusal } from '@goodvibes-jev/engine/errors';
 import { DiscordIntegration, SlackIntegration } from '../../integrations/index.js';
 import type { ProviderRuntimeSurface } from '../provider-runtime.js';
 import { describeActorAdmission, type ChannelPolicyManager } from '../policy-manager.js';
@@ -139,18 +140,36 @@ export async function runBuiltinAccountAction(
         // write setup performs; the surface's own settings watcher then starts
         // its receiving path.
         setSurfaceEnabled(context.deps, surface, true);
-        if (providerSurface && context.deps.providerRuntime) await context.deps.providerRuntime.start(providerSurface);
+        // The provider's own start is awaited and its answer is the receipt:
+        // switched on is not receiving until the connection says so.
+        const started = providerSurface && context.deps.providerRuntime
+          ? await context.deps.providerRuntime.start(providerSurface)
+          : undefined;
         const refreshed = await context.buildAccount(surface);
+        const section = `surfaces.${configSectionForSurface(surface)}.enabled`;
+        const ok = refreshed.enabled && (started === undefined || started.ok);
         return {
           ...base,
-          ok: refreshed.enabled,
+          ok,
           account: refreshed,
           state: refreshed.state,
           authState: refreshed.authState,
-          message: refreshed.enabled
-            ? `${refreshed.label} is switched on (surfaces.${configSectionForSurface(surface)}.enabled); it starts receiving and sending now.`
-            : `${refreshed.label} stays off: its switch was set, but an environment setting turns it off. Remove that setting and start again.`,
-          metadata: { enabled: refreshed.enabled, switchedOn: true },
+          message: !refreshed.enabled
+            ? `${refreshed.label} stays off: its switch was set, but an environment setting turns it off. Remove that setting and start again.`
+            : started === undefined
+              ? `${refreshed.label} is switched on (${section}); it starts receiving and sending now.`
+              : started.ok
+                ? `${refreshed.label} is switched on (${section}) and its connection started: ${started.message}`
+                : `${refreshed.label} is switched on (${section}), but its connection did not start: ${started.message}`,
+          ...(refreshed.enabled && started !== undefined && !started.ok ? {
+            refusal: refusal({
+              code: 'CHANNEL_START_FAILED',
+              state: `${refreshed.label} is switched on but not receiving`,
+              reason: started.status.lastError ?? started.message,
+              next: [`Fix the ${refreshed.label} credential or connection, then start it again.`],
+            }),
+          } : {}),
+          metadata: { enabled: refreshed.enabled, switchedOn: true, ...(started ? { running: started.status.running } : {}) },
         };
       }
       if (surface === 'telegram' && account.enabled && context.restartTelegramIngress) {
@@ -325,6 +344,10 @@ async function runProviderSetupAction(
         ...(directSigningSecret ? ['signingSecret'] : []),
         ...(directAppToken ? ['appToken'] : []),
       ]);
+      const savedMetadata = [
+        ...(defaultChannel ? ['default channel'] : []),
+        ...(workspaceId ? ['workspace id'] : []),
+      ].join(' and ');
       return {
         ...base,
         ok: configured && unreadable.length === 0,
@@ -336,7 +359,17 @@ async function runProviderSetupAction(
           ? unreadableMessage('Slack', unreadable)
           : configured
             ? 'Slack configuration stored.'
-            : 'Slack metadata stored; provide botToken, appToken, or signingSecret to enable Slack.',
+            : `Saved the Slack ${savedMetadata}; Slack is not enabled: no credential is stored. Provide botToken, appToken, or signingSecret to enable it.`,
+        // What was saved is part of the answer: a setup that stored metadata
+        // but could not enable Slack did change something.
+        ...(!configured && unreadable.length === 0 ? {
+          refusal: refusal({
+            code: 'CHANNEL_NOT_ENABLED',
+            state: `saved the Slack ${savedMetadata}; Slack is not enabled`,
+            reason: 'No Slack credential is stored, so Slack was not enabled.',
+            next: ['Run setup again with botToken, appToken, or signingSecret.'],
+          }),
+        } : {}),
         metadata: {
           storedSecretFields: [
             ...(directBotToken ? ['botToken'] : []),

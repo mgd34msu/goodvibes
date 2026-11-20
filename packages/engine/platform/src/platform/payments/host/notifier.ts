@@ -170,7 +170,7 @@ export function purchaseInboxItem(kind: PaymentWindowKind | 'notice', message: s
  * Cost: one record-log append per notice, one per answer or withdrawal.
  */
 /** The refusal for an owner answer that could not be read: never silence, so nothing is bought on it. */
-function unreadableAnswer(error: unknown): ReturnType<typeof refusal> {
+export function unreadableAnswer(error: unknown): ReturnType<typeof refusal> {
   return refusal({
     code: PAYMENT_ANSWER_UNREADABLE,
     state: 'your answer to the purchase notice could not be read',

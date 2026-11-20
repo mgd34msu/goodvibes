@@ -53,7 +53,7 @@ function toGatewayVerbError(error: unknown): never {
   if (error instanceof ContractOperatorError) {
     throw new GatewayVerbError(error.message, error.code, error.status, error.field);
   }
-  if (error instanceof RefusalError && error.refusal.code === 'IDEMPOTENCY_KEY_REUSED') {
+  if (error instanceof RefusalError && (error.refusal.code === 'IDEMPOTENCY_KEY_REUSED' || error.refusal.code === 'IDEMPOTENCY_KEY_IN_FLIGHT' || error.refusal.code === 'CONTRACT_KEY_UNRECORDED')) {
     throw new GatewayVerbError(formatRefusal(error.refusal), error.refusal.code, error.refusal.status ?? 409, 'idempotencyKey');
   }
   throw error;

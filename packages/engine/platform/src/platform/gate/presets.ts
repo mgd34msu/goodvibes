@@ -19,7 +19,7 @@ export interface GatePreset {
   readonly name: GatePresetName;
   /** The `permissions.mode` value that selects this preset. */
   readonly mode: PermissionMode;
-  /** One line for the presets sheet and the docs. */
+  /** What the mode does, in plain sentences, for the presets sheet, the mode chip and the docs. */
   readonly summary: string;
   /** The action per stakes level. */
   readonly stakes: Readonly<Record<Stakes, GateAction>>;
@@ -40,31 +40,31 @@ export interface GatePresetDefinition extends GatePreset {
 export const GATE_PRESETS: Readonly<Record<GatePresetName, GatePresetDefinition>> = {
   'ask-me': {
     name: 'ask-me', label: 'Ask me', mode: 'ask-me',
-    summary: 'With a working decision model, an action runs unless it reads as critical, irreversible or weakening security, or is an owner-only decision; those ask you. Without one, every action asks you except a read inside the workspace and a change to files inside it that can be undone, unless a per-tool setting allows it.',
+    summary: 'GoodVibes asks you before anything risky. With a decision model, Jev reads each action and you are asked about what can\'t be undone, weakens a safety setting, hides what it does or sends secrets out. Without one, you are asked before every command and every file change outside this folder, unless a per-tool setting allows it.',
     stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'ask' },
     readOnly: false,
   },
   'jev-decides': {
     name: 'jev-decides', label: 'Jev decides', mode: 'jev-decides',
-    summary: 'Jev decides every action the permission rules do not settle, critical ones included, allowing justified actions and refusing harmful ones; owner-only decisions still ask you. Without a working decision model it behaves as ask-me.',
+    summary: 'Jev, the decision model, decides what is safe to run and refuses what is harmful; you are asked only about decisions that are yours, such as destroying data or weakening a safety setting. Without a working decision model, GoodVibes asks you instead, as Ask me does.',
     stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'ask' },
     readOnly: false,
   },
   'just-vibes': {
     name: 'just-vibes', label: 'Just vibes', mode: 'just-vibes',
-    summary: 'Does as much as it can without interrupting you: Jev decides every action the permission rules do not settle, critical ones included; what Jev would not run, owner-only decisions, and every such action when no decision model works are held and listed at the end of the run.',
+    summary: 'GoodVibes keeps working without interrupting you: Jev decides what it can, and anything that needs you is held and listed at the end of the run. Without a working decision model, everything that needs a decision is held.',
     stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'ask' },
     readOnly: false,
   },
   yolo: {
     name: 'yolo', label: 'YOLO', mode: 'yolo',
-    summary: 'Runs authorized actions without general safety decisions; host containment, secret storage and payment rules still apply.',
+    summary: 'GoodVibes runs everything without asking; it still keeps to the sandbox, secret storage and payment limits.',
     stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'allow' },
     readOnly: false,
   },
   plan: {
     name: 'plan', label: 'Plan', mode: 'plan',
-    summary: 'Planning only: every action that is not a read is refused before its stakes are considered; reads run under the usual rules. Leave plan mode to carry out the plan.',
+    summary: 'Planning only: GoodVibes reads and plans but changes nothing. Leave plan mode to carry out the plan.',
     stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'ask' },
     readOnly: true,
   },

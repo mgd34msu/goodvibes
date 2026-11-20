@@ -20,11 +20,17 @@
  *                   default (443 for https, 80 for http), as a browser reads
  *                   it; with a bare --host or none, the control plane's
  *                   configured port
- *   --token <t>     default: this machine's operator token, read from
- *                   <daemon home>/operator-tokens.json
+ *   --token <t>     default: for this machine's own daemon (a loopback or
+ *                   local address at its port, or its declared public URL
+ *                   once that proves it is this daemon), this machine's
+ *                   operator token from <daemon home>/operator-tokens.json;
+ *                   for any other daemon, the token or `/auth login daemon`
+ *                   session stored for that exact origin, else a refusal.
+ *                   This machine's token is never sent to another daemon.
  *
- * Authentication is `Authorization: Bearer <operator token>` against the
- * control plane, the same credential a TUI and a web UI already use.
+ * Authentication is `Authorization: Bearer <token>` against the control
+ * plane, built by the one header builder (daemon-target.ts), which refuses a
+ * URL on any origin other than the one the token is for.
  *
  * The defaults are the whole point. A homelab box is headless: the operator
  * has SSHed into it and wants `cluster status` to work with no flags at all.
@@ -38,16 +44,25 @@
  * verbs mean. It resolves a target, makes a request, and returns the parsed
  * body. Every decision about what the answer MEANS belongs to the daemon.
  */
-import { readConnectedDaemonOrigin, readControlPlaneBinding } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
+import { parseDaemonOrigin, readConnectedDaemonOrigin, readControlPlaneBinding, type DaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { readOperatorTokenFile } from '@goodvibes-jev/engine/platform/platform/workspace/daemon-home';
+import { readConnectedDaemonToken, readDaemonSessionToken } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-credentials';
+import { classifyDaemonOrigin, proveDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target-resolver';
+import { bindCredential, daemonAuthHeaders, daemonTarget, CredentialOriginError } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
 
 /** Where to send a verb, and what to authenticate with. */
 export interface RemoteDaemonTarget {
   readonly baseUrl: string;
+  /** The token for this daemon's origin only; sent through `daemonAuthHeaders`, which refuses any other origin. */
   readonly token: string;
   /** True when the target is this machine's own daemon, for message wording. */
   readonly isLocal: boolean;
+  /**
+   * This machine's token for its declared public address: sent only after
+   * that address answers the daemon identity challenge (once per process).
+   */
+  readonly needsProof?: boolean | undefined;
 }
 
 /** The flags every remote-capable daemon subcommand accepts. */
@@ -92,6 +107,8 @@ export interface ResolveRemoteTargetInput {
   readonly daemonHomeDir: string;
   /** Injectable so tests never read a real token file. */
   readonly readToken?: ((daemonHomeDir: string) => string | undefined) | undefined;
+  /** The client's home, whose per-origin record (`connected-daemons.json`) holds tokens for other daemons. */
+  readonly homeDirectory?: string | undefined;
 }
 
 /**
@@ -149,21 +166,49 @@ export function resolveRemoteDaemonTarget(input: ResolveRemoteTargetInput): Remo
       fix: `say how to reach it: --host https://${hostForUrl(typed.host)}:${port} (encrypted), or --host http://${hostForUrl(typed.host)}:${port} to send the operator token unencrypted over the network; a URL without a port means 443 for https and 80 for http`,
     };
   }
+  const baseUrl = buildBaseUrl(host, port, binding.tlsMode, typed.scheme ?? connected?.scheme);
+  const origin = parseDaemonOrigin(baseUrl);
+  if (!origin) {
+    return { ok: false, code: 'invalid-host', error: `'${host}' does not make a daemon address`, fix: '--host takes a host name or address, or a base URL such as https://10.0.0.7:3421' };
+  }
   const explicitToken = input.flags.token?.trim();
-  const token = explicitToken
-    || extractOperatorToken((input.readToken ?? readOperatorTokenFile)(input.daemonHomeDir));
+  if (explicitToken) return { ok: true, target: { baseUrl, token: explicitToken, isLocal } };
+  const chosen = tokenForOrigin(origin, typed.host ? 'typed' : connected ? 'connected' : 'binding', input);
+  if (!chosen.ok) return chosen;
+  return { ok: true, target: { baseUrl, token: chosen.token, isLocal, ...(chosen.needsProof ? { needsProof: true } : {}) } };
+}
+
+/**
+ * The credential for `origin` when none was typed: the session or token this
+ * client stored for that exact origin, else this machine's operator token only
+ * when the origin is this machine's daemon. The connected host never falls back
+ * to this machine's token.
+ */
+function tokenForOrigin(origin: DaemonOrigin, chosenBy: 'typed' | 'connected' | 'binding', input: ResolveRemoteTargetInput):
+  { readonly ok: true; readonly token: string; readonly needsProof: boolean } | DaemonFailure {
+  const home = input.homeDirectory;
+  const stored = home ? readDaemonSessionToken(home, origin.baseUrl) ?? readConnectedDaemonToken(home, origin.baseUrl) : null;
+  if (stored) return { ok: true, token: stored, needsProof: false };
+  // With nothing typed and no connected host, the address is this machine's own bind (a wildcard included).
+  const place = chosenBy === 'binding' ? 'yes' : classifyDaemonOrigin(origin, input.configManager);
+  if (chosenBy === 'connected' || place === 'no') {
+    return {
+      ok: false,
+      code: 'token-missing',
+      error: `no credential is stored for ${origin.baseUrl}; this machine's operator token is never sent to another daemon`,
+      fix: 'pass --token with the operator token from the machine you are trying to reach (its <daemon home>/operator-tokens.json)',
+    };
+  }
+  const token = extractOperatorToken((input.readToken ?? readOperatorTokenFile)(input.daemonHomeDir));
   if (!token) {
     return {
       ok: false,
       code: 'token-missing',
       error: 'no operator token was found for this machine',
-      fix: isLocal
-        ? 'start the daemon once so it creates its operator token, or pass --token'
-        : 'pass --token with the operator token from the machine you are trying to reach',
+      fix: 'start the daemon once so it creates its operator token, or pass --token',
     };
   }
-
-  return { ok: true, target: { baseUrl: buildBaseUrl(host, port, binding.tlsMode, typed.scheme ?? connected?.scheme), token, isLocal } };
+  return { ok: true, token, needsProof: place === 'declared' };
 }
 
 const SCHEME_DEFAULT_PORT = { http: 80, https: 443 } as const;
@@ -299,6 +344,21 @@ export async function callDaemonVerb<T>(
   fetchImpl: DaemonFetch = fetch,
 ): Promise<DaemonVerbOutcome<T>> {
   const where = target.isLocal ? 'the daemon on this machine' : `the daemon at ${target.baseUrl}`;
+  const url = `${target.baseUrl}${path}`;
+  const origin = parseDaemonOrigin(target.baseUrl);
+  let authorization: Record<string, string>;
+  try {
+    if (!origin) throw new CredentialOriginError(target.baseUrl, null);
+    const credential = bindCredential(origin, target.token, 'explicit');
+    // This machine's declared public address gets its token only after it proves it is this daemon.
+    if (target.needsProof === true && !await proveDaemonOrigin(origin, credential, target.token, fetchImpl as unknown as typeof fetch)) {
+      return { ok: false, code: 'token-missing', error: `${target.baseUrl} did not prove it is the daemon on this machine, so this machine's operator token was not sent to it`,
+        fix: 'check that controlPlane.publicBaseUrl reaches the daemon on this machine, or pass --token with that daemon\'s own token' };
+    }
+    authorization = daemonAuthHeaders(daemonTarget(origin, credential, target.isLocal), url);
+  } catch (error) {
+    return { ok: false, code: 'invalid-host', error: error instanceof Error ? error.message : `the token is not for ${url}`, fix: 'name the daemon as scheme://host:port and pass --token for it' };
+  }
   // A peer that accepts the connection and never answers must not hang the command; the race also covers a fetch that ignores its signal.
   const timeoutMs = init.timeoutMs ?? DAEMON_VERB_TIMEOUT_MS;
   const signal = init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
@@ -314,10 +374,10 @@ export async function callDaemonVerb<T>(
       else signal.addEventListener('abort', onAbort, { once: true });
     });
     response = await Promise.race([
-      fetchImpl(`${target.baseUrl}${path}`, {
+      fetchImpl(url, {
         method: init.method,
         headers: {
-          Authorization: `Bearer ${target.token}`,
+          ...authorization,
           ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }),
         },
         ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),

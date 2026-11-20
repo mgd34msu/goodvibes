@@ -60,7 +60,7 @@ export const occasionsConfigSettings: ConfigSettingDefinition[] = [
     key: 'occasions.cadenceDays',
     type: 'number',
     description:
-      'How often an unresolved CONFLICT in your dates, two different dates recorded for the same thing, is raised again, in days. It no longer governs birthday reminders: those speak twice, when the date enters its runway and on the day itself, and never repeat beyond that. A conflict is a fact about your file that stays wrong until you fix it, so it does keep coming back.',
+      'How often an unresolved CONFLICT in your dates, two lines recorded for the same thing (two different dates, or one date written twice), is raised again, in days. It no longer governs birthday reminders: those speak twice, when the date enters its runway and on the day itself, and never repeat beyond that. A conflict is a fact about your file that stays wrong until you fix it, so it does keep coming back.',
     ...intRange(1, 60),
   },
   {

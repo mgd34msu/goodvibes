@@ -46,6 +46,10 @@ export interface CompactionViews {
   readonly compacted: string;
   /** Only the text the compaction wrote, which is what it claims about the conversation; empty when it wrote nothing. */
   readonly written: string;
+  /** How many source messages were left out of `source` for length (0 when the reader saw every one). */
+  readonly sourceOmitted: number;
+  /** How many source messages were shortened in `source` for length. */
+  readonly sourceClipped: number;
 }
 
 /** Plain text of one message, including tool calls, tool results and image placeholders. */
@@ -186,5 +190,7 @@ export function compactionViews(
     source: sourceLines.join('\n\n'),
     compacted: compactedLines.join('\n\n'),
     written: writtenLines.join('\n\n'),
+    sourceOmitted: sourceEntries.filter((entry) => entry.omitted).length,
+    sourceClipped: sourceEntries.filter((entry) => !entry.omitted && entry.body.length > cap).length,
   };
 }

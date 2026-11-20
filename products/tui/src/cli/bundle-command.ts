@@ -8,6 +8,10 @@ import { applyDaemonConfigWrites } from '@goodvibes-jev/engine/platform/platform
 import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
+import { readConnectedDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
+import { resolveDaemonTarget } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target-resolver';
+import { bearerFor } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
+import { RefusalError } from '@goodvibes-jev/engine/errors';
 
 import { getPackageVersion } from './help.ts';
 import { classifyProviderSetup } from '../providers/provider-classification.ts';
@@ -35,7 +39,19 @@ export const handleBundleCommand = createSupportBundleCommand<
     packageVersion: getPackageVersion,
     onboardingMarkerPath: getOnboardingCheckMarkerPath,
     // The daemon applies its own settings as one update; with none running the import writes its file for it to read at start.
-    routeDaemonSettings: (runtime, entries) => applyDaemonConfigWrites(entries, resolveRouterDeps(runtime.configManager)),
+    // A connected daemon (daemon.connectedHost.url) gets them with its own bound credential, or nothing is sent.
+    routeDaemonSettings: (runtime, entries) => {
+      const deps = resolveRouterDeps(runtime.configManager);
+      if (!readConnectedDaemonOrigin((key) => runtime.configManager.get(key))) return applyDaemonConfigWrites(entries, deps);
+      const resolution = resolveDaemonTarget({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory });
+      if (!resolution.ok) throw new RefusalError(resolution.refusal);
+      const { origin, credential } = resolution.target;
+      return applyDaemonConfigWrites(entries, { ...deps, endpoint: {
+        baseUrl: origin.baseUrl,
+        token: credential ? bearerFor(credential, origin.baseUrl) : undefined,
+        source: `the connected daemon at ${origin.baseUrl}`,
+      } });
+    },
   },
   {
     site: 'terminal-shell.support-bundle.export',

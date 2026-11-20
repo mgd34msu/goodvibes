@@ -164,6 +164,9 @@ export async function handleGenericWebhookSurface(req: Request, context: Generic
     channelId,
     title: typeof body.title === 'string' ? body.title : externalId,
     metadata: { ...withoutReservedMetadata(body.metadata), ...(correlationId ? { correlationId } : {}) },
+    // The caller's id for this message: a retry with the same correlationId (a lost answer, a
+    // timeout) finds the message already accepted and starts nothing a second time.
+    ...(correlationId ? { providerMessageId: correlationId } : {}),
     signal: req.signal,
     queueReply: ({ agentId, sessionId }) => {
       if (!callbackUrl || !context.surfaceDeliveryEnabled('webhook')) return;

@@ -405,6 +405,7 @@ export const CONTRACT_SUMMARY_SCHEMA = objectSchema({
   createdAt: NUMBER_SCHEMA,
   completedAt: NUMBER_SCHEMA,
   updatedAt: NUMBER_SCHEMA,
+  held: objectSchema({ code: enumSchema(['input-unavailable', 'claim-unavailable']), reason: STRING_SCHEMA, at: NUMBER_SCHEMA }, ['code', 'reason', 'at']),
   revision: STRING_SCHEMA,
 }, ['id', 'sessionId', 'ownerAgentId', 'origin', 'ask', 'goal', 'status', 'groupCount', 'unitCount', 'unitsPassed', 'unitsFailed',
   'openEscalationIds', 'usage', 'createdAt', 'updatedAt', 'revision']);

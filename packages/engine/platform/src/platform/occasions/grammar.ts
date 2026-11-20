@@ -190,6 +190,14 @@ export function parseOccasionLine(lineIndex: number, text: string): OccasionLine
       'no date on the line, so there is nothing to count down to, write it as MM-DD or YYYY-MM-DD',
     );
   }
+  if (recurrence === 'once' && date.kind !== 'dated') {
+    // Once with no year has no day it happens on, so it would never come up.
+    return unparsedOccasion(
+      lineIndex,
+      text,
+      'once but no year, so there is no day it happens on, write the date as YYYY-MM-DD or drop once to make it annual',
+    );
+  }
   if (kind === null) {
     return unparsedOccasion(
       lineIndex,

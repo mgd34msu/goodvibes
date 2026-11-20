@@ -127,6 +127,7 @@ import { createProviderStack } from './provider-stack.js';
 import { ensureConfiguredModelIsRoutable } from '../providers/fallback-model.js';
 import { createAgentExecutionGraph } from './agent-graph-composition.js';
 import { bindPermissionModeChangeEvent } from '../permissions/mode-change-emitter.js';
+import { describeModeInForceWords } from '../permissions/decision-model-readiness.js';
 import { requireSurfaceRoot } from './surface-root.js';
 import { createRuntimeSecretsManager } from './secrets-composition.js';
 import { resolveGoodVibesDaemonHome } from '../config/goodvibes-home.js';
@@ -577,7 +578,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   scope.registry.add('shared webhook notifier', () => webhookNotifier.close());
   const replayEngine = new DeterministicReplayEngine(workingDirectory);
   // Poll-free runtime event for permission-mode changes so surfaces can render a live mode pill.
-  bindPermissionModeChangeEvent(configManager, runtimeBus, 'runtime');
+  scope.registry.add('permission mode change event', bindPermissionModeChangeEvent(configManager, runtimeBus, 'runtime'));
   const sessionMemoryStore = new SessionMemoryStore();
   const sessionLineageTracker = new SessionLineageTracker();
   const sessionChangeTracker = new SessionChangeTracker();
@@ -971,6 +972,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       listContracts: () => contractRunner.list({ includeInputSnapshot: false }),
       modeInForce: (chosen, explicitlyChosen) => permissionManager.modeInForce(chosen, explicitlyChosen),
       modeInForceReason: (chosen, explicitlyChosen) => permissionManager.describeModeInForce(chosen, explicitlyChosen).reason,
+      modeInForceWords: (chosen, explicitlyChosen) => describeModeInForceWords(configManager, { chosen, explicitlyChosen }),
     });
     scope.registry.add('native automation updates', registerNativeAutomationGatewayMethods(gatewayMethods, { manager: automationManager, host: externalPermissionHost }));
   }

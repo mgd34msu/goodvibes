@@ -20,6 +20,18 @@ export function findCandidate(comparison: StoredComparison, blindId: string): Co
   return comparison.candidates.find((candidate) => candidate.blindId.toUpperCase() === normalized) ?? null;
 }
 
+/**
+ * Why a candidate cannot win, or null when it can: a winner is a candidate
+ * whose run produced an answer. A failed run has nothing to judge, so it is
+ * never saved as the winner or applied as the model route.
+ */
+export function unjudgeableWinnerReason(comparison: StoredComparison, winner: CompareCandidateResult): string | null {
+  if (winner.status === 'completed') return null;
+  const answered = comparison.candidates.filter((candidate) => candidate.status === 'completed').map((candidate) => candidate.blindId);
+  return `Candidate ${winner.blindId} failed${winner.error ? ` (${winner.error})` : ''}, so it cannot be the winner. `
+    + (answered.length > 0 ? `Pick one of: ${answered.join(', ')}.` : 'No candidate of this comparison answered; run the comparison again.');
+}
+
 export function modelRouteHandoff(candidate: CompareCandidateResult, reveal: boolean): Record<string, unknown> {
   return {
     ...(reveal ? {

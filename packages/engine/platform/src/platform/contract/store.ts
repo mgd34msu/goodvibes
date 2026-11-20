@@ -1,3 +1,4 @@
+import { absent, failedRead, present, refusal, type Observed, type Refusal } from '@goodvibes-jev/engine/errors';
 import { retainOwnedJson } from '../gate/judgment-input.js';
 import { contractCreationPathAbsent, publishInitialContractCheckpoint } from './creation-claim.js';
 /**
@@ -169,6 +170,16 @@ export function idempotencyFileId(scope: string): string {
   return `idem-${createHash('sha256').update(scope).digest('hex')}`;
 }
 
+/**
+ * The kernel-released lock a start holds on its retry key, from reading the key's record until the started
+ * contract's first checkpoint is published: a second process with the same key waits and then finds that contract.
+ * Keys share 256 lock files by the first byte of their digest, so the lock files stay bounded (a lock file is never
+ * removed); two different keys wait on each other only when they share that byte.
+ */
+export function contractIdempotencyLockPath(projectRoot: string, scope: string): string {
+  return join(contractsDir(projectRoot), '.leases', `${idempotencyFileId(scope).slice(0, 'idem-'.length + 2)}.start.sqlite`);
+}
+
 /** The current writer namespace, isolated from schema1–5 readers' flat scans. */
 export function contractCheckpointsDir(projectRoot: string): string {
   return join(contractsDir(projectRoot), 'checkpoints-v6');
@@ -275,6 +286,17 @@ function isContractShape(value: unknown): value is Contract {
 }
 
 /** Why a snapshot was not accepted; null when it was. */
+/** A contract whose admission record could not be read: not evidence that its checkpoint is safe to use. */
+function unreadableAdmission(contractId: string, error: unknown): Refusal {
+  return refusal({
+    code: 'CONTRACT_CHECKPOINT_REFUSED',
+    state: `the admission record of contract ${contractId} could not be read`,
+    reason: `Contract ${contractId}'s admission record could not be read (${summarizeError(error)}), so its checkpoint is not used.`,
+    next: ['Inspect the contract admissions under .goodvibes, then resume again.', `Or cancel the contract: goodvibes-contract cancel ${contractId}.`],
+    retryable: false,
+  });
+}
+
 export type ContractSnapshotRejection = 'unparseable' | 'not-an-envelope' | 'future-version' | 'invalid-contract';
 
 /**
@@ -832,10 +854,12 @@ export class ContractStore {
    * contract is gone: then this copy must not be written at all. Runs only on that conflict path; one read.
    */
   private rebaseOnDisk(contract: Contract, base: ContractProgressTracker): ContractProgressTracker | null {
-    let fresh: Contract | null;
-    try { fresh = this.loadAvailable(contract.id); }
-    catch (error) { if (error instanceof ContractStoreVersionError) throw error; return null; }
-    if (fresh === null) return null;
+    let fresh: Contract;
+    try {
+      const read = this.loadAvailable(contract.id);
+      if (read.kind !== 'present') return null;
+      fresh = read.value;
+    } catch (error) { if (error instanceof ContractStoreVersionError) throw error; return null; }
     const freshTracker = this.loadedTrackers.get(fresh);
     if (freshTracker === undefined || freshTracker.layout !== 'progress') return null;
     const ours = changedPaths(base, contract), theirs = changedPaths(base, fresh);
@@ -1041,7 +1065,10 @@ export class ContractStore {
     const cached = this.endedRecords.get(contractId);
     if (cached !== undefined) { this.endedRecords.delete(contractId); this.endedRecords.set(contractId, cached); return cached; }
     let contract: Contract | null;
-    try { contract = this.load(contractId); } catch { return null; }
+    try {
+      const read = this.load(contractId);
+      contract = read.kind === 'present' ? read.value : null;
+    } catch { return null; }
     if (contract === null || !isTerminalContractStatus(contract.status)) return null;
     if (this.endedRecords.size >= MAX_TERMINAL_CONTRACT_FILES) this.evictEndedRecord(this.endedRecords.keys().next().value!);
     this.endedRecords.set(contractId, contract);
@@ -1063,9 +1090,9 @@ export class ContractStore {
         // `ended` answers null for a checkpoint that has not ended too (one another
         // process runs, or one waiting for the owner): that is refused by name, not
         // reported as missing.
-        let stored: Contract | null = null;
-        try { stored = this.load(contractId); } catch { /* unreadable: left for load() to report */ }
-        return stored === null ? 'not-found' : 'not-ended';
+        let read: ReturnType<ContractStore['load']> | undefined;
+        try { read = this.load(contractId); } catch { /* unreadable: left for load() to report */ }
+        return read?.kind === 'present' ? 'not-ended' : 'not-found';
       }
     } else {
       if (!isTerminalContractStatus(contract.status)) return 'not-ended';
@@ -1118,63 +1145,62 @@ export class ContractStore {
   }
 
   /**
-   * Reads a contract's file. A file that is refused (unparseable, not an
-   * envelope or malformed contract) is quarantined. A newer schema throws and
-   * stays at its original path, so no caller may mistake it for an absent file.
-   * Does not hold the contract.
+   * Reads a contract's file, as an observed read: `present` with the contract,
+   * `absent` when no file is there, `failed` when the file was refused
+   * (unparseable, not an envelope, malformed, another id, or unbound authority
+   * metadata), naming the quarantine path. A refused file is never "no
+   * contract": a resume must not start it again from its admission. A newer
+   * schema throws and stays at its original path. Does not hold the contract.
    */
-  load(contractId: string): Contract | null {
+  load(contractId: string): Observed<Contract> {
     // A checkpoint name appears only once its bytes are complete (staged file, exclusive link).
     return this.loadAvailable(contractId);
   }
 
-  private loadAvailable(contractId: string): Contract | null {
+  private loadAvailable(contractId: string): Observed<Contract> {
     const dir = contractCheckpointDir(this.projectRoot, contractId), basePath = join(dir, CHECKPOINT_BASE_FILE);
     if (existsSync(basePath)) return this.loadProgress(contractId, dir, basePath);
     const currentPath = contractPath(this.projectRoot, contractId);
     const path = existsSync(currentPath) ? currentPath : historicalContractPath(this.projectRoot, contractId);
-    if (!existsSync(path)) return null;
+    if (!existsSync(path)) return absent;
     const source = captureQuarantineSource(path);
-    if (!source) return null;
+    if (!source) return absent;
     try {
       let receipt: OwnedContractCheckpointRead;
       try { receipt = readOwnedContractCheckpoint(path, 'contract', source); }
       catch (error) {
-        if (error instanceof QuarantineEncodingError) { this.quarantine(path, 'unparseable', source); return null; }
+        if (error instanceof QuarantineEncodingError) { return this.refuseCheckpoint(contractId, path, 'unparseable', source); }
         throw error;
       }
       const read = parseContractSnapshot(ownedContractCheckpointText(receipt), receipt, path === currentPath ? CURRENT_CONTRACT_SCHEMA_VERSION : 5);
       source.assertCurrent();
       if ('rejected' in read) {
         if (read.rejected === 'future-version') throw new ContractStoreVersionError(contractId);
-        this.quarantine(path, read.rejected, source);
-        return null;
+        return this.refuseCheckpoint(contractId, path, read.rejected, source);
       }
       if (read.snapshot.contract.id !== contractId) {
-        this.quarantine(path, 'invalid-contract', source);
-        return null;
+        return this.refuseCheckpoint(contractId, path, 'invalid-contract', source);
       }
       let hasAdmission: boolean;
       try { hasAdmission = read.snapshot.contract.durableAdmission === undefined && new DurableContractAdmissions(this.projectRoot).findByContractId(contractId) !== null; }
-      catch { return null; } // Corrupt authority metadata is not evidence that an unbound alias is safe.
+      catch (error) { return failedRead(unreadableAdmission(contractId, error)); } // Corrupt authority metadata is not evidence that an unbound alias is safe.
       source.assertCurrent();
       if (read.snapshot.contract.durableAdmission === undefined && hasAdmission) {
-        this.quarantine(path, 'invalid-contract', source);
-        return null;
+        return this.refuseCheckpoint(contractId, path, 'invalid-contract', source);
       }
       const contract = read.snapshot.contract;
       const tracker = ContractProgressTracker.of(contract, path === currentPath ? 'single-file' : 'historical');
       try { tracker.sourceIdentity = fileObservationIdentity(path); } catch { /* gone since: its first save finds it changed */ }
       tracker.sourceSchemaVersion = read.snapshot.schemaVersion;
       this.loadedTrackers.set(contract, tracker);
-      return contract;
+      return present(contract);
     } finally { source.close(); }
   }
 
   /** Reads a checkpoint directory: the base with the progress log applied, through the same parse and quarantine as a single file. */
-  private loadProgress(contractId: string, dir: string, basePath: string): Contract | null {
+  private loadProgress(contractId: string, dir: string, basePath: string): Observed<Contract> {
     const source = captureQuarantineSource(basePath);
-    if (!source) return null;
+    if (!source) return absent;
     try {
       const read: { assembled?: AssembledCheckpoint; log?: LogIdentity | null } = {};
       let receipt: OwnedContractCheckpointRead;
@@ -1186,7 +1212,7 @@ export class ContractStore {
           return read.assembled.text;
         });
       } catch (error) {
-        if (error instanceof QuarantineEncodingError) { this.quarantine(basePath, 'unparseable', source); return null; }
+        if (error instanceof QuarantineEncodingError) { return this.refuseCheckpoint(contractId, basePath, 'unparseable', source); }
         if (error instanceof CheckpointFormatError) throw new ContractStoreVersionError(contractId);
         throw error;
       }
@@ -1195,28 +1221,25 @@ export class ContractStore {
       // A torn last line was ignored above; only a base or a record set that does not make a contract is quarantined.
       if ('rejected' in parsed) {
         if (parsed.rejected === 'future-version') throw new ContractStoreVersionError(contractId);
-        this.quarantine(basePath, parsed.rejected, source);
-        return null;
+        return this.refuseCheckpoint(contractId, basePath, parsed.rejected, source);
       }
       const contract = parsed.snapshot.contract;
       if (contract.id !== contractId) {
-        this.quarantine(basePath, 'invalid-contract', source);
-        return null;
+        return this.refuseCheckpoint(contractId, basePath, 'invalid-contract', source);
       }
       let hasAdmission: boolean;
       try { hasAdmission = contract.durableAdmission === undefined && new DurableContractAdmissions(this.projectRoot).findByContractId(contractId) !== null; }
-      catch { return null; }
+      catch (error) { return failedRead(unreadableAdmission(contractId, error)); }
       source.assertCurrent();
       if (hasAdmission) {
-        this.quarantine(basePath, 'invalid-contract', source);
-        return null;
+        return this.refuseCheckpoint(contractId, basePath, 'invalid-contract', source);
       }
       const assembled = read.assembled!;
       this.loadedTrackers.set(contract, ContractProgressTracker.of(contract, 'progress', {
         sources: assembled.sources, log: read.log ?? null, snapshotBytes: assembled.snapshotBytes, appendedBytes: assembled.appendedBytes, damaged: assembled.damaged,
       }));
       this.noteSupportedVersion(basePath);
-      return contract;
+      return present(contract);
     } finally { source.close(); }
   }
 
@@ -1256,7 +1279,10 @@ export class ContractStore {
     try { this.assertStoredVersion(contract.id); } catch { return false; }
     try { if (new DurableContractAdmissions(this.projectRoot).findByContractId(contract.id) !== null) return false; }
     catch { return false; }
-    const existing = this.contracts.get(contract.id) ?? this.load(contract.id);
+    const held = this.contracts.get(contract.id);
+    const stored = held === undefined ? this.load(contract.id) : undefined;
+    // A refused checkpoint was already quarantined, preserved for inspection: the import replaces nothing.
+    const existing = held ?? (stored?.kind === 'present' ? stored.value : null);
     // An imported snapshot must never create/replace a native admission or strip its restart guard.
     if (contract.durableAdmission !== undefined || existing?.durableAdmission !== undefined) return false;
     if (existing && !isTerminalContractStatus(existing.status) && !force) {
@@ -1483,7 +1509,19 @@ export class ContractStore {
     this.timers.delete(contractId);
   }
 
-  private quarantine(path: string, reason: ContractSnapshotRejection, source: QuarantineSource): void {
+  /** Quarantines a refused checkpoint and answers the failed read naming where it went. */
+  private refuseCheckpoint(contractId: string, path: string, reason: ContractSnapshotRejection, source: QuarantineSource): Observed<never> {
+    const quarantinePath = this.quarantine(path, reason, source);
+    return failedRead(refusal({
+      code: 'CONTRACT_CHECKPOINT_REFUSED',
+      state: `the checkpoint of contract ${contractId} was refused (${reason}) and moved to ${quarantinePath}`,
+      reason: `Contract ${contractId}'s checkpoint could not be read (${reason}), so it is not resumed and not started again from its admission.`,
+      next: [`Inspect the quarantined file at ${quarantinePath}.`, `Or cancel the contract: goodvibes-contract cancel ${contractId}.`],
+      retryable: false,
+    }));
+  }
+
+  private quarantine(path: string, reason: ContractSnapshotRejection, source: QuarantineSource): string {
     // Static rejection vocabulary only: parser excerpts can contain private asks.
     // The shared helper checks the exact original read before exclusive archive
     // publication; a replacement source and earlier forensic files stay intact.
@@ -1497,6 +1535,7 @@ export class ContractStore {
     // Different IDs share the same forensic budget, including historical and
     // current checkpoint namespaces. Keep the just-published original visible.
     this.reapQuarantines(this.now(), basename(outcome.quarantinePath));
+    return outcome.quarantinePath;
   }
 
   private reapQuarantines(now: number, currentName?: string) {

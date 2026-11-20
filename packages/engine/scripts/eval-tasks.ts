@@ -30,7 +30,7 @@ const scratch = mkdtempSync(join(tmpdir(), 'goodvibes-eval-tasks-'));
 try {
   const copy = join(scratch, 'suite');
   cpSync(suiteDir, copy, { recursive: true });
-  const result = await runTaskSuite(copy, { executor: createHeadlessRunExecutor({ command }) });
+  const result = await runTaskSuite(copy, { executor: createHeadlessRunExecutor({ command }), sourceDir: suiteDir });
   console.log(formatTaskSuiteResult({ ...result, suiteDir }));
   process.exitCode = result.passed ? 0 : 1;
 } finally {

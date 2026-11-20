@@ -380,7 +380,9 @@ function refreshService(input: DaemonServiceCliInput, initial: PlatformServiceMa
   const manager = kept === undefined || kept === (input.workingDirectory ?? input.homeDir)
     ? initial
     : buildManager({ ...input, workingDirectory: kept });
-  if (owner === 'product' && manager.installedDefinitionMatches()) {
+  // Current means the file matches AND the service manager has taken it: a
+  // reload that failed after the write is run again, never reported current.
+  if (owner === 'product' && manager.installedDefinitionMatches() && !manager.registrationPending()) {
     return { ok: true, exitCode: 0, status: before,
       lines: [`the ${before.platform} service definition at ${before.path} is already current; nothing was changed.`] };
   }

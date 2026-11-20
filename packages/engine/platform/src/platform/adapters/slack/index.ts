@@ -7,7 +7,7 @@ import { summarizeError } from '../../utils/error-display.js';
 import { fetchWithTimeout } from '../../utils/fetch-with-timeout.js';
 import { resolveSecretInput, type SecretRefResolutionOptions } from '../../config/secret-refs.js';
 import { hasAttachments, ingressAnswer, ingressAnswerResponse, noticeUnsupportedAttachment, readRecord, readTextBodyWithinLimit } from '../helpers.js';
-import { answerSurfaceControl, runSurfaceMessage, submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
+import { answerSurfaceControl, runSurfaceMessage, savedWithin, submitSurfaceMessageSaved, SURFACE_ACK_DEADLINE_MS, surfaceAckStillSaving, surfaceOutcomeResponse } from '../surface-message.js';
 
 export async function handleSlackSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
   const signingSecret =
@@ -142,58 +142,68 @@ export async function handleSlackSurfacePayload(
         error: summarizeError(error),
       }));
     };
-    setImmediate(() => {
-      void (async () => {
-        const outcome = await submitSurfaceMessage(context, binding, {
-          surface: 'slack',
-          text: task,
-          logLabel: 'handleSlackSurfaceWebhook',
-          control: false,
-          externalId: event.channelId,
-          threadId: event.channelId,
-          userId: event.userId,
-          displayName: event.userName,
-          title: event.channelName || event.command,
-          metadata: { command: event.command },
-          replyBinding: (replyTo) => responseUrl ? { ...replyTo, metadata: { ...replyTo.metadata, responseUrl } } : replyTo,
-        });
-        switch (outcome.kind) {
-          case 'continued':
-            await postToResponseUrl({
-              response_type: 'in_channel',
-              text: outcome.agentId ? `Continuing session ${outcome.sessionId} via agent ${outcome.agentId}.` : `Queued for session ${outcome.sessionId}; it will run when the agent now starting finishes.`,
-            }, 'continuation response');
-            return;
-          case 'started':
-            await postToResponseUrl({
-              response_type: 'in_channel',
-              blocks: slack.formatAgentResult(
-                outcome.agentId,
-                task,
-                `Session ${outcome.sessionId} active. Agent ${outcome.agentId} will reply in-channel when complete.`,
-              ),
-            }, 'follow-up');
-            return;
-          case 'answered':
-            // The conversation gate already answered in the channel (a work proposal, or why nothing started).
-            return;
-          case 'not-started':
-            logger.error('handleSlackSurfaceWebhook: the agent was not started', { error: outcome.error });
-            context.reportIngressFailure?.('slack', outcome.error);
-            await postToResponseUrl({ response_type: 'ephemeral', text: `Nothing was started: ${outcome.error}` }, 'start failure response');
-            return;
-          case 'control':
-            return;
-        }
-      })().catch((error: unknown) => {
-        // The HTTP response is already sent, so a throw here has no caller to
-        // reach; it is logged and reported on the surface's ingress alarm.
-        const detail = summarizeError(error);
-        logger.error('handleSlackSurfaceWebhook: slash-command processing failed after the ack', { error: detail });
-        context.reportIngressFailure?.('slack', detail);
-      });
+    // Slack's id for this command: a redelivered command finds it already accepted and starts nothing again.
+    const triggerId = typeof bodyRecord.trigger_id === 'string' && bodyRecord.trigger_id ? bodyRecord.trigger_id : undefined;
+    // Save, then acknowledge: the message is stored (the session input row) before Slack hears "Received".
+    const { submitted, saved } = submitSurfaceMessageSaved(context, binding, {
+      surface: 'slack',
+      text: task,
+      logLabel: 'handleSlackSurfaceWebhook',
+      control: false,
+      externalId: event.channelId,
+      threadId: event.channelId,
+      userId: event.userId,
+      displayName: event.userName,
+      title: event.channelName || event.command,
+      metadata: { command: event.command },
+      ...(triggerId ? { providerMessageId: triggerId } : {}),
+      replyBinding: (replyTo) => responseUrl ? { ...replyTo, metadata: { ...replyTo.metadata, responseUrl } } : replyTo,
     });
-
+    const followUp = submitted.then(async (outcome) => {
+      switch (outcome.kind) {
+        case 'continued':
+          await postToResponseUrl({
+            response_type: 'in_channel',
+            text: outcome.agentId ? `Continuing session ${outcome.sessionId} via agent ${outcome.agentId}.` : `Queued for session ${outcome.sessionId}; it will run when the agent now starting finishes.`,
+          }, 'continuation response');
+          return;
+        case 'started':
+          await postToResponseUrl({
+            response_type: 'in_channel',
+            blocks: slack.formatAgentResult(
+              outcome.agentId,
+              task,
+              `Session ${outcome.sessionId} active. Agent ${outcome.agentId} will reply in-channel when complete.`,
+            ),
+          }, 'follow-up');
+          return;
+        case 'answered':
+          // The conversation gate already answered in the channel (a work proposal, or why nothing started).
+          return;
+        case 'not-started':
+          logger.error('handleSlackSurfaceWebhook: the agent was not started', { error: outcome.error });
+          context.reportIngressFailure?.('slack', outcome.error);
+          await postToResponseUrl({ response_type: 'ephemeral', text: `Nothing was started: ${outcome.error}` }, 'start failure response');
+          return;
+        case 'control':
+          return;
+      }
+    });
+    followUp.catch((error: unknown) => {
+      // A failure after the acknowledgement has no caller to reach; it is logged
+      // and reported on the surface's ingress alarm.
+      const detail = summarizeError(error);
+      logger.error('handleSlackSurfaceWebhook: slash-command processing failed', { error: detail });
+      context.reportIngressFailure?.('slack', detail);
+    });
+    // Slack drops an acknowledgement later than 3 seconds: past 2.5 the answer says the save is still running.
+    const state = await savedWithin(saved, SURFACE_ACK_DEADLINE_MS);
+    if (state === 'pending') {
+      return Response.json({ response_type: 'ephemeral', text: surfaceAckStillSaving(task) });
+    }
+    if (state === 'failed') {
+      return Response.json({ response_type: 'ephemeral', text: 'Nothing was saved or started; send the command again.' });
+    }
     return Response.json({
       response_type: 'in_channel',
       text: `Received: _${task}_`,

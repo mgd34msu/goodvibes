@@ -414,6 +414,7 @@ export interface ProviderResponseIdentity {
 export interface ProviderSignInRouteReport {
   readonly route: string;
   readonly label: string;
+  /** `reason` is a fixed sentence with the HTTP status and code (`signInFailureReason`), never the provider's own words. */
   readonly movedFrom?: { readonly route: string; readonly label: string; readonly reason: string } | undefined;
 }
 
@@ -431,6 +432,13 @@ export interface ChatResponse {
    */
   signInRoute?: ProviderSignInRouteReport | undefined;
   content: string;
+  /**
+   * `reasoning` when the model wrote nothing outside its reasoning and
+   * `content` is that reasoning (the never-empty floor, inline-reasoning.ts).
+   * The committed answer is labelled as reasoning wherever it is shown or
+   * delivered (`committedAnswerText`). Absent for an ordinary answer.
+   */
+  textSource?: 'reasoning' | undefined;
   toolCalls: ToolCall[];
   usage: {
     inputTokens: number;       // Billed input tokens (excludes cache tokens on Anthropic)

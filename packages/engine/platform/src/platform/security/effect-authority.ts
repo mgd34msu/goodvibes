@@ -64,7 +64,8 @@ const ROWS = [
   { id: 'run.cancel', least: 'member', scope: 'write:automation', subject: 'own' },
   { id: 'run.retry', least: 'member', scope: 'write:automation', subject: 'own' },
   { id: 'approval.raise', least: 'device', scope: 'write:approvals', subject: 'own' },
-  { id: 'approval.read', least: 'member', scope: 'read:approvals', subject: 'own' },
+  /** Reading an approval record the actor raised (a coalesced raise returns it only to its raiser). */
+  { id: 'approval.read', least: 'device', scope: 'read:approvals', subject: 'own' },
   /** Answering an approval, a question or a purchase window put to the owner. */
   { id: 'approval.answer', least: 'owner', scope: 'write:approvals', subject: 'any', modelRefused: true },
   { id: 'owner-inbox.post', least: 'device', scope: 'write:approvals', subject: 'own' },

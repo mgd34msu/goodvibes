@@ -89,9 +89,9 @@ export interface PlanReadResult {
  *
  * The FIRST line for an id is the active occasion, matching the profile's own
  * rule for a duplicated mechanical field. A later line for the same id is not
- * dropped: if it names a different date it becomes a conflict, and if it names
- * the same one it is a harmless duplicate that stays in the file and stays
- * visible.
+ * dropped: it is a conflict, whatever date it names. A same-date duplicate is
+ * not harmless: its kind, person, lead time or recurrence can differ, and
+ * removing the first line would quietly make the second one the occasion.
  */
 export function readOccasionDeclarations(
   source: Pick<OccasionProfileSource, 'importantDates'>,
@@ -128,7 +128,6 @@ export function readOccasionDeclarations(
   for (const [id, group] of byId) {
     if (group.length < 2) continue;
     const dates = [...new Set(group.map((entry) => renderOccasionDate(entry.date)))];
-    if (dates.length < 2) continue;
     conflicts.push({
       occasionId: id,
       title: group[0]?.title ?? id,

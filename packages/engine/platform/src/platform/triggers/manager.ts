@@ -24,6 +24,7 @@ import { randomUUID } from 'node:crypto';
 import { structuredTransience, type FailureTransience } from '@goodvibes-jev/engine/errors';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { summarizeError } from '../utils/error-display.js';
+import { newIncarnation } from '../utils/target-ref.js';
 import { logger } from '../utils/logger.js';
 import { TriggerManagerWork, stopTriggerResources } from './manager-work.js';
 import { restartDueStreams } from './manager-stream-restarts.js';
@@ -93,6 +94,18 @@ export class TriggerManager {
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private supervisionTimer: ReturnType<typeof setInterval> | null = null;
   private inFlight = new Set<string>();
+  /**
+   * One incarnation per trigger record in this process, fresh on create: a
+   * probe started for a trigger that was removed (and an id reused) while it
+   * ran carries the old incarnation, and its result is dropped instead of
+   * landing on the new trigger.
+   */
+  private readonly incarnations = new Map<string, string>();
+  private incarnationOf(id: string): string {
+    let incarnation = this.incarnations.get(id);
+    if (incarnation === undefined) this.incarnations.set(id, incarnation = newIncarnation());
+    return incarnation;
+  }
   private readonly restartingStreams = new Set<string>();
   /** This process owns the store and its records are the live ones. */
   private loaded = false;
@@ -515,6 +528,7 @@ export class TriggerManager {
 
     // The definition is saved before any command starts; a create whose save fails fails.
     const admitted = record;
+    this.incarnations.set(definition.id, newIncarnation());
     this.records.set(definition.id, admitted);
     try { this.store.insert(admitted); this.stored.add(definition.id); }
     catch (error) { this.records.delete(definition.id); throw error; }
@@ -609,6 +623,7 @@ export class TriggerManager {
     this.ensureOwner('remove a trigger', false);
     this.cancel(id);
     const removed = this.records.delete(id);
+    this.incarnations.delete(id);
     this.persist(id);
     return removed;
   }
@@ -666,6 +681,7 @@ export class TriggerManager {
     this.inFlight.add(id);
     const spec = record.definition.spec;
     const startedAt = this.now();
+    const incarnation = this.incarnationOf(id);
     try {
       const io = this.options.probeIo ?? createDefaultProbeIo();
       const raw = await runProbe(spec.probe, io, {
@@ -673,13 +689,18 @@ export class TriggerManager {
         ...(record.definition.ownerSessionId !== undefined ? { ownerSessionId: record.definition.ownerSessionId } : {}),
       });
       const value = runExtract(spec.extract, raw);
+      // The trigger was removed, and maybe made again under its id, while the
+      // probe ran: this result belongs to a record that no longer exists.
+      if (this.incarnations.get(id) !== incarnation) return this.records.get(id) ?? null;
       return this.applyObservation(id, value, startedAt, spec);
     } catch (error) {
+      if (this.incarnations.get(id) !== incarnation) return this.records.get(id) ?? null;
       // Whether a retry can clear this failure is read from its structure; a
       // failure read as permanent parks the trigger at once.
       return this.applyCheckFailure(id, summarizeError(error), startedAt, transienceOf(error));
     } finally {
-      this.inFlight.delete(id);
+      // Only this incarnation's mark: a re-created trigger's own check keeps its own.
+      if (this.incarnations.get(id) === incarnation || !this.records.has(id)) this.inFlight.delete(id);
     }
   }
 

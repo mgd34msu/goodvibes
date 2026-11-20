@@ -19,11 +19,11 @@ export function RelayPairingOffer({ pairing, onConfirm, onDismiss }: RelayPairin
     <div className="banner warning" role="alert">
       <Radio size={16} aria-hidden="true" />
       {' '}
-      Connect through the relay at <strong>{relayHost}</strong> to the daemon with key{' '}
-      <code>{fingerprint}</code>? Only confirm if the daemon you are pairing with shows the same key.
-      {replacesExisting && ' This replaces your current relay pairing.'}
+      Connect through the relay at <strong>{relayHost}</strong> to the computer whose GoodVibes key is{' '}
+      <code>{fingerprint}</code>? Confirm only if your computer shows the same key.
+      {replacesExisting && ' This replaces the relay this device uses now.'}
       {' '}
-      <Button size="sm" onClick={onConfirm}>Confirm pairing</Button>
+      <Button size="sm" onClick={onConfirm}>Use this relay</Button>
       {' '}
       <Button size="sm" variant="ghost" onClick={onDismiss}>Dismiss</Button>
     </div>

@@ -433,6 +433,7 @@ export function createEmailDraftUpdateHandler(service: EmailGatewayService): Gat
       inReplyTo: readOptionalString(params.inReplyTo),
       references: readOptionalString(params.references),
     };
+    refuseNonUserRequest(invocation, 'email.draft.update');
     if (!service.updateDraft) return unsupported('replacing a saved draft');
     return service.updateDraft(input);
   };
@@ -678,5 +679,6 @@ export function registerEmailGatewayMethods(
   attach('email.attachment.get', createEmailAttachmentGetHandler(service));
   attach('email.drafts.list', createEmailDraftsListHandler(service));
   attach('email.draft.create', createEmailDraftCreateHandler(service));
+  attach('email.draft.update', createEmailDraftUpdateHandler(service));
   attach('email.send', createEmailSendHandler(service, ledger, ownerAddresses));
 }

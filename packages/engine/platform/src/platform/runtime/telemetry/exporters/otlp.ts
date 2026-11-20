@@ -14,11 +14,17 @@ import { ExportQueue } from './queue.js';
 import { logger } from '../../../utils/logger.js';
 import { instrumentedFetch } from '../../../utils/fetch-with-timeout.js';
 import { summarizeError } from '../../../utils/error-display.js';
-import { buildOtlpTraceDocumentFromSpans } from '../api-helpers.js';
+import { buildOtlpTraceDocumentFromSpans, sanitizeSpan } from '../api-helpers.js';
 
-/** The same OTLP/JSON document the telemetry API serves, so both paths agree on kinds, parents and attributes. */
+/**
+ * The same OTLP/JSON document the telemetry API serves, in the API's safe view
+ * (`sanitizeSpan(span, 'safe')`): a collector is a remote reader, so content
+ * attributes (a task's text, prompts, tool arguments and output) are withheld
+ * and credential-shaped text is masked, exactly as for a read client that did
+ * not ask for the raw view. Kinds, parents, ids, statuses and timings are kept.
+ */
 function serialiseSpans(spans: ReadableSpan[]): string {
-  return JSON.stringify(buildOtlpTraceDocumentFromSpans(spans));
+  return JSON.stringify(buildOtlpTraceDocumentFromSpans(spans.map((span) => sanitizeSpan(span, 'safe'))));
 }
 
 const DEFAULT_FLUSH_INTERVAL_MS = 5000;

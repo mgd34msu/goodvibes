@@ -425,6 +425,9 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
     );
   }
 
+  /** Set when a conflicted merge left the base checkout mid-merge: the lane merges nothing until it is seen restored. */
+  let baseMidMerge: string | undefined;
+
   async function integrateOne(workstream: Workstream, item: WorkItem): Promise<void> {
     // A branch missing its last phase's commit would merge as empty and be
     // reported merged while the work sits uncommitted in the tree. It waits
@@ -448,6 +451,13 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
         resourceGuards.set(bound, () => { repositoryGuard?.(); binding(); });
       }
       if (item.worktreeInitialized === false) throw refused(`item ${item.id}'s worktree ${path} never finished initializing, so it holds no work to merge`, 'Run the item again; its worktree is removed and created again.');
+      // The lane stopped because a conflicted merge left the base checkout mid-merge: nothing more is
+      // merged into it until it is seen restored (`git merge --abort` there), checked again here.
+      if (baseMidMerge !== undefined) {
+        const base = await bound.observeBaseRestored();
+        if (base.state !== 'done') throw refused(base.state === 'failed' ? base.refusal.state : baseMidMerge, `Run \`git merge --abort\` in the base checkout, then retry the integration.`);
+        baseMidMerge = undefined;
+      }
       // The resource guard already begins with the repository guard.
       const outcome = await bound.integrate(() => { (resourceGuards.get(bound) ?? repositoryGuard)?.(); });
       if (outcome.status === 'merged') {
@@ -462,11 +472,16 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
         return;
       }
       if (outcome.status === 'conflict') {
+        // Without the observation that the base was restored, the sequential lane stops here.
+        if (outcome.base.state !== 'done') {
+          baseMidMerge = outcome.base.state === 'failed' || outcome.base.state === 'unknown' ? outcome.base.refusal.state : 'the base checkout is mid-merge';
+        }
         item.mergeState = 'conflict';
         // Structured list first (a resolution session seeds from DATA), the
         // prose blockedReason kept for display compatibility.
         item.conflictFiles = [...outcome.files];
-        item.blockedReason = `merge-conflict: ${outcome.files.join(', ') || 'unknown files'}`;
+        item.blockedReason = `merge-conflict: ${outcome.files.join(', ') || 'unknown files'}`
+          + (outcome.base.state === 'failed' ? `; ${outcome.base.refusal.state}: ${outcome.base.refusal.next.join(' ')}` : '');
         deps.emit({
           type: 'item-merge-conflict', workstreamId: workstream.id, itemId: item.id,
           branch: bound.branch, path: bound.path, files: outcome.files,

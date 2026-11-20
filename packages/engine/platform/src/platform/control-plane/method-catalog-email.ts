@@ -52,6 +52,8 @@ const EMAIL_MESSAGE_DETAIL_SCHEMA = objectSchema({
   bodyText: STRING_SCHEMA,
   bodyHtml: STRING_SCHEMA,
   attachments: arraySchema(EMAIL_ATTACHMENT_SCHEMA),
+  /** The mailbox generation the UID was read under; email.inbox.update needs it. */
+  uidValidity: NUMBER_SCHEMA,
 }, ['uid', 'from', 'subject', 'date', 'messageId', 'bodyText']);
 
 const EMAIL_DRAFT_SUMMARY_SCHEMA = objectSchema({
@@ -292,7 +294,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     id: 'email.inbox.list',
     title: 'List Email Inbox',
     description:
-      'Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. `before` pages backwards: pass the smallest UID of the page you have to get the next older page; `total` counts every match. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted. A message the daemon\'s inbox mirror has labelled carries `triageLabel` (spam, priority or normal); one not labelled yet has none. A message the mirror holds carries `screening`: `screened`, or `not-screened` when only code checked it for credential and card text, with `screeningReason`.',
+      'Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. `before` pages backwards: pass the smallest UID of the page you have to get the next older page; `total` counts every match. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted. A message the daemon\'s inbox mirror has labelled carries `triageLabel` (spam, priority or normal); one not labelled yet has none. A message the mirror holds carries `screening`: `screened`, or `not-screened` when only code checked it for credential and card text, with `screeningReason`. `uidValidity` is the mailbox generation the page\'s UIDs belong to (absent only when the server reports none); email.inbox.update needs it.',
     category: 'email',
     effects: ['email.read'],
     http: { method: 'GET', path: '/api/email/inbox' },
@@ -310,13 +312,14 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
       messages: arraySchema(EMAIL_INBOX_MESSAGE_SCHEMA),
       total: NUMBER_SCHEMA,
       unreadable: arraySchema(EMAIL_INBOX_UNREADABLE_SCHEMA),
+      uidValidity: NUMBER_SCHEMA,
     }, ['messages', 'total']),
   }),
   methodDescriptor({
     id: 'email.inbox.read',
     title: 'Read Email Message',
     description:
-      'Return the full body and attachment metadata for a single inbox message by IMAP UID. Read-only (BODY.PEEK; does not mark as read).',
+      'Return the full body and attachment metadata for a single inbox message by IMAP UID, with `uidValidity`, the mailbox generation it was read under (email.inbox.update needs it). Read-only (BODY.PEEK; does not mark as read).',
     category: 'email',
     effects: ['email.inspect'],
     http: { method: 'GET', path: '/api/email/inbox/{uid}' },
@@ -328,7 +331,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     repeat: 'unsafe',
     title: 'Create Email Draft',
     description:
-      'Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field.',
+      'Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field. To change a saved draft, use email.draft.update with its uid and uidValidity: a second create leaves two drafts.',
     category: 'email',
     effects: ['email.administer'],
     http: { method: 'POST', path: '/api/email/drafts' },
@@ -347,8 +350,37 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     outputSchema: objectSchema({
       draftId: STRING_SCHEMA,
       uid: NUMBER_SCHEMA,
+      uidValidity: NUMBER_SCHEMA,
       mailbox: STRING_SCHEMA,
     }, ['draftId', 'mailbox']),
+    dangerous: true,
+  }),
+  methodDescriptor({
+    id: 'email.draft.update',
+    repeat: 'unsafe',
+    title: 'Replace an Email Draft',
+    description:
+      'Replace one saved draft in the IMAP Drafts folder with an edited one, so the folder keeps one copy: the edited message is appended, then the draft named by `uid` is removed. `uid` and `uidValidity` are what email.drafts.list (or email.draft.create) returned; a reset Drafts folder or a draft that is gone is refused with nothing changed, and a server that cannot remove one message by UID (no UIDPLUS) is refused before anything is written. A draft is never sent by this verb. Answers the new draft\'s { draftId, uid?, uidValidity?, mailbox } and `replaced`, the UID removed.',
+    category: 'email',
+    effects: ['email.administer'],
+    // Served through the control-plane invoke endpoint, like email.inbox.update.
+    transport: ['ws'],
+    inputSchema: objectSchema({
+      uid: NUMBER_SCHEMA,
+      uidValidity: NUMBER_SCHEMA,
+      to: STRING_SCHEMA,
+      subject: STRING_SCHEMA,
+      body: STRING_SCHEMA,
+      inReplyTo: STRING_SCHEMA,
+      references: STRING_SCHEMA,
+    }, ['uid', 'uidValidity', 'to', 'subject', 'body']),
+    outputSchema: objectSchema({
+      draftId: STRING_SCHEMA,
+      uid: NUMBER_SCHEMA,
+      uidValidity: NUMBER_SCHEMA,
+      mailbox: STRING_SCHEMA,
+      replaced: NUMBER_SCHEMA,
+    }, ['draftId', 'mailbox', 'replaced']),
     dangerous: true,
   }),
   methodDescriptor({
@@ -380,7 +412,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     repeat: 'safe',
     title: 'Mark, Archive or Delete an Email',
     description:
-      'Change one inbox message by IMAP UID: action seen or unseen sets or clears its read flag; archive moves it to the folder the server marks Archive (or All Mail); delete moves it to the folder the server marks Trash, so it can be recovered there. A server with no such folder is refused and nothing changes; nothing here expunges permanently. Pass uidValidity when you have it so a reset mailbox refuses instead of changing another message. Answers { uid, action, movedTo? }.',
+      'Change one inbox message by IMAP UID: action seen or unseen sets or clears its read flag; archive moves it to the folder the server marks Archive (or All Mail); delete moves it to the folder the server marks Trash, so it can be recovered there. A server with no such folder is refused and nothing changes; nothing here expunges permanently. uidValidity is required: the mailbox generation email.inbox.list or email.inbox.read returned with the uid, so a reset mailbox refuses instead of changing whichever message now holds that UID. Answers { uid, action, movedTo? }.',
     category: 'email',
     effects: ['email.administer'],
     // Served through the control-plane invoke endpoint, like checkpoints.* and rewind.*.
@@ -389,7 +421,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
       uid: NUMBER_SCHEMA,
       action: { type: 'string', enum: ['seen', 'unseen', 'archive', 'delete'] },
       uidValidity: NUMBER_SCHEMA,
-    }, ['uid', 'action']),
+    }, ['uid', 'action', 'uidValidity']),
     outputSchema: objectSchema({
       uid: NUMBER_SCHEMA,
       action: STRING_SCHEMA,
@@ -417,7 +449,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     id: 'email.drafts.list',
     title: 'List Email Drafts',
     description:
-      'Return the newest drafts (default 25, at most 100) in the account\'s Drafts folder, newest first, each with its recipient, subject, date, the Message-ID it replies to and up to 64 KB of body text, so a draft can be reopened in a composer. Read-only.',
+      'Return the newest drafts (default 25, at most 100) in the account\'s Drafts folder, newest first, each with its recipient, subject, date, the Message-ID it replies to and up to 64 KB of body text, so a draft can be reopened in a composer; `uidValidity` is the Drafts folder generation the UIDs belong to, which email.draft.update needs to replace one. Read-only.',
     category: 'email',
     effects: ['email.inspect'],
     // Served through the control-plane invoke endpoint, like checkpoints.* and rewind.*.
@@ -427,6 +459,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
       drafts: arraySchema(EMAIL_DRAFT_SUMMARY_SCHEMA),
       total: NUMBER_SCHEMA,
       mailbox: STRING_SCHEMA,
+      uidValidity: NUMBER_SCHEMA,
     }, ['drafts', 'total', 'mailbox']),
   }),
   /**

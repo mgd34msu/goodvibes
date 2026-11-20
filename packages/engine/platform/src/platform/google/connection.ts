@@ -89,7 +89,7 @@ function readString(value: unknown): string | null {
  * token cannot call anything, and reporting it as present would produce a
  * capability that claims to be ready and then fails on first use.
  */
-async function storeCredentials(sources: GoogleConnectionSources): Promise<GoogleOAuthCredentials | null> {
+async function storeCredentials(sources: GoogleConnectionSources, retried = false): Promise<GoogleOAuthCredentials | null> {
   const clientId = readString(safeGet(sources, GOOGLE_CONFIG_KEYS.oauthClientId));
   if (clientId === null) return null;
 
@@ -97,6 +97,11 @@ async function storeCredentials(sources: GoogleConnectionSources): Promise<Googl
     sources.secretGet(GOOGLE_SECRET_KEYS.oauthClientSecret),
     sources.secretGet(GOOGLE_SECRET_KEYS.oauthRefreshToken),
   ]);
+  // The client id is a setting read before the secrets were awaited: one that moved meanwhile
+  // belongs to another client, so the three are read again together once instead of mixed.
+  if (readString(safeGet(sources, GOOGLE_CONFIG_KEYS.oauthClientId)) !== clientId) {
+    return retried ? null : storeCredentials(sources, true);
+  }
   const secret = readString(clientSecret);
   const refresh = readString(refreshToken);
   if (secret === null || refresh === null) return null;

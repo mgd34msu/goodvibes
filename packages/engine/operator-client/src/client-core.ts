@@ -49,6 +49,12 @@ export interface OperatorRemoteClientOptions {
    * @defaultValue true
    */
   readonly validateResponses?: boolean | undefined;
+  /**
+   * The owning client's lifetime. Every stream this client opens listens to
+   * it as well as to its own call's signal: aborting it ends each open stream
+   * and refuses each open still in flight (and every later one).
+   */
+  readonly streamSignal?: AbortSignal | undefined;
 }
 
 /**
@@ -379,7 +385,11 @@ export function createOperatorRemoteClient(
     // validateResponses option is intentionally not forwarded because streams
     // do not have a single response body to validate.
     // A caller that only wants the closer still gives the stream a subscriber that handles gaps and ends.
-    const streamOptions = options ?? { handlers: { onEvent: () => {}, onGap: () => {}, onEnd: () => {} } };
+    const given = options ?? { handlers: { onEvent: () => {}, onGap: () => {}, onEnd: () => {} } };
+    const owner = clientOptions.streamSignal;
+    const streamOptions = owner
+      ? { ...given, signal: given.signal ? AbortSignal.any([given.signal, owner]) : owner }
+      : given;
     try {
       return openContractRouteStream(
         transport,

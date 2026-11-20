@@ -12,6 +12,7 @@ import {
   persistSecretBackedConfigValue,
 } from '../../config/secret-config.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { secretArg } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 
 export function registerConfigCommand(registry: CommandRegistry): void {
   registry.register(configWorkspaceCommand);
@@ -73,7 +74,8 @@ const configWorkspaceCommand = createConfigWorkspaceCommand<CommandContext>({
     // command has to route them the same way, or the two ways of setting the
     // same key disagree about where the value lands.
     if (isSecretConfigKey(key)) {
-      await handleSecretConfigSet(ctx, key as ConfigKey, value);
+      // The value is a declared secret position (secretArgs), masked in the input history.
+      await handleSecretConfigSet(ctx, key as ConfigKey, secretArg(2).reveal('store-write'));
       return;
     }
     try {

@@ -8,6 +8,8 @@ import { logger } from '../utils/logger.js';
 import { readCloudflareConfig } from './config.js';
 import { CLOUDFLARE_TUNNEL_TOKEN_KEY } from './constants.js';
 import { resolveSecretRef } from './cloudflare-token-resolvers.js';
+import { FenceIssuer } from '../utils/owner-fence.js';
+import { OwnedScope, NOTHING_RUNNING, type CloseReport } from '../utils/owned-work.js';
 
 export type CloudflareTunnelConnectorState =
   | 'not-configured'
@@ -84,6 +86,10 @@ function findOnPath(name: string): string | null {
  */
 export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandle {
   private child: TunnelConnectorProcess | null = null;
+  /** Owns the current child until its exit is observed: SIGTERM, 5 s, SIGKILL, 2 s. */
+  private childScope: OwnedScope | null = null;
+  /** Retired by dispose(): a reconcile still resolving its token then starts nothing. */
+  readonly #lifetime = new FenceIssuer('cloudflare tunnel connector');
   private running: { readonly tunnelId: string; readonly token: string } | null = null;
   private current: CloudflareTunnelConnectorStatus = { state: 'not-configured', detail: 'No Cloudflare Tunnel is provisioned.', restarts: 0, since: Date.now() };
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
@@ -118,11 +124,17 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
     this.reconcileInBackground();
   }
 
-  /** Stops following the settings and stops the connector; for daemon shutdown. */
-  async dispose(): Promise<void> {
+  /**
+   * Stops following the settings and stops the connector; for daemon shutdown.
+   * Waits for a reconcile in flight (which then starts nothing) before the
+   * stop, so no child can be launched after it. Resolves with the stop report.
+   */
+  async dispose(): Promise<CloseReport> {
+    this.#lifetime.retire('the daemon is stopping');
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers = [];
-    await this.stop();
+    await this.reconciling;
+    return this.stop();
   }
 
   private reconcileInBackground(): void {
@@ -138,6 +150,8 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
   }
 
   private async reconcileNow(options: { readonly force?: boolean }): Promise<CloudflareTunnelConnectorStatus> {
+    const fence = this.#lifetime.peek();
+    if (!fence.current) return this.current;
     const config = readCloudflareConfig(this.options.configManager);
     if (!config.tunnelId) {
       await this.stop();
@@ -150,6 +164,8 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
       return this.current;
     }
     const token = await this.resolveToken(config.tunnelTokenRef);
+    // Disposed while the token was being read: start nothing.
+    if (!fence.current) return this.current;
     if (!token) {
       await this.stop();
       this.set({
@@ -172,6 +188,7 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
       });
       return this.current;
     }
+    if (!fence.current) return this.current;
     this.running = { tunnelId: config.tunnelId, token };
     this.stopping = false;
     this.failuresSinceConnected = 0;
@@ -197,7 +214,12 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
     });
   }
 
-  async stop(): Promise<void> {
+  /**
+   * Stops the connector: SIGTERM, 5 s, SIGKILL, 2 s. Reports `stopped` only
+   * once the child's exit was observed; a child that outlives SIGKILL leaves
+   * the state `failed`, naming its pid, and is named in the returned report.
+   */
+  async stop(): Promise<CloseReport> {
     this.stopping = true;
     const wasActive = this.running !== null;
     if (this.restartTimer) {
@@ -205,25 +227,26 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
       this.restartTimer = null;
     }
     const child = this.child;
+    const scope = this.childScope;
     this.child = null;
+    this.childScope = null;
     this.running = null;
-    if (!child) {
+    if (!child || !scope) {
       if (wasActive) this.set({ state: 'stopped', tunnelId: this.current.tunnelId, detail: 'The tunnel connector was stopped.' });
-      return;
+      return NOTHING_RUNNING;
     }
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        child.kill('SIGKILL');
-        resolve();
-      }, 5_000);
-      timer.unref?.();
-      child.on('exit', () => {
-        clearTimeout(timer);
-        resolve();
+    const report = await scope.close('the tunnel connector was stopped');
+    if (report.stillRunning.length > 0) {
+      this.set({
+        state: 'failed',
+        tunnelId: this.current.tunnelId,
+        detail: `cloudflared${child.pid !== undefined ? ` (pid ${child.pid})` : ''} was told to stop and killed, but its exit was not seen; it may still be connecting the tunnel.`,
+        next: [child.pid !== undefined ? `End it yourself: kill -9 ${child.pid}` : 'End the cloudflared process yourself'],
       });
-      child.kill('SIGTERM');
-    });
+      return report;
+    }
     this.set({ state: 'stopped', tunnelId: this.current.tunnelId, detail: 'The tunnel connector was stopped.' });
+    return report;
   }
 
   private async resolveToken(ref: string): Promise<string | null> {
@@ -253,6 +276,18 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
       return;
     }
     this.child = child;
+    const exited = new Promise<void>((resolve) => {
+      child.on('exit', () => resolve());
+      // A child that never started raises 'error' and no 'exit'.
+      child.on('error', () => { if (child.pid === undefined) resolve(); });
+    });
+    const scope = new OwnedScope('cloudflare tunnel connector');
+    scope.child('cloudflared', {
+      pid: child.pid,
+      kill: (signal) => { child.kill(signal === 'SIGKILL' || signal === 9 ? 'SIGKILL' : 'SIGTERM'); },
+      exited,
+    });
+    this.childScope = scope;
     let lastError = '';
     let buffered = '';
     child.stderr?.on('data', (chunk: Buffer | string) => {
@@ -279,6 +314,7 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
     child.on('exit', (code, signal) => {
       if (child !== this.child) return;
       this.child = null;
+      this.childScope = null;
       if (this.stopping) return;
       this.onExit(binary, `exited (${signal ?? `code ${code ?? 'unknown'}`})${lastError ? `: ${lastError}` : ''}`);
     });

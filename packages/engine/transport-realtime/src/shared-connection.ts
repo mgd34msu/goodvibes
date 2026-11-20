@@ -38,9 +38,15 @@ export interface SharedConnection<TDomain extends string> {
   close(): void;
 }
 
+/**
+ * Open one connection for `domains`. `signal` aborts when the connector lets
+ * this open go (the last listener left, or a newer set replaced it): the
+ * opener stops waiting and rejects. A connection that still lands is closed.
+ */
 export type OpenSharedConnection<TDomain extends string, TEvent extends EventLike> = (
   domains: readonly TDomain[],
   sink: SharedConnectionSink<TDomain, TEvent>,
+  signal: AbortSignal,
 ) => Promise<SharedConnection<TDomain>>;
 
 interface Subscriber<TEvent extends EventLike> {
@@ -67,6 +73,8 @@ export function createSharedDomainConnector<TDomain extends string, TEvent exten
   let connection: SharedConnection<TDomain> | null = null;
   let carried: ReadonlySet<TDomain> = new Set();
   let opening = false;
+  // Aborts the open in flight when it is let go of, so an unsubscribe never waits on it.
+  let openAbort: AbortController | null = null;
   let syncTimer: ReturnType<typeof setTimeout> | null = null;
 
   const wanted = (): TDomain[] => [...subscribers.keys()].sort();
@@ -104,6 +112,8 @@ export function createSharedDomainConnector<TDomain extends string, TEvent exten
   const letGo = (): void => {
     generation += 1;
     opening = false;
+    openAbort?.abort(new Error('The connection being opened is no longer wanted.'));
+    openAbort = null;
     if (syncTimer) clearTimeout(syncTimer);
     syncTimer = null;
     const previous = connection;
@@ -145,9 +155,11 @@ export function createSharedDomainConnector<TDomain extends string, TEvent exten
   const openFor = (domains: readonly TDomain[]): void => {
     const owner = ++generation;
     opening = true;
+    const abort = new AbortController();
+    openAbort = abort;
     let pending: Promise<SharedConnection<TDomain>>;
     try {
-      pending = Promise.resolve(open(domains, sinkFor(owner)));
+      pending = Promise.resolve(open(domains, sinkFor(owner), abort.signal));
     } catch (error) {
       pending = Promise.reject(error);
     }
@@ -156,6 +168,7 @@ export function createSharedDomainConnector<TDomain extends string, TEvent exten
         opened.close();
         return;
       }
+      if (openAbort === abort) openAbort = null;
       opening = false;
       connection = opened;
       carried = new Set(domains);
@@ -163,6 +176,7 @@ export function createSharedDomainConnector<TDomain extends string, TEvent exten
       if (!sameSet(wanted(), carried)) scheduleSync();
     }, (error: unknown) => {
       if (owner !== generation) return;
+      if (openAbort === abort) openAbort = null;
       // Feeds still waiting get the failure and retry on their own schedule;
       // feeds that were served by the connection this one replaces are told it ended.
       endAll({ final: (error as { recoverable?: unknown } | null)?.recoverable === false }, error);

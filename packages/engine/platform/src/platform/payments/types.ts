@@ -211,6 +211,8 @@ export type ExecutionRefusalCode =
   | 'owner-changed'
   /** The purchase notice could not be prepared or sent. */
   | 'notice-unavailable'
+  /** The owner's answer to the purchase notice could not be read; it is never taken as silence, so nothing was bought. */
+  | 'answer-unreadable'
   /** Another purchase in flight holds the budget this one needs. */
   | 'budget-held'
   /** The click was made and no answer was seen: the order may or may not have been placed. */

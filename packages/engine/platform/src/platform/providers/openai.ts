@@ -41,12 +41,42 @@ import { withProviderStopReason } from './provider-stop-reason.js';
 import { isOpenAiSpentQuota, openAiRetryAfterMs, parseRateLimitHeaders } from './rate-limit-headers.js';
 import type { CacheHitTracker } from './cache-strategy.js';
 import { extractOpenAIStreamTextDelta } from './openai-stream-delta.js';
-import { summarizeError, toProviderError } from '../utils/error-display.js';
+import { normalizeError, summarizeError, toProviderError } from '../utils/error-display.js';
 import { resolveOpenAIClientApiKey } from './openai-compat.js';
 import { resolveEffortForRequest, resolveReasoningEffortSpec } from './reasoning-effort-families.js';
 import { reasoningEffortLevels } from './reasoning-effort.js';
 import { fetchOpenAISubscriptionModelIds, OpenAISubscriptionRoute, subscriptionAccountKey, type OpenAISubscriptionStore } from './openai-codex.js';
 import { logger } from '../utils/logger.js';
+
+/** What a failed sign-in's category means, in a fixed sentence. */
+const SIGN_IN_FAILURE_WORDS: Readonly<Record<string, string>> = {
+  authentication: 'the sign-in was not accepted',
+  authorization: 'the sign-in may not use this model',
+  permission: 'the sign-in may not use this model',
+  billing: 'its plan or credit is used up',
+  rate_limit: 'it reached its rate limit',
+  timeout: 'the request timed out',
+  network: 'the connection failed',
+  bad_request: 'the request was refused',
+  not_found: 'the model was not found there',
+  service: 'the service answered with an error',
+  protocol: 'its answer could not be read',
+};
+
+/**
+ * Why a sign-in failed, as the person and every record of the move may see
+ * it: a fixed sentence for the failure's category, the HTTP status, and the
+ * provider's short error code when it is one. Never the provider's own words:
+ * an upstream body can carry anything, and this reason is put in the
+ * transcript, the turn's events and the final error.
+ */
+export function signInFailureReason(error: unknown): string {
+  const normalized = normalizeError(error);
+  const words = SIGN_IN_FAILURE_WORDS[normalized.category] ?? 'the request failed';
+  const status = normalized.statusCode !== undefined ? ` (HTTP ${normalized.statusCode})` : '';
+  const code = normalized.providerCode !== undefined && /^[A-Za-z0-9_.-]{1,64}$/.test(normalized.providerCode) ? `, code ${normalized.providerCode}` : '';
+  return `${words}${status}${code}`;
+}
 
 const NOOP_CACHE_HIT_TRACKER: Pick<CacheHitTracker, 'recordTurn'> = {
   recordTurn: () => {},
@@ -283,7 +313,7 @@ export class OpenAIProvider implements LLMProvider {
           }
           throw error;
         }
-        movedFrom = { route, label: OPENAI_SIGN_IN_ROUTE_LABELS[route], reason: error instanceof Error ? error.message : String(error) };
+        movedFrom = { route, label: OPENAI_SIGN_IN_ROUTE_LABELS[route], reason: signInFailureReason(error) };
         logger.info('[openai] sign-in route failed; asking the same model through the next sign-in', {
           model: params.model, from: route, to: next, reason: summarizeError(error),
         });

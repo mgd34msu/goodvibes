@@ -137,10 +137,10 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
     id: 'sessions.hosted.attach',
     repeat: 'safe',
     title: 'Attach to a Daemon-Hosted Session',
-    description: 'Join a hosted session and receive its transcript so far, so a client that was never connected, or one reconnecting after the daemon restarted, renders what it missed instead of an empty screen. A session restored from disk has its loop rebuilt on this call, with a system line in the transcript stating that its in-flight turn did not survive the restart. Live output continues on the `turn` and `tools` event domains, filtered on this session id. Attaching is what keeps a `kill`-policy session alive: the policy is applied when the LAST client detaches. An attachment carries a LEASE, `hostedSessions.attachmentTtlMs`, ten minutes by default, or `leaseMs` for this attachment alone, because a client that crashed or closed its tab never calls detach, and a claim nothing expires would hold a kill-policy session open forever. Calling attach again with the same `clientId` renews it, and a client whose control-plane connection is still open renews automatically, so an attached client watching a long turn in silence is never reaped. When the last attachment lapses the session is treated as detached and its policy decides. ws-only invoke verb; no REST binding.',
+    description: 'Join a hosted session and receive its transcript so far, so a client that was never connected, or one reconnecting after the daemon restarted, renders what it missed instead of an empty screen. A session restored from disk has its loop rebuilt on this call, with a system line in the transcript stating that its in-flight turn did not survive the restart. Live output continues on the `turn` and `tools` event domains, filtered on this session id. Attaching is what keeps a `kill`-policy session alive: the policy is applied when the LAST client detaches. An attachment carries a LEASE, `hostedSessions.attachmentTtlMs`, ten minutes by default, or `leaseMs` for this attachment alone, because a client that crashed or closed its tab never calls detach, and a claim nothing expires would hold a kill-policy session open forever. Calling attach again with the same `clientId` renews it, and a client whose control-plane connection is still open renews automatically, so an attached client watching a long turn in silence is never reaped. When the last attachment lapses the session is treated as detached and its policy decides. A credential below admin attaches only to a session it created or an owner shared with it (sessions.hosted.share), and needs read:transcripts as well as write:sessions because the call returns the transcript; anyone else is refused 403 NOT_YOURS naming session.share. Attaching never makes the caller an owner. ws-only invoke verb; no REST binding.',
     category: 'sessions',
     transport: ['ws'],
-    effects: ['sessions.write'],
+    effects: ['session.attach', 'session.transcript.read'],
     // Attaching changes who is watching, not the shared session record, so this
     // drives the hosted lifecycle channel and honestly claims nothing else.
     events: ['control.hosted_session_update'],
@@ -178,7 +178,7 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
     repeat: 'safe',
     effects: ['session.end'],
     title: 'End a Daemon-Hosted Session',
-    description: 'End a hosted session regardless of who is attached or what its detach policy says: the in-flight turn is interrupted, its loop is taken apart, its workspace floor is released when it was the last session using it, and the record is kept, terminated, with the reason `killed`, until `hostedSessions.terminatedRetentionMs` retires it. Killing an already-terminated session returns that record unchanged rather than reporting an error for work that is already done. ws-only invoke verb; no REST binding.',
+    description: 'End a hosted session regardless of who is attached or what its detach policy says: the in-flight turn is interrupted, its loop is taken apart, its workspace floor is released when it was the last session using it, and the record is kept, terminated, with the reason `killed`, until `hostedSessions.terminatedRetentionMs` retires it. Killing an already-terminated session returns that record unchanged rather than reporting an error for work that is already done. A credential below admin ends only a session it created or was shared (403 NOT_YOURS otherwise). ws-only invoke verb; no REST binding.',
     category: 'sessions',
     transport: ['ws'],
     // Ending one closes its shared-spine record too, so both channels fire.
@@ -189,10 +189,10 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
   methodDescriptor({
     id: 'sessions.hosted.list',
     title: 'List Daemon-Hosted Sessions',
-    description: 'Every session this daemon hosts, most recently updated first. Terminated sessions are excluded unless `includeTerminated` is set, they are kept, with the reason they ended, until the retention window retires them, so a session that stopped can be asked about instead of having simply vanished. Each record carries the policy that would apply on the next detach, so a client can show what leaving will do before it leaves. A session\'s title is its first prompt unless one was given, so it needs read:transcripts. ws-only invoke verb; no REST binding.',
+    description: 'Every session this daemon hosts, most recently updated first. Terminated sessions are excluded unless `includeTerminated` is set, they are kept, with the reason they ended, until the retention window retires them, so a session that stopped can be asked about instead of having simply vanished. Each record carries the policy that would apply on the next detach, so a client can show what leaving will do before it leaves. A session\'s title is its first prompt unless one was given, so it needs read:transcripts, and a credential below admin is listed only the sessions it created or was shared. ws-only invoke verb; no REST binding.',
     category: 'sessions',
     transport: ['ws'],
-    effects: ['transcripts.read'],
+    effects: ['session.transcript.read'],
     inputSchema: objectSchema({ includeTerminated: BOOLEAN_SCHEMA }, []),
     outputSchema: objectSchema({
       sessions: arraySchema(HOSTED_SESSION_RECORD_SCHEMA),
@@ -201,18 +201,37 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
   methodDescriptor({
     id: 'sessions.hosted.history',
     title: 'Read a Daemon-Hosted Session\'s Transcript',
-    description: 'Return a hosted session\'s record and its transcript, live or ended, without attaching. An ended session (its last client detached under the kill policy, its attachment lease lapsed, it was killed, or the daemon restarted) keeps its transcript on disk until `hostedSessions.terminatedRetentionMs` (24 hours by default) retires it, so its reply stays readable here, also after a daemon restart; after that the id answers 404 SESSION_NOT_FOUND. An admin credential reads any session; any other credential reads only a session its principal created or attached to, else 403 HOSTED_SESSION_NOT_OWNED. Reading changes nothing and does not keep a kill-policy session alive. ws-only invoke verb; no REST binding.',
+    description: 'Return a hosted session\'s record and its transcript, live or ended, without attaching. An ended session (its last client detached under the kill policy, its attachment lease lapsed, it was killed, or the daemon restarted) keeps its transcript on disk until `hostedSessions.terminatedRetentionMs` (24 hours by default) retires it, so its reply stays readable here, also after a daemon restart; after that the id answers 404 SESSION_NOT_FOUND. An admin credential reads any session; any other credential reads only a session its principal created or an owner shared with it (sessions.hosted.share), else 403 HOSTED_SESSION_NOT_OWNED. Reading changes nothing and does not keep a kill-policy session alive. ws-only invoke verb; no REST binding.',
     category: 'sessions',
     transport: ['ws'],
-    effects: ['transcripts.read'],
+    effects: ['session.transcript.read'],
     errorCodes: [
       { code: 'SESSION_NOT_FOUND', status: 404, meaning: 'This daemon holds no hosted session with that id, or its retention ended; nothing was read.' },
-      { code: 'HOSTED_SESSION_NOT_OWNED', status: 403, meaning: 'The session was not created or attached to by this credential; read it with the credential that did, or an admin one.' },
+      { code: 'HOSTED_SESSION_NOT_OWNED', status: 403, meaning: 'The session was not created by this credential or shared with it; ask an owner to share it, or read it with an admin credential.' },
     ],
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
     outputSchema: objectSchema({
       session: HOSTED_SESSION_RECORD_SCHEMA,
       history: HOSTED_SESSION_HISTORY_SCHEMA,
     }, ['session', 'history']),
+  }),
+  methodDescriptor({
+    id: 'sessions.hosted.share',
+    repeat: 'safe',
+    title: 'Share a Daemon-Hosted Session',
+    description: 'Add a principal (a user name, or `pairing:<id>` for a paired device) to a hosted session\'s owners, so it may attach, read the transcript and watch the session\'s turns live (`read:own-sessions`). Only an owner of the session or an admin shares it; anyone else is refused 403 NOT_YOURS. The owners are saved with the session and outlive its end and a restart; sharing with a principal that already owns it changes nothing (`added: false`). Attaching never adds an owner, so this is the one way another credential joins a session. ws-only invoke verb; no REST binding.',
+    category: 'sessions',
+    transport: ['ws'],
+    effects: ['session.share'],
+    errorCodes: [
+      { code: 'SESSION_NOT_FOUND', status: 404, meaning: 'This daemon holds no hosted session with that id; nothing was shared.' },
+      { code: 'NOT_YOURS', status: 403, meaning: 'The caller is not an owner of the session and not an admin; nothing was shared.' },
+    ],
+    inputSchema: objectSchema({ sessionId: STRING_SCHEMA, principalId: STRING_SCHEMA }, ['sessionId', 'principalId']),
+    outputSchema: objectSchema({
+      session: HOSTED_SESSION_RECORD_SCHEMA,
+      owners: arraySchema(STRING_SCHEMA),
+      added: BOOLEAN_SCHEMA,
+    }, ['session', 'owners', 'added']),
   }),
 ];

@@ -57,7 +57,7 @@ export type { RememberTier, RememberTierOption } from './platform/permissions/ap
 
 // ── Session + approval brokers (the submit + permission seams) ────────────────
 export type { ApprovalBroker, SharedSessionBroker } from './platform/control-plane/index.js';
-export type { SharedSessionSubmission, SubmitSharedSessionMessageInput } from './platform/control-plane/session-types.js';
+export type { SharedSessionSubmission, SharedSessionSubmissionReceipt, SubmitSharedSessionMessageInput } from './platform/control-plane/session-types.js';
 
 // ── Typed event subscription ──────────────────────────────────────────────────
 export { RuntimeEventBus } from './platform/runtime/events/index.js';

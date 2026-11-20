@@ -30,14 +30,15 @@ import { type BackToBottomState } from './back-to-bottom.ts';
  * resting chrome is 7 rows. While main works, 2 more: the blank row and the
  * throbber; while the output is scrolled back, 2 more: an empty row and the
  * back-to-bottom pill. The composer holds only input (its placeholder, even
- * while the keyboard is in the work tree). The status line
- * opens with the chips that are never dropped for lack of room: the mode
- * (muted; plan in the info color), or "! YOLO" in the error color
- * while everything is auto-approved, the live microphone and the power note
- * ("sleep disabled" / "held: …"). Then, while a turn runs, the `esc`
- * interrupt keycap; the working directory and any background work; then the
- * cost, the context bar and the `ctrl+p` keycap for
- * the Agent workspace. A context window near compaction keeps its bar.
+ * while the keyboard is in the work tree). The status line (status-line.ts)
+ * opens with the mode in force in words (`Asks: Jev decides`, and why when it
+ * differs) and its `shift+tab` key, then the chips that are never dropped for
+ * lack of room: "! YOLO" in the error color while everything is
+ * auto-approved, the live microphone and the power chip ("sleep disabled" /
+ * "sleep held"); the composer's intent; the unread notices with `ctrl+n`;
+ * while a turn runs, the `esc` interrupt keycap; any background work. On the
+ * right: the cost, `context 34%`, `model …` and the `ctrl+p` keycap for the
+ * Agent workspace.
  *
  * Inside an agent or process view (shell/session-views.ts) the composer's bar
  * takes that session's color and its own placeholder (or a one-line reason in
@@ -60,13 +61,26 @@ export interface ShellFooterBuildOptions {
   readonly usage: { available?: boolean; up: number; down: number; cacheRead?: number; cacheWrite?: number; costUsd?: number | undefined };
   readonly showExitNotice: boolean;
   readonly lastCopyTime: number;
-  /** The model the session cost is priced against; not drawn (the header names the model). */
+  /** The model the session cost is priced against. */
   readonly model?: string;
-  readonly workingDir?: string;
-  /** The home directory, drawn as ~ at the start of the working directory. */
-  readonly homeDirectory?: string;
   /** An agent or process view is showing (core/session-focus.ts). */
   readonly view?: ShellFooterView | null;
+  /** The current branch: the status bar's `branch …` segment; absent outside a repository. */
+  readonly branch?: string;
+  /** The serving model's display name: the status bar's `model …` segment. */
+  readonly modelLabel?: string;
+  /** The working tree differs from HEAD: `branch main, changed`. */
+  readonly branchChanged?: boolean;
+  /** The mode in force in words (ModeInForceWords): the status bar's `Asks:` segment. */
+  readonly modeWords?: { readonly chosen: string; readonly inForce?: string; readonly because?: string } | null;
+  /** The key that changes the mode, as bound ("shift+tab"). */
+  readonly modeKey?: string;
+  /** The mode just changed: the `Asks:` segment flashes. */
+  readonly modeFlash?: boolean;
+  /** Notices not yet seen in the notifications view: `2 notices`; none at zero. */
+  readonly unreadNotices?: number;
+  /** The key that opens the notifications, as bound ("ctrl+n"). */
+  readonly noticesKey?: string;
   /** The model's context window; null when it is unknown (the meter says "unknown"). */
   readonly contextWindow?: number | null;
   /**
@@ -149,23 +163,18 @@ function composerModeStyle(options: ShellFooterBuildOptions): { label: string; c
 }
 
 /**
- * The status line's mode chip: the mode's name (muted; plan in the info
- * color; a request that leaves this terminal in the remote color), or
- * "! YOLO" in the error color while everything is auto-approved.
- * While the warning shows, only plan keeps its name beside it (a read-only
- * posture still worth knowing); any other name would only repeat or
- * contradict it.
+ * The composer's intent as a chip after the mode's words while it is not an
+ * ordinary prompt (shell, command, plan, delegation, memory pin): plan in the
+ * info color, a request that leaves this terminal in the remote color.
  */
-function modeChips(label: string, dangerMode: boolean): StatusChip[] {
+const INTENTS: ReadonlySet<string> = new Set(['shell', 'command', 'plan', 'delegation', 'orchestration', 'memory pin']);
+function intentChips(options: ShellFooterBuildOptions): StatusChip[] {
   const t = activeTokens();
-  const chips: StatusChip[] = [];
-  if (!dangerMode || label === 'plan') {
-    const remote = label === 'delegation' || label === 'orchestration';
-    const fg = label === 'plan' ? t.info : remote ? activeUiTones().chrome.remote : t.textMuted;
-    chips.push({ text: label, fg, bold: label === 'plan' || remote, keep: true });
-  }
-  if (dangerMode) chips.push({ text: '! YOLO', fg: t.error, bold: true, keep: true });
-  return chips;
+  if (!INTENTS.has(options.composerMode ?? 'prompt')) return [];
+  const label = composerModeStyle(options).label;
+  const remote = label === 'delegation' || label === 'orchestration';
+  const fg = label === 'plan' ? t.info : remote ? activeUiTones().chrome.remote : t.textMuted;
+  return [{ text: label, fg, bold: label === 'plan' || remote, keep: true }];
 }
 
 /** The compaction threshold as a fraction [0..1] (0.85 when unset or nonsense). */
@@ -182,10 +191,12 @@ export const { buildShellFooter, estimateShellFooterHeight } = createShellFooter
   renderThrobberLine,
   cost: (options) => statusCostText(options.usage, options.model),
   barColor: (options) => composerModeStyle(options).color,
-  modeChips: (options) => modeChips(composerModeStyle(options).label, options.dangerMode === true),
   powerNote: (options) => options.powerNote,
   compactFraction,
-  flags: (options) => ((options.composerFlags ?? []).includes('attachments') ? [{ text: 'image attached', fg: activeTokens().info }] : []),
+  flags: (options) => [
+    ...intentChips(options),
+    ...((options.composerFlags ?? []).includes('attachments') ? [{ text: 'image attached', fg: activeTokens().info }] : []),
+  ],
   hints: (options) => (options.contractQuestionHint
     ? [UIFactory.stringToLine(`   ${options.contractQuestionHint}`, options.width, { fg: activeTokens().textMuted, bold: true })]
     : []),

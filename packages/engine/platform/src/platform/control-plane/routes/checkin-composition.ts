@@ -3,6 +3,7 @@ import { CheckinService, CheckinReceiptStore, createProviderBackedCheckinJudge }
 import { createRuntimeCheckinStateReader, judgeOnlyWhenOwnerNeeded } from '../../checkin/state-reader.js';
 import type { ConfigKey } from '../../config/schema.js';
 import { RefusalError } from '@goodvibes-jev/engine/errors';
+import { systemActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import { parseChannelDeliveryTarget } from '../../channels/delivery/types.js';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayVerbGroupDeps } from './register-gateway-verb-groups.js';
@@ -32,7 +33,8 @@ export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCata
       // subscriptions fire on a settled config and enabled never lands before its channel.
       ...(setMany ? {
         setMany: (changes: readonly { readonly key: string; readonly value: string | boolean }[]): void => {
-          const result = setMany(changes.map(change => ({ key: change.key as ConfigKey, value: change.value })), { kind: 'owner', surface: 'checkin.config.set' });
+          // The checkin.config.set call that asks for it was admitted at the gateway; its checkin.* keys loosen nothing.
+          const result = setMany(changes.map(change => ({ key: change.key as ConfigKey, value: change.value })), systemActor('checkin.config.set'));
           if (!result.ok) throw new RefusalError(result.refusal);
         },
       } : {}),

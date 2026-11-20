@@ -1,5 +1,5 @@
 import type { ConfigChange, ConfigKey, ConfigManager, JudgmentFallbackSettings, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
+import { CONFIG_SCHEMA, localOwnerActor } from '@goodvibes-jev/engine/platform/platform/config';
 import { DECISION_MODEL_PROFILES, captureJudgmentBackendSettings, validEndpointURL, type DecisionModelProfile } from '@goodvibes-jev/judgment';
 import type { OpenSelection, SelectionItem } from './selection-modal.js';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
@@ -80,7 +80,7 @@ export function openSettingsChoice(
   const save = (patch: ReadonlyArray<readonly [ConfigKey, unknown]>) => {
     if (!current()) return;
     const changes: ConfigChange[] = patch.map(([key, value]) => ({ key, value }));
-    const result = config.setMany(changes, { kind: 'owner', surface: 'settings' });
+    const result = config.setMany(changes, localOwnerActor());
     if (!result.ok) ctx.print(`Not saved: ${result.refusal.reason} ${result.refusal.next.join(' ')}`.trim());
     if (result.saved.length > 0) changed();
     ctx.renderRequest();

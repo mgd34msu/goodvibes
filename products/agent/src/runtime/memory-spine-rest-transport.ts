@@ -75,6 +75,8 @@ function deadlineFetch(verb: string, timeoutMs: number): typeof fetch {
 }
 
 function requireToken(connection: SessionRegistrationConnection): void {
+  // A surface that may not dial the daemon (switch off, no credential bound to it) sends nothing.
+  if (connection.unavailable !== undefined) throw new Error(`memory spine: ${connection.unavailable}`);
   if (connection.token) return;
   throw new Error(connection.tokenPath
     ? `memory spine: no connected-host operator token found at ${connection.tokenPath}`

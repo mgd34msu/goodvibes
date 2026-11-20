@@ -12,8 +12,9 @@
  *
  * PER-HUNK ACTIONS (HunkActionSheet, opened by tapping a hunk):
  *   - APPROVE, mark the hunk reviewed. Purely client-side progress tracking (a
- *     reviewed/total indicator); no wire call, resets on refresh (honest, a refreshed diff
- *     is a new capture).
+ *     reviewed/total indicator); no wire call. The mark is keyed by the hunk's content
+ *     (hunkReviewKey: path and content digest), so after a refresh it stays only on a hunk
+ *     whose lines are exactly what was reviewed; changed content reads unreviewed.
  *   - COMMENT, host classification selects genuine native source-aware intake or the
  *     explicit legacy formatter. Native originals remain separate from host-resolved
  *     complete selected hunk evidence; no native failure falls back to ordinary steer.

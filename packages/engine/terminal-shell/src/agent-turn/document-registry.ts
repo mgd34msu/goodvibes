@@ -519,7 +519,8 @@ export class AgentDocumentRegistry {
         title,
         body,
         tags,
-        status: input.status ?? existing.status,
+        // Reviewed names a revision: new content is not reviewed until it is marked again.
+        status: input.status ?? (version && existing.status === 'reviewed' ? 'draft' : existing.status),
         updatedAt: timestamp,
         ...(version ? { versions: [version], versionCount: Math.min(existing.versionCount + 1, MAX_VERSIONS) } : {}),
         lastArtifactId: input.lastArtifactId === undefined ? existing.lastArtifactId : input.lastArtifactId || undefined,

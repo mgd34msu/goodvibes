@@ -69,10 +69,14 @@ const SQL = {
     WHERE EXISTS (SELECT 1 FROM ${TABLE} WHERE id = json_extract(note.value, '$.id') AND status = 'answered')
     ORDER BY note.key
     RETURNING decision_id`,
-  /** The time of the entry at a position from the newest; the row cap keeps entries from it on. */
-  nthNewest: `SELECT at FROM ${TABLE} ORDER BY at DESC LIMIT 1 OFFSET $offset`,
-  /** Entries the retention rule no longer keeps, oldest first; an entry with a truth note always stays. */
-  expired: `SELECT id FROM ${TABLE} WHERE at < $cutoff
+  /** The entry at a position from the newest, by time then id; the row cap keeps it and every newer one. */
+  nthNewest: `SELECT at, id FROM ${TABLE} ORDER BY at DESC, id DESC LIMIT 1 OFFSET $offset`,
+  /**
+   * Entries the retention rule no longer keeps, oldest first: older than
+   * $before, or past the row cap (before the capping entry by time then id, so
+   * entries tied on its time count too). An entry with a truth note always stays.
+   */
+  expired: `SELECT id FROM ${TABLE} WHERE (at < $before OR at < $capAt OR (at = $capAt AND id < $capId))
     AND NOT EXISTS (SELECT 1 FROM ${NOTES_TABLE} WHERE decision_id = ${TABLE}.id AND kind = 'truth')
     ORDER BY at, id LIMIT $limit`,
   deleteNotes: `DELETE FROM ${NOTES_TABLE} WHERE decision_id IN (SELECT value FROM json_each($ids))`,
@@ -126,6 +130,7 @@ const OUTCOME_FILTER =
 const FILTERS: Readonly<Record<Exclude<keyof DecisionQuery, 'limit'>, string>> = {
   battery: equals('battery'),
   site: equals('site'),
+  excludeSite: '(site IS NULL OR site <> $excludeSite)',
   since: 'at >= $since',
   until: 'at < $until',
   outcome: OUTCOME_FILTER,
@@ -250,10 +255,12 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
       throw new RangeError('Decision log retention needs a positive batch and entry cap.');
     }
     this.flushNotes();
-    const capped = rowsOf<{ readonly at: string }>(this.#db, SQL.nthNewest, { offset: rule.maxEntries - 1 })[0]?.at;
-    const cutoff = capped !== undefined && capped > rule.before ? capped : rule.before;
+    // Exactly the newest `maxEntries` stay under the cap: ties on the capping time are broken by id.
+    const capped = rowsOf<{ readonly at: string; readonly id: string }>(this.#db, SQL.nthNewest, { offset: rule.maxEntries - 1 })[0];
     return this.#db.transaction(() => {
-      const ids = rowsOf<{ readonly id: string }>(this.#db, SQL.expired, { cutoff, limit: rule.batch }).map(row => row.id);
+      const ids = rowsOf<{ readonly id: string }>(this.#db, SQL.expired, {
+        before: rule.before, capAt: capped?.at ?? '', capId: capped?.id ?? '', limit: rule.batch,
+      }).map(row => row.id);
       if (ids.length === 0) return 0;
       const list = JSON.stringify(ids);
       this.#db.query(SQL.deleteNotes).run({ ids: list });

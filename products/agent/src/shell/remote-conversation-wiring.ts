@@ -219,13 +219,13 @@ export function installRemoteConversationRouting(
     fallbackModel: ctx.runtime.model,
     fallbackProvider: ctx.runtime.provider,
     workspaceRoot: ctx.services.workingDirectory,
-    knownSessionIds: () => {
+    knownSessions: () => {
       try {
-        return ctx.services.sessionManager.list().map((info) => info.name);
+        return new Map(ctx.services.sessionManager.list().map((info) => [info.name, info.mirroredFrom] as const));
       } catch {
         // An unreadable store means "nothing known", which is the safe answer:
         // it can only cause a re-mirror, never a lost conversation.
-        return [];
+        return new Map();
       }
     },
   }).catch(() => undefined);

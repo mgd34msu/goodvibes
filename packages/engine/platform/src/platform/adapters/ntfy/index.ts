@@ -5,6 +5,7 @@ import type { SurfaceAdapterContext } from '../types.js';
 import { inboundDedupKey, ntfyInboundDedup } from '../inbound-dedup.js';
 import { answerSurfaceControl, submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import type { UpsertRouteBindingInput } from '../../channels/route-manager.js';
+import { readNtfyTopics } from '../../channels/builtin/surface-secrets.js';
 import {
   isGoodVibesNtfyDeliveryEcho,
   resolveGoodVibesNtfyTopics,
@@ -91,7 +92,7 @@ export async function handleNtfySurfacePayload(
   let delivered = false;
   const committed = () => { delivered = true; };
   try {
-    const topics = resolveConfiguredNtfyTopics(context);
+    const topics = await resolveConfiguredNtfyTopics(context);
     const response = topic === topics.chatTopic
       ? await handleNtfyChatPayload(body, context, topic, message, committed)
       : topic === topics.remoteTopic
@@ -107,12 +108,14 @@ export async function handleNtfySurfacePayload(
   }
 }
 
-function resolveConfiguredNtfyTopics(context: SurfaceAdapterContext) {
+async function resolveConfiguredNtfyTopics(context: SurfaceAdapterContext) {
+  // Each topic name is a credential read from the secret store its setting names.
+  const names = await readNtfyTopics({ configManager: context.configManager, secretsManager: context.secretsManager });
   // A shipped topic name on the public server is not routed: anyone can post to it.
   return resolveGoodVibesNtfyTopics({
-    chatTopic: readConfigString(context, 'surfaces.ntfy.chatTopic'),
-    agentTopic: readConfigString(context, 'surfaces.ntfy.agentTopic'),
-    remoteTopic: readConfigString(context, 'surfaces.ntfy.remoteTopic'),
+    chatTopic: names.chatTopic,
+    agentTopic: names.agentTopic,
+    remoteTopic: names.remoteTopic,
     baseUrl: readConfigString(context, 'surfaces.ntfy.baseUrl'),
   });
 }

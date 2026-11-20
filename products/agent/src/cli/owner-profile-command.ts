@@ -1,4 +1,5 @@
 import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+import { commandArgsWithLiteralMarker } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
 /**
  * owner-profile-command.ts, `goodvibes-agent owner-profile` over the daemon's
  * `profile.*` control-plane verbs (docs/owner-profile.md §11.1).
@@ -390,7 +391,7 @@ export async function handleOwnerProfileCommand(
 ): Promise<CliCommandOutput> {
   const invoke = options.invoke ?? gatewayFor(runtime);
   const outputEntersModelContext = options.outputEntersModelContext ?? true;
-  const [sub = 'read', ...rest] = runtime.cli.commandArgs;
+  const [sub = 'read', ...rest] = commandArgsWithLiteralMarker(runtime.cli);
   switch (sub.toLowerCase()) {
     case 'read':
     case 'show':

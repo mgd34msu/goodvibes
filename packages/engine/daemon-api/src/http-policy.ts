@@ -8,6 +8,7 @@ export {
   actorFromPrincipal,
   actorHoldsScope,
   agentActor,
+  localOwnerActor,
   systemActor,
 } from './actor.js';
 export type { Actor, ActorClass, ActorPrincipal, OwnerIdentity } from './actor.js';
@@ -59,6 +60,13 @@ export interface RequestPrincipal extends AuthenticatedPrincipal {
   readonly ownerDevice?: true;
   /** Who this principal is as a cause of effects (actor.ts), derived once with it. */
   readonly actor: Actor;
+  /**
+   * How the request carrying this credential reached the daemon, set by the
+   * listener for the request it authenticated (runtime/network/request-transport.ts):
+   * from this machine, over TLS, over the tailnet, or over a plain network.
+   * Absent for a principal described without a request.
+   */
+  readonly transport?: 'loopback' | 'tls' | 'tailnet' | 'plain-network' | undefined;
 }
 
 /**

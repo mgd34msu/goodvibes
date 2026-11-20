@@ -53,18 +53,21 @@ export class ProbeToolHost {
     return () => { this.attached.delete(entry); };
   }
 
-  /** The registry and tool a probe from this owner runs on: the owner's own registry first. */
+  /**
+   * The registry and tool a probe from this owner runs on: the owner
+   * session's own registry, and only that one. A trigger with no owner session
+   * runs only on a registry that belongs to no session. Never another
+   * session's tools, which would run with that session's grants.
+   */
   private find(name: string, ownerSessionId: string | undefined): { readonly registry: ProbeToolRegistry; readonly tool: Tool } | undefined {
-    let fallback: { readonly registry: ProbeToolRegistry; readonly tool: Tool } | undefined;
     for (const entry of this.attached) {
-      const tool = entry.registry.list().find((candidate) => candidate.definition.name === name);
-      if (!tool) continue;
       let owner: string | undefined;
-      try { owner = entry.session?.(); } catch { owner = undefined; }
-      if (ownerSessionId !== undefined && owner === ownerSessionId) return { registry: entry.registry, tool };
-      fallback ??= { registry: entry.registry, tool };
+      try { owner = entry.session?.(); } catch { continue; }
+      if (owner !== ownerSessionId) continue;
+      const tool = entry.registry.list().find((candidate) => candidate.definition.name === name);
+      if (tool) return { registry: entry.registry, tool };
     }
-    return fallback;
+    return undefined;
   }
 
   /** Why this probe cannot run here, in a sentence with the next step; undefined when it can. */
@@ -74,7 +77,9 @@ export class ProbeToolHost {
     if (!found) {
       return this.attached.size === 0
         ? `Platform-tool probes run on the tools of an open session, and none is open in this process now; use an http, file or command probe, or create the trigger from a session.`
-        : `No session in this process has a tool named "${name}". List the tools the session offers and probe with one of them.`;
+        : ownerSessionId === undefined
+          ? `This trigger belongs to no session, and only a session's own tools run its platform-tool probe. Create the trigger from the session whose "${name}" it should call, or use an http, file or command probe.`
+          : `Session ${ownerSessionId} is not open in this process or has no tool named "${name}"; a probe runs only on its own session's tools. List the tools the session offers and probe with one of them.`;
     }
     if (!probeCallOnlyReads(found.tool, input as Record<string, unknown>)) {
       return `"${name}" with this input does not only read, and a probe runs unattended, so it may call only a tool that reads (read, find, inspect, a state read...). Probe with such a tool, or use a command probe.`;

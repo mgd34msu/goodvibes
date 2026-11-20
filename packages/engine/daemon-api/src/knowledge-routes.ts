@@ -11,12 +11,15 @@ import {
   readBoundedPositiveInteger,
   readOptionalBoundedInteger,
   readOptionalStringField,
+  readSelectionField,
   readStringArrayField,
+  refuseEmptySelection,
   type JsonRecord,
 } from './route-helpers.js';
 import { createDaemonKnowledgeRefinementRouteHandlers } from './knowledge-refinement-routes.js';
 import {
   KNOWLEDGE_BROWSER_KINDS,
+  KNOWLEDGE_BROWSER_SOURCE_KINDS,
   KNOWLEDGE_CANDIDATE_STATUSES,
   KNOWLEDGE_PACKET_DETAILS,
   KNOWLEDGE_REVIEW_ACTIONS,
@@ -411,6 +414,9 @@ const knowledgeBodySchemas = createRouteBodySchemaRegistry({
     const knowledgeSpaceId = readOptionalStringField(body, 'knowledgeSpaceId');
     const candidateSourceIds = readStringArrayField(body, 'candidateSourceIds');
     const candidateNodeIds = readStringArrayField(body, 'candidateNodeIds');
+    // An explicit empty candidate list selects nothing; it is never "every source".
+    if (candidateSourceIds?.length === 0) return refuseEmptySelection('candidateSourceIds', 'search every source');
+    if (candidateNodeIds?.length === 0) return refuseEmptySelection('candidateNodeIds', 'search every node');
     return {
       query,
       ...(knowledgeSpaceId ? { knowledgeSpaceId } : {}),
@@ -419,9 +425,8 @@ const knowledgeBodySchemas = createRouteBodySchemaRegistry({
       ...(typeof body.includeSources === 'boolean' ? { includeSources: body.includeSources } : {}),
       ...(typeof body.includeConfidence === 'boolean' ? { includeConfidence: body.includeConfidence } : {}),
       ...(typeof body.includeLinkedObjects === 'boolean' ? { includeLinkedObjects: body.includeLinkedObjects } : {}),
-      // Empty candidate lists are read as not sent, as before readStringArrayField returned [] for them.
-      ...(candidateSourceIds?.length ? { candidateSourceIds } : {}),
-      ...(candidateNodeIds?.length ? { candidateNodeIds } : {}),
+      ...(candidateSourceIds ? { candidateSourceIds } : {}),
+      ...(candidateNodeIds ? { candidateNodeIds } : {}),
       ...(typeof body.strictCandidates === 'boolean' ? { strictCandidates: body.strictCandidates } : {}),
     };
   }),
@@ -447,10 +452,11 @@ const knowledgeBodySchemas = createRouteBodySchemaRegistry({
   runJob: createRouteBodySchema<KnowledgeRunJobBody>('POST /api/knowledge/jobs/:jobId/run', (body) => {
     const mode = readKnowledgeJobRunMode(body.mode);
     const sourceIds = readStringArrayField(body, 'sourceIds');
+    // An explicit empty selection selects nothing; it is never "every source".
+    if (sourceIds?.length === 0) return refuseEmptySelection('sourceIds', 'run the job over every source');
     return {
       ...(mode ? { mode } : {}),
-      // An empty `sourceIds` list is read as not sent, as before readStringArrayField returned [] for it.
-      ...(sourceIds?.length ? { sourceIds } : {}),
+      ...(sourceIds ? { sourceIds } : {}),
       ...(Object.hasOwn(body, 'limit') ? { limit: readBoundedBodyInteger(body.limit, 50, 500) } : {}),
     };
   }),
@@ -755,8 +761,13 @@ async function handleKnowledgeIngestArtifact(context: DaemonKnowledgeRouteContex
   if (admin) return admin;
 
   if (isArtifactUploadRequest(request)) {
-    const uploaded = await createArtifactFromUploadRequest(context.artifactStore, request);
+    // Fields are checked before the upload is stored: a refused one stores nothing.
+    const uploaded = await createArtifactFromUploadRequest(context.artifactStore, request, (fields) => {
+      const checked = readKnowledgeSourceType(fields.sourceType);
+      return checked instanceof Response ? checked : undefined;
+    });
     if (uploaded instanceof Response) return uploaded;
+    let ingested = false;
     try {
       // The artifact is already stored; only descriptive fields carry over. A `uri`, `path` or
       // `allowPrivateHosts` field would let the uploader name the source's provenance or skip
@@ -765,7 +776,7 @@ async function handleKnowledgeIngestArtifact(context: DaemonKnowledgeRouteContex
       const uploadSourceType = readKnowledgeSourceType(fields.sourceType);
       if (uploadSourceType instanceof Response) return uploadSourceType;
       const uploadTags = Array.isArray(fields.tags) ? fields.tags.filter((entry): entry is string => typeof entry === 'string').slice(0, MAX_KNOWLEDGE_INGEST_TAGS) : undefined;
-      return Response.json(await context.knowledgeService.ingestArtifact({
+      const result = await context.knowledgeService.ingestArtifact({
         artifactId: uploaded.artifactId,
         ...(typeof fields.title === 'string' ? { title: fields.title } : {}),
         ...(typeof fields.folderPath === 'string' ? { folderPath: fields.folderPath } : {}),
@@ -774,9 +785,16 @@ async function handleKnowledgeIngestArtifact(context: DaemonKnowledgeRouteContex
         ...uploadSourceType,
         ...(typeof fields.connectorId === 'string' ? { connectorId: fields.connectorId } : {}),
         ...(typeof fields.metadata === 'object' && fields.metadata !== null ? { metadata: fields.metadata as Record<string, unknown> } : {}),
-      }), { status: 201 });
+      });
+      ingested = true;
+      return Response.json(result, { status: 201 });
     } catch (error) {
       return readServiceErrorResponse(error);
+    } finally {
+      // Stored only for this ingest: one that did not happen leaves no artifact behind.
+      if (!ingested) {
+        try { context.artifactStore.delete?.(uploaded.artifactId); } catch { /* the store's own sweep retires it */ }
+      }
     }
   }
 
@@ -818,20 +836,14 @@ async function handleKnowledgeSyncBrowserHistory(context: DaemonKnowledgeRouteCo
   const body = await context.parseOptionalJsonBody(request);
   if (body instanceof Response) return body;
   const input = body ?? {};
-  const sourceKinds = Array.isArray(input.sourceKinds)
-    ? input.sourceKinds.filter((entry): entry is KnowledgeBrowserSourceKind => entry === 'history' || entry === 'bookmark')
-    : undefined;
-  const named = Array.isArray(input.browsers)
-    ? input.browsers.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0).map((entry) => entry.trim().toLowerCase())
-    : undefined;
-  const unknownBrowser = named?.find((entry) => !isOneOf(KNOWLEDGE_BROWSER_KINDS, entry));
-  if (unknownBrowser !== undefined) {
-    return jsonErrorResponse({
-      error: `browsers must be among ${KNOWLEDGE_BROWSER_KINDS.join(', ')}; got "${unknownBrowser}". Nothing was synced.`,
-      code: 'INVALID_ARGUMENT',
-    }, { status: 400 });
-  }
-  const browsers = named?.filter((entry): entry is KnowledgeBrowserKind => isOneOf(KNOWLEDGE_BROWSER_KINDS, entry));
+  // Each list is a selection: not sent is the documented default (every installed browser; history and
+  // bookmarks), an unknown entry is a 400 naming it, and `[]` is a 400: it selects nothing, never "all".
+  const sourceKinds = readSelectionField<KnowledgeBrowserSourceKind>(input, 'sourceKinds', KNOWLEDGE_BROWSER_SOURCE_KINDS, { emptyMeans: 'refuse' });
+  if (sourceKinds instanceof Response) return sourceKinds;
+  const browsers = readSelectionField<KnowledgeBrowserKind>(
+    { browsers: Array.isArray(input.browsers) ? input.browsers.map((entry) => typeof entry === 'string' ? entry.toLowerCase() : entry) : input.browsers },
+    'browsers', KNOWLEDGE_BROWSER_KINDS, { emptyMeans: 'refuse' });
+  if (browsers instanceof Response) return browsers;
   try {
     return Response.json(await context.knowledgeService.syncBrowserHistory({
       ...(Object.hasOwn(input, 'limit') ? { limit: readBoundedBodyInteger(input.limit, 50, 500) } : {}),
@@ -840,8 +852,8 @@ async function handleKnowledgeSyncBrowserHistory(context: DaemonKnowledgeRouteCo
       ...(typeof input.sessionId === 'string' ? { sessionId: input.sessionId } : {}),
       ...(typeof input.connectorId === 'string' ? { connectorId: input.connectorId } : {}),
       ...readRequestMetadata(input),
-      ...(browsers?.length ? { browsers } : {}),
-      ...(sourceKinds?.length ? { sourceKinds } : {}),
+      ...(browsers.kind === 'default' ? {} : { browsers }),
+      ...(sourceKinds.kind === 'default' ? {} : { sourceKinds }),
     }), { status: 201 });
   } catch (error) {
     return readServiceErrorResponse(error);

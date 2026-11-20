@@ -67,6 +67,13 @@ import { buildShellSessionContinuityHints } from './shell/session-continuity-hin
 import { wireShellUiOpeners } from './shell/ui-openers.ts';
 import { deriveComposerState } from './core/composer-state.ts';
 import { createPowerNoteSource } from './runtime/power-note-source.ts';
+import { createModeWordsSource, getSharedModeFlash } from '@goodvibes-jev/engine/terminal-shell/session-permission-mode';
+import { keycapLabel } from '@goodvibes-jev/engine/terminal-shell/status-line';
+import { drawSplashAdditions } from '@goodvibes-jev/engine/terminal-shell/first-run';
+import { GitStatusProvider, type GitHeaderInfo } from '@goodvibes-jev/engine/terminal-shell/git-status';
+import { describeExecutionModeWords } from './permissions/execution-mode.ts';
+import { footerTargetRows } from './renderer/footer-targets.ts';
+import { getSharedNotificationFeed } from './core/notifications-feed.ts';
 import { watchDaemonPowerEvents, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 import { buildPersistedSessionContextFromFacts, holdOfferedRecoverySnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { installFocusModeExitGuard, markFocusModeEnabled, wrapRequestPermissionWithApprovalAlert } from './shell/terminal-focus-mode.ts';
@@ -386,8 +393,24 @@ async function main(prepared: PreparedShellCliRuntime) {
     const note = powerNote.get();
     if (note && note.detail !== postedPowerNote) publishToSharedFeed(note.detail, { restored: false, notice: { level: 'warning' } });
     postedPowerNote = note?.detail ?? null;
-    return note?.chip;
+    return note?.chip ?? undefined;
   };
+  // The status bar's mode words, recomputed only when the mode in force can change (session-permission-mode.ts);
+  // its flash after Shift+Tab, and the unread notices count, each repaint when they change.
+  const modeWords = createModeWordsSource(configManager, () => render());
+  getSharedModeFlash().onChange = () => render();
+  unsubs.push(() => modeWords.stop(), getSharedNotificationFeed().subscribe(() => render()));
+  // The status bar's branch: read once, then polled the way the terminal app does (a few file stats
+  // every 5 s; git runs only when git's own files moved or the terminal regains focus) and after each turn.
+  const gitStatus = new GitStatusProvider(ctx.services.workingDirectory);
+  let gitInfo: GitHeaderInfo | undefined;
+  const showGit = (info: GitHeaderInfo): void => { gitInfo = info; render(); };
+  void gitStatus.getStatus().then(showGit, () => undefined);
+  gitStatus.startPolling(5_000, showGit, () => ctx.services.focusTracker.isFocused());
+  unsubs.push(
+    () => gitStatus.stopPolling(),
+    uiServices.events.turns.on('TURN_COMPLETED', () => { void gitStatus.refresh().then(showGit, () => undefined); }),
+  );
   unsubs.push(
     () => powerNote.stop(),
     configManager.subscribe('power.keepAwake', () => powerNote.refresh()),
@@ -890,6 +913,16 @@ async function main(prepared: PreparedShellCliRuntime) {
   input.filePicker.setOnUpdate(() => render());
   input.processModal.setOnRefresh(() => render());
   input.surfaceModals.onChange = () => render();
+  // A click on a status bar segment opens its view (status-line.ts); the Agent keeps no changes view, so its branch only reads.
+  input.onFooterTarget = (target) => {
+    if (target === 'mode') commandContext.openSettingsModal?.('permissions.mode');
+    else if (target === 'notices') commandContext.openNotifications?.();
+    else if (target === 'context') commandContext.openContextInspector?.();
+    else if (target === 'model') commandContext.openModelPicker?.();
+    else if (target === 'agents') commandContext.openActivityModal?.();
+    else if (target === 'commands') commandContext.openCommandPalette?.();
+    render();
+  };
   input.sessionView = sessionViews;
   input.transcriptScroll = transcriptEscape(
     transcript,
@@ -1041,9 +1074,16 @@ async function main(prepared: PreparedShellCliRuntime) {
       },
       showExitNotice: input.showExitNotice,
       lastCopyTime: input.lastCopyTime,
-      model: runtime.model, // prices the cost; the header names the model
-      workingDir,
-      homeDirectory,
+      model: runtime.model, // prices the cost
+      modelLabel: currentModel.displayName || currentModel.id,
+      // '?' is the git read's "no repository here (or no answer yet)": no branch segment.
+      branch: gitInfo && gitInfo.branch !== '?' ? gitInfo.branch : undefined,
+      branchChanged: gitInfo?.dirty === true,
+      modeWords: describeExecutionModeWords(configManager, () => modeWords.current()),
+      modeKey: keycapLabel(ctx.services.keybindingsManager.getComboLabel('cycle-permission-mode')),
+      modeFlash: getSharedModeFlash().active(),
+      unreadNotices: getSharedNotificationFeed().unreadCount(),
+      noticesKey: keycapLabel(ctx.services.keybindingsManager.getComboLabel('open-notifications')),
       view: viewFrame?.footer ?? null,
       contextWindow: providerRegistry.getKnownContextWindowForModel(currentModel), // null: unknown, the meter says so
       compactThreshold: configManager.get('behavior.autoCompactThreshold') as number,
@@ -1076,6 +1116,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     const shellHeaderLines = viewFrame ? headerLines : withHeaderGap(headerLines, width); // a view's body starts with its own empty row
     input.bodyTopRow = shellHeaderLines.length; // mouse rows map to transcript rows from here
     const shellFooterLines = footerLines;
+    input.footerTargets = footerTargetRows(shellFooterLines, height - shellFooterLines.length); // status bar segments open their views on a click
     const shellLayout = createShellLayout({
       width,
       height,
@@ -1121,7 +1162,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     let viewport = viewFrame
       ? viewFrame.body(vHeight)
       : conversation.isSplashShowing()
-        ? centerViewportContent(conversationViewport.viewport, conversationViewport.effectiveHeight, conversationWidth)
+        ? drawSplashAdditions(centerViewportContent(conversationViewport.viewport, conversationViewport.effectiveHeight, conversationWidth), conversationViewport.effectiveHeight, conversationWidth, { modeKey: keycapLabel(ctx.services.keybindingsManager.getComboLabel('cycle-permission-mode')) })
         : conversationViewport.viewport;
 
     if (!viewFrame) viewport.push(...thinkingRows); // main's own rows stay with main

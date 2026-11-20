@@ -1162,6 +1162,8 @@ export class MemoryStore {
       indexedRecords: 0,
       embeddingProviderId: HASHED_MEMORY_EMBEDDING_PROVIDER.id,
       embeddingProviderLabel: HASHED_MEMORY_EMBEDDING_PROVIDER.label,
+      embeddingSpace: '',
+      awaitingReembed: 0,
       error: 'memory vector index disabled',
     };
   }

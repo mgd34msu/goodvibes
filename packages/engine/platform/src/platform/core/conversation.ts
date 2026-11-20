@@ -218,9 +218,11 @@ export class ConversationManager {
    * history as one trailing message (host-instructions.ts). Not history: not
    * saved, not shown, and it does not move the message revision.
    */
-  readonly hostInstructions: HostInstructions = new HostInstructionChannel();
+  readonly hostInstructions: HostInstructions = new HostInstructionChannel(() => this.#requestAccepted());
   /** Run as each provider request is assembled, before the host channel is read (see `onRequest`). */
   readonly #requestHooks = new Set<() => void>();
+  /** Run after the provider accepted a request (see `onRequestAccepted`). */
+  readonly #acceptedHooks = new Set<() => void>();
 
   constructor() {}
 
@@ -234,6 +236,28 @@ export class ConversationManager {
   onRequest(hook: () => void): () => void {
     this.#requestHooks.add(hook);
     return () => { this.#requestHooks.delete(hook); };
+  }
+
+  /**
+   * Run `hook` after the provider accepted a request (the host channel was
+   * told it was delivered): the counterpart of `onRequest`, so what a request
+   * hook handed in (the owner's answer) is recorded delivered only once a
+   * request carrying it was accepted. Cheap and must not throw; a throw is
+   * logged. Returns the function that removes it.
+   */
+  onRequestAccepted(hook: () => void): () => void {
+    this.#acceptedHooks.add(hook);
+    return () => { this.#acceptedHooks.delete(hook); };
+  }
+
+  #requestAccepted(): void {
+    for (const hook of this.#acceptedHooks) {
+      try {
+        hook();
+      } catch (error) {
+        logger.warn('ConversationManager: a request-accepted hook failed', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
   }
 
   /** Every change to the message history (append, stream update, undo, branch switch, compaction, reset) as a revision source. */
@@ -766,6 +790,10 @@ export class ConversationManager {
   }
 
   public switchBranch(name: string): boolean {
+    // The branch already in use: its live messages are newer than any stored
+    // snapshot of it, so switching to it changes nothing (installing the
+    // snapshot would replace the live conversation with an older one).
+    if (name === this.currentBranch) return true;
     const stored = this.branches.get(name);
     if (!stored) return false;
     this.branches.set(this.currentBranch, cloneMessages(this.messages));

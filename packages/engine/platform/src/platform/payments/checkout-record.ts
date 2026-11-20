@@ -57,6 +57,8 @@ export function captureCheckoutRecord(value: unknown): InFlightCheckout | null {
   if (row['windowHeldReply'] !== undefined && (row['windowHeldReply'] !== true || row['windowKind'] !== 'approval')) return null;
   if (Object.hasOwn(row, 'windowNotice') && (typeof row['windowNotice'] !== 'string'
     || !row['windowNotice'].trim() || row['windowNotice'].length > 16_384)) return null;
+  if (row['dispatchId'] !== undefined && !text(row['dispatchId'])) return null;
+  if (row['cartDigest'] !== undefined && (typeof row['cartDigest'] !== 'string' || !/^[0-9a-f]{64}$/.test(row['cartDigest']))) return null;
   const deliveries = row['windowDeliveries'];
   if (deliveries !== undefined && !deliveriesValid(deliveries)) return null;
   return row as unknown as InFlightCheckout;

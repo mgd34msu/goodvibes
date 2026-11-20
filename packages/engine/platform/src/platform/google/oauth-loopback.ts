@@ -111,6 +111,38 @@ export interface StartLoopbackListenerOptions {
 export interface LoopbackCodeResult {
   readonly code: string;
   readonly state: string;
+  /**
+   * Answers the browser tab that delivered the code, once the exchange and
+   * save have an outcome: the success page only when the credential was
+   * stored, otherwise the error page with the reason. A listener whose page
+   * was already sent ignores it.
+   */
+  readonly respond?: ((outcome: LoopbackPageOutcome) => void) | undefined;
+}
+
+/** What the browser tab is told at the end of a consent. */
+export type LoopbackPageOutcome =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly message: string };
+
+/** The page for an outcome: `renderLoopbackSuccessPage` or `renderLoopbackErrorPage`. */
+export function renderLoopbackOutcomePage(outcome: LoopbackPageOutcome): { readonly status: 200 | 500; readonly body: string } {
+  return outcome.ok
+    ? { status: 200, body: renderLoopbackSuccessPage() }
+    : { status: 500, body: renderLoopbackErrorPage(outcome.message) };
+}
+
+/**
+ * The page a code redirect gets when the app has not answered within the
+ * listener's wait: the code arrived, and the app says whether it finished.
+ */
+export function renderLoopbackPendingPage(): string {
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>Finishing</title></head>
+<body style="font-family: system-ui, sans-serif; text-align: center; padding: 4rem 1rem;">
+<h1>Google answered</h1>
+<p>The app is still finishing the connection. Return to it to see whether it completed.</p>
+</body></html>`;
 }
 
 export interface LoopbackListener {
@@ -177,6 +209,7 @@ function escapeHtml(value: string): string {
  * accepted and never searched for a better answer.
  */
 export type LoopbackRedirectOutcome =
+  /** `body` is the success page; a listener sends it only once the exchange and save succeeded (`respond`). */
   | { readonly kind: 'code'; readonly result: LoopbackCodeResult; readonly body: string; readonly status: 200 }
   | {
       readonly kind: 'error';

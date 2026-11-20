@@ -110,6 +110,7 @@ import { readRepricedCheckout, readRepricedCheckoutInCode } from './checkout-rep
 import { markPaymentCheckoutAction } from '../security/order-submission.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { minorUnitExponent } from './money-parsing.js';
+import type { Money, OrderEvidence, SubmissionDispatch } from './money.js';
 
 /** An amount in minor units as a page may print it: with or without grouping, with a point or a comma before the minor digits. */
 function printedAmounts(amount: number, currency: string): string[] {
@@ -121,6 +122,11 @@ function printedAmounts(amount: number, currency: string): string[] {
   return [...new Set([`${plain}.${minor}`, `${comma}.${minor}`, `${plain},${minor}`, `${dot},${minor}`, `${space},${minor}`])];
 }
 
+/** Whether `text` prints `value` in any of the ways a page prints an amount, as a whole number. */
+export function pageShowsAmount(text: string, value: Money): boolean {
+  return printedAmounts(value.minor, value.currency).some(amount => holdsAmount(text, amount));
+}
+
 /** Whether `text` holds `amount` as a whole number, not inside a longer one. */
 function holdsAmount(text: string, amount: string): boolean {
   for (let at = text.indexOf(amount); at !== -1; at = text.indexOf(amount, at + 1)) {
@@ -130,28 +136,65 @@ function holdsAmount(text: string, amount: string): boolean {
   return false;
 }
 
+/** A line of the order summary that states the payable total ("Total", "Order total", "Grand total"), never a subtotal. */
+const TOTAL_LABEL = /\b(?:order |grand |estimated |)total\b/i;
+const NOT_THE_TOTAL = /\bsub-?\s?total\b|\btotal (?:savings|discount|items?)\b/i;
+
 /**
- * Code's terms check when no decision model reads the live checkout: every
- * document's checkout text is readable, the approved payable total is printed
- * on it, and the delivery option the quote selected is named on it. The page
- * origin and submit control were already checked by `observePage`.
+ * The amounts the order summary states as its total: each line labelled as
+ * the total (not a subtotal), and when the label stands alone on its line, the
+ * line after it (a label and its amount in two cells).
+ */
+function statedTotalLines(text: string): readonly string[] {
+  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const stated: string[] = [];
+  lines.forEach((line, index) => {
+    if (!TOTAL_LABEL.test(line) || NOT_THE_TOTAL.test(line)) return;
+    stated.push(line);
+    if (!/\d/.test(line) && lines[index + 1] !== undefined) stated.push(lines[index + 1]!);
+  });
+  return stated;
+}
+
+/**
+ * Code's terms check when no decision model reads the live checkout. The
+ * approved payable total must be the amount the order summary's total line
+ * states, not merely a number printed somewhere on the page (a cart line, a
+ * free-shipping threshold or an advert can print it too). The delivery option
+ * the quote chose must be one the page shows as selected (a chosen <select>
+ * option, a checked radio or an ARIA-selected control); a page that offers no
+ * selectable option at all is held to its total line alone, since the total
+ * already carries the delivery cost. A page without a total line, or with
+ * selectable options none of which names the chosen one, is not verified: the
+ * purchase stops and the owner is asked again. The page origin and submit
+ * control were already checked by `observePage`.
  */
 function pageShowsApprovedTerms(expected: CheckoutTerms, state: object): boolean {
   const documents = (state as { readonly documents?: unknown }).documents;
   if (!Array.isArray(documents) || documents.length === 0) return false;
-  const texts: string[] = [];
+  const totals: string[] = [];
+  const selected: string[] = [];
   for (const document of documents) {
-    const checkout = (document as { readonly checkout?: { readonly text?: unknown; readonly selections?: unknown } } | null)?.checkout;
+    const view = document as {
+      readonly checkout?: { readonly text?: unknown; readonly selections?: unknown };
+      readonly controls?: unknown;
+    } | null;
+    const checkout = view?.checkout;
     if (typeof checkout?.text !== 'string') return false;
-    texts.push(checkout.text);
+    totals.push(...statedTotalLines(checkout.text));
     if (Array.isArray(checkout.selections)) for (const selection of checkout.selections as { readonly labels?: unknown }[]) {
-      if (Array.isArray(selection?.labels)) texts.push(...selection.labels.filter((label): label is string => typeof label === 'string'));
+      if (Array.isArray(selection?.labels)) selected.push(...selection.labels.filter((label): label is string => typeof label === 'string'));
+    }
+    if (Array.isArray(view?.controls)) for (const control of view.controls as { readonly checked?: unknown; readonly name?: unknown; readonly control?: { readonly type?: unknown; readonly label?: unknown } }[]) {
+      if (control?.checked !== true || control.control?.type !== 'radio') continue;
+      for (const name of [control.name, control.control.label]) if (typeof name === 'string' && name.trim()) selected.push(name);
     }
   }
-  const text = texts.join('\n');
-  if (!printedAmounts(expected.total.minor, expected.total.currency).some(amount => holdsAmount(text, amount))) return false;
+  const amounts = printedAmounts(expected.total.minor, expected.total.currency);
+  if (!totals.some(line => amounts.some(amount => holdsAmount(line, amount)))) return false;
   const shipping = expected.shippingLabel.trim().toLowerCase();
-  return shipping.length === 0 || text.toLowerCase().includes(shipping);
+  if (shipping.length === 0 || selected.length === 0) return true;
+  return selected.some(label => label.toLowerCase().includes(shipping));
 }
 
 /**
@@ -229,6 +272,8 @@ export interface CheckoutSubmission {
   readonly navigated: boolean;
   /** The page the submit was clicked on, for a composition that reads where it landed. */
   readonly target: CheckoutEngineTarget;
+  /** The submit this click was, when the flow named one: its total is what a confirmation must show. */
+  readonly dispatch?: SubmissionDispatch | undefined;
 }
 
 /**
@@ -253,6 +298,8 @@ export interface CheckoutSubmissionDescription {
    * found.
    */
   readonly confirmed?: boolean | undefined;
+  /** With `confirmed`: the landing page shows the dispatch's own total. */
+  readonly totalShown?: boolean | undefined;
 }
 
 export interface BrowserCheckoutDriverDeps {
@@ -435,9 +482,10 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
 
   /**
    * The terms reading after the card is typed. Without a decision model, code
-   * checks the live page instead (`pageShowsApprovedTerms`): the approved
-   * payable total and the selected delivery option are on it. Anything short
-   * of that is a changed quote, never a submit.
+   * checks the live page instead (`pageShowsApprovedTerms`): the order
+   * summary's total line states the approved payable total and the delivery
+   * option shown as selected is the one quoted. Anything short of that is a
+   * changed quote, never a submit.
    */
   async verifyTerms(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<boolean> {
     return decisionOrClassic(() => this.readTerms(expected, ownership), () => this.checkTermsInCode(expected, ownership));
@@ -617,11 +665,13 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     owner.assertCurrent();
   }
 
-  async submitOrder(target: string, ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<{
+  async submitOrder(target: string, ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined },
+    dispatch?: SubmissionDispatch): Promise<{
     readonly url: string;
     readonly orderId: string | null;
     readonly challenge?: CheckoutChallenge | null | undefined;
     readonly verified: boolean;
+    readonly evidence?: OrderEvidence | null | undefined;
   }> {
     let result: Record<string, unknown>;
     let enteredClick = false;
@@ -656,16 +706,40 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     }
     const url = readUrl(result) ?? await this.url();
     const describe = this.deps.describeSubmission;
-    if (describe === undefined) return { url, orderId: null, challenge: null, verified: false };
-    const described = await describe({ url, navigated: result['navigated'] === true, target: this.target });
-    // Being wired is not evidence; what it found is. A composition that looked
-    // and saw nothing, no order id, no challenge, no explicit confirmation,
-    // gets the same honest `verified: false` as a composition with no
-    // describeSubmission at all, rather than a "purchased" nothing here
-    // actually watched complete.
-    const verified = described.orderId !== null || described.challenge !== null || described.confirmed === true;
-    return { url, orderId: described.orderId, challenge: described.challenge, verified };
+    if (describe === undefined) return { url, orderId: null, challenge: null, verified: false, evidence: null };
+    const navigated = result['navigated'] === true;
+    const described = await describe({ url, navigated, target: this.target, ...(dispatch ? { dispatch } : {}) });
+    // Being wired is not evidence; what it found is, and only about this
+    // dispatch: an order number or a confirmation showing this dispatch's
+    // total, read after this click on the merchant's own domain. Wording
+    // alone, a landing elsewhere, or no dispatch named is no evidence, and
+    // the purchase stays `submitted-unverified` (settleSubmission, money.ts).
+    const evidence = dispatch === undefined ? null : orderEvidenceOf(dispatch, url, described);
+    const verified = evidence !== null || described.challenge !== null;
+    return { url, orderId: described.orderId, challenge: described.challenge, verified, evidence };
   }
+}
+
+/** Whether the landing URL is on the merchant's registrable domain (or a host under it). */
+function landedOnMerchant(url: string, merchantDomain: string): boolean {
+  let host: string;
+  try { host = new URL(url).hostname.toLowerCase().replace(/\.$/, ''); } catch { return false; }
+  const merchant = merchantDomain.toLowerCase().replace(/\.$/, '');
+  if (host === merchant || host.endsWith(`.${merchant}`)) return true;
+  const landed = registrableDomain(host);
+  return landed !== null && landed === registrableDomain(merchant);
+}
+
+/** The landing page's description as evidence about `dispatch`, or null when it ties nothing to it. */
+function orderEvidenceOf(dispatch: SubmissionDispatch, url: string, described: CheckoutSubmissionDescription): OrderEvidence | null {
+  if (!landedOnMerchant(url, dispatch.merchantDomain)) return null;
+  if (described.orderId !== null && described.orderId.trim().length > 0) {
+    return { kind: 'order-number', dispatch, orderId: described.orderId, landedFrom: 'this-submit' };
+  }
+  if (described.confirmed === true && described.totalShown === true) {
+    return { kind: 'confirmation-with-total', dispatch, totalShown: dispatch.total, landedFrom: 'this-submit' };
+  }
+  return null;
 }
 
 /**

@@ -32,7 +32,7 @@
  */
 
 import type { PermissionCategory, PermissionPromptRequest, PermissionRequestAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { buildPermissionApprovalBrief, buildRememberOptions, execFileOperationLines, execRunPlace, fallbackAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { approvalQuestion, buildPermissionApprovalBrief, buildRememberOptions, execFileOperationLines, execRunPlace, fallbackAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { decodeBase64 } from '@goodvibes-jev/engine/platform/platform/control-plane/approval-hunk-apply';
 import { enterAnswer } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import { activeTokens } from '../renderer/theme.ts';
@@ -455,7 +455,7 @@ export function renderPermissionCard(request: PermissionPromptRequest, state: Pe
   const pinned = (buttons.length > 0 ? 2 : 0) + (tierRows.length > 0 ? tierHeight + 1 : 0);
   // Fill rows: padding, title, blank, body..., pinned, blank, hints, empty last row.
   const f = beginModal(screenWidth, screenHeight, {
-    title: buildPermissionApprovalBrief(request).title,
+    title: approvalQuestion(request),
     titleGlyph: { char: titleGlyph(request.category), fg: t.warning },
     width,
     height: body.length + pinned + hintRows + 5,

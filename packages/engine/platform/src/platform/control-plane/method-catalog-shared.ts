@@ -158,6 +158,12 @@ export interface GatewayMethodInvocationContext {
    * in-process, which is the program's own (`systemActor`).
    */
   readonly actor?: Actor | undefined;
+  /**
+   * Set only by the transport: how the request reached the daemon (loopback,
+   * TLS, the tailnet or a plain network). An effect that may only cross some
+   * links (a card number) reads it. Absent for a call made in-process.
+   */
+  readonly transport?: 'loopback' | 'tls' | 'tailnet' | 'plain-network' | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
 }
 

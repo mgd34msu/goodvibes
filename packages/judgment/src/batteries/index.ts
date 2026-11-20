@@ -23,6 +23,7 @@ export {
   type BatteryItem,
   type BatteryItems,
   type BatteryRun,
+  type PartialBatteryRun,
   type ChoiceItem,
   type ExpectedFor,
   type Fixture,

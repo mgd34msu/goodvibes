@@ -1,8 +1,9 @@
 import type { PermissionPromptDecision } from '../permissions/prompt.js';
 import type { RememberTier } from '../permissions/approval-rules.js';
 import { assertPermissionActive } from '../permissions/cancellation.js';
-import { assertExplicitApprovalDisposition, type ExplicitApprovalDisposition } from './approval-disposition.js';
+import { assertExplicitApprovalDisposition, type ExplicitApprovalDisposition, type SharedApprovalDecision } from './approval-disposition.js';
 import type { RequestSharedApprovalInput, SharedApprovalRecord } from './approval-broker.js';
+import type { TransitionOutcome } from './approval-lifecycle.js';
 import { raiseSharedApproval, type RaiseApprovalDeps, type RaisedApproval } from './approval-broker-raise.js';
 import { logger } from '../utils/logger.js';
 
@@ -11,16 +12,6 @@ export interface OwnerApprovalGuard {
   readonly assertCurrent: () => void;
   /** Required to permit exact, host-validated modifications such as retention choice. */
   readonly validateDecision?: ((decision: PermissionPromptDecision) => void) | undefined;
-}
-
-/**
- * Filled in by the broker call that was given it: `applied` is true only when
- * that very call moved the record. A call that found the approval already
- * decided, or lost a race to another caller using the same actor name, reads
- * false.
- */
-export interface ApprovalActionOutcome {
-  applied?: boolean | undefined;
 }
 
 export interface ResolveSharedApprovalInput {
@@ -33,8 +24,15 @@ export interface ResolveSharedApprovalInput {
   readonly reason?: string | undefined;
   readonly actor: string;
   readonly actorSurface?: string | undefined;
+  /** The node the actor reached; the home node when absent. */
+  readonly actorNode?: string | undefined;
   readonly note?: string | undefined;
-  readonly outcome?: ApprovalActionOutcome | undefined;
+  /**
+   * The revision of the record the decider was shown. Required of every
+   * caller; `undefined` only for the broker's own local-prompt and owner-proof
+   * paths, whose prompt is the record itself.
+   */
+  readonly expectedRevision: number | undefined;
 }
 
 export interface ResolveOwnerApprovalInput {
@@ -47,7 +45,7 @@ export interface ResolveOwnerApprovalInput {
 
 export interface RaisedOwnerApproval extends RaisedApproval {
   /** Host-private capability. Never serialize, publish, or store this function. */
-  readonly resolveOwnerDecision: (input: ResolveOwnerApprovalInput) => Promise<SharedApprovalRecord | null>;
+  readonly resolveOwnerDecision: (input: ResolveOwnerApprovalInput) => Promise<TransitionOutcome>;
 }
 
 export interface OwnerApprovalProof {
@@ -62,7 +60,7 @@ interface OwnerCapability {
 }
 
 type OwnerApprovalDeps = RaiseApprovalDeps & {
-  resolve(id: string, input: ResolveSharedApprovalInput, proof?: OwnerApprovalProof): Promise<SharedApprovalRecord | null>;
+  resolve(id: string, input: ResolveSharedApprovalInput, proof?: OwnerApprovalProof): Promise<TransitionOutcome>;
 };
 
 function invalidOwnerDecision(): never {
@@ -111,7 +109,7 @@ export class OwnerApprovalAuthority {
     const pending = deps.pendingResolvers.get(raised.approval.id);
     const capability = ownedGuard ? { token: Symbol('owner-approval'), guard: ownedGuard } : undefined;
     if (capability && pending && !pending.retired) this.#capabilities.set(raised.approval.id, capability);
-    const resolveOwnerDecision = capability ? async (resolution: ResolveOwnerApprovalInput): Promise<SharedApprovalRecord | null> => {
+    const resolveOwnerDecision = capability ? async (resolution: ResolveOwnerApprovalInput): Promise<TransitionOutcome> => {
       if (typeof resolution.assertCurrent !== 'function') invalidOwnerDecision();
       const assertCurrent = resolution.assertCurrent;
       capability.guard.assertCurrent();
@@ -122,6 +120,8 @@ export class OwnerApprovalAuthority {
         disposition: decision.approved ? 'approved' : 'denied',
         actor: resolution.actor,
         actorSurface: resolution.actorSurface,
+        // The owner's own capability for this ask: its proof, not a revision, is what is checked.
+        expectedRevision: undefined,
       }, { token: capability.token, assertCurrent });
     } : undefined;
     // A wire caller serializing a raised result must never export this capability.
@@ -136,7 +136,8 @@ export class OwnerApprovalAuthority {
         return localPrompt(ownedInput.request, { signal: pending?.promptController?.signal });
       }).then((decision) => resolveOwnerDecision
         ? resolveOwnerDecision({ decision, actor, actorSurface, assertCurrent: ownedGuard!.assertCurrent })
-        : deps.resolve(raised.approval.id, { ...decision, actor, actorSurface }))
+        // The local prompt shows the ask itself; a claim or note elsewhere does not change what was answered.
+        : deps.resolve(raised.approval.id, { ...decision, actor, actorSurface, expectedRevision: undefined }))
         .catch(async (error: unknown) => {
           // Source/owner errors may contain private context. Persist a fixed note.
           if (ownedGuard) await deps.cancel(raised.approval.id).catch(() => undefined);
@@ -149,12 +150,12 @@ export class OwnerApprovalAuthority {
     return raised;
   }
 
-  /** Called before mutation and after each awaited store boundary. */
-  check(approval: SharedApprovalRecord, input: ResolveSharedApprovalInput, proof?: OwnerApprovalProof): (() => void) | undefined {
-    if (!approval.requiresOwnerDecision || !input.approved) return undefined;
+  /** Called inside the broker's write unit, before the write and again after it landed. */
+  check(approval: SharedApprovalRecord, decision: SharedApprovalDecision, proof?: OwnerApprovalProof): (() => void) | undefined {
+    if (!approval.requiresOwnerDecision || !decision.approved) return undefined;
     const capability = this.#capabilities.get(approval.id);
     if (!capability || !proof || capability.token !== proof.token || capability.resolving) invalidOwnerDecision();
-    if (input.remember === true || input.rememberTier !== undefined || input.selectedHunks !== undefined) invalidOwnerDecision();
+    if (decision.remember === true || decision.rememberTier !== undefined) invalidOwnerDecision();
     const assertCurrent = (): void => {
       if (this.#capabilities.get(approval.id) !== capability
         || (approval.expiresAt !== undefined && approval.expiresAt <= Date.now())) invalidOwnerDecision();
@@ -173,7 +174,4 @@ export class OwnerApprovalAuthority {
     const capability = this.#capabilities.get(approvalId);
     if (capability) capability.resolving = false;
   }
-
-  /** True while an exact owner decision for this ask is between its check and its durable write. */
-  isResolving(approvalId: string): boolean { return this.#capabilities.get(approvalId)?.resolving === true; }
 }

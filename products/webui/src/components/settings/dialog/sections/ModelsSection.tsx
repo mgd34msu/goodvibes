@@ -12,7 +12,7 @@
  * (provider-status.ts deriveProviderStatus over the merged list record and the
  * freshest providers.get snapshot), only its presentation changed.
  */
-import { useProviderModelOptions } from '../../../../lib/use-provider-model-options';
+import { modelOptionsSourceOf, useProviderModelOptions, type ModelOptionsSource } from '../../../../lib/use-provider-model-options';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -111,7 +111,7 @@ export function ModelsSection() {
           provider={selected.value}
           providerId={selected.id}
           modelProviders={data.modelProviders}
-          sourceReady={data.providers.isSuccess && data.modelCatalog.isSuccess && !data.providers.isFetching && !data.modelCatalog.isFetching}
+          source={modelOptionsSourceOf(data.providers, data.modelCatalog)}
           currentRegistryKey={data.current.registryKey}
           onBack={() => setSelectedId('')}
         />
@@ -207,14 +207,14 @@ function ProviderDetail({
   provider,
   providerId,
   modelProviders,
-  sourceReady,
+  source,
   currentRegistryKey,
   onBack,
 }: {
   provider: unknown;
   providerId: string;
   modelProviders: unknown[];
-  sourceReady: boolean;
+  source: ModelOptionsSource;
   currentRegistryKey: string;
   onBack: () => void;
 }) {
@@ -238,8 +238,11 @@ function ProviderDetail({
   const status = useMemo(() => deriveProviderStatus(combined), [combined]);
   // Which sign-in requests use, in order (OpenAI: the subscription first, then the API key), as the provider reports it.
   const signInOrder = firstString(readPath(combined, ['runtime', 'auth']), ['detail']);
-  const providerModels = useProviderModelOptions(provider, modelProviders, sourceReady && !detail.isFetching);
+  const providerModels = useProviderModelOptions(provider, modelProviders,
+    source.kind === 'ready' && detail.isFetching ? { kind: 'ready', refreshing: true } : source);
   const models: ModelOption[] = providerModels.models;
+  const modelsRead = providerModels.read;
+  const refreshing = source.kind === 'ready' && (source.refreshing || detail.isFetching);
   const title = bestTitle(provider, providerId);
 
   const selectModel = useMutation({
@@ -279,7 +282,13 @@ function ProviderDetail({
 
       <SettingsBlock title="Models" description="Pick the model new chats use.">
         {selectModel.isError && <ErrorState error={selectModel.error} title="Model selection failed" />}
-        {models.length === 0 ? (
+        {modelsRead.kind === 'loading' ? (
+          <div className="settings-skeleton" aria-label="Loading models" aria-busy="true">
+            {Array.from({ length: 3 }, (_, i) => <SkeletonBlock key={i} variant="block" height={40} />)}
+          </div>
+        ) : modelsRead.kind === 'failed' ? (
+          <ErrorState error={source.kind === 'failed' ? source.error : modelsRead.refusal.reason} title="Failed to load models" />
+        ) : models.length === 0 ? (
           <p className="settings-empty">No models reported for this provider.</p>
         ) : (
           <RowList aria-label="Available models">
@@ -301,7 +310,7 @@ function ProviderDetail({
                       ) : (
                         <Button
                           size="sm"
-                          disabled={selectModel.isPending}
+                          disabled={selectModel.isPending || refreshing}
                           aria-label={`Use ${model.label}`}
                           onClick={() => selectModel.mutate(model.registryKey)}
                         >

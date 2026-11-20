@@ -27,7 +27,11 @@ export type KeyAction =
   | 'undo'
   | 'redo'
   | 'paste'
-  | 'focus-work-tree';
+  | 'focus-work-tree'
+  | 'cycle-permission-mode'
+  | 'open-notifications'
+  | 'failure-other-model'
+  | 'failure-details';
 
 export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION_DESCRIPTIONS,
   'workspace-picker':      'Open the Agent operator workspace',
@@ -39,6 +43,10 @@ export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION
   'block-save':            'Save nearest block to file',
   'line-start':            'Move to start of line',
   'clear-prompt':          'Clear the prompt',
+  'cycle-permission-mode': 'Change how often it asks, for this session (asks before YOLO; the saved default is set in /settings)',
+  'open-notifications':    'Open the notices (the status bar counts the unread ones)',
+  'failure-other-model':   'After a failed turn: choose another model and send the prompt again',
+  'failure-details':       'After a failed turn: show what the provider said',
 };
 
 export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindingDefaults<KeyAction>([
@@ -47,7 +55,8 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   'activity-open', 'history-search', 'search', 'block-copy',
   'bookmark', 'block-save', 'delete-word', 'line-start',
   'next-error-line-end', 'kill-line', 'clear-prompt', 'undo',
-  'redo', 'paste', 'focus-work-tree',
+  'redo', 'paste', 'focus-work-tree', 'cycle-permission-mode',
+  'open-notifications', 'failure-other-model', 'failure-details',
 ], {
   'workspace-picker':      [{ key: 'p', ctrl: true }],
   'workspace-close':       [{ key: 'x', ctrl: true }],
@@ -58,6 +67,13 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   'line-start':            [{ key: 'a', ctrl: true }],
   'kill-line':             [{ key: 'k', ctrl: true }],
   'clear-prompt':          [{ key: 'u', ctrl: true }],
+  // Shift+Tab: this session's permission mode (the tokenizer reads the xterm back-tab, CSI Z, as this chord).
+  'cycle-permission-mode': [{ key: 'tab', shift: true }],
+  // Ctrl+N: the notices the status bar counts.
+  'open-notifications':    [{ key: 'n', ctrl: true }],
+  // Alt+O and Alt+I: the failed turn's "use another model" and "details"; chords that can never be typed text.
+  'failure-other-model':   [{ key: 'o', alt: true }],
+  'failure-details':       [{ key: 'i', alt: true }],
 });
 
 const KEY_ACTION_ALIASES: Readonly<Record<string, KeyAction>> = {

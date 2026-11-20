@@ -1,4 +1,4 @@
-import type { ProviderAuthRouteDescriptor } from './interface.js';
+import type { ProviderAuthRouteDescriptor, ProviderDeclaredAuthRoute } from './interface.js';
 
 function routeUsable(route: ProviderAuthRouteDescriptor): boolean {
   return route.usable ?? route.configured;
@@ -23,6 +23,22 @@ export function formatProviderAuthRoute(route: ProviderAuthRouteDescriptor, pres
   ].filter((part): part is string => Boolean(part));
   const detail = route.detail?.trim();
   return `${presentation?.label(route.route, route.label) ?? route.label} [${presentation?.id(route.route) ?? route.route}; ${status.join(', ')}]${detail ? ` - ${detail}` : ''}`;
+}
+
+/**
+ * How a person sets a provider up through one of its declared sign-in routes,
+ * in plain words (first run's provider list). Undefined for a route a person
+ * does not complete themselves (a service's own OAuth).
+ */
+export function describeAuthRouteForPerson(route: ProviderDeclaredAuthRoute): string | undefined {
+  switch (route) {
+    case 'subscription-oauth': return 'sign in with your browser';
+    case 'api-key':
+    case 'secret-ref': return 'paste an API key';
+    case 'anonymous':
+    case 'none': return 'no sign-in needed';
+    case 'service-oauth': return undefined;
+  }
 }
 
 export function formatProviderAuthRouteId(route: string): string {

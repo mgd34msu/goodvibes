@@ -3,6 +3,12 @@ export interface ConversationFollowUpItem {
   readonly summary: string;
   /** Completed work to deliver verbatim, separate from its brief status. */
   readonly result?: string | undefined;
+  /**
+   * The turn whose request started this work (security/turn-boundary.ts
+   * turnId at the spawn). Recovery runs that request, and only while it is
+   * still in the conversation; absent for work no turn started.
+   */
+  readonly turnId?: string | undefined;
 }
 
 const MAX_BATCH_SIZE = 6;
@@ -21,7 +27,11 @@ export function normalizeConversationFollowUpItems(
   for (const item of items) {
     const summary = normalizeSummary(item.summary);
     if (!summary) continue;
-    deduped.set(item.key, { key: item.key, summary, ...(item.result?.trim() ? { result: item.result.trim() } : {}) });
+    deduped.set(item.key, {
+      key: item.key, summary,
+      ...(item.result?.trim() ? { result: item.result.trim() } : {}),
+      ...(item.turnId !== undefined ? { turnId: item.turnId } : {}),
+    });
   }
   return [...deduped.values()].slice(0, MAX_BATCH_SIZE);
 }

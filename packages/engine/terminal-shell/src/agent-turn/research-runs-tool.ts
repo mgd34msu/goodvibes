@@ -49,6 +49,7 @@ type AgentResearchRunsMode =
   | 'resume'
   | 'cancel'
   | 'complete'
+  | 'attach_report'
   | 'fail'
   | 'delete';
 
@@ -63,6 +64,7 @@ const MODES: readonly AgentResearchRunsMode[] = [
   'resume',
   'cancel',
   'complete',
+  'attach_report',
   'fail',
   'delete',
 ];
@@ -199,7 +201,7 @@ function runNextRouteLines(run: AgentResearchRunRecord): readonly string[] {
         `  reportArtifact research action:"report_artifact" artifactId:${routeString(run.reportArtifactId)}`,
         `  promoteKnowledge agent_knowledge_ingest sourceKind:"artifact" artifactId:${routeString(run.reportArtifactId)}`,
       ] : [
-        `  attachReport research action:"complete" id:${routeString(run.id)} reportArtifactId:"..."`,
+        `  attachReport research action:"attach_report" id:${routeString(run.id)} reportArtifactId:"..."`,
       ]),
     );
   } else {
@@ -324,7 +326,7 @@ function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolv
           note: { type: 'string', description: 'Checkpoint, pause, cancel, completion, or general note.' },
           nextSteps: { type: 'array', items: { type: 'string' }, description: 'Next visible research steps.' },
           sourceIds: { type: 'array', items: { type: 'string' }, description: 'Project-local research source ids attached to this run.' },
-          reportArtifactId: { type: 'string', description: 'Saved report artifact id when completing the run.' },
+          reportArtifactId: { type: 'string', description: 'Saved report artifact id when completing the run, or for attach_report on a completed run that has none.' },
           error: { type: 'string', description: 'Failure note for fail mode.' },
           includeCheckpoints: { type: 'boolean', description: 'Include recent checkpoint lines in list/search output.' },
           includeLogTail: { type: 'boolean', description: 'Include recent run log tail in list/search output.' },
@@ -424,6 +426,13 @@ function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolv
             reportArtifactId: readString(args.reportArtifactId),
             sourceIds: readStringList(args.sourceIds),
           })));
+        }
+        if (mode === 'attach_report') {
+          assertWrite();
+          const reportArtifactId = readString(args.reportArtifactId);
+          if (!reportArtifactId) return failure('attach_report needs reportArtifactId.');
+          if (researchArtifactExists(toolRegistry, reportArtifactId) === false) return failure(unknownReportArtifact(reportArtifactId).message);
+          return written(formatMutationResult('Attached the report to Agent research run', registry.attachReport(requireId(args), reportArtifactId)));
         }
         if (mode === 'fail') {
           assertWrite();

@@ -8,6 +8,7 @@ import {
   readBoundedPositiveInteger,
   readOptionalStringField,
   readStringArrayField,
+  refuseEmptySelection,
 } from './route-helpers.js';
 
 type KnowledgeRefinementRunBody = {
@@ -50,13 +51,6 @@ function readRefinementTaskFilter(url: URL): KnowledgeRefinementTaskFilter {
     ...(url.searchParams.get('subjectId') ? { subjectId: url.searchParams.get('subjectId')! } : {}),
     ...(url.searchParams.get('gapId') ? { gapId: url.searchParams.get('gapId')! } : {}),
   };
-}
-
-function refuseEmptySelection(field: string, defaultMeaning: string): Response {
-  return jsonErrorResponse({
-    error: `${field} is an empty list, which selects nothing; omit ${field} to ${defaultMeaning}.`,
-    code: 'INVALID_REQUEST',
-  }, { status: 400 });
 }
 
 const knowledgeRefinementBodySchemas = createRouteBodySchemaRegistry({

@@ -329,7 +329,7 @@ export function ConfigGroupList({
             itself on the platform's entry-surface allowlist.
           */}
           {group.id === 'payments' && <PaymentCardEntry currency={currency} />}
-          {group.id === 'payments' && <PaymentWindows />}
+          {group.id === 'payments' && <PaymentWindows currency={currency} />}
           {group.id === 'surfaces' && <TelegramCursorRecovery />}
           {group.id === 'surfaces' && <TelegramDelegatedIntake />}
           {group.featureUnits.map((unit) => (

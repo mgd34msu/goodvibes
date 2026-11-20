@@ -170,6 +170,8 @@ export class WakeListener {
   #frameGapTimer: unknown = null;
   /** Which recorder the current stream is, parsed from its label. */
   #openedBackend: Exclude<WakeRuntimeSettings['capture']['backend'], 'auto'> | null = null;
+  /** The newest open still in flight (until it adopts its stream or releases it). */
+  #opening: Promise<WakeStartOutcome> | null = null;
   #framesSeen = 0;
   #lastFrameAt: number | null = null;
   /**
@@ -229,6 +231,20 @@ export class WakeListener {
    * must not produce a microphone permission prompt.
    */
   async start(): Promise<WakeStartOutcome> {
+    // A stop() retired an open that is still settling: wait for it to release
+    // what it opened, so the device is never opened twice at once.
+    const previous = this.#opening;
+    if (previous !== null && this.#phase !== 'starting') {
+      const timeout = this.#options.startTimeoutMs ?? START_TIMEOUT_MS;
+      let timer: unknown;
+      const expired = new Promise<'expired'>((resolve) => { timer = this.#setTimer(() => resolve('expired'), timeout); });
+      const outcome = await Promise.race([previous.then(() => 'settled' as const, () => 'settled' as const), expired]);
+      this.#clearTimer(timer);
+      if (outcome === 'expired') {
+        return { started: false, refusal: 'capture-unavailable', detail: `the previous capture start has not released the microphone after ${timeout} ms; start again shortly` };
+      }
+      return this.start();
+    }
     if (this.#stopping || this.#stream !== null || this.#phase === 'starting') {
       return { started: false, refusal: 'already-running', detail: 'the wake-word listener is already running' };
     }
@@ -321,7 +337,15 @@ export class WakeListener {
    * reads the return value then, so every failure must be reported or turned
    * into the next wait, never a silent drop to idle.
    */
-  async #open(restart = false): Promise<WakeStartOutcome> {
+  #open(restart = false): Promise<WakeStartOutcome> {
+    const opening = this.#openNow(restart);
+    this.#opening = opening;
+    const settled = (): void => { if (this.#opening === opening) this.#opening = null; };
+    void opening.then(settled, settled);
+    return opening;
+  }
+
+  async #openNow(restart: boolean): Promise<WakeStartOutcome> {
     const generation = ++this.#captureGeneration;
     this.#resetScoring();
     const current = (): boolean => generation === this.#captureGeneration && !this.#stopping;

@@ -10,6 +10,7 @@ import 'node:fs';
 import 'node:path';
 import { InputTokenizer, type InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { reportDroppedPaste } from '@goodvibes-jev/engine/terminal-shell/input-content';
+import { resolveFooterTarget, type FooterTarget } from '../renderer/footer-targets.ts';
 import {
   cleanupMarkerRegistryForHandler,
   executeBlockActionForHandler,
@@ -161,6 +162,10 @@ export class InputHandler extends TerminalInputHandlerState {
   public settingsModal = new SettingsModal();
   public mcpWorkspace = new McpWorkspace();
   public agentWorkspace = new AgentWorkspace();
+  /** Screen row → what a click on that status bar row (and column) opens; set each frame. */
+  public footerTargets: ReadonlyMap<number, FooterTarget> = new Map();
+  /** Opens what a clicked status bar segment names; wired by the shell. */
+  public onFooterTarget: ((target: FooterTarget) => void) | null = null;
 
   public sessionPickerModal: SessionPickerModal;
   public profilePickerModal: ProfilePickerModal;
@@ -293,6 +298,10 @@ export class InputHandler extends TerminalInputHandlerState {
         },
         cycleAgentWorkspaceCategory: (direction: 'next' | 'prev') => this.cycleAgentWorkspaceCategory(direction),
         dismissAgentWorkspace: () => this.dismissAgentWorkspace(),
+        footerTargetAt: (row: number, col?: number) => resolveFooterTarget(this.footerTargets, row, col),
+        openFooterTarget: (target: FooterTarget) => {
+          this.onFooterTarget?.(target);
+        },
         openModelPickerWithTarget: (target: ModelPickerTarget) => this.openModelPickerWithTarget(target),
         openProviderModelPickerWithTarget: (target: ModelPickerTarget) => this.openProviderModelPickerWithTarget(target),
         onModelPickerCommit: () => this.handleModelPickerCommit(),

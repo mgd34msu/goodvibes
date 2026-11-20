@@ -173,6 +173,8 @@ export function createCapturedCodeContext(input: {
   let current: Generation | undefined;
   let assertReadingCurrent: (() => Promise<void>) | undefined;
   let pinnedProvider: MemoryEmbeddingProvider | null = null;
+  /** The embedding space the held generation was built in (state/embedding-space.ts). */
+  let pinnedSpace: string | undefined;
   let operation: AbortController | undefined;
   let disposed = false;
   let unavailable: string | undefined;
@@ -367,13 +369,16 @@ export function createCapturedCodeContext(input: {
   const prepareNow = async (buildStarted: () => void): Promise<void> => {
       input.signal?.throwIfAborted();
       if (disposed) throw new Error('captured code context is closed');
-      // The run's captured generation is already indexed: every later turn reuses it.
-      if (immutable && current && shared && operation) { assertReadingCurrent = undefined; return; }
+      // The run's captured generation is already indexed: every later turn reuses it,
+      // while the embedding space it was built in is still the current one.
+      if (immutable && current && shared && operation && registry?.getDefaultProviderOrNull() === pinnedProvider
+        && registry?.currentSpace(MEMORY_VECTOR_DIMS).id === pinnedSpace) { assertReadingCurrent = undefined; return; }
       assertReadingCurrent = undefined; current = undefined; cachedStats = undefined; operation?.abort();
       const owner = new AbortController(); operation = owner;
       const deadline = AbortSignal.timeout(OPERATION_TIMEOUT_MS);
       const signal = AbortSignal.any([...(input.signal ? [input.signal] : []), owner.signal, deadline]);
       pinnedProvider = registry?.getDefaultProviderOrNull() ?? null;
+      pinnedSpace = registry?.currentSpace(MEMORY_VECTOR_DIMS).id;
       unavailable = undefined;
       if (pinnedProvider && pinnedProvider.id !== HASHED_MEMORY_EMBEDDING_PROVIDER.id && pinnedProvider.capturedInputAdmission !== 'per-attempt') {
         releaseIndex(); unavailable = 'captured code unavailable: embedding provider lacks per-attempt admission'; return;

@@ -1,6 +1,6 @@
 import { logger } from '../utils/logger.js';
 import type { AutomationDeliveryManager } from './delivery-manager.js';
-import type { AutomationDeliveryTarget } from './delivery.js';
+import type { AutomationDeliveryAttempt, AutomationDeliveryTarget } from './delivery.js';
 import { calculateRetryDelay } from './failures.js';
 import { retryCapacityWaitKey, type AutomationCapacityWait } from './scheduler-capacity.js';
 import type { AutomationJob } from './jobs.js';
@@ -8,6 +8,7 @@ import type { AutomationRun } from './runs.js';
 import { summarizeError } from '../utils/error-display.js';
 import { readFailureTransience, type FailureTransience } from '../integrations/delivery.js';
 import type { UnattendedAnswer, UnattendedRuns } from './unattended-runs.js';
+import type { ScheduleRunOutcome } from '@goodvibes-jev/engine/contracts';
 
 export interface AutomationFailureFollowUpContext {
   readonly jobs: Map<string, AutomationJob>;
@@ -32,6 +33,10 @@ interface AutomationRunDeliveryContext {
   readonly unattendedRuns?: UnattendedRuns | undefined;
   readonly syncRunToRuntime: (run: AutomationRun, source: string) => void;
   readonly saveRuns: () => Promise<void>;
+  /** Records on the job how a completed run's answer reached the person (AutomationJob.lastOutcome). */
+  readonly noteJobOutcome?: ((jobId: string, outcome: Exclude<ScheduleRunOutcome, 'failed'>) => void) | undefined;
+  /** Removes a finished one-shot job once its run's delivery is recorded. */
+  readonly removeOneShotJob?: ((jobId: string) => void) | undefined;
 }
 
 function saveJobsAsync(context: Pick<AutomationFailureFollowUpContext, 'saveJobs'>, reason: string, jobId: string): void {
@@ -299,43 +304,63 @@ export function maybeDeliverAutomationFailureNotice(
   });
 }
 
+/**
+ * Deliver a settled run's answer to its job's targets (or the owner inbox).
+ * Returns whether a delivery was started. A run that owes its delivery
+ * (`delivery: owed`, written with its end) is settled by the write that
+ * records the delivery, and only then is a finished one-shot job removed, so
+ * a restart in between still has the job's targets to deliver to.
+ */
 export function maybeDeliverAutomationRun(
   context: AutomationRunDeliveryContext,
   job: AutomationJob,
   run: AutomationRun,
-): void {
-  if (context.deliveryInFlight.has(run.id)) return;
-  if (run.deliveryIds.length > 0) return;
+): boolean {
+  if (context.deliveryInFlight.has(run.id)) return true;
+  if (run.deliveryIds.length > 0) return false;
+  const settleOwed = async (attempts: readonly AutomationDeliveryAttempt[]): Promise<void> => {
+    const latest = context.runs.get(run.id);
+    if (!latest || (attempts.length === 0 && !latest.delivery)) return;
+    const updated: AutomationRun = {
+      ...latest,
+      ...(attempts.length > 0 ? { deliveryIds: attempts.map((attempt) => attempt.id), deliveryAttempts: attempts } : {}),
+      delivery: undefined,
+      updatedAt: Date.now(),
+    };
+    context.runs.set(updated.id, updated);
+    context.syncRunToRuntime(updated, 'automation.delivery');
+    await context.saveRuns();
+    if (job.deleteAfterRun && run.status === 'completed') context.removeOneShotJob?.(job.id);
+  };
   // A job that names no target: its answer goes to the owner inbox, never only to the run history.
   if (job.delivery.mode === 'none' || !context.deliveryManager) {
-    if (!context.unattendedRuns || run.status === 'cancelled') return;
+    if (!context.unattendedRuns || run.status === 'cancelled') return false;
     context.deliveryInFlight.add(run.id);
     void context.unattendedRuns.postToInbox(automationRunAnswer(job, run))
+      .then(async () => {
+        if (run.status === 'completed') context.noteJobOutcome?.(job.id, 'inbox');
+        await settleOwed([]);
+      })
+      .catch((error: unknown) => {
+        logger.warn('AutomationManager: the run answer could not be put in the owner inbox; it stays owed', { runId: run.id, jobId: job.id, error: summarizeError(error) });
+      })
       .finally(() => { context.deliveryInFlight.delete(run.id); });
-    return;
+    return true;
   }
   context.deliveryInFlight.add(run.id);
   void context.deliveryManager.deliverJobRun(job, run)
     .then(async (deliveryAttempts) => {
       // Every named target failed (or none could be resolved): the answer goes to the owner inbox instead.
-      if (context.unattendedRuns && deliveryAttempts.every((attempt) => attempt.status === 'failed' || attempt.status === 'dead_lettered')) {
+      const undelivered = deliveryAttempts.every((attempt) => attempt.status === 'failed' || attempt.status === 'dead_lettered');
+      if (run.status === 'completed') context.noteJobOutcome?.(job.id, undelivered ? 'not-delivered' : 'delivered');
+      if (context.unattendedRuns && undelivered) {
         const reason = deliveryAttempts.length === 0
           ? 'No delivery target of this job could be reached.'
           : `Not delivered: ${deliveryAttempts.map((attempt) => attempt.error ?? attempt.status).join('; ')}.`;
         await context.unattendedRuns.postToInbox(automationRunAnswer(job, run), reason);
       }
-      if (deliveryAttempts.length === 0) return;
-      const latest = context.runs.get(run.id);
-      if (!latest) return;
-      const updated: AutomationRun = {
-        ...latest,
-        deliveryIds: deliveryAttempts.map((attempt) => attempt.id),
-        deliveryAttempts,
-        updatedAt: Date.now(),
-      };
-      context.runs.set(updated.id, updated);
-      context.syncRunToRuntime(updated, 'automation.delivery');
-      await context.saveRuns();
+      // The attempts (or the inbox) are the delivery's record; the run owes nothing more.
+      await settleOwed(deliveryAttempts);
     })
     .catch((error) => {
       logger.warn('AutomationManager: delivery failed', {
@@ -347,4 +372,5 @@ export function maybeDeliverAutomationRun(
     .finally(() => {
       context.deliveryInFlight.delete(run.id);
     });
+  return true;
 }

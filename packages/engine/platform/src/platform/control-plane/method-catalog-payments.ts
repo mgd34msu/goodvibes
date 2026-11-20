@@ -98,7 +98,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     id: 'payments.budget.status',
     title: 'Payment Budget Status',
     description:
-      "Today's spending pools: the daily item budget, the separate overage budget that covers only unavoidable charges (tax, mandatory fees, and the delivery option actually used), and the tolerance allowance. Each reports its limit, what today has spent, what purchases in flight are holding, and what is left. Includes the calendar day and the timezone it was computed in, the day resets at midnight in daemon.timezone, UTC when unset, and whether this node is the one currently allowed to spend. Each spend keeps the day it was made on, in the zone then in force, and counts until that day is over, so changing the timezone cannot hand back a spent budget.",
+      "Today's spending pools: the daily item budget, the separate overage budget that covers only unavoidable charges (tax, mandatory fees, and the delivery option actually used), and the tolerance allowance. Each reports its limit, what today has spent, what purchases in flight are holding, and what is left. Includes the calendar day and the timezone it was computed in, the day resets at midnight in daemon.timezone, UTC when unset, and whether this node is the one currently allowed to spend. Each spend keeps the day it was made on, in the zone then in force, and counts until that day is over, so changing the timezone cannot hand back a spent budget. The pools are in `currency` and count only what was spent in it: changing payments.currency starts a new pool for the rest of the day, and what was spent earlier that day in the old currency is listed in earlierSpend, in its own currency, never converted.",
     category: 'payments',
     effects: ['payments.read'],
     http: { method: 'GET', path: '/api/payments/budget' },
@@ -145,7 +145,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Approve One Purchase',
     description:
-      'The owner approves one purchase in advance, out of band from the conversation that will run it: the merchant\'s registrable domain, the item, and the most it may cost. Optional unless payments.confirmEveryPurchase is on. The amount is read in the budget currency ("25" and "25.00" are the same amount) and an amount no purchase could match is refused before anything is recorded. Mints a persisted, single-use approval bound to those fields, expiring in five minutes; a matching payments.checkout.begin spends it, and it answers that purchase\'s approval window for a total up to its amount. Requires confirm: true and the explicit-user-request context, the same confirmation gate every destructive verb on this daemon uses; /payments approve and the web UI send both. The response never carries card material; this verb never touches a card at all.',
+      'The owner approves one purchase in advance, out of band from the conversation that will run it: the merchant\'s registrable domain, the item, and the most it may cost. Optional unless payments.confirmEveryPurchase is on. The amount is read in the budget currency, payments.currency ("25" and "25.00" are the same amount), and an amount no purchase could match is refused before anything is recorded. Mints a persisted, single-use approval bound to those fields and that currency (returned as currency), expiring in five minutes; a begin after payments.currency changed is a different purchase and does not spend it; a matching payments.checkout.begin spends it, and it answers that purchase\'s approval window for a total up to its amount. Requires confirm: true and the explicit-user-request context, the same confirmation gate every destructive verb on this daemon uses; /payments approve and the web UI send both. The response never carries card material; this verb never touches a card at all.',
     category: 'payments',
     effects: ['purchase.approve'],
     http: { method: 'POST', path: '/api/payments/checkout/approve' },
@@ -162,8 +162,9 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
       merchantDomain: STRING_SCHEMA,
       item: STRING_SCHEMA,
       amount: STRING_SCHEMA,
+      currency: STRING_SCHEMA,
       expiresAt: STRING_SCHEMA,
-    }, ['approved', 'action', 'merchantDomain', 'item', 'amount', 'expiresAt']),
+    }, ['approved', 'action', 'merchantDomain', 'item', 'amount', 'currency', 'expiresAt']),
   }),
   methodDescriptor({
     id: 'payments.standing.list',

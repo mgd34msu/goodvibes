@@ -11,6 +11,7 @@ import { sameKnowledgeRecord, captureKnowledgeStoreInput, copyKnowledgeRepresent
 import { JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { validateCurrentKnowledgeSchema, validateKnowledgeSchemaV12, validateKnowledgeSchemaV13, validateKnowledgeSchemaV14, validateKnowledgeSchemaV15, validateKnowledgeSchemaV16 } from './store-current-schema-validation.js';
 import { createKnowledgeNodeContentRevisions } from './store-node-content-revisions.js';
+import { KNOWLEDGE_SCHEMA_FORMAT } from './store-schema-version.js';
 import { rewriteKnowledgeTextClocks } from './store-integer-clocks.js';
 import { createKnowledgeNodeActivationCache } from './store-node-activation-cache.js';
 import { createGeneratedProjectionIdentityIndex } from './store-generated-projection-selector.js';
@@ -344,7 +345,7 @@ export class KnowledgeStore {
       if (record.metadata.homeGraphIdentityVersion === 1) assertKnowledgeWriteCurrent(() => declareNativeData?.('homegraph-object-identities-v1'));
     };
     this.declareSemanticSourceFormat = declareNativeData ? () => declareNativeData('knowledge-semantic-source-revisions-v2') : undefined;
-    this.sqlite = new SQLiteStore(this.dbPath, { beforePersist: () => declareNativeData?.('knowledge-schema-v17'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
+    this.sqlite = new SQLiteStore(this.dbPath, { beforePersist: () => declareNativeData?.(KNOWLEDGE_SCHEMA_FORMAT), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
     nativeArtifactReferenceStores.set(this, Object.freeze({ sqlite: this.sqlite, path: this.dbPath, nodes: this.nodes, closed: () => this.closed }));
     homeGraphSnapshotGroupWriters.set(this,
       (original: KnowledgeNodeRecord, groups: readonly string[], assertCurrent: () => void) => this.#updateHomeGraphSnapshotGroups(original, groups, assertCurrent));

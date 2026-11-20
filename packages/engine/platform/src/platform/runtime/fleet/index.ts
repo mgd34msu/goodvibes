@@ -27,6 +27,7 @@ export type {
   ProcessRegistry,
   SteerOptions,
   SteerResult,
+  SteerStep,
 } from './types.js';
 export type { ProcessRegistryDeps, RegistryTimers } from './registry.js';
 export {

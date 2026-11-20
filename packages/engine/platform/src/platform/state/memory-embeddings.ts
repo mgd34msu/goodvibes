@@ -1,6 +1,7 @@
 import { ConfigManager, getConfiguredEmbeddingProviderId } from '../config/index.js';
 import { createBuiltinMemoryEmbeddingProviders } from './memory-embedding-http.js';
 import { MEMORY_VECTOR_DIMS } from './embedding-dims.js';
+import { embeddingSpaceOf, type EmbeddingSpace } from './embedding-space.js';
 
 export const DEFAULT_MEMORY_EMBEDDING_DIMS = MEMORY_VECTOR_DIMS;
 
@@ -54,6 +55,12 @@ export interface MemoryEmbeddingProvider {
   readonly dimensions: number;
   readonly deterministic?: boolean | undefined;
   readonly local?: boolean | undefined;
+  /**
+   * The model this provider embeds with now (a setting or environment value it
+   * reads when it embeds). Absent for a provider with one model: its id names
+   * the space. Two models of one provider make vectors that cannot be compared.
+   */
+  model?(): string;
   embedSync?(request: MemoryEmbeddingRequest): MemoryEmbeddingResult;
   embed?(request: MemoryEmbeddingRequest): Promise<MemoryEmbeddingResult>;
   status?(): MemoryEmbeddingProviderStatus | Promise<MemoryEmbeddingProviderStatus>;
@@ -184,6 +191,17 @@ export class MemoryEmbeddingProviderRegistry {
 
   getDefaultProviderOrNull(): MemoryEmbeddingProvider | null {
     return this.providers.get(this.getDefaultProviderId()) ?? null;
+  }
+
+  /**
+   * The space the active provider embeds in at `dimensions`: what a stored
+   * vector records and every search filters on. An unregistered provider id is
+   * its own space (nothing it could have embedded matches it).
+   */
+  currentSpace(dimensions: number): EmbeddingSpace {
+    const id = this.getDefaultProviderId();
+    const provider = this.providers.get(id);
+    return embeddingSpaceOf({ id, model: provider?.model?.() ?? id, dimensions });
   }
 
   getDefaultProvider(): MemoryEmbeddingProvider {

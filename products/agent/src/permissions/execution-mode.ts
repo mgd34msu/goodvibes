@@ -1,7 +1,7 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { effectivePermissionMode, isGatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import { effectivePermissionMode, gatePresetLabel, isGatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import type { GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate';
-import { describePermissionModeInForce, type PermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { describePermissionModeInForce, type ModeInForceWords, type PermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 /** Borrow the active conversation's owner; no second configuration store. */
 export interface ActiveExecutionMode {
@@ -45,6 +45,25 @@ export function readExecutionModeInForce(config: Pick<ConfigManager, 'get'>): Pe
     return difference ? { chosen: difference.chosen, mode, reason: difference.reason } : { chosen: mode, mode };
   }
   return describePermissionModeInForce(config);
+}
+
+/**
+ * The status bar's mode words: this process's ModeInForceWords (`local`,
+ * kept current by session-permission-mode.ts), or, for a hosted session, the
+ * host's mode in force and the mode chosen there. One memory read.
+ */
+export function describeExecutionModeWords(
+  config: Pick<ConfigManager, 'get'>,
+  local: () => ModeInForceWords,
+): Pick<ModeInForceWords, 'chosen' | 'inForce' | 'because'> {
+  if (!hasActiveExecutionMode(config)) return local();
+  const inForce = readExecutionModeInForce(config);
+  if (inForce === undefined) return { chosen: 'not reported yet' };
+  if (inForce.mode === inForce.chosen) return { chosen: gatePresetLabel(inForce.mode) };
+  return {
+    chosen: gatePresetLabel(inForce.chosen),
+    inForce: inForce.mode === 'ask-me' ? 'asking you for now' : `${gatePresetLabel(inForce.mode)} for now`,
+  };
 }
 
 export async function refreshExecutionMode(config: object): Promise<void> {

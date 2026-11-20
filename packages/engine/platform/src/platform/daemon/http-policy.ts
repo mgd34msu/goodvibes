@@ -18,6 +18,7 @@ export {
   actorFromPrincipal,
   actorHoldsScope,
   agentActor,
+  localOwnerActor,
   systemActor,
   principalHasScope,
   resolveAuthenticatedPrincipal,

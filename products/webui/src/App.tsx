@@ -26,7 +26,7 @@ import { RelayOverflowBanner } from './components/status/RelayOverflowBanner';
 import { WakeBanner } from './components/voice/WakeBanner';
 import { useWakeHost } from './lib/voice/useWake';
 import { DaemonReceipts } from './components/status/DaemonReceipts';
-import { clearStoredAuthToken, getCurrentAuth, hasStoredTokenSync, client as platformClient } from './lib/goodvibes';
+import { forgetUnendedSignIn, getCurrentAuth, hasStoredTokenSync, retryDaemonSignOut, signOut, client as platformClient } from './lib/goodvibes';
 import { queryKeys } from './lib/queries';
 import { ChatView } from './views/ChatView';
 import { WorkView } from './views/work/WorkView';
@@ -56,7 +56,7 @@ import {
   selectRemovedSessionIds,
   selectVisibleSessions,
 } from './lib/companion-sessions-state';
-import { formatError, isDaemonUnreachableError, isMethodUnavailableError, isSessionNotFoundError } from './lib/errors';
+import { formatError, isDaemonUnreachableError, isMethodUnavailableError, isServerFaultError, isSessionNotFoundError } from './lib/errors';
 
 /** Read the auth status two minutes before a session's reported end; false for a credential with no end. */
 function sessionEndRereadDelay(snapshot: unknown): number | false {
@@ -102,7 +102,8 @@ export default function App() {
     // is NOT an unreachable error, so this does not busy-poll the sign-in front door.
     // Signed in with a session that ends: read again shortly before that end, so the end the
     // daemon has moved forward while the app was used replaces the stored one (getCurrentAuth).
-    refetchInterval: (query) => (isDaemonUnreachableError(query.state.error) ? 5_000 : sessionEndRereadDelay(query.state.data)),
+    refetchInterval: (query) => (isDaemonUnreachableError(query.state.error) || isServerFaultError(query.state.error)
+      ? 5_000 : sessionEndRereadDelay(query.state.data)),
     refetchIntervalInBackground: true,
   });
   // D-WEBUI-3: auth.current only re-probes once it has ALREADY errored (see
@@ -490,13 +491,32 @@ export default function App() {
   const handleSearch = useCallback(() => {
     getCommands().find((command) => command.id === 'system.palette')?.run();
   }, []);
-  const handleSignOut = useCallback(() => {
+  // A sign-out whose daemon session could not be ended: signed out here, and the reason, with a retry.
+  const [signOutProblem, setSignOutProblem] = useState<{ readonly error: string; readonly retrying: boolean } | null>(null);
+  const finishSignOut = useCallback(() => {
     // A relay pairing routes this browser's requests to one daemon; signing out must not leave it behind.
-    void clearStoredAuthToken().then(() => {
-      unpairRelay();
+    // It goes once the daemon session is ended (or given up on): the retry may need the relay route.
+    unpairRelay();
+    setSignOutProblem(null);
+  }, []);
+  const handleSignOut = useCallback(() => {
+    void signOut().then((outcome) => {
+      if (outcome.endedOnDaemon) finishSignOut();
+      else setSignOutProblem({ error: outcome.error ?? 'no answer', retrying: false });
       return queryClient.invalidateQueries();
     });
-  }, [queryClient]);
+  }, [queryClient, finishSignOut]);
+  const handleRetrySignOut = useCallback(() => {
+    setSignOutProblem((current) => current && { ...current, retrying: true });
+    void retryDaemonSignOut().then((outcome) => {
+      if (outcome.endedOnDaemon) finishSignOut();
+      else setSignOutProblem({ error: outcome.error ?? 'no answer', retrying: false });
+    });
+  }, [finishSignOut]);
+  const handleDismissSignOut = useCallback(() => {
+    forgetUnendedSignIn();
+    finishSignOut();
+  }, [finishSignOut]);
 
   // Honest login gate. Signed-out (auth.current 401 → query error) shows the front door
   // instead of the shell. On first load with a stored token, show a neutral splash while
@@ -508,7 +528,11 @@ export default function App() {
   // this classification must win over everything else below, including a health-poll
   // outage that happens to be in flight at the same moment: a bad token always routes
   // to sign-in, never the unreachable overlay.
-  const authIsUnauthorized = auth.isError && !isDaemonUnreachableError(auth.error);
+  // The read of who is signed in is one of three answers: a principal, absent
+  // (the daemon said this token is not signed in), or failed (no answer: the
+  // network, status 0, or a server fault). Only absent signs out.
+  const authReadFailed = auth.isError && (isDaemonUnreachableError(auth.error) || isServerFaultError(auth.error));
+  const authIsUnauthorized = auth.isError && !authReadFailed;
   // D-WEBUI-3: the daemon is "unreachable" either because auth.current itself just
   // failed with a network error, OR because health has declared the connection 'down'
   // (the event stream dropped and the probes since have failed), the latter is what catches
@@ -520,7 +544,7 @@ export default function App() {
   // health poll's next successful 15s cycle.
   const healthUnreachable = health.connection === 'down';
   const daemonUnreachable = !authIsUnauthorized
-    && ((auth.isError && isDaemonUnreachableError(auth.error)) || healthUnreachable)
+    && (authReadFailed || healthUnreachable)
     && hasToken;
   // D-WEBUI-2: no stored token means signed-out, full stop, this must NOT wait on
   // auth.current's pending/cached state. Gating this on `authPending` let a stale
@@ -558,6 +582,16 @@ export default function App() {
     return (
       <AppShell view={view} onNavigate={handleNavigate} onOpenSettings={openSettings}>
         {relayOffer}
+        {signOutProblem !== null && (
+          <div className="banner warning" role="alert">
+            Signed out here; the daemon session could not be ended: {signOutProblem.error}. Until it is,
+            the old sign-in still works wherever it was copied.{' '}
+            <Button variant="secondary" size="sm" onClick={handleRetrySignOut} disabled={signOutProblem.retrying}>
+              {signOutProblem.retrying ? 'Trying…' : 'Try again'}
+            </Button>{' '}
+            <Button variant="ghost" size="sm" onClick={handleDismissSignOut}>Leave it</Button>
+          </div>
+        )}
         <SignedOutGate
           pairingError={pairing.status === 'error' ? pairing.error : undefined}
           relayPairingError={relayPairing.status === 'error' ? relayPairing.error : undefined}
@@ -606,6 +640,7 @@ export default function App() {
       <div className="daemon-gate-overlay">
         <DaemonUnreachableGate
           detail={formatError(auth.error)}
+          serverFault={auth.isError && isServerFaultError(auth.error)}
           retrying={auth.isFetching}
           // The health poll can still say 'down' for up to a probe interval after the daemon
           // is back; Retry re-runs those probes now so the overlay does not outlive recovery.

@@ -30,9 +30,12 @@ import { restoreTurnAnchors } from '@goodvibes-jev/engine/platform/platform/rewi
 import { restoreWorkTreeFolds } from './work-tree-wiring.js';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
+  claimSessionHere,
+  closeSessionHere,
   findSessionCrashSnapshot,
   isSessionOpenElsewhere,
   moveSessionHere,
+  takeSessionOverHere,
   type SessionCrashSnapshot,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { crashSnapshotHandlerFor, type CrashSnapshotHandler, type CrashSnapshotHandling } from './session-crash-offer.js';
@@ -456,12 +459,21 @@ export async function loadSavedSessionIntoLive(
     throw new Error('A turn is still running. Stop it with Esc or let it finish, then load the session.');
   }
   const surface = deps.surface;
-  // Two terminals saving one session overwrite each other's turns; one stat and one lock attempt per load.
-  if (surface && !options.force && isSessionOpenElsewhere(surface, name)) {
-    throw new Error(
-      `Session ${name} is open in another running terminal: loading it here would fork its live state. `
-        + `Close it there, or run \`/session resume ${name} --force\` to take it over anyway.`,
-    );
+  const openElsewhere = (): Error => new Error(
+    `Session ${name} is open in another running terminal: loading it here would fork its live state. `
+      + `Close it there, or run \`/session resume ${name} --force\` to take it over anyway.`,
+  );
+  // Two terminals saving one session overwrite each other's turns. The quick probe refuses without waiting; the
+  // claim then takes the session's lock before anything is installed, so two terminals loading it at once cannot
+  // both get it (the probe alone left the load window open). A forced load takes it over instead.
+  let claimed = false;
+  if (surface && name !== deps.runtime.sessionId) {
+    if (options.force) takeSessionOverHere(surface, name);
+    else {
+      if (isSessionOpenElsewhere(surface, name)) throw openElsewhere();
+      if (!(await claimSessionHere(surface, name))) throw openElsewhere();
+      claimed = true;
+    }
   }
   let outcome: SessionResumeOutcome;
   try {
@@ -476,6 +488,8 @@ export async function loadSavedSessionIntoLive(
       agents: deps.agents,
     });
   } catch (error) {
+    // The load did not happen: the claim taken for it is given back (the live session keeps its own).
+    if (surface && (claimed || options.force) && deps.runtime.sessionId !== name) closeSessionHere(surface, name);
     deps.recoveryFailed?.(name, error);
     throw error;
   }

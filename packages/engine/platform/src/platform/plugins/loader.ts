@@ -17,6 +17,8 @@ import { PluginInFlightTracker } from './in-flight.js';
 import { PLUGIN_NAME_PATTERN, resolvePluginGrant } from '../runtime/plugins/manifest.js';
 import type { PluginTrustTier } from '../runtime/plugins/trust.js';
 import { readInstalledBundleGuard } from '../runtime/ecosystem/installed-bundle-guard.js';
+import { contentDigest } from '../utils/target-ref.js';
+import { sha256Base64Url } from '../utils/sha256.js';
 
 export interface PluginPathOptions {
   readonly cwd: string;
@@ -211,7 +213,21 @@ export interface PluginLoaderDeps {
    * The plugin's current trust tier, read at each start. PluginManager.init
    * supplies its trust store; without one every plugin starts `untrusted`.
    */
-  trustTier?: ((pluginName: string) => PluginTrustTier) | undefined;
+  trustTier?: ((pluginName: string, copy: DiscoveredPlugin) => PluginTrustTier) | undefined;
+}
+
+/**
+ * The content of one copy of a plugin, as trust is bound to it: the digest of
+ * its manifest and of its entry file's bytes. Null when the entry cannot be
+ * read (that copy then has no trust to apply). One read per start or trust change.
+ */
+export function pluginContentDigest(discovered: DiscoveredPlugin): string | null {
+  const entryPath = resolve(join(discovered.pluginDir, discovered.manifest.main ?? 'index.js'));
+  try {
+    return contentDigest({ manifest: discovered.manifest, entry: sha256Base64Url(readFileSync(entryPath)) });
+  } catch {
+    return null;
+  }
 }
 
 /** Cleanup failures remain observable to an awaited lifetime owner. */
@@ -274,7 +290,8 @@ export async function loadPlugin(
   }
 
   // The tier is read at every start, so a change of trust applies at the next one.
-  const tier = deps.trustTier?.(manifest.name) ?? 'untrusted';
+  // The tier given to THIS copy (its directory and content): another same-named copy, or this one changed, is untrusted.
+  const tier = deps.trustTier?.(manifest.name, discovered) ?? 'untrusted';
   const grant = resolvePluginGrant(manifest.name, manifest, tier);
   if (grant.withheldHighRisk.length > 0) {
     // Code in this process cannot be held to a capability it was refused, so a

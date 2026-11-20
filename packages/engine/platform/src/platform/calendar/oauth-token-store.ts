@@ -40,9 +40,6 @@ const DEFAULT_REFRESH_LEEWAY_MS = 60_000;
 function tokenKey(provider: CalendarProviderId): string {
   return daemonSecretKeyFor(`calendar.${provider}.tokens`);
 }
-function accountKey(provider: CalendarProviderId): string {
-  return daemonSecretKeyFor(`calendar.${provider}.account`);
-}
 function statusKey(provider: CalendarProviderId): string {
   return daemonSecretKeyFor(`calendar.${provider}.status`);
 }
@@ -99,34 +96,41 @@ export class CalendarTokenStore {
     this.leewayMs = options.refreshLeewayMs ?? DEFAULT_REFRESH_LEEWAY_MS;
   }
 
-  /** Persist a fresh token set + account metadata; clears any reconnect marker. */
+  /**
+   * Persist a fresh token set + account metadata; clears any reconnect marker.
+   * The account is kept inside the token record, so one write publishes both:
+   * a failed write leaves the earlier connection whole (its token with its own
+   * account), never new account details beside an old credential or an account
+   * listed with no token.
+   */
   async save(provider: CalendarProviderId, tokens: StoredTokenSet, account: ConnectedAccount): Promise<void> {
-    // Account first: tokens with no account would be an account nobody lists.
-    await this.secrets.set(accountKey(provider), JSON.stringify(account));
-    await this.secrets.set(tokenKey(provider), JSON.stringify(tokens));
+    await this.secrets.set(tokenKey(provider), JSON.stringify({ ...tokens, account } satisfies StoredConnection));
     await this.secrets.delete(statusKey(provider));
+  }
+
+  /** The stored token record (token set and its account), or null when there is none or it cannot be read. */
+  private async loadConnection(provider: CalendarProviderId): Promise<StoredConnection | null> {
+    const raw = await this.secrets.get(tokenKey(provider));
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as StoredConnection;
+      return parsed && typeof parsed === 'object' && typeof parsed.accessToken === 'string' ? parsed : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Read the stored token set for a provider, or null when disconnected. */
   async load(provider: CalendarProviderId): Promise<StoredTokenSet | null> {
-    const raw = await this.secrets.get(tokenKey(provider));
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw) as StoredTokenSet;
-    } catch {
-      return null;
-    }
+    const connection = await this.loadConnection(provider);
+    if (!connection) return null;
+    const { account: _account, ...tokens } = connection;
+    return tokens;
   }
 
-  /** Read the account metadata for a provider, or null. */
+  /** Read the account metadata for a provider, or null: only an account whose token record reads is connected. */
   async loadAccount(provider: CalendarProviderId): Promise<ConnectedAccount | null> {
-    const raw = await this.secrets.get(accountKey(provider));
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw) as ConnectedAccount;
-    } catch {
-      return null;
-    }
+    return (await this.loadConnection(provider))?.account ?? null;
   }
 
   /** List every connected account across providers. */
@@ -207,10 +211,8 @@ export class CalendarTokenStore {
     }
     // The rotated token set goes first: it is the only copy of a refresh token
     // the provider has already invalidated the old one for.
-    await this.secrets.set(tokenKey(provider), JSON.stringify(refreshed));
-    if (!(await this.loadAccount(provider))) {
-      await this.secrets.set(accountKey(provider), JSON.stringify(this.syntheticAccount(provider, refreshed)));
-    }
+    const account = (await this.loadAccount(provider)) ?? this.syntheticAccount(provider, refreshed);
+    await this.secrets.set(tokenKey(provider), JSON.stringify({ ...refreshed, account } satisfies StoredConnection));
     await this.secrets.delete(statusKey(provider));
     return refreshed.accessToken;
   }
@@ -233,7 +235,6 @@ export class CalendarTokenStore {
       revokedRemotely = await revokeToken(config, fetchImpl, tokens.refreshToken ?? tokens.accessToken);
     }
     await this.secrets.delete(tokenKey(provider));
-    await this.secrets.delete(accountKey(provider));
     await this.secrets.delete(statusKey(provider));
     return { revokedRemotely };
   }
@@ -265,4 +266,9 @@ export class CalendarTokenStore {
       connectedAt: tokens.obtainedAt,
     };
   }
+}
+
+/** The one record a connection is kept in: its token set and the account it belongs to, written together. */
+interface StoredConnection extends StoredTokenSet {
+  readonly account?: ConnectedAccount | undefined;
 }

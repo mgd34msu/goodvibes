@@ -68,6 +68,13 @@ export const SECRET_BEARING_CONFIG_PATHS: readonly string[] = [
   'surfaces.slack.appToken',
   'surfaces.discord.botToken',
   'surfaces.ntfy.token',
+  // On a public ntfy server a topic name is all a stranger needs to post work
+  // into it or read the replies: each topic is a credential, stored as a
+  // reference and shown masked.
+  'surfaces.ntfy.topic',
+  'surfaces.ntfy.chatTopic',
+  'surfaces.ntfy.agentTopic',
+  'surfaces.ntfy.remoteTopic',
   'surfaces.telegram.botToken',
   'surfaces.telegram.webhookSecret',
   'surfaces.googleChat.verificationToken',

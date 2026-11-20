@@ -752,8 +752,9 @@ export class ContractStore {
       return;
     }
     if (tracker.layout === 'single-file') tracker = this.moveSingleFile(id, writer.dir, tracker);
-    // Once per hold, before this save can write a side file of its own.
-    if (!writer.cleared) { this.clearDirectory(writer.dir, tracker); writer.cleared = true; }
+    // Once per hold, before this save can write a temp file of its own: a dead writer's temp files go.
+    // Side files are not touched here: older log lines may still name them (see compact).
+    if (!writer.cleared) { this.clearDirectory(writer.dir, tracker, false); writer.cleared = true; }
     const durable = contract.durableAdmission !== undefined;
     const at = this.now();
     const change = tracker.diff(contract, at, (field, text) => writeCheckpointSideFile(writer.dir, field, text));
@@ -838,8 +839,9 @@ export class ContractStore {
       throw new ContractCheckpointStaleError(id);
     }
     // Not read or written by this store yet: what is on disk now, read under the lock.
+    // A refused checkpoint was quarantined by the read, so nothing is at the path: the first save writes it new.
     const stored = this.loadAvailable(id);
-    const tracker = stored === null ? ContractProgressTracker.of(contract, 'none') : this.loadedTrackers.get(stored);
+    const tracker = stored.kind !== 'present' ? ContractProgressTracker.of(contract, 'none') : this.loadedTrackers.get(stored.value);
     if (tracker === undefined) throw new Error('The stored checkpoint could not be read back for comparison');
     this.trackers.set(id, tracker);
     this.trackedCopies.add(contract);
@@ -959,14 +961,20 @@ export class ContractStore {
     return writer.log;
   }
 
-  /** Under the lock no other writer is live: any temp file here is a dead writer's, and a side file the state does not name is unused. */
-  private clearDirectory(dir: string, tracker: ContractProgressTracker): void {
+  /**
+   * Under the lock no other writer is live: any temp file here is a dead
+   * writer's. With `sideFiles`, a side file the state does not name is unused
+   * and goes too; that is only true right after a compaction rewrote the log,
+   * because until then earlier lines of the log still name the files they
+   * replaced, and a replay reads every line.
+   */
+  private clearDirectory(dir: string, tracker: ContractProgressTracker, sideFiles: boolean): void {
     let names: string[];
     try { names = readdirSync(dir); } catch { return; }
     const referenced = tracker.referencedFiles(), unused: string[] = [];
     for (const name of names) {
       if (name.includes('.tmp-')) removeFile(join(dir, name));
-      else if (isCheckpointSideFileName(name) && !referenced.has(name)) unused.push(name);
+      else if (sideFiles && isCheckpointSideFileName(name) && !referenced.has(name)) unused.push(name);
     }
     if (unused.length === 0) return;
     // The lines that stopped naming these files must be on disk before the files go.
@@ -985,6 +993,8 @@ export class ContractStore {
     writeFileAtomic(path, `${line}\n`, { durable });
     tracker.commitSnapshot(change, Buffer.byteLength(line) + 1);
     tracker.log = logIdentityOf(path);
+    // The log is now one snapshot naming only the files the state holds: what no line names can go.
+    this.clearDirectory(writer.dir, tracker, true);
   }
 
   /** Keeps the ended summary in step with a contract just written: written when it ended, removed when it is running again. */

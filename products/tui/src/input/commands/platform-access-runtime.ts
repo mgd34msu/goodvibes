@@ -65,6 +65,29 @@ function sessionTokenKey(target: ServiceTarget, override: string | undefined): s
 }
 
 /**
+ * A listener session token as stored: with the origin that issued it, so it is
+ * only ever presented back to that origin.
+ */
+interface StoredListenerSession {
+  readonly origin: string;
+  readonly token: string;
+}
+
+function encodeListenerSession(origin: string, token: string): string {
+  return JSON.stringify({ origin, token } satisfies StoredListenerSession);
+}
+
+/** The stored listener session, or null when the value does not name the origin that issued it. */
+function decodeListenerSession(value: string): StoredListenerSession | null {
+  try {
+    const parsed = JSON.parse(value) as Partial<StoredListenerSession> | null;
+    return parsed && typeof parsed.origin === 'string' && typeof parsed.token === 'string' && parsed.token ? { origin: parsed.origin, token: parsed.token } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The service URL a password or session token may be sent to, or why not:
  * plain http carries them readable by anyone on the path, so it is accepted
  * only for this machine.
@@ -98,8 +121,17 @@ async function exchangeServiceLogin(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: input.username, password: input.password }),
+      // A redirect is never followed: the password goes only to the address typed.
+      redirect: 'manual',
       signal: AbortSignal.timeout(AUTH_LOGIN_TIMEOUT_MS),
     });
+    if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+      const location = response.headers.get('location');
+      let where = 'another address';
+      try { if (location) where = new URL(location, url).origin; } catch { /* an unreadable Location names nothing */ }
+      ctx.print(`Auth login refused: ${input.baseUrl.origin} answered with a redirect to ${where}, and the password is sent only to the address you typed. Sign in at that address directly if it is the ${input.target}. Nothing was stored.`);
+      return;
+    }
     if (!response.ok) {
       // The body is not echoed: a login endpoint may reflect the submitted credentials.
       ctx.print(`Auth login failed (HTTP ${response.status}). Check the base URL, username and password, then retry.`);
@@ -132,7 +164,8 @@ async function exchangeServiceLogin(
       ].join('\n'));
       return;
     }
-    await requireSecretsManager(ctx).set(input.secretKey, body.token);
+    // Stored with the origin that issued it: sign-out sends it back only there.
+    await requireSecretsManager(ctx).set(input.secretKey, encodeListenerSession(input.baseUrl.origin, body.token));
     ctx.print([
       `Signed in to the ${input.target} at ${input.baseUrl.origin} as ${input.username}; the session token is in secure storage as ${input.secretKey}.`,
       `  The session stays valid on the ${input.target} until it expires or you run /auth logout ${input.target} ${input.baseUrl.origin}${input.secretKey === sessionTokenKey(input.target, undefined) ? '' : ` ${input.secretKey}`}.`,
@@ -161,11 +194,26 @@ async function endServiceSession(
 ): Promise<void> {
   const secrets = requireSecretsManager(ctx);
   const homeDirectory = requireShellPaths(ctx).homeDirectory;
-  // A daemon session is held per address.
-  const token = input.target === 'daemon' ? readDaemonSessionToken(homeDirectory, input.baseUrl.origin) : await secrets.get(input.secretKey);
-  if (!token) {
+  // A daemon session is held per address; a listener session names the origin that issued it.
+  const stored = input.target === 'daemon' ? readDaemonSessionToken(homeDirectory, input.baseUrl.origin) : await secrets.get(input.secretKey);
+  if (!stored) {
     ctx.print(`No ${input.target} session is held for ${input.baseUrl.origin}; nothing to sign out of. /auth login ${input.target} <baseUrl> <username> signs in.`);
     return;
+  }
+  let token = stored;
+  if (input.target === 'listener') {
+    const session = decodeListenerSession(stored);
+    if (!session) {
+      // It does not say which listener issued it, so it is sent nowhere.
+      await secrets.delete(input.secretKey);
+      ctx.print(`Removed the stored listener token ${input.secretKey} from this terminal without contacting ${input.baseUrl.origin}: it does not name the listener that issued it, so it is never sent anywhere. That session lapses at its expiry.`);
+      return;
+    }
+    if (session.origin !== input.baseUrl.origin) {
+      ctx.print(`The listener session stored as ${input.secretKey} was issued by ${session.origin}; it is never sent to ${input.baseUrl.origin}. Nothing was sent or removed. /auth logout listener ${session.origin}${input.secretKey === sessionTokenKey('listener', undefined) ? '' : ` ${input.secretKey}`} signs out there.`);
+      return;
+    }
+    token = session.token;
   }
   let revoked: string;
   try {
@@ -173,6 +221,8 @@ async function endServiceSession(
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: '{}',
+      // The token is sent to its issuing origin only, never on to a redirect target.
+      redirect: 'manual',
       signal: AbortSignal.timeout(AUTH_LOGIN_TIMEOUT_MS),
     });
     revoked = response.ok

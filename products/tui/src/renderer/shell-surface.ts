@@ -4,7 +4,7 @@ import '@goodvibes-jev/engine/platform/platform/providers';
 import { UIFactory } from './ui-factory.ts';
 import { type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { activeTokens, activeUiTones } from './theme.ts';
-import { permissionModeLabel, permissionModeTone } from '../core/permission-mode.ts';
+import { permissionModeTone } from '../core/permission-mode.ts';
 import { SLEEP_DISABLED_CHIP } from '../core/power-status.ts';
 import './composer.ts';
 import { renderStatusLine, type StatusChip } from './status-line.ts';
@@ -67,15 +67,26 @@ export interface ShellFooterBuildOptions {
   readonly usage: { available?: boolean; up: number; down: number; cacheRead?: number; cacheWrite?: number; fleetCostUsd?: number | null; costUsd?: number | undefined };
   readonly showExitNotice: boolean;
   readonly lastCopyTime: number;
-  /** The model the session cost is priced against; not drawn (the header names the model). */
+  /** The model the session cost is priced against. */
   readonly model?: string;
-  readonly workingDir?: string;
-  /** The home directory, drawn as ~ at the start of the working directory. */
-  readonly homeDirectory?: string;
   /** An agent or process view is showing (session-focus.ts). */
   readonly view?: ShellFooterView | null;
-  /** The current branch (and dirty marker), shown beside the directory at rest. */
+  /** The current branch: the status bar's `branch …` segment; absent outside a repository. */
   readonly branch?: string;
+  /** The serving model's display name: the status bar's `model …` segment. */
+  readonly modelLabel?: string;
+  /** The working tree differs from HEAD: `branch main, changed`. */
+  readonly branchChanged?: boolean;
+  /** The mode in force in words (ModeInForceWords): the status bar's `Asks:` segment. */
+  readonly modeWords?: { readonly chosen: string; readonly inForce?: string; readonly because?: string } | null;
+  /** The key that changes the mode, as bound ("shift+tab"). */
+  readonly modeKey?: string;
+  /** The mode just changed: the `Asks:` segment flashes. */
+  readonly modeFlash?: boolean;
+  /** Notices not yet seen in the notifications view: `2 notices`; none at zero. */
+  readonly unreadNotices?: number;
+  /** The key that opens the notifications, as bound ("ctrl+n"). */
+  readonly noticesKey?: string;
   /** The model's context window; null when it is unknown (the meter says "unknown"). */
   readonly contextWindow?: number | null;
   readonly compactThreshold?: number;
@@ -89,10 +100,7 @@ export interface ShellFooterBuildOptions {
   readonly runningAgentProgress?: string;
   readonly composerFlags?: readonly string[];
   readonly composerPendingRisk?: 'none' | 'approval-wait' | 'shell' | 'command' | 'remote';
-  /**
-   * Current execution mode. Named by the status line's mode chip
-   * and colors the composer's bar. Cycled by Shift+Tab and toggled by /plan.
-   */
+  /** The execution mode in force: colors the composer's bar. Cycled by Shift+Tab and toggled by /plan. */
   readonly permissionMode?: string;
   /** Passive context pressure hint from buildContextStatusHint, a row above the composer. */
   readonly contextStatusHint?: string | null;
@@ -159,27 +167,6 @@ function composerBarColor(permissionMode: string | undefined, shell: boolean): s
   return tone === 'info' ? t.info : tone === 'caution' ? t.warning : t.brand;
 }
 
-/**
- * The status line's mode chip: the approval mode (muted; plan in the info
- * color), or "! YOLO" in the error color while everything is
- * auto-approved. While the warning shows, only plan keeps its name beside it
- * (a read-only posture still worth knowing); another execution label next to it
- * would only repeat or contradict it.
- */
-function modeChips(permissionMode: string | undefined, dangerMode: boolean): StatusChip[] {
-  const t = activeTokens();
-  const chips: StatusChip[] = [];
-  if (!dangerMode || permissionMode === 'plan') {
-    chips.push({
-      text: permissionModeLabel(permissionMode),
-      fg: permissionMode === 'plan' ? t.info : t.textMuted,
-      bold: permissionMode === 'plan',
-      keep: true,
-    });
-  }
-  if (dangerMode) chips.push({ text: '! YOLO', fg: t.error, bold: true, keep: true });
-  return chips;
-}
 
 /** The chips no view hides: auto-approve, the live microphone, sleep disabled. */
 
@@ -213,7 +200,6 @@ export const { buildShellFooter, estimateShellFooterHeight } = createShellFooter
     return above;
   },
   barColor: (options) => composerBarColor(options.permissionMode, options.composerPendingRisk === 'shell'),
-  modeChips: (options) => modeChips(options.permissionMode, options.dangerMode === true),
   powerNote: (options) => (options.powerKeepAwake ? SLEEP_DISABLED_CHIP : undefined),
   compactFraction: (value) => (value && value > 0 ? value : 0.85),
   flags(options) {

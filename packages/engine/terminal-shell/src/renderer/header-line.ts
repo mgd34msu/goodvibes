@@ -4,19 +4,18 @@
  *   col 1   GoodVibes, bold, in the theme's brand -> brandEnd gradient
  *           (the theme's gradient, never the protected splash constant)
  *   then    the version (faint) and the session title (muted)
- *   right   the branch with a warning-colored dirty dot (ahead/behind counts
- *           muted), 3 columns, then the serving model ending at width-2,
- *           followed by the failover marker in the warning color while the
- *           serving backend is not the configured one
+ *   right   only while the serving backend is not the configured one: the
+ *           serving model and the failover marker in the warning color,
+ *           ending at width-2
  *
  * No rule row under it; on the main screen one empty row (withHeaderGap)
- * keeps the output off it. The header is the one place for session identity:
- * title, branch, model. Inside an agent or process view the title gives way
- * to the breadcrumb (main › engineer, the last name in its own color) and the
- * right side names that session: the agent's model, or the process's pid,
- * uptime and port. On a narrow row the marker falls back to its short
- * form, then is dropped whole (a half-cut marker reads worse than none); the
- * branch goes before the marker does, the title before either.
+ * keeps the output off it. The branch and the model are on the status bar,
+ * labelled (`branch main, changed`, `model rt-1`). Inside an agent or process
+ * view the title gives way to the breadcrumb (main › engineer, the last name
+ * in its own color) and the right side names that session: the agent's
+ * model, or the process's pid, uptime and port. On a narrow row the marker
+ * falls back to its short form, then is dropped whole (a half-cut marker
+ * reads worse than none); the title goes before it.
  */
 import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
 import { getDisplayWidth, interpolateColor, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -71,29 +70,19 @@ function put(line: Line, x: number, endX: number, seg: Seg): number {
     }
     return cx;
 }
-function branchSegments(gitInfo: GitHeaderInfo): Seg[] {
-    const t = activeTokens();
-    const segs: Seg[] = [{ text: gitInfo.branch, fg: t.textMuted }];
-    if (gitInfo.ahead > 0)
-        segs.push({ text: ` +${gitInfo.ahead}`, fg: t.textMuted });
-    if (gitInfo.behind > 0)
-        segs.push({ text: ` -${gitInfo.behind}`, fg: t.textMuted });
-    if (gitInfo.dirty)
-        segs.push({ text: ' ●', fg: t.warning });
-    return segs;
-}
 /**
  * Render the header row.
  *
  * @param width   - Terminal columns.
- * @param model   - Serving model id (core/active-model-identity.ts).
+ * @param model   - Serving model id (core/active-model-identity.ts), drawn
+ *                  only beside the failover marker.
  * @param title   - Optional session title, truncated to fit.
- * @param gitInfo - Optional branch/dirty/ahead-behind.
+ * @param _gitInfo - The branch is the status bar's (`branch main, changed`).
  * @param version - Defaults to the live build VERSION; tests pin a fixture.
  * @param modelNote - The failover marker (core/active-model-identity.ts), set
  *                    only while serving differs from the configured model.
  */
-function renderHeaderLine(presentation: HeaderPresentation, width: number, model: string, title?: string | undefined, gitInfo?: GitHeaderInfo | undefined, version: string = presentation.defaultVersion, modelNote?: string | undefined, view?: HeaderView | undefined): Line[] {
+function renderHeaderLine(presentation: HeaderPresentation, width: number, model: string, title?: string | undefined, _gitInfo?: GitHeaderInfo | undefined, version: string = presentation.defaultVersion, modelNote?: string | undefined, view?: HeaderView | undefined): Line[] {
     const BRAND = presentation.brand;
     version = (presentation.versionPrefix ?? '') + version;
     const t = activeTokens();
@@ -116,14 +105,11 @@ function renderHeaderLine(presentation: HeaderPresentation, width: number, model
         else if (fits(baseW + getDisplayWidth(short)))
             note = short;
     }
-    if (presentation.truncateModel && !fits(getDisplayWidth(model)))
-        model = truncateDisplay(model, Math.max(0, end - leftMin - GAP));
-    const modelW = getDisplayWidth(model) + getDisplayWidth(note);
-    const branch = gitInfo ? branchSegments(gitInfo) : [];
-    const branchW = branch.reduce((s, seg) => s + getDisplayWidth(seg.text), 0);
-    const showBranch = branchW > 0 && fits(branchW + GAP + modelW);
-    const rightW = modelW + (showBranch ? branchW + GAP : 0);
-    const rightX = Math.max(leftMin + GAP, end - rightW);
+    // The model is the status bar's; the header names it only with the failover marker.
+    if (note && presentation.truncateModel && !fits(getDisplayWidth(model) + getDisplayWidth(note)))
+        model = truncateDisplay(model, Math.max(0, end - leftMin - GAP - getDisplayWidth(note)));
+    const rightW = note ? getDisplayWidth(model) + getDisplayWidth(note) : 0;
+    const rightX = note ? Math.max(leftMin + GAP, end - rightW) : end + GAP;
     // Brand, version, title.
     let x = BRAND_X;
     [...BRAND].forEach((ch, i) => {
@@ -135,15 +121,10 @@ function renderHeaderLine(presentation: HeaderPresentation, width: number, model
         if (room >= 4)
             put(line, x + 2, rightX - GAP, { text: truncateDisplay(title, room), fg: t.textMuted });
     }
-    let rx = rightX;
-    if (showBranch) {
-        for (const seg of branch)
-            rx = put(line, rx, end, seg);
-        rx += GAP;
-    }
-    rx = put(line, rx, end, { text: model, fg: t.text });
-    if (note)
+    if (note) {
+        const rx = put(line, rightX, end, { text: model, fg: t.text });
         put(line, rx, end, { text: note, fg: t.warning });
+    }
     return [line];
 }
 /** The header inside an agent or process view. */

@@ -7,7 +7,10 @@ export {
   mayEnterCardDetails,
   mayOfferCardEntryFlow,
   describeCardEntryRefusal,
+  describeCardTransportRefusal,
+  mayCrossWithCardDetails,
 } from './entry-policy.js';
+export type { CardEntryTransport } from './entry-policy.js';
 export { PAYMENTS_SYNTHETIC_CONFIG_KEYS } from '../config/payment-config-keys.js';
 export { minorUnitExponent } from './money-parsing.js';
 export { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentSecurityCodeAcceptance } from './window-view.js';

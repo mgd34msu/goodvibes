@@ -1,6 +1,9 @@
 import type { TriggerRecord } from '../../../triggers/types.js';
 import type { ProcessNode, ProcessState } from '../types.js';
 
+/** The check interval a condition trigger runs at when it names none (triggers/manager.ts, without a configured default). */
+const DEFAULT_CONDITION_CHECK_INTERVAL_MS = 60_000;
+
 /**
  * Trigger-family TriggerRecord → ProcessNode.
  *
@@ -53,14 +56,23 @@ export function adaptWatcherTrigger(record: TriggerRecord, now: number): Process
     || record.state === 'running'
     || record.state === 'firing'
     || record.state === 'backoff';
-  const kind = record.definition.spec.kind;
   const startedAt = record.definition.createdAt;
 
   return {
     id: record.definition.id,
     kind: 'trigger',
+    serves: 'you',
+    schedule: {
+      // A condition trigger checks on an interval (the manager's default when it names none); a stream or on-exit trigger waits for its event.
+      ...(record.definition.spec.kind === 'condition'
+        ? { cadence: { kind: 'every' as const, intervalMs: record.definition.spec.intervalMs ?? DEFAULT_CONDITION_CHECK_INTERVAL_MS } } : {}),
+      firedCount: record.firedCount,
+      ...(record.lastFiredAt !== undefined ? { lastFiredAt: record.lastFiredAt } : {}),
+      since: startedAt,
+    },
     parentId: undefined,
-    label: `${record.definition.label} (${kind})`,
+    // The trigger's own name; how it checks is the schedule facts' to say ("Checks every 30 min").
+    label: record.definition.label,
     state,
     startedAt,
     elapsedMs: alive ? Math.max(0, now - startedAt) : Math.max(0, record.updatedAt - startedAt),

@@ -7,7 +7,7 @@ import { client as platformClient } from '../lib/goodvibes';
 import { REASONING_EFFORT_SEVERITY } from '@goodvibes-jev/engine/platform/browser/reasoning-effort';
 import { asRecord, bestId, bestTitle, firstString } from '../lib/object';
 import { queryKeys } from '../lib/queries';
-import { useProviderModelOptions } from '../lib/use-provider-model-options';
+import { modelOptionsSourceOf, useProviderModelOptions } from '../lib/use-provider-model-options';
 import { providerOptionsFromResponse, reasoningOptionsForModel, sortProvidersConfiguredFirst } from '../lib/provider-models';
 import { deriveProviderStatus } from '../lib/provider-status';
 import { shouldSteerComposerKey, shouldSubmitComposerKey } from '../lib/composer-keys';
@@ -183,8 +183,7 @@ export function ChatView({
   );
   const selectedProvider = providerOptions.find((provider) => provider.id === selectedProviderId)?.value ?? providerOptions[0]?.value;
   const catalogProviders = useMemo(() => catalogProviderOptions.map(provider => provider.value), [catalogProviderOptions]);
-  const providerModels = useProviderModelOptions(selectedProvider, catalogProviders,
-    providers.isSuccess && modelCatalog.isSuccess && !providers.isFetching && !modelCatalog.isFetching);
+  const providerModels = useProviderModelOptions(selectedProvider, catalogProviders, modelOptionsSourceOf(providers, modelCatalog));
   const providerModelOptions = providerModels.models;
   // Existing chats retain their own route. A default-model change elsewhere
   // must not make this composer claim that its pinned session changed.

@@ -60,7 +60,7 @@ the top finds a section by name or by the setting inside it.
 | Voice | Voice | Dictation, spoken replies and the wake word |
 | Notifications | Notifications, Check-ins | Push notifications and install, occasion reminders, and the proactive check-in schedule and receipts |
 | Memory | Memory | Provenance chips, consolidation and the daemon's memory use |
-| Permissions | Permissions | Approval rules, the sandbox and tool policy |
+| Permissions | Permissions | The four permission modes as cards, each with what it does, and why the mode in force differs when it does; under Advanced, approval rules, MCP tool rules, the permission evaluator, the sandbox and tool policy |
 
 Settings read and write the daemon's own configuration through typed editors:
 secrets are masked and write-only, a refusal for lack of admin scope is
@@ -70,13 +70,14 @@ build has never heard of lands in Advanced instead of disappearing.
 
 ## Signing in and pairing
 
-The sign-in screen leads with scanning. Run `goodvibes pair` in the terminal
-(or open the desktop app's pairing panel) and either open the QR's link on the
-phone or scan it with the in-page camera scanner. A scanned token feeds the
-same validation path as a pasted one, and the one-time secret is stripped from
-the URL immediately so it never lingers in the address bar or history. Pasting
-an operator token by hand is the fallback; username/password login is offered
-as a de-emphasized tertiary path.
+The sign-in screen leads with scanning: "Run goodvibes pair on your computer
+and scan the code." Run `goodvibes pair` in the terminal (or open the desktop
+app's pairing panel) and either open the QR's link on the phone or press "Scan
+the code" for the in-page camera scanner. A scanned code feeds the same
+validation path as a pasted one, and the one-time secret is stripped from the
+URL immediately so it never lingers in the address bar or history. Everything
+else is under "Other ways to sign in": pasting a sign-in code by hand, the relay
+code, username and password, and where to find a code.
 
 A pairing link can also carry a hand-off bundle with up to three offers, so
 one scan can finish the whole device setup. Each offer is independently
@@ -359,10 +360,14 @@ not serve memory" state, never a blank panel that reads as empty.
 
 ### Knowledge
 
-Knowledge is the regular GoodVibes Knowledge/Wiki surface. It is for asking
-the knowledge base, searching it, viewing sources, nodes, issues and maps,
-rendering projections when the platform/daemon exposes them, and ingesting URLs or
-artifacts where supported.
+Knowledge is the regular GoodVibes Knowledge/Wiki surface. Browse shows what it
+knows by subject: the subjects (the store's topics) on the left, the facts filed
+under the chosen one on the right, each with "From <source> · <when>" (on a
+phone the facts open as their own page with Back). Below the subjects are the
+sources it read, and a Details disclosure holds the graph itself: nodes with
+their kinds and states, issues and wiki projections. It is also for asking the
+knowledge base, searching it, the map, rendering projections when the
+platform/daemon exposes them, and ingesting URLs or artifacts where supported.
 
 Home Assistant Home Graph is not part of this page. If Home Graph data appears
 in regular Knowledge results by default, that is an upstream scoping issue and

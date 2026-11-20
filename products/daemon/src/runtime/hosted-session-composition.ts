@@ -193,17 +193,16 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         // policy, admission and settings routing, as the Agent's own process does.
         workerSurface: hostedWorkerSurface,
       });
+      let stopLending = (): void => {};
       try {
         // The floor's own tolerant custom load must settle before cached names
         // can be copied or a hosted model can be selected. The shared floor
         // owner drains this async acquisition and refuses late shutdown leases.
         await floor.providerRegistry.ready();
-        // Copy the daemon registry's discovery snapshot into this floor. The
-        // explicit host preloads its home/surface cache before server admission;
-        // its owned background scan can later update that snapshot. Changes reach
-        // new floors only; existing floors do not watch the persisted cache.
-        const discovered = services.providerRegistry.listDiscoveredServers();
-        if (discovered.length > 0) floor.providerRegistry.registerDiscoveredProviders([...discovered]);
+        // The daemon registry lends this floor its discovered servers: what it
+        // holds now, and each later scan's result while the floor lives, so a
+        // model the daemon lists after this floor was built runs in it too.
+        stopLending = services.providerRegistry.lendDiscoveredServers(floor.providerRegistry);
         // Snapshots this workspace's tree after each of its sessions' turns, so
         // checkpoints.restore and sessions.changes.get work for a hosted session.
         // It outlives the floor: a finished session's changes stay reviewable.
@@ -215,12 +214,13 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
           contractRunner: floor.contractRunner,
           execPosture: hostedExecPosture,
           // Resolves once every owner the floor started has drained (its background processes included).
-          dispose: (): Promise<void> => floor.close(),
+          dispose: (): Promise<void> => { stopLending(); return floor.close(); },
         };
       } catch (error) {
         // Until publication, this factory owns its returned client graph. The
         // cause rides on the failure; the session engine logs it and refuses
         // the create with the workspace named.
+        stopLending();
         try { floor.dispose(); }
         catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Daemon hosted workspace provider preload and cleanup failed'); }
         throw new Error('Daemon hosted workspace provider preload failed', { cause: error });

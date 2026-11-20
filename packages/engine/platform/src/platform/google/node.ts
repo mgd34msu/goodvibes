@@ -27,7 +27,10 @@ import { GCLOUD_DEFAULT_TIMEOUT_MS } from './gcloud.js';
 import { runProcess } from '../utils/process-runner.js';
 import {
   classifyLoopbackRedirect,
+  renderLoopbackOutcomePage,
+  renderLoopbackPendingPage,
   type LoopbackCodeResult,
+  type LoopbackPageOutcome,
   type LoopbackListener,
   type StartLoopbackListenerOptions,
 } from './oauth-loopback.js';
@@ -91,6 +94,11 @@ export function createProcessCommandPort(): GoogleCommandPort {
  * anything here, so the `state` check that defends this flow is exercised by
  * tests that never bind a port.
  */
+/** Longest the tab that delivered the code waits for the exchange and save before it is told to return to the app. */
+const PAGE_ANSWER_WAIT_MS = 60_000;
+/** How long the answered page is given to be written before the port is released. */
+const PAGE_FLUSH_MS = 250;
+
 export function startLoopbackListener(options: StartLoopbackListenerOptions): LoopbackListener {
   const host = options.host ?? '127.0.0.1';
   let settled = false;
@@ -116,23 +124,39 @@ export function startLoopbackListener(options: StartLoopbackListenerOptions): Lo
     action();
   }
 
+  const html = (status: number, body: string): Response => new Response(body, {
+    status,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+  });
+  // The tab that delivered the code waits for the exchange and save: it is
+  // told "connected" only once the credential is stored.
+  let answerPage: ((outcome: LoopbackPageOutcome) => void) | undefined;
+  let answering: Promise<Response> | undefined;
   const server = Bun.serve({
     hostname: host,
     port: options.port ?? 0,
-    fetch(request: Request): Response {
+    fetch(request: Request): Response | Promise<Response> {
       const outcome = classifyLoopbackRedirect(request.url, options.expectedState);
       if (outcome.kind === 'error') {
         // A stray hit (a probe, a prefetch, another page) must not end a
         // consent the person is still completing: only an error that carries
         // this run's state is Google's answer.
         if (outcome.settlesWait) settle(() => rejectCode(outcome.error));
-      } else {
-        settle(() => resolveCode(outcome.result));
+        return html(outcome.status, outcome.body);
       }
-      return new Response(outcome.body, {
-        status: outcome.status,
-        headers: { 'content-type': 'text/html; charset=utf-8' },
+      if (settled) return html(409, renderLoopbackPendingPage());
+      answering = new Promise<Response>((resolveAnswer) => {
+        const deadline = setTimeout(() => { answerPage = undefined; resolveAnswer(html(202, renderLoopbackPendingPage())); }, PAGE_ANSWER_WAIT_MS);
+        answerPage = (page) => {
+          answerPage = undefined;
+          clearTimeout(deadline);
+          const rendered = renderLoopbackOutcomePage(page);
+          resolveAnswer(html(rendered.status, rendered.body));
+        };
       });
+      const respond = (page: LoopbackPageOutcome): void => { answerPage?.(page); };
+      settle(() => resolveCode({ ...outcome.result, respond }));
+      return answering;
     },
   });
 
@@ -151,7 +175,11 @@ export function startLoopbackListener(options: StartLoopbackListenerOptions): Lo
       // Settle first: a wait that is still pending must end, or whoever
       // awaits it is suspended for ever once the server is gone.
       settle(() => rejectCode(new Error('The sign-in listener was closed before a redirect arrived.')));
-      server.stop(true);
+      // A tab still waiting for its page is told the consent stopped.
+      answerPage?.({ ok: false, message: 'The connection stopped before it finished. Return to the app and try again.' });
+      if (answering === undefined) { server.stop(true); return; }
+      // Let the page that was just answered be written, then release the port.
+      void answering.then(() => setTimeout(() => { server.stop(true); }, PAGE_FLUSH_MS));
     },
   };
 }

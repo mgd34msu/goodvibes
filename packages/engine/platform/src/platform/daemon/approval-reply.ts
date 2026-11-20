@@ -125,9 +125,11 @@ export async function tryResolveApprovalReplyFromChannel(
     const action = command?.[1], id = command?.[2];
     if (!id || (action !== 'approve' && action !== 'deny')) return false;
     if (!candidates.some(candidate => candidate.id === id)) return false;
+    const shown = candidates.find(candidate => candidate.id === id)!;
     const resolved = await broker.resolveApproval(id, { approved: action === 'approve', disposition: action === 'approve' ? 'approved' : 'denied',
-      actor: userId, actorSurface: surface, note: text.trim(), reason: 'Explicit owner command without a decision model.' });
-    return resolved?.status === (action === 'approve' ? 'approved' : 'denied');
+      actor: userId, actorSurface: surface, note: text.trim(), reason: 'Explicit owner command without a decision model.',
+      expectedRevision: shown.revision });
+    return resolved.applied;
   }
 
   // Validate every candidate and the full reply before any request starts.
@@ -165,6 +167,8 @@ export async function tryResolveApprovalReplyFromChannel(
   const action = `resolve approval ${target.id}: ${answer}`;
   selection?.recordAction(action);
   const settled = await broker.resolveApproval(target.id, {
+    // The ask as it was when the reply was read: one that moved during the reading is not this reply's to settle.
+    expectedRevision: candidates.find((candidate) => candidate.id === target.id)!.revision,
     approved,
     disposition: approved ? 'approved' : answer === 'amend' ? 'amended' : 'denied',
     actor: userId,
@@ -179,9 +183,9 @@ export async function tryResolveApprovalReplyFromChannel(
   // moves. When the ask was settled elsewhere during the reading, the broker
   // returns that record, which this reply did not decide, and the message
   // goes on as ordinary chat.
-  if (!settled || settled.status !== (approved ? 'approved' : 'denied')) {
-    selection?.recordAction(`no resolution: approval ${target.id} was already ${settled?.status ?? 'unavailable'}`);
-    logger.info('Channel reply did not resolve the approval', { surface, userId, approvalId: target.id, status: settled?.status ?? null });
+  if (!settled.applied) {
+    selection?.recordAction(`no resolution: approval ${target.id} was ${settled.record?.status ?? 'unavailable'} (${settled.refusal.code})`);
+    logger.info('Channel reply did not resolve the approval', { surface, userId, approvalId: target.id, status: settled.record?.status ?? null, code: settled.refusal.code });
     return false;
   }
   logger.info('Pending approval resolved from a channel reply', {

@@ -154,8 +154,9 @@ export interface MailViewProps {
 }
 
 export function MailView({ tabs }: MailViewProps = {}) {
-  // Send and save-draft do not touch the inbox, so they invalidate nothing; mark,
-  // archive and delete change it and refresh the listing. Opening a message is a
+  // Send and save-draft do not touch the inbox; save-draft refreshes the Drafts list
+  // (an opened draft is replaced, never copied); mark, archive and delete change the
+  // inbox and refresh the listing. Opening a message is a
   // BODY.PEEK read and leaves it unread until Mark read is pressed.
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -173,6 +174,10 @@ export function MailView({ tabs }: MailViewProps = {}) {
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [inReplyTo, setInReplyTo] = useState('');
+  // The saved draft the composer holds (opened from Drafts): saving replaces it, never adds a copy.
+  const [editingDraft, setEditingDraft] = useState<{ readonly uid: number; readonly uidValidity: number } | null>(null);
+  // What the composer was loaded with (a reply, a draft, or nothing): anything else in it is unsaved writing.
+  const loadedComposer = useRef(JSON.stringify(['', '', '', '']));
   const composerLifetime = useRef<ClientLifetime | null>(null);
   const composerRevision = useRef(0);
   // One id per message as written: kept while the text is unchanged, so a repeated
@@ -219,7 +224,13 @@ export function MailView({ tabs }: MailViewProps = {}) {
   });
 
   const update = useMutation({
-    mutationFn: (input: { uid: number; action: 'seen' | 'unseen' | 'archive' | 'delete' }) => platformClient.operator.email.inbox.update(input),
+    // The mailbox generation the message was read under goes with its uid: a reset mailbox refuses instead of changing another message.
+    mutationFn: (input: { uid: number; uidValidity: number | undefined; action: 'seen' | 'unseen' | 'archive' | 'delete' }) => {
+      if (input.uidValidity === undefined) {
+        return Promise.reject(new Error('The mail server did not say which mailbox generation this message belongs to, so it cannot be changed safely from here. Change it in another mail client.'));
+      }
+      return platformClient.operator.email.inbox.update({ uid: input.uid, uidValidity: input.uidValidity, action: input.action });
+    },
     onSuccess: async (result) => {
       if (result.action === 'archive' || result.action === 'delete') {
         if (selectedUid === result.uid) setSelectedUid(null);
@@ -253,6 +264,8 @@ export function MailView({ tabs }: MailViewProps = {}) {
     setSubject('');
     setBody('');
     setInReplyTo('');
+    setEditingDraft(null);
+    loadedComposer.current = JSON.stringify(['', '', '', '']);
     setComposeOpen(false);
   }, []);
 
@@ -322,7 +335,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
   });
 
   const saveDraft = useMutation({
-    mutationFn: (snapshot: ComposerSnapshot) => {
+    mutationFn: async (snapshot: ComposerSnapshot & { readonly draft: { readonly uid: number; readonly uidValidity: number } | null }) => {
       assertComposerCurrent(snapshot);
       const input: EmailDraftCreateInput = {
         to: snapshot.to,
@@ -330,15 +343,25 @@ export function MailView({ tabs }: MailViewProps = {}) {
         body: snapshot.body,
         ...(snapshot.inReplyTo ? { inReplyTo: snapshot.inReplyTo, references: snapshot.inReplyTo } : {}),
       };
-      return platformClient.operator.email.draft.create(input);
+      // An opened draft is replaced in place; a new one is appended.
+      if (snapshot.draft) {
+        const replaced = await platformClient.operator.email.draft.update({ ...input, uid: snapshot.draft.uid, uidValidity: snapshot.draft.uidValidity });
+        return { uid: replaced.uid, replaced: replaced.replaced as number | undefined };
+      }
+      const created = await platformClient.operator.email.draft.create(input);
+      return { uid: created.uid, replaced: undefined as number | undefined };
     },
-    onSuccess: (result, snapshot) => {
+    onSuccess: async (result, snapshot) => {
       if (composerCurrent(snapshot)) clearComposer();
       toast({
-        title: 'Draft saved to the account',
-        description: `Appended to the IMAP Drafts folder as UID ${result.uid}. It is in the mailbox itself, so it is there in any mail client, not only here.`,
+        title: result.replaced === undefined ? 'Draft saved to the account' : 'Draft updated in the account',
+        description: result.replaced === undefined
+          ? `Appended to the IMAP Drafts folder${result.uid === undefined ? '' : ` as UID ${result.uid}`}. It is in the mailbox itself, so it is there in any mail client, not only here.`
+          : `Replaced draft UID ${result.replaced}${result.uid === undefined ? '' : ` with UID ${result.uid}`}; the Drafts folder keeps one copy.`,
         tone: 'success',
       });
+      // The Drafts list shows the saved copy, not the one it replaced.
+      await queryClient.invalidateQueries({ queryKey: ['email', 'drafts'] });
     },
     onError: (error) => {
       const note = mailRefusalNote(error);
@@ -362,26 +385,50 @@ export function MailView({ tabs }: MailViewProps = {}) {
 
   const composerReady = to.trim() !== '' && subject.trim() !== '' && body.trim() !== '';
 
-  function startReply(message: MailMessageData): void {
+  /** Unsent, unsaved writing in the composer, which loading a reply or a draft would replace. */
+  function composerHasUnsavedWriting(): boolean {
+    if (!to.trim() && !subject.trim() && !body.trim()) return false;
+    return JSON.stringify([to, subject, body, inReplyTo]) !== loadedComposer.current;
+  }
+
+  /** Replace the composer's text only when nothing unsaved is in it, or the person agrees to lose it. */
+  async function mayReplaceComposer(what: string): Promise<boolean> {
+    if (!composerHasUnsavedWriting()) return true;
+    return confirm.ask({
+      title: 'Replace the message you are writing?',
+      description: `The message in the composer has not been sent or saved. Opening ${what} replaces it, and it cannot be brought back. Save it as a draft first to keep it.`,
+      confirmLabel: 'Replace',
+      tone: 'danger',
+    });
+  }
+
+  async function startReply(message: MailMessageData): Promise<void> {
+    if (!await mayReplaceComposer('the reply')) return;
     composerLifetime.current = getClientLifetime();
     composerRevision.current++;
     setTo(message.from);
     setSubject(replySubjectLine(message.subject));
     setInReplyTo(message.messageId);
     setBody(quotedReply(message));
+    setEditingDraft(null);
+    loadedComposer.current = JSON.stringify([message.from, replySubjectLine(message.subject), quotedReply(message), message.messageId]);
     setComposeOpen(true);
     // A repeated Reply clicked in the still-visible desktop drawer must return
     // keyboard ownership to the composer, even though the panel stays mounted.
     composeRef.current?.focus('body');
   }
 
-  function openDraft(draft: { to: string; subject: string; body: string; inReplyTo: string }): void {
+  async function openDraft(draft: { uid: number; to: string; subject: string; body: string; inReplyTo: string }, uidValidity: number | undefined): Promise<void> {
+    if (!await mayReplaceComposer('this draft')) return;
     composerLifetime.current = getClientLifetime();
     composerRevision.current++;
     setTo(draft.to);
     setSubject(draft.subject);
     setBody(draft.body);
     setInReplyTo(draft.inReplyTo);
+    // Saving it replaces this draft; without the folder's generation it is saved as a new one instead of guessing.
+    setEditingDraft(uidValidity === undefined ? null : { uid: draft.uid, uidValidity });
+    loadedComposer.current = JSON.stringify([draft.to, draft.subject, draft.body, draft.inReplyTo]);
     setComposeOpen(true);
     composeRef.current?.focus('body');
   }
@@ -468,7 +515,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
                 className="mail-row"
                 title={draft.subject || '(no subject)'}
                 meta={`${draft.to || '(no recipient)'} · ${draft.body.slice(0, 120)}`}
-                onSelect={() => openDraft(draft)}
+                onSelect={() => void openDraft(draft, drafts.data?.uidValidity)}
                 trailing={<span className="mail-row__date">{formatShort(draft.date)}</span>}
               />
             ))}
@@ -572,7 +619,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
             meta={detail.data ? `${detail.data.from} · ${formatWhen(detail.data.date)}` : undefined}
             actions={openMessage ? (
               <>
-                <Button variant="outline" size="sm" icon={<Reply />} onClick={() => startReply(openMessage)}>
+                <Button variant="outline" size="sm" icon={<Reply />} onClick={() => void startReply(openMessage)}>
                   Reply
                 </Button>
                 <Button
@@ -580,14 +627,14 @@ export function MailView({ tabs }: MailViewProps = {}) {
                   size="sm"
                   icon={<MailOpen />}
                   disabled={update.isPending}
-                  onClick={() => update.mutate({ uid: openMessage.uid, action: selectedSummary?.unread === false ? 'unseen' : 'seen' })}
+                  onClick={() => update.mutate({ uid: openMessage.uid, uidValidity: openMessage.uidValidity, action: selectedSummary?.unread === false ? 'unseen' : 'seen' })}
                 >
                   {selectedSummary?.unread === false ? 'Mark unread' : 'Mark read'}
                 </Button>
                 <IconButton label="Archive" icon={<Archive />} disabled={update.isPending}
-                  onClick={() => update.mutate({ uid: openMessage.uid, action: 'archive' })} />
+                  onClick={() => update.mutate({ uid: openMessage.uid, uidValidity: openMessage.uidValidity, action: 'archive' })} />
                 <IconButton label="Delete (moves to Trash)" icon={<Trash2 />} disabled={update.isPending}
-                  onClick={() => update.mutate({ uid: openMessage.uid, action: 'delete' })} />
+                  onClick={() => update.mutate({ uid: openMessage.uid, uidValidity: openMessage.uidValidity, action: 'delete' })} />
               </>
             ) : undefined}
             onClose={() => selectMessage(null)}
@@ -628,7 +675,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
             onBodyChange={(value) => { composerRevision.current++; setBody(value); }}
             onClearReply={() => { composerRevision.current++; setInReplyTo(''); }}
             onSend={() => void submitSend()}
-            onSaveDraft={() => { if (!composerReady || surfaceRefusing || saveDraft.isPending) return; const snapshot = captureComposer(); if (snapshot) saveDraft.mutate(snapshot); }}
+            onSaveDraft={() => { if (!composerReady || surfaceRefusing || saveDraft.isPending) return; const snapshot = captureComposer(); if (snapshot) saveDraft.mutate({ ...snapshot, draft: editingDraft }); }}
             onClose={() => { composerRevision.current++; setComposeOpen(false); }}
             ready={composerReady}
             sending={send.isPending}

@@ -144,6 +144,8 @@ export interface TurnModel {
         readonly severity?: 'error' | 'warning' | 'info' | undefined;
         /** Drawn in the transcript even where other notices are shown elsewhere (platform core isTranscriptNotice). */
         readonly inTranscript?: boolean | undefined;
+        /** The runtime event the notice restates; its row kind (transcript-row-renderers.ts). */
+        readonly event?: string | undefined;
     }>;
 }
 /** A contiguous stretch of the transcript: one user message, one turn, or one standalone system message. */
@@ -594,6 +596,7 @@ export function buildTurnModel(input: BuildTurnInput): TurnModel {
         messageIndex: number;
         content: string;
         severity?: 'error' | 'warning' | 'info' | undefined;
+        event?: string | undefined;
     }> = [];
     const calledIds = new Set<string>();
     for (let abs = unit.start; abs <= unit.end; abs++) {
@@ -615,7 +618,7 @@ export function buildTurnModel(input: BuildTurnInput): TurnModel {
             continue;
         }
         if (m.role === 'system') {
-            notices.push({ messageIndex: abs, content: m.content, severity: m.presentation?.severity, ...(isTranscriptNotice(m) ? { inTranscript: true } : {}) });
+            notices.push({ messageIndex: abs, content: m.content, severity: m.presentation?.severity, ...(isTranscriptNotice(m) ? { inTranscript: true } : {}), ...(m.runtimeEvent ? { event: m.runtimeEvent.type } : {}) });
             continue;
         }
         if (m.role !== 'assistant')

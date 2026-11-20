@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { RefusalError, refusal, type Selection } from '@goodvibes-jev/engine/errors';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import type {
   DistributedPairRequestStatus,
@@ -243,7 +244,7 @@ export async function verifyDistributedPairRequest(
   }
   const peerBefore = findPeerForRequest(state, request);
   const peer = ensurePeerFromRequest(state, request, input.metadata);
-  const issued = issueToken(state, peer.id, 'pair-verified-token');
+  const issued = issueToken(state, peer.id, 'pair-verified-token', { kind: 'default' });
   const verifiedRequest: StoredPairRequest = {
     ...request,
     status: 'verified',
@@ -301,13 +302,14 @@ export async function rotateDistributedPeerToken(
   input: {
     readonly actor?: string | undefined;
     readonly label?: string | undefined;
-    readonly scopes?: readonly string[] | undefined;
+    /** Not given (or `default`): the published scope set. `none` is refused: a token with no scope has no use. */
+    readonly scopes?: Selection<string> | undefined;
   } = {},
 ): Promise<{ peer: DistributedPeerRecord; token: DistributedPeerTokenRecord & { value: string } } | null> {
   await startDistributedRuntime(state);
   const peer = state.peers.get(peerId);
   if (!peer) return null;
-  const issued = issueToken(state, peerId, input.label ?? 'rotated-access-token', input.scopes);
+  const issued = issueToken(state, peerId, input.label ?? 'rotated-access-token', input.scopes ?? { kind: 'default' });
   recordDistributedRuntimeAudit(state, buildAudit('token-rotated', input.actor ?? 'operator', {
     peerId,
     note: issued.token.label,
@@ -703,9 +705,20 @@ function issueToken(
   state: DistributedRuntimeManagerState,
   peerId: string,
   label: string,
-  // A new peer token holds every scope the published peer contract names.
-  scopes: readonly string[] = getPeerContract().scopes,
+  // `default`: every scope the published peer contract names. An empty selection is never "all": it is refused.
+  selection: Selection<string>,
 ): { token: StoredPeerTokenRecord; value: string; replaced: string[] } {
+  if (selection.kind === 'none') {
+    throw new RefusalError(refusal({
+      code: 'INVALID_REQUEST',
+      state: 'no scope was selected for the peer token',
+      reason: 'A peer token needs at least one scope.',
+      next: ['Omit scopes for the published set, or name the scopes the token should hold.'],
+      retryable: false,
+      status: 400,
+    }));
+  }
+  const scopes: readonly string[] = selection.kind === 'default' ? getPeerContract().scopes : selection.values;
   const peer = state.peers.get(peerId);
   if (!peer) throw new Error(`Unknown distributed peer: ${peerId}`);
   const replaced = peer.tokens.filter((entry) => !entry.revokedAt).map((entry) => entry.id);

@@ -18,7 +18,7 @@ import {
   getExternalSurfaceAutoStartFieldId,
   isExternalSurfaceSelectedByDefault,
 } from './onboarding-wizard-external-surfaces.ts';
-import { getDaemonSource } from './onboarding-wizard-network-adopt.ts';
+import { adoptedDaemonScheme, getDaemonSource } from './onboarding-wizard-network-adopt.ts';
 import { applyFeatureUnitOperations, dropUnchangedConfigOperations } from './onboarding-feature-units.ts';
 import { adoptedDaemonUrl, buildGoodVibesSecretKey, buildGoodVibesSecretRef, isSecretReferenceValue } from './onboarding-wizard-helpers.ts';
 import { deriveProviderKeyCaptureTargets, providerKeyFieldId } from '../../runtime/onboarding/provider-key-capture.ts';
@@ -355,7 +355,7 @@ function addCloudflareOperations(
 /** The existing daemon this terminal was pointed at, as "Connect to an existing daemon" applied it. */
 function readAdoptedDaemonUrl(controller: OnboardingWizardControllerLike): string {
   const adoptHost = controller.getStringFieldValue('network.adopt-daemon-host', '127.0.0.1').trim() || '127.0.0.1';
-  return adoptedDaemonUrl(adoptHost, controller.getPortFieldValue('network.adopt-daemon-port', 3421));
+  return adoptedDaemonUrl(adoptHost, controller.getPortFieldValue('network.adopt-daemon-port', 3421), adoptedDaemonScheme(controller));
 }
 
 export function addNetworkOperations(

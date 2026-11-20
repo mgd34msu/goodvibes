@@ -23,6 +23,7 @@ import {
   type AttemptCandidate,
   type AttemptJudge,
   type AttemptJudgment,
+  type AttemptLoserOutcome,
   type AttemptPickResult,
   type HeldMergeGroup,
   type OrchestrationEvent,
@@ -34,6 +35,11 @@ import {
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { OwnedScope } from '../utils/owned-work.js';
+import { existsSync } from 'node:fs';
+import { done, failedOutcome, observe, pending, refusal, type EffectOutcome } from '@goodvibes-jev/engine/errors';
+
+/** How long a pick waits for each loser's worktree clean-up before reporting it still cleaning. */
+const LOSER_CLEANUP_DEADLINE_MS = 10_000;
 
 /** Thrown for an honest caller error against the best-of-N surface (unknown group, not-ready, bad winner). */
 export class AttemptError extends Error {
@@ -413,20 +419,55 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
     // Losers: discard their work (clean the worktree) and mark terminal. A held
     // loser passed its gates, it is 'passed' with an honest "not selected" note,
     // not a failure; a failed loser is left failed.
-    for (const loser of losers) {
+    // Each loser's clean-up is awaited up to a deadline and reported as seen: cleaned only when its
+    // worktree is observed gone; still cleaning (with the check to run) past the deadline; failed with why.
+    const cleanups = losers.map((loser) => {
       if (loser.state === 'held-merge') {
         loser.state = 'passed';
         (loser.warnings ??= []).push('best-of-N: not selected (loser worktree cleaned)');
       }
-      void ownedWork.run('attempt work', () => deps.cleanupWorktree(workstream, loser)).catch((error) => {
-        logger.warn('attempts: loser worktree cleanup did not complete', { itemId: loser.id, error: summarizeError(error) });
-      });
-    }
+      return cleanLoser(workstream, loser);
+    });
     groups.delete(groupId);
     resolving.delete(groupId);
     const loserItemIds = losers.map((l) => l.id);
     deps.emit({ type: 'attempt-winner-picked', workstreamId: entry.workstreamId, groupId, winnerItemId, loserItemIds, auto });
-    return { groupId, winnerItemId, loserItemIds, auto };
+    const loserOutcomes = await Promise.all(cleanups);
+    return { groupId, winnerItemId, loserItemIds, losers: loserOutcomes, auto };
+  }
+
+  async function cleanLoser(workstream: Workstream, loser: WorkItem): Promise<AttemptLoserOutcome> {
+    const path = loser.worktreePath;
+    const since = Date.now();
+    const cleanup = ownedWork.run('attempt work', () => deps.cleanupWorktree(workstream, loser));
+    const settled = cleanup.then(async (): Promise<EffectOutcome> => {
+      const seen = await observe('loser worktree removed', () => loser.worktreePath === undefined && (path === undefined || !existsSync(path)) ? true : undefined);
+      if (seen !== undefined) return done({ value: undefined, observed: seen.observed });
+      return failedOutcome(refusal({
+        code: 'LOSER_WORKTREE_KEPT',
+        state: `the worktree of ${loser.id} was kept at ${path ?? loser.worktreePath ?? 'its path'}`,
+        reason: `The worktree of ${loser.id} still holds work that exists nowhere else, so it was kept instead of cleaned.`,
+        next: ['Inspect the kept worktree; remove it with `git worktree remove` once its work is not needed.'],
+        retryable: false,
+      }));
+    }, (error: unknown): EffectOutcome => {
+      logger.warn('attempts: loser worktree cleanup did not complete', { itemId: loser.id, error: summarizeError(error) });
+      return failedOutcome(refusal({
+        code: 'LOSER_CLEANUP_FAILED',
+        state: `the worktree of ${loser.id} was not cleaned`,
+        reason: `Cleaning the worktree of ${loser.id} did not complete: ${summarizeError(error)}`,
+        next: ['Run `git worktree list` to see whether it is still there, and remove it by hand if it is.'],
+        retryable: false,
+      }));
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<EffectOutcome>((resolve) => {
+      timer = setTimeout(() => resolve(pending('git worktree list', since)), LOSER_CLEANUP_DEADLINE_MS);
+      timer.unref?.();
+    });
+    try {
+      return { id: loser.id, outcome: await Promise.race([settled, late]) };
+    } finally { clearTimeout(timer); }
   }
 
   function pickWinner(groupId: string, winnerItemId: string): Promise<AttemptPickResult> {

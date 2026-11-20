@@ -202,6 +202,7 @@ export {
   isBackgroundCall,
   needsAttention,
   summarizeToolCall,
+  toolCallFileCounts,
   toolFamily,
 } from './tool-call-summary.js';
 export type {
@@ -219,3 +220,28 @@ export type {
 } from './tool-call-summary.js';
 
 export { CATALOG_PROVIDER_NAME_ALIASES, declaredProviderCatalogId } from './provider-catalog.js';
+
+export {
+  dayWords,
+  describeChanges,
+  describeLastRun,
+  describeSchedule,
+  describeTriggerCadence,
+  intervalWords,
+  parseIntervalWords,
+} from './schedule-words.js';
+export type { ScheduleCadence, ScheduleRunOutcome, WordForm } from './schedule-words.js';
+export { agoWords, readWorkBoard } from './work-board.js';
+export type {
+  BoardAction,
+  BoardGroup,
+  BoardRefType,
+  BoardRow,
+  BoardTone,
+  WorkBoard,
+  WorkBoardAsk,
+  WorkBoardNode,
+  WorkBoardSession,
+  WorkBoardSources,
+  WorkBoardTask,
+} from './work-board.js';

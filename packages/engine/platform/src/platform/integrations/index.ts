@@ -41,6 +41,16 @@ export { attachRuntimeNotifications, RUNTIME_NOTIFICATION_EVENTS } from './notif
 export type { RuntimeNotificationEvent, RuntimeNotificationOptions, RuntimeNotificationSink, RuntimeNotificationWork } from './notification-dispatcher.js';
 export type { NotificationDeadLetter, NotificationDeadLetterSource, NotificationReplayResult } from './notification-dead-letters.js';
 export { WebhookNotifier } from './webhooks.js';
+export {
+  NOTIFICATION_WEBHOOK_SECRET_PREFIX,
+  forgetNotificationWebhook,
+  notificationWebhookSecretKey,
+  resolveNotificationWebhook,
+  resolveNotificationWebhookLocally,
+  shownNotificationWebhook,
+  storeNotificationWebhook,
+} from './notification-webhooks.js';
+export type { NotificationWebhookSecretStore } from './notification-webhooks.js';
 export type {
   WebhookNotifierDeliveryResult,
   WebhookNotifierOptions,

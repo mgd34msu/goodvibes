@@ -9,6 +9,7 @@
  * - resolveApiKeys()       , three-tier async resolution: env → SecretsManager → skip
  */
 
+import { revealOrNull } from '../security/secret.js';
 import { SecretsManager } from './secrets.js';
 import { API_KEY_PROVIDER_IDS, getBuiltinProviderEnvVars } from './provider-credential-catalog.js';
 
@@ -63,7 +64,7 @@ export async function resolveApiKeys(
   // a resolve costs one read of each store plus one per stored provider key,
   // not one per store for each of the hundred-odd variable names.
   const stored = secrets.list ? new Set(await secrets.list()) : null;
-  const read = (name: string): Promise<string | null> => (stored && !stored.has(name) ? Promise.resolve(null) : secrets.get(name));
+  const read = (name: string): Promise<string | null> => (stored && !stored.has(name) ? Promise.resolve(null) : secrets.get(name).then((secret) => revealOrNull(secret, 'dispatch')));
 
   const result: Record<string, string> = {};
 

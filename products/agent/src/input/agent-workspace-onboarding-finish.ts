@@ -8,7 +8,7 @@ export const ONBOARDING_CRITICAL_STEP_IDS = ['runtime', 'connected-host-auth', '
 export const ONBOARDING_COMPLETE_SYNTHETIC_ACTION: AgentWorkspaceAction = {
   id: 'onboarding-apply-close',
   label: 'Apply & close',
-  detail: 'Acknowledge onboarding as finished, persist the user completion marker, and close the fullscreen Agent workspace.',
+  detail: 'Finish onboarding when a model route works: save the user completion marker and close the fullscreen Agent workspace. Without a usable route it says what is missing and onboarding stays open.',
   kind: 'onboarding-complete',
   safety: 'safe',
 };

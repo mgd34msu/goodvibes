@@ -67,6 +67,8 @@ export class ClusterCoordinator {
    */
   private nodeIdValue: string | null = null;
   private election: ClusterElection | null = null;
+  /** The election whose stop failed with a fenced surface; status keeps reporting it until the next start. */
+  private stoppedFenced: ClusterElection | null = null;
   private transport: ClusterTransport | null = null;
   private started = false;
   /** The start in flight, which a second start() joins and stop() waits out. */
@@ -373,6 +375,7 @@ export class ClusterCoordinator {
       logger: this.options.logger,
     });
 
+    this.stoppedFenced = null;
     this.election = new ClusterElection({
       nodeId: this.nodeId,
       version: this.options.version,
@@ -426,10 +429,18 @@ export class ClusterCoordinator {
     if (inFlightStart) await inFlightStart.catch(() => {});
     if (this.election) {
       // The election's own stop performs the ordered stop-then-RESIGN, per
-      // surface.
-      await this.election.stop(reason);
-      this.election = null;
-      this.transport = null;
+      // surface. A consumer that would not drain fails the stop: the election
+      // is kept for status, which reports that surface fenced with the failure.
+      const election = this.election;
+      try {
+        await election.stop(reason);
+      } catch (error) {
+        this.stoppedFenced = election;
+        throw error;
+      } finally {
+        this.election = null;
+        this.transport = null;
+      }
       return;
     }
     if (this.ungatedRunning) await this.stopAllUngated(reason);
@@ -456,6 +467,7 @@ export class ClusterCoordinator {
   /** The `cluster` section of /status. Inspection only. */
   status(): ClusterStatus {
     if (this.election) return this.election.status();
+    if (this.stoppedFenced) return this.stoppedFenced.status();
     const surfaces: ClusterSurfaceStatus[] = this.registry.list().map((surface) => ({
       surfaceId: surface.surfaceId,
       label: surface.label,

@@ -319,6 +319,7 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
   const warnings: string[] = [];
   const refusedFlags: string[] = [];
   const commandArgs: string[] = [];
+  const literalArgs: string[] = [];
   const positionals: string[] = [];
   let flags = catalog.createDefaultFlags();
 
@@ -346,6 +347,7 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
           command: catalog.unresolvedCommandSentinel ?? catalog.defaultCommand,
           rawCommand: found.token,
           commandArgs: [],
+          literalArgs: [],
           positionals: [],
           flags: catalog.createDefaultFlags(),
           errors,
@@ -394,7 +396,7 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
     const afterCommandWord = sawCommand && index > found!.index;
 
     if (ddashSeen) {
-      if (afterCommandWord) commandArgs.push(token);
+      if (afterCommandWord) { commandArgs.push(token); literalArgs.push(token); }
       if (!afterCommandWord || command === 'run') positionals.push(token);
       continue;
     }
@@ -537,7 +539,7 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
   }
 
   const result: EngineParseResult<TCommand, TFlags> = {
-    binary, command, rawCommand, commandArgs, positionals, flags, errors, warnings, refusedFlags,
+    binary, command, rawCommand, commandArgs, literalArgs, positionals, flags, errors, warnings, refusedFlags,
   };
   return catalog.postProcess ? catalog.postProcess(result) : result;
 }
@@ -549,3 +551,25 @@ export {
   resolveCatalogCommand,
   findCatalogFlagArityConflicts,
 } from './cli-catalog-types.js';
+
+/**
+ * The words of `commandArgs` a handler may read its own options from: all of
+ * them but the literal words typed after `--`, which are text however they
+ * look (`goodvibes-agent profiles delete x -- --yes` does not confirm).
+ */
+export function optionArgsOf(cli: { readonly commandArgs: readonly string[]; readonly literalArgs?: readonly string[] | undefined }): readonly string[] {
+  const literal = cli.literalArgs?.length ?? 0;
+  return literal === 0 ? cli.commandArgs : cli.commandArgs.slice(0, cli.commandArgs.length - literal);
+}
+
+/**
+ * `commandArgs` with the `--` put back before the literal words, for a handler
+ * that reads its options itself and stops at `--` (the engine consumes the
+ * marker, so without it a literal `--yes` would read as the option). With no
+ * literal words, or no words before them, it is `commandArgs` unchanged.
+ */
+export function commandArgsWithLiteralMarker(cli: { readonly commandArgs: readonly string[]; readonly literalArgs?: readonly string[] | undefined }): readonly string[] {
+  const options = optionArgsOf(cli);
+  const literal = cli.literalArgs ?? [];
+  return literal.length === 0 || options.length === 0 ? cli.commandArgs : [...options, '--', ...literal];
+}

@@ -47,7 +47,6 @@ import { occasionStateReceipts } from './operation.js';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
 import { logger } from '../utils/logger.js';
-import { reconcileRaiseLedger } from './cadence.js';
 import { groupWorkShared, type GroupWorkLink } from '../cluster/group-work.js';
 import type { AuthorityChange } from '../cluster/authority-record-file.js';
 import { mergeOccasionSlices, occasionIdsOf, sliceIsEmpty, sliceJson, sliceOf, withSlice, type OccasionSlice } from './state-replica.js';
@@ -176,10 +175,9 @@ function validOpenItem(value: unknown): OpenItem | null {
   if (!(OPEN_ITEM_KINDS as readonly string[]).includes(kind) || !isIsoDate(dueOn)) return null;
   const occurrence = typeof value['occurrence'] === 'string' ? value['occurrence'] : '';
   const expiresAfter = str(value['expiresAfter']);
-  // Absent on every item written before boundaries existed, and absent is read
-  // as EMPTY rather than as "unknown": an empty ledger plus a raise count is
-  // exactly the signature the reconciliation looks for, so a legacy item is
-  // recognised by its shape instead of by a version number nobody bumped.
+  // The boundaries this item has been raised at, read as saved: an empty list
+  // stays empty (the owner's "later" clears it), and nothing is inferred from
+  // the raise count.
   const rawBoundaries = Array.isArray(value['servedBoundaries']) ? value['servedBoundaries'] : [];
   const servedBoundaries = [
     ...new Set(
@@ -294,8 +292,8 @@ function validSweepReport(value: unknown): OccasionSweepReport | null {
  */
 export function validateOccasionState(
   raw: unknown,
-): { snapshot: OccasionStateSnapshot; dropped: number; reconciled: number } {
-  if (!isRecord(raw)) return { snapshot: emptySnapshot(), dropped: 0, reconciled: 0 };
+): { snapshot: OccasionStateSnapshot; dropped: number } {
+  if (!isRecord(raw)) return { snapshot: emptySnapshot(), dropped: 0 };
   let dropped = 0;
   const take = <T>(key: string, validate: (value: unknown) => T | null): T[] => {
     const list = Array.isArray(raw[key]) ? (raw[key] as readonly unknown[]) : [];
@@ -307,18 +305,7 @@ export function validateOccasionState(
     }
     return out;
   };
-  // Reconciliation runs at LOAD, before any caller can read an open item and
-  // before any sweep can act on one. A machine mid-way through the old
-  // repeating cadence therefore goes quiet the moment the fixed daemon boots,
-  // rather than one sweep later, which on an hourly sweep would have been one
-  // more push about the owner's own birthday, and one more is the whole complaint.
-  let reconciled = 0;
-  const openItems = take('openItems', validOpenItem).map((item) => {
-    const settled = reconcileRaiseLedger(item);
-    if (settled === null) return item;
-    reconciled += 1;
-    return settled;
-  });
+  const openItems = take('openItems', validOpenItem);
 
   return {
     snapshot: {
@@ -332,7 +319,6 @@ export function validateOccasionState(
       lastSweep: validSweepReport(raw['lastSweep']),
     },
     dropped,
-    reconciled,
   };
 }
 
@@ -363,8 +349,6 @@ export class OccasionStateStore {
     return { assertCurrent: () => { if (this.publication !== publication) throw new Error('Occasion state changed.'); } };
   }
   private corruption: string | null = null;
-  /** How many open nudges had their raise ledger rebuilt at load. Disclosed. */
-  private reconciledOpenItems = 0;
   /** Whole-file writes run one at a time, in call order. See StoreWriteQueue. */
   private readonly writes = new StoreWriteQueue();
   /** The group's record, once attached; it is used only while this machine is in a group. */
@@ -406,7 +390,7 @@ export class OccasionStateStore {
   async takeFromGroup(only?: readonly string[]): Promise<void> {
     const group = this.group;
     if (!groupWorkShared(group ?? undefined)) return;
-    await this.state(true);
+    await this.state();
     const view = group!.file.view();
     if (!view) return;
     // The first comparison in a group covers every occasion, so state this
@@ -511,22 +495,22 @@ export class OccasionStateStore {
    */
   async prepareRead(options: JudgmentReadingOptions = {}): Promise<void> {
     const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
-    assertCurrent(); await this.state(Boolean(options.assertCurrent || options.signal), assertCurrent); assertCurrent();
+    assertCurrent(); await this.state(assertCurrent); assertCurrent();
   }
 
-  private async state(readOnly = false, assertCurrent: () => void = UNRESTRICTED_OPERATION): Promise<OccasionStateSnapshot> {
+  private async state(assertCurrent: () => void = UNRESTRICTED_OPERATION): Promise<OccasionStateSnapshot> {
     assertCurrent();
     if (this.snapshot !== null && !this.loading) return this.snapshot;
     // The first load is shared by every caller that arrives while it runs, so it
     // is not fenced by any one caller: that caller giving up would otherwise fail
     // the others. Each caller applies its own fence after the wait.
-    const loading = this.loading ?? (this.loading = this.loadState(readOnly).finally(() => { this.loading = undefined; }));
+    const loading = this.loading ?? (this.loading = this.loadState().finally(() => { this.loading = undefined; }));
     const snapshot = await loading;
     assertCurrent();
     return snapshot;
   }
 
-  private async loadState(readOnly = false, assertCurrent: () => void = UNRESTRICTED_OPERATION): Promise<OccasionStateSnapshot> {
+  private async loadState(assertCurrent: () => void = UNRESTRICTED_OPERATION): Promise<OccasionStateSnapshot> {
     assertCurrent();
     const read = await this.store.loadOrDiscard();
     assertCurrent();
@@ -539,7 +523,7 @@ export class OccasionStateStore {
       this.snapshot = emptySnapshot();
       return this.snapshot;
     }
-    const { snapshot, dropped, reconciled } = validateOccasionState(read.data);
+    const { snapshot, dropped } = validateOccasionState(read.data);
     if (dropped > 0) {
       logger.warn('occasions: dropped malformed records while loading state', {
         path: this.filePath,
@@ -547,19 +531,6 @@ export class OccasionStateStore {
       });
     }
     this.snapshot = snapshot;
-    if (reconciled > 0) {
-      this.reconciledOpenItems = reconciled;
-      logger.info(
-        'occasions: settled open nudges written under the old repeating cadence, '
-        + 'they stay open and stop being pushed',
-        { path: this.filePath, reconciled },
-      );
-      // Written back immediately rather than left to the next write. The
-      // rebuilt ledger IS the thing that keeps the owner from being pushed at again,
-      // and a correction that only exists in memory is one crash away from
-      // undoing itself.
-      if (!readOnly) await this.persist(snapshot, assertCurrent);
-    }
     return this.snapshot;
   }
 
@@ -588,7 +559,7 @@ export class OccasionStateStore {
    */
   private async change<T>(mutate: (snapshot: OccasionStateSnapshot) => T, assertCurrent: () => void = UNRESTRICTED_OPERATION, options: { readonly publish?: (result: T) => boolean; readonly afterPublish?: () => void } = {}): Promise<T> {
     assertCurrent();
-    await this.state(true, assertCurrent);
+    await this.state(assertCurrent);
     let value!: T;
     await this.writes.run(async () => {
       // The file is observed when this write's turn comes, so a write queued
@@ -1039,7 +1010,6 @@ export class OccasionStateStore {
       mirrors: snapshot.mirrors.length,
       attributions: snapshot.attributions.length,
       lastSweep: snapshot.lastSweep,
-      reconciledOpenItems: this.reconciledOpenItems,
       corruption: this.corruption,
     };
   }

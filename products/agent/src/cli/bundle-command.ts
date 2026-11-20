@@ -1,3 +1,4 @@
+import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
 import { createSupportBundleCommand } from '@goodvibes-jev/engine/terminal-shell/support-bundle-command';
 import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
 import { existsSync } from 'node:fs';
@@ -29,7 +30,8 @@ function remoteHostTarget(runtime: CliCommandRuntime): DaemonTarget | undefined 
   const baseUrl = resolveConnectedHostBaseUrl(runtime.configManager);
   let host: string;
   try { host = new URL(baseUrl).hostname.replace(/^\[|\]$/g, ''); } catch { return undefined; }
-  if (host === 'localhost' || host === '::1' || host.startsWith('127.')) return undefined;
+  // The one loopback rule (parsed, not prefix-matched): `127.example.test` is another machine.
+  if (isLoopbackHost(host)) return undefined;
   const resolution = resolveDaemonTarget({
     configManager: runtime.configManager,
     homeDirectory: runtime.homeDirectory,

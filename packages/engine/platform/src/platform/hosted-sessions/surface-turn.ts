@@ -49,12 +49,6 @@ export interface HostedSurfaceToolsInput {
   readonly providerRegistry: HostedSessionProviderRegistry;
   /** The daemon's own request path; absent where the host serves no requests. */
   readonly daemonRequests?: HostedDaemonRequestPath | undefined;
-  /**
-   * The message an authenticated operator sent for the session's current turn,
-   * read live; null when the turn was started by channel or automation input,
-   * or before the first operator message.
-   */
-  readonly ownerTurnText?: (() => string | null) | undefined;
 }
 
 /** What a surface's system prompt is composed from, once per model request. */
@@ -64,7 +58,7 @@ export interface HostedSurfacePromptInput {
   /** The host's own base prompt for this session: what it is and where it runs. */
   readonly basePrompt: string;
   readonly providerRegistry: HostedSessionProviderRegistry;
-  /** The user message the current turn answers; null before the first one. */
+  /** The user message the current turn answers (its turn record's request text); null outside a turn. */
   readonly turnText: string | null;
   /** The model request's signal; a composition stops when it aborts. */
   readonly signal?: AbortSignal | undefined;

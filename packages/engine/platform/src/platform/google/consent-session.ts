@@ -32,6 +32,7 @@ import {
   generatePkcePair,
   type GoogleFetchPort,
   type GoogleLoopbackListenerFactory,
+  type LoopbackCodeResult,
 } from './oauth-loopback.js';
 import { safeConfigString } from './config-access.js';
 import { secretReferenceFor } from '../config/plaintext-credential-sweep.js';
@@ -219,12 +220,13 @@ export function beginGoogleConsent(deps: BeginGoogleConsentDeps): GoogleConsentS
     assertDeliveryCurrent(deps);
   };
 
-  const completed: Promise<GoogleConsentCompletion> = (async () => {
+  let received: LoopbackCodeResult | undefined;
+  const run = async (): Promise<GoogleConsentCompletion> => {
     try {
       let code: string;
       try {
         assertCurrent();
-        const received = await listener.waitForCode(deps.timeoutMs ?? CONSENT_WAIT_MS);
+        received = await listener.waitForCode(deps.timeoutMs ?? CONSENT_WAIT_MS);
         assertCurrent();
         code = received.code;
       } catch (error) {
@@ -280,6 +282,16 @@ export function beginGoogleConsent(deps: BeginGoogleConsentDeps): GoogleConsentS
       return { ok: true, detail: 'Google approved. The credential is in the encrypted store.' };
     } catch (error) {
       return { ok: false, reason: 'stopped', cause: error, detail: 'The Google consent stopped before completion.', problem: 'The authorization owner changed or its storage was unavailable.', fix: 'Start a new connection with the current client.' };
+    }
+  };
+  const completed: Promise<GoogleConsentCompletion> = (async () => {
+    try {
+      const result = await run();
+      // The browser tab is answered only now: "connected" after the exchange and save, otherwise why not.
+      received?.respond?.(result.ok
+        ? { ok: true }
+        : { ok: false, message: [result.detail, result.problem, result.fix].filter((part) => part !== undefined && part.length > 0).join(' ') });
+      return result;
     } finally {
       close();
     }

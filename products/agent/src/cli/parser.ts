@@ -17,6 +17,7 @@ export function parseGoodVibesCli(argv: readonly string[], binary = 'goodvibes-a
     command: result.command,
     rawCommand: result.rawCommand,
     commandArgs: result.commandArgs,
+    literalArgs: result.literalArgs,
     positionals: result.positionals,
     flags: result.flags,
     errors: result.errors,

@@ -96,6 +96,12 @@ export interface CompanionChatMessage {
    *   regenerate to try the same exchange again.
    */
   readonly deliveryState?: 'cancelled' | 'queued' | 'unanswered' | 'failed' | undefined;
+  /**
+   * On a user message posted with a `clientMessageId`: that key, echoed so the
+   * sender matches its own pending bubble to this message by identity, never
+   * by its text (two sends of the same words are two messages).
+   */
+  readonly clientMessageId?: string | undefined;
   /** On a `'failed'` reply: why it failed, in words a person can act on. */
   readonly failureReason?: string | undefined;
   /**

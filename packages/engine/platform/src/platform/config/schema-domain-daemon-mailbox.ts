@@ -314,8 +314,9 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.inbound.notice.route',
     type: 'string',
-    description: 'Where the owner is told about inbound mail: the literal "default" inherits the owner\'s '
-      + 'existing notice route binding; a specific route binding id sends inbound-mail notices somewhere else. '
+    description: 'Where the owner is told about inbound mail: the literal "default" uses the owner\'s most recently '
+      + 'used one-to-one conversation with the daemon (never a group or shared channel); a specific route binding id, '
+      + 'shared or not, sends inbound-mail notices there instead. '
       + 'A second place to configure "where to reach me" is a second place to get it wrong, so most '
       + 'installations should leave this at default.',
   },

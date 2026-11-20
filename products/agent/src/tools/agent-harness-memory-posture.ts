@@ -91,9 +91,10 @@ function preserveNative(record: Record<string, unknown>, native: Readonly<Record
 }
 function protectedVector(native: MemoryVectorStats, value: unknown): MemoryVectorStats {
   const record = protectedRecord(value);
-  preserveNative(record, { ...native }, ['backend', 'enabled', 'available', 'dimensions', 'indexedRecords', 'embeddingProviderId']);
+  preserveNative(record, { ...native }, ['backend', 'enabled', 'available', 'dimensions', 'indexedRecords', 'embeddingProviderId', 'embeddingSpace', 'awaitingReembed']);
   return { backend: native.backend, enabled: native.enabled, available: native.available, dimensions: native.dimensions,
     indexedRecords: native.indexedRecords, embeddingProviderId: native.embeddingProviderId,
+    embeddingSpace: native.embeddingSpace, awaitingReembed: native.awaitingReembed,
     embeddingProviderLabel: protectedText(record.embeddingProviderLabel), path: protectedText(record.path),
     ...(native.error !== undefined ? { error: protectedText(record.error) } : {}),
     ...(native.platformLimitReason !== undefined ? { platformLimitReason: protectedText(record.platformLimitReason) } : {}) };
@@ -230,7 +231,8 @@ function memoryStatus(snapshot: MemoryPostureSnapshot, memoryAvailable: boolean)
 function vectorStatus(vector: MemoryVectorStats | null): MemoryVectorPostureStatus {
   if (!vector) return 'unavailable';
   if (!vector.enabled) return 'disabled';
-  if (vector.available && !vector.error) return 'ready';
+  // Memories embedded by an earlier provider or model are left out of search until a rebuild.
+  if (vector.available && !vector.error && vector.awaitingReembed === 0) return 'ready';
   return 'attention';
 }
 
@@ -353,6 +355,7 @@ function compactVector(vector: MemoryVectorStats | null): Record<string, unknown
     enabled: vector.enabled,
     available: vector.available,
     indexedRecords: vector.indexedRecords,
+    awaitingReembed: vector.awaitingReembed,
     dimensions: vector.dimensions,
     embeddingProviderId: vector.embeddingProviderId,
     embeddingProviderLabel: vector.embeddingProviderLabel,

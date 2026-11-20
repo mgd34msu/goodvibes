@@ -178,7 +178,6 @@ export {
   hasServed,
   leadWindowOpens,
   isSpent,
-  reconcileRaiseLedger,
 } from './cadence.js';
 
 export {

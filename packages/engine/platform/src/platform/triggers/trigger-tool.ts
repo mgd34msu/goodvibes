@@ -15,6 +15,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { TriggerDefinitionError } from './validation.js';
 import { TriggerManager } from './manager.js';
 import { localTriggerOperations, type TriggerOperations } from './operations.js';
+import { currentTurn } from '../security/turn-boundary.js';
 
 export const TRIGGER_TOOL_ACTIONS = ['create', 'list', 'history', 'cancel', 'reset'] as const;
 export type TriggerToolAction = (typeof TRIGGER_TOOL_ACTIONS)[number];
@@ -87,8 +88,9 @@ export function createTriggerTool(supervisor: TriggerManager | TriggerOperations
             if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
               return { success: false, error: 'create needs a definition object: { id, label, spec, action? }.' };
             }
-            const input = definition as Record<string, unknown>;
-            const owner = input['ownerSessionId'] ?? sessionOwner?.();
+            // The owner session is the host's: the session of the turn this call runs in, never one the model names.
+            const { ownerSessionId: _modelOwner, ...input } = definition as Record<string, unknown>;
+            const owner = local ? currentTurn()?.ownerSessionId ?? sessionOwner?.() : undefined;
             const created = await operations.create({
               ...input,
               ...(typeof owner === 'string' && owner.length > 0 ? { ownerSessionId: owner } : {}),

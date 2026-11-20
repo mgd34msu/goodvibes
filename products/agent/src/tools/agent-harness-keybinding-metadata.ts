@@ -12,6 +12,7 @@ import {
 } from '../input/keybindings.ts';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { clipboardPasteReceipt } from '@goodvibes-jev/engine/terminal-shell/input-content';
 
 /**
  * Keys the shell handles itself before configurable bindings are consulted, and
@@ -708,7 +709,9 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
     }
     case 'paste': {
       if (!context.pasteFromClipboard) return runUnavailable(resolved.action, route, 'This Agent shell does not give commands a clipboard paste route. Ctrl+V in the prompt still pastes; ask the user to paste directly.');
-      const pasted = context.pasteFromClipboard();
+      // The receipt says that something was pasted, its kind and line count: never the
+      // clipboard text, its marker or the unsent composer around it (the model reads this).
+      const pasted = clipboardPasteReceipt(context.pasteFromClipboard());
       if (!pasted.pasted) {
         return { status: 'not_pasted', done: false, action: resolved.action, effect: 'paste-from-clipboard', reason: 'The clipboard holds no supported text or image data, so nothing was pasted.', pasted, keybinding: descriptor };
       }

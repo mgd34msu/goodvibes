@@ -37,6 +37,7 @@ import {
   DEFAULT_ON_EXIT_MAX_DURATION_MS,
   launchOnExitProcess,
   renderOnExitPrompt,
+  type TriggerProcessHost,
 } from './process-triggers.js';
 import { createDefaultProbeIo, runProbe } from './probes.js';
 import { evaluateRule } from './rules.js';
@@ -595,8 +596,11 @@ export class TriggerManager {
     if (!refused.ok) return record;
     const now = this.now();
 
-    const termination = record.process && record.state === 'running' ? buildCancelledTermination({ process: record.process, now }) : undefined;
     const fromEarlierBoot = record.process !== undefined && record.state === 'running' && record.process.daemonBootId !== this.daemonBootId;
+    // A child of an earlier boot is not ours to signal, so the cancel records
+    // no termination for it; ours is `cancel-requested` until its exit is seen.
+    const termination = record.process && record.state === 'running' && !fromEarlierBoot
+      ? buildCancelledTermination({ process: record.process, now }) : undefined;
     const cancelled: TriggerRecord = {
       ...record,
       state: 'cancelled',
@@ -699,8 +703,8 @@ export class TriggerManager {
       // failure read as permanent parks the trigger at once.
       return this.applyCheckFailure(id, summarizeError(error), startedAt, transienceOf(error));
     } finally {
-      // Only this incarnation's mark: a re-created trigger's own check keeps its own.
-      if (this.incarnations.get(id) === incarnation || !this.records.has(id)) this.inFlight.delete(id);
+      // The mark is this check's: no other check of the id starts while it is set.
+      this.inFlight.delete(id);
     }
   }
 
@@ -975,6 +979,38 @@ export class TriggerManager {
       });
       try { await this.fireOnExit(record.definition.id, termination, now); }
       finally { if (this.records.get(record.definition.id)?.state !== 'running') host.release?.(record.process.processId); }
+    }
+    this.observeCancelledExits(host, now);
+  }
+
+  /**
+   * A cancelled child's exit, once seen: the cancel's `cancel-requested`
+   * termination is replaced by what was observed (or `unknown` when the host
+   * no longer knows the process), and the child is released.
+   */
+  private observeCancelledExits(host: TriggerProcessHost, now: number): void {
+    for (const record of [...this.records.values()]) {
+      if (record.state !== 'cancelled' || !record.process || record.process.daemonBootId !== this.daemonBootId) continue;
+      const index = record.runs.findLastIndex((run) => run.termination?.state === 'cancel-requested');
+      if (index < 0) continue;
+      const observed = host.observe(record.process.processId);
+      if (observed?.running) continue;
+      const requested = record.runs[index]!.termination!;
+      const termination: TerminationMetadata = observed
+        ? { ...buildTermination({
+          process: record.process, observed, now,
+          ...(this.config.outputTailBytes !== undefined ? { outputTailBytes: this.config.outputTailBytes } : {}),
+        }), reason: 'cancelled' }
+        : { ...requested, state: 'unknown', stderrTail: 'The trigger was cancelled and the supervisor no longer knows the process, so its exit was not seen.' };
+      const runs = [...record.runs];
+      runs[index] = {
+        ...runs[index]!,
+        termination,
+        detail: observed ? `cancelled by an operator; the process ${termination.state} after the stop` : 'cancelled by an operator; the process exit was not seen',
+      };
+      this.records.set(record.definition.id, { ...record, runs, updatedAt: now });
+      this.persist(record.definition.id);
+      host.release?.(record.process.processId);
     }
   }
 

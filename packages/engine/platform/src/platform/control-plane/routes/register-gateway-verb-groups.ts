@@ -283,7 +283,7 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
   readonly channelDeliveryRouter?: Pick<ChannelDeliveryRouter, 'deliver'> | undefined;
   readonly providerRegistry?: ProviderRegistry | undefined;
   readonly automationManager?:
-    | Pick<AutomationManager, 'start' | 'listJobs' | 'createJob' | 'updateJob' | 'setEnabled' | 'attachCheckinEvaluator' | 'listRuns' | 'runNow'>
+    | (Pick<AutomationManager, 'start' | 'listJobs' | 'createJob' | 'updateJob' | 'setEnabled' | 'attachCheckinEvaluator' | 'listRuns' | 'runNow'> & Partial<Pick<AutomationManager, 'cancelRun'>>)
     | undefined;
   /** A read-only session lister for the check-in briefing (the full SharedSessionBroker satisfies it). */
   readonly sessionLister?: { listSessions(limit?: number): readonly CheckinSessionView[] } | undefined;
@@ -449,7 +449,17 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
     // which item a finished session resolved is read from the item's stored
     // session id, so a restart loses nothing.
     const liveResolutions = new Map<string, string>();
+    // The run behind each resolution session started here, so one whose item's conflict ended meanwhile can be stopped.
+    const resolutionRuns = new Map<string, string>();
+    // Items a resolve is starting a session for or a retry is merging (shared by both handlers and the re-merge below).
+    const resolutionClaims = new Set<string>();
     const conflictsDeps: FleetConflictsDeps = {
+      resolutionClaims,
+      stopResolutionSession: async (sessionId) => {
+        const runId = resolutionRuns.get(sessionId);
+        if (runId === undefined || automation.cancelRun === undefined) throw new Error(`no run of session ${sessionId} can be stopped from here`);
+        await automation.cancelRun(runId, 'the merge conflict it was started for ended before it began');
+      },
       // A second resolve is refused while the first session still works in the kept tree.
       isSessionLive: (sessionId) => liveResolutions.has(sessionId),
       listWorkstreams,
@@ -465,6 +475,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
           if (chosen) liveResolutions.delete(chosen);
           return started;
         }
+        resolutionRuns.set(started.sessionId, started.runId);
         return { sessionId: started.sessionId };
       },
     };
@@ -482,8 +493,10 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
         if (payload.type !== 'AUTOMATION_RUN_COMPLETED' || sessionId === undefined || !sessionId.startsWith(CONFLICT_RESOLUTION_SESSION_PREFIX)) return;
         const itemId = liveResolutions.get(sessionId) ?? findConflictBySession(listWorkstreams(), sessionId);
         liveResolutions.delete(sessionId);
-        if (!itemId || payload.outcome !== 'success') return;
-        void retryIntegration(itemId).then((outcome) => {
+        resolutionRuns.delete(sessionId);
+        if (!itemId || payload.outcome !== 'success' || resolutionClaims.has(itemId)) return;
+        resolutionClaims.add(itemId);
+        void retryIntegration(itemId).finally(() => resolutionClaims.delete(itemId)).then((outcome) => {
           logger.info('fleet.conflicts: post-resolution re-merge', { itemId, outcome });
         }, (error: unknown) => {
           logger.warn('fleet.conflicts: post-resolution re-merge failed', { itemId, error: summarizeError(error) });

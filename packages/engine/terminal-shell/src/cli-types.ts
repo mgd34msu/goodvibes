@@ -84,6 +84,8 @@ export interface GoodVibesCliParseResult {
   readonly command: GoodVibesCliCommand;
   readonly rawCommand: string | undefined;
   readonly commandArgs: readonly string[];
+  /** The words typed after `--`: literal text, never options; also the tail of `commandArgs` (see optionArgsOf). */
+  readonly literalArgs?: readonly string[] | undefined;
   readonly positionals: readonly string[];
   readonly flags: GoodVibesCliFlags;
   readonly errors: readonly string[];

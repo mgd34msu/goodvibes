@@ -45,11 +45,15 @@ export function dedupeOnboardingVerificationItems(
  * list of verification items returned after the apply completed.
  */
 export function formatOnboardingApplyCompletionMessage(items: readonly OnboardingVerificationItem[]): string {
+  // Counted from every item: "verified" only when every one passed. Failed
+  // items are listed by the caller with what to do; warnings are listed here.
+  const failed = items.filter((item) => item.status === 'fail').length;
   const warnings = items.filter((item) => item.status === 'warn');
-  if (warnings.length === 0) return `Onboarding applied and verified ${items.length} item(s).`;
   const passed = items.filter((item) => item.status === 'pass').length;
+  if (failed === 0 && warnings.length === 0) return `Onboarding applied and verified ${items.length} item(s).`;
   return [
-    `Onboarding settings applied. ${passed} verification item(s) passed; ${warnings.length} warning(s) need attention.`,
+    `Onboarding settings applied. ${passed} of ${items.length} verification item(s) passed`
+      + `${failed > 0 ? `; ${failed} failed` : ''}${warnings.length > 0 ? `; ${warnings.length} warning(s) need attention` : ''}.`,
     ...warnings.map((warning) => `  warning ${warning.id}: ${warning.message}`),
   ].join('\n');
 }

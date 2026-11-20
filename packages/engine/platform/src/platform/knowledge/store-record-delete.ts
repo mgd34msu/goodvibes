@@ -62,6 +62,24 @@ function otherSupportingSourceIds(node: KnowledgeNodeRecord, deletedSourceId: st
   return claimed.filter((value): value is string => typeof value === 'string' && value.length > 0 && value !== deletedSourceId);
 }
 
+/**
+ * Sources joined to a node by an edge, either way, besides `deletedSourceId`:
+ * an edge between a node and a source is evidence that source supports it,
+ * whether or not a writer also listed the source in the node's metadata.
+ */
+function edgeSupportingSourceIds(view: KnowledgeRecordDeleteView, nodeId: string, deletedSourceId: string): string[] {
+  const rows = view.sqlite.exec(
+    "SELECT from_kind, from_id, to_kind, to_id FROM knowledge_edges WHERE (from_kind = 'node' AND from_id = ?) OR (to_kind = 'node' AND to_id = ?)",
+    [nodeId, nodeId],
+  )[0]?.values ?? [];
+  const ids: string[] = [];
+  for (const [fromKind, fromId, toKind, toId] of rows) {
+    if (fromKind === 'source' && typeof fromId === 'string' && fromId !== deletedSourceId) ids.push(fromId);
+    if (toKind === 'source' && typeof toId === 'string' && toId !== deletedSourceId) ids.push(toId);
+  }
+  return ids;
+}
+
 export function deleteKnowledgeNodeRecord(view: KnowledgeRecordDeleteView, id: string): boolean {
   if (!view.nodes.has(id)) return false;
   const plan = newPlan();
@@ -72,14 +90,16 @@ export function deleteKnowledgeNodeRecord(view: KnowledgeRecordDeleteView, id: s
 
 /**
  * Removes the source, what was derived from it, and the nodes it owns. A node
- * that names another source that still exists as support is kept: deleting it
- * would lose knowledge the surviving source still backs.
+ * that another source that still exists supports is kept, whether the support
+ * is named in its metadata or is an edge between them: deleting it would lose
+ * knowledge the surviving source still backs.
  */
 export function deleteKnowledgeSourceRecord(view: KnowledgeRecordDeleteView, id: string): boolean {
   if (!view.sources.has(id)) return false;
   const plan = newPlan();
   for (const node of selectRecords(view.nodes, 'source_id = ?', [id], '', (record) => record.sourceId === id)) {
     if (otherSupportingSourceIds(node, id).some((other) => view.sources.has(other))) continue;
+    if (edgeSupportingSourceIds(view, node.id, id).some((other) => view.sources.has(other))) continue;
     planNodeDelete(plan, node.id);
   }
   planDelete(plan, "DELETE FROM knowledge_edges WHERE (from_kind = 'source' AND from_id = ?) OR (to_kind = 'source' AND to_id = ?)", [id, id]);

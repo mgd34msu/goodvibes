@@ -583,6 +583,13 @@ export class MailboxCursorStore {
      * `startHistoryId`). Any stored position is then discarded.
      */
     readonly historyExpired?: boolean | undefined;
+    /**
+     * The stored `historyId` the caller last read (null when it read none).
+     * A stored cursor is replaced only while it still holds this position: a
+     * cursor another source or process wrote meanwhile is resumed, never
+     * overwritten by a caller that read before it.
+     */
+    readonly expectedHistoryId: string | null;
   }): Promise<GmailCursorResolution> {
     // Refused rather than persisted: a historyId that fails validation on the
     // way in would be silently dropped on the way out by the load-time content
@@ -598,7 +605,7 @@ export class MailboxCursorStore {
       const stored = index >= 0 ? (cursors[index] ?? null) : null;
       const existing = stored !== null && stored.source === 'gmail' ? stored : null;
 
-      if (existing && input.historyExpired !== true) {
+      if (existing && (input.historyExpired !== true || existing.historyId !== input.expectedHistoryId)) {
         return { next: cursors, result: { kind: 'resumed', cursor: existing } };
       }
 

@@ -284,16 +284,16 @@ export async function routeConfigWrite(
   //, including the ones a keystroke handler fires and reads back in the same
   // turn, which then read the old value. That is a real ordering change for a
   // path that has no daemon in it at all.
-  const routed = agentDaemonConfigClientInstalled() ? await routeDaemonOwnedConfigWrite(key, value) : null;
+  // The host the write goes to, captured once: the read-back asks the same host.
+  const host = agentDaemonConfigClientInstalled() ? agentDaemonConfigClient() : null;
+  const routed = host ? await routeDaemonOwnedConfigWrite(key, value) : null;
   if (routed === 'daemon') {
     logger.debug('[config] routed write over config.set', { key });
     // The write is already applied; a failed read-back must not turn it into a reported failure.
     let readBack: unknown;
-    let readBackFailed = false;
     try {
-      readBack = await agentDaemonConfigClient()?.get(key);
+      readBack = await host?.get(key);
     } catch (error) {
-      readBackFailed = true;
       logger.warn('[config] daemon applied config.set but the read-back failed', { key, error: summarizeError(error) });
     }
     return {
@@ -304,11 +304,10 @@ export async function routeConfigWrite(
       // The value the owning runtime holds after the write. Read back rather
       // than echoed: the daemon may coerce or clamp what it was sent, and
       // reporting what we asked for would describe a value nobody holds. An
-      // unreadable value falls back to what was sent, which is the closest
-      // honest answer available.
-      value: readBack ?? value,
-      reason: readBackFailed
-        ? 'applied by the connected host over config.set; the value shown is the one sent because reading it back failed'
+      // unreadable value is reported as unknown, never as the value sent.
+      value: readBack,
+      reason: readBack === undefined
+        ? 'applied by the connected host over config.set; the value it holds now is unknown because reading it back failed'
         : 'applied by the connected host over config.set',
     };
   }

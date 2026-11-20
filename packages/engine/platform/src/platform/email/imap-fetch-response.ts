@@ -61,7 +61,10 @@
  */
 export interface ImapFetchFrame {
   readonly syntax: string;
+  /** The literal decoded as UTF-8, for callers that read text. */
   readonly literal?: string;
+  /** The literal's octets exactly as sent: an attachment is taken from these, never from the decoded text. */
+  readonly literalBytes?: Uint8Array;
 }
 
 /** One `* n FETCH (...)` response, read whole. */

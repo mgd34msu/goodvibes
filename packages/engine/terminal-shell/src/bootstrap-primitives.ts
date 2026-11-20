@@ -209,8 +209,15 @@ export function keepTerminalDeadLetters(
         logger.warn('A failed-notification list left by an earlier terminal could not be read', { file: fileFor(slot), error: summarizeError(error) });
       }
     }
-    // The own file last: the list read so far is written there, and the files taken over are emptied.
-    notifier.persistDeadLetters(fileFor(own.slot));
+    // The own file last: the list read so far is written there, and the files
+    // taken over are removed only once that write returned. When it throws,
+    // they stay on disk (their locks given back) for the next terminal to take.
+    try {
+      notifier.persistDeadLetters(fileFor(own.slot));
+    } catch (error) {
+      for (const { lock } of adopted) lock.release();
+      throw error;
+    }
     for (const { slot, lock } of adopted) {
       try { unlinkSync(fileFor(slot)); } catch { /* the entries are in this terminal's file now */ }
       lock.release();

@@ -61,7 +61,8 @@ function matchingVisualReports(
   records: readonly ResearchVisualReportRecord[],
   run: AgentResearchRunRecord | null,
 ): readonly ResearchVisualReportRecord[] {
-  if (!run?.reportArtifactId) return records;
+  // A run with no report linked has no visual report: an absent link selects nothing, never the whole catalog.
+  if (!run?.reportArtifactId) return [];
   return records.filter((record) => record.reportArtifactId === run.reportArtifactId);
 }
 
@@ -300,7 +301,9 @@ export async function researchWorkflowSummary(context: CommandContext, rawArgs: 
         {
           id: 'save-report',
           status: certifiedVisualRecords.length > 0 || reviewedSources.length > 0 ? 'ready' : 'waiting',
-          next: certifiedVisualRecords.length > 0 ? 'Inspect the certified browser/PWA report render, then export, archive, or promote only after review.' : reviewedSources.length > 0 ? 'Use the reviewed-source bundle and save a citation-covered visual report packet artifact.' : 'Save the report only after reviewed or used sources exist.',
+          next: certifiedVisualRecords.length > 0
+            ? 'Inspect the certified browser/PWA report render, then export, archive, or promote only after review.'
+            : `${run && !run.reportArtifactId ? 'No visual report is linked to this run yet. ' : ''}${reviewedSources.length > 0 ? 'Use the reviewed-source bundle and save a citation-covered visual report packet artifact.' : 'Save the report only after reviewed or used sources exist.'}`,
           route: certifiedVisualRecords[0]?.modelRoute ?? (reviewedSources.length > 0 ? bundleRoute : `research action:"sources" query:${quote(sourceQuery)}`),
           reportRoute,
         },

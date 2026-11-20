@@ -163,3 +163,24 @@ export function describeCardEntryRefusal(surface: string): string {
 export function mayOfferCardEntryFlow(surface: string): boolean {
   return mayEnterCardDetails(surface);
 }
+
+/** How a request reached the daemon (runtime/network/request-transport.ts `RequestTransport`). */
+export type CardEntryTransport = 'loopback' | 'tls' | 'tailnet' | 'plain-network';
+
+/** The links a card number or security code may cross: this machine, TLS, or the tailnet's own encryption. */
+export function mayCrossWithCardDetails(transport: CardEntryTransport | undefined): boolean {
+  return transport === 'loopback' || transport === 'tls' || transport === 'tailnet';
+}
+
+/**
+ * Why a card or its security code is not taken over this connection, and
+ * where it can be: the daemon refuses `card.enter` over a plain network (or a
+ * request whose route it cannot name), and the web UI shows the same words
+ * instead of the form.
+ */
+export function describeCardTransportRefusal(): string {
+  return 'Card details are not taken over this connection: it reaches the daemon unencrypted over the network, '
+    + 'so the card number would cross it in the clear. Nothing was sent or stored. '
+    + 'Enter the card on the daemon\'s own machine (the terminal app, the Agent, or the web UI at localhost), '
+    + 'over https (controlPlane.tls), or over the machine\'s Tailscale address.';
+}

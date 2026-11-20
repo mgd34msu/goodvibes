@@ -48,6 +48,8 @@ export interface HandlerContextEnvelope {
   readonly credentialKind?: GatewayMethodInvocationContext['credentialKind'];
   readonly nativeExecutionAuthority?: GatewayMethodInvocation['nativeExecutionAuthority'];
   readonly isAuthorized?: GatewayMethodInvocation['isAuthorized'];
+  /** How the request reached the daemon, as the transport established it; absent for an in-process call. */
+  readonly transport?: GatewayMethodInvocationContext['transport'];
 }
 
 /** Typed, host-facing shape of a single method invocation. */
@@ -99,6 +101,7 @@ export function normalizeContext(
     authToken: context.authToken ?? '',
     ...(context.principalKind ? { principalKind: context.principalKind } : {}),
     ...(context.credentialKind ? { credentialKind: context.credentialKind } : {}),
+    ...(context.transport ? { transport: context.transport } : {}),
   };
 }
 

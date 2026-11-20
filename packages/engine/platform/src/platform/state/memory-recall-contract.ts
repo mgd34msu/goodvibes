@@ -120,6 +120,7 @@ export function describeMemoryIndexUnavailable(stats: MemoryVectorStats): string
   // missing records or unable to embed the query, so zero matches is not "nothing matches".
   if (stats.error) return `the semantic memory index is failing: ${stats.error}`;
   if (stats.indexedRecords === 0) return 'the semantic memory index has no indexed records yet';
+  if (stats.awaitingReembed >= stats.indexedRecords) return 'every indexed memory was embedded by an earlier embedding provider or model; a rebuild re-embeds them';
   return null;
 }
 
@@ -130,10 +131,15 @@ export function describeMemoryIndexUnavailable(stats: MemoryVectorStats): string
  * presenting it as equivalent. Returns null when a real provider is configured.
  */
 export function describeMemoryIndexCaveat(stats: MemoryVectorStats): string | null {
+  const caveats: string[] = [];
   if (stats.embeddingProviderId === HASHED_MEMORY_EMBEDDING_PROVIDER.id) {
-    return 'running on the hashed-only fallback embedding provider (no dedicated semantic model configured), ranking is approximate, not modeled semantic understanding';
+    caveats.push('running on the hashed-only fallback embedding provider (no dedicated semantic model configured), ranking is approximate, not modeled semantic understanding');
   }
-  return null;
+  // Rows of another space are left out of the search, not scored against this query.
+  if (stats.awaitingReembed > 0) {
+    caveats.push(`${stats.awaitingReembed} of ${stats.indexedRecords} indexed memories were embedded by an earlier embedding provider or model and are left out until a vector rebuild re-embeds them`);
+  }
+  return caveats.length > 0 ? caveats.join('; ') : null;
 }
 
 /**

@@ -195,6 +195,8 @@ export class FenceIssuer implements RevisionSource {
     this.#generation = { epoch: ended.epoch + 1, controller: new AbortController(), base: undefined };
     const error = new FenceError(this.id, refusal, ended.epoch, ended.epoch + 1, reason);
     ended.controller.abort(error);
+    // A retired issuer has no live generation: the one after it is born aborted, so peek() is never current.
+    if (refusal === 'retired') this.#generation.controller.abort(new FenceError(this.id, 'retired', ended.epoch, ended.epoch + 1, reason));
   }
 
   /**

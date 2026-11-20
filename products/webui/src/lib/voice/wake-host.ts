@@ -26,7 +26,9 @@
  * the real engine and the real listener with a stubbed inference session, rather
  * than testing a second implementation of this logic.
  */
+import { FenceIssuer } from '@goodvibes-jev/engine/platform/platform/utils/owner-fence';
 import {
+  AudioCaptureError as CaptureFailure,
   utteranceToAudioArtifact,
   type AudioCaptureError,
   type AudioCaptureOpener,
@@ -176,6 +178,13 @@ export interface WakeHostDeps {
   readonly createNoiseSuppression?: NoiseSuppressionFactory | undefined;
   /** Sends an utterance to speech-to-text and returns the text. */
   readonly transcribe: (artifact: UtteranceAudioArtifact) => Promise<string>;
+  /**
+   * The browser's sign-in generation (lib/client-lifetime.ts): an utterance
+   * captured under one is delivered only while it is still current, so words
+   * spoken before a sign-out or a change of account never land under the next.
+   * Absent: one generation for the host's whole life.
+   */
+  readonly identityRevision?: (() => number) | undefined;
   /** Plays the activation sound; false when this tab could not make a sound. */
   readonly chime: () => boolean;
   /** Registers this host so a push-to-talk press can stand it down. */
@@ -219,10 +228,41 @@ export class WakeHost {
   #lockRelease: (() => void) | null = null;
   /** Aborts the wait while another tab holds the lock. */
   #lockWait: AbortController | null = null;
+  /**
+   * The generation of device opens. stop(), suspend() and a cleared
+   * configuration move it at once, outside the serialised chain, so an open
+   * still waiting (a permission prompt nobody answers) is abandoned instead of
+   * holding the stop behind it, and a stream that lands after is closed.
+   */
+  readonly #opens = new FenceIssuer('wake capture');
 
   constructor(deps: WakeHostDeps) {
     this.#deps = deps;
   }
+
+  /**
+   * The opener the listener is given: each open takes the current generation's
+   * fence, gives up the moment that generation ends, and closes a stream that
+   * arrives after it, never adopting it.
+   */
+  readonly #fencedOpenCapture: AudioCaptureOpener = (request, handlers) => {
+    const fence = this.#opens.peek();
+    const stopped = () => new CaptureFailure('device-unavailable', 'Wake detection was stopped while the microphone was opening.');
+    if (!fence.current) return Promise.reject(stopped());
+    return new Promise((resolve, reject) => {
+      const onAbort = (): void => reject(stopped());
+      fence.signal.addEventListener('abort', onAbort, { once: true });
+      this.#deps.openCapture(request, handlers).then((stream) => {
+        fence.signal.removeEventListener('abort', onAbort);
+        if (fence.current) { resolve(stream); return; }
+        void stream.stop().catch((error: unknown) => this.#deps.warn('a microphone stream opened after stop could not be closed', { error: String(error) }));
+        reject(stopped());
+      }, (error: unknown) => {
+        fence.signal.removeEventListener('abort', onAbort);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      });
+    });
+  };
 
   getState(): WakeHostState {
     return this.#state;
@@ -252,6 +292,7 @@ export class WakeHost {
    * `config.get` refetch.
    */
   applySettings(settings: WakeRuntimeSettings | null): Promise<void> {
+    if (settings === null) this.#opens.issue();
     return this.#run(async () => {
       this.#settings = settings;
       if (settings === null) {
@@ -306,6 +347,7 @@ export class WakeHost {
 
   /** Stand down and release the device, so a press can take it. */
   suspend(): Promise<void> {
+    this.#opens.issue();
     return this.#run(async () => {
       if (this.#listener === null) return;
       this.#suspended = true;
@@ -354,6 +396,7 @@ export class WakeHost {
 
   /** Stop for good and release everything. */
   stop(): Promise<void> {
+    this.#opens.issue();
     return this.#run(async () => {
       await this.#teardown();
       this.#releaseTabLock();
@@ -474,7 +517,7 @@ export class WakeHost {
 
     const listener = new WakeListener({
       settings,
-      openCapture: this.#deps.openCapture,
+      openCapture: this.#fencedOpenCapture,
       ...(this.#deps.createNoiseSuppression !== undefined
         ? { createNoiseSuppression: this.#deps.createNoiseSuppression }
         : {}),
@@ -629,9 +672,15 @@ export class WakeHost {
       return;
     }
     this.#patch({ phase: 'transcribing' });
+    // The sign-in this utterance was spoken under; compared again right before the words are handed on.
+    const spokenUnder = this.#deps.identityRevision?.();
     try {
       const artifact = utteranceToAudioArtifact(utterance);
       const text = (await this.#deps.transcribe(artifact)).trim();
+      if (spokenUnder !== this.#deps.identityRevision?.()) {
+        this.#finishUtterance({ error: 'The words after that wake were dropped: this browser signed out or changed account while they were transcribed.' });
+        return;
+      }
       const autoSubmit = this.#settings?.autoSubmit === true;
       this.#finishUtterance({ lastTranscript: text, error: null });
       if (text.length > 0) this.#sink?.(text, { autoSubmit });
@@ -835,7 +884,8 @@ const unwiredTranscribe: WakeHostDeps['transcribe'] = () => {
 const mutableDeps: {
   loadModelSet: WakeHostDeps['loadModelSet'];
   transcribe: WakeHostDeps['transcribe'];
-} = { loadModelSet: unwiredLoader, transcribe: unwiredTranscribe };
+  identityRevision: () => number;
+} = { loadModelSet: unwiredLoader, transcribe: unwiredTranscribe, identityRevision: () => 0 };
 
 /**
  * The tab's wake host.
@@ -849,6 +899,7 @@ export const wakeHost: WakeHost = createWakeHost({
   openCapture: micArbiter.openCapture,
   loadModelSet: (settings) => mutableDeps.loadModelSet(settings),
   transcribe: (artifact) => mutableDeps.transcribe(artifact),
+  identityRevision: () => mutableDeps.identityRevision(),
   chime: () => playWakeChime(),
   arbiter: micArbiter,
   tabLock: createBrowserWakeTabLock(),
@@ -859,7 +910,9 @@ export const wakeHost: WakeHost = createWakeHost({
 export function installWakeHostDaemonDeps(deps: {
   readonly loadModelSet: WakeHostDeps['loadModelSet'];
   readonly transcribe: WakeHostDeps['transcribe'];
+  readonly identityRevision: () => number;
 }): void {
   mutableDeps.loadModelSet = deps.loadModelSet;
   mutableDeps.transcribe = deps.transcribe;
+  mutableDeps.identityRevision = deps.identityRevision;
 }

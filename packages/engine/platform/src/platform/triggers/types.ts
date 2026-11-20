@@ -341,7 +341,8 @@ export interface TriggerDefinition {
  * daemon restarts and the child is gone, an honest `daemon-restart` fire beats
  * a trigger that silently evaporates.
  */
-export type TerminationState = 'exited' | 'signalled' | 'timed-out' | 'unknown';
+/** `cancel-requested`: an operator cancelled the trigger and the stop was sent; the exit is not seen yet (`observed` false). */
+export type TerminationState = 'exited' | 'signalled' | 'timed-out' | 'cancel-requested' | 'unknown';
 
 export type TerminationReason =
   | 'normal'

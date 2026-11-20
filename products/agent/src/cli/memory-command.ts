@@ -1,4 +1,5 @@
 import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+import { commandArgsWithLiteralMarker } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import {
@@ -795,7 +796,7 @@ async function handleVector(runtime: CliCommandRuntime, store: MemoryCommandStor
 
 export async function handleMemoryCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
   try {
-    const [sub = 'list', ...rest] = runtime.cli.commandArgs;
+    const [sub = 'list', ...rest] = commandArgsWithLiteralMarker(runtime.cli);
     const normalized = sub.toLowerCase();
     if (normalized === 'handoff-inspect' || normalized === 'inspect') return await handleInspect(runtime, rest);
     return await withMemoryCommandStore(runtime, isWritingSubcommand(normalized, rest), async (store) => {

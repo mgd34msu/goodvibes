@@ -25,7 +25,8 @@ import type { SecretsManager } from '@goodvibes-jev/engine/platform/platform/con
 import type { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import type { EmbeddingProviderPickerEntry, ModelPickerTargetInfo } from '../input/model-picker.ts';
-import { CommandPalette, buildPaletteEntries } from '../input/command-palette.ts';
+import { openCommandPaletteOn } from '../input/command-palette.ts';
+import { AGENT_VIEW_NAMES, CHANGES_VIEW_NAMES, USAGE_VIEW_NAMES } from '../input/views.ts';
 import { confirmThrough } from '../input/confirm-dialog.ts';
 import { getSharedToastCenter } from '../renderer/toast-center.ts';
 import { categorizeBuiltinCommands } from '../input/commands.ts';
@@ -81,6 +82,13 @@ type WireShellUiOpenersOptions = {
 };
 
 let commandCategoryMapCache: Map<string, string> | null = null;
+
+/** The TUI's former view names find the modal that holds them now (the palette's extra search words). */
+const PALETTE_VIEW_KEYWORDS: ReadonlyMap<string, readonly string[]> = new Map([
+  ['agents', AGENT_VIEW_NAMES],
+  ['usage', USAGE_VIEW_NAMES],
+  ['changes', CHANGES_VIEW_NAMES],
+]);
 
 /**
  * Map each built-in command name to its reference category, memoized. Drives
@@ -381,37 +389,26 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   commandContext.showToast = (toast) => toasts.show(toast);
 
   commandContext.openCommandPalette = () => {
-    // The palette is built live from the command registry, never a hardcoded
-    // list, so it can never drift from the real command set. Category labels
-    // come from the same source the generated docs use (getCommandCategoryMap).
-    const registry = input.commandRegistry;
-    if (!registry) return;
-    const top = input.surfaceModals.top();
-    if (top instanceof CommandPalette) return;
-    const palette = new CommandPalette({
-      entries: buildPaletteEntries(registry.getAll(), getCommandCategoryMap()),
-      onChanged: render,
+    // Built live from the command registry when it opens; category labels come
+    // from the same source the generated docs use (getCommandCategoryMap).
+    openCommandPaletteOn({
+      modals: input.surfaceModals,
+      commands: () => input.commandRegistry?.getAll(),
+      categories: getCommandCategoryMap,
+      extraKeywords: PALETTE_VIEW_KEYWORDS,
       describe: (id) => (id === 'model' ? commandContext.session.runtime.model || undefined : undefined),
-      onRun: (entry, mode) => {
-        if (mode === 'run' && commandContext.executeCommand) {
-          // A command gone since the palette opened, or one that refuses, says so like a typed one.
-          void runPickedCommand(commandContext.executeCommand, entry.id, [], (message) => commandContext.print(message)).finally(() => render());
-          return;
-        }
-        // Fill the composer with the command (and a trailing space so the
-        // inline args hint shows what the command wants), command mode armed,
-        // so the user types any arguments and presses Enter, matching
-        // tab-completion's fill behavior.
-        input.prompt = `/${entry.id} `;
+      // A command gone since the palette opened, or one that refuses, says so like a typed one.
+      run: (name) => runPickedCommand(commandContext.executeCommand, name, [], (message) => commandContext.print(message)),
+      fill: (name) => {
+        // The command and a trailing space so the inline args hint shows what it wants.
+        input.prompt = `/${name} `;
         input.cursorPos = input.prompt.length;
         input.commandMode = true;
         input.autocomplete?.reset();
         commandContext.focusPrompt?.();
-        render();
       },
+      render,
     });
-    input.surfaceModals.push(palette);
-    render();
   };
 
   wireViewOpeners({ commandContext, input, views, viewPanelAdapter, render });

@@ -207,39 +207,47 @@ async function send(
     const detail = `delivery request failed: ${errorText(error)}`;
     return {
       receipt: { ...base, outcome: 'failed', detail: `${detail} (not counted against the device)` },
-      stamp: { subscriptionId: subscription.id, evidence: 'unproven', detail },
+      stamp: { subscriptionId: subscription.id, endpoint: subscription.endpoint, evidence: 'unproven', detail },
     };
   }
 
   if (httpStatus >= 200 && httpStatus < 300) {
     return {
       receipt: { ...base, outcome: 'delivered', httpStatus },
-      stamp: { subscriptionId: subscription.id, evidence: 'delivered', detail: `push service accepted it (${httpStatus})` },
+      stamp: { subscriptionId: subscription.id, endpoint: subscription.endpoint, evidence: 'delivered', detail: `push service accepted it (${httpStatus})` },
     };
   }
   if (GONE_STATUSES.has(httpStatus)) {
     const detail = `push endpoint reported ${httpStatus} gone`;
     return {
       receipt: { ...base, outcome: 'pruned', httpStatus, detail: `${detail}; subscription removed` },
-      stamp: { subscriptionId: subscription.id, evidence: 'gone', detail },
+      stamp: { subscriptionId: subscription.id, endpoint: subscription.endpoint, evidence: 'gone', detail },
     };
   }
   const detail = `push service returned ${httpStatus}`;
   if (httpStatus >= 500 || httpStatus < 400 || UNPROVEN_STATUSES.has(httpStatus)) {
     return {
       receipt: { ...base, outcome: 'failed', httpStatus, detail: `${detail} (not counted against the device)` },
-      stamp: { subscriptionId: subscription.id, evidence: 'unproven', detail },
+      stamp: { subscriptionId: subscription.id, endpoint: subscription.endpoint, evidence: 'unproven', detail },
     };
   }
   return {
     receipt: { ...base, outcome: 'failed', httpStatus, detail },
-    stamp: { subscriptionId: subscription.id, evidence: 'rejected', detail },
+    stamp: { subscriptionId: subscription.id, endpoint: subscription.endpoint, evidence: 'rejected', detail },
   };
 }
 
 /** The receipt as the store's write left it: a rejection at the bound becomes `pruned`. */
 function settle(result: SendResult, applied: ReadonlyMap<string, AppliedPushOutcome>, bound: number): PushDeliveryReceipt {
   const { receipt, stamp } = result;
+  if (stamp && applied.get(stamp.subscriptionId)?.superseded) {
+    // Not counted and not removed: the device has a new endpoint since.
+    return {
+      ...receipt,
+      outcome: receipt.outcome === 'pruned' ? 'failed' : receipt.outcome,
+      detail: `${stamp.detail}; the device registered a new endpoint meanwhile, so this answer about the old one was not applied to its subscription`,
+    };
+  }
   if (!stamp || stamp.evidence !== 'rejected') return receipt;
   const outcome = applied.get(stamp.subscriptionId);
   if (!outcome) return receipt;

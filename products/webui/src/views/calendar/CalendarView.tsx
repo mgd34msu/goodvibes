@@ -29,6 +29,7 @@ import { client as platformClient } from '../../lib/goodvibes';
 import type { CalendarEventCreateInput, CalendarIcsImportInput } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import {
+  errorCode,
   formatError,
   isCalendarAuthFailedError,
   isCalendarUnconfiguredError,
@@ -187,6 +188,8 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
   // The start and end the edit form opened with: times are sent only when changed, so editing
   // the title of an all-day event keeps it all-day.
   const [editingTimes, setEditingTimes] = useState({ start: '', end: '' });
+  // The calendar's version of the event when the form opened: a save over a newer version is refused, not written over it.
+  const [editingRevision, setEditingRevision] = useState<string | undefined>(undefined);
   const confirm = useConfirm();
   const [title, setTitle] = useState('');
   const [start, setStart] = useState('');
@@ -255,6 +258,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
           description: description.trim(),
           ...(splitAttendees(attendees) ? { attendees: splitAttendees(attendees) } : {}),
           ...(calendarFilter ? { calendarId: calendarFilter } : {}),
+          ...(editingRevision ? { expectedRevision: editingRevision } : {}),
           confirm: true,
         });
         return 'Event updated.';
@@ -275,6 +279,15 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
     onSuccess: async (message) => {
       closeEventForm();
       setNotice({ body: message });
+      await queryClient.invalidateQueries({ queryKey: ['calendar', 'events'] });
+      await queryClient.invalidateQueries({ queryKey: ['calendar', 'event'] });
+    },
+    onError: async (error) => {
+      // Changed elsewhere since the form opened: nothing was written. The form closes and the
+      // event is shown as it is now, so the change can be made again on the current version.
+      if (errorCode(error) !== 'CALENDAR_EVENT_CHANGED') return;
+      closeEventForm();
+      setNotice({ tone: 'bad', body: 'Not saved: this event was changed on the calendar after you opened it. It is shown as it is now; make your change again.' });
       await queryClient.invalidateQueries({ queryKey: ['calendar', 'events'] });
       await queryClient.invalidateQueries({ queryKey: ['calendar', 'event'] });
     },
@@ -303,6 +316,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
     setDescription('');
     setAttendees('');
     setEditingId('');
+    setEditingRevision(undefined);
     setNewOpen(false);
   }
 
@@ -315,6 +329,8 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
   function openEditEvent(event: CalendarEventDetailData): void {
     create.reset();
     setEditingId(event.id);
+    const revision = (event as { readonly revision?: unknown }).revision;
+    setEditingRevision(typeof revision === 'string' && revision ? revision : undefined);
     setTitle(event.title);
     setStart(localDateTimeValue(event.start));
     setEnd(localDateTimeValue(event.end));

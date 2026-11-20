@@ -30,6 +30,7 @@
  * live under the daemon's retention rule, and a few bytes per marker never hit
  * the storage quota.
  */
+import { FenceIssuer, type Fence } from '@goodvibes-jev/engine/platform/platform/utils/owner-fence';
 import {
   announcedCapabilities,
   readBrowserBindings,
@@ -182,7 +183,8 @@ export interface PhoneNodeClientOptions {
    */
   readonly fetchImpl?: ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) | undefined;
   readonly bindings?: BrowserBindings | undefined;
-  readonly runCapability?: ((capabilityId: string, input: Record<string, unknown>) => Promise<CapabilityRunResult>) | undefined;
+  /** Runs one capability; `fence` ends when the node stops or unpairs, and the camera and screen paths race it. */
+  readonly runCapability?: ((capabilityId: string, input: Record<string, unknown>, fence: Fence) => Promise<CapabilityRunResult>) | undefined;
   readonly onState?: ((state: PhoneNodeState) => void) | undefined;
   readonly pullIntervalMs?: number | undefined;
   readonly heartbeatIntervalMs?: number | undefined;
@@ -231,6 +233,8 @@ export class PhoneNodeClient {
   /** The lifetime whose pump is in flight; per lifetime so a stale pump cannot clear a newer one's flag. */
   private busyLifetime: AbortController | null = null;
   private lifetime = new AbortController();
+  /** The paired identity's generation of capability runs: an unpair or a refused token ends every run still waiting on a device. */
+  readonly #runs = new FenceIssuer('phone node capability');
   /**
    * Work item ids whose capability has already run, keyed to their outcome and,
    * for items run by this tab, the report. Checked at the top of runWork() so a
@@ -437,6 +441,7 @@ export class PhoneNodeClient {
   /** Forget this device's pairing locally. */
   unpair(): void {
     this.stop();
+    this.#runs.issue();
     this.identity = null;
     this.refusedCalls.clear();
     this.executedWork.clear();
@@ -450,6 +455,7 @@ export class PhoneNodeClient {
    */
   private handleAuthFailure(): void {
     this.stop();
+    this.#runs.issue();
     this.identity = null;
     this.refusedCalls.clear();
     this.executedWork.clear();
@@ -570,11 +576,13 @@ export class PhoneNodeClient {
       ? payload.input
       : {}) as Record<string, unknown>;
     const runner = this.options.runCapability
-      ?? ((id: string, capabilityInput: Record<string, unknown>) => runWebNodeCapability(id, capabilityInput, this.bindings));
+      ?? ((id: string, capabilityInput: Record<string, unknown>, fence: Fence) => runWebNodeCapability(id, capabilityInput, fence, this.bindings));
     this.inFlightWork.add(item.id);
+    // The run's fence: this generation of the node, ended by stop() (the lifetime) or an unpair.
+    const fence = this.#runs.peek().narrow({ signal: lifetime.signal });
     let result: CapabilityRunResult;
     try {
-      result = await runner(capabilityId, input);
+      result = await runner(capabilityId, input, fence);
     } finally {
       this.inFlightWork.delete(item.id);
     }

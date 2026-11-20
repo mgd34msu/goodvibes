@@ -131,7 +131,7 @@ export const FETCH_TOOL_SCHEMA = {
       enum: ['count_only', 'minimal', 'standard', 'verbose'],
       description:
         'count_only: totals only; minimal: URL + status + byte size;'
-        + ' standard: URL + status + content (default); verbose: all metadata.',
+        + ' standard: URL + status + content (default); verbose: all metadata, with the value of credential headers (set-cookie, authorization and the like) withheld.',
     },
     cache_ttl_seconds: {
       type: 'integer',

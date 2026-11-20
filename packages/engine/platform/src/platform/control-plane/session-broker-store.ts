@@ -91,16 +91,25 @@ export interface SessionBrokerStorage {
 /**
  * The fields of a record the index lists. Liveness (`updatedAt`,
  * `lastActivityAt`, each participant's `lastSeenAt`) is meaningful only to the
- * running process, and the counters and agent fields are stated by the
- * session's own log, so neither rewrites the index.
+ * running process, and the counters and agent fields of an active session are
+ * stated by the session's own log, read at every start, so neither rewrites
+ * the index. Any other session's log is not read at start (the index lists
+ * it), so its message count and last message time are the index's to carry: a
+ * message appended after close rewrites the index, and the list shows it after
+ * a restart without loading the history.
  */
 function indexedFields(record: SharedSessionRecord): string {
   const {
-    updatedAt: _updatedAt, lastActivityAt: _lastActivityAt, lastMessageAt: _lastMessageAt, messageCount: _messageCount,
+    updatedAt: _updatedAt, lastActivityAt: _lastActivityAt, lastMessageAt, messageCount,
     retainedMessageCount: _retained, pendingInputCount: _pending, activeAgentId: _active, lastAgentId: _lastAgent,
     lastAgentModel: _lastAgentModel, lastError: _lastError, participants, ...listed
   } = record;
-  return JSON.stringify({ ...listed, participants: participants.map(({ lastSeenAt: _seen, ...participant }) => participant) });
+  return JSON.stringify({
+    ...listed,
+    // The same rule as the deferral at start: a session that is not active is listed from here.
+    ...(record.status !== 'active' ? { messageCount, lastMessageAt } : {}),
+    participants: participants.map(({ lastSeenAt: _seen, ...participant }) => participant),
+  });
 }
 
 /** The newest completion in a session's messages, as the broker's completeAgent stamps it. */

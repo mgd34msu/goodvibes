@@ -120,6 +120,13 @@ export interface PermissionRequestAnalysis {
   readonly host?: string | undefined;
   /** The risk family Jev read, when the gate read the call. */
   readonly riskFamily?: GateRiskFamily | undefined;
+  /**
+   * Jev's reading of the call, fact by fact with the ones it was unsure of,
+   * when a decision model read it: the ask's consequence sentence and its
+   * "can't be undone" mark are worded only from confident facts
+   * (permissions/ask-consequence.ts). Absent when no model read the call.
+   */
+  readonly reading?: GateReadingRecord | undefined;
 }
 
 /** What the gate's reading of a call concluded, as a decision carries it. */

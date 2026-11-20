@@ -1,10 +1,10 @@
-"""Pick the release a new release upgrades from: the nearest earlier stable vN.N.N tag.
+"""Pick the release a new release upgrades from: the highest earlier stable vN.N.N tag.
 
 Usage: resolve_previous_release.py <release tag> <git revision to search from>
 
 Prints `tag=` and `source=` to $GITHUB_OUTPUT when there is one. No earlier stable tag is a
-first release: a warning says the upgrade and rollback proof is skipped. A tag search that fails
-while earlier stable tags exist is an error, never a silent skip.
+first release: a warning says the upgrade and rollback proof is skipped. A tag listing that fails
+is an error, never a silent skip.
 """
 import os
 import re
@@ -18,15 +18,27 @@ def git(*args):
     return subprocess.run(['git', *args], capture_output=True, text=True)
 
 
+def version(tag):
+    """(major, minor, patch) of a stable vN.N.N tag."""
+    return tuple(int(part) for part in tag[1:].split('.'))
+
+
 def resolve(release_tag, base, git=git):
-    """Return (tag, source commit) of the previous release, or None for a first release."""
-    earlier = [t for t in git('tag', '--merged', base, '--list', 'v[0-9]*').stdout.split() if STABLE.fullmatch(t) and t != release_tag]
-    described = git('describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*', '--exclude', 'v*-*', '--exclude', 'v*+*', base)
-    previous = described.stdout.strip() if described.returncode == 0 else ''
-    if not previous or previous == release_tag:
-        if earlier:
-            raise SystemExit(f'Earlier stable release tags exist ({", ".join(sorted(earlier)[-3:])}) but the nearest one could not be resolved from {base}: {described.stderr.strip()}')
+    """Return (tag, source commit) of the previous release, or None for a first release.
+
+    The previous release is the highest stable vN.N.N tag (by version, not by distance) among
+    the tags merged into `base`, below the release being made. A nearer tag that is not of that
+    exact form (v3.4, v3.3.1.1, v3.3.2-rc.1) is never the answer.
+    """
+    listed = git('tag', '--merged', base, '--list', 'v[0-9]*')
+    if listed.returncode != 0:
+        raise SystemExit(f'The release tags merged into {base} could not be listed: {listed.stderr.strip()}')
+    earlier = [t for t in listed.stdout.split() if STABLE.fullmatch(t) and t != release_tag]
+    if STABLE.fullmatch(release_tag):
+        earlier = [t for t in earlier if version(t) < version(release_tag)]
+    if not earlier:
         return None
+    previous = max(earlier, key=version)
     source = git('rev-parse', f'{previous}^{{commit}}')
     if source.returncode != 0:
         raise SystemExit(f'The previous release tag {previous} does not name a commit: {source.stderr.strip()}')

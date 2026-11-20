@@ -71,3 +71,10 @@
   flex-direction: column;
   gap: 12px;
 }
+
+/* A fact is read whole: its text wraps instead of being cut at one line. */
+.knowledge-fact .gv-row__title {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}

@@ -126,6 +126,7 @@ import { ImapSession } from './imap-session.js';
 import {
   applyImapMessageAction,
   fetchImapAttachment,
+  findImapDraftByMessageId,
   listImapDrafts,
   prepareDraftReplacement,
   removeReplacedDraft,
@@ -225,6 +226,18 @@ const IMAP_KEYWORD = /^[A-Za-z0-9_.$-]{1,64}$/;
 
 /** About 700,000 UIDs; a mailbox past that is refused rather than read in part. */
 const COMPLETE_SEARCH_RESPONSE_BYTES = 8 * 1_048_576;
+
+/**
+ * APPEND was sent and its answer was not read: the server may have stored the
+ * draft. Not "not saved": saving the same draft again under its Message-ID
+ * looks for it first.
+ */
+export class DraftAppendUnconfirmedError extends Error {
+  constructor() {
+    super('The draft may have been saved: the mail server\'s answer to the save was not read. Saving the same draft again looks for it in the Drafts folder first, so it is not saved twice.');
+    this.name = 'DraftAppendUnconfirmedError';
+  }
+}
 
 export class ImapClient {
   private readonly options: ImapClientOptions;
@@ -643,6 +656,7 @@ export class ImapClient {
    * this client reads from stays EXAMINEd, and stays read-only.
    */
   async appendDraft(input: ImapAppendDraftInput): Promise<ImapAppendDraftResult> {
+    // A save that starts APPEND and gets no answer may have been stored: DraftAppendUnconfirmedError says so.
     input = { ...input };
     validateDraftInput(input);
 
@@ -666,7 +680,7 @@ export class ImapClient {
       // Once APPEND starts the server may be waiting for literal bytes. Never
       // reuse that transport or expose its potentially private failure text.
       this.close();
-      throw new Error('The draft append could not be confirmed.');
+      throw new DraftAppendUnconfirmedError();
     } finally { selection.signal?.removeEventListener('abort', retire); }
 
   }
@@ -769,6 +783,15 @@ export class ImapClient {
   /** One attachment's bytes, by its position in the message's attachment list; null when the message is gone. */
   async fetchAttachment(uid: number, index: number): Promise<ImapAttachmentContent | null> {
     return fetchImapAttachment(this.requireReadableMailbox(), uid, index);
+  }
+
+  /** A draft saved under `messageId` in the Drafts folder (discovered as `appendDraft` does), or null when none is there. */
+  async findDraft(messageId: string, override?: string): Promise<ImapAppendDraftResult | null> {
+    const session = this.requireSession();
+    const selection = await this.resolveDraftsMailbox(session, override);
+    selection.assertCurrent();
+    const found = await findImapDraftByMessageId(session, selection.value, messageId);
+    return found ? { uid: found.uid, uidValidity: found.uidValidity, mailbox: selection.value } : null;
   }
 
   /** The newest drafts in the Drafts folder (discovered as `appendDraft` does), newest first. */

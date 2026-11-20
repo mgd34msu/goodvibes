@@ -59,6 +59,7 @@ import {
   recordSharedSessionInput,
   applySurfaceInputDelivery,
   assertSurfaceInputClaimable,
+  assertSurfaceInputClaimCurrent,
   cancelQueuedSessionInputs,
   claimNextQueuedSessionInput,
   moveSharedSessionInput,
@@ -95,6 +96,7 @@ import {
 import { applyBootOrphanSweep, sweepSharedSessions } from './session-broker-gc.js';
 import { SharedSessionRuntimeBusBridge } from './session-broker-runtime-bus.js';
 import { handleSharedSessionIntent, PROVIDER_MESSAGE_KEY_FIELD, type ProviderMessageClaim } from './session-broker-intent.js';
+import { FenceIssuer, type Fence } from '../utils/owner-fence.js';
 import { isDelegatedSessionInput } from './session-intents.js';
 import { submitDelegatedSessionMessage, type DelegatedSessionInputBinding, type DelegatedSessionSubmission } from './session-broker-delegated.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
@@ -177,6 +179,16 @@ export class SharedSessionBroker {
   private readonly sessions = new TrackedMap<SharedSessionRecord>(this.noteChange);
   private readonly messages = new SessionBucketMap<SharedSessionMessage[]>(this.noteChange, (id) => this.loadDeferredHistory(id));
   private readonly inputs = new SessionBucketMap<SharedSessionInputRecord[]>(this.noteChange, (id) => this.loadDeferredHistory(id));
+  /**
+   * Each session's close fence, made on first use. `closeSession` moves its epoch, so input admitted against the
+   * open session is refused at the point it would be recorded (session-broker-intent.ts). One integer per session.
+   */
+  private readonly closeFences = new Map<string, FenceIssuer>();
+  private sessionFence(sessionId: string): Fence {
+    let issuer = this.closeFences.get(sessionId);
+    if (issuer === undefined) { issuer = new FenceIssuer(`session ${sessionId}`); this.closeFences.set(sessionId, issuer); }
+    return issuer.peek();
+  }
   /** Sessions whose messages and inputs are on disk only; they load on first use. */
   private readonly deferred = new Set<string>();
   /** When each closed session's loaded history was last asked for. */
@@ -741,6 +753,8 @@ export class SharedSessionBroker {
       ...closed, channelPermissionModeRevision: (touched.channelPermissionModeRevision ?? 0) + 1,
     };
     this.sessions.set(sessionId, updated);
+    // Input admitted while the session was open and not yet recorded is refused from here on.
+    this.closeFences.get(sessionId)?.issue();
     // A deliberate close ends what was waiting to start in it; left queued, the
     // rows keep the daemon "busy" and a later completion would start them.
     const cancelled = cancelQueuedSessionInputs(this.sessionInputStore(), sessionId, 'session closed');
@@ -788,6 +802,8 @@ export class SharedSessionBroker {
     // A hosted loop the engine still vouches for would register itself again as an empty active record.
     if (this.externalLivenessProbe?.(session) === true) return 'active';
     this.sessions.delete(sessionId);
+    this.closeFences.get(sessionId)?.retire('session deleted');
+    this.closeFences.delete(sessionId);
     this.messages.quietDelete(sessionId);
     this.inputs.quietDelete(sessionId);
     this.deferred.delete(sessionId);
@@ -1044,7 +1060,11 @@ export class SharedSessionBroker {
     // the completion message so the session's log states it after a restart.
     const model = typeof metadata.model === 'string' && metadata.model ? metadata.model : this.agentStatusProvider.getStatus(agentId)?.model;
     if (shouldStoreAgentCompletion(this.messageStore(), sessionId, agentId)) {
-      await this.appendMessage(sessionId, { role, body, agentId, metadata: model ? { ...metadata, model } : metadata });
+      // Checked and appended in one synchronous section (the store is loaded above): two reporters of the same
+      // end that arrive together cannot both pass the check before either appends.
+      const message = appendSharedSessionMessage(this.messageStore(), { sessionId, role, body, agentId, metadata: model ? { ...metadata, model } : metadata }, MAX_PERSISTED_MESSAGES);
+      await this.persist();
+      this.publishUpdate('session-message-appended', { sessionId, message });
     } else if (session.activeAgentId !== agentId && !(this.inputs.get(sessionId) ?? []).some((entry) => !isDelegatedSessionInput(entry)
       && entry.activeAgentId === agentId && (entry.state === 'delivered' || entry.state === 'spawned'))) {
       return { session };
@@ -1445,6 +1465,7 @@ export class SharedSessionBroker {
           return this.sessions.get(attached.id) ?? attached;
         },
         appendMessage: (sessionId, i) => this.appendMessage(sessionId, i),
+        sessionFence: (sessionId) => this.sessionFence(sessionId),
         appendUnpublishedMessage: (sessionId, i) => appendSharedSessionMessage(this.messageStore(), { sessionId, ...i }, MAX_PERSISTED_MESSAGES),
         sessionInputStore: () => this.sessionInputStore(),
         publishInputLifecycleEvent: (event, i, extra) => this.publishInputLifecycleEvent(event, i, extra),
@@ -1536,13 +1557,26 @@ export class SharedSessionBroker {
   async markInputDelivered(
     sessionId: string,
     inputId: string,
-    options: { readonly consumed?: boolean | undefined; readonly agentId?: string | undefined; readonly claim?: boolean | undefined; readonly surfaceInstance?: string | undefined; readonly beforeApply?: (() => void) | undefined } = {},
+    options: {
+      readonly consumed?: boolean | undefined; readonly agentId?: string | undefined; readonly claim?: boolean | undefined; readonly surfaceInstance?: string | undefined;
+      /**
+       * The claim token of a surface reporting over the wire (null: it sent none). With `claim`, a number renews
+       * the caller's claim; with any other report it must be the input's current claim epoch. Undefined for the
+       * daemon's own in-process reports, which no surface claim fences.
+       */
+      readonly claimEpoch?: number | null | undefined;
+      readonly beforeApply?: (() => void) | undefined;
+    } = {},
   ): Promise<SharedSessionInputRecord | null> {
     await this.start();
     // The async startup boundary must not turn a stale source into a claim.
     assertSynchronousJudgmentGuard(() => options.beforeApply?.(), () => new Error('Session delivery authority checks must be synchronous'));
-    if (options.claim === true && options.consumed !== true) assertSurfaceInputClaimable(this.sessionInputStore(), sessionId, inputId, Date.now());
-    const applied = applySurfaceInputDelivery(this.sessionInputStore(), sessionId, inputId, options, {
+    // The claim (or the claimant's report) is checked where the row moves, with no await before the apply below.
+    const claiming = options.claim === true && options.consumed !== true;
+    const claim = claiming ? assertSurfaceInputClaimable(this.sessionInputStore(), sessionId, inputId, Date.now(), options.claimEpoch ?? undefined) : undefined;
+    if (!claiming && options.claimEpoch !== undefined) assertSurfaceInputClaimCurrent(this.sessionInputStore(), sessionId, inputId, options.claimEpoch ?? undefined, options.agentId?.trim() || undefined);
+    const { claim: _claimed, claimEpoch: _token, beforeApply: _before, ...report } = options;
+    const applied = applySurfaceInputDelivery(this.sessionInputStore(), sessionId, inputId, { ...report, ...(claim === undefined ? {} : { claim }) }, {
       publish: (event, payload) => this.publishUpdate(event, payload),
       publishInput: (event, input, extra) => this.publishInputLifecycleEvent(event, input, extra),
       announce: (binding) => this.announceSurfaceReply(binding),

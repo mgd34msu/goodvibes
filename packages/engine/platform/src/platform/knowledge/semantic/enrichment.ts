@@ -501,7 +501,10 @@ async function persistSemanticExtraction(
   await support.readAll();
   guard.assertCurrent(); assertQualityCurrent();
   const supportedDrafts = factDrafts.filter((draft) => support.outcome(draft.supportKey) === 'supported');
-  const unsupportedFacts = factDrafts.filter((draft) => support.outcome(draft.supportKey) === 'no-support').length;
+  const unsupportedDrafts = factDrafts.filter((draft) => support.outcome(draft.supportKey) === 'no-support');
+  const unsupportedFacts = unsupportedDrafts.length;
+  // Facts already stored under a dropped draft's identity: the only ones a later supersession has to settle.
+  const unsupportedIds = new Set(unsupportedDrafts.filter((draft) => draft.existingFact).map((draft) => draft.factId));
   const supportUnsettled = factDrafts.length - supportedDrafts.length - unsupportedFacts;
   if (supportedDrafts.length < factDrafts.length) {
     // Rendering consumes only supported facts; a supplied page could still state a left-out claim.
@@ -523,6 +526,19 @@ async function persistSemanticExtraction(
   }
   const applySupersession = await resolveSupersession();
   guard.assertCurrent(); assertQualityCurrent();
+  // A fact this source stated before but no longer supports is not rewritten by
+  // this pass, so it is superseded like any other fact the source dropped:
+  // retired, or kept on its other sources while they support it. Its own support
+  // reading runs only when such a fact exists (never on an ordinary pass).
+  let applyUnsupportedSupersession: (() => Promise<void>) | undefined;
+  if (unsupportedIds.size > 0) {
+    const unsupportedSupport = createGeneratedFactWritePlanner(store, guard, { signal: options.signal, partial: true });
+    const resolveUnsupported = prepareSemanticSupersession(store, source.id, spaceId, activeIds, guard, planner, unsupportedSupport, assertQualityCurrent, unsupportedIds);
+    await unsupportedSupport.readAll();
+    guard.assertCurrent(); assertQualityCurrent();
+    applyUnsupportedSupersession = await resolveUnsupported();
+    guard.assertCurrent(); assertQualityCurrent();
+  }
   const gapPlans = gapIdentities.map(({ gap, identity }) => ({ gap, nodeInput: prepareObservedKnowledgeNodeInput(store, nodeSlug(enrichmentGapNodeInput(gap, source,
     extraction, semantic, spaceId, store.getNode(identity.id), identity)), 'research-task', { source, extraction },
       () => ({ source: store.getSource(source.id), extraction: store.getExtractionBySourceId(source.id) })),
@@ -591,6 +607,7 @@ async function persistSemanticExtraction(
   const wikiPage = await persistWikiPage(store, source, semantic, spaceId, wikiInput, wikiInput ? () => store.upsertPreparedNode(activation, activationIndex++) : undefined, assertQualityCurrent);
   if (wikiPage) nodeIdentities.get(wikiPage.id)!.retain(wikiPage);
   await applySupersession();
+  await applyUnsupportedSupersession?.();
   assertQualityCurrent();
   const result = { source, skipped: false, extractor: semantic.extractor, facts, entities, gaps, ...(wikiPage ? { wikiPage } : {}),
     ...(leftOut.unquoted + leftOut.unsettled + leftOut.unsupported > 0 ? { factsLeftOut: leftOut } : {}) };

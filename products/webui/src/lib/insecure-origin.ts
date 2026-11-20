@@ -18,7 +18,7 @@
  * disagree. A 100.64/10 address is shared with carrier-grade NAT, so a browser (which
  * has no Tailscale probe and no environment) is pointed at the Tailscale name instead.
  */
-import { isPrivateNetworkHost } from '@goodvibes-jev/engine/transport-http/paths';
+import { isLoopbackHost, isPrivateNetworkHost, isTailnetHost } from '@goodvibes-jev/engine/transport-http/paths';
 
 export const INSECURE_ORIGIN_TITLE = 'This page needs HTTPS';
 
@@ -69,4 +69,27 @@ export function isInsecureTransportOrigin(): boolean {
   const protocol = url.protocol;
   if (protocol !== 'http:' && protocol !== 'ws:') return false;
   return !isPrivateNetworkHost(url.hostname);
+}
+
+/**
+ * How this page reaches the daemon, read the way the daemon reads it for card
+ * entry (runtime/network/request-transport.ts): https or wss is TLS; plain
+ * http to this machine is loopback; plain http to a Tailscale address is the
+ * tailnet; plain http to anything else (a LAN address, a .local name) is a
+ * plain network, where the daemon refuses a card number, so the form is not
+ * offered there either.
+ */
+export function cardEntryTransport(): 'loopback' | 'tls' | 'tailnet' | 'plain-network' {
+  const base = effectiveBaseUrl();
+  let url: URL;
+  try {
+    url = new URL(base || window.location.href);
+  } catch {
+    return 'plain-network';
+  }
+  if (url.protocol === 'https:' || url.protocol === 'wss:') return 'tls';
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  if (isLoopbackHost(host)) return 'loopback';
+  if (isTailnetHost(host)) return 'tailnet';
+  return 'plain-network';
 }

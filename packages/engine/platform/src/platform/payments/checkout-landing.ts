@@ -3,10 +3,12 @@
  *
  * After the one submit click, the merchant shows a confirmation page or an
  * error. This reads that page's own words, in code and with no model request,
- * for two things: that the order was placed, and the order number the shop
- * gave it. Either one makes the submission verified (browser-checkout-driver.ts),
- * so the purchase is recorded as `purchased` with the order number rather than
- * `submitted-unverified`.
+ * for what ties it to THIS submit: the order number the shop gave it, or a
+ * confirmation that shows the dispatch's own total. The driver turns either
+ * into `OrderEvidence` only on the merchant's own domain
+ * (browser-checkout-driver.ts), and the purchase is `purchased` only through
+ * `settleSubmission` (money.ts). Confirmation wording alone ("Thank you for
+ * your order") names no order and proves nothing: it stays `submitted-unverified`.
  *
  * The reading errs toward "unverified": a page that mentions a decline, a
  * failure or a retry verifies nothing, an order number is taken only beside a
@@ -15,7 +17,8 @@
  * default the rest of the flow already reports; a wrong "purchased" is not.
  */
 import { sanitizeNoticeField } from '../security/notice-text.js';
-import type { CheckoutBrowserEngine, CheckoutEngineTarget, CheckoutSubmission, CheckoutSubmissionDescription } from './browser-checkout-driver.js';
+import { pageShowsAmount, type CheckoutBrowserEngine, type CheckoutEngineTarget, type CheckoutSubmission, type CheckoutSubmissionDescription } from './browser-checkout-driver.js';
+import type { Money } from './money.js';
 
 const NOTHING_FOUND: CheckoutSubmissionDescription = Object.freeze({ orderId: null, challenge: null });
 
@@ -41,9 +44,11 @@ function cardShaped(token: string): boolean {
 /**
  * What a landing page's text says about the order. `navigated` is whether the
  * submit moved to a new page; a confirmation sentence on the checkout page
- * itself, without a number, is not taken as confirmation.
+ * itself, without a number, is not taken as confirmation. `total` is the
+ * dispatch's total: a confirmation without an order number counts
+ * (`totalShown`) only when the page shows that very amount.
  */
-export function readOrderConfirmation(text: string, navigated: boolean): CheckoutSubmissionDescription {
+export function readOrderConfirmation(text: string, navigated: boolean, total?: Money): CheckoutSubmissionDescription {
   const flat = text.replace(/\s+/g, ' ').trim();
   if (flat.length === 0 || FAILURE.test(flat) || !CONFIRMED.test(flat)) return NOTHING_FOUND;
   for (const match of flat.matchAll(ORDER_NUMBER)) {
@@ -52,7 +57,8 @@ export function readOrderConfirmation(text: string, navigated: boolean): Checkou
     const orderId = sanitizeNoticeField(token, 30);
     if (orderId.length > 0) return { orderId, challenge: null };
   }
-  return navigated ? { orderId: null, challenge: null, confirmed: true } : NOTHING_FOUND;
+  if (!navigated) return NOTHING_FOUND;
+  return { orderId: null, challenge: null, confirmed: true, totalShown: total !== undefined && pageShowsAmount(flat, total) };
 }
 
 /** The engine reads the landing page needs, beyond what the checkout driver uses. */
@@ -92,7 +98,7 @@ export function describeCheckoutLanding(
         const names = elements.map((element) => (element && typeof element === 'object' ? textOf((element as { readonly name?: unknown }).name) : ''));
         text = [textOf(snapshot['title']), ...names].join('\n');
       }
-      return readOrderConfirmation(text, submission.navigated);
+      return readOrderConfirmation(text, submission.navigated, submission.dispatch?.total);
     } catch {
       return NOTHING_FOUND;
     }

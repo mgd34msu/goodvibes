@@ -22,6 +22,7 @@ import { readSurfaceMessageText, type AgentWorkspaceChannelTriage } from '../inp
 import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn/daemon-operator-client';
 import { UNKNOWN_PRINCIPAL_LABEL } from './principal-attribution.ts';
 import { renderForModel, untrustedFrom } from './untrusted-content.ts';
+import type { Page } from '@goodvibes-jev/engine/errors';
 
 /** The daemon method that serves provider inbound feeds. */
 export const CHANNEL_INBOX_LIST_METHOD = 'channels.inbox.list';
@@ -131,7 +132,8 @@ export interface UnifiedInboxTarget {
 // Aggregate model
 // ---------------------------------------------------------------------------
 
-export type UnifiedInboxSourceState = 'ready' | 'empty' | 'unavailable';
+/** `partial`: the source answered, but part of what it holds is missing (a provider whose last sync failed). */
+export type UnifiedInboxSourceState = 'ready' | 'empty' | 'partial' | 'unavailable';
 
 export interface UnifiedInboxSource {
   readonly name: string;
@@ -187,10 +189,30 @@ export type InboundChannelFeedState =
   | {
       readonly available: true;
       readonly methodId: typeof CHANNEL_INBOX_LIST_METHOD;
-      readonly items: readonly UnifiedInboxInboundMessageItem[];
+      /** The page the host returned: `more` and `next` say a further page is there to read. */
+      readonly page: Page<UnifiedInboxInboundMessageItem>;
       readonly total: number;
       readonly truncated: boolean;
+      /** True when a configured provider's items are missing because its last sync failed. */
+      readonly partial: boolean;
+      /** Each provider's own state as the host reported it. */
+      readonly providers: readonly InboundProviderStatus[];
     };
+
+/** One provider of the inbound feed, as the host reported it. */
+export interface InboundProviderStatus {
+  readonly provider: string;
+  readonly state: string;
+  /** What the host said failed, when the state is `error` (third-party text: shown only in the untrusted frame). */
+  readonly error?: string;
+}
+
+function readInboundProviders(value: unknown): InboundProviderStatus[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).flatMap((entry) => (typeof entry.provider === 'string' && typeof entry.state === 'string'
+    ? [{ provider: entry.provider, state: entry.state, ...(typeof entry.error === 'string' ? { error: entry.error } : {}) }]
+    : []));
+}
 
 export interface UnifiedInbox {
   readonly mode: 'unified_inbox';
@@ -367,13 +389,21 @@ export async function fetchInboundChannelFeed(
     };
   }
   const items = (result.body.items as unknown[]).filter(isRecord).map(toInboundMessageItem);
+  const nextCursor = typeof result.body.nextCursor === 'string' && result.body.nextCursor.length > 0 ? result.body.nextCursor : undefined;
   return {
     available: true,
     methodId: CHANNEL_INBOX_LIST_METHOD,
-    items,
+    page: { items, more: result.body.hasMore === true || nextCursor !== undefined, ...(nextCursor !== undefined ? { next: nextCursor } : {}) },
     total: typeof result.body.total === 'number' ? result.body.total : items.length,
     truncated: result.body.truncated === true,
+    partial: result.body.partial === true,
+    providers: readInboundProviders(result.body.providers),
   };
+}
+
+/** The providers whose last sync failed (their names are the host's own provider ids). */
+function failedInboundProviders(feed: Extract<InboundChannelFeedState, { readonly available: true }>): string[] {
+  return feed.providers.filter((provider) => provider.state === 'error').map((provider) => provider.provider);
 }
 
 const DELIVERY_ATTENTION_STATUSES = new Set(['failed', 'dead_lettered', 'pending', 'sending']);
@@ -407,7 +437,7 @@ export function aggregateUnifiedInbox(
   const limit = typeof options.limit === 'number' && options.limit > 0 ? Math.min(options.limit, 200) : 50;
   const inboundChannelFeed = options.inboundChannelFeed ?? INBOUND_FEED_NOT_ATTEMPTED;
   const inboundMessageItems = inboundChannelFeed.available
-    ? inboundChannelFeed.items.slice(0, limit)
+    ? inboundChannelFeed.page.items.slice(0, limit)
     : [];
 
   // --- Delivery items ---
@@ -487,17 +517,20 @@ export function aggregateUnifiedInbox(
     {
       name: 'inbound_messages',
       route: CHANNEL_INBOX_LIST_METHOD,
+      // A provider whose sync failed makes the feed partial, never empty or ready.
       state: inboundChannelFeed.available
-        ? (inboundMessageItems.length === 0 ? 'empty' : 'ready')
+        ? (inboundChannelFeed.partial ? 'partial' : inboundMessageItems.length === 0 ? 'empty' : 'ready')
         : 'unavailable',
       itemCount: inboundMessageItems.length,
-      ...(inboundChannelFeed.available ? {} : { error: inboundChannelFeed.detail }),
+      ...(inboundChannelFeed.available
+        ? inboundChannelFeed.partial ? { error: `provider sync failed: ${failedInboundProviders(inboundChannelFeed).join(', ') || 'a provider'}` } : {}
+        : { error: inboundChannelFeed.detail }),
     },
   ];
 
   const blockedSources = sources.filter((s) => s.state === 'unavailable').length;
   const overallStatus: UnifiedInbox['status'] =
-    blockedSources === sources.length ? 'blocked' : attentionCount > 0 ? 'attention' : 'ready';
+    blockedSources === sources.length ? 'blocked' : attentionCount > 0 || sources.some((s) => s.state === 'partial') ? 'attention' : 'ready';
 
   return {
     mode: 'unified_inbox',
@@ -613,7 +646,8 @@ export function formatUnifiedInbox(inbox: UnifiedInbox, options: { readonly thir
     `  items: ${summary.totalItems} (deliveries: ${summary.deliveryItems}, surface messages: ${summary.surfaceMessageItems}, route bindings: ${summary.routeBindingItems}, inbound: ${summary.inboundMessageItems})`,
     `  attention: ${summary.attentionCount}  failures: ${summary.failureCount}`,
     `  inbound channel feed: ${feed.available
-      ? `${feed.total} message(s)${feed.truncated ? ', truncated' : ''} via ${feed.methodId}`
+      ? `${feed.total} message(s)${feed.truncated ? ', truncated' : ''}${feed.page.more ? ', more on the next page' : ''} via ${feed.methodId}`
+        + (feed.partial ? `; partial: sync failed for ${failedInboundProviders(feed).join(', ') || 'a provider'}` : '')
       : `unavailable (${feed.reason})`}`,
     `  policy: ${inbox.policy}`,
     '',

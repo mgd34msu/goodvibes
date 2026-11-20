@@ -6,12 +6,35 @@ import type {
   KnowledgeIssueRecord,
   KnowledgeIssueUpsertInput,
   KnowledgeNodeRecord,
+  KnowledgeNodeUpsertInput,
 } from '../types.js';
 import {
   semanticMetadata,
 } from './utils.js';
+import { defineFormat, renderChecked } from '../../utils/format-codec.js';
 
 export const SELF_IMPROVEMENT_RETRY_DELAY_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * A gap's `nextRepairAttemptAt`: milliseconds since the epoch, as a safe
+ * integer. The gap writer renders it and every scheduler reads it with this
+ * one codec, so a retry window cannot be stored in a form the scheduler skips.
+ */
+export const GAP_RETRY_CLOCK = defineFormat<number>({
+  name: 'knowledge gap retry time',
+  parse(raw) {
+    return typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0
+      ? { ok: true, value: raw }
+      : { ok: false, reason: 'expected milliseconds since the epoch as a whole number' };
+  },
+  render(value) { return value; },
+});
+
+/** The gap's retry time, or undefined when it holds none (or one this codec cannot read). */
+export function gapRetryAt(metadata: Readonly<Record<string, unknown>>): number | undefined {
+  const parsed = GAP_RETRY_CLOCK.parse(metadata.nextRepairAttemptAt);
+  return parsed.ok ? parsed.value : undefined;
+}
 
 /** Every `repairStatus` a gap's metadata records. */
 export type KnowledgeGapRepairStatus =
@@ -80,17 +103,16 @@ export async function markGapRepairAttempt(
 ): Promise<KnowledgeNodeRecord> {
   // Only the locally generated retry clock is encoded. Explicit caller values
   // remain untouched and undergo complete raw admission on later reads.
-  const nextRepairAttemptAt = details.nextRepairAttemptAt ?? (
-    RETRY_WINDOW_STATUSES.has(details.status)
-      ? knowledgeClockIso(Date.now() + SELF_IMPROVEMENT_RETRY_DELAY_MS)
-      : undefined
+  const retryAt = details.nextRepairAttemptAt ?? (
+    RETRY_WINDOW_STATUSES.has(details.status) ? Date.now() + SELF_IMPROVEMENT_RETRY_DELAY_MS : undefined
   );
+  const nextRepairAttemptAt = retryAt === undefined ? undefined : renderChecked(GAP_RETRY_CLOCK, retryAt);
   // An undefined key would erase the stored window on merge. Only a retry
   // status sets it and only a repair clears it; any other status keeps it.
   const retryWindow = nextRepairAttemptAt !== undefined
     ? { nextRepairAttemptAt }
     : details.status === 'repaired' ? { nextRepairAttemptAt: undefined } : {};
-  const committed = await upsertObservedKnowledgeNode(store, {
+  const input: KnowledgeNodeUpsertInput = {
     id: gap.id,
     kind: gap.kind,
     slug: gap.slug,
@@ -113,17 +135,26 @@ export async function markGapRepairAttempt(
       ...retryWindow,
       knowledgeSpaceId: spaceId,
     },
-  }, 'research-task', gap, () => { details.assertCurrent?.(); return store.getNode(gap.id); });
-  if (details.status === 'repaired') {
-    for (const issue of store.listIssues(Number.MAX_SAFE_INTEGER).filter((entry) => entry.nodeId === gap.id && entry.status === 'open')) {
-      await resolveIssue(store, issue, spaceId, details.reason ?? 'Gap was repaired with accepted source-backed evidence.');
-    }
-  }
+  };
+  const readEvidence = () => { details.assertCurrent?.(); return store.getNode(gap.id); };
+  if (details.status !== 'repaired') return upsertObservedKnowledgeNode(store, input, 'research-task', gap, readEvidence);
+  // A repaired gap is retired together with its open issues, in one commit, as
+  // suppressGap does: a failure part way can no longer leave an open issue on a
+  // gap that left the candidate set.
+  const node = prepareObservedKnowledgeNodeInput(store, input, 'research-task', gap, readEvidence);
+  const issues = store.listIssues(Number.MAX_SAFE_INTEGER).filter((entry) => entry.nodeId === gap.id && entry.status === 'open');
+  const guard = () => {
+    details.assertCurrent?.();
+    for (const issue of issues) if (store.getIssue(issue.id) !== issue) throw new KnowledgeSourceQualityHeldError('stale');
+  };
+  const reason = details.reason ?? 'Gap was repaired with accepted source-backed evidence.';
+  await store.applyPreparedIngest({ sources: [], extractions: [], nodes: [], edges: [], issues: [] }, async () => ({
+    nodes: [node], edges: [], issues: issues.map((issue) => resolvedIssueInput(issue, spaceId, reason)),
+    assertCurrent: guard,
+  }));
+  const committed = store.getNode(gap.id);
+  if (!committed) throw new Error(`The repaired gap ${gap.id} is not in the knowledge store after its commit`);
   return committed;
-}
-
-async function resolveIssue(store: KnowledgeStore, issue: KnowledgeIssueRecord, spaceId: string, reason: string): Promise<void> {
-  await store.upsertIssue(resolvedIssueInput(issue, spaceId, reason));
 }
 
 function resolvedIssueInput(issue: KnowledgeIssueRecord, spaceId: string, reason: string): KnowledgeIssueUpsertInput {

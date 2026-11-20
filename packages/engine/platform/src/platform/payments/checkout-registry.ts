@@ -117,6 +117,14 @@ export interface InFlightCheckout {
   /** Exact rendered notice sent for this quote. Storage alone grants no act. */
   readonly windowNotice?: string | undefined;
   /**
+   * The one submit this record's click was: minted and journaled with the
+   * `submit-pending` phase, before the click (money.ts `SubmissionDispatch`).
+   * Only evidence naming this dispatch makes the purchase `purchased`.
+   */
+  readonly dispatchId?: string | undefined;
+  /** sha256 of the matched lines, quantities and total the dispatch submitted (money.ts `cartDigest`). */
+  readonly cartDigest?: string | undefined;
+  /**
    * Set on an approval window that follows a veto reply which was not a
    * go-ahead. A restart resumes it as that approval (silence denies) instead
    * of opening a new veto window.

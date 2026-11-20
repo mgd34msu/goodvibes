@@ -80,15 +80,25 @@ function buildCohortReport(agentManager: AgentManager, cohort: string): string {
   return lines.join('\n');
 }
 
+/** A follow-up with the turn whose request started the work, when one did (recovery reruns only that request). */
+function forTurn(item: ConversationFollowUpItem, turnId: string | undefined): ConversationFollowUpItem {
+  return turnId === undefined ? item : { ...item, turnId };
+}
+
+/** The turn whose tool call started a contract's owner agent; undefined when unknown (a restart, a schedule). */
+function contractTurn(agentManager: Pick<AgentManager, 'requestTurnOf'>, contract: ReturnType<ContractRunner['get']>): string | undefined {
+  return contract?.ownerAgentId ? agentManager.requestTurnOf(contract.ownerAgentId) : undefined;
+}
+
 function buildCohortFollowUp(agentManager: AgentManager, cohort: string): ConversationFollowUpItem {
   const agents = agentManager.listByCohort(cohort);
   const completed = agents.filter((agent) => agent.status === 'completed').length;
   const failed = agents.filter((agent) => agent.status === 'failed').length;
   const cancelled = agents.filter((agent) => agent.status === 'cancelled').length;
-  return {
+  return forTurn({
     key: `cohort:${cohort}:complete`,
     summary: `Agent cohort "${cohort}" finished with ${completed} completed, ${failed} failed, and ${cancelled} cancelled out of ${agents.length} total agents.`,
-  };
+  }, agents.map((agent) => agentManager.requestTurnOf(agent.id)).find((turnId) => turnId !== undefined));
 }
 
 /**
@@ -227,7 +237,7 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
   onContract('CONTRACT_PASSED', (payload) => {
     contractLine(`\u2713 ${payload.contractId} PASSED: ${payload.criteriaMet} of ${payload.criteriaJudged} criteria met, ${payload.nudges} corrections`, payload);
     const contract = contractRunner.get(payload.contractId);
-    queueConversationFollowUp?.(contractEndFollowUp(payload, contract));
+    queueConversationFollowUp?.(forTurn(contractEndFollowUp(payload, contract), contractTurn(agentManager, contract)));
     finishWorkstreamLabel(payload.contractId);
     checkContractCohorts(contract);
   });
@@ -235,7 +245,7 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
   onContract('CONTRACT_FAILED', (payload) => {
     contractLine(`\u2717 ${payload.contractId} FAILED: ${payload.reason}`, payload);
     const contract = contractRunner.get(payload.contractId);
-    queueConversationFollowUp?.(contractEndFollowUp(payload, contract));
+    queueConversationFollowUp?.(forTurn(contractEndFollowUp(payload, contract), contractTurn(agentManager, contract)));
     finishWorkstreamLabel(payload.contractId);
     checkContractCohorts(contract);
   });
@@ -243,7 +253,7 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
   onContract('CONTRACT_CANCELLED', (payload) => {
     contractLine(`${payload.contractId} cancelled: ${payload.reason} (${payload.filesModified} files modified)`, payload);
     const contract = contractRunner.get(payload.contractId);
-    queueConversationFollowUp?.(contractEndFollowUp(payload, contract));
+    queueConversationFollowUp?.(forTurn(contractEndFollowUp(payload, contract), contractTurn(agentManager, contract)));
     finishWorkstreamLabel(payload.contractId);
     checkContractCohorts(contract);
   });
@@ -327,7 +337,7 @@ export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions
         router.low(voice.completedLine(facts), payload);
       });
       const followUp = agentEndFollowUp(record, payload.agentId, undefined, voice);
-      if (followUp) queueConversationFollowUp?.(followUp);
+      if (followUp) queueConversationFollowUp?.(forTurn(followUp, agentManager.requestTurnOf(payload.agentId)));
     }
     checkCohort(record);
     requestRender();
@@ -362,7 +372,7 @@ export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions
         }
       }
       const followUp = agentEndFollowUp(record, payload.agentId, payload.error, voice);
-      if (followUp) queueConversationFollowUp?.(followUp);
+      if (followUp) queueConversationFollowUp?.(forTurn(followUp, agentManager.requestTurnOf(payload.agentId)));
     }
     checkCohort(record);
     requestRender();
@@ -449,7 +459,7 @@ function contractEndFollowUp(event: ContractEndEvent, contract: ReturnType<Contr
  */
 export function registerSessionFollowUps(options: {
   readonly runtimeBus: RuntimeEventBus;
-  readonly agentManager: Pick<AgentManager, 'getStatus'>;
+  readonly agentManager: Pick<AgentManager, 'getStatus' | 'requestTurnOf'>;
   readonly contractRunner: Pick<ContractRunner, 'get'>;
   readonly sessionId: string;
   readonly queueConversationFollowUp: (item: ConversationFollowUpItem) => void;
@@ -460,12 +470,12 @@ export function registerSessionFollowUps(options: {
     const record = agentManager.getStatus(agentId);
     if (!record || record.sessionId !== sessionId) return;
     const followUp = agentEndFollowUp(record, agentId, error, voice);
-    if (followUp) queueConversationFollowUp(followUp);
+    if (followUp) queueConversationFollowUp(forTurn(followUp, agentManager.requestTurnOf(agentId)));
   };
   const onContractEnd = (event: ContractEndEvent): void => {
     const contract = contractRunner.get(event.contractId);
     if (contract?.sessionId !== sessionId) return;
-    queueConversationFollowUp(contractEndFollowUp(event, contract));
+    queueConversationFollowUp(forTurn(contractEndFollowUp(event, contract), contractTurn(agentManager, contract)));
   };
   const unsubs = [
     runtimeBus.on<Extract<AgentEvent, { type: 'AGENT_COMPLETED' }>>('AGENT_COMPLETED', ({ payload }) => onAgentEnd(payload.agentId, undefined)),

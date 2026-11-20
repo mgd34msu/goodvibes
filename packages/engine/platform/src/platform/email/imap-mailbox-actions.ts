@@ -13,7 +13,7 @@ import type { ImapSession } from './imap-session.js';
 import { formatMailboxName } from './imap-names.js';
 import { parseMailboxList } from './imap-draft.js';
 import { parseMailboxStatus, parseSearchNumbers, readEnvelopeBatch } from './imap-headers.js';
-import { decodeTextPart, extractBodyStructure, extractFetchSection, parseBodyStructure } from './imap-bodystructure.js';
+import { decodeTextPart, extractBodyStructure, extractFetchSection, extractFetchSectionBytes, parseBodyStructure } from './imap-bodystructure.js';
 import { fetchSection, parseFetchResponses } from './imap-fetch-response.js';
 
 export type ImapMessageAction = 'seen' | 'unseen' | 'archive' | 'delete';
@@ -125,14 +125,20 @@ export async function fetchImapAttachment(session: ImapSession, uid: number, ind
   if (part.sizeBytes > IMAP_ATTACHMENT_LITERAL_BYTES) {
     throw new Error(`The attachment ${part.filename || `#${index + 1}`} is larger than ${IMAP_ATTACHMENT_MAX_BYTES / 1_048_576} MB and is not handed over here. Open it in your mail program.`);
   }
-  const raw = extractFetchSection(await session.commandFrames(`UID FETCH ${uid} BODY.PEEK[${part.section}]`, {
+  // Taken as octets: an 8bit or binary part is copied byte for byte, base64
+  // and quoted-printable are decoded from the bytes, never from UTF-8 text.
+  const octets = extractFetchSectionBytes(await session.commandFrames(`UID FETCH ${uid} BODY.PEEK[${part.section}]`, {
     maxResponseBytes: IMAP_ATTACHMENT_LITERAL_BYTES + 4_096,
-  })) ?? '';
+  }));
+  if (octets === null) {
+    throw new Error(`The mail server sent no content for the attachment ${part.filename || `#${index + 1}`}; nothing was handed over. Open it in your mail program.`);
+  }
+  const raw = Buffer.from(octets.buffer, octets.byteOffset, octets.byteLength);
   const bytes = part.encoding === 'base64'
-    ? Buffer.from(raw.replace(/[^A-Za-z0-9+/=]/g, ''), 'base64')
+    ? Buffer.from(raw.toString('latin1').replace(/[^A-Za-z0-9+/=]/g, ''), 'base64')
     : part.encoding === 'quoted-printable'
-      ? Buffer.from(raw.replace(/=\r?\n/g, '').replace(/=([0-9A-Fa-f]{2})/g, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16))), 'latin1')
-      : Buffer.from(raw, 'utf8');
+      ? Buffer.from(raw.toString('latin1').replace(/=\r?\n/g, '').replace(/=([0-9A-Fa-f]{2})/g, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16))), 'latin1')
+      : Buffer.from(raw);
   return {
     filename: part.filename,
     contentType: part.type.length > 0 ? `${part.type}/${part.subtype}` : 'application/octet-stream',
@@ -146,6 +152,14 @@ export async function fetchImapAttachment(session: ImapSession, uid: number, ind
  * its recipient, subject, thread reference and up to 64 KB of body text, so a
  * draft can be opened in a composer without a second request.
  */
+/** The newest draft in `mailbox` saved under `messageId` (one EXAMINE and one UID SEARCH), or null when there is none. */
+export async function findImapDraftByMessageId(session: ImapSession, mailbox: string, messageId: string): Promise<{ readonly uid: number; readonly uidValidity: number | null } | null> {
+  const examined = parseMailboxStatus(await session.command(`EXAMINE ${formatMailboxName(mailbox)}`));
+  const uids = parseSearchNumbers(await session.command(`UID SEARCH HEADER Message-ID "${messageId}"`));
+  const uid = uids.at(-1);
+  return uid === undefined ? null : { uid, uidValidity: examined.uidValidity };
+}
+
 export async function listImapDrafts(session: ImapSession, mailbox: string, limit: number): Promise<{ drafts: ImapDraftSummary[]; total: number; uidValidity: number | null }> {
   const examined = parseMailboxStatus(await session.command(`EXAMINE ${formatMailboxName(mailbox)}`));
   const uidValidity = examined.uidValidity;

@@ -42,6 +42,7 @@ import type { OwnerInbox } from '../control-plane/owner-inbox.js';
 import type { QuestionInbox } from '../tools/query/index.js';
 import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
 import { getProcessUntrustedContentLedger, withUntrustedContentScope } from '../security/untrusted-content.js';
+import { currentTurn } from '../security/turn-boundary.js';
 import {
   containmentFor,
   resolveHostedExecPosture,
@@ -371,17 +372,15 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
 
   if (options.floor.devicePosture) registerDevicePhoneTool(toolRegistry, options.floor.devicePosture);
 
-  // The user message the current turn answers; a surface prompt ranks its context against it.
-  let turnText: string | null = null;
-  // The same message when an authenticated operator sent it (an operator's input
-  // or a native conversation turn); null for a turn channel or automation input started.
-  let ownerTurnText: string | null = null;
+  // What the current turn answers, and whether an authenticated operator sent
+  // it, live in the turn's own record (security/turn-boundary.ts currentTurn),
+  // opened by the orchestrator per turn: a message queued behind a running
+  // turn cannot change what that turn's prompt or tools read.
   // The surface's own tools go in after the platform's, once per composed session.
   const surfaceTurn = options.surfaceTurn;
   let surfaceTools: HostedSurfaceTools | undefined;
   try {
     surfaceTools = surfaceTurn?.registerTools({ registry: toolRegistry, sessionId, workspaceRoot: options.workspaceRoot, floor: options.floor, providerRegistry,
-      ownerTurnText: () => ownerTurnText,
       ...(options.daemonRequests ? { daemonRequests: options.daemonRequests } : {}) });
   } catch (error) {
     // Nothing else holds this session yet: release what was composed so far.
@@ -402,7 +401,8 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       const existing = signal ? surfacePromptBySignal.get(signal) : undefined;
       if (existing) return existing;
       const composed = Promise.resolve(surfaceTurn.systemPrompt({
-        sessionId, workspaceRoot: options.workspaceRoot, basePrompt: options.systemPrompt, providerRegistry, turnText, signal,
+        sessionId, workspaceRoot: options.workspaceRoot, basePrompt: options.systemPrompt, providerRegistry,
+        turnText: currentTurn()?.requestText ?? null, signal,
       }));
       if (signal) surfacePromptBySignal.set(signal, composed);
       return composed;
@@ -542,12 +542,11 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       // evidence that turn's pending send is judged against. Channel and
       // automation input never starts one, so their exposure accumulates.
       await withUntrustedContentScope(contentScope, async () => {
-        // A running turn composed its prompt at its first request; this text is the next turn's.
-        turnText = text;
-        ownerTurnText = submitOptions?.operatorInput === true ? text : null;
         if (submitOptions?.operatorInput === true && !orchestrator.isTurnInFlight && !orchestrator.isThinking) ledger.startTurn();
         await withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(text, undefined, {
           awaitQueuedTurn: true,
+          // An operator's message is the owner's request for its own turn (and only that turn).
+          ...(submitOptions?.operatorInput === true ? { ownerRequest: true } : {}),
           ...(submitOptions?.answersContractQuestion !== undefined ? { answersContractQuestion: submitOptions.answersContractQuestion } : {}),
           origin: {
             source: 'hosted-session',
@@ -566,8 +565,6 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       if (orchestrator.isTurnInFlight || orchestrator.isThinking
         || (before !== 'unclaimed' && before !== 'retryable')) throw new Error(`Native turn cannot be queued or replayed: it is ${before}`);
       orchestrator.bindNativeConversationProject(source.projectId);
-      turnText = source.text;
-      ownerTurnText = source.text;
       // The permit proves the owner's own app sent this input and no turn is in
       // flight (checked above), so it starts this session's next
       // untrusted-content turn, as an operator's input does in `submit`. For

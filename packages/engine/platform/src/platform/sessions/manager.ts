@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, readSync, readdirSync, statSync, writeFileSync, unlinkSync, renameSync, openSync, fsyncSync, closeSync } from 'fs';
+import { existsSync, fstatSync, mkdirSync, readFileSync, readSync, readdirSync, statSync, writeFileSync, unlinkSync, renameSync, openSync, fsyncSync, closeSync } from 'fs';
 import { basename, join } from 'path';
 import { logger } from '../utils/logger.js';
+import type { OwnerStamp } from '../utils/owner-stamp.js';
 import type { AgentRecord } from '../tools/agent/index.js';
 import type { Contract, ContractView } from '../contract/types.js';
 import { loadedReturnContext, type SessionReturnContextSummary } from '../runtime/session-return-context.js';
@@ -55,9 +56,38 @@ export interface SessionMeta {
    * reads one line per file. Absent on files saved before it was recorded.
    */
   messageCount?: number | undefined;
+  /**
+   * Set on a copy of a conversation another owner holds (a daemon-hosted
+   * session mirrored here): which owner and its revision when copied. A save
+   * that is not such a copy (the conversation continued here) carries none.
+   */
+  mirroredFrom?: OwnerStamp | undefined;
 }
 
 /** Options of {@link SessionManager.save}. */
+/** A session file's identity (device, inode, size, modification time): every save replaces the file, so any save changes it. */
+function fileIdentityOf(fd: number): string {
+  const stat = fstatSync(fd, { bigint: true });
+  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}`;
+}
+
+/**
+ * What each session file was when a manager in this process last read it whole (a load) or wrote it, by path. A
+ * save compares the file with it first: a file another process saved since then is not overwritten with this
+ * process's older copy. Shared by every manager in the process, so one manager's save is not another's surprise.
+ */
+const knownSessionFiles = new Map<string, string>();
+
+/** This process's copy of a session is older than its file: another terminal saved it since. Nothing was written. */
+export class SessionSavedElsewhereError extends Error {
+  readonly code = 'SESSION_SAVED_ELSEWHERE';
+  constructor(readonly sessionName: string) {
+    super(`Session ${sessionName} was saved by another terminal since this one read it, so this save would have overwritten that one's turns; nothing was saved. `
+      + `Run \`/session resume ${sessionName}\` to continue from that save, or \`/session save <new name>\` to keep this conversation under another name.`);
+    this.name = 'SessionSavedElsewhereError';
+  }
+}
+
 export interface SessionSaveOptions {
   /** Replace a file that holds another conversation (the user said so, e.g. `/save <name> --replace`). */
   readonly replace?: boolean | undefined;
@@ -90,7 +120,14 @@ function metaFromRecord(record: Record<string, unknown>): SessionMeta {
     ...(typeof record.conversationId === 'string' ? { conversationId: record.conversationId } : {}),
     ...(typeof record.messageCount === 'number' && Number.isSafeInteger(record.messageCount) && record.messageCount >= 0
       ? { messageCount: record.messageCount } : {}),
+    ...(readOwnerStamp(record.mirroredFrom) ? { mirroredFrom: readOwnerStamp(record.mirroredFrom) } : {}),
   };
+}
+
+function readOwnerStamp(value: unknown): OwnerStamp | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const { owner, revision } = value as { readonly owner?: unknown; readonly revision?: unknown };
+  return typeof owner === 'string' && typeof revision === 'string' ? { owner, revision } : undefined;
 }
 
 /** Messages in a file saved before its meta line recorded the count: every non-removed message line. */
@@ -131,6 +168,8 @@ export interface SessionInfo {
   filePath: string;
   titleSource?: ConversationTitleSource | undefined;
   returnContext?: SessionReturnContextSummary | undefined;
+  /** The owner and revision this file copies, when it is a mirror (SessionMeta.mirroredFrom). */
+  mirroredFrom?: OwnerStamp | undefined;
 }
 
 /**
@@ -273,17 +312,23 @@ export class SessionManager {
    * Mirrors the reference implementation in platform/security/user-auth.ts
    * (atomicWriteSecretFile), which performs both fsyncs.
    */
-  private _atomicWrite(filePath: string, content: string): void {
+  private _atomicWrite(filePath: string, content: string, bless: boolean): void {
     const tmpPath = join(this.sessionsDir, `.tmp-${process.pid}-${Date.now()}`);
     writeFileSync(tmpPath, content, 'utf-8');
     // fsync the file to flush data buffers before rename
     const fileFd = openSync(tmpPath, 'r+');
+    let written: string;
     try {
       fsyncSync(fileFd);
+      // The rename keeps the inode, size and time: this is the file's identity once published.
+      written = fileIdentityOf(fileFd);
     } finally {
       closeSync(fileFd);
     }
     renameSync(tmpPath, filePath);
+    // What this process now knows the file to be; a write that did not start from a current copy leaves the old
+    // (now stale) identity, so a later save of an older copy is still refused.
+    if (bless) knownSessionFiles.set(filePath, written);
     // fsync the directory to flush the directory entry (makes rename durable)
     const dirFd = openSync(this.sessionsDir, 'r');
     try {
@@ -339,8 +384,11 @@ export class SessionManager {
     return record ? metaFromRecord(record) : null;
   }
 
-  /** The meta line (line 0) of an existing session file, or undefined when absent, unreadable or not a meta line. */
-  private _readExistingMetaRecord(filePath: string): Record<string, unknown> & { saveSource?: unknown; name?: unknown; conversationId?: unknown } | undefined {
+  /**
+   * The meta line (line 0) of an existing session file, or undefined when absent, unreadable or not a meta line.
+   * `identity`, when given, receives the identity of the file read (from the descriptor already open; no extra read).
+   */
+  private _readExistingMetaRecord(filePath: string, identity?: { value?: string | undefined }): Record<string, unknown> & { saveSource?: unknown; name?: unknown; conversationId?: unknown } | undefined {
     if (!existsSync(filePath)) return undefined;
     let fd: number;
     try {
@@ -349,6 +397,7 @@ export class SessionManager {
       return undefined;
     }
     try {
+      if (identity) identity.value = fileIdentityOf(fd);
       // Read up to the first newline: a long title or return context can push
       // the meta line past any fixed prefix, and an unparseable prefix would
       // read as "no stamp" and downgrade a user save.
@@ -411,7 +460,13 @@ export class SessionManager {
     // files from before the name was recorded cannot be told apart and keep their overwrite behaviour.
     // The file's own stem (what list() shows, what an opened session's id is) always
     // addresses it, as it does for reads: such a save keeps the name the file recorded.
-    const existing = this._readExistingMetaRecord(filePath);
+    const onDisk: { value?: string | undefined } = {};
+    const existing = this._readExistingMetaRecord(filePath, onDisk);
+    // The file another terminal saved after this process last read or wrote it is not overwritten with this copy.
+    const known = knownSessionFiles.get(filePath);
+    if (!options.replace && known !== undefined && onDisk.value !== undefined && onDisk.value !== known) {
+      throw new SessionSavedElsewhereError(sanitizedName);
+    }
     const existingName = existing?.name;
     const addressedByStem = name === sanitizedName;
     if (typeof existingName === 'string' && existingName !== name && !addressedByStem) {
@@ -448,6 +503,7 @@ export class SessionManager {
       saveSource: this._resolveSaveSource(filePath, meta.saveSource),
       ...(meta.conversationId !== undefined ? { conversationId: meta.conversationId } : {}),
       messageCount: messages.filter(message => (message as { removed?: unknown }).removed !== true).length,
+      ...(meta.mirroredFrom ? { mirroredFrom: { owner: meta.mirroredFrom.owner, revision: meta.mirroredFrom.revision } } : {}),
     };
     lines.push(JSON.stringify(metaRecord));
 
@@ -474,7 +530,7 @@ export class SessionManager {
       lines.push(JSON.stringify({ type: 'branches' as const, branches: branches.branches, currentBranch: branches.currentBranch }));
     }
 
-    this._atomicWrite(filePath, lines.join('\n') + '\n');
+    this._atomicWrite(filePath, lines.join('\n') + '\n', true);
     return { filePath, sanitizedName };
   }
 
@@ -489,7 +545,13 @@ export class SessionManager {
       throw new Error(`Session not found: ${name}`);
     }
 
-    const raw = readFileSync(filePath, 'utf-8');
+    // Read through one descriptor, whose identity is what a later save of this session compares the file with.
+    const fd = openSync(filePath, 'r');
+    let raw: string;
+    try {
+      knownSessionFiles.set(filePath, fileIdentityOf(fd));
+      raw = readFileSync(fd, 'utf-8');
+    } finally { closeSync(fd); }
     const lines = raw.split('\n').filter(l => l.trim().length > 0);
 
     let meta: SessionMeta = { title: '', model: '', provider: '', timestamp: 0, titleSource: 'system' };
@@ -618,6 +680,7 @@ export class SessionManager {
       filePath,
       titleSource: meta?.titleSource ?? 'system',
       returnContext: meta?.returnContext,
+      ...(meta?.mirroredFrom ? { mirroredFrom: meta.mirroredFrom } : {}),
     };
   }
 
@@ -663,7 +726,12 @@ export class SessionManager {
     const filePath = this._resolveSessionFile(name);
     if (filePath === null) throw new Error(`Session not found: ${name}`);
 
-    const raw = readFileSync(filePath, 'utf-8');
+    const fd = openSync(filePath, 'r');
+    let raw: string, read: string;
+    try {
+      read = fileIdentityOf(fd);
+      raw = readFileSync(fd, 'utf-8');
+    } finally { closeSync(fd); }
     const lines = raw.split('\n');
     if (lines.length === 0) throw new Error('Session file is empty');
 
@@ -681,8 +749,11 @@ export class SessionManager {
         else delete record.returnContext;
       }
       lines[0]! = JSON.stringify(record);
-      this._atomicWrite(filePath, lines.join('\n'));
+      // The title is changed on the file as read now, so another terminal's save is kept. This process's own copy
+      // counts as current afterwards only if it was current before (no other save came between).
+      this._atomicWrite(filePath, lines.join('\n'), knownSessionFiles.get(filePath) === read);
     } catch (err: unknown) {
+      if (err instanceof SessionSavedElsewhereError) throw err;
       throw new Error(`Failed to update session title: ${name}: ${summarizeError(err)}`);
     }
   }
@@ -702,6 +773,7 @@ export class SessionManager {
     } catch (e) {
       throw new Error(`Failed to delete session: ${summarizeError(e)}`);
     }
+    knownSessionFiles.delete(filePath);
     this._forgetVerificationJournals(journals);
     for (const listener of [...this.deletedListeners]) {
       try {

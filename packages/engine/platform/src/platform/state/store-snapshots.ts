@@ -111,6 +111,31 @@ function snapshotSidecars(snapshotPath: string): string[] {
   return SIDECARS.map(sidecar => `${snapshotPath}${sidecar}`).filter(path => existsSync(path));
 }
 
+/**
+ * Folds a database's WAL into the file itself (one checkpoint, then the
+ * connection closes and SQLite removes the emptied sidecars), so the file
+ * alone holds every committed change and can be renamed into place as one
+ * unit. False when SQLite is not available here.
+ */
+function foldIntoFile(dbPath: string): boolean {
+  const Ctor = bunDatabase();
+  if (!Ctor) return false;
+  let db: Database | undefined;
+  try {
+    db = new Ctor(dbPath);
+    db.run('PRAGMA busy_timeout = 5000');
+    const result = db.query('PRAGMA wal_checkpoint(TRUNCATE)').get() as { busy?: unknown } | null;
+    // A checkpoint another connection blocked did not fold everything.
+    if (result && result.busy !== 0 && result.busy !== undefined) return false;
+  } catch (error) {
+    // A damaged store (the usual reason to restore) may not open: it is then kept with its sidecars as they are.
+    logger.debug('store journal could not be folded into its file', { store: basename(dbPath), error: summarizeError(error) });
+    return false;
+  } finally { db?.close(); }
+  removeSidecars(dbPath);
+  return true;
+}
+
 function removeSidecars(snapshotPath: string): void {
   for (const sidecar of SIDECARS) {
     try { unlinkSync(`${snapshotPath}${sidecar}`); } catch { /* absent */ }
@@ -154,12 +179,7 @@ export function snapshotStoreFile(
   const at = (options.now ?? Date.now)();
   const snapshotPath = newStoreSnapshotPath(dbPath, reason, at);
   if (!hasSqliteHeader(dbPath)) throw new Error(`store snapshot source is not a SQLite database: ${dbPath}`);
-  if (!vacuumInto(dbPath, snapshotPath)) {
-    copyFileSync(dbPath, snapshotPath);
-    try { assertCopyComplete(dbPath, snapshotPath); }
-    catch (error) { try { unlinkSync(snapshotPath); } catch { /* nothing was kept */ } throw error; }
-    if (existsSync(`${dbPath}-wal`)) copyFileSync(`${dbPath}-wal`, `${snapshotPath}-wal`);
-  }
+  if (!vacuumInto(dbPath, snapshotPath)) publishCopiedSnapshot(dbPath, snapshotPath);
   // Stamp the snapshot's mtime with its LOGICAL creation time: listStoreSnapshots
   // reads createdAt from the filesystem mtime while the scheduler dedups on the
   // injectable clock, so under an injected time the wall-clock mtime would make
@@ -174,6 +194,36 @@ export function snapshotStoreFile(
   }
   logger.info('store snapshot written', { store: basename(dbPath), reason, snapshotPath });
   return snapshotPath;
+}
+
+/**
+ * A copied snapshot appears under its name only when it is complete: the file
+ * and its WAL are copied under staged names, then the WAL is renamed to its
+ * sidecar name and the file to the snapshot's name last. A crash before the
+ * last rename leaves no snapshot (an orphan WAL, which the next listing
+ * removes), never a snapshot without its WAL.
+ */
+function publishStagedSnapshot(staged: string, snapshotPath: string): void {
+  if (existsSync(`${staged}-wal`)) renameSync(`${staged}-wal`, `${snapshotPath}-wal`);
+  renameSync(staged, snapshotPath);
+}
+
+function discardStagedSnapshot(staged: string): void {
+  try { unlinkSync(staged); } catch { /* nothing was kept */ }
+  removeSidecars(staged);
+}
+
+function publishCopiedSnapshot(dbPath: string, snapshotPath: string): void {
+  const staged = `${snapshotPath}.partial`;
+  try {
+    copyFileSync(dbPath, staged);
+    assertCopyComplete(dbPath, staged);
+    if (existsSync(`${dbPath}-wal`)) copyFileSync(`${dbPath}-wal`, `${staged}-wal`);
+    publishStagedSnapshot(staged, snapshotPath);
+  } catch (error) {
+    discardStagedSnapshot(staged);
+    throw error;
+  }
 }
 
 export interface StoreSnapshotInfo {
@@ -239,32 +289,46 @@ export function restoreStoreSnapshot(dbPath: string, snapshotPath?: string): Res
   if (!existsSync(source)) {
     throw new Error(`snapshot not found: ${source}`);
   }
+  // Each side of the swap is one self-contained file: the live store's WAL is
+  // folded into it first, and the snapshot is staged with its WAL folded in.
+  // Then the only multi-file step left is removing the (now empty) live
+  // sidecars before one rename: a crash at any point leaves the live store
+  // whole or the restored one whole, never a file beside a journal that is
+  // not its own.
   let keptCurrentAt: string | null = null;
   if (existsSync(dbPath)) {
+    const folded = foldIntoFile(dbPath);
     keptCurrentAt = `${dbPath}.pre-restore`;
-    removeSidecars(keptCurrentAt);
-    copyFileSync(dbPath, keptCurrentAt);
-    for (const sidecar of SIDECARS) {
-      if (existsSync(`${dbPath}${sidecar}`)) copyFileSync(`${dbPath}${sidecar}`, `${keptCurrentAt}${sidecar}`);
+    // The parked copy replaces the previous one only once it is complete.
+    const parking = `${keptCurrentAt}.partial`;
+    discardStagedSnapshot(parking);
+    copyFileSync(dbPath, parking);
+    if (!folded) for (const sidecar of SIDECARS) {
+      if (existsSync(`${dbPath}${sidecar}`)) copyFileSync(`${dbPath}${sidecar}`, `${parking}${sidecar}`);
     }
+    removeSidecars(keptCurrentAt);
+    for (const sidecar of SIDECARS) if (existsSync(`${parking}${sidecar}`)) renameSync(`${parking}${sidecar}`, `${keptCurrentAt}${sidecar}`);
+    renameSync(parking, keptCurrentAt);
   }
   mkdirSync(dirname(dbPath), { recursive: true });
-  // Write beside the target and rename, so a crash leaves the old file or the whole snapshot, never half of one.
+  // Written beside the target and renamed, so a crash leaves the old file or the whole snapshot, never half of one.
   const pending = `${dbPath}.restore-${process.pid}.tmp`;
   try {
     copyFileSync(source, pending);
     assertCopyComplete(source, pending);
+    for (const sidecar of SIDECARS) {
+      if (existsSync(`${source}${sidecar}`)) copyFileSync(`${source}${sidecar}`, `${pending}${sidecar}`);
+    }
+    if (!foldIntoFile(pending)) throw new Error(`the snapshot ${source} could not be opened to fold its journal into it, so it was not restored`);
+    if (!hasSqliteHeader(pending)) throw new Error(`the restored copy is not a SQLite database: ${pending}`);
     // The live sidecars belong to the file being replaced: left in place they would be replayed onto the snapshot.
     for (const sidecar of SIDECARS) {
       if (existsSync(`${dbPath}${sidecar}`)) unlinkSync(`${dbPath}${sidecar}`);
     }
     renameSync(pending, dbPath);
   } catch (error) {
-    try { unlinkSync(pending); } catch { /* the copy may not exist */ }
+    discardStagedSnapshot(pending);
     throw error;
-  }
-  for (const sidecar of SIDECARS) {
-    if (existsSync(`${source}${sidecar}`)) copyFileSync(`${source}${sidecar}`, `${dbPath}${sidecar}`);
   }
   logger.info('store restored from snapshot', { store: basename(dbPath), restoredFrom: source, keptCurrentAt });
   return { restoredFrom: source, keptCurrentAt };
@@ -356,16 +420,17 @@ export async function snapshotStoreFileAsync(
   try {
     const walPath = `${dbPath}-wal`;
     const pinnedWal = release !== null && existsSync(walPath);
-    await copyFile(dbPath, snapshotPath);
+    const staged = `${snapshotPath}.partial`;
     try {
+      await copyFile(dbPath, staged);
       // Under a held snapshot a checkpoint may still write frames the WAL copy
       // also carries into the file, so its size can move; the header still has to hold.
-      if (pinnedWal) { if (!hasSqliteHeader(snapshotPath)) throw new Error(`store snapshot copy is not a SQLite database: ${snapshotPath}`); }
-      else assertCopyComplete(dbPath, snapshotPath);
-      if (existsSync(walPath)) await copyFile(walPath, `${snapshotPath}-wal`);
+      if (pinnedWal) { if (!hasSqliteHeader(staged)) throw new Error(`store snapshot copy is not a SQLite database: ${snapshotPath}`); }
+      else assertCopyComplete(dbPath, staged);
+      if (existsSync(walPath)) await copyFile(walPath, `${staged}-wal`);
+      publishStagedSnapshot(staged, snapshotPath);
     } catch (error) {
-      try { unlinkSync(snapshotPath); } catch { /* nothing was kept */ }
-      removeSidecars(snapshotPath);
+      discardStagedSnapshot(staged);
       throw error;
     }
   } finally { release?.(); }

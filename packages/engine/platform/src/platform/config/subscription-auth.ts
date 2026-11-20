@@ -80,12 +80,12 @@ export async function resolveFreshOpenAIAccessToken(
   if (!existing) return { kind: 'unconfigured' };
   if (existing.revokedAt !== undefined) return { kind: 'session-dead' };
   const oauth = openaiOAuth();
-  if (!oauth) return { kind: 'refreshed', accessToken: existing.accessToken };
+  if (!oauth) return { kind: 'refreshed', accessToken: existing.accessToken.reveal('dispatch') };
   try {
     const accessToken = await manager.resolveAccessToken('openai', oauth);
     return accessToken === null ? { kind: 'unconfigured' } : { kind: 'refreshed', accessToken };
   } catch (error) {
     if (error instanceof SubscriptionSessionEndedError) return { kind: 'session-dead' };
-    return { kind: 'refreshed', accessToken: existing.accessToken };
+    return { kind: 'refreshed', accessToken: existing.accessToken.reveal('dispatch') };
   }
 }

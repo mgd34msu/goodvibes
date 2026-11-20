@@ -211,7 +211,9 @@ export function createSharedDomainConnector<TDomain extends string, TEvent exten
     syncTimer = setTimeout(sync, 0);
   }
 
-  return (domain, onEnvelope, onEnded) => new Promise<() => void>((resolve, reject) => {
+  return (domain, onEnvelope, onEnded, signal) => new Promise<() => void>((resolve, reject) => {
+    const left = (): DOMException => new DOMException('The listener left before its connection opened.', 'AbortError');
+    if (signal?.aborted) { reject(left()); return; }
     const subscriber: Subscriber<TEvent> = { onEnvelope, onEnded, waiting: undefined };
     const set = subscribers.get(domain) ?? new Set<Subscriber<TEvent>>();
     set.add(subscriber);
@@ -220,7 +222,22 @@ export function createSharedDomainConnector<TDomain extends string, TEvent exten
       resolve(release(domain, subscriber));
       return;
     }
-    subscriber.waiting = { resolve, reject };
+    const abandon = (): void => {
+      const waiting = subscriber.waiting;
+      if (!waiting) return;
+      subscriber.waiting = undefined;
+      const current = subscribers.get(domain);
+      if (current?.delete(subscriber) && current.size === 0) subscribers.delete(domain);
+      // Nobody else wants a connection: the open in flight is aborted at once.
+      if (subscribers.size === 0) letGo();
+      else scheduleSync();
+      waiting.reject(left());
+    };
+    subscriber.waiting = {
+      resolve: (value) => { signal?.removeEventListener('abort', abandon); resolve(value); },
+      reject: (error) => { signal?.removeEventListener('abort', abandon); reject(error); },
+    };
+    signal?.addEventListener('abort', abandon, { once: true });
     scheduleSync();
   });
 }

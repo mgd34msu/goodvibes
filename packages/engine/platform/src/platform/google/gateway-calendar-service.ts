@@ -184,6 +184,7 @@ function toDetail(record: CalendarEventRecord): CalendarGatewayEventDetail {
     ...toSummary(record),
     uid: record.id,
     ...(record.recurrence === undefined || record.recurrence.length === 0 ? {} : { recurrence: record.recurrence.join('\n') }),
+    ...(record.etag === undefined ? {} : { revision: record.etag }),
   };
 }
 
@@ -398,6 +399,9 @@ export function createGoogleCalendarGatewayService(
       const calendar = calendarId ?? 'primary';
       const current = unwrap(await client.getEvent(eventId, calendar));
       if (current.recurrence !== undefined && current.recurrence.length > 0) throw refuseSeries(eventId, 'changing');
+      // The version the person edited, when they sent it: a newer one on the calendar is refused before anything is sent.
+      if (changes.expectedRevision !== undefined && current.etag !== undefined && current.etag !== changes.expectedRevision) throw changedMeanwhile(eventId);
+      const ifMatch = changes.expectedRevision ?? current.etag;
       const timesChanged = changes.start !== undefined || changes.end !== undefined;
       const start = changes.start ?? current.start;
       const end = changes.end ?? current.end;
@@ -410,7 +414,7 @@ export function createGoogleCalendarGatewayService(
         ...(changes.description === undefined ? {} : { description: changes.description }),
         ...(changes.attendees === undefined ? {} : { attendees: changes.attendees }),
         ...(guests.length > 0 ? { notifyAttendees: true } : {}),
-        ...(current.etag === undefined ? {} : { ifMatch: current.etag }),
+        ...(ifMatch === undefined ? {} : { ifMatch }),
       });
       if (!patched.ok && patched.status === 412) throw changedMeanwhile(eventId);
       return { eventId: unwrap(patched).id, updatedAt: new Date(now()).toISOString() };

@@ -285,8 +285,8 @@ export async function verifyCreatedTokenPolicies(
   const missing = [...expectedIds].filter((id) => !actualIds.has(id));
   if (actualIds.size === 0 || missing.length > 0) {
     throw new CloudflareControlPlaneError(
-      `Cloudflare created the operational token but did not persist the expected permission policy. Missing permission group ids: ${missing.join(', ') || 'all'}. ` +
-        'Delete the unusable token in Cloudflare and retry with this platform version.',
+      `Cloudflare created the operational token${token.id ? ` (token id ${token.id})` : ''} but did not persist the expected permission policy. Missing permission group ids: ${missing.join(', ') || 'all'}. ` +
+        'Creating the token again revokes this unusable one first.',
       'CLOUDFLARE_TOKEN_POLICY_MISMATCH',
       502,
     );

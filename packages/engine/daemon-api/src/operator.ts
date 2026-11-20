@@ -232,7 +232,7 @@ async function dispatchOperatorRoutesInner(
   if (routeBindingMatch && method === 'PATCH') return handlers.patchRouteBinding(safeDecodeURIComponent(routeBindingMatch[1]!), req);
   if (routeBindingMatch && method === 'DELETE') return handlers.deleteRouteBinding(safeDecodeURIComponent(routeBindingMatch[1]!), req);
 
-  if (pathname === '/api/approvals' && method === 'GET') return handlers.getApprovals(url);
+  if (pathname === '/api/approvals' && method === 'GET') return handlers.getApprovals(url, req);
   const approvalActionMatch = pathname.match(/^\/api\/approvals\/([^/]+)\/(claim|approve|deny|cancel)$/);
   if (approvalActionMatch && method === 'POST') {
     return handlers.approvalAction(safeDecodeURIComponent(approvalActionMatch[1]!), approvalActionMatch[2]! as 'claim' | 'approve' | 'deny' | 'cancel', req);

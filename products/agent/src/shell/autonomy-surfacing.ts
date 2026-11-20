@@ -120,10 +120,16 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let draftPassArmed = false;
 
-  // Refresh lastSeenAt every 5 minutes so rapid restarts still detect activity.
-  const lastSeenRefreshInterval = setInterval(() => {
+  // The last-seen time moves forward only over runs that were read: while the
+  // digest's read of the host's runs is under way, or after it failed, it stays
+  // where it was, so the next digest asks for those runs again.
+  let runsRead: 'not-asked' | 'reading' | 'read' | 'failed' = 'not-asked';
+  const saveLastSeen = (): void => {
+    if (runsRead === 'reading' || runsRead === 'failed') return;
     lastSeenStore.save();
-  }, LAST_SEEN_REFRESH_MS);
+  };
+  // Refresh lastSeenAt every 5 minutes so rapid restarts still detect activity.
+  const lastSeenRefreshInterval = setInterval(saveLastSeen, LAST_SEEN_REFRESH_MS);
   lastSeenRefreshInterval.unref();
 
   const comingUpCache: { items: string[]; fetchedAt: number | null; fetching: boolean } = {
@@ -226,7 +232,8 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
       const lastSeenAt = lastSeenStore.read();
       // Started first so the synchronous reads below overlap the host request.
       // Only asked once there is a lastSeenAt; a first run suppresses the digest.
-      const runsRead: Promise<AutomationRunsSinceResult> = lastSeenAt === null
+      if (lastSeenAt !== null) runsRead = 'reading';
+      const runsReading: Promise<AutomationRunsSinceResult> = lastSeenAt === null
         ? Promise.resolve(NO_RUNS)
         : options.listAutomationRunsSince(lastSeenAt, readSignal()).catch((error: unknown) => (
           { runs: [], deliveries: [], unavailable: describeError(error), unavailableKind: 'no_answer' as const }));
@@ -244,7 +251,8 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
         approvalsUnavailableReason = describeError(error);
       }
 
-      const runsSince = await runsRead;
+      const runsSince = await runsReading;
+      if (lastSeenAt !== null) runsRead = runsSince.unavailableKind === 'no_answer' ? 'failed' : 'read';
       lifetime.signal.throwIfAborted();
 
       const completedRuns = runsSince.runs.filter((run) => run.status === 'completed');
@@ -311,7 +319,7 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
     lifetime.abort();
     clearInterval(lastSeenRefreshInterval);
     if (idleTimer !== undefined) { clearTimeout(idleTimer); idleTimer = undefined; }
-    lastSeenStore.save();
+    saveLastSeen();
   }
 
   return {

@@ -305,7 +305,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
     replay: IDEMPOTENCY_KEY_REPLAY,
     effects: ['media.administer', 'outward.send'],
     title: 'Run Multimodal Analysis',
-    description: 'Analyze an image, audio file, video artifact, or document through the unified multimodal service.',
+    description: 'Analyze an image, audio file, video artifact, or document through the unified multimodal service. With a write-back requested, `writeback` reports it as an outcome: `state: "done"` with what was stored in `value` (201), or `state: "failed"` with its `refusal` (207: the analysis finished and is returned, but nothing was stored).',
     category: 'media',
     http: { method: 'POST', path: '/api/multimodal/analyze' },
     inputSchema: MULTIMODAL_ANALYZE_REQUEST_SCHEMA,

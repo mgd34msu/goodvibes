@@ -9,20 +9,29 @@ import { isActiveKnowledgeEdge } from '../projection-utils.js';
 import { readString, readStringArray, semanticMetadata } from './utils.js';
 import type { SemanticPrimarySourcePlanner, SemanticWriteGuard } from './primary-source-plan.js';
 
-/** Capture supersession from the original graph, before any entity/fact writes. */
+/**
+ * Capture supersession from the original graph, before any entity/fact writes.
+ * `activeIds` are the records this pass rewrites. `only`, when given, limits
+ * the pass to those records instead: the facts this pass drafted whose support
+ * then failed, which it therefore does not rewrite and must retire or keep on
+ * their other sources (read with a planner of their own, after the first
+ * support reading settled).
+ */
 export function prepareSemanticSupersession(
   store: KnowledgeStore, sourceId: string, spaceId: string, activeIds: ReadonlySet<string>,
   guard: SemanticWriteGuard, planner: SemanticPrimarySourcePlanner, support: GeneratedFactWritePlanner,
   assertCurrent?: (() => void) | undefined,
+  only?: ReadonlySet<string> | undefined,
 ) {
   const readSuperseded = () => store.listNodesInSpace(spaceId).filter((node) => (
     semanticNodeReferencesSource(node, sourceId) && typeof node.metadata.semanticKind === 'string'
     // An enrichment pass only replaces records owned by enrichment. A repair
     // promotion or an independently created research task has its own lifetime.
     && (node.metadata.extractor === 'llm' || node.metadata.extractor === 'deterministic')
-    && node.status !== 'stale' && !activeIds.has(node.id)
+    && node.status !== 'stale' && (only ? only.has(node.id) : !activeIds.has(node.id))
   ));
-  const nodes = guard.watch('supersession-nodes', readSuperseded);
+  const watchKey = only ? 'supersession-unsupported' : 'supersession';
+  const nodes = guard.watch(`${watchKey}-nodes`, readSuperseded);
   const drafts = nodes.map((node) => {
     if (node.metadata.semanticIdentityVersion !== undefined && node.metadata.semanticIdentityVersion !== 1) throw new SemanticIdentityHeldError('unsupported-format');
     guard.node(node.id);
@@ -43,7 +52,7 @@ export function prepareSemanticSupersession(
     }, supportingSourceIds) };
   });
   const factIds = new Set(nodes.map((node) => node.id));
-  guard.watch('supersession-supports', () => store.listEdges().filter((edge) => edge.toKind === 'node' && factIds.has(edge.toId)));
+  guard.watch(`${watchKey}-supports`, () => store.listEdges().filter((edge) => edge.toKind === 'node' && factIds.has(edge.toId)));
   return async () => {
     const plans: Array<{ node: KnowledgeNodeRecord; supportingSourceIds: string[]; primarySourceId: string | undefined; supportKey: string | undefined }> = [];
     for (const draft of drafts) {

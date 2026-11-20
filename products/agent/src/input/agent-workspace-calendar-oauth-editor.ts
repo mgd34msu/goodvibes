@@ -75,7 +75,7 @@ export function createCalendarOAuthEditor(provider: Provider, isConfigured = fal
     message: cardMessage(label, provider, isConfigured),
     fields: [
       { id: 'clientId', label: 'Client ID', value: '', required: true, multiline: false, hint: `Your ${label} OAuth client id (Desktop/public client needs no secret).` },
-      { id: 'clientSecret', label: 'Client secret (optional)', value: '', required: false, multiline: false, hint: 'Only for a confidential-client app. Stored through the secret manager, masked here.', redact: true },
+      { id: 'clientSecret', label: 'Client secret (optional)', value: '', required: false, multiline: false, hint: 'Only for a confidential-client app. Stored through the secret manager, masked here.', redact: true, verbatim: true },
       { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: `Type yes to store these credentials, then run ${CONNECT_HINT[provider]} to authorize.` },
     ],
   };

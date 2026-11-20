@@ -24,6 +24,26 @@ interface SubscriptionServices {
   readonly secretsManager: SecretsManager;
 }
 
+/**
+ * What `subscription inspect --output json` prints of a stored sign-in: the
+ * facts of the record, never a token. The tokens are Secrets on the record;
+ * this projection names each field it shows, so no later field of the record
+ * reaches the output without being chosen here.
+ */
+function storedSubscriptionView(stored: NonNullable<ReturnType<SubscriptionManager['get']>>) {
+  return {
+    configured: true,
+    tokenType: stored.tokenType,
+    expiresAt: stored.expiresAt ?? null,
+    refreshToken: stored.refreshToken ? 'present' : 'absent',
+    scopes: stored.scopes ?? [],
+    overrideAmbientApiKeys: stored.overrideAmbientApiKeys,
+    createdAt: stored.createdAt,
+    updatedAt: stored.updatedAt,
+    ...(stored.revokedAt !== undefined ? { revokedAt: stored.revokedAt } : {}),
+  };
+}
+
 /** CLI subscription actions share their OAuth/state mechanics; explicit manual completion remains a product policy. */
 export function createCliSubscriptionView<Runtime extends SubscriptionRuntime, Services extends SubscriptionServices>(
   withRuntimeServices: <T>(runtime: Runtime, fn: (services: Services) => Promise<T> | T) => Promise<T>,
@@ -104,7 +124,7 @@ export function createCliSubscriptionView<Runtime extends SubscriptionRuntime, S
         });
         const stored = services.subscriptionManager.get(provider);
         return cliCommandDone(formatJsonOrText(runtime.cli)(
-          { provider, resolved, inspection, stored },
+          { provider, resolved, inspection, stored: stored ? storedSubscriptionView(stored) : { configured: false } },
           [
             `GoodVibes subscription ${provider}`,
             field('configured', String(yesNo(inspection.configured))),

@@ -33,13 +33,14 @@ import {
   type GmailInboundReaderProvider,
   type GmailInboundReaderSources,
 } from '../google/gmail-inbound-reader.js';
+import { revealOrNull, type Secret } from '../security/secret.js';
 import { nodeGoogleFilePort } from '../google/node.js';
 import { daemonGoogleConnectionOwner } from '../google/daemon-connection.js';
 
 /** The slice of the daemon runtime this composition needs. Nothing wider. */
 export interface DaemonGmailInboundReaderDeps {
   readonly configManager: { get(key: never): unknown };
-  readonly secretsManager: { get(key: string): Promise<string | null> };
+  readonly secretsManager: { get(key: string): Promise<Secret | null> };
   /**
    * The daemon's own home. Absent in narrow compositions, and the adoption
    * probe cannot run without one, `~/.gmail-mcp` is a path, not a guess.
@@ -82,7 +83,7 @@ export function createDaemonGmailInboundReader(
       // (platform/google/config-access.ts), so an absent section reads as "not
       // configured" rather than throwing out of the supervisor's start path.
       configGet: (key) => deps.configManager.get(key as never),
-      secretGet: (key) => deps.secretsManager.get(key),
+      secretGet: async (key) => revealOrNull(await deps.secretsManager.get(key), 'dispatch'),
     },
     fetch: fetchPort,
     // The daemon's one token manager, shared with the calendar verbs and the start-up check.

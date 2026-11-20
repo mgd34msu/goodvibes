@@ -26,7 +26,7 @@ import type { AgentManager } from '../tools/agent/index.js';
 import { SlackIntegration, DiscordIntegration, NtfyIntegration, resolveNtfyDefaultPriority } from '../integrations/index.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
+import { readNtfyTopics, resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
 import { postToPublicWebhook, validatePublicWebhookUrl } from '../utils/url-safety.js';
 import type { HostResolver } from '../runtime/network/destination.js';
 import { webAppLink } from './web-app-link.js';
@@ -106,7 +106,7 @@ export async function deliverSurfaceProgress(
     return;
   }
   if (pending.surfaceKind === 'ntfy') {
-    const topic = pending.topic ?? String(deps.configManager.get('surfaces.ntfy.topic') ?? '');
+    const topic = pending.topic ?? (await readNtfyTopics(deps)).topic;
     if (!topic) return;
     const ntfy = new NtfyIntegration(
       String(deps.configManager.get('surfaces.ntfy.baseUrl') ?? 'https://ntfy.sh'),
@@ -192,7 +192,7 @@ export async function deliverNtfyAgentReply(
   pending: PendingSurfaceReply,
   message: string,
 ): Promise<void> {
-  const topic = pending.topic ?? String(deps.configManager.get('surfaces.ntfy.topic') ?? '');
+  const topic = pending.topic ?? (await readNtfyTopics(deps)).topic;
   if (!topic) return;
   const ntfy = new NtfyIntegration(
     String(deps.configManager.get('surfaces.ntfy.baseUrl') ?? 'https://ntfy.sh'),

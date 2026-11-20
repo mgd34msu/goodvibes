@@ -1,5 +1,6 @@
 import { createVerificationCompactor } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
-import { readVerificationHostToken, resolveVerificationHostUrl } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
+import { resolveVerificationHostUrl, verificationHostTarget } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
+import { bearerFor } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
 import { writeVerificationReportFiles } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 import {
   createVerificationPrimitives,
@@ -189,8 +190,20 @@ const { runCommand, commandCheck, fetchCheck, countStatuses } = createVerificati
   validateJsonOnNonZero: true,
 });
 
-function readConnectedHostToken(homeDir: string): string | undefined {
-  return readVerificationHostToken(homeDir, ['GOODVIBES_CONNECTED_HOST_TOKEN', 'GOODVIBES_DAEMON_TOKEN'], readJsonFile);
+/**
+ * The token for the host being checked, released only for its origin: a
+ * passed token or GOODVIBES_CONNECTED_HOST_TOKEN goes to that host; this
+ * machine's daemon token (GOODVIBES_DAEMON_TOKEN or its operator token file)
+ * only when the host is this machine's daemon. Every request of the run goes
+ * to `connectedHostBaseUrl`, so the one origin check covers them all.
+ */
+function connectedHostToken(homeDir: string, connectedHostBaseUrl: string, explicitToken: string | undefined): string | undefined {
+  const target = verificationHostTarget({
+    homeDir, url: connectedHostBaseUrl, explicitToken,
+    hostEnvKeys: ['GOODVIBES_CONNECTED_HOST_TOKEN'], localEnvKeys: ['GOODVIBES_DAEMON_TOKEN'],
+    readJson: readJsonFile, settingsPath: join(homeDir, 'agent', 'settings.json'),
+  });
+  return target.credential ? bearerFor(target.credential, connectedHostBaseUrl) : undefined;
 }
 
 function resolveConnectedHostBaseUrl(homeDir: string, explicit?: string): string {
@@ -471,7 +484,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
   const projectRoot = resolve(options.projectRoot);
   const binaryPath = resolve(options.binaryPath);
   const connectedHostBaseUrl = resolveConnectedHostBaseUrl(homeDir, options.connectedHostBaseUrl);
-  const token = options.token ?? readConnectedHostToken(homeDir);
+  const token = connectedHostToken(homeDir, connectedHostBaseUrl, options.token);
   const commandEnv = buildCommandEnv(homeDir, connectedHostBaseUrl, token);
   const checks: LiveVerificationCheck[] = [];
 

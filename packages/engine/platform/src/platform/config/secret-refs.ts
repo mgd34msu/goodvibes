@@ -1,3 +1,4 @@
+import { isSecret, type Secret } from '../security/secret.js';
 import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { summarizeError } from '../utils/error-display.js';
@@ -155,7 +156,8 @@ export type SecretCommandRunner = (
 export interface SecretRefResolutionOptions {
   /** Keep provider/reference failure text private at caller-owned publication boundaries. */
   readonly diagnosticMode?: 'default' | 'structural' | undefined;
-  readonly resolveLocalSecret?: ((key: string) => Promise<string | null>) | undefined;
+  /** The local store's read (SecretsManager.get); a `Secret` is revealed here for the dispatch the reference is resolved for. */
+  readonly resolveLocalSecret?: ((key: string) => Promise<Secret | string | null>) | undefined;
   readonly runCommand?: SecretCommandRunner | undefined;
   readonly homeDirectory?: string | undefined;
   /** Names the setting in a refusal, so an operator is not handed a 401 to chase. */
@@ -844,7 +846,8 @@ export async function resolveSecretRef(
       return { source: ref.source, value: process.env[ref.id] ?? null };
     case 'goodvibes':
       if (!options.resolveLocalSecret) throw new Error('GoodVibes secret ref requires a local secret resolver');
-      return { source: ref.source, value: await options.resolveLocalSecret(ref.id) };
+      const local = await options.resolveLocalSecret(ref.id);
+      return { source: ref.source, value: isSecret(local) ? local.reveal('dispatch') : local };
     case 'file':
       return { source: ref.source, value: resolveFileRef(ref, options) };
     case 'exec': {

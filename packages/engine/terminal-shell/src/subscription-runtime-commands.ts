@@ -4,8 +4,10 @@ import {
   createOAuthLocalListener,
   getSubscriptionProviderConfig,
   listAvailableSubscriptionProviders,
+  subscriptionExportForm,
   type OAuthProviderConfig,
   type ProviderSubscription,
+  type SubscriptionGrant,
   type SubscriptionManager,
 } from '@goodvibes-jev/engine/platform/platform/config';
 import { inspectProviderAuth } from '@goodvibes-jev/engine/platform/platform/runtime/security';
@@ -42,7 +44,8 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
   interface SubscriptionBundle {
     readonly version: 1;
     readonly exportedAt: number;
-    readonly subscriptions: readonly ProviderSubscription[];
+    /** The sign-ins with their tokens as text: the file is the owner's chosen store for moving them. */
+    readonly subscriptions: readonly SubscriptionGrant[];
   }
   function buildReviewText(ctx: Context): string {
     const subscriptions = requireSubscriptionManager(ctx).list();
@@ -69,7 +72,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
     if (Number.isNaN(new Date(candidate.exportedAt).getTime())) return null;
     const list = candidate.subscriptions;
     if (!Array.isArray(list)) return null;
-    const subscriptions: ProviderSubscription[] = [];
+    const subscriptions: SubscriptionGrant[] = [];
     for (const entry of list) {
       const record = readBundleSubscription(entry);
       if (!record) return null;
@@ -78,7 +81,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
     return { version: 1, exportedAt: candidate.exportedAt, subscriptions };
   }
   /** One exported sign-in, keeping only the fields a stored session has; a refresh in flight is not carried over. */
-  function readBundleSubscription(entry: unknown): ProviderSubscription | null {
+  function readBundleSubscription(entry: unknown): SubscriptionGrant | null {
     if (!entry || typeof entry !== 'object') return null;
     const r = entry as Record<string, unknown>;
     const isTime = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -376,7 +379,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
             const bundle: SubscriptionBundle = {
               version: 1,
               exportedAt: Date.now(),
-              subscriptions: manager.list(),
+              subscriptions: manager.list().map(subscriptionExportForm),
             };
             // Owner-only (0600): the file holds access and refresh tokens.
             atomicWriteFileSync(targetPath, `${JSON.stringify(bundle, null, 2)}\n`, { mkdirp: true });

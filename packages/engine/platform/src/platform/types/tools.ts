@@ -25,6 +25,8 @@ export type PermissionCategory = (typeof PERMISSION_CATEGORIES)[number];
 export const ENGINE_TOOL_CATEGORIES: Readonly<Record<string, PermissionCategory>> = Object.freeze({
   read: 'read', find: 'read', fetch: 'read', analyze: 'read', inspect: 'read', state: 'read', registry: 'read',
   goodvibes_context: 'read', repo_map: 'read', context_accounting: 'read',
+  // A question left in the owner's own inbox reaches no one else and changes nothing outside the app, so it is not asked about.
+  query: 'read',
   write: 'write', edit: 'write', goodvibes_settings: 'write',
   exec: 'execute',
   agent: 'delegate', delegate: 'delegate', workflow: 'delegate', mcp: 'delegate',

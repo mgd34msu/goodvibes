@@ -97,6 +97,7 @@ function createHttpEmbeddingProvider(definition: ProviderDefinition, context: Cr
     label: definition.label,
     dimensions: DEFAULT_MEMORY_EMBEDDING_DIMS,
     local: definition.local,
+    model: () => definition.resolveConfig(env, DEFAULT_MEMORY_EMBEDDING_DIMS).model,
     async embed(request: MemoryEmbeddingRequest): Promise<MemoryEmbeddingResult> {
       request.signal?.throwIfAborted();
       const config = resolveConfigured(request.dimensions);

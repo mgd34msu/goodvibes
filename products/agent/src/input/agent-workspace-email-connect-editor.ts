@@ -129,6 +129,7 @@ export function createEmailConnectWizardEditor(
           ? 'Leave blank to keep the stored password. Stored through the Agent secret manager; masked here and never rendered in results.'
           : 'Stored through the Agent secret manager. Masked here and never rendered in results.',
         redact: true,
+        verbatim: true,
       },
       { id: 'fromAddress', label: 'From address', value: stored?.fromAddress || stored?.username || status?.username || '', required: true, multiline: false, hint: 'Address used in the From: header when sending.' },
       { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to test the connection and store these settings.' },

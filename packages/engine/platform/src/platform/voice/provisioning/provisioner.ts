@@ -7,6 +7,7 @@ import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { withProcessLock } from '../../utils/process-lock.js';
 import { writeJsonFileAtomic } from '../../utils/atomic-json-store.js';
+import { publishReplacement, recoverReplacements, stageReplacement } from '../../state/commit-point.js';
 import { downloadVerifiedFile, fileMatchesCached, type VerifiedDownloadResult, type VerifiedDownloadSpec } from './download-verified.js';
 import type { VoiceInstallProgressSnapshot } from './install-progress.js';
 import {
@@ -410,12 +411,19 @@ export async function extractEngineAtomically(
     if (!isUsableBinary(extractedBinary)) {
       throw new Error(`extracted archive is missing a usable binary at ${binaryRelPath}`);
     }
-    // Swap: move the old tree aside, rename the new one in, drop the old.
-    const oldTree = `${finalTree}.old`;
-    rmSync(oldTree, { recursive: true, force: true });
-    if (existsSync(finalTree)) renameSync(finalTree, oldTree);
-    renameSync(join(tmpDir, topDir), finalTree);
-    rmSync(oldTree, { recursive: true, force: true });
+    // Swap through the commit point: the installed tree is kept aside until the
+    // new one is in place and its binary checks out, and comes back otherwise;
+    // an interrupted swap is settled by the next run (reapProvisionLeftovers).
+    const replacement = stageReplacement(finalTree, 'directory');
+    renameSync(join(tmpDir, topDir), replacement.staged);
+    try {
+      publishReplacement(replacement, (tree) => {
+        if (!isUsableBinary(join(tree, ...binaryRelPath.split('/').slice(1)))) throw new Error(`the installed tree has no usable binary at ${binaryRelPath}`);
+      });
+    } catch (error) {
+      rmSync(replacement.staged, { recursive: true, force: true });
+      throw error;
+    }
   } finally {
     // Partial-extract cleanup: the temp tree never lingers.
     rmSync(tmpDir, { recursive: true, force: true });
@@ -545,11 +553,16 @@ const PROVISION_LOCK_WAIT_MS = 15 * 60_000;
  * (`<file>.download`) is kept: the next download resumes it.
  */
 function reapProvisionLeftovers(paths: ManagedVoicePaths): void {
+  // An engine swap a kill interrupted: an installed tree that is there stays and
+  // the one it replaced goes; when the swap stopped before the new tree was in
+  // place, the one it replaced comes back. Never both gone.
+  try { recoverReplacements(paths.enginesDir, (tree) => readdirSync(tree).length > 0); }
+  catch (error) { logger.warn('voice provisioning: an interrupted engine swap could not be settled', { dir: paths.enginesDir, error: summarizeError(error) }); }
   for (const dir of [paths.enginesDir, paths.modelsDir]) {
     let names: string[];
     try { names = readdirSync(dir); } catch { continue; }
     for (const name of names) {
-      if (!(name.startsWith('.extract-') || name.endsWith('.old') || (name.startsWith('.') && name.endsWith('.part')))) continue;
+      if (!(name.startsWith('.extract-') || (name.startsWith('.') && name.endsWith('.part')))) continue;
       try { rmSync(join(dir, name), { recursive: true, force: true }); }
       catch (error) { logger.warn('voice provisioning leftover could not be removed', { path: join(dir, name), error: summarizeError(error) }); }
     }

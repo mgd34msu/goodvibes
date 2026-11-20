@@ -43,8 +43,8 @@ export interface QuestionAsker {
   readonly sessionWatch?: SessionAnswerWatch | undefined;
 }
 
-/** An inbox the asker's process can also record "taken" in (the store itself, read directly). */
-export type AskingInbox = QuestionInbox & Partial<Pick<OwnerAnswerReader, 'claim'>>;
+/** An inbox the asker's process can also record "taken" and "delivered" in (the store itself, read directly). */
+export type AskingInbox = QuestionInbox & Partial<Pick<OwnerAnswerReader, 'take' | 'confirmDelivered'>>;
 
 function belongsTo(item: OwnerItem, asker: QuestionAsker): boolean {
   if (asker.agent !== undefined) return answerAgentOf(item) === asker.agent;
@@ -89,9 +89,13 @@ export function askingQuestions(inbox: AskingInbox, asker: () => QuestionAsker |
     },
     async find(id) {
       const item = await inbox.find(id);
-      // The model read the answer itself: it is taken, and no request carries it again.
+      // The model read the answer itself, in this tool result: it is taken, no request carries it again,
+      // and it is delivered (the result is part of the conversation the model is reading).
       const who = current();
-      if (item && item.status === 'answered' && who && belongsTo(item, who) && inbox.claim?.(item.id)) forgetOwnerQuestion(item.id);
+      if (item && item.status === 'answered' && who && belongsTo(item, who) && inbox.take?.(item.id)) {
+        inbox.confirmDelivered?.([item.id]);
+        forgetOwnerQuestion(item.id);
+      }
       return item;
     },
     list: (filter) => inbox.list(filter),

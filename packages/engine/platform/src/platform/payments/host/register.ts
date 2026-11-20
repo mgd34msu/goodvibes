@@ -45,6 +45,7 @@ import type {
 } from '../../control-plane/routes/payments.js';
 import { logger } from '../../utils/logger.js';
 import { HandlerError, registerCatalogHandlers } from './handler-plumbing.js';
+import { describeCardTransportRefusal, mayCrossWithCardDetails } from '../entry-policy.js';
 import type { TypedHandler, Unregister } from './handler-plumbing.js';
 import { CheckoutServiceHolder, checkoutApproveHandler, checkoutBeginHandler } from './checkout-handlers.js';
 import { purchaseWindowStatusHandler, purchaseWindowAnswerHandler, purchaseSecurityCodeHandler } from './window-handlers.js';
@@ -266,6 +267,7 @@ function budgetStatusHandler(deps: PaymentsHandlerDeps, service: PaymentsGateway
     return {
       enabled: view.enabled, dayKey: view.pools.dayKey, timezone: view.pools.timezone, currency: view.currency,
       item: view.pools.item, overage: view.pools.overage, tolerance: view.pools.tolerance,
+      ...(view.pools.earlierSpend ? { earlierSpend: view.pools.earlierSpend } : {}),
       reservationCount: view.reservationCount, isPaymentsLeader: view.isPaymentsLeader,
       ...(stop ? { stopped: paymentHostStopView(stop) } : {}),
     };
@@ -421,7 +423,9 @@ export function registerPaymentsMethods(
     return { id, deleted: result.deleted, secretsCleared: result.secretsCleared };
   };
 
-  const cardsCreate: TypedHandler<unknown, Record<string, unknown>> = async ({ body }) => {
+  const cardsCreate: TypedHandler<unknown, Record<string, unknown>> = async ({ body, context }) => {
+    // card.enter crosses only this machine, TLS or the tailnet; refused before the body is read.
+    if (!mayCrossWithCardDetails(context.transport)) throw new HandlerError(describeCardTransportRefusal(), 'CARD_ENTRY_TRANSPORT', 403);
     const params = asRecord(body);
     const kind = readString(params, 'kind');
     if (kind !== 'virtual' && kind !== 'real') {

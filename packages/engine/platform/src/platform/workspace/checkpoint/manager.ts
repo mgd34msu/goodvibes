@@ -201,6 +201,10 @@ export class WorkspaceCheckpointManager {
           // since we loaded it; every rewrite below saves the whole index, so
           // it must start from what is on disk.
           if (this.initialized) await this.reloadManifest();
+          // During init (the baseline) the index was read before this lock was
+          // held: another process may have saved its own first entry since, and
+          // writing ours over it would drop it. One stat; a read only if it moved.
+          else if (await this.readManifestSignature() !== this.manifestSignature) await this.reloadManifest();
           return await fn();
         } finally {
           release();
@@ -529,11 +533,11 @@ export class WorkspaceCheckpointManager {
 
   private async createInternal(opts: CreateCheckpointOptions, recordEmptyFirst = false): Promise<WorkspaceCheckpoint | null> {
     await this.guardFirstSnapshotSize(opts);
-    await this.sideGit.stageAll(opts.paths);
-    const treeHash = await this.sideGit.writeTree();
-
     const parent = this.mostRecentCheckpoint();
     const parentTree = parent ? await this.sideGit.treeOf(parent.commit) : EMPTY_TREE_HASH;
+    await this.sideGit.stageAll(opts.paths, parent ? parentTree : undefined);
+    const treeHash = await this.sideGit.writeTree();
+
     if (parentTree === treeHash && !(recordEmptyFirst && !parent)) {
       logger.debug('WorkspaceCheckpointManager.create: tree unchanged since parent, no-op', {
         kind: opts.kind,

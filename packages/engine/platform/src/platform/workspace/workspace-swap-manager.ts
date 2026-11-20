@@ -44,6 +44,7 @@ import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { createEventEnvelope } from '../runtime/events/index.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { failedRead, present, refusal, type Observed } from '@goodvibes-jev/engine/errors';
 
 /** The services bound to the working directory, in product terms; all of them move together. */
 export const WORKSPACE_ROOT_BOUND_SERVICES: readonly string[] = Object.freeze([
@@ -222,14 +223,35 @@ export class WorkspaceSwapManager {
     }
   }
 
-  private busySessions(): number {
-    try { return this.deps.getBusySessionCount?.() ?? 0; } catch { return 0; }
+  /**
+   * How many sessions have a turn running or input waiting. A probe that
+   * throws is `failed`, never 0: a move does not cut off a turn it could not see.
+   */
+  busySessions(): Observed<number> {
+    const probe = this.deps.getBusySessionCount;
+    if (probe === undefined) return present(0);
+    try { return present(probe()); }
+    catch (err: unknown) {
+      return failedRead(refusal({
+        code: 'WORKSPACE_BUSY_UNKNOWN',
+        state: 'the move waits',
+        reason: `could not tell whether a turn is running: ${summarizeError(err)}`,
+        next: ['The move starts once the daemon can tell that no turn is running.'],
+        retryable: true,
+      }));
+    }
+  }
+
+  /** True only when the probe saw no busy session. */
+  private idle(): boolean {
+    const busy = this.busySessions();
+    return busy.kind === 'present' && busy.value === 0;
   }
 
   private moveWhenIdle(): void {
     const target = this.waitingMove;
     if (target === null || this.movingTo !== null) return;
-    if (this.busySessions() > 0) {
+    if (!this.idle()) {
       this.waitTimer = setTimeout(() => {
         this.waitTimer = null;
         this.moveWhenIdle();
@@ -269,13 +291,16 @@ export class WorkspaceSwapManager {
         note: `Saved. This host cannot move while it runs, so it keeps working in '${from}' until it restarts; after a restart every service uses '${to}'.${override}`,
       };
     }
-    const busy = this.movingTo === null && this.waitingMove !== null ? this.busySessions() : 0;
+    const read = this.movingTo === null && this.waitingMove !== null ? this.busySessions() : present(0);
+    const busy = read.kind === 'present' ? read.value : 0;
     return {
       ok: true, previous: from, current: to, persisted: true, moving: true, waitingForSessions: busy,
       restartRequired: false, requiresRestart: [],
-      note: busy > 0
-        ? `Saved. The daemon moves to '${to}' as soon as ${busy} busy session(s) finish their current turn; every service then starts again there and attached apps reconnect.${override}`
-        : `Saved. The daemon is moving to '${to}' now: every service starts again there and attached apps reconnect in a moment.${override}`,
+      note: read.kind === 'failed'
+        ? `Saved. The daemon could not tell whether a turn is running, so the move to '${to}' waits until it can; every service then starts again there and attached apps reconnect.${override}`
+        : busy > 0
+          ? `Saved. The daemon moves to '${to}' as soon as ${busy} busy session(s) finish their current turn; every service then starts again there and attached apps reconnect.${override}`
+          : `Saved. The daemon is moving to '${to}' now: every service starts again there and attached apps reconnect in a moment.${override}`,
     };
   }
 

@@ -54,23 +54,31 @@ export class SandboxSessionRegistry {
     return [...this.sessions.values()].sort((a, b) => b.startedAt - a.startedAt);
   }
 
-  public async start(profileId: SandboxProfile['id'], label: string | undefined, configManager: ConfigManagerLike): Promise<SandboxSession> {
+  /**
+   * Starts a contained session, or rejects with ContainmentUnavailableError
+   * when this host cannot contain it. `host: true` starts a host session (no
+   * boundary, host network) because the person asked for one.
+   */
+  public async start(profileId: SandboxProfile['id'], label: string | undefined, configManager: ConfigManagerLike,
+    options: { readonly host?: boolean | undefined } = {}): Promise<SandboxSession> {
     const profile = listSandboxProfiles().find((entry) => entry.id === profileId);
     if (!profile) {
       throw new Error(`Unknown sandbox profile: ${profileId}`);
     }
-    return this.startNew(profile, label, configManager);
+    return this.startNew(profile, label, configManager, options);
   }
 
   /**
    * Records the session and its launch plan; nothing is spawned here, so the
    * session reports `planned`. Every process the session runs starts inside the
-   * plan's boundary (bubblewrap) or, on a host without one, as a host process,
-   * which the plan's backend and summary say. Whether a process actually starts
-   * is reported by whoever spawns it (an MCP connect, or `execute`).
+   * plan's boundary (bubblewrap), or as a host process when the person asked
+   * for a host session, which the plan's backend and summary say. A host that
+   * cannot contain the session refuses it (the plan throws). Whether a process
+   * actually starts is reported by whoever spawns it (an MCP connect, or `execute`).
    */
-  private startNew(profile: SandboxProfile, label: string | undefined, configManager: ConfigManagerLike): SandboxSession {
-    const launchPlan = buildSandboxLaunchPlan(profile, this.workspaceRoot, getSandboxWritableExtras(configManager));
+  private startNew(profile: SandboxProfile, label: string | undefined, configManager: ConfigManagerLike,
+    options: { readonly host?: boolean | undefined }): SandboxSession {
+    const launchPlan = buildSandboxLaunchPlan(profile, this.workspaceRoot, getSandboxWritableExtras(configManager), options);
     const session: SandboxSession = Object.freeze({
       id: createSandboxSessionId(),
       profileId: profile.id,

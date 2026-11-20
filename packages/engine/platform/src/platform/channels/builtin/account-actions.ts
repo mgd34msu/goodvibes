@@ -22,6 +22,7 @@ import {
   providerEnvBacked,
 } from './surfaces.js';
 import { clearSurfaceSecret, storeSurfaceSecret } from './surface-secrets.js';
+import { displaySettingValue } from '../../config/config-key-facts.js';
 
 // What each action does to credentials is CHANNEL_ACCOUNT_ACTION_EFFECTS in account-action-effects.ts,
 // beside this switch: a new action, or a new name for one, needs its entry there before it compiles.
@@ -496,10 +497,12 @@ async function runProviderSetupAction(
     const remoteTopic = readString(input?.remoteTopic);
     const token = readString(input?.token);
     const baseUrl = readString(input?.baseUrl);
-    if (topic) context.deps.configManager.set('surfaces.ntfy.topic', topic);
-    if (chatTopic) context.deps.configManager.set('surfaces.ntfy.chatTopic', chatTopic);
-    if (agentTopic) context.deps.configManager.set('surfaces.ntfy.agentTopic', agentTopic);
-    if (remoteTopic) context.deps.configManager.set('surfaces.ntfy.remoteTopic', remoteTopic);
+    // Each topic name is a credential: stored in the secret store, its setting holds the reference.
+    const topicScope = readSecretScope(input?.secretScope);
+    if (topic) await storeSurfaceSecret(context.deps, 'ntfy', 'topic', topic, topicScope);
+    if (chatTopic) await storeSurfaceSecret(context.deps, 'ntfy', 'chatTopic', chatTopic, topicScope);
+    if (agentTopic) await storeSurfaceSecret(context.deps, 'ntfy', 'agentTopic', agentTopic, topicScope);
+    if (remoteTopic) await storeSurfaceSecret(context.deps, 'ntfy', 'remoteTopic', remoteTopic, topicScope);
     // A new server with a new token: the old token is cleared first, so it is never sent to the new server.
     if (baseUrl && token && baseUrl !== context.deps.configManager.get('surfaces.ntfy.baseUrl')) context.deps.configManager.set('surfaces.ntfy.token', '');
     if (baseUrl) context.deps.configManager.set('surfaces.ntfy.baseUrl', baseUrl);
@@ -509,7 +512,10 @@ async function runProviderSetupAction(
     // switch the surface on and report success.
     if (configured) context.deps.configManager.set('surfaces.ntfy.enabled', true);
     const refreshed = await context.buildAccount('ntfy');
-    const unreadable = storedButUnreadable(refreshed, token ? ['primary'] : []);
+    const unreadable = storedButUnreadable(refreshed, [
+      ...(token ? ['primary'] : []), ...(topic ? ['topic'] : []), ...(chatTopic ? ['chatTopic'] : []),
+      ...(agentTopic ? ['agentTopic'] : []), ...(remoteTopic ? ['remoteTopic'] : []),
+    ]);
     return {
       ...base,
       ok: configured && unreadable.length === 0,
@@ -520,11 +526,12 @@ async function runProviderSetupAction(
       message: unreadable.length > 0
         ? unreadableMessage('ntfy', unreadable)
         : configured ? 'ntfy configuration stored.' : 'ntfy is config-backed; provide topics and optional token to configure it.',
+      // The topics are credentials: what is stored is shown (the reference), never a name.
       metadata: {
-        topic: topic ?? context.deps.configManager.get('surfaces.ntfy.topic'),
-        chatTopic: chatTopic ?? context.deps.configManager.get('surfaces.ntfy.chatTopic'),
-        agentTopic: agentTopic ?? context.deps.configManager.get('surfaces.ntfy.agentTopic'),
-        remoteTopic: remoteTopic ?? context.deps.configManager.get('surfaces.ntfy.remoteTopic'),
+        topic: displaySettingValue('surfaces.ntfy.topic', context.deps.configManager.get('surfaces.ntfy.topic')),
+        chatTopic: displaySettingValue('surfaces.ntfy.chatTopic', context.deps.configManager.get('surfaces.ntfy.chatTopic')),
+        agentTopic: displaySettingValue('surfaces.ntfy.agentTopic', context.deps.configManager.get('surfaces.ntfy.agentTopic')),
+        remoteTopic: displaySettingValue('surfaces.ntfy.remoteTopic', context.deps.configManager.get('surfaces.ntfy.remoteTopic')),
       },
     };
   }

@@ -20,7 +20,8 @@ import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from '../surface-modal-host.js';
 import type { SelectionItem } from '../selection-modal.js';
 import { tokenizeSlashCommand } from '../slash-command-parser.js';
-import { beginModal, finishModal, standardModalWidth, type KitHint, type SurfaceLayer } from '../renderer/surface-kit.js';
+import { beginModal, finishModal, scrollCountText, type KitHint, type SurfaceLayer } from '../renderer/surface-kit.js';
+import { drawList, type KitRow } from '../renderer/surface-kit-list.js';
 import { activeTokens } from '../renderer/theme.js';
 import { listByName } from './lists.js';
 import { fixedChoices, isShown, listChoices, renderTypedLine, riskWords } from './typed-line.js';
@@ -295,31 +296,21 @@ export class GuidedPanel implements SurfaceModal {
       ...(sub ? { sub } : {}),
       titleGlyph: { char: '', fg: t.text },
       hints,
-      width: Math.min(standardModalWidth(screenWidth), 84),
       height: rows + 6 + (hints.length > 0 ? 2 : 0),
       center: true,
     });
   }
 
   private renderMenu(screenWidth: number, screenHeight: number): SurfaceLayer {
-    const t = activeTokens();
     const rows = this.rows();
     const f = this.frame(screenWidth, screenHeight, rows.length, [['↑↓', 'move'], ['⏎', 'choose']], this.group ? this.group.label : this.command.summary);
-    let y = f.top;
-    rows.forEach((row, index) => {
-      if (y > f.bottom) return;
+    // The kit list: the product's selection bar, starting at the title's column.
+    const kitRows: KitRow[] = rows.map((row, index) => {
       const value = row.action ? (this.rowValues.get(row.action.id) ?? (row.action.risk !== 'none' ? riskWords(row.action.risk) : '')) : '';
-      const selected = index === this.selected;
-      const width = f.r - f.l + 1;
-      const label = rowLabel(row);
-      const line = ` ${label}${' '.repeat(Math.max(1, width - label.length - value.length - 2))}${value} `.slice(0, width);
-      if (selected) f.canvas.put(f.l, y, line, { fg: t.selectedListItemText, bg: t.brand, bold: true });
-      else {
-        f.canvas.put(f.l, y, `   ${label}`, { fg: t.text });
-        if (value) f.canvas.right(f.r - 1, y, value, { fg: t.textMuted });
-      }
-      y += 1;
+      return { label: rowLabel(row), ...(value ? { right: value } : {}), selected: index === this.selected };
     });
+    const listed = drawList(f.canvas, { mouseNavigation: true, rows: kitRows, top: f.top, bottom: f.bottom, x0: f.l + 1, x1: f.r, scrollKey: { owner: this, name: 'guided-menu' } });
+    f.hintRight = scrollCountText(listed.above, listed.below);
     return finishModal(f);
   }
 
@@ -331,35 +322,51 @@ export class GuidedPanel implements SurfaceModal {
     const values = this.values();
     const line = renderTypedLine(this.command, action.id, values);
     const f = this.frame(screenWidth, screenHeight, fields.length * 2 + 6, [['⏎', this.stepIndex < steps.length - 1 ? 'next' : 'done'], ['tab', 'field'], ['esc', 'back']]);
-    const width = f.r - f.l + 1;
+    // Text starts at the title's column; the form scrolls so the blank being answered is always shown.
+    const l = f.l + 1;
+    const width = f.r - l + 1;
     let y = f.top;
-    f.canvas.put(f.l, y, `${action.label}${steps.length > 1 ? ` · step ${this.stepIndex + 1} of ${steps.length}` : ''}`, { fg: t.textMuted });
+    f.canvas.put(l, y, `${action.label}${steps.length > 1 ? ` · step ${this.stepIndex + 1} of ${steps.length}` : ''}`, { fg: t.textMuted });
     y += 1;
     const question = action.stepTitles?.[this.stepIndex];
-    if (question) { f.canvas.put(f.l, y, `   ${question}`, { fg: t.text }); y += 1; }
+    if (question) { f.canvas.put(l, y, `   ${question}`, { fg: t.text }); y += 1; }
     const labelWidth = Math.min(22, Math.max(...fields.map((input) => input.label.length)) + 3);
-    fields.forEach((input, index) => {
-      if (y > f.bottom - 3) return;
+    const inline = (input: InputDescription): boolean => {
+      const choices = fixedChoices(input);
+      return choices !== undefined && choices.length <= 3 && choices.reduce((sum, choice) => sum + choice.label.length + 5, 0) < width - 4;
+    };
+    const heightOf = (index: number, first: number): number =>
+      inline(fields[index]!) ? 3 : index === first || inline(fields[index - 1]!) ? 2 : 1;
+    // Rows left for blanks: the run line and its gap (and a note) stay at the bottom.
+    const room = f.bottom - y - 2 - (this.note ? 2 : 0);
+    let first = 0;
+    const span = (from: number, to: number): number => { let total = 0; for (let k = from; k <= to; k++) total += heightOf(k, from); return total; };
+    while (first < this.field && span(first, Math.min(this.field, fields.length - 1)) > room) first++;
+    let last = first;
+    while (last + 1 < fields.length && span(first, last + 1) <= room - 1) last++;
+    if (first > 0) f.canvas.right(f.r, f.top, `↑ ${first} more above`, { fg: t.textFaint });
+    for (let index = first; index <= last; index++) {
+      const input = fields[index]!;
       const focused = index === this.field;
       const choices = fixedChoices(input);
-      if (choices && choices.length <= 3 && choices.reduce((sum, choice) => sum + choice.label.length + 5, 0) < width - 4) {
+      if (inline(input)) {
         // A short choice: its question on one line, its answers side by side under it.
         y += 1;
-        f.canvas.put(f.l, y, `   ${input.help.endsWith('?') ? input.help : input.label}`, { fg: t.text });
+        f.canvas.put(l, y, `   ${input.help.endsWith('?') ? input.help : input.label}`, { fg: t.text });
         y += 1;
-        let x = f.l + 3;
-        for (const choice of choices) {
+        let x = l + 3;
+        for (const choice of choices!) {
           const on = this.texts[input.id] === choice.value;
           x = f.canvas.put(x, y, ` ${choice.label} `, on ? (focused ? { fg: t.selectedListItemText, bg: t.brand, bold: true } : { fg: t.text, bg: t.border }) : { fg: t.textMuted });
           x += 3;
         }
         y += 1;
-        return;
+        continue;
       }
-      if (index === 0 || fixedChoices(fields[index - 1]!)) y += 1;
+      if (index === first || inline(fields[index - 1]!)) y += 1;
       const label = `   ${input.label}`.padEnd(labelWidth + 3);
-      f.canvas.put(f.l, y, label, { fg: focused ? t.text : t.textMuted, bold: focused });
-      let x = f.l + label.length;
+      f.canvas.put(l, y, label, { fg: focused ? t.text : t.textMuted, bold: focused });
+      let x = l + label.length;
       const typed = this.texts[input.id] ?? '';
       if (choices) {
         const chosen = choices.find((choice) => choice.value === typed);
@@ -381,12 +388,13 @@ export class GuidedPanel implements SurfaceModal {
         }
       }
       y += 1;
-    });
-    if (this.note) { y += 1; f.canvas.put(f.l + 3, y, this.note, { fg: t.warning }); }
+    }
+    if (last < fields.length - 1) { y += 1; f.canvas.put(l + 3, y, `↓ ${fields.length - 1 - last} more below (tab)`, { fg: t.textFaint }); }
+    if (this.note) { y += 1; f.canvas.put(l + 3, y, this.note, { fg: t.warning }); }
     const runY = Math.min(f.bottom, y + 2);
     const lead = '   This will run: ';
-    f.canvas.put(f.l, runY, lead, { fg: t.textMuted });
-    f.canvas.put(f.l + lead.length, runY, line.length > width - lead.length ? `${line.slice(0, width - lead.length - 1)}…` : line, { fg: t.text });
+    f.canvas.put(l, runY, lead, { fg: t.textMuted });
+    f.canvas.put(l + lead.length, runY, line.length > width - lead.length ? `${line.slice(0, width - lead.length - 1)}…` : line, { fg: t.text });
     return finishModal(f);
   }
 }

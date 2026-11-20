@@ -1,8 +1,13 @@
 /**
  * The Knowledge tab of the Library. One section switch keeps every knowledge function
  * reachable without stacked panels:
- *   Browse   sources, nodes, issues and wiki projections as rows (filtered by the
- *            Library's shared search), with Ask and Search for the current query.
+ *   Browse   what it knows, by subject (ux A7.6): the subjects on the left, the facts
+ *            filed under the chosen one on the right, each with where it came from
+ *            (views/knowledge/knowledge-subjects.ts); on a phone the facts are a
+ *            pushed page with Back. Below the subjects, the sources it read, then a
+ *            Details disclosure with the graph itself (nodes with their kinds and
+ *            states, issues, wiki projections). Everything is filtered by the
+ *            Library's shared search, with Ask and Search for the current query.
  *            A selected row opens in the detail pane (item data, a projection with
  *            Render and Materialize, or the answer to a question).
  *   Map      the knowledge map, with its named honesty states.
@@ -23,13 +28,15 @@ import { asProjectionKind, projectionPayload, type ProjectionKind } from '../lib
 import { CodeFrame, DetailPane, DetailSection, Disclosure, EmptyState, Facts, ListDetail, RowGroup, SkeletonRows } from '../components/data-view/DataView';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Field';
-import { Row } from '../components/ui/Row';
+import { Row, RowList } from '../components/ui/Row';
 import { Segmented } from '../components/ui/Segmented';
 import ErrorBoundary from '../components/feedback/ErrorBoundary';
 import { ErrorState } from '../components/feedback/ErrorState';
 import { KnowledgeMap } from './knowledge/KnowledgeMap';
 import { KnowledgePacketPanel } from './knowledge/KnowledgePacket';
 import { KnowledgeActivity, scalarFacts } from './knowledge/KnowledgeActivity';
+import { knowledgeSubjects, type KnowledgeSubject } from './knowledge/knowledge-subjects';
+import { PHONE_QUERY, useMediaQuery } from '../components/ui/overlay';
 import { AddLinkDialog } from './knowledge/AddLinkDialog';
 import { includesText, sentence } from './library/library-data';
 import '../styles/components/knowledge.css';
@@ -173,10 +180,12 @@ interface ItemGroupProps {
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
+  /** The row's one line of meta; `<kind label> · <state>` when absent. */
+  metaFor?: (item: unknown) => string;
 }
 
 function ItemGroup({
-  label, kindLabel, prefix, items, query, pageSize, selectedKey, onSelect, hasMore = false, loadingMore = false, onLoadMore,
+  label, kindLabel, prefix, items, query, pageSize, selectedKey, onSelect, hasMore = false, loadingMore = false, onLoadMore, metaFor,
 }: ItemGroupProps) {
   const [visible, setVisible] = useState(pageSize);
   const shown = useMemo(
@@ -194,7 +203,7 @@ function ItemGroup({
             <Row
               key={`${key}-${index}`}
               title={itemTitle(item, id)}
-              meta={`${kindLabel} · ${sentence(bestStatus(item))}`}
+              meta={metaFor ? metaFor(item) : `${kindLabel} · ${sentence(bestStatus(item))}`}
               selected={selectedKey === key}
               onSelect={() => onSelect(key)}
             />
@@ -266,6 +275,52 @@ function ProjectionGroup({ items, query, selection, onSelect }: ProjectionGroupP
   );
 }
 
+/** The subjects that hold something matching the Library search (all of them without one). */
+function matchingSubjects(subjects: readonly KnowledgeSubject[], query: string): readonly KnowledgeSubject[] {
+  if (!query.trim()) return subjects;
+  return subjects.filter((subject) => includesText([subject.name], query) || subject.facts.some((fact) => includesText([fact.text], query)));
+}
+
+function SubjectGroup({ subjects, active, onSelect }: { subjects: readonly KnowledgeSubject[]; active: string | null; onSelect: (name: string) => void }) {
+  if (subjects.length === 0) return null;
+  return (
+    <RowGroup label="Subjects" count={subjects.length}>
+      {subjects.map((subject) => (
+        <Row
+          key={subject.name}
+          title={subject.name}
+          meta={`${subject.facts.length} ${subject.facts.length === 1 ? 'fact' : 'facts'}`}
+          selected={active === subject.name}
+          onSelect={() => onSelect(subject.name)}
+        />
+      ))}
+    </RowGroup>
+  );
+}
+
+/** The facts filed under one subject, newest first, each with where it came from. */
+function FactsPane({ subject, query, selection, onSelect }: { subject: KnowledgeSubject; query: string; selection: string | null; onSelect: (key: string) => void }) {
+  const facts = query.trim() && !includesText([subject.name], query)
+    ? subject.facts.filter((fact) => includesText([fact.text], query))
+    : subject.facts;
+  return (
+    <DetailPane title={subject.name} meta={`${facts.length} ${facts.length === 1 ? 'fact' : 'facts'}`}>
+      <RowList aria-label={`What it knows about ${subject.name}`}>
+        {facts.map((fact) => (
+          <Row
+            key={fact.id}
+            className="knowledge-fact"
+            title={fact.text}
+            meta={fact.origin}
+            selected={selection === `fact:${fact.id}`}
+            onSelect={() => onSelect(`fact:${fact.id}`)}
+          />
+        ))}
+      </RowList>
+    </DetailPane>
+  );
+}
+
 export interface KnowledgeViewProps {
   /** The Library's shared search text (already settled). */
   query?: string;
@@ -275,6 +330,9 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
   const queryClient = useQueryClient();
   const [section, setSection] = useState<Section>('browse');
   const [selection, setSelection] = useState<string | null>(null);
+  // The subject whose facts are open; on a wide screen the first one shows until another is picked.
+  const [subject, setSubject] = useState<string | null>(null);
+  const phone = useMediaQuery(PHONE_QUERY);
   const [linkOpen, setLinkOpen] = useState(false);
   const [mapFilter, setMapFilter] = useState('');
 
@@ -342,6 +400,12 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
   const allSources = useMemo(() => withMatches(loadedSources, searchText ? matchedSources : []), [loadedSources, matchedSources, searchText]);
   const allNodes = useMemo(() => withMatches(loadedNodes, searchText ? matchedNodes : []), [loadedNodes, matchedNodes, searchText]);
   const allIssues = useMemo(() => firstArray(issues.data, ['issues', 'items', 'data']), [issues.data]);
+  const subjects = useMemo(() => knowledgeSubjects(allNodes, allSources), [allNodes, allSources]);
+  const shownSubjects = useMemo(() => matchingSubjects(subjects, query), [subjects, query]);
+  const activeSubject = shownSubjects.find((item) => item.name === subject) ?? (phone ? null : shownSubjects[0] ?? null);
+  const selectedFact = selection?.startsWith('fact:')
+    ? activeSubject?.facts.find((fact) => `fact:${fact.id}` === selection) ?? null
+    : null;
   const projectionSelections = useMemo(
     () => firstArray(projections.data, ['targets', 'items', 'data'])
       .map(projectionSelection)
@@ -412,18 +476,29 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
           <Button variant="ghost" size="sm" onClick={() => setSection('activity')}>View jobs</Button>
         </div>
       )}
+      <SubjectGroup
+        subjects={shownSubjects}
+        active={activeSubject?.name ?? null}
+        onSelect={(name) => { setSubject(name); setSelection(null); }}
+      />
       <ItemGroup
         label="Sources" kindLabel="Source" prefix="source" items={allSources} query={query} pageSize={PAGE_SIZE.source}
         selectedKey={selection} onSelect={setSelection}
+        metaFor={(item) => sentence(bestStatus(item))}
         hasMore={Boolean(sources.hasNextPage)} loadingMore={sources.isFetchingNextPage} onLoadMore={() => void sources.fetchNextPage()}
       />
-      <ItemGroup
-        label="Nodes" kindLabel="Node" prefix="node" items={allNodes} query={query} pageSize={PAGE_SIZE.node}
-        selectedKey={selection} onSelect={setSelection}
-        hasMore={Boolean(nodes.hasNextPage)} loadingMore={nodes.isFetchingNextPage} onLoadMore={() => void nodes.fetchNextPage()}
-      />
-      <ItemGroup label="Issues" kindLabel="Issue" prefix="issue" items={allIssues} query={query} pageSize={PAGE_SIZE.issue} selectedKey={selection} onSelect={setSelection} />
-      <ProjectionGroup items={projectionSelections} query={query} selection={selection} onSelect={setSelection} />
+      {allNodes.length + allIssues.length + projectionSelections.length > 0 && (
+        <Disclosure key={query.trim() ? 'searching' : 'browsing'} summary="Details" defaultOpen={Boolean(query.trim())}>
+          <ItemGroup
+            label="Nodes" kindLabel="Node" prefix="node" items={allNodes} query={query} pageSize={PAGE_SIZE.node}
+            selectedKey={selection} onSelect={setSelection}
+            metaFor={(item) => `${sentence(firstString(item, ['kind']) || 'node')} · ${sentence(bestStatus(item))}`}
+            hasMore={Boolean(nodes.hasNextPage)} loadingMore={nodes.isFetchingNextPage} onLoadMore={() => void nodes.fetchNextPage()}
+          />
+          <ItemGroup label="Issues" kindLabel="Issue" prefix="issue" items={allIssues} query={query} pageSize={PAGE_SIZE.issue} selectedKey={selection} onSelect={setSelection} />
+          <ProjectionGroup items={projectionSelections} query={query} selection={selection} onSelect={setSelection} />
+        </Disclosure>
+      )}
       {browseEmpty && (
         <EmptyState
           icon={<BookOpen />}
@@ -500,10 +575,14 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
         )}
       </DetailPane>
     );
+  } else if (selectedFact) {
+    detail = <ItemPane key={selection} itemId={selectedFact.id} label={selectedFact.origin || 'Fact'} onClose={() => setSelection(null)} />;
   } else if (selection && /^(source|node|issue|preserved):/.test(selection)) {
     const [kind, ...rest] = selection.split(':');
     detail = <ItemPane key={selection} itemId={rest.join(':')} label={kind === 'preserved' ? 'Saved projection · All spaces' : sentence(kind)}
       includeAllSpaces={kind === 'preserved'} onClose={() => setSelection(null)} />;
+  } else if (activeSubject) {
+    detail = <FactsPane key={activeSubject.name} subject={activeSubject} query={query} selection={selection} onSelect={setSelection} />;
   }
 
   return (
@@ -518,14 +597,14 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
 
         {section === 'browse' && (
           <ListDetail
-            mode="peek"
+            mode="split"
             list={listPane}
             detail={detail}
             detailOpen={detail !== null}
-            onCloseDetail={() => setSelection(null)}
-            listLabel="Knowledge"
+            onCloseDetail={() => { if (selection) setSelection(null); else setSubject(null); }}
+            listLabel="What it knows"
             detailLabel="Knowledge detail"
-            backLabel="All knowledge"
+            backLabel={selectedFact && activeSubject ? activeSubject.name : 'All knowledge'}
           />
         )}
 

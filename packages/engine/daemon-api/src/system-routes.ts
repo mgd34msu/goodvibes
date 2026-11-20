@@ -9,8 +9,9 @@ import {
 } from './route-helpers.js';
 import { jsonErrorResponse, readJsonErrorResponse } from './error-response.js';
 import { withAdmin } from './auth-helpers.js';
-import { requestActor } from './http-policy.js';
+import { requestActor, systemActor } from './http-policy.js';
 import type {
+  ApprovalActionResultLike,
   ApprovalRememberTier,
   AutomationRouteBindingKind,
   DaemonSystemRouteContext,
@@ -226,12 +227,20 @@ export function createDaemonSystemRouteHandlers(
         ? Response.json({ removed: true, id: bindingId })
         : jsonErrorResponse({ error: 'Unknown route binding' }, { status: 404 });
     },
-    getApprovals: (url?: URL) => {
+    getApprovals: (url, req) => {
       if (!context.integrationHelpers) {
         return jsonErrorResponse({ error: 'Integration helper service unavailable' }, { status: 503 });
       }
-      const approvalId = url?.searchParams.get('approvalId')?.trim();
-      return Response.json(context.integrationHelpers.getApprovalSnapshot(approvalId || undefined));
+      const approvalId = url?.searchParams.get('approvalId')?.trim() || undefined;
+      // Each record carries its reading for this caller: what is waiting, on whom, until when, what the caller may do now.
+      const viewer = context.approvalBroker.viewerOf(context.resolveAuthenticatedPrincipal?.(req)?.actor);
+      const rows = approvalId === undefined ? context.approvalBroker.list(viewer, 50)
+        : [context.approvalBroker.get(approvalId, viewer)].filter((row) => row !== null);
+      const snapshot = context.integrationHelpers.getApprovalSnapshot(approvalId);
+      return Response.json({
+        ...(isJsonRecord(snapshot) ? snapshot : {}),
+        approvals: rows.map((row) => ({ ...(isJsonRecord(row.record) ? row.record : {}), reading: row.reading })),
+      });
     },
     // A decision grants or withholds tool execution (and can persist a durable
     // rule), so it takes the same authority as the other state changes here.
@@ -438,14 +447,17 @@ export function createDaemonSystemRouteHandlers(
       const setMany = context.configManager.setMany.bind(context.configManager);
       const putToOwner = await ownerActResponse(context, req, '/config/many', changes, 'config.setMany', { entries: changes },
         () => {
-          const applied = setMany(changes, { kind: 'owner', surface: 'daemon-api' });
+          // Applied when the owner approves it: the program carries out what he decided.
+          const applied = setMany(changes, systemActor('owner-approved:config.setMany'));
           if (!applied.ok) throw new Error(applied.refusal.reason);
         });
       if (putToOwner) return putToOwner;
       const writeAdmin = context.requireAdmin(req);
       if (writeAdmin) return writeAdmin;
-      // One admission, one write per settings file, one revision and one change event per key.
-      const result = context.configManager.setMany(changes, { kind: 'owner', surface: 'daemon-api' });
+      // One admission, one write per settings file, one revision and one change event per key,
+      // for the caller's own actor: the manager admits a loosening change for it again.
+      const writer = context.resolveAuthenticatedPrincipal?.(req)?.actor ?? systemActor('daemon-api');
+      const result = context.configManager.setMany(changes, writer);
       if (!result.ok) {
         const { refusal } = result;
         return jsonErrorResponse({ error: refusal.reason, code: refusal.code, state: refusal.state, next: [...refusal.next],
@@ -857,95 +869,85 @@ async function handleApprovalAction(
   action: 'claim' | 'approve' | 'deny' | 'cancel',
   req: Request,
 ): Promise<Response> {
+  const path = `/api/approvals/${approvalId}/${action}`;
   const body = await context.parseOptionalJsonBody(req);
-  if (body instanceof Response) return context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, body);
+  if (body instanceof Response) return context.recordApiResponse(req, path, body);
   const payload = body ?? {} as JsonRecord;
   const actor = requestActor(context, req);
+  const viewer = context.approvalBroker.viewerOf(context.resolveAuthenticatedPrincipal?.(req)?.actor);
   const note = typeof payload.note === 'string' ? payload.note : undefined;
-  if (action === 'claim') {
-    const outcome: { applied?: boolean | undefined } = {};
-    const approval = await context.approvalBroker.claimApproval(approvalId, actor, 'web', note, outcome);
-    return approval
-      ? context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval, ...approvalActionOutcome(approval, action, actor, outcome) }))
-      : context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({ error: 'Unknown approval', code: 'APPROVAL_NOT_FOUND' }, { status: 404 }));
-  }
-  if (action === 'cancel') {
-    const outcome: { applied?: boolean | undefined } = {};
-    // A surface leaving an ask it raised releases its own claim; the ask is
-    // cancelled only once no other surface that raised it is still waiting.
+  const answer = (outcome: ApprovalActionResultLike, extra: Record<string, unknown> = {}): Response => context.recordApiResponse(req, path,
+    outcome.record === null
+      ? jsonErrorResponse({ error: outcome.applied ? 'Unknown approval' : outcome.refusal.reason, code: 'APPROVAL_NOT_FOUND',
+        ...(outcome.applied ? {} : { state: outcome.refusal.state, next: [...outcome.refusal.next] }) }, { status: 404 })
+      // Applied or not, the answer carries the record and the caller's reading as they are now: a raced or stale
+      // action is 200 with `applied: false` and the refusal saying why, so it can be shown again in place.
+      : Response.json({ applied: outcome.applied, approval: outcome.record, reading: outcome.reading,
+        ...(outcome.applied ? {} : { refusal: outcome.refusal }), ...extra }));
+  // A surface leaving an ask it raised, or confirming it received the decision, gives up its own hold; no revision needed.
+  if (action === 'cancel' && payload.release === true) {
     const holdId = typeof payload.holdId === 'string' && payload.holdId.length > 0 ? payload.holdId : undefined;
-    const approval = payload.release === true && context.approvalBroker.releaseApproval
-      ? await context.approvalBroker.releaseApproval(approvalId, actor, 'web', note, outcome, holdId)
-      : await context.approvalBroker.cancelApproval(approvalId, actor, 'web', note, outcome);
-    return approval
-      ? context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval, ...approvalActionOutcome(approval, action, actor, outcome) }))
-      : context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({ error: 'Unknown approval', code: 'APPROVAL_NOT_FOUND' }, { status: 404 }));
+    return answer(await context.approvalBroker.release(approvalId, { actor, actorSurface: 'web', note, holdId }, viewer));
   }
+  // Every other action names the revision of the approval the caller showed or read (approvals.list returns it).
+  const expectedRevision = payload.expectedRevision;
+  if (typeof expectedRevision !== 'number' || !Number.isInteger(expectedRevision) || expectedRevision < 1) {
+    return context.recordApiResponse(req, path, jsonErrorResponse({
+      error: 'expectedRevision must be the revision of the approval you showed or read (approvals.list returns it on each record).',
+      code: 'INVALID_ARGUMENT', field: 'expectedRevision',
+    }, { status: 400 }));
+  }
+  if (action === 'claim') return answer(await context.approvalBroker.claim(approvalId, { actor, actorSurface: 'web', note, expectedRevision }, viewer));
+  if (action === 'cancel') return answer(await context.approvalBroker.cancel(approvalId, { actor, actorSurface: 'web', note, expectedRevision }, viewer));
   // Legacy generic callbacks choose this URL from a boolean. The URL alone
   // therefore cannot prove that an operator chose permanent workspace trust.
   const disposition = payload.disposition;
   if (disposition !== undefined && (action === 'approve'
     ? disposition !== 'approved'
     : disposition !== 'denied' && disposition !== 'amended')) {
-    return context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`,
+    return context.recordApiResponse(req, path,
       jsonErrorResponse({ error: 'disposition must match the approval action.', code: 'INVALID_ARGUMENT', field: 'disposition' }, { status: 400 }));
   }
   const selectedHunks = action === 'approve' ? readSelectedHunks(payload.selectedHunks) : undefined;
-  if (selectedHunks instanceof Response) {
-    return context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, selectedHunks);
-  }
+  if (selectedHunks instanceof Response) return context.recordApiResponse(req, path, selectedHunks);
   // The full decision reach travels over HTTP, not just note/remember: a tier
   // grant, a deny reason, and an argument-modifying approval (e.g. the typed
   // answer to a command's terminal prompt) must all reach the same broker
-  // resolution the in-process path uses. Malformed values are honest 400s,
-  // silently dropping them is exactly the defect this closes.
+  // resolution the in-process path uses. Malformed values are honest 400s.
   const rememberTier = readRememberTier(payload.rememberTier);
-  if (rememberTier instanceof Response) {
-    return context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, rememberTier);
-  }
+  if (rememberTier instanceof Response) return context.recordApiResponse(req, path, rememberTier);
   if (payload.reason !== undefined && typeof payload.reason !== 'string') {
-    return context.recordApiResponse(
-      req,
-      `/api/approvals/${approvalId}/${action}`,
-      jsonErrorResponse({ error: 'reason must be a string.', code: 'INVALID_ARGUMENT', field: 'reason' }, { status: 400 }),
-    );
+    return context.recordApiResponse(req, path,
+      jsonErrorResponse({ error: 'reason must be a string.', code: 'INVALID_ARGUMENT', field: 'reason' }, { status: 400 }));
   }
   const reason = typeof payload.reason === 'string' ? payload.reason : undefined;
   const modifiedArgs = action === 'approve' ? readModifiedArgs(payload.modifiedArgs) : undefined;
-  if (modifiedArgs instanceof Response) {
-    return context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, modifiedArgs);
-  }
-  let approval: unknown | null;
-  const outcome: { applied?: boolean | undefined } = {};
+  if (modifiedArgs instanceof Response) return context.recordApiResponse(req, path, modifiedArgs);
+  let outcome: ApprovalActionResultLike;
   try {
-    approval = await context.approvalBroker.resolveApproval(approvalId, {
-      outcome,
+    outcome = await context.approvalBroker.resolve(approvalId, {
       approved: action === 'approve',
       ...(disposition !== undefined ? { disposition: disposition as 'approved' | 'denied' | 'amended' } : {}),
       remember: typeof payload.remember === 'boolean' ? payload.remember : false,
       actor,
       actorSurface: 'web',
       note,
+      expectedRevision,
       ...(selectedHunks !== undefined ? { selectedHunks } : {}),
       ...(rememberTier !== undefined ? { rememberTier } : {}),
       ...(reason !== undefined ? { reason } : {}),
       ...(modifiedArgs !== undefined ? { modifiedArgs } : {}),
-    });
+    }, viewer);
   } catch (error) {
     // The broker throws a 400-tagged error for an out-of-range or non-edit
-    // per-hunk selection. Surface it as an honest HTTP 400, not a 500.
+    // per-hunk selection, and an error naming what was not saved. Surface it honestly.
     const status = typeof (error as { status?: unknown })?.status === 'number' ? (error as { status: number }).status : 500;
     const code = typeof (error as { code?: unknown })?.code === 'string' ? (error as { code: string }).code : undefined;
     const message = error instanceof Error ? error.message : 'Approval resolution failed.';
-    return context.recordApiResponse(
-      req,
-      `/api/approvals/${approvalId}/${action}`,
-      jsonErrorResponse({ error: message, ...(code ? { code } : status === 400 ? { code: 'INVALID_ARGUMENT' } : {}) }, { status }),
-    );
+    return context.recordApiResponse(req, path,
+      jsonErrorResponse({ error: message, ...(code ? { code } : status === 400 ? { code: 'INVALID_ARGUMENT' } : {}) }, { status }));
   }
-  return approval
-    ? context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval, ...approvalActionOutcome(approval, action, actor, outcome), recorded: recordedDecision(approval) }))
-    : context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({ error: 'Unknown approval', code: 'APPROVAL_NOT_FOUND' }, { status: 404 }));
+  return answer(outcome, outcome.record === null ? {} : { recorded: recordedDecision(outcome.record) });
 }
 
 /**
@@ -1081,42 +1083,6 @@ function readModifiedArgs(value: unknown): Record<string, unknown> | undefined |
     return jsonErrorResponse({ error: 'modifiedArgs must be an object of tool arguments.', code: 'INVALID_ARGUMENT', field: 'modifiedArgs' }, { status: 400 });
   }
   return value as Record<string, unknown>;
-}
-
-const APPROVAL_ACTION_TARGET = { claim: 'claimed', approve: 'approved', deny: 'denied', cancel: 'cancelled' } as const;
-
-/**
- * Whether this call changed the approval, as reported by the broker call itself.
- *
- * An action on an approval that already ended returns that record unchanged
- * with 200, deliberately: a surface that raced a decision made elsewhere, and
- * a write-back retried after a failed write, both must not fail. `applied`
- * is what tells such a caller that nothing changed, and `refusal` says why in
- * terms a person or an agent can act on, rather than a success toast for an
- * expired ask.
- */
-function approvalActionOutcome(
-  approval: unknown,
-  action: keyof typeof APPROVAL_ACTION_TARGET,
-  actor: string,
-  outcome: { applied?: boolean | undefined },
-): { applied: boolean; refusal?: string } {
-  const record = isJsonRecord(approval) ? approval : {};
-  const status = typeof record.status === 'string' ? record.status : 'unknown';
-  const target = APPROVAL_ACTION_TARGET[action];
-  const by = action === 'claim' ? record.claimedBy : record.resolvedBy;
-  // The broker says whether this call moved the record; two calls by the same
-  // principal cannot be told apart by comparing names. A broker that does not
-  // report it falls back to comparing the actor.
-  const applied = typeof outcome.applied === 'boolean' ? outcome.applied && status === target : status === target && by === actor;
-  if (applied) return { applied: true };
-  const resolvedBy = typeof record.resolvedBy === 'string' ? ` by ${record.resolvedBy}` : '';
-  return {
-    applied: false,
-    refusal: status === 'pending' || status === 'claimed'
-      ? `Approval is still ${status}; this ${action} was not recorded. Read the approval again and retry.`
-      : `Approval is ${status}${resolvedBy}, which is final; it cannot become ${target}. Nothing changed.`,
-  };
 }
 
 /**

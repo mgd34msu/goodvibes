@@ -267,7 +267,12 @@ export interface InboundMailNoticeRoute {
    * the producer has, extended across the port: the only code that turns spans
    * into text is the code that knows the destination.
    */
-  send(notice: StructuredNotice, binding: NoticeRouteBinding | null): Promise<SurfaceNoticeDelivery>;
+  send(notice: StructuredNotice, binding: NoticeRouteBinding | null, announces: string): Promise<SurfaceNoticeDelivery>;
+}
+
+/** What a message's owner notice announces, the same for every attempt at it: `mail:<message key>:notice` (a long one is split into `:partN`). */
+export function mailNoticeAnnounces(messageKey: string): string {
+  return `mail:${messageKey}:notice`;
 }
 
 export interface InboundMailIntakeDeps {
@@ -730,7 +735,7 @@ export function createInboundMailIntake(deps: InboundMailIntakeDeps): InboundMai
       let delivery: SurfaceNoticeDelivery;
       try {
         const route = deps.notices.resolveBinding();
-        delivery = await deps.notices.send(entry.notice, route.kind === 'bound' ? route.binding : null);
+        delivery = await deps.notices.send(entry.notice, route.kind === 'bound' ? route.binding : null, mailNoticeAnnounces(entry.key));
       } catch (error) {
         held.set(heldKey, entry);
         if (deps.noticeHealth?.get() === null) routeDown(summarizeError(error), at);
@@ -960,7 +965,9 @@ export function createInboundMailIntake(deps: InboundMailIntakeDeps): InboundMai
       // text, never raw span concatenation.
       //
       // THE LAST STEP THAT MAY THROW.
-      const delivery: SurfaceNoticeDelivery = await deps.notices.send(plan.notice, plan.binding);
+      // One identity per message for every attempt (a pass retried after a restart with the row still
+      // `pending`, a held notice sent later): a surface that drops repeats drops the second.
+      const delivery: SurfaceNoticeDelivery = await deps.notices.send(plan.notice, plan.binding, mailNoticeAnnounces(key));
       if (delivery.delivered) {
         status = 'delivered';
       } else if (delivery.reason === 'delivery-failed') {

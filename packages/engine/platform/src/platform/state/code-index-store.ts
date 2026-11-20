@@ -315,9 +315,14 @@ export class CodeIndexStore {
     if (this.authorizedRunUsed) throw new Error('Use guarded authorized code index access');
     if (!this.db || !this.available) return null;
     const stored = getCodeIndexMeta(this.db, EMBEDDING_PROVIDER_META_KEY);
-    const current = this.embeddingRegistry.getDefaultProviderId();
+    const current = this.currentSpace();
     if (stored === null || stored === current) return null;
-    return `embeddings built with ${stored}, current provider ${current}, rebuild to re-embed`;
+    return `embeddings built in ${stored}, current embedding space ${current}, rebuild to re-embed`;
+  }
+
+  /** The space (`<provider>:<model>:<dimensions>`) the index is stamped with and a build embeds in now. */
+  private currentSpace(): string {
+    return this.embeddingRegistry.currentSpace(MEMORY_VECTOR_DIMS).id;
   }
 
   stats(): CodeIndexStats {
@@ -601,7 +606,7 @@ export class CodeIndexStore {
     // different provider than the current default, the unchanged-file
     // shortcut would silently keep stale-space vectors, force a full
     // re-embed so a completed build always leaves a single-provider index.
-    const currentProviderId = this.embeddingRegistry.getDefaultProviderId();
+    const currentProviderId = this.currentSpace();
     const storedProviderId = this.db ? getCodeIndexMeta(this.db, EMBEDDING_PROVIDER_META_KEY) : null;
     // An index holding chunks but no stamp is one whose first build never finished: its
     // vectors cannot be vouched for either, so it is re-embedded and then stamped.
@@ -626,6 +631,8 @@ export class CodeIndexStore {
     const candidateFiles = Array.from(scanned).sort();
 
     const keepPaths = new Set<string>();
+    /** Kept paths this build did not re-embed (a budget or an unreadable file): their chunks are from before the build. */
+    const keptWithoutEmbedding = new Set<string>();
     let filesIndexed = 0;
     let filesUnchanged = 0;
     let chunksIndexed = 0;
@@ -644,6 +651,7 @@ export class CodeIndexStore {
         skip.overFileCap++;
         // Left out by a budget, not gone: its existing chunks are not a deletion.
         keepPaths.add(rel);
+        keptWithoutEmbedding.add(rel);
         continue;
       }
 
@@ -661,6 +669,7 @@ export class CodeIndexStore {
       if (totalBytes + stat.size > maxTotalBytes) {
         skip.overTotalBytes++;
         keepPaths.add(rel);
+        keptWithoutEmbedding.add(rel);
         continue;
       }
       // One read: the binary verdict comes from the bytes it returned.
@@ -674,6 +683,7 @@ export class CodeIndexStore {
         skip.readErrors++;
         // An unreadable file still exists; keep what the index has until it reads again.
         keepPaths.add(rel);
+        keptWithoutEmbedding.add(rel);
         continue;
       }
 
@@ -734,12 +744,18 @@ export class CodeIndexStore {
 
     // Sweep: a file that no longer exists (deleted, renamed, or newly gitignored) loses its chunks.
     let filesRemoved = 0;
-    for (const path of listIndexedPaths(this.db)) {
+    const indexedPaths = listIndexedPaths(this.db);
+    for (const path of indexedPaths) {
       if (!keepPaths.has(path) && !this.touchedDuringBuild.has(path)) {
         deleteChunksForPath(this.db, path);
         filesRemoved++;
       }
     }
+    // A re-embed that kept a file's chunks without embedding them (over a budget,
+    // unreadable) leaves vectors of the earlier space: the index is not current.
+    const oldSpaceLeft = forceReembed && indexedPaths.some((path) => keptWithoutEmbedding.has(path));
+    // The space moved while the build embedded: what it wrote is not all of one space.
+    const spaceMoved = this.currentSpace() !== currentProviderId;
 
     // Stamp provenance only on a COMPLETED build, every chunk that survives
     // to this point is either freshly embedded under currentProviderId or was
@@ -747,7 +763,7 @@ export class CodeIndexStore {
     // A file skipped mid-re-embed still holds vectors from the old provider,
     // so the stamp is withheld and the mismatch keeps asking for a rebuild.
     // A file that failed for a reason other than changing also still holds old-space vectors.
-    if (!(forceReembed && changedDuringBuild > 0) && failedFiles === 0) setCodeIndexMeta(this.db, EMBEDDING_PROVIDER_META_KEY, currentProviderId);
+    if (!(forceReembed && changedDuringBuild > 0) && failedFiles === 0 && !oldSpaceLeft && !spaceMoved) setCodeIndexMeta(this.db, EMBEDDING_PROVIDER_META_KEY, currentProviderId);
     this.touchedDuringBuild.clear();
 
     const completedAt = Date.now();
@@ -838,7 +854,7 @@ export class CodeIndexStore {
     // The first write into an index that was never stamped records its provider, so a build
     // cut short still knows which vector space it wrote.
     const stampProvider = getCodeIndexMeta(this.db, EMBEDDING_PROVIDER_META_KEY) === null && countIndexedChunks(this.db) === 0
-      ? this.embeddingRegistry.getDefaultProviderId()
+      ? this.currentSpace()
       : undefined;
     replaceFileChunks(this.db, relPath, drafts.map((draft, i) => ({ chunk: draft.chunk, embedding: embeddings[i]! })), { stampProvider });
     return { indexed: drafts.length > 0 || mode === 'empty', mode, chunkCount: drafts.length };

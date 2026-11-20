@@ -166,9 +166,11 @@ export {
   isSessionOpenElsewhere,
   moveSessionHere,
   openSessionHere,
+  SessionOpenElsewhereError,
   sessionIdentityFile,
   sessionOpenLockPath,
   sweepClosedSessionLocks,
+  takeSessionOverHere,
 } from './session-open-lock.js';
 export type { SessionIdentitySurface, SessionLockSweepResult } from './session-open-lock.js';
 

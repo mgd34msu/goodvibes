@@ -43,7 +43,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { getProcessUntrustedContentLedger, type UntrustedContentLedger } from './untrusted-content.js';
 import type { TurnInputOrigin } from '../../events/turn.js';
-import { guestSurfaceId, isGuestSurfaceId } from '../gate/surface-authority.js';
+import { guestSurfaceId, normalizeSurfaceId } from '../gate/surface-authority.js';
+import { actorFromChannelSender, type Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 
 /**
  * Reset the untrusted-content window if, and only if, this invocation is a
@@ -139,6 +140,15 @@ export interface TurnContext {
   readonly sessionId: string | null;
   /** The surface the turn's input came from; undefined for owner-direct input (what {@link turnSurfaceOf} gives). */
   readonly surface: string | undefined;
+  /**
+   * Whose turn it is, when the host knows a person other than the local owner:
+   * the chat sender a channel admitted (`actorFromChannelSender`), set by the
+   * daemon from the sender the adapter verified, never by message content. A
+   * guest's turn is a model acting for that guest (`agentActor(actor)`), so
+   * its calls are admitted as the guest's, never the owner's. Absent: the
+   * local owner's own session, or a surface with no sender identity.
+   */
+  readonly actor?: Actor | undefined;
   readonly origin: TurnInputOrigin | undefined;
   /** The message this turn answers. */
   readonly requestText: string | null;
@@ -161,6 +171,28 @@ export function turnSurfaceOf(origin: TurnInputOrigin | undefined): string | und
   return inputOriginIsOwnerDirect(origin) ? undefined : (origin?.surface ?? origin?.source ?? 'unknown');
 }
 
+/**
+ * The surface the gate's surface table reads for a turn: its surface, in its
+ * guest form (`guest:<surface>`, surface-authority.ts) when the turn's actor is
+ * a guest, so a guest's turn carries no command authority on any surface.
+ * Derived from the actor; nothing stores the guest form.
+ */
+export function turnAuthoritySurface(turn: Pick<TurnContext, 'surface' | 'actor'> | undefined): string | undefined {
+  if (turn?.surface === undefined) return undefined;
+  return turn.actor?.class === 'guest' ? guestSurfaceId(turn.surface) : turn.surface;
+}
+
+/** {@link turnAuthoritySurface} of the turn in scope. */
+export function currentTurnAuthoritySurface(): string | undefined {
+  return turnAuthoritySurface(currentTurn());
+}
+
+/** The channel of the guest whose turn is in scope, or undefined when the turn is not a guest's. */
+export function currentGuestChannel(): string | undefined {
+  const turn = currentTurn();
+  return turn?.actor?.class === 'guest' && turn.surface !== undefined ? normalizeSurfaceId(turn.surface) : undefined;
+}
+
 /** Runs one turn's work with its whole record in scope. */
 export function withTurn<T>(context: TurnContext, fn: () => Promise<T>): Promise<T> {
   return turnScope.run(Object.freeze({ ...context }), fn);
@@ -172,36 +204,19 @@ export function currentTurn(): TurnContext | undefined {
 }
 
 /**
- * Runs one turn's work with only its input origin known: a turn record with a
- * fresh id, its surface and origin, and nothing else. Kept for the
- * conversation loop until it opens its scope with {@link withTurn} and the
- * whole record.
- */
-export function withTurnSurface<T>(origin: TurnInputOrigin | undefined, fn: () => Promise<T>): Promise<T> {
-  return withTurn({
-    turnId: freshTurnId(),
-    sessionId: null,
-    surface: turnSurfaceOf(origin),
-    origin,
-    requestText: null,
-    ownerRequestText: null,
-    callerAgentId: null,
-    ownerSessionId: null,
-  }, fn);
-}
-
-/**
  * Runs work that outlives the call (an agent spawned for a channel message) with
  * the surface it was triggered from in scope, so its tool calls meet the gate's
  * surface-authority check instead of being taken for the local owner's. It is
- * a turn of its own: it carries the surface and nothing of the turn that
- * started it (not its request text, not its owner's authority).
+ * a turn of its own: it carries the surface and whose turn started it (a
+ * guest stays a guest), and nothing else of that turn (not its request text,
+ * not its owner's authority).
  */
-export function withTurnSurfaceId<T>(surface: string | undefined, fn: () => T): T {
+export function withTurnSurfaceId<T>(surface: string | undefined, fn: () => T, actor?: Actor | undefined): T {
   return turnScope.run(Object.freeze({
     turnId: freshTurnId(),
     sessionId: null,
     surface,
+    ...(actor !== undefined ? { actor } : {}),
     origin: undefined,
     requestText: null,
     ownerRequestText: null,
@@ -211,19 +226,50 @@ export function withTurnSurfaceId<T>(surface: string | undefined, fn: () => T): 
 }
 
 /**
- * Runs `fn` as the turn of a channel sender who is not the channel's owner: its
- * surface is the guest form of `surface` (gate/surface-authority.ts,
- * guestSurfaceId), so its tool calls may read and answer and every change is
- * put to the owner. The daemon sets it from the sender the adapter verified.
- * The rest of the turn in scope, if any, is kept; only the surface narrows,
- * and no owner request text survives into a guest's turn.
+ * Runs one run of an agent as a turn of its own: the agent's id as the caller
+ * (so the agent tool names it as the parent of what it spawns, never a value
+ * the model wrote), the surface and actor it was started for, its session, and
+ * the request of the turn that started it. Not that turn's owner authority:
+ * an agent's tools never pass as the owner's own message.
  */
-export function withGuestTurn<T>(surface: string, fn: () => T): T {
+export function withAgentTurn<T>(agent: {
+  readonly agentId: string;
+  readonly surface: string | undefined;
+  readonly actor?: Actor | undefined;
+  readonly sessionId: string | null;
+  readonly requestText: string | null;
+}, fn: () => T): T {
+  return turnScope.run(Object.freeze({
+    turnId: freshTurnId(),
+    sessionId: agent.sessionId,
+    surface: agent.surface,
+    ...(agent.actor !== undefined ? { actor: agent.actor } : {}),
+    origin: undefined,
+    requestText: agent.requestText,
+    ownerRequestText: null,
+    callerAgentId: agent.agentId,
+    ownerSessionId: agent.sessionId,
+  }), fn);
+}
+
+/**
+ * Runs `fn` as the turn of a channel sender who is not the channel's owner:
+ * the turn's actor is that guest (`actorFromChannelSender`), so its tool calls
+ * may read and answer and every change is put to the owner (the gate reads
+ * the guest from the actor, {@link turnAuthoritySurface}). The daemon sets it
+ * from the sender the adapter verified. The rest of the turn in scope, if
+ * any, is kept; only who the turn is for narrows, and no owner request text
+ * survives into a guest's turn.
+ */
+export function withGuestTurn<T>(surface: string, fn: () => T, userId?: string | undefined): T {
   const outer = currentTurn();
+  const channel = normalizeSurfaceId(surface);
   return turnScope.run(Object.freeze({
     turnId: outer?.turnId ?? freshTurnId(),
     sessionId: outer?.sessionId ?? null,
-    surface: guestSurfaceId(surface),
+    surface: channel,
+    // A guest whose id the caller did not hand over is still a guest: `isChannelOwner: false` decides it.
+    actor: actorFromChannelSender({ surface: channel, userId: userId ?? 'guest', isChannelOwner: false }),
     origin: outer?.origin,
     requestText: outer?.requestText ?? null,
     ownerRequestText: null,
@@ -233,13 +279,14 @@ export function withGuestTurn<T>(surface: string, fn: () => T): T {
 }
 
 /**
- * The surface a channel spawn runs under: a guest turn already in scope (the
- * conversation gate started it for a non-owner sender) is kept, so starting
- * the agent cannot hand a guest's message the channel's own authority.
+ * The scope a channel spawn runs under: a guest turn already in scope (the
+ * conversation gate started it for a non-owner sender) is kept, surface and
+ * guest together, so starting the agent cannot hand a guest's message the
+ * channel's own authority.
  */
-export function channelTurnSurfaceId(surface: string | undefined): string | undefined {
-  const scoped = currentTurn()?.surface;
-  return isGuestSurfaceId(scoped) ? scoped : surface;
+export function channelTurnScope(surface: string | undefined): { readonly surface: string | undefined; readonly actor?: Actor | undefined } {
+  const scoped = currentTurn();
+  return scoped?.actor?.class === 'guest' ? { surface: scoped.surface, actor: scoped.actor } : { surface };
 }
 
 /**
@@ -250,6 +297,6 @@ export function channelTurnSurfaceId(surface: string | undefined): string | unde
  * model writes.
  */
 export function currentTurnActor(): string {
-  const surface = currentTurn()?.surface;
+  const surface = currentTurnAuthoritySurface();
   return surface === undefined ? 'owner' : `surface:${surface}`;
 }

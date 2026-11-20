@@ -86,6 +86,24 @@ export interface FleetPickView {
   readonly proposal: string | null;
 }
 
+/** One loser's clean-up from `fleet.attempts.pick`, as observed (an EffectOutcome). */
+interface LoserCleanup {
+  readonly id: string;
+  readonly outcome: { readonly state: string; readonly check?: string; readonly refusal?: { readonly reason: string } };
+}
+
+/** Cleaned only when a loser's worktree was seen gone; still cleaning names its check; failed says why. */
+function describeLoserCleanup(losers: readonly LoserCleanup[]): string {
+  if (losers.length === 0) return 'no loser worktrees';
+  const cleaned = losers.filter((loser) => loser.outcome.state === 'done').length;
+  const parts = [`${cleaned} of ${losers.length} loser worktree(s) cleaned`];
+  for (const loser of losers) {
+    if (loser.outcome.state === 'pending') parts.push(`${shortId(loser.id)} still cleaning (check: ${loser.outcome.check ?? 'git worktree list'})`);
+    else if (loser.outcome.state !== 'done') parts.push(`${shortId(loser.id)} not cleaned: ${loser.outcome.refusal?.reason ?? 'no reason given'}`);
+  }
+  return parts.join('; ');
+}
+
 function shortId(id: string): string {
   return id.length > 10 ? `${id.slice(0, 10)}…` : id;
 }
@@ -286,7 +304,14 @@ export class FleetActs {
     let submitted = submit;
     try {
       const result = await gateway.steerObserved({ id: steer.nodeId, text, ...(submit ? { submit: true } : {}) });
-      if (result.queued) {
+      if (result.queued === 'partial') {
+        // The text is in the pane already: the composer closes, so Enter cannot type it a second time.
+        if (this.observedSteer === steer) this.observedSteer = null;
+        this.deps.notify(`[Fleet] Steer partly sent: ${result.reason ?? 'a later send failed'}. Finish it in that session; it was not sent again.`);
+        this.deps.markDirty();
+        return;
+      }
+      if (result.queued === true) {
         failure = null;
         submitted = result.submitted ?? submit;
       } else if (result.declined === true) {
@@ -446,8 +471,7 @@ export class FleetActs {
         try {
           const result = await gateway.pick({ groupId: group.groupId, winnerItemId: cand.itemId, confirm: true });
           if (result.applied) {
-            const losersCleaned = result.loserItemIds?.length ?? losers;
-            this.deps.notify(`[Fleet] Winner picked for group ${shortId(group.groupId)}: attempt ${cand.attemptIndex + 1} merged, ${losersCleaned} loser worktree(s) cleaned.`);
+            this.deps.notify(`[Fleet] Winner picked for group ${shortId(group.groupId)}: attempt ${cand.attemptIndex + 1} merged; ${describeLoserCleanup('losers' in result && Array.isArray(result.losers) ? result.losers as readonly LoserCleanup[] : [])}.`);
           } else {
             this.deps.notify(`[Fleet] Pick not applied for group ${shortId(group.groupId)}: the daemon still requires confirmation.`);
           }

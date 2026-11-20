@@ -94,6 +94,7 @@ export {
 
 // ── Idempotency ───────────────────────────────────────────────────────────────
 export type {
+  IdempotencyClaim,
   IdempotencyKeyContext,
   IdempotencyRecord,
   IdempotencyStoreConfig,

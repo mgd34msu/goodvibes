@@ -214,7 +214,7 @@ export function createGoogleClientManualEditor(): AgentWorkspaceLocalEditor {
       + `the Agent secret manager, masked here, and never rendered back. ${SIGN_IN_PAUSE}`,
     fields: [
       { id: 'clientId', label: 'Client ID', value: '', required: true, multiline: false, hint: 'The OAuth client id from the Google console.' },
-      { id: 'clientSecret', label: 'Client secret', value: '', required: true, multiline: false, hint: 'Stored through the Agent secret manager. Masked here and never rendered in results.', redact: true },
+      { id: 'clientSecret', label: 'Client secret', value: '', required: true, multiline: false, hint: 'Stored through the Agent secret manager. Masked here and never rendered in results.', redact: true, verbatim: true },
       confirmField('Type yes to store these and run the OAuth flow.'),
     ],
   };

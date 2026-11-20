@@ -2,7 +2,8 @@ import type { ConfigManager } from '../config/manager.js';
 import type { ConfigKey } from '../config/schema-types.js';
 import type { SecretsManager } from '../config/secrets.js';
 import type { ServiceRegistry } from '../config/service-registry.js';
-import { resolveSurfaceSecret } from './builtin/surface-secrets.js';
+import { readNtfyTopics, resolveSurfaceSecret, storeSurfaceSecret } from './builtin/surface-secrets.js';
+import { NTFY_TOPIC_TARGETS } from './builtin/setup-schema.js';
 import { channelCredentials } from './credential-holder.js';
 import {
   DiscordGatewayClient,
@@ -60,7 +61,8 @@ export interface ProviderRuntimeActionResult {
 
 interface ProviderRuntimeManagerDeps {
   readonly configManager: ConfigManager;
-  readonly secretsManager?: Pick<SecretsManager, 'get' | 'getGlobalHome'> | undefined;
+  /** `set` and `delete` store a generated ntfy topic name (a credential) when the surface starts with one unset. */
+  readonly secretsManager?: (Pick<SecretsManager, 'get' | 'getGlobalHome'> & Partial<Pick<SecretsManager, 'set' | 'delete'>>) | undefined;
   readonly serviceRegistry: ServiceRegistry;
   readonly buildSurfaceAdapterContext: () => SurfaceAdapterContext;
   /**
@@ -153,6 +155,16 @@ export class ChannelProviderRuntimeManager {
    * so a failure kept on that status was erased by the next topic's start.
    */
   private readonly ntfyTopicErrors = new Map<string, string>();
+  /**
+   * Each topic name this node reads, by the role it plays ('chat topic', ...).
+   * A topic name is a credential: status, results and logs name the role.
+   */
+  private readonly ntfyTopicRoles = new Map<string, string>();
+
+  /** What status and logs say for a topic: its role, never its name. */
+  private ntfyTopicLabel(topic: string): string {
+    return this.ntfyTopicRoles.get(topic) ?? 'an ntfy topic';
+  }
   private readonly ntfyReconnects = new Map<string, number>();
   private readonly ntfyMessageFailures = new Map<string, number>();
   private socketLostHandler: ((kind: 'slack' | 'discord', reason: string, permanent?: boolean) => void) | null = null;
@@ -211,8 +223,8 @@ export class ChannelProviderRuntimeManager {
     return String(this.deps.configManager.get('surfaces.ntfy.baseUrl') || 'https://ntfy.sh');
   }
 
-  /** Every ntfy topic this node is configured to read. */
-  ntfyTopics(): string[] {
+  /** Every ntfy topic this node is configured to read (each name read from the secret store its setting names). */
+  ntfyTopics(): Promise<string[]> {
     return this.resolveNtfyTopics();
   }
 
@@ -258,7 +270,7 @@ export class ChannelProviderRuntimeManager {
       ? createNtfyLiveSubscriptionSince()
       : createNtfyLiveSubscriptionSince(replayFromMs);
     this.markStarted('ntfy', {
-      topics: this.runningNtfyTopics(),
+      topics: this.runningNtfyTopics().map((topic) => this.ntfyTopicLabel(topic)),
       since,
       replayCachedMessages: replayFromMs !== null,
     });
@@ -271,7 +283,7 @@ export class ChannelProviderRuntimeManager {
       const message = summarizeError(error);
       if (this.ntfyAborts.get(topic) === abort) this.ntfyAborts.delete(topic);
       this.failNtfyTopic(topic, message);
-      logger.warn('ChannelProviderRuntimeManager: ntfy stream failed', { topic, error: message });
+      logger.warn('ChannelProviderRuntimeManager: ntfy stream failed', { topic: this.ntfyTopicLabel(topic), error: message });
     });
     return this.result('ntfy', true, 'ntfy JSON stream runtime started.');
   }
@@ -288,7 +300,7 @@ export class ChannelProviderRuntimeManager {
     this.ntfyTopicErrors.delete(topic);
     this.ntfyReconnects.delete(topic);
     if (this.ntfyAborts.size === 0) this.markStopped('ntfy');
-    else this.markStarted('ntfy', { topics: this.runningNtfyTopics() });
+    else this.markStarted('ntfy', { topics: this.runningNtfyTopics().map((topic) => this.ntfyTopicLabel(topic)) });
     return this.result('ntfy', true, 'ntfy topic subscription stopped.');
   }
 
@@ -308,7 +320,7 @@ export class ChannelProviderRuntimeManager {
   status(surface: ProviderRuntimeSurface): ProviderRuntimeStatus {
     const state = this.state[surface]!;
     const topicErrors = surface === 'ntfy' && this.ntfyTopicErrors.size > 0
-      ? [...this.ntfyTopicErrors].map(([topic, error]) => `${topic}: ${error}`).join('; ')
+      ? [...this.ntfyTopicErrors].map(([topic, error]) => `${this.ntfyTopicLabel(topic)}: ${error}`).join('; ')
       : undefined;
     const lastError = state.lastError ?? topicErrors;
     return {
@@ -443,7 +455,7 @@ export class ChannelProviderRuntimeManager {
    * topic it won.
    */
   private async startNtfy(options: ProviderRuntimeStartOptions = {}): Promise<ProviderRuntimeActionResult> {
-    const topics = this.resolveNtfyTopics();
+    const topics = await this.resolveNtfyTopics();
     if (topics.length === 0) {
       this.markError('ntfy', 'ntfy topic is required for subscription runtime.');
       return this.result('ntfy', false, 'ntfy topic is required for subscription runtime.');
@@ -458,7 +470,7 @@ export class ChannelProviderRuntimeManager {
     // takes a partly started runtime for a running one.
     const started = results.length - failed.length;
     return this.result('ntfy', false,
-      `ntfy started for ${started} of ${results.length} topics. Not reading: ${failed.map(({ topic, result }) => `${topic} (${result.message})`).join('; ')}`);
+      `ntfy started for ${started} of ${results.length} topics. Not reading: ${failed.map(({ topic, result }) => `${this.ntfyTopicLabel(topic)} (${result.message})`).join('; ')}`);
   }
 
   /**
@@ -589,13 +601,13 @@ export class ChannelProviderRuntimeManager {
         if (oldest !== undefined) this.ntfyMessageFailures.delete(oldest);
       }
       logger.warn('ChannelProviderRuntimeManager: ntfy message dispatch failed; it will be delivered again', {
-        topic, messageId: message.id, attempt, of: NTFY_MESSAGE_ATTEMPTS, error: detail,
+        topic: this.ntfyTopicLabel(topic), messageId: message.id, attempt, of: NTFY_MESSAGE_ATTEMPTS, error: detail,
       });
       throw new Error(detail);
     }
     if (key) this.ntfyMessageFailures.delete(key);
     logger.error('ChannelProviderRuntimeManager: ntfy message dispatch failed; skipping it so the topic keeps moving', {
-      topic, messageId: message.id ?? '(none)', attempts: attempt, error: detail,
+      topic: this.ntfyTopicLabel(topic), messageId: message.id ?? '(none)', attempts: attempt, error: detail,
     });
     this.deps.ingressAlarm?.recordFailure('ntfy', detail, 'skipped');
   }
@@ -634,21 +646,39 @@ export class ChannelProviderRuntimeManager {
     return resolveSurfaceSecret(this.deps, 'ntfy', 'primary');
   }
 
-  private resolveNtfyTopics(): string[] {
+  private async resolveNtfyTopics(): Promise<string[]> {
     const config = this.deps.configManager;
     // The surface is on and a topic is unset: give it an unguessable name, as the relay does its rendezvous id.
-    if (config.get('surfaces.ntfy.enabled') === true) try {
-      const generated = ensureNtfyTopics({ get: (key) => config.get(key as ConfigKey), set: (key, value) => config.set(key as 'surfaces.ntfy.chatTopic', value) });
+    // The name is a credential: it goes to the secret store and the setting holds its reference.
+    const secrets = this.deps.secretsManager;
+    if (config.get('surfaces.ntfy.enabled') === true && secrets?.set && secrets.delete) try {
+      const writer = { configManager: config, secretsManager: { set: secrets.set.bind(secrets), delete: secrets.delete.bind(secrets) } };
+      const generated = await ensureNtfyTopics({
+        get: (key) => config.get(key as ConfigKey),
+        store: async (key, topic) => {
+          const target = NTFY_TOPIC_TARGETS.find((entry) => entry[2] === key);
+          if (target) await storeSurfaceSecret(writer, 'ntfy', target[0], topic, 'daemon');
+        },
+      });
       if (generated.length > 0) {
-        logger.info('ntfy topics generated; subscribe to these names on your phone', { topics: generated });
+        // The names are credentials and stay out of the log; the owner reads them where he asks to see them.
+        logger.info('ntfy topics generated and kept in the secret store; subscribe to them on your phone', {
+          settings: generated.map((entry) => entry.setting),
+          next: 'goodvibes surfaces check ntfy shows the topic names to subscribe to',
+        });
       }
     } catch (error) {
       logger.warn('ntfy topics could not be generated and saved', { error: summarizeError(error) });
     }
+    const names = await readNtfyTopics(this.deps);
+    this.ntfyTopicRoles.clear();
+    if (names.chatTopic) this.ntfyTopicRoles.set(names.chatTopic, 'chat topic');
+    if (names.agentTopic) this.ntfyTopicRoles.set(names.agentTopic, 'agent topic');
+    if (names.remoteTopic) this.ntfyTopicRoles.set(names.remoteTopic, 'remote topic');
     const topics = resolveGoodVibesNtfyTopics({
-      chatTopic: String(config.get('surfaces.ntfy.chatTopic') || ''),
-      agentTopic: String(config.get('surfaces.ntfy.agentTopic') || ''),
-      remoteTopic: String(config.get('surfaces.ntfy.remoteTopic') || ''),
+      chatTopic: names.chatTopic,
+      agentTopic: names.agentTopic,
+      remoteTopic: names.remoteTopic,
       baseUrl: String(config.get('surfaces.ntfy.baseUrl') || ''),
     });
     for (const refused of topics.refused) this.failNtfyTopic(refused.topic, refused.reason);
@@ -743,7 +773,9 @@ export class ChannelProviderRuntimeManager {
         || discordService?.tokenRef,
       );
     }
-    return this.resolveNtfyTopics().length > 0;
+    // Configured when a topic setting is set; its name is read (and an unset one generated) when ntfy starts.
+    return (['surfaces.ntfy.chatTopic', 'surfaces.ntfy.agentTopic', 'surfaces.ntfy.remoteTopic'] as const)
+      .some((key) => String(this.deps.configManager.get(key) ?? '').trim() !== '');
   }
 
   /**

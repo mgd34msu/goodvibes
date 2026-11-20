@@ -65,7 +65,8 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
       configManager: views.configManager,
       hosted: getSharedHostedSessionFeed(),
       // The outcome goes back to the modal so it never claims a send that did not happen.
-      steerHosted: (text) => sayToHosted(commandContext, text),
+      // The draft's own attachment travels with it: sent only to the session it was written for.
+      steerHosted: (text, binding) => sayToHosted(commandContext, text, undefined, binding),
       sessionCost: () => {
         const cost = views.usage.sessionCost();
         return cost.priced ? cost.usd : null;
@@ -94,9 +95,14 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
       requestRender: render,
     }));
   };
-  // A click on the footer's token or context row opens Usage.
+  // A click on a status bar segment opens its view; elsewhere on the row, Usage.
   input.onFooterTarget = (target) => {
     if (target === 'usage') commandContext.openUsage?.();
+    else if (target === 'mode') commandContext.openSettingsModal?.('permissions.mode');
+    else if (target === 'notices') commandContext.openNotifications?.();
+    else if (target === 'context') commandContext.openContextInspector?.();
+    else if (target === 'changes') commandContext.openChanges?.();
+    else if (target === 'model') commandContext.openModelPicker?.();
     else if (target === 'agents') commandContext.openAgents?.();
     else if (target === 'commands') commandContext.openCommandPalette?.();
     else if (target === 'bottom') {

@@ -41,7 +41,7 @@ export { MEMORY_VECTOR_DIMS };
  * the stored vector width (embedding-dims.ts) or the row layout changes: the
  * index is a derived cache, the migration drops it and it is rebuilt.
  */
-export const MEMORY_VECTOR_SCHEMA_VERSION = 3;
+export const MEMORY_VECTOR_SCHEMA_VERSION = 4;
 export { embedMemoryText } from './memory-embeddings.js';
 
 export interface MemoryVectorSearchFilter {
@@ -69,6 +69,14 @@ export interface MemoryVectorStats {
   indexedRecords: number;
   embeddingProviderId: string;
   embeddingProviderLabel: string;
+  /** The space searches filter on now (`<provider>:<model>:<dimensions>`). */
+  embeddingSpace: string;
+  /**
+   * Rows embedded in another space (an earlier provider or model): searches
+   * leave them out until a rebuild re-embeds them, rather than scoring them
+   * against a query from a different space.
+   */
+  awaitingReembed: number;
   error?: string | undefined;
   /**
    * Set when the vector index is unavailable because the RUNTIME PLATFORM
@@ -125,7 +133,7 @@ export function buildMemoryEmbeddingText(record: MemoryRecord): string {
   ].filter(Boolean).join('\n');
 }
 
-type StoredVectorRow = { record_id: string; source_revision: string; provider_id: string };
+type StoredVectorRow = { record_id: string; source_revision: string; space_id: string };
 
 /**
  * The memory store's vector index. A synchronous write has no `await` between
@@ -198,8 +206,9 @@ export class SqliteVecMemoryIndex {
         targetVersion: MEMORY_VECTOR_SCHEMA_VERSION,
         migrations: [{ toVersion: MEMORY_VECTOR_SCHEMA_VERSION, migrate: () => {
           // v1 only stored content digests, which cannot establish a native row
-          // revision; v2 did not record which provider made each vector, so a
-          // changed provider could leave old vectors in the new one's space.
+          // revision; v2 did not record which provider made each vector; v3
+          // recorded the provider but not its model, and kept it out of the
+          // vector table, so a search could not filter on it in its statement.
           // Snapshot first (above), then rebuild this derived cache.
           // Primary memories live in the separate memory store and stay intact.
           this.db?.transaction(() => {
@@ -247,6 +256,8 @@ export class SqliteVecMemoryIndex {
       indexedRecords: this.countIndexedRecords(),
       embeddingProviderId: provider?.id ?? this.embeddingRegistry.getDefaultProviderId(),
       embeddingProviderLabel: provider?.label ?? `Unregistered (${this.embeddingRegistry.getDefaultProviderId()})`,
+      embeddingSpace: this.space(),
+      awaitingReembed: this.countOutsideSpace(),
       ...(this.platformLimitReason ? { platformLimitReason: this.platformLimitReason } : {}),
       ...(error ? { error } : {}),
     };
@@ -266,6 +277,7 @@ export class SqliteVecMemoryIndex {
       return;
     }
     let embedding: Float32Array;
+    const space = this.space();
     try {
       const result = this.embeddingRegistry.embedSync({
         text: buildMemoryEmbeddingText(record), dimensions: this.dimensions, usage: 'record', recordId: record.id,
@@ -276,7 +288,7 @@ export class SqliteVecMemoryIndex {
       return;
     }
     try {
-      this.writeEntries([{ record, revision: options.revision ?? this.revisionOf(record.id) ?? standaloneRevision(), embedding }]);
+      this.writeEntries([{ record, revision: options.revision ?? this.revisionOf(record.id) ?? standaloneRevision(), embedding }], [], space);
     } catch (err) {
       this.markStoreFailure(err);
     }
@@ -292,7 +304,7 @@ export class SqliteVecMemoryIndex {
     if (!db || !this.enabled) return;
     const revision = options.revision ?? this.revisionOf(record.id);
     if (this.currentRevision && revision === undefined) return;
-    const providerId = this.embeddingRegistry.getDefaultProviderId();
+    const space = this.space();
     // A provider that ignores the signal cannot hold the caller past a cancellation.
     const result = await awaitMemoryOperation(() => this.embeddingRegistry.embedAsync({
       text: buildMemoryEmbeddingText(record),
@@ -301,10 +313,10 @@ export class SqliteVecMemoryIndex {
       recordId: record.id,
       signal: options.signal, beforeAttempt: () => assertMemoryOperationCurrent(options),
     }), options);
-    if (!this.stillCurrent(db, providerId, record.id, revision)) return;
+    if (!this.stillCurrent(db, space, record.id, revision)) return;
     this.clearEmbeddingError();
     try {
-      this.writeEntries([{ record, revision: revision ?? standaloneRevision(), embedding: normalizeMemoryEmbeddingVector(result.vector, this.dimensions) }]);
+      this.writeEntries([{ record, revision: revision ?? standaloneRevision(), embedding: normalizeMemoryEmbeddingVector(result.vector, this.dimensions) }], [], space);
     } catch (err) {
       this.markStoreFailure(err);
     }
@@ -333,12 +345,12 @@ export class SqliteVecMemoryIndex {
       void this.syncAsync(entries).catch((err: unknown) => this.markEmbeddingUnavailable(err));
       return;
     }
-    const providerId = this.embeddingRegistry.getDefaultProviderId();
+    const space = this.space();
     const stored = this.storedRows();
     const changed: Array<{ record: MemoryRecord; revision: string; embedding: Float32Array }> = [];
     try {
       for (const entry of entries) {
-        if (isIndexed(stored.get(entry.record.id), entry.revision, providerId)) continue;
+        if (isIndexed(stored.get(entry.record.id), entry.revision, space)) continue;
         const result = this.embeddingRegistry.embedSync({
           text: buildMemoryEmbeddingText(entry.record), dimensions: this.dimensions, usage: 'record', recordId: entry.record.id,
         });
@@ -350,7 +362,7 @@ export class SqliteVecMemoryIndex {
     }
     const live = new Set(entries.map((entry) => entry.record.id));
     try {
-      this.writeEntries(changed, [...stored.keys()].filter((id) => !live.has(id)));
+      this.writeEntries(changed, [...stored.keys()].filter((id) => !live.has(id)), space);
     } catch (err) {
       this.markStoreFailure(err);
     }
@@ -368,9 +380,9 @@ export class SqliteVecMemoryIndex {
     assertMemoryOperationCurrent(options);
     const db = this.db;
     if (!db || !this.enabled) return;
-    const providerId = this.embeddingRegistry.getDefaultProviderId();
+    const space = this.space();
     const stored = this.storedRows();
-    const pending = entries.filter((entry) => options.force || !isIndexed(stored.get(entry.record.id), entry.revision, providerId));
+    const pending = entries.filter((entry) => options.force || !isIndexed(stored.get(entry.record.id), entry.revision, space));
     const live = new Set(entries.map((entry) => entry.record.id));
     const gone = [...stored.keys()].filter((id) => !live.has(id));
     for (let start = 0; start < pending.length; start += SqliteVecMemoryIndex.rebuildBatchSize) {
@@ -388,12 +400,12 @@ export class SqliteVecMemoryIndex {
         this.markEmbeddingUnavailable(err);
         return;
       }
-      if (this.db !== db || this.embeddingRegistry.getDefaultProviderId() !== providerId) return;
+      if (this.db !== db || this.space() !== space) return;
       this.clearEmbeddingError();
-      const current = batch.flatMap((entry, index) => this.stillCurrent(db, providerId, entry.record.id, entry.revision)
+      const current = batch.flatMap((entry, index) => this.stillCurrent(db, space, entry.record.id, entry.revision)
         ? [{ ...entry, embedding: normalizeMemoryEmbeddingVector(results[index]!.vector, this.dimensions) }] : []);
       try {
-        this.writeEntries(current);
+        this.writeEntries(current, [], space);
       } catch (err) {
         this.markStoreFailure(err);
         return;
@@ -424,6 +436,8 @@ export class SqliteVecMemoryIndex {
     const requestedLimit = normalizeLimit(filter.limit, 10);
     const vectorLimit = Math.max(requestedLimit, 1);
     let embedding: Float32Array;
+    // The space the query is embedded in; rows of any other space are left out in the same statement.
+    const space = this.space();
     try {
       const result = await awaitMemoryOperation(() => this.embeddingRegistry.embedAsync({
         text: trimmed, dimensions: this.dimensions, usage: 'query',
@@ -435,10 +449,10 @@ export class SqliteVecMemoryIndex {
       this.markEmbeddingUnavailable(err);
       return [];
     }
-    if (this.db !== db) return [];
+    if (this.db !== db || this.space() !== space) return [];
     this.clearEmbeddingError();
-    const where: string[] = ['embedding MATCH ?', 'k = ?'];
-    const params: SQLQueryBindings[] = [embedding, vectorLimit];
+    const where: string[] = ['embedding MATCH ?', 'k = ?', 'space = ?'];
+    const params: SQLQueryBindings[] = [embedding, vectorLimit, space];
 
     if (filter.scope) {
       where.push('scope = ?');
@@ -453,6 +467,7 @@ export class SqliteVecMemoryIndex {
       where.push('review_state = ?');
       params.push(requestedStates[0]!);
     }
+    // A hint only: the row's confidence here is a copy; the store re-checks the live row.
     if (filter.minConfidence !== undefined) {
       where.push('confidence >= ?');
       params.push(filter.minConfidence);
@@ -494,7 +509,7 @@ export class SqliteVecMemoryIndex {
         rowid       INTEGER PRIMARY KEY AUTOINCREMENT,
         record_id   TEXT NOT NULL UNIQUE,
         source_revision TEXT NOT NULL DEFAULT '',
-        provider_id TEXT NOT NULL DEFAULT '',
+        space_id    TEXT NOT NULL DEFAULT '',
         updated_at  INTEGER NOT NULL DEFAULT 0,
         indexed_at  INTEGER NOT NULL DEFAULT 0
       )
@@ -503,6 +518,7 @@ export class SqliteVecMemoryIndex {
     this.db.run(`
       CREATE VIRTUAL TABLE IF NOT EXISTS memory_vectors USING vec0(
         embedding float[${this.dimensions}],
+        space text,
         scope text,
         cls text,
         review_state text,
@@ -522,19 +538,31 @@ export class SqliteVecMemoryIndex {
     return Number(row?.count ?? 0);
   }
 
-  /** What the index holds, in one query: revision and provider per record. */
+  /** What the index holds, in one query: revision and space per record. */
   private storedRows(): Map<string, StoredVectorRow> {
-    const rows = this.db?.query<StoredVectorRow, []>('SELECT record_id, source_revision, provider_id FROM memory_vector_ids').all() ?? [];
+    const rows = this.db?.query<StoredVectorRow, []>('SELECT record_id, source_revision, space_id FROM memory_vector_ids').all() ?? [];
     return new Map(rows.map((row) => [row.record_id, row]));
+  }
+
+  /** The space the active provider embeds in at this index's width. */
+  private space(): string {
+    return this.embeddingRegistry.currentSpace(this.dimensions).id;
+  }
+
+  /** Rows embedded in another space than the current one. */
+  private countOutsideSpace(): number {
+    if (!this.db || !this.enabled) return 0;
+    const row = this.db.query<CountRow, [string]>('SELECT count(*) AS count FROM memory_vector_ids WHERE space_id != ?').get(this.space());
+    return Number(row?.count ?? 0);
   }
 
   private revisionOf(recordId: string): string | undefined {
     return this.currentRevision?.(recordId);
   }
 
-  /** After an awaited embed: same open index, same provider, and the row still at the embedded revision. */
-  private stillCurrent(db: Database, providerId: string, recordId: string, revision: string | undefined): boolean {
-    if (this.db !== db || !this.enabled || this.embeddingRegistry.getDefaultProviderId() !== providerId) return false;
+  /** After an awaited embed: same open index, same space, and the row still at the embedded revision. */
+  private stillCurrent(db: Database, space: string, recordId: string, revision: string | undefined): boolean {
+    if (this.db !== db || !this.enabled || this.space() !== space) return false;
     return !this.currentRevision || this.currentRevision(recordId) === revision;
   }
 
@@ -568,21 +596,22 @@ export class SqliteVecMemoryIndex {
   private writeEntries(
     entries: ReadonlyArray<{ readonly record: MemoryRecord; readonly revision: string; readonly embedding: Float32Array }>,
     removed: readonly string[] = [],
+    /** The space the entries were embedded in, read before their embed. */
+    space: string = this.space(),
   ): void {
     const db = this.db;
     if (!db || (entries.length === 0 && removed.length === 0)) return;
-    const providerId = this.embeddingRegistry.getDefaultProviderId();
     const ensureId = db.query('INSERT OR IGNORE INTO memory_vector_ids (record_id) VALUES (?)');
     const selectId = db.query<RecordIdRow, [string]>('SELECT rowid FROM memory_vector_ids WHERE record_id = ? LIMIT 1');
     const dropVector = db.query('DELETE FROM memory_vectors WHERE rowid = ?');
     const insertVector = db.query(
       `INSERT INTO memory_vectors
-         (rowid, embedding, scope, cls, review_state, confidence, record_id, updated_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (rowid, embedding, space, scope, cls, review_state, confidence, record_id, updated_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const stamp = db.query(
       `UPDATE memory_vector_ids
-         SET source_revision = ?, provider_id = ?, updated_at = ?, indexed_at = ?
+         SET source_revision = ?, space_id = ?, updated_at = ?, indexed_at = ?
        WHERE rowid = ?`,
     );
     db.transaction(() => {
@@ -592,9 +621,9 @@ export class SqliteVecMemoryIndex {
         if (!row) throw new Error(`Memory vector row id not found for ${record.id}`);
         const rowid = Number(row.rowid);
         dropVector.run(rowid);
-        insertVector.run(rowid, embedding, record.scope, record.cls, record.reviewState,
+        insertVector.run(rowid, embedding, space, record.scope, record.cls, record.reviewState,
           record.confidence, record.id, record.updatedAt, record.createdAt);
-        stamp.run(revision, providerId, record.updatedAt, Date.now(), rowid);
+        stamp.run(revision, space, record.updatedAt, Date.now(), rowid);
       }
       this.deleteIdsIn(db, removed);
     })();
@@ -621,10 +650,10 @@ export class SqliteVecMemoryIndex {
   }
 }
 
-/** Whether the index already holds this row at this revision, embedded by this provider. */
-function isIndexed(row: StoredVectorRow | undefined, revision: string, providerId: string): boolean {
-  // Unchanged text indexed by another provider is stale: its vector is in a different space.
-  return row !== undefined && row.source_revision === revision && row.provider_id === providerId;
+/** Whether the index already holds this row at this revision, embedded in this space. */
+function isIndexed(row: StoredVectorRow | undefined, revision: string, space: string): boolean {
+  // Unchanged text embedded by another provider or model is stale: its vector is in a different space.
+  return row !== undefined && row.source_revision === revision && row.space_id === space;
 }
 
 /** An index used without a store has no row revision; each write is its own. */

@@ -44,7 +44,7 @@
  * reconciliation is done with Bun.spawnSync, paid once per import, exactly
  * like the launch-dirty snapshot.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { captureExistingDirectory } from '../utils/atomic-json-store.js';
 import { WorktreeIdentityRegistry, type StoredWorktreeIdentity, type WorktreeIdentityKey } from './worktree-identities.js';
@@ -55,6 +55,11 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { OwnedScope } from '../utils/owned-work.js';
 import type { OrchestrationEvent, WorkItem, Workstream } from './types.js';
+
+/** A path with its links resolved, or as given when it does not exist: two spellings of one directory compare equal. */
+function physicalPath(path: string): string {
+  try { return realpathSync(path); } catch { return path; }
+}
 
 export interface WorktreeIsolationManagerDeps {
   readonly nativeDataWriter?: NativeDataWriteOwner | undefined;
@@ -269,6 +274,13 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
       if (existing.length > 1) throw refused(`branch ${branchForReservation} is checked out in ${existing.length} worktrees (${existing.map(resource => resource.path).join(', ')})`, 'Remove the extra worktrees with git worktree remove, then restart the work.');
       if (existing[0] && row.state === 'reserved') {
         // Created but never recorded (a stop between git worktree add and the record): no agent ran there.
+        // Only the tree at the path this reservation creates is that one; a tree on the branch anywhere else
+        // was made by hand, may hold work, and is reported and kept.
+        const reservedPath = itemWorktreeDir(deps.projectRoot, branchForReservation);
+        if (physicalPath(existing[0].path) !== physicalPath(reservedPath)) {
+          throw refused(`branch ${branchForReservation}, reserved for item ${item.id}, is checked out at ${existing[0].path}, not at ${reservedPath} where this work creates it, so it was not made by this work and was kept`,
+            `If nothing you need is in it, remove it with git worktree remove ${existing[0].path}, then run the item again.`);
+        }
         await discardUnstarted(workstream, item, existing[0].path, branchForReservation, 'its creation was never recorded');
         row = await registry.reserve(key);
       } else if (existing[0]) {

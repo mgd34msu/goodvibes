@@ -17,13 +17,30 @@
  * settings-modal-secrets.ts next door for the credential half.
  */
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { DaemonConfigClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   agentDaemonConfigClient,
-  agentDaemonConfigClientInstalled,
+  agentDaemonConfigClientRevision,
   isDaemonOwnedConfigKey,
-  routeDaemonOwnedConfigWrite,
 } from '../config/daemon-config-routing.ts';
+
+/**
+ * The connected host a value was chosen for: the installed client (one host's
+ * verb caller) and its installation revision. A follow-up write sent after the
+ * modal closed goes to this host or nowhere, never to a host installed since.
+ */
+export interface ConnectedHostTarget {
+  readonly client: DaemonConfigClient;
+  readonly revision: number;
+}
+
+/** The host that owns `key` now, or null when the key is this process's own or no host client is installed. */
+export function captureConnectedHostTarget(key: ConfigKey): ConnectedHostTarget | null {
+  const client = agentDaemonConfigClient();
+  if (!client || !isDaemonOwnedConfigKey(key) || !client.ownsKey(key)) return null;
+  return { client, revision: agentDaemonConfigClientRevision() };
+}
 
 /** What the modal shows while and after a routed write. */
 export interface DaemonSettingWriteReport {
@@ -33,6 +50,8 @@ export interface DaemonSettingWriteReport {
   readonly settled?: boolean;
   /** The value the host holds for the key after an applied write. */
   readonly applied?: { readonly value: unknown };
+  /** The write was applied but the host's value could not be read back: what it holds is unknown. */
+  readonly heldUnknown?: true;
 }
 
 /**
@@ -52,33 +71,36 @@ export function routeSettingWriteToConnectedHost(
   key: ConfigKey,
   value: unknown,
   report: (update: DaemonSettingWriteReport) => void,
+  target: ConnectedHostTarget | null = captureConnectedHostTarget(key),
 ): boolean {
-  if (!agentDaemonConfigClientInstalled() || !isDaemonOwnedConfigKey(key)) return false;
+  if (!target) return false;
+  // A follow-up chosen for one host is never sent to another installed since (a switch of host, or a re-composed runtime).
+  if (agentDaemonConfigClientRevision() !== target.revision || agentDaemonConfigClient() !== target.client) {
+    logger.warn('SettingsModal: a setting chosen for one connected host was not sent, because the connected host changed', { key });
+    report({ ok: false, settled: true, message: `Not saved: ${key} was chosen for the host this window was connected to, and the connected host changed since, so it was not sent to the new one. Set it again if it is still wanted.` });
+    return true;
+  }
   report({ ok: true, message: 'Saving on the connected host…' });
   void (async () => {
     try {
-      await routeDaemonOwnedConfigWrite(key, value);
+      await target.client.set(key, value);
     } catch (error) {
       const message = summarizeError(error);
       logger.error('SettingsModal: the connected host refused a setting write', { key, error: message });
       report({ ok: false, settled: true, message: `Save failed: ${message}` });
       return;
     }
-    // The host may coerce or clamp what it was sent, so show what it holds. If it cannot be read
-    // back the write still stands; the value sent is the closest answer.
-    let held = value;
+    // The host may coerce or clamp what it was sent, so show what it holds, read from the same host.
+    // If it cannot be read back the write still stands, and what the host holds is unknown: never the value sent.
+    let held: unknown;
     try {
-      const live = await agentDaemonConfigClient()?.get(key);
-      if (live !== undefined) held = live;
+      held = await target.client.get(key);
     } catch (error) {
       logger.warn('SettingsModal: the connected host applied a setting but it could not be read back', { key, error: summarizeError(error) });
     }
-    report({
-      ok: true,
-      settled: true,
-      message: 'Applied by the connected host; it takes effect for every client.',
-      applied: { value: held },
-    });
+    report(held === undefined
+      ? { ok: true, settled: true, heldUnknown: true, message: 'Applied by the connected host, but the value it now holds could not be read back (held value unknown).' }
+      : { ok: true, settled: true, message: 'Applied by the connected host; it takes effect for every client.', applied: { value: held } });
   })();
   return true;
 }

@@ -15,7 +15,7 @@ import { readResolvedSettingLookups } from '@/runtime/index.ts';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import { agentDaemonConfigClient, agentDaemonConfigClientInstalled, isDaemonOwnedConfigKey, openEffectiveConfigView } from '../config/daemon-config-routing.ts';
-import { routeSettingWriteToConnectedHost } from './settings-modal-daemon-writes.ts';
+import { captureConnectedHostTarget, routeSettingWriteToConnectedHost, type ConnectedHostTarget } from './settings-modal-daemon-writes.ts';
 import { isDeepStrictEqual } from 'node:util';
 import { modelPickerLaunchForKey, parseNumberEditBuffer } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
 import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments';
@@ -1114,12 +1114,21 @@ export class SettingsModal extends TerminalSettingsModalState<
    * modal was closed or reopened meanwhile, so the owner's last change is never
    * dropped; only the row update and the message need the modal still open.
    */
-  private _routeHostWrite(key: ConfigKey, value: unknown, opened: number): boolean {
+  private _routeHostWrite(key: ConfigKey, value: unknown, opened: number,
+    target: ConnectedHostTarget | null = captureConnectedHostTarget(key),
+    reportClosed: ((message: string) => void) | null = this.reportError): boolean {
     const write: { next?: { readonly value: unknown } } = {};
     const live = () => this.active && opened === this.secretWriteSession;
     const routed = routeSettingWriteToConnectedHost(key, value, (update) => {
+      // A follow-up sent after the modal closed has no row to show its outcome; a refusal is still told.
+      if (!live() && update.settled && !update.ok) reportClosed?.(update.message);
       if (live()) {
         this.lastSettingEffectMessage = update.message;
+        if (update.heldUnknown) {
+          this.hostHeldValues.delete(key);
+          this.hostUnreadable.set(key, 'host value unknown: applied, but it could not be read back');
+          this._reapplyHostValues();
+        }
         if (update.applied) {
           this._applyRoutedValue(key, update.applied.value);
           // Same warning as a local write, set after the host's report so the report does not replace it.
@@ -1131,11 +1140,12 @@ export class SettingsModal extends TerminalSettingsModalState<
         const next = write.next;
         if (next && !isDeepStrictEqual(next.value, value)) {
           if (live()) this._setValue(key, next.value);
-          else this._routeHostWrite(key, next.value, opened);
+          // After close, the newest value goes to the host it was chosen for, or is refused and reported.
+          else this._routeHostWrite(key, next.value, opened, target, reportClosed);
         }
       }
       if (live()) this.requestHostSettingRender?.();
-    });
+    }, target);
     if (routed && live()) this.routedWrites.set(key, write);
     return routed;
   }

@@ -26,7 +26,11 @@ const SECRET_NAME = /(?:token|bearer|material)(?:ref)?$|(?:secret|password|passp
  * A generic `*Url` / `*Target` cannot be matched by name without flagging
  * ordinary endpoints, so these stay declared by hand.
  */
-export const NAME_OPAQUE_SECRET_KEYS: readonly string[] = ['surfaces.webhook.defaultTarget'];
+export const NAME_OPAQUE_SECRET_KEYS: readonly string[] = [
+  'surfaces.webhook.defaultTarget',
+  // An ntfy topic name is the credential on a public server.
+  'surfaces.ntfy.topic', 'surfaces.ntfy.chatTopic', 'surfaces.ntfy.agentTopic', 'surfaces.ntfy.remoteTopic',
+];
 
 /** True when a key's last path segment names a secret (`foo.apiKey`, `bar.authToken`). */
 export function looksLikeSecretKey(key: string): boolean {

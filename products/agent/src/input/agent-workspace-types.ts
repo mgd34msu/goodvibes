@@ -97,6 +97,11 @@ export interface AgentWorkspaceEditorField {
   readonly multiline: boolean;
   readonly hint: string;
   readonly redact?: boolean;
+  /**
+   * The value is read exactly as typed, never trimmed: a password, secret,
+   * token or key whose leading or trailing space is part of it.
+   */
+  readonly verbatim?: true;
 }
 
 export interface AgentWorkspaceLocalEditor {

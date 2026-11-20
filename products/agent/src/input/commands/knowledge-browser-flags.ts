@@ -1,5 +1,6 @@
 import type { BrowserKnowledgeKind, BrowserKnowledgeSourceKind } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { splitCommandOption } from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
+import type { Selection } from '@goodvibes-jev/engine/errors';
 
 const BROWSER_KINDS = ['chrome', 'chromium', 'brave', 'edge', 'vivaldi', 'arc', 'opera', 'firefox', 'zen', 'librewolf', 'waterfox', 'floorp', 'safari', 'orion', 'epiphany'] as const satisfies readonly BrowserKnowledgeKind[];
 const BROWSER_SOURCE_KINDS = ['history', 'bookmark'] as const satisfies readonly BrowserKnowledgeSourceKind[];
@@ -7,8 +8,10 @@ const DEFAULT_IMPORT_LIMIT = 250;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface BrowserImportScope {
-  readonly browsers: readonly BrowserKnowledgeKind[];
-  readonly sourceKinds: readonly BrowserKnowledgeSourceKind[];
+  /** `default` when the flag was not typed (every installed browser); never an empty selection. */
+  readonly browsers: Selection<BrowserKnowledgeKind>;
+  /** `default` when the flag was not typed (history and bookmarks). */
+  readonly sourceKinds: Selection<BrowserKnowledgeSourceKind>;
   readonly limit: number;
   readonly sinceMs: number | undefined;
 }
@@ -42,16 +45,22 @@ function readNames<Name extends string>(
   flags: readonly string[],
   valid: readonly Name[],
   label: string,
-): { readonly ok: true; readonly names: readonly Name[] } | { readonly ok: false; readonly message: string } {
+): { readonly ok: true; readonly names: Selection<Name> } | { readonly ok: false; readonly message: string } {
   const { present, value } = flagValue(args, flags);
-  if (!present) return { ok: true, names: [] };
+  if (!present) return { ok: true, names: { kind: 'default' } };
   const requested = listOf(value);
   const rejected = requested.filter((name) => !valid.includes(name as Name));
-  if (requested.length === 0 || rejected.length > 0) {
+  const [first, ...rest] = requested as Name[];
+  if (first === undefined || rejected.length > 0) {
     const shown = rejected.length > 0 ? `Unknown ${label} ${rejected.join(', ')}.` : `${flags[0]} needs a value.`;
     return { ok: false, message: `${shown} Valid ${label}s: ${valid.join(', ')}. Nothing was imported.` };
   }
-  return { ok: true, names: requested as Name[] };
+  return { ok: true, names: { kind: 'only', values: [first, ...rest] } };
+}
+
+/** A selection as the browser-history route takes it: omitted for the default, else exactly its values. */
+export function selectionWireValue<Name extends string>(selection: Selection<Name>): readonly Name[] | undefined {
+  return selection.kind === 'only' ? selection.values : undefined;
 }
 
 function readCount(args: readonly string[], name: string): { readonly ok: true; readonly value: number | undefined } | { readonly ok: false; readonly message: string } {
@@ -66,9 +75,9 @@ function readCount(args: readonly string[], name: string): { readonly ok: true; 
 /**
  * The scope of a browser history import, or why it was refused.
  *
- * An empty browser list means "every installed browser" to the importer, so a
- * flag that was typed but resolved to nothing must be refused here rather than
- * widened: the person asked for a narrower import than all of them.
+ * A flag not typed is the importer's default (every installed browser; history
+ * and bookmarks); a flag that was typed but resolved to nothing is refused here
+ * rather than widened: the person asked for a narrower import than all of them.
  */
 export function parseBrowserImportScope(args: readonly string[], now: number): BrowserImportScopeResult {
   const browsers = readNames(args, ['--browsers', '--browser'], BROWSER_KINDS, 'browser');

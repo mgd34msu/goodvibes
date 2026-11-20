@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { processStartTime } from '../config/process-start-time.js';
@@ -88,6 +88,8 @@ export interface ManagedServiceProcessControl {
 /** How long a manual restart waits for the previous process to exit before refusing to start a second one. */
 const MANUAL_STOP_WAIT_MS = 10_000;
 const MANUAL_STOP_POLL_MS = 100;
+/** How long a process that ignored SIGTERM has to exit after SIGKILL. */
+const MANUAL_KILL_WAIT_MS = 2_000;
 /** How long a service-manager command may take before it is reported as not answering (a broken user bus). */
 const SERVICE_QUERY_TIMEOUT_MS = 10_000;
 
@@ -195,15 +197,6 @@ export const SERVICE_STATE_ROOT = 'daemon';
  */
 export function serviceStateDirectory(homeDirectory: string): string {
   return join(resolve(homeDirectory), '.goodvibes', SERVICE_STATE_ROOT, 'service');
-}
-
-/** Where earlier versions kept the same files: under the working directory, in one of three roots. */
-function legacyServiceStateDirectories(workingDirectory: string): string[] {
-  return [
-    join(workingDirectory, '.goodvibes', 'goodvibes', 'service'),
-    join(workingDirectory, '.goodvibes', 'daemon', 'service'),
-    join(workingDirectory, '.goodvibes', 'service'),
-  ];
 }
 
 /** Resolves the configured `service.platform` (default `auto`) against the host operating system. */
@@ -534,8 +527,6 @@ export class PlatformServiceManager {
   private readonly currentRestriction?: (() => void) | undefined;
   /** {@link serviceStateDirectory} of this manager's home. */
   private readonly stateDirectory: string;
-  /** Records left in a legacy location are moved once per manager. */
-  private legacyStateAdopted = false;
   private readonly launch?: ManagedDaemonLaunch | undefined;
   private readonly defaultServiceName?: string | undefined;
   private readonly featureFlags: FeatureFlagReader;
@@ -579,44 +570,14 @@ export class PlatformServiceManager {
     };
   }
 
-  /** {@link getPaths}, after any record a legacy location still holds was moved to the state directory. */
+  /** The paths service definitions are kept under. */
   private statePaths(): ManagedServicePaths {
-    this.adoptLegacyState();
     return this.getPaths();
   }
 
-  /** The pid file of `platform`, after any legacy record was moved into place. */
+  /** The pid file of `platform`, in the one state directory. */
   private pidPath(platform: ManagedServicePlatform): string {
-    this.adoptLegacyState();
     return pidFilePath(platform, this.stateDirectory);
-  }
-
-  /**
-   * Earlier versions kept the pid file and the manual/Windows definitions
-   * under the working directory, in a root that depended on which process
-   * built the manager. The first read of a path moves each such file into
-   * the one state directory when nothing is there yet: a few existence checks
-   * once per manager, nothing after.
-   */
-  private adoptLegacyState(): void {
-    if (this.legacyStateAdopted) return;
-    this.legacyStateAdopted = true;
-    const names = ['systemd.pid', 'launchd.pid', 'windows.pid', 'manual.pid', 'manual-service.txt', 'windows-task.txt'];
-    for (const legacy of legacyServiceStateDirectories(this.workingDirectory)) {
-      if (legacy === this.stateDirectory) continue;
-      for (const name of names) {
-        const from = join(legacy, name);
-        const to = join(this.stateDirectory, name);
-        if (!existsSync(from) || existsSync(to)) continue;
-        try {
-          this.assertCurrent();
-          mkdirSync(this.stateDirectory, { recursive: true });
-          renameSync(from, to);
-        } catch {
-          // Left where it is; the next manager tries again.
-        }
-      }
-    }
   }
 
   /** Read-only identity check; an installed definition grants no authority for another selected host. */
@@ -1093,29 +1054,57 @@ export class PlatformServiceManager {
     };
   }
 
-  private stopManualProcess(platform: ManagedServicePlatform): void {
+  private signalManualProcess(pid: number, signal: NodeJS.Signals): void {
+    this.assertCurrent();
+    try {
+      if (this.processControl.signal) this.processControl.signal(pid, signal);
+      else process.kill(pid, signal);
+    } catch {
+      // Already gone; the wait below sees it.
+    }
+  }
+
+  /**
+   * Stop the recorded process and keep its pid file until its exit is seen:
+   * SIGTERM, up to 10 s, SIGKILL, up to 2 s more. Returns the pid still
+   * running when even SIGKILL did not end it (its pid file is kept, so status
+   * and a later stop still find it), else undefined. The daemon answering
+   * this request cannot wait for its own exit: it is signalled and its record
+   * removed, as its own shutdown would.
+   */
+  private *stopManualProcessFlow(platform: ManagedServicePlatform): ServiceFlow<number | undefined> {
     const pidPath = this.pidPath(platform);
     const record = existsSync(pidPath) ? this.readPidRecord(pidPath) : undefined;
     if (record !== undefined && this.isServiceProcess(record)) {
-      this.assertCurrent();
-      try {
-        if (this.processControl.signal) this.processControl.signal(record.pid, 'SIGTERM');
-        else process.kill(record.pid, 'SIGTERM');
-      } catch {
-        // ignore stale processes
+      this.signalManualProcess(record.pid, 'SIGTERM');
+      if (record.pid !== process.pid) {
+        for (let waited = 0; this.isServiceProcess(record) && waited < MANUAL_STOP_WAIT_MS; waited += MANUAL_STOP_POLL_MS) {
+          yield { pause: MANUAL_STOP_POLL_MS };
+        }
+        if (this.isServiceProcess(record)) {
+          this.signalManualProcess(record.pid, 'SIGKILL');
+          for (let waited = 0; this.isServiceProcess(record) && waited < MANUAL_KILL_WAIT_MS; waited += MANUAL_STOP_POLL_MS) {
+            yield { pause: MANUAL_STOP_POLL_MS };
+          }
+        }
+        if (this.isServiceProcess(record)) return record.pid;
       }
     }
     if (existsSync(pidPath)) {
       this.assertCurrent();
       rmSync(pidPath, { force: true });
     }
+    return undefined;
   }
 
   private *stopManualFlow(platform: ManagedServicePlatform): ServiceFlow<ManagedServiceStatus> {
-    this.stopManualProcess(platform);
+    const stillRunning = yield* this.stopManualProcessFlow(platform);
     return {
       ...(yield* this.statusFlow()),
       lastAction: 'stop',
+      ...(stillRunning !== undefined
+        ? { actionError: `the service process (pid ${stillRunning}) did not exit after SIGTERM and SIGKILL; its pid file is kept so status still finds it` }
+        : {}),
     };
   }
 
@@ -1132,21 +1121,14 @@ export class PlatformServiceManager {
         actionError: `the service process (pid ${record.pid}) is the daemon answering this request and cannot restart itself; run the restart from a terminal (service restart) instead`,
       };
     }
-    this.stopManualProcess(platform);
-    if (record !== undefined && this.isServiceProcess(record)) {
-      for (let waited = 0; this.isServiceProcess(record) && waited < MANUAL_STOP_WAIT_MS; waited += MANUAL_STOP_POLL_MS) {
-        yield { pause: MANUAL_STOP_POLL_MS };
-      }
-      if (this.isServiceProcess(record)) {
-        // Keep tracking it so stop/status can still find the process that did not exit.
-        this.assertCurrent();
-        writeFileSync(pidPath, `${record.pid}\n${record.startTime ?? ''}\n`, 'utf-8');
-        return {
-          ...(yield* this.statusFlow()),
-          lastAction: 'restart',
-          actionError: `the previous service process (pid ${record.pid}) did not exit within ${MANUAL_STOP_WAIT_MS / 1000} seconds, so no second one was started`,
-        };
-      }
+    const stillRunning = yield* this.stopManualProcessFlow(platform);
+    if (stillRunning !== undefined) {
+      // Its pid file was kept, so stop/status can still find the process that did not exit.
+      return {
+        ...(yield* this.statusFlow()),
+        lastAction: 'restart',
+        actionError: `the previous service process (pid ${stillRunning}) did not exit after SIGTERM and SIGKILL, so no second one was started`,
+      };
     }
     return yield* this.startManualFlow(platform, 'restart');
   }
@@ -1443,10 +1425,22 @@ export class PlatformServiceManager {
     if (this.processControl.isRunning) return this.processControl.isRunning(pid);
     try {
       process.kill(pid, 0);
-      return true;
     } catch {
       return false;
     }
+    // An exited child this process has not reaped yet still answers signal 0; it runs nothing.
+    return !isZombie(pid);
+  }
+}
+
+/** Linux: the process has exited and only waits to be reaped (state `Z` in /proc/<pid>/stat). */
+function isZombie(pid: number): boolean {
+  if (process.platform !== 'linux') return false;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf-8');
+    return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) === 'Z';
+  } catch {
+    return false;
   }
 }
 

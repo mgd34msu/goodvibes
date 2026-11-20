@@ -28,6 +28,7 @@ export function adaptHookAction(def: HookActionDefinition, now: number = Date.no
   return {
     id: def.id,
     kind: 'hook-action',
+    serves: 'you',
     parentId: undefined,
     label: `on ${def.event}${def.condition ? ` if ${def.condition}` : ''} → ${def.action} (this process only)`,
     task: def.action,

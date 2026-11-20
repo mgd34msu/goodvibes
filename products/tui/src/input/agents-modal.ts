@@ -57,6 +57,8 @@ import type { ConfirmOptions } from './confirm-dialog.ts';
 import type { ViewTarget } from './views.ts';
 import { hostedHeaderTexts, hostedRowTexts, transcriptTail } from './agents-modal-text.ts';
 import { HostedTranscriptViewport } from './hosted-transcript-viewport.ts';
+import { currentHostedBinding } from '../runtime/client/hosted-attachments.ts';
+import type { SessionBinding } from '@goodvibes-jev/engine/platform/platform/runtime/client/session-binding';
 
 /** What the modal can do to a process (the process registry, through the fleet read model). */
 export interface FleetActionCallbacks {
@@ -82,7 +84,7 @@ export interface AgentsModalDeps {
    * awaited: `{ ok: false }` or a rejection keeps the draft and shows the
    * error; a plain return (nothing to await) counts as sent.
    */
-  readonly steerHosted?: (text: string) => void | Promise<void | { readonly ok: boolean; readonly error?: string }>;
+  readonly steerHosted?: (text: string, binding: SessionBinding | null) => void | Promise<void | { readonly ok: boolean; readonly error?: string }>;
   /** This session's own cost (the "you" half of the header), or null when unpriced. */
   readonly sessionCost?: () => number | null;
   readonly confirm?: (options: ConfirmOptions) => Promise<boolean>;
@@ -114,7 +116,8 @@ export class AgentsModal implements SurfaceModal {
   tabs: FleetTabsState = EMPTY_FLEET_TABS_STATE;
   /** The full-height view of the hosted session is open. */
   hostedFull = false;
-  steer: { readonly id: string; draft: string } | null = null;
+  /** The composer: its target and, for the hosted session, the attachment it was opened for (sent only there). */
+  steer: { readonly id: string; draft: string; readonly binding?: SessionBinding | null } | null = null;
   private hostedSending = false;
   status: AgentsText | null = null;
   private receiptStatus: { nodeId: string; messageId: string; label: string; status: AgentsText } | null = null;
@@ -362,7 +365,8 @@ export class AgentsModal implements SurfaceModal {
     if (!entry) return;
     if (entry.kind === 'hosted') {
       if (!this.deps.steerHosted) { this.say('Steering the hosted session is not available here.', 'error'); return; }
-      this.steer = { id: HOSTED_ID, draft: '' };
+      // The draft belongs to the session attached now; an attach that completes while it is typed does not redirect it.
+      this.steer = { id: HOSTED_ID, draft: '', binding: this.deps.hosted ? currentHostedBinding(this.deps.hosted) : null };
       return;
     }
     const node = entry.row.node;
@@ -381,7 +385,7 @@ export class AgentsModal implements SurfaceModal {
       if (this.hostedSending) return;
       let pending: ReturnType<NonNullable<AgentsModalDeps['steerHosted']>>;
       try {
-        pending = this.deps.steerHosted?.(text);
+        pending = this.deps.steerHosted?.(text, steer.binding ?? null);
       } catch (error) {
         this.say(`Not sent to the hosted session: ${summarizeError(error)}`, 'error');
         return;
@@ -414,6 +418,11 @@ export class AgentsModal implements SurfaceModal {
     // A synchronous host callback can close this modal or replace the composer.
     // Its receipt must not overwrite a newer target/draft or paint a closed view.
     if (this.closed || this.steer !== steer) return;
+    if (result.queued === 'partial') {
+      // Part of it reached the target: sending the draft again would type it twice, so it is not kept for a resend.
+      this.say(`${result.reason}. Finish it in that session; it was not sent again.`, 'error');
+      return;
+    }
     if (!result.queued) {
       // The draft stays so nothing typed is lost.
       const siblings = liveSteerableLabels(this.fleet().rows.map((row) => row.node), steer.id);

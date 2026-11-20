@@ -269,16 +269,54 @@ export class InputNotClaimableError extends Error {
 }
 
 /**
- * A claim is granted to one caller: a queued input, or a delivered one no
- * agent was named for within the lease. Checked where the row moves, with no
- * await between, so two surfaces racing for one input cannot both pass.
+ * Input metadata key holding the epoch of the surface claim on an input: 1 for
+ * the first claim, one more for each claim granted to a new claimant. The
+ * claimant's token is that epoch; a report carrying an older one settles
+ * nothing, so a claimant whose lease lapsed cannot bind an agent to, or
+ * complete, an input another surface took over.
  */
-export function assertSurfaceInputClaimable(store: SharedSessionInputStore, sessionId: string, inputId: string, now: number): void {
+export const CLAIM_EPOCH_METADATA_KEY = 'claimEpoch';
+
+/** The claim epoch on an input, or undefined when no surface ever claimed it. */
+export function inputClaimEpoch(input: SharedSessionInputRecord): number | undefined {
+  const epoch = input.metadata?.[CLAIM_EPOCH_METADATA_KEY];
+  return typeof epoch === 'number' && Number.isSafeInteger(epoch) && epoch > 0 ? epoch : undefined;
+}
+
+/**
+ * A claim is granted to one caller: a queued input, or a delivered one no
+ * agent was named for within the lease. The holder of the current epoch may
+ * renew it (`epoch` given and still current) while no agent is bound, which
+ * restarts the lease without moving the epoch. Checked where the row moves,
+ * with no await between, so two surfaces racing for one input cannot both pass.
+ * Returns whether the call renews the current claim.
+ */
+export function assertSurfaceInputClaimable(store: SharedSessionInputStore, sessionId: string, inputId: string, now: number, epoch?: number): 'new' | 'renew' {
+  const current = store.inputs.get(sessionId)?.find((entry) => entry.id === inputId);
+  if (!current) return 'new';
+  const unbound = !current.activeAgentId;
+  if (epoch !== undefined) {
+    if (current.state === 'delivered' && unbound && inputClaimEpoch(current) === epoch) return 'renew';
+    throw new InputNotClaimableError(current.state === 'delivered' && unbound ? 'claimed by another surface' : current.state);
+  }
+  if (current.state === 'queued' || (current.state === 'delivered' && unbound && now - current.updatedAt >= SURFACE_CLAIM_LEASE_MS)) return 'new';
+  throw new InputNotClaimableError(current.state);
+}
+
+/**
+ * A report on an input a surface claimed must carry the current claim epoch;
+ * one from a claimant that was superseded is refused before anything moves.
+ * Once the current claimant bound its agent, a report naming that same agent
+ * is that claimant's (its answer when the run ends). An input no surface
+ * claimed takes reports as before (a surface without claims).
+ */
+export function assertSurfaceInputClaimCurrent(store: SharedSessionInputStore, sessionId: string, inputId: string, epoch: number | undefined, agentId: string | undefined): void {
   const current = store.inputs.get(sessionId)?.find((entry) => entry.id === inputId);
   if (!current) return;
-  const unbound = !current.activeAgentId;
-  if (current.state === 'queued' || (current.state === 'delivered' && unbound && now - current.updatedAt >= SURFACE_CLAIM_LEASE_MS)) return;
-  throw new InputNotClaimableError(current.state);
+  const held = inputClaimEpoch(current);
+  if (held === epoch) return;
+  if (held !== undefined && current.activeAgentId !== undefined && agentId !== undefined && current.activeAgentId === agentId) return;
+  throw new InputNotClaimableError(held === undefined ? current.state : 'claimed by another surface');
 }
 
 /** A surface's delivery report, and whether it was applied to the row. */
@@ -339,7 +377,7 @@ export function applySurfaceInputDelivery(
   store: SharedSessionInputStore,
   sessionId: string,
   inputId: string,
-  options: { readonly consumed?: boolean | undefined; readonly agentId?: string | undefined; readonly claim?: boolean | undefined; readonly surfaceInstance?: string | undefined },
+  options: { readonly consumed?: boolean | undefined; readonly agentId?: string | undefined; readonly claim?: 'new' | 'renew' | undefined; readonly surfaceInstance?: string | undefined },
   hooks: {
     readonly publish: (event: string, payload: unknown) => void;
     readonly publishInput: (event: string, input: SharedSessionInputRecord, extra: Record<string, unknown>) => void;
@@ -354,9 +392,13 @@ export function applySurfaceInputDelivery(
   // no lifecycle event, so nothing is routed or shown for a move that did not happen.
   if (!outcome.applied) return outcome.input;
   // A claim restarts the clock of an input that was already delivered with no
-  // agent, so the next claimant waits out the lease again instead of taking it too.
-  const updated = options.claim && !consumed
-    ? updateSharedSessionInput(store, sessionId, inputId, (entry) => ({ ...entry, updatedAt: Date.now() })) ?? outcome.input
+  // agent, so the next claimant waits out the lease again instead of taking it
+  // too. A new claimant gets the next epoch (its token); a renewal keeps it.
+  const updated = options.claim !== undefined && !consumed
+    ? updateSharedSessionInput(store, sessionId, inputId, (entry) => {
+      const epoch = (inputClaimEpoch(entry) ?? 0) + (options.claim === 'new' ? 1 : 0);
+      return { ...entry, updatedAt: Date.now(), metadata: { ...entry.metadata, [CLAIM_EPOCH_METADATA_KEY]: Math.max(1, epoch) } };
+    }) ?? outcome.input
     : outcome.input;
   const agentId = options.agentId?.trim();
   let record = updated;

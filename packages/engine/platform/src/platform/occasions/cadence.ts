@@ -248,35 +248,3 @@ export function raisedAtBoundary(
     dueOn,
   };
 }
-
-/**
- * Rebuild the raise ledger of an item written before boundaries existed.
- *
- * A machine that has been running the old repeating cadence holds nudge items
- * with a raise count and no served boundaries, the owner's own birthday, at
- * the time this was written, sat at five raises and climbing. Those items are
- * not deleted and not resolved: nothing about them was resolved, and dropping
- * them would trade one broken promise for another. They are marked as having
- * already spoken, and they go quiet.
- *
- * The mapping is the conservative reading of what already happened to the owner:
- *
- *  - one raise  → the lead boundary is spent, the day itself is still owed.
- *    They were told once, at the top of the window, which is exactly what the
- *    new rule would have done.
- *  - two or more → both are spent. They have already heard about this
- *    occurrence at least as often as the ceiling allows, and the honest
- *    correction is silence, not one more.
- *
- * Returns `null` when there is nothing to reconcile, so the caller can count
- * and receipt only the items it actually changed.
- */
-export function reconcileRaiseLedger(item: OpenItem): OpenItem | null {
-  if (item.kind !== 'nudge') return null;
-  if (item.servedBoundaries.length > 0) return null;
-  if (item.raiseCount < 1) return null;
-  const served: readonly RaiseBoundary[] = item.raiseCount >= MAX_NUDGE_RAISES
-    ? ['lead', 'day-of']
-    : ['lead'];
-  return { ...item, servedBoundaries: served };
-}

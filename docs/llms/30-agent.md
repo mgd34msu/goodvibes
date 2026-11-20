@@ -188,7 +188,7 @@ Other notices go to toasts and `/notifications`; these lines are drawn in the co
 - Why a message was not sent and what to do, for example when the connected host refuses it because the workspace is not registered. The text stays in the composer.
 - The output of a `!` command: the command, its output and its exit status.
 
-The status line keeps one short chip for the power state (`sleep disabled`, `sleep held`, `keep-awake refused` or `sleep hooks off`, with `+1` when two apply); the full note is in `/notifications`, posted when it changes.
+The status bar is the terminal app's (see "Screen layout"): `Asks:` and the mode in force in words with the `shift+tab` key, the unread notices with `ctrl+n`, `context 34%`, `branch main, changed` and `model <name>`; a click on a segment opens its view, except the branch (the Agent has no changes view). The header names the program, its version and the session. A hosted session's mode is its host's: the segment shows it, and `Shift+Tab` sends the change to the host. The status bar keeps one short chip for the power state (`sleep disabled`, `sleep held` or `keep-awake refused`); the full note, and a warning such as the sleep-edge hooks being off, is a notice in `/notifications`, posted when it changes.
 
 ### Keys
 
@@ -218,8 +218,12 @@ The Agent's rebindable keys differ from the terminal app's. Its file is `~/.good
 | `undo`, `redo` | `Ctrl+Z`, `Ctrl+Shift+Z` | Undo or redo a composer edit. |
 | `paste` | `Ctrl+V` | Paste. |
 | `focus-work-tree` | `Alt+Up`, `Ctrl+Up` | Move onto the work tree. |
+| `cycle-permission-mode` | `Shift+Tab` | Cycle this session's permission mode, as in the terminal app. |
+| `open-notifications` | `Ctrl+N` | Open the notifications; the status bar counts the unread ones. |
+| `failure-other-model` | `Alt+O` | On the newest failed turn: choose another model and send the prompt again. |
+| `failure-details` | `Alt+I` | On the newest failed turn: show what the provider said. |
 
-The Agent has no command palette key, no `F2`, no `Alt` word-movement or kill-ring keys, no `Alt+C`, `Alt+A`, `Alt+M` or `Alt+V`, and no `Shift+Tab` permission-mode cycle.
+The Agent has no command palette key, no `F2`, no `Alt` word-movement or kill-ring keys, and no `Alt+C`, `Alt+A`, `Alt+M` or `Alt+V`.
 The old action names `panel-picker`, `panel-close`, `panel-close-all`, `panel-tab-next`, `panel-tab-prev` and `sidebar-toggle` are read as `workspace-picker`, `workspace-close`, `workspace-close-all`, `workspace-tab-next`, `workspace-tab-prev` and `activity-open`.
 `Ctrl+PageUp` and `Ctrl+PageDown` scroll by a page like `PageUp` and `PageDown`.
 
@@ -482,7 +486,7 @@ Agent Knowledge is the Agent's own knowledge store on the connected host, under 
 | `knowledge ingest-file <path> [--title <title>] [--tags a,b] --yes` | Ingest a file inside the workspace; its bytes are sent, so a remote host ingests exactly that file. |
 | `knowledge ingest-artifact <artifactId> [--title <title>] [--tags a,b] --yes` | Ingest a saved artifact. |
 | `knowledge ingest-connector <connectorId> [--input <json-or-text>|--path <path>|--content <text>] --yes` | Ingest through a connector. |
-| `knowledge import-urls <path> --yes`, `knowledge import-bookmarks <path> --yes`, `knowledge import-browser-history [--browsers chrome,firefox] [--sources history,bookmark] --yes` | Bulk import (browser history is capped at 500 rows). |
+| `knowledge import-urls <path> --yes`, `knowledge import-bookmarks <path> --yes`, `knowledge import-browser-history [--browsers chrome,firefox] [--sources history,bookmark] --yes` | Bulk import (browser history is capped at 500 rows). Exits `0` only when every item was imported; a partial batch exits `1` and lists each failed item with its reason (JSON: `outcome.failed`). `--browsers` and `--sources` left out read every installed browser and both kinds. |
 | `knowledge reindex --yes` | Rebuild the index. |
 
 Options that would target another space (`--space`, `--knowledge-space`, `--knowledge-space-id`, `--include-all-spaces`) are refused.
@@ -572,7 +576,7 @@ GoodVibes Agent browser
 #### `goodvibes-agent relay` and `fleet`
 
 `relay status` reads the connected host's relay registration and the Agent's imported `relay.*` settings; `relay pair [name]` mints the payload one phone scans to reach the host through the relay, carrying a relay code for that phone alone; `relay codes` lists the phones' relay codes (id, name, created, last used; never the code) and `relay revoke <id>` cuts one phone off the relay at its next request while every other keeps working.
-`fleet attempts list [--workstream <id>]` lists best-of-N attempt groups held for a winner pick; `fleet attempts judge <groupId>` asks the judge model to propose a winner (labelled as a proposal); `fleet attempts pick <groupId> <winnerItemId> --yes` merges the winner and removes the losing worktrees.
+`fleet attempts list [--workstream <id>]` lists best-of-N attempt groups held for a winner pick; `fleet attempts judge <groupId>` asks the judge model to propose a winner (labelled as a proposal); `fleet attempts pick <groupId> <winnerItemId> --yes` merges the winner and removes the losing worktrees, waiting up to ten seconds for each and reporting it as seen: cleaned, still cleaning (with `git worktree list` to check), or not cleaned with the reason (a worktree holding work that exists nowhere else is kept); a loser that was not cleaned makes the command exit 1.
 Both need the connected host; without it they print the reason and exit `1`.
 
 #### `goodvibes-agent compat` (alias `compatibility`)
@@ -593,7 +597,7 @@ GoodVibes Agent compatibility
 
 #### `goodvibes-agent import openclaw` (alias `migrate`)
 
-`import openclaw [path] [--apply] [--apply-permissions]` migrates an OpenClaw workspace (default `~/.openclaw`) into the Agent.
+`import openclaw [path] [--apply] [--apply-permissions]` migrates an OpenClaw workspace (default `~/.openclaw`) into the Agent. Options are read only before `--`: a word after it is the path, never `--apply` (the same holds for every `goodvibes-agent` command's own options, such as `--yes`).
 Without `--apply` it prints the personas, memory records, skills and permission categories it would create, and the files it would skip with reasons.
 `--apply` writes memory records (to the connected host's store when it answers, else to this machine), personas and skills; records already imported are reported as unchanged.
 `--apply-permissions` also grants the permission categories; each grant pre-allows every tool in the category for this profile, and the output lists the `/settings reset` commands that undo it.
@@ -755,7 +759,7 @@ Agent channel delivery sent
 
 ### Media and devices
 
-`/media providers | generate [--provider <id>] [--model <id>] [--mime <mime>] <prompt> --yes | generate collect <provider> <task-id> [key=value ...]` lists media providers, generates an image or video (saved as an artifact), or collects a job that had not finished.
+`/media providers | generate [--provider <id>] [--model <id>] [--mime <mime>] <prompt> --yes | generate collect <provider> <task-id> [key=value ...]` lists media providers, generates an image or video (saved as an artifact), or collects a job that had not finished. A collect with `waitSeconds=0` checks the job once and answers at once. A generation cancelled after the provider accepted the job still answers with the job's task id (`pending`), and the job is cancelled at the provider when the provider allows it, so it can be found, collected or cancelled; a submission whose answer was lost is reported as of unknown outcome (`MEDIA_SUBMIT_OUTCOME_UNKNOWN`), never as not sent: look for it in the provider's console before submitting again.
 `/network-scan [on|off|status]` (alias `/discover-lan`) turns local-network scanning for model servers on or off; when on, the Agent scans at each start and `/provider` shows what it found. `off` prints `Local network scanning is now off. Nothing on your network will be probed.`
 
 ### Support

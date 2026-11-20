@@ -255,7 +255,7 @@ const BASIC_OWN_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceBasicOwnComm
     message: 'Store one secret value through the Agent secret manager. The value is masked in this workspace. Type yes on the final field to confirm.',
     fields: [
       { id: 'key', label: 'Secret key', value: '', required: true, multiline: false, hint: 'Environment-style key, such as OPENAI_API_KEY.' },
-      { id: 'value', label: 'Secret value', value: '', required: true, multiline: false, hint: 'Raw value to store. It is masked here and never rendered in action results.', redact: true },
+      { id: 'value', label: 'Secret value', value: '', required: true, multiline: false, hint: 'Raw value to store. It is masked here and never rendered in action results.', redact: true, verbatim: true },
       { id: 'scope', label: 'Scope', value: '', required: false, multiline: false, hint: 'project or user. Blank defaults to project.' },
       { id: 'storage', label: 'Storage', value: '', required: false, multiline: false, hint: 'secure or plaintext. Blank defaults to secure.' },
       { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to store the secret value.' },

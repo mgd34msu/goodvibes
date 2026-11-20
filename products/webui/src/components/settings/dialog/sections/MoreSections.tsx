@@ -25,6 +25,7 @@ import { Toggle } from '../../../ui/Toggle';
 import { MemoryDiagnostics } from '../../MemoryDiagnostics';
 import { PermissionRules } from '../../PermissionRules';
 import { McpToolRules } from '../../McpToolRules';
+import { PermissionModeCards } from '../../PermissionModeCards';
 import { NotificationSettings } from '../../NotificationSettings';
 import { PairingTokensSettings } from '../../PairingTokensSettings';
 import { PowerSettings } from '../../PowerSettings';
@@ -182,12 +183,19 @@ export function MemorySection() {
   );
 }
 
+/** Opens with the four modes and what each means; everything else is under Advanced (ux A7.5). */
 export function PermissionsSection() {
   return (
     <>
-      <PermissionRules />
-      <McpToolRules />
-      <SectionConfig id="permissions" emptyText="No permission settings reported." />
+      <PermissionModeCards />
+      <details className="dv-disclosure permission-advanced">
+        <summary className="dv-disclosure__summary">Advanced</summary>
+        <div className="dv-disclosure__body">
+          <PermissionRules />
+          <McpToolRules />
+          <SectionConfig id="permissions" emptyText="No permission settings reported." />
+        </div>
+      </details>
     </>
   );
 }

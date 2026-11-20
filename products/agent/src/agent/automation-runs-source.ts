@@ -132,8 +132,11 @@ export async function listAutomationRunsSince(
     : createConnectedHost(() => connectedHostOf(host));
   try {
     const output: unknown = await client.invoke(AUTOMATION_RUNS_LIST_METHOD, { since }, { signal: options.signal });
-    const record = isRecord(output) ? output : {};
-    const rawRuns: readonly unknown[] = Array.isArray(record.runs) ? record.runs : [];
+    // An answer this Agent cannot read is not "no runs": it is a read that failed.
+    if (!isRecord(output) || !Array.isArray(output.runs)) {
+      return unavailableResult('the host answered in a shape this Agent does not read', 'no_answer');
+    }
+    const rawRuns: readonly unknown[] = output.runs;
     const runs: AutomationRunOutcome[] = [];
     const deliveries: AutomationRunDelivery[] = [];
     for (const raw of rawRuns) {

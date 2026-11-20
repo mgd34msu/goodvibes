@@ -86,8 +86,9 @@ export function createSpineAdoptionSync(
         sessionTransport: createSessionsClientSpineTransport(sessionsClient),
         inboundInputs: {
           listInputs: (sessionId, opts) => httpTransport.operator.sessions.inputsPage(sessionId, opts),
-          claimInput: (sessionId, inputId) =>
-            httpTransport.operator.sessions.deliverInput(sessionId, inputId, { claim: true }),
+          // A renewal sends the claim's token (its epoch), so a held input stays this surface's while it waits.
+          claimInput: (sessionId, inputId, claimEpoch?: number) =>
+            httpTransport.operator.sessions.deliverInput(sessionId, inputId, { claim: true, ...(claimEpoch === undefined ? {} : { claimEpoch }) }),
           deliverInput: (sessionId, inputId, opts) =>
             httpTransport.operator.sessions.deliverInput(sessionId, inputId, opts),
           // Input moves are pushed from the daemon's session-update stream, so a hosted

@@ -33,10 +33,13 @@ async function runSandboxSessionCommand(args: string[], ctx: CommandContext): Pr
     const profileId = args[2];
     const profile = profileId ? findSandboxProfile(profileId) : undefined;
     if (!profile) {
-      ctx.print(`Usage: /sandbox session start <${SANDBOX_PROFILE_IDS.join('|')}> [label...]`);
+      ctx.print(`Usage: /sandbox session start <${SANDBOX_PROFILE_IDS.join('|')}> [--host] [label...]`);
       return true;
     }
-    const session = await sessions.start(profile.id, args.slice(3).join(' '), ctx.platform.configManager);
+    // --host: a host session with no boundary and the host network, only because the person asked for one.
+    const rest = args.slice(3);
+    const host = rest.includes('--host');
+    const session = await sessions.start(profile.id, rest.filter((word) => word !== '--host').join(' '), ctx.platform.configManager, { host });
     ctx.print(`Started sandbox session ${session.id} for ${session.profileId} (backend=${session.backend}, state=${session.state}, startup=${session.startupStatus ?? 'n/a'}).`);
     if (session.startupDetail) ctx.print(`  ${session.startupDetail}`);
     return true;

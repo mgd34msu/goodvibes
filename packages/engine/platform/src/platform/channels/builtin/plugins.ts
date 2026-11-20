@@ -16,6 +16,7 @@ import {
   handleTelegramSurfaceWebhook,
   handleWhatsAppSurfaceWebhook,
 } from '../../adapters/index.js';
+import { displaySettingValue } from '../../config/config-key-facts.js';
 import type { AutomationRouteBinding } from '../../automation/routes.js';
 import type { SharedApprovalRecord } from '../../control-plane/index.js';
 import type { ProviderRuntimeStatus, ProviderRuntimeSurface } from '../provider-runtime.js';
@@ -215,10 +216,11 @@ export function registerBuiltinChannelPlugins(context: BuiltinPluginRegistration
     deliverProgress: (pending, progress) => context.deps.deliverSurfaceProgress(pending, progress),
     notifyApproval: (approval, binding) => context.deps.deliverNtfyApprovalUpdate(approval, binding),
     getStatus: async () => builtinStatus(context, 'ntfy', 'ntfy', context.deps.surfaceDeliveryEnabled('ntfy'), {
-      topic: context.deps.configManager.get('surfaces.ntfy.topic'),
-      chatTopic: context.deps.configManager.get('surfaces.ntfy.chatTopic'),
-      agentTopic: context.deps.configManager.get('surfaces.ntfy.agentTopic'),
-      remoteTopic: context.deps.configManager.get('surfaces.ntfy.remoteTopic'),
+      // Topic names are credentials: status shows the stored reference or (secret).
+      topic: displaySettingValue('surfaces.ntfy.topic', context.deps.configManager.get('surfaces.ntfy.topic')),
+      chatTopic: displaySettingValue('surfaces.ntfy.chatTopic', context.deps.configManager.get('surfaces.ntfy.chatTopic')),
+      agentTopic: displaySettingValue('surfaces.ntfy.agentTopic', context.deps.configManager.get('surfaces.ntfy.agentTopic')),
+      remoteTopic: displaySettingValue('surfaces.ntfy.remoteTopic', context.deps.configManager.get('surfaces.ntfy.remoteTopic')),
       baseUrl: context.deps.configManager.get('surfaces.ntfy.baseUrl'),
       providerRuntime: context.providerRuntimeStatus('ntfy'),
     }),
@@ -244,7 +246,7 @@ export function registerBuiltinChannelPlugins(context: BuiltinPluginRegistration
     deliverReply: (pending, message) => context.deps.deliverWebhookAgentReply(pending, message),
     notifyApproval: (approval, binding) => context.deps.deliverWebhookApprovalUpdate(approval, binding),
     getStatus: async () => builtinStatus(context, 'webhook', 'Generic webhook', context.deps.surfaceDeliveryEnabled('webhook'), {
-      defaultTarget: context.deps.configManager.get('surfaces.webhook.defaultTarget'),
+      defaultTarget: displaySettingValue('surfaces.webhook.defaultTarget', context.deps.configManager.get('surfaces.webhook.defaultTarget')),
     }),
     listAccounts: async () => [await context.buildAccount('webhook')],
     getAccount: async (accountId) => context.resolveAccount('webhook', accountId),

@@ -53,6 +53,7 @@ import {
   readBoundedPositiveInteger,
   readOptionalStringField,
   readStringArrayField,
+  refuseEmptySelection,
   type JsonRecord,
 } from './route-helpers.js';
 
@@ -326,12 +327,13 @@ const runtimeSessionBodySchemas = createRouteBodySchemaRegistry({
     const model = readOptionalStringField(body, 'model');
     const provider = readOptionalStringField(body, 'provider');
     const tools = readStringArrayField(body, 'tools', MAX_SESSION_TOOL_NAMES);
+    // An explicit empty tool list selects no tool; it is never "the default tool set".
+    if (tools?.length === 0) return refuseEmptySelection('tools', "give the agent its default tools");
     return {
       task,
       ...(model ? { model } : {}),
       ...(provider ? { provider } : {}),
-      // An empty `tools` list is read as not sent, as before readStringArrayField returned [] for it.
-      ...(tools?.length ? { tools } : {}),
+      ...(tools ? { tools } : {}),
       ...(routing ? { routing } : {}),
     };
   }),
@@ -371,6 +373,10 @@ async function handleCreateSharedSession(context: DaemonRuntimeRouteContext, req
   }, { status: 201 }));
 }
 
+function assertNeverSubmission(submission: never): never {
+  throw new TypeError(`Unhandled session submission mode: ${JSON.stringify((submission as { readonly mode?: unknown }).mode)}`);
+}
+
 async function handlePostTask(context: DaemonRuntimeRouteContext, req: Request): Promise<Response> {
   const body = await context.parseJsonBody(req);
   if (body instanceof Response) return body;
@@ -396,36 +402,35 @@ async function handlePostTask(context: DaemonRuntimeRouteContext, req: Request):
     }));
     if (submission instanceof Response) return submission;
 
-    if (submission.mode === 'continued-live') {
-      return context.recordApiResponse(req, '/task', Response.json({
-        acknowledged: true,
-        mode: submission.mode,
-        sessionId: submission.session.id,
-        agentId: submission.activeAgentId ?? null,
-        inputId: submission.input.id,
-      }, { status: 202 }));
-    }
-    if (submission.mode === 'queued-follow-up') {
-      return context.recordApiResponse(req, '/task', Response.json({
-        acknowledged: true,
-        mode: submission.mode,
-        sessionId: submission.session.id,
-        agentId: submission.activeAgentId ?? null,
-        inputId: submission.input.id,
-      }, { status: 202 }));
-    }
-    if (submission.mode === 'rejected') {
-      return context.recordApiResponse(req, '/task', Response.json({
-        acknowledged: false,
-        mode: submission.mode,
-        sessionId: submission.session.id,
-        inputId: submission.input.id,
-      }, { status: 409 }));
+    switch (submission.mode) {
+      case 'continued-live':
+      case 'queued-follow-up':
+      // queued-for-surface: the input waits for the session's live surface to collect and deliver
+      // it (sessions.inputs.list / deliver); no daemon agent is started, the surface runs the turn.
+      case 'queued-for-surface':
+        return context.recordApiResponse(req, '/task', Response.json({
+          acknowledged: true,
+          mode: submission.mode,
+          sessionId: submission.session.id,
+          agentId: submission.activeAgentId ?? null,
+          inputId: submission.input.id,
+        }, { status: 202 }));
+      case 'rejected':
+        return context.recordApiResponse(req, '/task', Response.json({
+          acknowledged: false,
+          mode: submission.mode,
+          sessionId: submission.session.id,
+          inputId: submission.input.id,
+        }, { status: 409 }));
+      case 'spawn':
+        break;
+      default:
+        return assertNeverSubmission(submission);
     }
 
     const sessionSpawn = context.trySpawnAgent({
       mode: 'spawn',
-      task: submission.task!,
+      task: submission.task,
       ...spawnRoutingFields({ model: input.model, provider: input.provider, tools: input.tools, routing: submission.input.routing ?? input.routing }),
     }, 'DaemonServer.handlePostTask.sharedSession', submission.session.id);
     if (sessionSpawn instanceof Response) {
@@ -567,6 +572,8 @@ async function handleDeliverSharedSessionInput(
   const surfaceInstance = agentId && typeof body?.surfaceInstance === 'string' && body.surfaceInstance.trim() ? body.surfaceInstance.trim() : undefined;
   const answer = typeof body?.answer === 'string' ? body.answer : undefined;
   const claim = body?.claim === true && !consumed;
+  // The surface's claim token (the input's claim epoch when it claimed it); null when it sent none.
+  const claimEpoch = typeof body?.claimEpoch === 'number' && Number.isSafeInteger(body.claimEpoch) && body.claimEpoch > 0 ? body.claimEpoch : null;
   // A surface that could not start the message reports it failed, with why,
   // so the row ends instead of waiting for an answer that will not come.
   if (consumed && !agentId && readSurfaceAnswerStatus(body?.status) === 'failed' && context.sessionBroker.failInput) {
@@ -589,6 +596,7 @@ async function handleDeliverSharedSessionInput(
       ...(agentId ? { agentId } : {}),
       ...(surfaceInstance ? { surfaceInstance } : {}),
       ...(claim ? { claim } : {}),
+      claimEpoch,
     });
   } catch (error) {
     if (!isInputNotClaimable(error)) throw error;
@@ -692,22 +700,33 @@ async function handleCompanionMessageKind(
     sessionId,
   }, { status: 202 }));
   // A client that names its message can retry after a timeout without adding a
-  // second turn: a message already stored (or still being stored) under that id
-  // is answered as accepted and not appended again.
-  const inFlightKey = clientMessageId ? `${sessionId}\u0000${clientMessageId}` : null;
-  if (inFlightKey) {
-    if (companionMessagesInFlight.has(inFlightKey) || hasStoredCompanionMessage(context, sessionId, clientMessageId!)) return answer();
-    companionMessagesInFlight.add(inFlightKey);
+  // second turn: a message already stored under that id is answered as
+  // accepted and not appended again. A retry that arrives while the first is
+  // still being stored waits for it and gets its answer: accepted once the
+  // message is on disk, or the same failure, never "accepted" for a message
+  // whose save then failed.
+  if (!clientMessageId) return await appendAndPublishCompanionMessage(context, sessionId, input, messageId, answer);
+  const inFlightKey = `${sessionId}\u0000${clientMessageId}`;
+  const running = companionMessagesInFlight.get(inFlightKey);
+  if (running) {
+    await running;
+    return answer();
   }
+  if (hasStoredCompanionMessage(context, sessionId, clientMessageId)) return answer();
+  const run = appendAndPublishCompanionMessage(context, sessionId, input, messageId, answer);
+  const stored = run.then(() => undefined);
+  companionMessagesInFlight.set(inFlightKey, stored);
+  // A failure is carried to the waiters above; this keeps it from being unobserved when there are none.
+  stored.catch(() => undefined);
   try {
-    return await appendAndPublishCompanionMessage(context, sessionId, input, messageId, answer);
+    return await run;
   } finally {
-    if (inFlightKey) companionMessagesInFlight.delete(inFlightKey);
+    if (companionMessagesInFlight.get(inFlightKey) === stored) companionMessagesInFlight.delete(inFlightKey);
   }
 }
 
-/** Client-chosen message ids being stored right now, so two concurrent retries cannot both append. */
-const companionMessagesInFlight = new Set<string>();
+/** Client-chosen message ids being stored right now, with the store's end, so a concurrent retry waits for it and answers as it does. */
+const companionMessagesInFlight = new Map<string, Promise<void>>();
 const DEDUPE_LOOKBACK_MESSAGES = 200;
 
 function readClientMessageId(value: unknown): string | undefined | Response {
@@ -901,10 +920,11 @@ function buildSharedSessionMessageInput(
   };
 }
 
-function readToolNames(value: unknown): string[] | undefined {
+function readToolNames(value: unknown): string[] | undefined | Response {
   if (!Array.isArray(value)) return undefined;
   const tools = value.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '').slice(0, MAX_SESSION_TOOL_NAMES);
-  return tools.length > 0 ? tools : undefined;
+  // An explicit empty tool list selects no tool; it is never "the default tool set".
+  return tools.length > 0 ? tools : refuseEmptySelection('routing.tools', 'give the agent its default tools');
 }
 
 /**
@@ -941,6 +961,8 @@ function readSharedSessionRoutingIntent(value: unknown): SharedSessionRoutingInt
   const executionIntent = readExecutionIntent(record.executionIntent);
   if (executionIntent instanceof Response) return executionIntent;
   const tools = readToolNames(record.tools);
+  if (tools instanceof Response) return tools;
+  // `[]` is kept: no fallback model, which differs from leaving the field out (the configured fallbacks).
   const fallbackModels = readStringArrayField(record, 'fallbackModels', MAX_SESSION_TOOL_NAMES);
   const helperModel = readHelperModel(record.helperModel);
   const providerSelection = readProviderSelection(record.providerSelection);
@@ -951,7 +973,7 @@ function readSharedSessionRoutingIntent(value: unknown): SharedSessionRoutingInt
     ...(typeof record.providerId === 'string' ? { providerId: record.providerId } : {}),
     ...(providerSelection ? { providerSelection } : {}),
     ...(providerFailurePolicy ? { providerFailurePolicy } : {}),
-    ...(fallbackModels?.length ? { fallbackModels } : {}),
+    ...(fallbackModels ? { fallbackModels } : {}),
     ...(helperModel ? { helperModel } : {}),
     ...(tools ? { tools } : {}),
     ...(executionIntent ? { executionIntent } : {}),
@@ -997,11 +1019,7 @@ async function respondToSessionSubmission(
     readonly executionIntent?: ExecutionIntent | undefined;
   } = {},
 ): Promise<Response> {
-  if (
-    submission.mode === 'continued-live' ||
-    submission.mode === 'queued-follow-up' ||
-    submission.mode === 'queued-for-surface'
-  ) {
+  if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up' || submission.mode === 'queued-for-surface') {
     // queued-for-surface: the input is queued for a live registered surface to
     // collect (sessions.inputs.list) and deliver (sessions.inputs.deliver). No
     // daemon executor is spawned, the surface owns turn execution.
@@ -1022,9 +1040,12 @@ async function respondToSessionSubmission(
     }, { status: 409 }));
   }
 
+  // Every other mode answered above; only `spawn` carries the task an agent starts on.
+  const task = submission.mode === 'spawn' ? submission.task : undefined;
+  if (task === undefined) throw new TypeError(`Unhandled session submission mode: ${submission.mode}`);
   const spawnResult = context.trySpawnAgent({
     mode: 'spawn',
-    task: submission.task!,
+    task,
     ...(spawnOptions.context ? { context: spawnOptions.context } : {}),
     ...spawnRoutingFields({ model: spawnOptions.model, provider: spawnOptions.provider, tools: spawnOptions.tools, routing: submission.input.routing }),
     ...(spawnOptions.executionIntent ? { executionIntent: spawnOptions.executionIntent } : {}),

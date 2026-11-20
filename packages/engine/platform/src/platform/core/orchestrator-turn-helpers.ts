@@ -174,9 +174,27 @@ export async function holdSessionCompletion(
   return true;
 }
 
+/**
+ * The model and provider a response came from, as the turn loop recorded the
+ * attempt that produced it (after a failover, the model that answered). The
+ * saved message names it, so a restored transcript prices it at its own model.
+ */
+export interface AnsweredBy {
+  /** The model's display name, as transcripts name models. */
+  readonly model: string;
+  readonly provider: string;
+}
+
+/** Who answered: the attempt's route when the loop recorded it, else the selected model (a response with no recorded attempt). */
+function answeredBy(args: { readonly answeredBy?: AnsweredBy | undefined; readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel'> }): AnsweredBy {
+  if (args.answeredBy) return args.answeredBy;
+  const model = args.providerRegistry.getCurrentModel();
+  return { model: model.displayName, provider: model.provider };
+}
+
 /** Hold the candidate privately until the contract accepts it, then permit publication. */
 export function holdSessionFinalResponse(
-  args: ConsumedEmitterArgs & { readonly conversation: ConversationManager; readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel'> },
+  args: ConsumedEmitterArgs & { readonly conversation: ConversationManager; readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel'>; readonly answeredBy?: AnsweredBy | undefined },
   session: ContractSessionTurn,
   response: ChatResponseWithReasoning,
   privateNudge?: (message: string) => void,
@@ -186,8 +204,7 @@ export function holdSessionFinalResponse(
     reasoningContent: answer.reasoningContent,
     reasoningSummary: response.reasoningSummary || undefined,
     usage: response.usage,
-    model: args.providerRegistry.getCurrentModel().displayName,
-    provider: args.providerRegistry.getCurrentModel().provider,
+    ...answeredBy(args),
   }), privateNudge);
 }
 
@@ -231,6 +248,8 @@ type ToolResponseOutcomeArgs = {
   emitterContext: EmitterContextFactory;
   turnId: string;
   response: ChatResponseWithReasoning;
+  /** The model that produced `response` (the turn loop's attempt route). */
+  answeredBy?: AnsweredBy | undefined;
   userText: string;
   /** Private host-held findings; these are evidence, never replacement requirements. */
   completionRepair?: string | undefined;
@@ -264,8 +283,7 @@ async function handleOwnedToolResponseOutcome(args: ToolResponseOutcomeArgs): Pr
     reasoningContent: args.response.reasoning || undefined,
     reasoningSummary: args.response.reasoningSummary || undefined,
     usage: args.response.usage,
-    model: args.providerRegistry.getCurrentModel().displayName,
-    provider: args.providerRegistry.getCurrentModel().provider,
+    ...answeredBy(args),
   });
   args.setPendingToolCalls(toolCalls);
 
@@ -323,6 +341,8 @@ type FinalResponseOutcomeArgs = {
   emitterContext: EmitterContextFactory;
   turnId: string;
   response: ChatResponseWithReasoning;
+  /** The model that produced `response` (the turn loop's attempt route). */
+  answeredBy?: AnsweredBy | undefined;
   /** This turn's MEMORY-sourced injected knowledge ids, stamped onto TURN_COMPLETED as metadata.memory.recordIds when non-empty (absent otherwise). */
   memoryRecordIds?: readonly string[] | undefined;
 };
@@ -336,8 +356,7 @@ export async function handleFinalResponseOutcome(args: FinalResponseOutcomeArgs)
     reasoningContent: answer.reasoningContent,
     reasoningSummary: args.response.reasoningSummary || undefined,
     usage: args.response.usage,
-    model: args.providerRegistry.getCurrentModel().displayName,
-    provider: args.providerRegistry.getCurrentModel().provider,
+    ...answeredBy(args),
   });
   // The completion check covers the transcript exactly through this append.
   // Usage warnings and compaction legitimately change the transcript

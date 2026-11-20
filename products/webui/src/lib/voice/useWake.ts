@@ -16,6 +16,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UtteranceAudioArtifact } from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import type { WakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import { client as platformClient } from '../goodvibes';
+import { getClientLifetime } from '../client-lifetime';
 import type { OperatorMethodOutput } from '../goodvibes';
 import {
   createBrowserModelSetLoader,
@@ -113,6 +114,7 @@ function ensureDaemonDeps(): void {
       warn: wakeHostWarn,
     }),
     transcribe: transcribeWakeArtifact,
+    identityRevision: () => getClientLifetime().revision,
   });
 }
 

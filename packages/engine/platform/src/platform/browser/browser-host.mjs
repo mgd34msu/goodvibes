@@ -271,7 +271,9 @@ const handlers = {
       case 'count': return { value: await locator.count() };
       case 'describe': return { value: await first.evaluate(compileFunction(args.source), args.arg) };
       case 'click':
-        await first.click({ button: args.button ?? 'left', clickCount: args.clickCount ?? 1, timeout, signal });
+        // A trial waits for the control to be clickable and does not click:
+        // the readiness check before a gated click must not press the button.
+        await first.click({ button: args.button ?? 'left', clickCount: args.clickCount ?? 1, timeout, signal, trial: args.trial === true });
         return { value: null };
       case 'fill':
         await first.fill(args.text ?? '', { timeout, signal });

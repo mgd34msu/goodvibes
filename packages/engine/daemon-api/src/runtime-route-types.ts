@@ -170,6 +170,21 @@ interface RuntimeTaskStateLike {
   readonly tasks: Map<string, RuntimeTaskLike>;
 }
 
+/**
+ * What a submitted message became. Only `spawn` carries the task to start an
+ * agent with; every other mode has none, so a route must switch on `mode`.
+ */
+export type RouteSessionSubmission<Input> = {
+  input: Input;
+  session: { id: string; status: string };
+  routeBinding?: AutomationRouteBinding | undefined;
+  activeAgentId?: string | null | undefined;
+  userMessage?: unknown | undefined;
+} & (
+  | { mode: 'spawn'; task: string }
+  | { mode: 'continued-live' | 'queued-follow-up' | 'queued-for-surface' | 'rejected'; task?: undefined }
+);
+
 export interface DaemonRuntimeRouteContext {
   readonly parseJsonBody: (req: Request) => Promise<JsonRecord | Response>;
   readonly parseOptionalJsonBody: (req: Request) => Promise<JsonRecord | null | Response>;
@@ -191,15 +206,7 @@ export interface DaemonRuntimeRouteContext {
       providerMessageId?: string | undefined;
       metadata?: Record<string, unknown> | undefined;
       routing?: SharedSessionRoutingIntent | undefined;
-    }): Promise<{
-      mode: 'continued-live' | 'spawn' | 'queued-follow-up' | 'queued-for-surface' | 'rejected';
-      input: { id: string; routing?: SharedSessionRoutingIntent | undefined };
-      session: { id: string; status: string };
-      routeBinding?: AutomationRouteBinding | undefined;
-      task?: string | undefined;
-      activeAgentId?: string | null | undefined;
-      userMessage?: unknown | undefined;
-    }>;
+    }): Promise<RouteSessionSubmission<{ id: string; routing?: SharedSessionRoutingIntent | undefined }>>;
     steerMessage(input: {
       sessionId?: string | undefined;
       routeId?: string | undefined;
@@ -215,15 +222,7 @@ export interface DaemonRuntimeRouteContext {
       metadata?: Record<string, unknown> | undefined;
       routing?: SharedSessionRoutingIntent | undefined;
       allowSpawnFallback?: boolean | undefined;
-    }): Promise<{
-      mode: 'continued-live' | 'spawn' | 'queued-follow-up' | 'queued-for-surface' | 'rejected';
-      input: { id: string; state: string; routing?: SharedSessionRoutingIntent | undefined };
-      session: { id: string; status: string };
-      routeBinding?: AutomationRouteBinding | undefined;
-      task?: string | undefined;
-      activeAgentId?: string | null | undefined;
-      userMessage?: unknown | undefined;
-    }>;
+    }): Promise<RouteSessionSubmission<{ id: string; state: string; routing?: SharedSessionRoutingIntent | undefined }>>;
     followUpMessage(input: {
       sessionId?: string | undefined;
       routeId?: string | undefined;
@@ -238,15 +237,7 @@ export interface DaemonRuntimeRouteContext {
       providerMessageId?: string | undefined;
       metadata?: Record<string, unknown> | undefined;
       routing?: SharedSessionRoutingIntent | undefined;
-    }): Promise<{
-      mode: 'continued-live' | 'spawn' | 'queued-follow-up' | 'queued-for-surface' | 'rejected';
-      input: { id: string; state: string; routing?: SharedSessionRoutingIntent | undefined };
-      session: { id: string; status: string };
-      routeBinding?: AutomationRouteBinding | undefined;
-      task?: string | undefined;
-      activeAgentId?: string | null | undefined;
-      userMessage?: unknown | undefined;
-    }>;
+    }): Promise<RouteSessionSubmission<{ id: string; state: string; routing?: SharedSessionRoutingIntent | undefined }>>;
     /** `inputId` names the exact queued input the agent was started for; without it the oldest queued input is claimed. */
     bindAgent(sessionId: string, agentId: string, inputId?: string): Promise<unknown>;
     createSession(input: {
@@ -273,7 +264,7 @@ export interface DaemonRuntimeRouteContext {
     getInputs(sessionId: string, limit: number): unknown[];
     /** One page of the session's inputs after `since`, oldest first; `more` says ask again from `next`. */
     getInputsPage(sessionId: string, options: { state?: SessionInputState | undefined; since?: number | undefined; limit?: number | undefined }): Page<unknown>;
-    markInputDelivered(sessionId: string, inputId: string, options: { consumed?: boolean | undefined; agentId?: string | undefined; claim?: boolean | undefined; surfaceInstance?: string | undefined; beforeApply?: (() => void) | undefined }): Promise<unknown | null>;
+    markInputDelivered(sessionId: string, inputId: string, options: { consumed?: boolean | undefined; agentId?: string | undefined; claim?: boolean | undefined; surfaceInstance?: string | undefined; claimEpoch?: number | null | undefined; beforeApply?: (() => void) | undefined }): Promise<unknown | null>;
     closeSession(sessionId: string): Promise<{ id: string } | null>;
     reopenSession(sessionId: string): Promise<{ id: string } | null>;
     detachParticipant(sessionId: string, surfaceId: string): Promise<{ id: string; status: string } | null>;

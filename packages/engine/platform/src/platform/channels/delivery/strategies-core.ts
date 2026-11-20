@@ -12,6 +12,7 @@ import { ownerDeliveryTargetProblem, postToPublicWebhook, validatePublicWebhookU
 import type { HostResolver } from '../../runtime/network/destination.js';
 import { resolveReachableBaseUrl } from '../../utils/reachable-base-url.js';
 import { resolveHomeAssistantAccessToken, resolveHomeAssistantEventType } from '../builtin/homeassistant.js';
+import { readNtfyTopics } from '../builtin/surface-secrets.js';
 import type { ChannelDeliveryRequest, ChannelDeliveryStrategy } from './types.js';
 import {
   appendAttachmentSummary,
@@ -320,7 +321,8 @@ export function createNtfyDeliveryStrategy(
         request.target.address,
         request.binding?.channelId,
         request.binding?.externalId,
-        String(configManager.get('surfaces.ntfy.topic') ?? ''),
+        // The default topic is a credential: its setting names where its name is stored.
+        (await readNtfyTopics({ configManager, secretsManager })).topic,
       );
       if (!topic) throw new Error('Missing ntfy topic');
       const ntfy = new NtfyIntegration(baseUrl, token ?? undefined);

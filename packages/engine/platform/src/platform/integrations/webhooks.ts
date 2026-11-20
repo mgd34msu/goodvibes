@@ -16,12 +16,14 @@ import {
   type NotificationDeadLetter, type NotificationDeadLetterSource, type NotificationReplayResult,
 } from './notification-dead-letters.js';
 import type { ConfigManager } from '../config/manager.js';
+import { isSecretReferenceValue } from '../config/secret-bearing-config-keys.js';
 
 const WEBHOOK_POLICY_ERRORS = {
   blocked: 'WebhookNotifier: blocked URL',
   closed: 'WebhookNotifier: closed',
   suppressed: 'WebhookNotifier: delivery suppressed under test (pass { force: true } to enable)',
   privacy: 'Notification privacy changed before delivery',
+  unresolved: 'WebhookNotifier: the stored webhook URL could not be read',
 } as const;
 class WebhookPolicyError extends Error {
   /** A refusal by policy is not cleared by sending again. */
@@ -35,7 +37,7 @@ function describeWebhookError(error: unknown): string {
   try {
     if (error instanceof WebhookPolicyError) {
       const kind = error.kind;
-      if (kind === 'blocked' || kind === 'suppressed' || kind === 'privacy' || kind === 'closed') return WEBHOOK_POLICY_ERRORS[kind];
+      if (kind === 'blocked' || kind === 'suppressed' || kind === 'privacy' || kind === 'closed' || kind === 'unresolved') return WEBHOOK_POLICY_ERRORS[kind];
     }
   } catch { /* Even prototype/field inspection of an unknown rejection may throw. */ }
   return describeStructuralDeliveryError(error);
@@ -83,10 +85,12 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
    */
   private readonly force: boolean;
   private readonly privateDeliveryHosts: () => readonly string[];
+  private readonly resolveTarget: ((entry: string) => Promise<string | null>) | undefined;
 
   constructor(urls: string[] = [], options: WebhookNotifierOptions = {}) {
     this.urls = validateWebhookUrls(urls);
     this.privateDeliveryHosts = options.privateDeliveryHosts ?? ((): readonly string[] => []);
+    this.resolveTarget = options.resolveTarget;
     this.metadataOnly = options.metadataOnly;
     this.timeoutMs = normalizeWebhookTimeoutMs(options.timeoutMs);
     this.maxConcurrent = normalizePositiveInteger(options.maxConcurrent, 8, 1, 32);
@@ -357,7 +361,14 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
   // Private helpers
   // -------------------------------------------------------------------------
 
-  private async postOne(url: string, envelope: NotificationEnvelope, lifetime: DeliveryLifetime): Promise<void> {
+  private async postOne(entry: string, envelope: NotificationEnvelope, lifetime: DeliveryLifetime): Promise<void> {
+    assertDeliveryCurrent(lifetime);
+    this.assertOpen();
+    // A configured entry is a goodvibes://secrets/ reference to the URL (the URL
+    // carries its key): read only here, for this request. Results, logs and the
+    // failed-notification list keep the entry, never the URL.
+    const url = isSecretReferenceValue(entry) ? await this.resolveTarget?.(entry) ?? null : entry;
+    if (url === null) throw new WebhookPolicyError('unresolved');
     assertDeliveryCurrent(lifetime);
     this.assertOpen();
     // SSRF tier filter, block requests to internal/private hosts.
@@ -367,7 +378,7 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
       // Automated webhook egress has no interactive approval flow: loopback
       // targets stay refused here alongside the absolute SSRF block.
       if (trustResult.tier === 'blocked' || trustResult.tier === 'localhost') {
-        emitSsrfDeny(hostname, url, trustResult.reason);
+        emitSsrfDeny(hostname, sanitizeUrlForLog(url), trustResult.reason);
         throw new WebhookPolicyError('blocked');
       }
     }
@@ -377,7 +388,7 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
     // GOODVIBES_SUPPRESS_NOTIFY), with `force` as the sanctioned opt-back-in
     // for tests that exercise this delivery layer itself.
     if (isNotifySuppressed(this.force)) {
-      logger.debug('WebhookNotifier: delivery suppressed under test', { url: sanitizeUrlForLog(url) });
+      logger.debug('WebhookNotifier: delivery suppressed under test', { url: sanitizeUrlForLog(entry) });
       throw new WebhookPolicyError('suppressed');
     }
 
@@ -452,6 +463,12 @@ export interface WebhookNotifierOptions {
    * listed host (a self-hosted ntfy, Home Assistant) may resolve to a private address.
    */
   privateDeliveryHosts?: (() => readonly string[]) | undefined;
+  /**
+   * Reads the URL a configured `goodvibes://secrets/` entry stands for, at
+   * each delivery (`resolveNotificationWebhook`). Without it a reference entry
+   * is not delivered and is reported as unreadable.
+   */
+  resolveTarget?: ((entry: string) => Promise<string | null>) | undefined;
   /**
    * Bypass test suppression for every delivery from this instance. Only
    * tests that exercise the real HTTP delivery layer itself should set this

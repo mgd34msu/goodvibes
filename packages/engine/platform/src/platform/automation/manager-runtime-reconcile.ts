@@ -31,7 +31,8 @@ export interface AutomationRunSettleContext {
   /** Delivers failure notices, emits run-failed and applies the job's retry or cooldown policy. */
   readonly followUp: AutomationFailureFollowUpContext;
   readonly emitJobAutoDisabled: (job: AutomationJob, reason: string) => void;
-  readonly maybeDeliverRun: (job: AutomationJob, run: AutomationRun) => void;
+  /** Starts the run's delivery; true when one was started (the run then owes it until it lands). */
+  readonly maybeDeliverRun: (job: AutomationJob, run: AutomationRun) => boolean;
   readonly applyFailureToJob: (job: AutomationJob, timestamp: number, countRun?: boolean) => AutomationJob;
   readonly removeJobRecord: (jobId: string, reason: string) => void;
 }
@@ -145,7 +146,7 @@ export function settleAutomationRun(
   const updatedJob: AutomationJob = settlement.status === 'completed'
     ? { ...job, successCount: job.successCount + 1, failureCount: 0, updatedAt: endedAt }
     : settlement.status === 'failed'
-      ? context.applyFailureToJob(job, endedAt, false)
+      ? { ...context.applyFailureToJob(job, endedAt, false), lastOutcome: 'failed' as const }
       : { ...job, updatedAt: endedAt };
   context.jobs.set(job.id, updatedJob);
   void context.syncExecutionRoute(updatedJob, updatedRun).catch((error: unknown) => {
@@ -171,11 +172,24 @@ export function settleAutomationRun(
   else if (settlement.status === 'cancelled') context.emitRunCompleted(updatedJob, updatedRun, 'cancelled');
   // A failed run is announced by its failure notice when that goes to the
   // job's own targets; sending the run message too would say it twice.
-  if (settlement.status !== 'failed' || !failureNoticeCoversRunDelivery(updatedJob)) context.maybeDeliverRun(updatedJob, updatedRun);
+  // Save, then deliver: the run's end carries `delivery: owed` in the caller's
+  // save, and the write that records the delivery clears it, so a daemon that
+  // stops in between delivers it after its restart (deliverOwedAutomationRuns).
+  let owed = false;
+  if (settlement.status !== 'failed' || !failureNoticeCoversRunDelivery(updatedJob)) {
+    const owing: AutomationRun = { ...updatedRun, delivery: { state: 'owed', effect: automationRunEffect(updatedRun.id) } };
+    context.runs.set(owing.id, owing);
+    owed = context.maybeDeliverRun(updatedJob, owing);
+    const latest = context.runs.get(owing.id);
+    // Nothing was started (no target, no inbox): nothing is owed.
+    if (!owed && latest?.delivery) context.runs.set(owing.id, { ...latest, delivery: undefined });
+  }
   // A one-shot job is done only when a run of it succeeded. A failed or
   // cancelled one stays (disabled once its occurrence fired) so the owner or
-  // an agent can retry the run or start it by hand; that run's success removes it.
-  if (updatedJob.deleteAfterRun && settlement.status === 'completed') {
+  // an agent can retry the run or start it by hand; that run's success removes
+  // it, once its answer was delivered (the delivery needs the job's targets,
+  // also after a restart), see maybeDeliverAutomationRun.
+  if (updatedJob.deleteAfterRun && settlement.status === 'completed' && !owed) {
     context.removeJobRecord(updatedJob.id, 'one-shot-complete');
   }
   if (settlement.status === 'failed') {
@@ -184,7 +198,12 @@ export function settleAutomationRun(
       context.emitJobAutoDisabled(updatedJob, updatedJob.pausedReason ?? 'failure-threshold-reached');
     }
   }
-  return updatedRun;
+  return context.runs.get(updatedRun.id) ?? updatedRun;
+}
+
+/** The identity of a run's delivery, the same for every attempt (the delivery manager's `announces`). */
+export function automationRunEffect(runId: string): string {
+  return `automation:${runId}:result`;
 }
 
 /** The deadline a run runs under: its own timeout, else the configured default; 0 is none. */

@@ -9,6 +9,7 @@
  * When the host is another machine and does not answer, a command that writes is
  * refused: storing it here would start a second store the host never sees.
  */
+import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
 import { resolveCanonicalMemoryDbPath, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
 import type { LocalMemoryStore, MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
@@ -53,9 +54,9 @@ function unreachableLocalStore(): LocalMemoryStore {
   };
 }
 
+/** The one loopback rule (parsed, not prefix-matched): a name such as `127.example.test` is another machine. */
 function hostIsThisMachine(baseUrl: string): boolean {
-  const host = new URL(baseUrl).hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  return host === 'localhost' || host === '::1' || host.startsWith('127.');
+  return isLoopbackHost(new URL(baseUrl).hostname);
 }
 
 /**

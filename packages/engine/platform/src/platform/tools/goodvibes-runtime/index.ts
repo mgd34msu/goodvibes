@@ -28,7 +28,6 @@ import type { ChannelPluginRegistry } from '../../channels/index.js';
 import type { Tool, ToolDefinition } from '../../types/tools.js';
 import type { ToolRegistry } from '../registry.js';
 import { assertCurrentToolExecution } from '../registry.js';
-import { isYoloExecution } from '../../gate/execution-context.js';
 import { CloudflareControlPlaneManager } from '../../cloudflare/manager.js';
 import type { CloudflareComponentSelection } from '../../cloudflare/types.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -174,7 +173,6 @@ export function createGoodVibesSettingsTool(
         mode: { type: 'string', enum: ['set', 'reset'], description: 'set writes value; reset returns the key to its default.' },
         key: { type: 'string', description: 'The setting key, as the settings list names it.' },
         value: { description: 'The value to set, of the setting\'s type; a credential is given as a goodvibes:// secret reference, never the secret itself.' },
-        confirm: { type: 'boolean', description: 'true confirms the change; required unless the call was approved or the session runs in yolo.' },
       },
       required: ['mode', 'key'],
       additionalProperties: false,
@@ -186,8 +184,11 @@ export function createGoodVibesSettingsTool(
   async function execute(args: JsonRecord, options?: import('../../types/tools.js').ToolExecuteOptions): Promise<{ success: boolean; output?: string; error?: string }> {
     try {
       if (deps.admissionPolicy === 'agent-main-conversation') return await executeAdmittedAgentSettings(args, options);
-      if (!assertCurrentToolExecution(args, options) && !isYoloExecution() && args.confirm !== true) {
-        return { success: false, error: 'Set confirm=true to change GoodVibes settings.' };
+      // A settings change runs only as a call the permission gate admitted (in
+      // every mode, yolo included, the gate decides it). Nothing in the call's
+      // own arguments admits it: the model cannot confirm its own change.
+      if (!assertCurrentToolExecution(args, options)) {
+        return { success: false, error: 'goodvibes_settings runs only as a tool call the permission gate admitted; nothing was changed.' };
       }
       if (args.mode !== 'set' && args.mode !== 'reset') {
         return { success: false, error: `Unknown goodvibes_settings mode: ${String(args.mode)}. Use "set" or "reset".` };

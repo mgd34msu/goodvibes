@@ -33,7 +33,10 @@ export type KeyAction =
   | 'toggle-memory-provenance'
   | 'voice-input'
   | 'focus-work-tree'
-  | 'cycle-permission-mode';
+  | 'cycle-permission-mode'
+  | 'open-notifications'
+  | 'failure-other-model'
+  | 'failure-details';
 
 export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION_DESCRIPTIONS,
   'command-palette':       'Open the command palette (search & run any command)',
@@ -54,7 +57,10 @@ export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION
   // state, there is no release event to watch, so this is two discrete presses,
   // and the description says so instead of implying a hold that cannot exist.
   'voice-input':           'Voice input: press to start recording, press again to stop and transcribe into the composer',
-  'cycle-permission-mode': 'Cycle this session\'s permission mode (asks before the mode with no approvals; the saved default is set in /settings)',
+  'cycle-permission-mode': 'Change how often it asks, for this session (asks before YOLO; the saved default is set in /settings)',
+  'open-notifications':    'Open the notices (the status bar counts the unread ones)',
+  'failure-other-model':   'After a failed turn: choose another model and send the prompt again',
+  'failure-details':       'After a failed turn: show what the provider said',
 };
 
 export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindingDefaults<KeyAction>([
@@ -65,7 +71,8 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   'redo', 'paste', 'word-back', 'word-forward',
   'kill-to-start', 'kill-word-forward', 'yank', 'yank-pop',
   'cancel-tool-call', 'toggle-keep-awake', 'toggle-memory-provenance', 'voice-input',
-  'focus-work-tree', 'cycle-permission-mode',
+  'focus-work-tree', 'cycle-permission-mode', 'open-notifications', 'failure-other-model',
+  'failure-details',
 ], {
 // Ctrl+P opens the command palette, the one entry point for every command,
   // view and setting; Ctrl+K (the other common palette chord) opens it too. The
@@ -118,6 +125,12 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
 // Shift+Tab: cycle this session's permission mode. The tokenizer reads the
   // xterm back-tab (CSI Z) as this chord.
   'cycle-permission-mode': [{ key: 'tab', shift: true }],
+// Ctrl+N: the notices the status bar counts. Unused by any other default.
+  'open-notifications':    [{ key: 'n', ctrl: true }],
+// Alt+O and Alt+I: the failed turn's "use another model" and "details". Chords
+  // that can never be typed text (like Alt+R retry), unused by any other default.
+  'failure-other-model':   [{ key: 'o', alt: true }],
+  'failure-details':       [{ key: 'i', alt: true }],
 });
 
 export class KeybindingsManager extends PlatformKeybindingsManager<KeyAction> {

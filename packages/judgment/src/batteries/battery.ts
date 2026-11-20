@@ -133,6 +133,14 @@ export interface BatteryRun<Items extends BatteryItems> {
   recordAction(action: string): void;
 }
 
+/**
+ * A run that asked only some questions: a reading is present only for a
+ * question that was asked, so a reader must handle an unasked one as absent.
+ */
+export interface PartialBatteryRun<Items extends BatteryItems> extends Omit<BatteryRun<Items>, 'readings'> {
+  readonly readings: { readonly [K in keyof Items]?: ReadingFor<Items[K]> };
+}
+
 export interface RunOptions<Items extends BatteryItems> extends CallOptions {
   /** Ask only these questions; the rest are left out of the request. */
   readonly only?: readonly (keyof Items & string)[];
@@ -143,6 +151,8 @@ export interface RunOptions<Items extends BatteryItems> extends CallOptions {
 export interface Battery<Items extends BatteryItems> extends BatteryDefinition<Items>, NamedDecision {
   /** Asks every question (or the `only` subset) about one state in a single request. */
   run(port: JudgmentPort, state: EntryType, options?: RunOptions<Items>): Promise<BatteryRun<Items>>;
+  /** Asks only the named questions; the readings are typed as present for those alone. */
+  runSome(port: JudgmentPort, state: EntryType, only: readonly (keyof Items & string)[], options?: Omit<RunOptions<Items>, 'only'>): Promise<PartialBatteryRun<Items>>;
 }
 
 export type AnyReading = YesNoReading | ChoiceReading | ScoreReading;
@@ -250,6 +260,9 @@ export function defineBattery<const Items extends BatteryItems>(definition: Batt
         result,
         recordAction: (action) => recordAction(port, result.decisionId, action),
       };
+    },
+    runSome(port, state, only, options = {}) {
+      return battery.run(port, state, { ...options, only });
     },
     checkFixtures: (port, options = {}) =>
       checkEachFixture(fixtures, options, async (fixture, run) => {

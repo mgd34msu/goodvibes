@@ -12,7 +12,7 @@ import {
   readStringList,
   stripCommandFlag,
 } from './agent-knowledge-args.ts';
-import { parseBrowserImportScope } from '../input/commands/knowledge-browser-flags.ts';
+import { parseBrowserImportScope, selectionWireValue } from '../input/commands/knowledge-browser-flags.ts';
 import { formatAsk, formatAgentKnowledgeFailureKind, formatBatchIngest, formatConnector, formatConnectorDoctor, formatConnectors, formatEntityList, formatFailure, formatIngest, formatItem, formatMap, formatReindex, reindexFailures, formatSearch, formatStatus, isRecord, tallyBatchIngest } from '@goodvibes-jev/engine/terminal-shell/agent-turn/knowledge-format';
 import { exitCodeOfTally } from '@goodvibes-jev/engine/errors';
 import { AGENT_KNOWLEDGE_METHODS, DELEGATION_METHOD } from '@goodvibes-jev/engine/terminal-shell/agent-turn/knowledge-methods';
@@ -436,8 +436,9 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
     const homeOverride = readOptionValue(rest, '--home');
     const result = await runKnowledgeCall(runtime, AGENT_KNOWLEDGE_METHODS.ingestBrowserHistory, async (connection) => (
       await postAgentKnowledgeJson(connection, AGENT_KNOWLEDGE_METHODS.ingestBrowserHistory.route, {
-        browsers: scope.scope.browsers,
-        sourceKinds: scope.scope.sourceKinds,
+        // Not typed: omitted, so the daemon applies its default; never an empty list.
+        browsers: selectionWireValue(scope.scope.browsers),
+        sourceKinds: selectionWireValue(scope.scope.sourceKinds),
         homeOverride,
         limit: scope.scope.limit,
         sinceMs: scope.scope.sinceMs,

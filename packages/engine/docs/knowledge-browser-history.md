@@ -81,12 +81,16 @@ capture, held-compilation, and failed-compilation counts in its result.
 
 ```ts
 const result = await knowledge.ingest.browserHistory({
-  browsers: ['chromium', 'firefox'],
-  sourceKinds: ['history', 'bookmark'],
+  browsers: { kind: 'only', values: ['chromium', 'firefox'] },
+  sourceKinds: { kind: 'only', values: ['history', 'bookmark'] },
   limit: 1000,
   sinceMs: Date.now() - 7 * 24 * 60 * 60 * 1000,
 });
 ```
+
+Both filters are selections: left out (or `{ kind: 'default' }`), `browsers`
+reads every installed browser and `sourceKinds` reads history and bookmarks;
+`{ kind: 'none' }` reads nothing. An empty selection is never "all".
 
 The `browsers` filter selects specific browser kinds (`BrowserKnowledgeKind`),
 not whole families. `'chromium'` is both a family name and a discrete kind, so
@@ -111,7 +115,10 @@ Daemon HTTP route:
 POST /api/knowledge/ingest/browser-history
 ```
 
-The route is admin-only because it reads local browser profile data.
+The route is admin-only because it reads local browser profile data. Its
+`browsers` and `sourceKinds` fields are lists; left out, the defaults above
+apply. An entry that is not a known browser or kind is a 400 naming it, and an
+empty list is a 400 (it selects nothing; omit the field for the default).
 
 Background job:
 

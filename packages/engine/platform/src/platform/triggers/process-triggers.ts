@@ -190,16 +190,21 @@ export function buildDaemonRestartTermination(input: {
   };
 }
 
+/**
+ * The termination a cancel records when it sends the stop: nothing has seen
+ * the process end yet, so it is `cancel-requested` and not observed. The
+ * supervisor replaces it with what it sees once the child exits.
+ */
 export function buildCancelledTermination(input: {
   readonly process: TrackedProcessRef;
   readonly now: number;
 }): TerminationMetadata {
   const { process: ref } = input;
   return {
-    state: 'signalled',
+    state: 'cancel-requested',
     reason: 'cancelled',
     exitCode: null,
-    signal: 'SIGTERM',
+    signal: null,
     timedOut: false,
     startedAt: ref.startedAt,
     endedAt: input.now,
@@ -208,8 +213,8 @@ export function buildCancelledTermination(input: {
     args: ref.args,
     pid: ref.pid,
     stdoutTail: '',
-    stderrTail: 'The trigger was cancelled by an operator before the process finished.',
-    observed: true,
+    stderrTail: 'The trigger was cancelled by an operator before the process finished; the stop was sent and its exit is not seen yet.',
+    observed: false,
   };
 }
 

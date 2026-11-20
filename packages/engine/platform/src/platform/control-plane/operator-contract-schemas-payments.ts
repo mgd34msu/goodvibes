@@ -55,6 +55,14 @@ export const PAYMENTS_BUDGET_STATUS_OUTPUT_SCHEMA = objectSchema(
     item: POOL_SCHEMA,
     overage: POOL_SCHEMA,
     tolerance: POOL_SCHEMA,
+    /**
+     * Present when today also spent in another currency before payments.currency
+     * changed: each currency's spend in its own minor units, never counted in the
+     * pools above (a currency change starts a new pool).
+     */
+    earlierSpend: arraySchema(objectSchema({
+      currency: STRING_SCHEMA, item: NUMBER_SCHEMA, overage: NUMBER_SCHEMA, tolerance: NUMBER_SCHEMA,
+    }, ['currency', 'item', 'overage', 'tolerance'])),
     /** How many purchases are holding budget right now. */
     reservationCount: NUMBER_SCHEMA,
     /**

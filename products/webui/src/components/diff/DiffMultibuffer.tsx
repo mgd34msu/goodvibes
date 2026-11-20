@@ -15,6 +15,7 @@
  * maxHunkLines with an honest "… N more" marker so a huge file never blows out the column.
  */
 import type { DiffFile, DiffHunk } from '../../lib/unified-diff';
+import { contentDigest } from '@goodvibes-jev/engine/platform/platform/utils/target-ref';
 import { Chip } from '../ui/Chip';
 import { StatusDot, type StatusTone } from '../ui/StatusDot';
 import '../../styles/components/diff-multibuffer.css';
@@ -36,15 +37,22 @@ export interface DiffMultibufferProps {
   idPrefix?: string;
 }
 
+const hunkDigests = new WeakMap<DiffHunk, string>();
+
 /**
- * A stable key for a hunk within a diff, for client-side review tracking. Namespaced by
- * file path so two files that happen to share a `@@` header do not collide. Header-based
- * (not the parse-order id) so it is meaningful to a caller comparing across refetches;
- * a refetch whose line numbers shifted legitimately yields a new key (the marker resets,
- * which is honest, the captured change is no longer the same one).
+ * A stable key for a hunk within a diff, for client-side review tracking: the file path
+ * and the content digest of the hunk's lines (each line's kind and text, the engine's
+ * `contentDigest`). A hunk whose content changed, even within the same `@@` range, is a
+ * new key, so a "reviewed" mark never stays on content nobody looked at; the same lines
+ * moved by an edit elsewhere in the file keep their mark. One digest per hunk object.
  */
 export function hunkReviewKey(filePath: string, hunk: DiffHunk): string {
-  return `${filePath}\0${hunk.header}`;
+  let digest = hunkDigests.get(hunk);
+  if (digest === undefined) {
+    digest = contentDigest(hunk.lines.map((line) => [line.type, line.text]));
+    hunkDigests.set(hunk, digest);
+  }
+  return `${filePath}\0${digest}`;
 }
 
 /** How many textual (reviewable) hunks the diff carries, the denominator for a

@@ -7,9 +7,9 @@
  *  - `code_chunks`    chunk metadata (path/lang/symbol/kind/lines/source revision)
  *  - `code_vectors`   vec0 virtual table keyed by rowid
  *  - `code_index_meta` key/value build provenance, currently the embedding
- *    provider id the index was last fully built with, so search() can refuse
- *    to compare query vectors from a different provider's space against the
- *    stored vectors (see CodeIndexStore.getProviderMismatch).
+ *    space (provider, model and width) the index was last fully built in, so
+ *    search() can refuse to compare query vectors from another space against
+ *    the stored vectors (see CodeIndexStore.getProviderMismatch).
  *
  * Every function takes the Database handle explicitly, this module holds no
  * state and never opens/closes connections; CodeIndexStore owns the lifecycle.
@@ -38,7 +38,8 @@ export type VectorRow = {
 };
 
 /** Meta key for the embedding provider id the index was last fully built with. */
-export const EMBEDDING_PROVIDER_META_KEY = 'embedding_provider_id';
+/** The embedding space (`<provider>:<model>:<dimensions>`, state/embedding-space.ts) every stored vector was made in. */
+export const EMBEDDING_PROVIDER_META_KEY = 'embedding_space';
 
 export const CHUNK_ROW_COLUMNS =
   'rowid, chunk_id, path, lang, symbol, kind, start_line, end_line, mtime, file_revision';

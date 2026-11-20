@@ -37,6 +37,15 @@ export interface AgentRecord extends ProgressBearingRecord {
   // `progress` and `progressAudience` come from ProgressBearingRecord: set them
   // together with `setAgentProgress`, never `progress` alone.
   toolCallCount: number;
+  /**
+   * Files this agent's settled read calls read and its settled write and edit
+   * calls changed, counted in memory per call (agents/orchestrator-runner.ts);
+   * the work board's "2 files read". Absent until the first such call.
+   */
+  filesRead?: number | undefined;
+  filesChanged?: number | undefined;
+  /** The call that started last and has not settled: the work board's title ("Writing docs/usage.md"). */
+  activeCall?: { readonly id: string; readonly name: string; readonly arguments: Readonly<Record<string, unknown>> } | undefined;
   usage?: {
     inputTokens: number;
     outputTokens: number;

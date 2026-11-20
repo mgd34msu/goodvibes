@@ -253,15 +253,21 @@ class BashServer {
     analyzeAndLintDocument(document) {
         return __awaiter(this, void 0, void 0, function* () {
             const { uri } = document;
+            // The version this analysis is of (GoodVibes patch): its quick fixes apply to it only.
+            const version = document.version;
             // Load the tree for the modified contents into the analyzer:
             let diagnostics = this.analyzer.analyze({ uri, document });
             // Run ShellCheck diagnostics:
             if (this.linter) {
                 try {
                     const sourceFolders = this.workspaceFolder ? [this.workspaceFolder] : [];
-                    const { diagnostics: lintDiagnostics, codeActions } = yield this.linter.lint(document, sourceFolders, this.config.shellcheckArguments);
-                    diagnostics = diagnostics.concat(lintDiagnostics);
-                    this.uriToCodeActions[uri] = codeActions;
+                    const linted = yield this.linter.lint(document, sourceFolders, this.config.shellcheckArguments);
+                    // A later edit superseded this lint before it ran; that edit's own analysis reports.
+                    if (linted === undefined) {
+                        return;
+                    }
+                    diagnostics = diagnostics.concat(linted.diagnostics);
+                    this.uriToCodeActions[uri] = { version, codeActions: linted.codeActions };
                 }
                 catch (err) {
                     logger_1.logger.error(`Error while linting: ${err}`);
@@ -311,7 +317,10 @@ class BashServer {
     // ==============================
     onCodeAction(params) {
         return __awaiter(this, void 0, void 0, function* () {
-            const codeActionsForUri = this.uriToCodeActions[params.textDocument.uri] || {};
+            // Quick fixes computed for an older version of the document would edit the wrong text (GoodVibes patch).
+            const entry = this.uriToCodeActions[params.textDocument.uri];
+            const current = this.documents.get(params.textDocument.uri);
+            const codeActionsForUri = entry && current && entry.version === current.version ? entry.codeActions : {};
             const codeActions = params.context.diagnostics
                 .map(({ data }) => codeActionsForUri[data === null || data === void 0 ? void 0 : data.id])
                 .filter((action) => action != null);

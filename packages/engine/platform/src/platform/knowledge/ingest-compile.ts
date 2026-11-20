@@ -39,6 +39,8 @@ import type {
 } from './types.js';
 import { getKnowledgeSpaceId, knowledgeSpaceMetadata } from './spaces.js';
 import { knowledgeTopicSlug } from './topic-slug.js';
+import { KNOWLEDGE_EDGE_STAMP_KEY, knowledgeSourceCompileOwner } from './store-import.js';
+import type { OwnerStamp } from '../utils/owner-stamp.js';
 
 /** Heading topics one document may add (only headings that name a fact of it). */
 const MAX_EXTRACTION_SECTION_NODES = 24;
@@ -257,12 +259,16 @@ async function commitKnowledgeCompilation(context: KnowledgeIngestContext, sourc
     const hints = await prepareKnowledgeStructuredEntityHints(source, nextExtraction, signal, (guard) => { assertAliasesCurrent = guard; });
     const check = () => { assertCurrent(); stage.assertCurrent(); };
     check();
-    const draft = stagedCompileWriter(context, check);
+    // The source's revision this compilation reads: every edge it writes from the
+    // source carries it, and a full compilation removes what an older one wrote.
+    const from: OwnerStamp = { owner: knowledgeSourceCompileOwner(source.id),
+      revision: `${source.updatedAt}:${nextExtraction?.id ?? ''}:${nextExtraction?.updatedAt ?? ''}` };
+    const draft = stagedCompileWriter(context, check, source.id, from);
     if (structuredOnly) await writeKnowledgeStructuredEntityHints(context, source, hints, draft.writer);
     else await compileKnowledgeSourceRecords(context, source, nextExtraction, hints, draft.writer, uris);
     check();
     compiled = { nodeCount: draft.nodes.size, edgeCount: draft.edges.length };
-    return { nodes: [...draft.nodes.values()], edges: draft.edges, issues: [], assertCurrent };
+    return { nodes: [...draft.nodes.values()], edges: draft.edges, issues: [], assertCurrent, ...(structuredOnly ? {} : { supersedes: from }) };
   }, { signal });
   if (structuredOnly) return;
   context.emitIfReady((bus, ctx) => emitKnowledgeCompileCompleted(bus, ctx, {
@@ -275,7 +281,7 @@ interface KnowledgeCompileWriter {
   observed(input: KnowledgeNodeUpsertInput, evidence: unknown, readEvidence: () => unknown, origin?: KnowledgeObservationOrigin): Promise<{ readonly id: string }>;
   edge(input: KnowledgeEdgeUpsertInput): Promise<unknown>;
 }
-function stagedCompileWriter(context: KnowledgeIngestContext, assertCurrent: () => void) {
+function stagedCompileWriter(context: KnowledgeIngestContext, assertCurrent: () => void, sourceId: string, from: OwnerStamp) {
   const nodes = new Map<string, KnowledgeNodeUpsertInput>();
   const edges: KnowledgeEdgeUpsertInput[] = [];
   function stageNode(input: KnowledgeNodeUpsertInput, observed?: { evidence: unknown; readEvidence: () => unknown; origin?: KnowledgeObservationOrigin | undefined }) {
@@ -290,7 +296,13 @@ function stagedCompileWriter(context: KnowledgeIngestContext, assertCurrent: () 
   const writer: KnowledgeCompileWriter = {
     node: async (input) => stageNode(input),
     observed: async (input, evidence, readEvidence, origin) => stageNode(input, { evidence, readEvidence, origin }),
-    edge: async (input) => { edges.push(snapshotNodeInput(input)); },
+    // An edge from the compiled source is the source's own product and carries its stamp; a
+    // shared edge (one folder inside another) is not, and a recompilation never removes it.
+    edge: async (input) => {
+      edges.push(snapshotNodeInput(input.fromKind === 'source' && input.fromId === sourceId
+        ? { ...input, metadata: { ...input.metadata, [KNOWLEDGE_EDGE_STAMP_KEY]: { owner: from.owner, revision: from.revision } } }
+        : input));
+    },
   };
   return { writer, nodes, edges };
 }

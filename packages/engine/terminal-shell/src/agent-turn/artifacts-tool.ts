@@ -1,6 +1,7 @@
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { link, mkdir, open, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, link, mkdir, open, readdir, readlink, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
+import { publishReplacement, recoverReplacements, stageReplacement } from '@goodvibes-jev/engine/platform/platform/state';
 import { dirname, join } from 'node:path';
 import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
@@ -301,7 +302,27 @@ async function exportArtifactToFile(
   assertCurrent(); assertSource(); target.assertCurrent();
   await mkdir(dirname(resolvedPath), { recursive: true });
   assertCurrent(); assertSource(); target.assertCurrent();
-  await writeFile(resolvedPath, buffer, { flag: overwrite ? 'w' : 'wx' });
+  // Written beside the target and published whole: a write that fails part way leaves the file it would replace as it was.
+  // A swap a crash interrupted here earlier is settled first (the file that was in place is kept).
+  recoverReplacements(dirname(resolvedPath), () => true);
+  const replacement = stageReplacement(resolvedPath, 'file');
+  try {
+    await writeFile(replacement.staged, buffer, { flag: 'wx' });
+    if (replacement.previous !== null) await chmod(replacement.staged, (await stat(resolvedPath)).mode & 0o7777).catch(() => undefined);
+    assertCurrent(); assertSource(); target.assertCurrent();
+    if (overwrite) {
+      publishReplacement(replacement, (path) => {
+        if (statSync(path).size !== buffer.byteLength) throw new Error(`The exported file at ${path} is not the artifact's ${buffer.byteLength} bytes`);
+      });
+    } else {
+      // Never replaces a file that appeared meanwhile: the link fails when the name is taken.
+      await link(replacement.staged, resolvedPath);
+      await unlink(replacement.staged);
+    }
+  } catch (error) {
+    await rm(replacement.staged, { force: true }).catch(() => undefined);
+    throw error;
+  }
   assertCurrent(); assertSource();
   return [
     'Exported Agent artifact',
@@ -429,31 +450,45 @@ function packageDocuments(collected: PackageManifest): ArtifactPackageEntry[] {
   return entries;
 }
 
-async function writeArtifactPackageDirectory(resolvedPath: string, payload: ArtifactPackagePayload, assertCurrent: (target: string) => void, overwrite: boolean): Promise<void> {
-  const destinationExisted = existsSync(resolvedPath);
-  const created: string[] = [];
-  const createdDirs: string[] = [];
+/**
+ * The package is built whole in a directory beside the target and published
+ * with one rename; the directory it replaces is kept until the new one is in
+ * place and holds its manifest, then removed. A write that fails part way
+ * leaves the earlier package exactly as it was. Files of the earlier directory
+ * that the new package does not contain are the caller's: they are carried
+ * into the new directory (hard links, a copy where links cannot be made) and
+ * returned so the result can list them.
+ */
+async function writeArtifactPackageDirectory(resolvedPath: string, payload: ArtifactPackagePayload, assertCurrent: (target: string) => void): Promise<string[]> {
+  // A swap a crash interrupted here earlier is settled first: a package that holds its manifest stays.
+  await mkdir(dirname(resolvedPath), { recursive: true });
+  recoverReplacements(dirname(resolvedPath), (path) => path !== resolvedPath || existsSync(join(path, 'manifest.json')));
+  const replacement = stageReplacement(resolvedPath, 'directory');
   try {
+    await mkdir(replacement.staged, { recursive: true });
     for (const entry of payload.entries) {
-      const target = join(resolvedPath, ...entry.path.split('/'));
+      const target = join(replacement.staged, ...entry.path.split('/'));
       assertCurrent(target);
-      const madeDir = await mkdir(dirname(target), { recursive: true });
-      if (madeDir) createdDirs.push(madeDir);
-      assertCurrent(target);
-      const existed = existsSync(target);
-      await writeFile(target, entry.buffer, { flag: overwrite ? 'w' : 'wx' });
-      if (!existed) created.push(target);
-      assertCurrent(target);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, entry.buffer, { flag: 'wx' });
     }
+    const leftovers = replacement.previous !== null ? await leftoverPackageFiles(resolvedPath, payload) : [];
+    for (const relativePath of leftovers) {
+      const from = join(resolvedPath, ...relativePath.split('/'));
+      const to = join(replacement.staged, ...relativePath.split('/'));
+      await mkdir(dirname(to), { recursive: true });
+      const kind = await stat(from).catch(() => null);
+      const linkTarget = await readlink(from).catch(() => null);
+      if (linkTarget !== null) await symlink(linkTarget, to);
+      else if (kind?.isFile()) await link(from, to).catch(() => copyFile(from, to));
+    }
+    assertCurrent(resolvedPath);
+    publishReplacement(replacement, (path) => {
+      if (!existsSync(join(path, 'manifest.json'))) throw new Error(`The package at ${path} has no manifest.json`);
+    });
+    return leftovers;
   } catch (error) {
-    // A half-written package has no manifest that describes it. Remove only what
-    // this call created: a directory or file the caller already had is theirs.
-    if (!destinationExisted) await rm(resolvedPath, { recursive: true, force: true }).catch(() => undefined);
-    else {
-      for (const target of created) await unlink(target).catch(() => undefined);
-      // mkdir returns the first directory it made; everything under it is ours.
-      for (const dir of createdDirs) await rm(dir, { recursive: true, force: true }).catch(() => undefined);
-    }
+    await rm(replacement.staged, { recursive: true, force: true }).catch(() => undefined);
     throw error;
   }
 }
@@ -463,7 +498,7 @@ async function leftoverPackageFiles(resolvedPath: string, payload: ArtifactPacka
   const expected = new Set(payload.entries.map((entry) => entry.path));
   const present = await readdir(resolvedPath, { recursive: true, withFileTypes: true }).catch(() => []);
   return present
-    .filter((item) => item.isFile())
+    .filter((item) => item.isFile() || item.isSymbolicLink())
     .map((item) => join(item.parentPath, item.name).slice(resolvedPath.length + 1).split('\\').join('/'))
     .filter((path) => !expected.has(path));
 }
@@ -498,9 +533,7 @@ async function exportArtifactPackage(
   const check = (path = resolvedPath) => { assertCurrent(); for (const source of sources) source(); target.assertCurrent(path); };
   check();
   const payload = await buildArtifactPackagePayload(loaded, { signal, assertCurrent: check });
-  const reused = existsSync(resolvedPath);
-  await writeArtifactPackageDirectory(resolvedPath, payload, check, overwrite);
-  const leftovers = reused ? await leftoverPackageFiles(resolvedPath, payload) : [];
+  const leftovers = await writeArtifactPackageDirectory(resolvedPath, payload, check);
   const artifactDir = join(resolvedPath, 'artifacts');
 
   return [

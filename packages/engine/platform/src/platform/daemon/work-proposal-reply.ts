@@ -34,7 +34,7 @@ export interface WorkProposalReplyDeps {
    * when ingress asked it with the message's other questions.
    */
   readonly reading?: { readonly target: WorkProposalRecord; readonly answer: InboundReading['proposal'] } | undefined;
-  readonly proposals?: (Pick<WorkProposalStore, 'listPending' | 'resolve'> & Partial<Pick<WorkProposalStore, 'get'>>) | undefined;
+  readonly proposals?: (Pick<WorkProposalStore, 'listPending' | 'resolve'> & Partial<Pick<WorkProposalStore, 'get' | 'markStarted'>>) | undefined;
   /**
    * Start the agreed work. Called only after an affirmative reply resolved a
    * pending proposal, so the run is pre-authorized by construction and must
@@ -153,7 +153,8 @@ async function resolveOwnedProposalReply(input: ChannelIngressPolicyInput, deps:
   const reply = { decision: answer === 'reject' ? 'negative' : 'affirmative',
     ...(answer === 'steer' ? { note: text } : {}) };
 
-  const resolved = store.resolve(target.id, reply.decision === 'affirmative' ? 'accepted' : 'declined');
+  // Saved before it is acted on or acknowledged (a failed save throws, and the proposal stays open).
+  const resolved = await store.resolve(target.id, reply.decision === 'affirmative' ? 'accepted' : 'declined');
   if (!resolved) {
     // Reaped between listPending and resolve, or answered by a racing reply.
     // A racing "yes" lost to the winning one: that proposal is under way, not expired.
@@ -184,6 +185,8 @@ async function resolveOwnedProposalReply(input: ChannelIngressPolicyInput, deps:
   });
   try {
     await deps.startAgreedWork(resolved, reply.note);
+    // Started: a restart from here on does not start it again.
+    store.markStarted?.(resolved.id);
   } catch (error) {
     // The proposal is already terminal, so a throw here would otherwise leave
     // the owner's "yes" answered by nothing.

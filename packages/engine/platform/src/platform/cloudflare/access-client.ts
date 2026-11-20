@@ -1,3 +1,4 @@
+import { revealOrNull } from '../security/secret.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { SecretsManager } from '../config/secrets.js';
 import { readCloudflareConfig } from './config.js';
@@ -36,7 +37,7 @@ export async function resolveAccessCredentials(
     const fromRef = parseAccessCredentials((await resolveSecretRef(ctx, ref)).value);
     if (fromRef) return fromRef;
   }
-  return parseAccessCredentials(await secretsManager?.get(CLOUDFLARE_ACCESS_SERVICE_TOKEN_KEY) ?? null);
+  return parseAccessCredentials(revealOrNull(await secretsManager?.get(CLOUDFLARE_ACCESS_SERVICE_TOKEN_KEY), 'dispatch'));
 }
 
 /**

@@ -182,6 +182,12 @@ export interface ImapAppendDraftInput {
   readonly references?: string | undefined;
   /** Overrides Drafts-folder discovery. */
   readonly mailbox?: string | undefined;
+  /**
+   * The draft's `Message-ID`, `<id@domain>`: minted once per draft and kept for
+   * every attempt to save it, so a save whose answer was lost can be found in
+   * the Drafts folder before it is saved again.
+   */
+  readonly messageId?: string | undefined;
 }
 
 /** Where an appended draft landed, and under which UID if the server said. */

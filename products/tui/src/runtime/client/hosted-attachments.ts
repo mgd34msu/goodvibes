@@ -1,5 +1,17 @@
 import type { HostedSessionFeed } from '../../views/hosted-session-feed.ts';
 import type { HostedSessionAttachment, HostedSessionRecord, HostedSessionsClient } from './hosted-sessions.ts';
+import { SessionBindingOwner, type SessionBinding } from '@goodvibes-jev/engine/platform/platform/runtime/client/session-binding';
+
+/**
+ * One attachment: the client it was made through, which stays on the daemon
+ * that holds it (operator-endpoint.ts `pinDaemonVerbCaller`), and that
+ * daemon's origin. Keyed by session id within that daemon; releasing it
+ * always goes back through its own client, never the newly selected daemon.
+ */
+interface HeldAttachment {
+  readonly client: HostedSessionsClient;
+  readonly origin: string;
+}
 
 interface Ownership {
   tail: Promise<void>;
@@ -8,18 +20,45 @@ interface Ownership {
   pendingReplacements: number;
   closeResult?: Promise<boolean>;
   streamAbort: AbortController | null;
-  readonly sessions: Map<string, HostedSessionsClient>;
+  readonly sessions: Map<string, HeldAttachment>;
+  /** The attachment the feed shows, as (daemon origin, session id, generation): what a draft or a steer was captured for. */
+  readonly binding: SessionBindingOwner;
 }
 const owners = new WeakMap<HostedSessionFeed, Ownership>();
-function owner(feed: HostedSessionFeed, client: HostedSessionsClient): Ownership {
+function owner(feed: HostedSessionFeed, client: HostedSessionsClient, origin: string): Ownership {
   let state = owners.get(feed);
   if (!state) {
-    state = { tail: Promise.resolve(), closing: false, generation: 0, pendingReplacements: 0, streamAbort: null, sessions: new Map() };
+    state = { tail: Promise.resolve(), closing: false, generation: 0, pendingReplacements: 0, streamAbort: null, sessions: new Map(), binding: new SessionBindingOwner() };
     owners.set(feed, state);
     const current = feed.getState().record;
-    if (current && current.status !== 'terminated') state.sessions.set(current.id, client);
+    if (current && current.status !== 'terminated') {
+      state.sessions.set(current.id, { client, origin });
+      state.binding.bind(origin, current.id);
+    }
   }
   return state;
+}
+
+/** The binding of the attachment the feed shows now, or null: captured by a draft or a steer when it starts. */
+export function currentHostedBinding(feed: HostedSessionFeed): SessionBinding | null {
+  const binding = owners.get(feed)?.binding.current() ?? null;
+  return binding && feed.getState().record?.id === binding.sessionId ? binding : null;
+}
+
+/**
+ * Throws `TargetChangedError` (code TARGET_CHANGED) when `binding` is not the
+ * attachment the feed shows now: another session was attached, or another
+ * daemon, since it was captured. `what` names the thing being sent.
+ */
+export function assertHostedBindingCurrent(feed: HostedSessionFeed, binding: SessionBinding, what: string): void {
+  const state = owners.get(feed);
+  if (!state) throw new Error(`${what} was for hosted session ${binding.sessionId}, and no hosted session is attached now`);
+  state.binding.assertCurrent(binding, what);
+}
+
+/** The daemon origin an attachment was made on, or undefined when this terminal holds none for that id. */
+export function hostedAttachmentOrigin(feed: HostedSessionFeed, sessionId: string): string | undefined {
+  return owners.get(feed)?.sessions.get(sessionId)?.origin;
 }
 function enqueue<T>(state: Ownership, operation: () => Promise<T>): Promise<T> {
   const result = state.tail.then(operation);
@@ -28,9 +67,10 @@ function enqueue<T>(state: Ownership, operation: () => Promise<T>): Promise<T> {
 }
 const errorText = (error: unknown): string => error instanceof Error ? error.message : String(error);
 async function release(state: Ownership, id: string): Promise<HostedSessionRecord> {
-  const client = state.sessions.get(id);
-  if (!client) throw new Error(`No owned hosted attachment for ${id}`);
-  const record = await client.detach(id);
+  const held = state.sessions.get(id);
+  if (!held) throw new Error(`No owned hosted attachment for ${id}`);
+  // Through the client it was made with: the daemon that holds it, whichever is selected now.
+  const record = await held.client.detach(id);
   state.sessions.delete(id);
   return record;
 }
@@ -48,10 +88,12 @@ function stopStream(feed: HostedSessionFeed, state: Ownership): unknown[] {
 export function replaceHostedAttachment(
   feed: HostedSessionFeed,
   client: HostedSessionsClient,
+  /** The daemon `client` calls (its origin): recorded with the attachment. */
+  origin: string,
   target: string | (() => Promise<HostedSessionRecord>),
   openStream: (attachment: HostedSessionAttachment, signal: AbortSignal) => Promise<void>,
 ): Promise<HostedSessionAttachment> {
-  const state = owner(feed, client);
+  const state = owner(feed, client, origin);
   const generation = state.generation;
   state.pendingReplacements++;
   return enqueue(state, async () => {
@@ -66,11 +108,11 @@ export function replaceHostedAttachment(
       if (typeof target === 'function') {
         const created = await target();
         targetId = created.id;
-        state.sessions.set(targetId, client); // create already attaches this client
+        state.sessions.set(targetId, { client, origin }); // create already attaches this client
       }
       if (state.closing || generation !== state.generation) throw new Error('Hosted attachment closed while creating the session');
       const attachment = await client.attach(targetId!);
-      state.sessions.set(attachment.session.id, client);
+      state.sessions.set(attachment.session.id, { client, origin });
       targetId = attachment.session.id;
       if (state.closing || generation !== state.generation) throw new Error('Hosted attachment closed while attaching');
       if (previousId && previousId !== targetId && state.sessions.has(previousId)) await release(state, previousId);
@@ -79,6 +121,8 @@ export function replaceHostedAttachment(
       let streamCloseFailure: unknown;
       try { feed.closeStream(); } catch (error) { streamCloseFailure = error; }
       feed.attach(attachment.session, attachment.history);
+      // A new attachment: what was captured for the earlier one is no longer current.
+      state.binding.bind(origin, attachment.session.id);
       const abort = new AbortController();
       state.streamAbort = abort;
       await openStream(attachment, abort.signal);
@@ -112,13 +156,13 @@ async function releaseAll(feed: HostedSessionFeed, state: Ownership): Promise<re
     try { records.push(await release(state, id)); }
     catch (error) { errors.push(`${id}: ${errorText(error)}`); }
   }
-  if (!currentId || !state.sessions.has(currentId)) feed.clear();
+  if (!currentId || !state.sessions.has(currentId)) { feed.clear(); state.binding.clear(); }
   if (errors.length) throw new Error(`Hosted detach failed: ${errors.join('; ')}${records.length ? `; released ${records.map(record => `${record.id} (${record.status})`).join(', ')}` : ''}`);
   return records;
 }
 
-export function detachHostedAttachments(feed: HostedSessionFeed, client: HostedSessionsClient): Promise<readonly HostedSessionRecord[]> {
-  const state = owner(feed, client);
+export function detachHostedAttachments(feed: HostedSessionFeed, client: HostedSessionsClient, origin: string): Promise<readonly HostedSessionRecord[]> {
+  const state = owner(feed, client, origin);
   state.generation++;
   const streamErrors = stopStream(feed, state);
   return enqueue(state, async () => {
@@ -130,8 +174,8 @@ export function detachHostedAttachments(feed: HostedSessionFeed, client: HostedS
 }
 
 /** Stops admission synchronously, then drains remote receipts, without killing sessions. */
-export function closeHostedAttachments(feed: HostedSessionFeed, client: HostedSessionsClient): Promise<boolean> {
-  const state = owner(feed, client);
+export function closeHostedAttachments(feed: HostedSessionFeed, client: HostedSessionsClient, origin: string): Promise<boolean> {
+  const state = owner(feed, client, origin);
   if (state.closeResult) return state.closeResult;
   state.closing = true;
   state.generation++;
@@ -148,5 +192,7 @@ export function closeHostedAttachments(feed: HostedSessionFeed, client: HostedSe
 }
 
 export function forgetHostedAttachment(feed: HostedSessionFeed, sessionId: string): void {
-  owners.get(feed)?.sessions.delete(sessionId);
+  const state = owners.get(feed);
+  state?.sessions.delete(sessionId);
+  if (state?.binding.current()?.sessionId === sessionId) state.binding.clear();
 }

@@ -1,5 +1,5 @@
 import { createVerificationCompactor } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
-import { readVerificationHostToken, resolveVerificationHostUrl } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
+import { resolveVerificationHostUrl, verificationHostTarget } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 import { writeVerificationReportFiles } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 import {
   createVerificationPrimitives,
@@ -83,9 +83,6 @@ export function homeAuditCheck(audit: HomeAudit): LiveVerificationCheck {
   };
 }
 
-function readDaemonToken(homeDir: string): string | undefined {
-  return readVerificationHostToken(homeDir, ['GOODVIBES_DAEMON_TOKEN'], readJsonFile);
-}
 
 function resolveDaemonBaseUrl(homeDir: string, explicit?: string): string {
   return resolveVerificationHostUrl(homeDir, explicit, ['GOODVIBES_DAEMON_URL'], readJsonFile);
@@ -96,7 +93,8 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
   const projectRoot = resolve(options.projectRoot);
   const binaryPath = resolve(options.binaryPath);
   const daemonBaseUrl = resolveDaemonBaseUrl(homeDir, options.daemonBaseUrl);
-  const token = options.token ?? readDaemonToken(homeDir);
+  // This machine's token goes only to this machine's daemon; another --daemon-url needs its own --token.
+  const target = verificationHostTarget({ homeDir, url: daemonBaseUrl, explicitToken: options.token, localEnvKeys: ['GOODVIBES_DAEMON_TOKEN'], readJson: readJsonFile });
   const checks: LiveVerificationCheck[] = [];
   const commandEnv = verificationCommandEnv(homeDir);
 
@@ -184,7 +182,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
   }
 
   checks.push(
-    await fetchCheck('daemon-status', 'Authenticated daemon /status', `${daemonBaseUrl}/status`, token, (status, body) => {
+    await fetchCheck('daemon-status', 'Authenticated daemon /status', `${daemonBaseUrl}/status`, target, (status, body) => {
       if (status !== 200) return { status: 'fail', summary: `/status returned ${status}.` };
       try {
         const parsed = JSON.parse(body) as { version?: unknown; engineVersion?: unknown };
@@ -198,7 +196,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
   );
 
   checks.push(
-    await fetchCheck('daemon-health', 'Authenticated daemon /api/health', `${daemonBaseUrl}/api/health`, token, validateDaemonHealth),
+    await fetchCheck('daemon-health', 'Authenticated daemon /api/health', `${daemonBaseUrl}/api/health`, target, validateDaemonHealth),
   );
 
   checks.push(
@@ -206,7 +204,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
       'openai-compatible-models',
       'OpenAI-compatible /v1/models route',
       `${daemonBaseUrl}/v1/models`,
-      token,
+      target,
       (status, body) => {
         if (status !== 200) return { status: 'fail', summary: `/v1/models returned ${status}.` };
         try {

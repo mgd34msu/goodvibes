@@ -75,3 +75,8 @@ export function isSecret(value: unknown): value is Secret {
 export function bearerHeader(secret: Secret): { readonly Authorization: string } {
   return { Authorization: `Bearer ${secret.reveal('dispatch')}` };
 }
+
+/** The text of a secret read for `purpose`, or null when nothing was stored (a reader that took a string before secrets were typed). */
+export function revealOrNull(secret: Secret | null | undefined, purpose: RevealPurpose): string | null {
+  return secret === null || secret === undefined ? null : secret.reveal(purpose);
+}

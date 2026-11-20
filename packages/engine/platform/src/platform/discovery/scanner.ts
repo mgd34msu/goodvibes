@@ -652,9 +652,43 @@ export async function scanHosts(
 // ---------------------------------------------------------------------------
 
 /**
+ * Whether this process has looked for model servers on this computer:
+ * 'off' before any scan started, 'running' while one runs, 'done' once one
+ * finished (first run's "looking for models on this computer…" / "none
+ * found"). A scan that was cancelled or failed leaves it as it was before.
+ */
+export type LocalScanState = 'off' | 'running' | 'done';
+let localScan: LocalScanState = 'off';
+let localScansRunning = 0;
+
+export function localScanState(): LocalScanState {
+  return localScan;
+}
+
+async function trackLocalScan<T>(run: () => Promise<T>): Promise<T> {
+  const before = localScan;
+  localScansRunning += 1;
+  if (localScan !== 'done') localScan = 'running';
+  try {
+    const result = await run();
+    localScan = 'done';
+    return result;
+  } catch (error) {
+    if (localScan !== 'done' && localScansRunning === 1) localScan = before;
+    throw error;
+  } finally {
+    localScansRunning -= 1;
+  }
+}
+
+/**
  * Scans only localhost (fast, ~100ms).
  */
 export async function scanLocalhost(signal?: AbortSignal): Promise<ScanResult> {
+  return trackLocalScan(() => scanLocalhostOnce(signal));
+}
+
+async function scanLocalhostOnce(signal?: AbortSignal): Promise<ScanResult> {
   const start = Date.now();
   const { servers, skipped } = await scanHosts(['127.0.0.1'], undefined, signal);
   return {
@@ -673,6 +707,13 @@ export async function scanLocalhost(signal?: AbortSignal): Promise<ScanResult> {
  * Returns merged, deduplicated results.
  */
 export async function scan(
+  onProgress?: (completed: number, total: number) => void,
+  signal?: AbortSignal,
+): Promise<ScanResult> {
+  return trackLocalScan(() => scanNetwork(onProgress, signal));
+}
+
+async function scanNetwork(
   onProgress?: (completed: number, total: number) => void,
   signal?: AbortSignal,
 ): Promise<ScanResult> {

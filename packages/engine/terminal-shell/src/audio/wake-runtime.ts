@@ -133,12 +133,11 @@ export function createTerminalWakeRuntime(policy: {
         detail: message,
       });
     };
-    const transcribe = async (utterance: CapturedUtterance, startedWith: WakeRuntimeSettings, signal: AbortSignal): Promise<void> => {
+    const transcribe = async (utterance: CapturedUtterance, signal: AbortSignal): Promise<void> => {
       if (signal.aborted) return;
       // Per-utterance rows follow the live config, like the status line that displays them; the listener's own rows apply on restart.
       const live = resolve();
-      const settings: WakeRuntimeSettings = { ...startedWith, autoSubmit: live.autoSubmit, retainAudio: live.retainAudio };
-      if (settings.retainAudio === 'session-temp') retainWakeClip(deps, utterance);
+      if (live.retainAudio === 'session-temp') retainWakeClip(deps, utterance);
       if (utterance.silent) {
         deps.notify('[Wake] Heard the wake phrase but nothing above the silence floor followed it.');
         deps.render();
@@ -191,15 +190,17 @@ export function createTerminalWakeRuntime(policy: {
         deps.render();
         return;
       }
+      // Read when the transcript is delivered, not when transcription began: a change made while it ran applies to it.
+      const autoSubmit = resolve().autoSubmit;
       try {
-        if (settings.autoSubmit) deps.submitTurn(text);
+        if (autoSubmit) deps.submitTurn(text);
         else {
           deps.writeDraft(text);
           deps.notify(policy.draftNotice);
           deps.render();
         }
       } catch (error) {
-        deps.notify(`[Wake] The transcript was ready but could not be ${settings.autoSubmit ? 'submitted' : 'placed in the draft'}: ${error instanceof Error ? error.message : String(error)}`);
+        deps.notify(`[Wake] The transcript was ready but could not be ${autoSubmit ? 'submitted' : 'placed in the draft'}: ${error instanceof Error ? error.message : String(error)}`);
         deps.render();
       }
     };
@@ -268,7 +269,7 @@ export function createTerminalWakeRuntime(policy: {
             deps.render();
           },
           onUtterance(utterance) {
-            if (current()) void transcribe(utterance, settings, controller.signal);
+            if (current()) void transcribe(utterance, controller.signal);
           },
           onDeviceBinding(binding: NonNullable<WakeListenerState['deviceBinding']>) {
             if (!current()) return;

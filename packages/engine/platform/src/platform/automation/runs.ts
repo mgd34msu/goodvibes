@@ -56,6 +56,14 @@ export interface AutomationRun extends AutomationEntityBase {
   readonly executionIntent?: AutomationExecutionIntent | undefined;
   readonly deliveryIds: readonly string[];
   readonly deliveryAttempts?: readonly AutomationDeliveryAttempt[] | undefined;
+  /**
+   * The run's answer is owed to its targets: written with the run's end, in
+   * the same save, and cleared by the write that records its delivery. A run
+   * still owed after a restart is delivered then, under the same identity
+   * (`effect`, the delivery's `announces`), so a target that drops repeats
+   * drops a second copy.
+   */
+  readonly delivery?: { readonly state: 'owed'; readonly effect: string } | undefined;
   readonly modelId?: string | undefined;
   readonly providerId?: string | undefined;
   readonly telemetry?: AutomationRunTelemetry | undefined;

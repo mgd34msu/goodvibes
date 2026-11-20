@@ -93,6 +93,12 @@ export interface WorkProposalRecord {
    * never agree to it; the agreed work runs as the guest's turn.
    */
   readonly answerFrom?: WorkProposalAnswerFrom | undefined;
+  /**
+   * The agreed work was started (an accepted proposal only), written after the
+   * start. An accepted proposal without it after a restart was agreed and never
+   * started (the daemon stopped in between); it is started then.
+   */
+  readonly started?: boolean | undefined;
 }
 
 /** The owner's conversation that answers a guest's proposal. */
@@ -183,6 +189,7 @@ export function validateWorkProposal(value: unknown): WorkProposalRecord | null 
     // Fails closed: a record written before this field existed, or one whose
     // delivery was never confirmed, loads as unseen and stays unanswerable.
     delivered: value.delivered === true,
+    ...(value.started === true ? { started: true } : {}),
     ...(optionalString(value.surfaceId) ? { surfaceId: optionalString(value.surfaceId) } : {}),
     ...(optionalString(value.routeId) ? { routeId: optionalString(value.routeId) } : {}),
     ...(optionalString(value.externalId) ? { externalId: optionalString(value.externalId) } : {}),
@@ -485,15 +492,37 @@ export class WorkProposalStore {
    * answered a second time), or its message was never confirmed delivered (the
    * owner has not seen it, so there is nothing for them to have answered).
    */
-  resolve(id: string, outcome: 'accepted' | 'declined'): WorkProposalRecord | null {
+  async resolve(id: string, outcome: 'accepted' | 'declined'): Promise<WorkProposalRecord | null> {
     if (!this.sweepEnabled) return null;
     this.reap();
     const record = this.proposals.get(id);
     if (!record || !record.delivered || !workProposalLifecycle.can(record.status, outcome)) return null;
     const resolved: WorkProposalRecord = { ...record, status: outcome };
+    // Taken at once, so a racing second answer finds it answered; acted on only
+    // once saved: an answer whose save failed is given back and throws, so the
+    // owner is never told work started that a restart would forget.
     this.proposals.set(id, resolved);
-    void this.persist();
+    try {
+      await this.persistOrThrow();
+    } catch (error) {
+      if (this.proposals.get(id) === resolved) this.proposals.set(id, record);
+      throw error;
+    }
     return resolved;
+  }
+
+  /** Record that an accepted proposal's work was started (one write). */
+  markStarted(id: string): void {
+    const record = this.proposals.get(id);
+    if (!record || record.status !== 'accepted' || record.started) return;
+    this.proposals.set(id, { ...record, started: true });
+    void this.persist();
+  }
+
+  /** Accepted proposals whose work was never started: read at start-up, each is started then. */
+  listAcceptedUnstarted(): WorkProposalRecord[] {
+    this.reap();
+    return [...this.proposals.values()].filter((record) => record.status === 'accepted' && record.started !== true);
   }
 
   /**
@@ -590,6 +619,20 @@ export class WorkProposalStore {
         error: summarizeError(error),
       });
     }
+  }
+
+  /** The same write as {@link persist}, in its order, but a failure throws to the caller. */
+  private persistOrThrow(): Promise<void> {
+    const path = this.storePath;
+    if (!path) return Promise.resolve();
+    const write = this.writeChain.then(async () => {
+      await this.initialization;
+      writeDocument(path, { version: WORK_PROPOSAL_SCHEMA_VERSION, proposals: [...this.proposals.values()] } satisfies PersistedFile);
+    });
+    this.writeChain = write.catch((error: unknown) => {
+      logger.warn('WorkProposalStore: persist failed', { error: summarizeError(error) });
+    });
+    return write;
   }
 
   /** Best-effort durable write, serialized so concurrent resolves cannot interleave. */

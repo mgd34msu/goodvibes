@@ -2,6 +2,7 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { resolveNotificationWebhookLocally } from '@goodvibes-jev/engine/platform/platform/integrations';
 
 export interface AgentHarnessNotificationArgs {
   readonly notificationTargetId?: unknown;
@@ -35,10 +36,12 @@ function readLimit(value: unknown, fallback: number): number {
 function readConfiguredWebhookUrls(context: CommandContext): readonly string[] {
   const notifications = context.platform.configManager.getCategory('notifications') as { readonly webhookUrls?: unknown } | null;
   const urls = Array.isArray(notifications?.webhookUrls) ? notifications.webhookUrls : [];
+  // Each member is a reference to a stored URL; only its scheme, host and shape are described below.
   return urls
     .filter((url): url is string => typeof url === 'string')
     .map((url) => url.trim())
-    .filter((url) => url.length > 0);
+    .filter((url) => url.length > 0)
+    .map((entry) => resolveNotificationWebhookLocally(entry, context.platform.secretsManager ?? undefined) ?? 'unreadable:stored-url');
 }
 
 function pathDepth(pathname: string): number {

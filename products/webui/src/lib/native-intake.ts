@@ -289,28 +289,15 @@ export async function openNativeIntake(
         return records.filter((record) => !inScope(record));
       },
       /**
-       * Saved originals of this daemon and project from an earlier pairing of this browser. The
-       * daemon answers only their own owner, so they are shown read-only and can be discarded.
+       * How many originals of this daemon and project were saved in this browser under another
+       * pairing. Their text is that principal's: it is never listed here, and the records stay
+       * for their owner, who recovers them by signing in as that pairing.
        */
-      async listOtherOwners() {
+      async countOtherOwners() {
         check();
-        const records = await journal.listOthers(binding);
+        const count = await journal.countOthers(binding);
         check();
-        return records;
-      },
-      /** Remove a saved original of an earlier pairing (see `listOtherOwners`). Nothing is sent. */
-      async discardOtherOwner(record: NativeIntakeBrowserRecord) {
-        check();
-        if (
-          record.binding.endpoint !== binding.endpoint ||
-          record.binding.projectId !== binding.projectId ||
-          record.binding.principalId === binding.principalId
-        )
-          throw new Error("Only a request saved under an earlier pairing of this browser can be discarded here.");
-        const target = await executionJournal.get(record.binding, record.command.inputId);
-        if (target) await executionJournal.remove(target);
-        await journal.remove(record);
-        check();
+        return count;
       },
       /** How many saved records this build cannot read. */
       unreadable: () => journal.unreadable(),

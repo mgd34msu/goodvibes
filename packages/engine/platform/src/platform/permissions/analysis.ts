@@ -155,5 +155,12 @@ export function withReading(analysis: PermissionRequestAnalysis, reading: GateRe
     ], 5),
     sideEffects: facts.map((name) => FACT_WORDING[name]),
     blastRadius: blastRadiusOf(reading, category),
+    reading: {
+      family: reading.family,
+      stakes: reading.stakes,
+      facts: { mutates: reading.mutates, outward: reading.outward, secrets: reading.secrets, irreversible: reading.irreversible,
+        beyondProject: reading.beyondProject, weakensSecurity: reading.weakensSecurity, obfuscated: reading.obfuscated },
+      uncertain: [...reading.uncertain],
+    },
   };
 }

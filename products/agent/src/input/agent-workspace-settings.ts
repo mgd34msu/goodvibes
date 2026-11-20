@@ -4,7 +4,7 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import { containsIssuerCredential, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
 import { readFileSync } from 'node:fs';
 import { getAgentSettingsSchema, readAgentSettingValue, type AgentConfigSetting } from '../config/settings-catalog.ts';
-import type { PendingSubscriptionLogin, ProviderSubscription } from '@goodvibes-jev/engine/platform/platform/config';
+import type { PendingSubscriptionLogin, ProviderSubscription, SubscriptionGrant } from '@goodvibes-jev/engine/platform/platform/config';
 import { setHarnessSetting } from '../agent/harness-control.ts';
 import { applyThemeModeSettingChange, applyThemeNameSettingChange, THEME_MODE_CONFIG_KEY, THEME_NAME_CONFIG_KEY } from '../renderer/theme-mode-config.ts';
 import { listThemeChoices, normalizeThemeName } from '../renderer/theme.ts';
@@ -288,7 +288,8 @@ function readRecordMap(record: Record<string, unknown>, key: string): readonly u
   return isRecord(value) ? Object.values(value) : [];
 }
 
-function isProviderSubscription(value: unknown): value is ProviderSubscription {
+/** A sign-in as an exported or older subscriptions file holds it: the tokens as text. */
+function isProviderSubscription(value: unknown): value is SubscriptionGrant {
   return isRecord(value)
     && typeof value.provider === 'string'
     && typeof value.accessToken === 'string'
@@ -297,6 +298,20 @@ function isProviderSubscription(value: unknown): value is ProviderSubscription {
     && typeof value.overrideAmbientApiKeys === 'boolean'
     && typeof value.createdAt === 'number'
     && typeof value.updatedAt === 'number';
+}
+
+/**
+ * Whether the stored sign-in is the one in the file: the same record apart
+ * from its tokens, which the manager hands out only as Secrets. A renewal or
+ * a new sign-in changes `updatedAt`, so a record that matches holds the same
+ * grant. The store's own bookkeeping (`tokenRevision`, `refreshingUntil`) is
+ * not part of a sign-in.
+ */
+function sameSignIn(current: ProviderSubscription | null, incoming: SubscriptionGrant): boolean {
+  if (!current) return false;
+  const { accessToken: _a, refreshToken: currentRefresh, tokenRevision: _r, refreshingUntil: _l, ...stored } = current;
+  const { accessToken: _b, refreshToken: incomingRefresh, tokenRevision: _s, refreshingUntil: _m, ...imported } = incoming;
+  return (currentRefresh === undefined) === (incomingRefresh === undefined) && valuesMatch(stored, imported);
 }
 
 function isPendingSubscriptionLogin(value: unknown): value is PendingSubscriptionLogin {
@@ -325,7 +340,7 @@ function planTuiSubscriptions(
         entries.push({ kind: 'active', status: 'skipped', reason: 'active subscription with invalid shape' });
         continue;
       }
-      const unchanged = valuesMatch(manager.get(entry.provider), entry);
+      const unchanged = sameSignIn(manager.get(entry.provider), entry);
       entries.push({ provider: entry.provider, kind: 'active', status: unchanged ? 'unchanged' : 'would_import' });
       if (!unchanged) values.push({ kind: 'active', value: entry });
     }
@@ -806,7 +821,9 @@ export function captureAgentWorkspaceTuiSettingsImportPreview(context: CommandCo
   if (!paths || !config) throw new ToolInputProjectionError('unconfigured');
   const builtin = config.getSchema(), host = config.getHostSettingsSchema();
   const incarnation = config.getConfigurationIncarnation();
-  const subscriptionValues = () => JSON.stringify(captureStrictJudgmentJson(subscriptions ? [subscriptions.list(), subscriptions.listPending()] : []));
+  // Each sign-in's record without its tokens (they are Secrets): a renewal or a new sign-in changes updatedAt and tokenRevision.
+  const subscriptionValues = () => JSON.stringify(captureStrictJudgmentJson(subscriptions
+    ? [subscriptions.list().map(({ accessToken: _access, refreshToken: _refresh, ...record }) => record), subscriptions.listPending()] : []));
   const originalSubscriptions = subscriptionValues();
   const sourcePaths = [paths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'settings.json'),
     paths.resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'settings.json'), paths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'subscriptions.json')];

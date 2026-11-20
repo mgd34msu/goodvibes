@@ -25,6 +25,8 @@ export interface IdempotencyRecord {
   status: IdempotencyStatus;
   /** Unix timestamp (ms) when the record was first created. */
   readonly createdAt: number;
+  /** Which record this is: a record that replaces an abandoned one under the same key gets a new epoch, so the old owner's claim settles nothing. */
+  readonly epoch: number;
   /** Unix timestamp (ms) when the record transitioned out of `in-flight`. */
   completedAt?: number | undefined;
   /**
@@ -72,8 +74,7 @@ export interface IdempotencyStoreConfig {
   maxRecords?: number | undefined;
   /**
    * How long an `in-flight` record may go without being finalized before it is
-   * treated as abandoned (its caller was torn down without `markComplete` or
-   * `markFailed`). An abandoned record no longer blocks a retry and is swept.
+   * treated as abandoned (its caller was torn down without settling its claim). An abandoned record no longer blocks a retry and is swept.
    * Set it above the longest legitimate run, since a retry of a run that is
    * still going would execute it twice.
    *

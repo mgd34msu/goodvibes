@@ -136,7 +136,13 @@ function uniqueStrings(values: Iterable<string>, limit = 24): string[] {
 }
 
 function decodeBuffer(buffer: Buffer): string {
-  return cleanText(buffer.toString('utf-8'));
+  return cleanText(decodeRaw(buffer));
+}
+
+/** The text as stored, for parsers of structured formats: nothing collapsed, trimmed or rewritten. */
+function decodeRaw(buffer: Buffer): string {
+  const text = buffer.toString('utf-8');
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
 async function extractHtml(buffer: Buffer, owner: KnowledgeExtractionOwner): Promise<KnowledgeExtractionResult> {
@@ -233,9 +239,11 @@ function extractTextLike(
 }
 
 function extractJson(buffer: Buffer): KnowledgeExtractionResult {
-  const text = decodeBuffer(buffer);
+  // Parsed from the raw text, so a string value keeps its spaces; only the search text is cleaned.
+  const raw = decodeRaw(buffer);
+  const text = cleanText(raw);
   try {
-    const parsed = JSON.parse(text) as unknown;
+    const parsed = JSON.parse(raw) as unknown;
     const rootKeys = isRecord(parsed)
       ? Object.keys(parsed).slice(0, 24)
       : [];
@@ -276,43 +284,50 @@ function extractJson(buffer: Buffer): KnowledgeExtractionResult {
   }
 }
 
+/**
+ * The header and the first five rows of a delimited table, parsed from the raw
+ * text: a quoted cell keeps its delimiters, quotes and line breaks, and an
+ * empty cell stays an empty cell. Nothing is cleaned before parsing.
+ */
 function parseDelimited(text: string, delimiter: ',' | '\t'): { headers: string[]; rows: string[][] } {
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  if (lines.length === 0) return { headers: [], rows: [] };
-  const parseLine = (line: string): string[] => {
-    const cells: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    for (let index = 0; index < line.length; index += 1) {
-      const char = line[index]!;
+  const records: string[][] = [];
+  let cells: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  let quoted = false;
+  const endCell = (): void => { cells.push(quoted ? current : current.trim()); current = ''; quoted = false; };
+  const endRecord = (): boolean => {
+    endCell();
+    // A blank line is not a row.
+    if (!(cells.length === 1 && cells[0] === '')) records.push(cells);
+    cells = [];
+    return records.length >= 6;
+  };
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (inQuotes) {
       if (char === '"') {
-        if (inQuotes && line[index + 1] === '"') {
-          current += '"';
-          index += 1;
-        } else {
-          inQuotes = !inQuotes;
-        }
-        continue;
-      }
-      if (char === delimiter && !inQuotes) {
-        cells.push(current.trim());
-        current = '';
-        continue;
-      }
-      current += char;
+        if (text[index + 1] === '"') { current += '"'; index += 1; }
+        else inQuotes = false;
+      } else current += char;
+      continue;
     }
-    cells.push(current.trim());
-    return cells;
-  };
-  return {
-    headers: parseLine(lines[0]!),
-    rows: lines.slice(1, 6).map(parseLine),
-  };
+    if (char === '"' && current.trim() === '') { current = ''; inQuotes = true; quoted = true; continue; }
+    if (char === delimiter) { endCell(); continue; }
+    if (char === '\r' && text[index + 1] === '\n') continue;
+    if (char === '\n' || char === '\r') { if (endRecord()) break; continue; }
+    current += char;
+  }
+  if (records.length < 6 && (current.length > 0 || cells.length > 0)) endRecord();
+  if (records.length === 0) return { headers: [], rows: [] };
+  return { headers: records[0]!, rows: records.slice(1, 6) };
 }
 
 function extractDelimited(buffer: Buffer, delimiter: ',' | '\t', format: 'csv' | 'tsv'): KnowledgeExtractionResult {
-  const text = decodeBuffer(buffer);
-  const { headers, rows } = parseDelimited(text, delimiter);
+  // Parsed from the raw text (consecutive tabs are empty cells, a quoted cell may span lines); only the search text is cleaned.
+  const raw = decodeRaw(buffer);
+  const text = cleanText(raw);
+  const { headers, rows } = parseDelimited(raw, delimiter);
   const summary = headers.length > 0
     ? `${format.toUpperCase()} table with ${headers.length} column(s); sampled ${rows.length} row(s).`
     : `${format.toUpperCase()} table.`;

@@ -83,7 +83,7 @@ interface NativeTurnOwnership {
   failure?: NativeHostedTurnFailure;
 }
 export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & {
-  readonly manager: Pick<HostedSessionManager, 'create' | 'deliverNative' | 'cancelNative' | 'kill' | 'get' | 'captureNativeContinuation' | 'assertNativeContinuation' | 'waitForNativeAvailability'> & Partial<Pick<HostedSessionManager, 'withNativeContinuationDiff'>>;
+  readonly manager: Pick<HostedSessionManager, 'create' | 'deliverNative' | 'cancelNative' | 'kill' | 'get' | 'ownersOf' | 'captureNativeContinuation' | 'assertNativeContinuation' | 'waitForNativeAvailability'> & Partial<Pick<HostedSessionManager, 'withNativeContinuationDiff'>>;
   readonly broker: Pick<SharedSessionBroker, 'reserveNativeTurnInput' | 'getInputsSince' | 'settleNativeTurnInput'>;
   readonly journal?: NativeHostedTurnJournal;
 }) {
@@ -118,10 +118,16 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
     return session;
   }
   async function proveSession(sessionId: string, principalId: string, allowRecovery = false, originSurface?: NativeHostedTurnOriginSurface) {
+    // The hosted session's own record is what proves the session: that a
+    // native turn made it, for which surface, and whose it is (its creator,
+    // saved with it). The journal holds turns, and compacting it may drop the
+    // turn that created the session; the session stays and stays provable.
+    const hosted = deps.manager.get(sessionId);
+    if (!hosted?.nativeConversation) throw new NativeHostedTurnError('stale');
+    const surface: NativeHostedTurnOriginSurface | null = hosted.originSurface === 'agent' ? 'agent' : hosted.originSurface === 'webui' ? 'webui' : null;
+    if (surface === null) throw new NativeHostedTurnError('stale');
+    if (deps.manager.ownersOf(sessionId)[0] !== principalId) throw new NativeHostedTurnError('forbidden');
     const records = await journal.sessionRecords(sessionId);
-    const root = records.find(record => record.sessionId === sessionId && record.identity.continuationSessionId === undefined);
-    if (!root) throw new NativeHostedTurnError('stale');
-    const surface = root.originSurface ?? 'webui';
     if ((originSurface !== undefined && originSurface !== surface) || records.some(record =>
       !(record.state === 'cancelled' && record.sessionId === null) && (record.originSurface ?? 'webui') !== surface)) throw new NativeHostedTurnError('stale');
     if (records.some(record => record.identity.projectId !== deps.projectId || record.identity.principalId !== principalId)) throw new NativeHostedTurnError('forbidden');
@@ -182,8 +188,10 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
   async function session(sessionId: string, authority: NativePairedExecutionAuthority | undefined, options: NativeHostedTurnOptions): Promise<NativeHostedSessionLookup> {
     if (closed) throw new NativeHostedTurnError('closed');
     const records = await journal.sessionRecords(sessionId);
-    if (!records.length) {
-      if (deps.manager.get(sessionId)?.nativeConversation || deps.broker.getInputsSince(sessionId).some(input => input.metadata?.['nativeConversation'] !== undefined)) throw new NativeHostedTurnError('recovery-required');
+    // A native session whose turns were all compacted out of the journal is
+    // still native: its own record proves it below.
+    if (!records.length && !deps.manager.get(sessionId)?.nativeConversation) {
+      if (deps.broker.getInputsSince(sessionId).some(input => input.metadata?.['nativeConversation'] !== undefined)) throw new NativeHostedTurnError('recovery-required');
       return { kind: 'legacy' };
     }
     if (!authority) throw new NativeHostedTurnError('forbidden');
@@ -350,7 +358,8 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
       if (owned.cancelled) throw new NativeHostedTurnError('closed');
       const session = source.continuation
         ? assertSession(source.continuation.sessionId, identity.principalId, originSurface)
-        : await deps.manager.create({ workspaceRoot: projectRoot, title: nativeSessionTitle(source.text), originSurface, detachPolicy: 'survive' }, { nativeConversation: true, ...(permissionMode === undefined ? {} : { permissionMode }) });
+        // Created with its principal as its first owner: the session record, saved with it, is what later proves whose it is.
+        : await deps.manager.create({ workspaceRoot: projectRoot, title: nativeSessionTitle(source.text), originSurface, detachPolicy: 'survive', principalId: identity.principalId }, { nativeConversation: true, ...(permissionMode === undefined ? {} : { permissionMode }) });
       createdNewSession = !source.continuation;
       owned.sessionId = session.id;
       if (session.originSurface !== originSurface || realpathSync(session.workspaceRoot) !== projectRoot || realpathSync(deps.projectRoot) !== projectRoot) throw new NativeHostedTurnError('stale');

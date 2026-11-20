@@ -151,15 +151,13 @@ export interface SharedSessionRecord {
   readonly metadata: Record<string, unknown>;
 }
 
-export interface SharedSessionSubmission {
+interface SharedSessionSubmissionBase {
   readonly session: SharedSessionRecord;
   readonly userMessage: SharedSessionMessage;
   readonly routeBinding?: AutomationRouteBinding | undefined;
   readonly input: SharedSessionInputRecord;
   readonly intent: SharedSessionInputIntent;
-  readonly mode: 'spawn' | 'continued-live' | 'queued-follow-up' | 'queued-for-surface' | 'rejected';
   readonly state: SharedSessionInputRecord['state'];
-  readonly task?: string | undefined;
   readonly activeAgentId?: string | undefined;
   readonly created: boolean;
   /**
@@ -170,6 +168,28 @@ export interface SharedSessionSubmission {
    */
   readonly duplicate?: true | undefined;
 }
+
+/**
+ * What a submitted message became. Only `spawn` carries the task to start an
+ * agent with; every other mode was taken by a running agent, queued (for the
+ * next turn or for a live surface to collect), or rejected, and has no task, so
+ * a caller must switch on `mode` to start anything.
+ */
+export type SharedSessionSubmission =
+  | (SharedSessionSubmissionBase & { readonly mode: 'spawn'; readonly task: string })
+  | (SharedSessionSubmissionBase & {
+    readonly mode: 'continued-live' | 'queued-follow-up' | 'queued-for-surface' | 'rejected';
+    readonly task?: undefined;
+  });
+
+/**
+ * A submission as an operator client reads it back: the host already started
+ * any agent itself (`agentId`), so the task is not part of the answer.
+ */
+export type SharedSessionSubmissionReceipt = SharedSessionSubmissionBase & {
+  readonly mode: SharedSessionSubmission['mode'];
+  readonly task?: string | undefined;
+};
 
 export interface SubmitSharedSessionMessageInput {
   readonly sessionId?: string | undefined;

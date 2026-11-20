@@ -45,7 +45,6 @@ import {
   refreshOnboardingHydrationForHandler,
   restartOnboardingExternalServicesIfNeededForHandler,
   restoreOnboardingModelPickerCancelStateForHandler,
-  saveWizardProgressForHandler,
   syncRuntimeFromOnboardingRequestForHandler,
   verifyOnboardingRuntimePostureForHandler,
 } from './handler-onboarding.ts';
@@ -293,9 +292,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
         onModelPickerCommit: () => this.handleModelPickerCommit(),
         onOnboardingAction: (action: OnboardingWizardAction) => {
           void this.handleOnboardingAction(action);
-        },
-        onStepChange: () => {
-          saveWizardProgressForHandler(this);
         },
       },
     );

@@ -93,6 +93,7 @@ import { UserAuthManager } from '../security/user-auth.js';
 import { PairingTokenManager } from '../pairing/pairing-token-store.js';
 import { AcpHostService } from '../acp/host.js';
 import { WebhookNotifier } from '../integrations/webhooks.js';
+import { resolveNotificationWebhook } from '../integrations/notification-webhooks.js';
 import { createMcpAutonomousElicitationHandler } from '../mcp/elicitation-autonomous.js';
 import { createMcpPersonElicitation } from '../mcp/elicitation.js';
 import {
@@ -573,7 +574,11 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const worktreeRegistry = seams.worktreeRegistry?.(workingDirectory) ?? new WorktreeRegistry(workingDirectory);
   const notificationsMetadataOnly = seams.notificationsMetadataOnly
     ?? ((): boolean => readNotificationsMetadataOnly(() => configManager.get(NOTIFICATIONS_METADATA_ONLY_KEY as never)));
-  const webhookNotifier = new WebhookNotifier([], { metadataOnly: notificationsMetadataOnly, privateDeliveryHosts });
+  // notifications.webhookUrls holds references; each URL is read from the secret store only for its delivery.
+  const webhookNotifier = new WebhookNotifier([], {
+    metadataOnly: notificationsMetadataOnly, privateDeliveryHosts,
+    resolveTarget: (entry) => resolveNotificationWebhook(entry, secretsManager),
+  });
   // It can send memory-pressure notices before boot attaches it; own it now.
   scope.registry.add('shared webhook notifier', () => webhookNotifier.close());
   const replayEngine = new DeterministicReplayEngine(workingDirectory);

@@ -1,4 +1,5 @@
-import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync, unlinkSync } from 'node:fs';
+import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { noteToolWrites } from './file-watcher.js';
@@ -79,14 +80,32 @@ function holds(current: Buffer | null, content: string | Buffer | null): boolean
   return current.equals(typeof content === 'string' ? Buffer.from(content, 'utf-8') : content);
 }
 
-/** Put `content` at `path`; null removes the file. */
-function restore(path: string, content: string | Buffer | null): void {
+/**
+ * Put `content` at `path`; null removes the file. The new content is written
+ * beside the file and renamed over it, so a write that fails (a full disk)
+ * leaves the file as it was, never truncated; the file keeps its mode. With
+ * `expected`, the file is checked again right before the rename and a file
+ * changed meanwhile refuses (`conflict`), so an editor's save between the
+ * first check and this write is never overwritten.
+ */
+function restore(path: string, content: string | Buffer | null, expected?: { readonly content: string | Buffer | null; readonly conflict: () => Error }): void {
+  const check = expected === undefined ? undefined : (): void => {
+    const current = readCurrent(path);
+    // Already what this restore writes (a created file already gone) is not a change by someone else.
+    if (!holds(current, expected.content) && !holds(current, content)) throw expected.conflict();
+  };
   if (content === null) {
+    check?.();
     try { unlinkSync(path); } catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
-  } else if (typeof content === 'string') {
-    writeFileSync(path, content, 'utf-8');
   } else {
-    writeFileSync(path, content);
+    let mode: number;
+    try { mode = statSync(path).mode & 0o7777; } catch { mode = 0o666 & ~process.umask(); }
+    // Through a symlink, as a plain write would go: the link stays a link.
+    let target = path;
+    try { target = realpathSync(path); } catch { target = path; }
+    writeFileAtomic(target, typeof content === 'string' ? Buffer.from(content, 'utf-8') : content, {
+      mode, cleanupStaleTemps: false, ...(check ? { assertCurrent: check } : {}),
+    });
   }
   // An undo or redo is the product's own change, not one made outside it.
   noteToolWrites([path]);
@@ -186,7 +205,8 @@ export class FileUndoManager {
         if (!settled && !holds(current, expected(op))) throw new FileUndoConflictError(op.path, direction, paths);
       }
       for (const op of operations) {
-        restore(op.path, target(op));
+        // Checked again at the rename: a file changed since the check above refuses, and what was done is put back below.
+        restore(op.path, target(op), { content: expected(op), conflict: () => new FileUndoConflictError(op.path, direction, paths) });
         done.push(op);
         logger.debug(`file-undo: ${direction} applied`, { path: op.path });
       }
@@ -246,7 +266,10 @@ export class FileUndoManager {
     }
     const done: FileOperation[] = [];
     try {
-      for (const op of operations) { restore(op.path, op.beforeContent); done.push(op); }
+      for (const op of operations) {
+        restore(op.path, op.beforeContent, { content: op.afterContent, conflict: () => new FileUndoConflictError(op.path, 'undo', all) });
+        done.push(op);
+      }
     } catch (err) {
       for (const op of done.reverse()) {
         try { restore(op.path, op.afterContent); } catch (rollbackError) {

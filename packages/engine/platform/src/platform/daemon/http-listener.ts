@@ -6,8 +6,11 @@ import type { HookEvent } from '../hooks/types.js';
 import {
   authenticateOperatorRequest,
   extractOperatorAuthToken,
+  operatorRequestActor,
   type PairingTokenAuthenticator,
 } from '../security/http-auth.js';
+import { NO_OWNER_USER, type Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { admitEffects } from '../security/effect-authority.js';
 import { UserAuthManager } from '../security/user-auth.js';
 import { ConfigManager } from '../config/manager.js';
 import { resolveInboundTlsContext, type ResolvedInboundTlsContext } from '../runtime/network/index.js';
@@ -346,12 +349,16 @@ export class HttpListener {
   // Auth
   // -------------------------------------------------------------------------
 
-  private checkAuth(req: Request): boolean {
-    return authenticateOperatorRequest(req, {
+  /** Who the request is (an `Actor`), or null when its credential does not authenticate. */
+  private checkAuth(req: Request): Actor | null {
+    const authenticated = authenticateOperatorRequest(req, {
       sharedToken: this.authToken,
       userAuth: this.userAuth,
       pairingTokens: this.config.pairingTokens,
-    }) !== null;
+    });
+    if (authenticated === null) return null;
+    const ownerUser = this.userAuth.ownerUsername();
+    return operatorRequestActor(authenticated, ownerUser === null ? NO_OWNER_USER : { ownerUser });
   }
 
   /** A presented credential the listener refused; never carries the credential. */
@@ -453,7 +460,8 @@ export class HttpListener {
       return Response.json({ error: 'Too many requests' }, { status: 429, headers: { 'Retry-After': '60' } });
     }
 
-    if (!this.checkAuth(req)) {
+    const actor = this.checkAuth(req);
+    if (actor === null) {
       // A request with no credential is a probe, answered 401 and not reported as a failed sign-in.
       if (extractOperatorAuthToken(req)) this.emitAuthFailed(requestId, clientIp);
       return authenticationRequiredResponse();
@@ -462,6 +470,18 @@ export class HttpListener {
     const { pathname, method } = { pathname: url.pathname, method: req.method };
 
     if (pathname === '/webhook' && method === 'POST') {
+      // Firing the owner's hooks is the `hook.fire` effect, admitted here as on
+      // the daemon's own hook routes: an admin (or the owner), with write:hooks.
+      const admission = admitEffects(actor, ['hook.fire']);
+      if (admission.kind !== 'allowed') {
+        const missing = admission.kind === 'refused' ? admission.missing : 'owner';
+        return Response.json({
+          error: `Firing a hook needs ${missing === 'admin' ? 'an admin credential' : missing === 'owner' ? 'the owner' : missing}; this credential does not hold it. Nothing was fired.`,
+          code: admission.kind === 'refused' ? (missing === 'admin' ? 'ADMIN_REQUIRED' : admission.code) : 'OWNER_ONLY',
+          category: 'authorization', status: 403, effect: admission.effect, missing,
+          next: [admission.kind === 'refused' ? admission.next : 'Ask the owner to fire it from his own credential.'],
+        }, { status: 403 });
+      }
       return this.handleWebhook(req);
     }
 

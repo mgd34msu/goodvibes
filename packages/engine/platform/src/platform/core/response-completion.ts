@@ -148,24 +148,47 @@ function completionRepairMessage(findings: readonly CompletionFinding[]): string
     + findings.map((finding, index) => `${index + 1}. ${JSON.stringify({ id: finding.check, ...finding })}`).join('\n');
 }
 
-/** Include only agent IDs actually returned by this conversation's agent tool, never the entire shared fleet. */
+/** The agent modes whose results name agents this conversation started. */
+const SPAWNING_AGENT_MODES: ReadonlySet<unknown> = new Set(['spawn', 'batch-spawn']);
+
+/**
+ * The agent ids a spawn result names as started: `agentId` and a contract's
+ * `ownerAgentId` (mode spawn), and `id` / `agentId` of each entry of `agents`
+ * (mode batch-spawn). Never any other string in the result.
+ */
+function spawnedAgentIds(result: unknown): string[] {
+  if (!result || typeof result !== 'object') return [];
+  const record = result as Record<string, unknown>;
+  const ids: string[] = [];
+  for (const key of ['agentId', 'ownerAgentId']) if (typeof record[key] === 'string') ids.push(record[key]);
+  if (Array.isArray(record.agents)) {
+    for (const agent of record.agents as unknown[]) {
+      if (!agent || typeof agent !== 'object') continue;
+      const entry = agent as Record<string, unknown>;
+      if (typeof entry.id === 'string') ids.push(entry.id);
+      else if (typeof entry.agentId === 'string') ids.push(entry.agentId);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Include only agents this conversation's agent tool started: the ids its
+ * spawn and batch-spawn results name, never an id that a list, status or get
+ * result merely mentions, and never the entire shared fleet.
+ */
 export function collectResponseDelegates(conversation: ConversationManager,
   manager: Pick<AgentManager, 'list'> & Partial<Pick<AgentManager, 'getConversationSnapshot'>>, knownAgentIds: readonly string[] = []): NonNullable<ResponseCompletionInput['delegated']> {
   const messages = conversation.getMessageSnapshot();
-  const agentCalls = new Set(messages.flatMap(message => message.role === 'assistant'
-    ? (message.toolCalls ?? []).filter(call => call.name === 'agent').map(call => call.id) : []));
+  const spawnCalls = new Set(messages.flatMap(message => message.role === 'assistant'
+    ? (message.toolCalls ?? []).filter(call => call.name === 'agent' && SPAWNING_AGENT_MODES.has(call.arguments?.['mode'])).map(call => call.id) : []));
   const records = new Map(manager.list().map(record => [record.id, record]));
   const selected = new Set(knownAgentIds.filter(id => records.has(id)));
   for (const message of messages) {
-    if (message.role !== 'tool' || !agentCalls.has(message.callId)) continue;
+    if (message.role !== 'tool' || !spawnCalls.has(message.callId)) continue;
     let value: unknown;
     try { value = JSON.parse(message.content); } catch { continue; }
-    const pending = [value];
-    while (pending.length) {
-      const entry = pending.pop();
-      if (typeof entry === 'string' && records.has(entry)) selected.add(entry);
-      else if (entry && typeof entry === 'object') for (const child of Object.values(entry)) pending.push(child);
-    }
+    for (const id of spawnedAgentIds(value)) if (records.has(id)) selected.add(id);
   }
   return [...selected].map(id => {
     const record = records.get(id)!;

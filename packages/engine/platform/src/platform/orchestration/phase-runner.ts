@@ -36,6 +36,7 @@ import { getContractTransportRetryDelayMs, getContractTransportRetryLimit } from
 import { readFailure } from '@goodvibes-jev/engine/errors';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { FenceError, FenceIssuer, type Fence } from '../utils/owner-fence.js';
 import type { CancellationRegistry } from './cancellation.js';
 import { excludeUntouchedLaunchResidue, readDirtyTreePaths, type DirtyLaunchSnapshot } from './dirty-guard.js';
 import { mergeWorkItemUsage } from './types.js';
@@ -288,12 +289,16 @@ async function phaseChangedPaths(deps: Pick<PhaseRunnerDeps, 'projectRoot' | 'it
 
 /** Quality gates (global-config-driven) + phase-required-gate assertion + phantom guard, for an item that is not a contract unit. */
 async function evaluateGate(
+  fence: Fence,
   workstream: Workstream,
   phase: Phase,
   report: CompletionReport | null,
   deps: PhaseRunnerDeps,
 ): Promise<GateOutcome> {
+  fence.check();
   const results = [...await runContractGates({
+    // A kill during the gates stops the gate commands; a fence that ended refuses the rest.
+    signal: fence.signal,
     configManager: deps.configManager,
     // Worktree mode: the configured quality gates run INSIDE the item's
     // isolated worktree, the same tree the claim check reads, so gates
@@ -327,6 +332,7 @@ async function evaluateGate(
     }
   }
 
+  fence.check();
   return { passed: results.every((r) => r.passed), results };
 }
 
@@ -344,22 +350,35 @@ const LOCK_RETRY_DELAYS_MS = [250, 1_000, 3_000] as const;
 /**
  * Runs a commit, trying again a bounded number of times when git reports that
  * another process holds its lock (decided from git's message, no model). Any
- * other error, or the lock still held after the last wait, is thrown.
+ * other error, or the lock still held after the last wait, is thrown. The
+ * phase fence is checked right before each attempt: a phase killed or
+ * superseded meanwhile commits nothing (FenceError).
  */
-async function commitWithLockRetry<T>(run: () => Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+async function commitWithLockRetry<T>(fence: Fence, run: () => Promise<T>): Promise<T> {
+  const signal = fence.signal;
   for (let attempt = 0; ; attempt++) {
+    fence.check();
     try { return await run(); }
     catch (error) {
       const delay = LOCK_RETRY_DELAYS_MS[attempt];
-      if (delay === undefined || signal?.aborted || !GIT_LOCK_HELD.test(summarizeError(error))) throw error;
+      if (delay === undefined || signal.aborted || !GIT_LOCK_HELD.test(summarizeError(error))) throw error;
       await new Promise<void>((resolve) => {
         const timer = setTimeout(done, delay);
-        function done(): void { clearTimeout(timer); signal?.removeEventListener('abort', done); resolve(); }
-        signal?.addEventListener('abort', done, { once: true });
+        function done(): void { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); }
+        signal.addEventListener('abort', done, { once: true });
       });
-      if (signal?.aborted) throw error;
     }
   }
+}
+
+/** A commit the phase fence refused before git ran: nothing was committed. */
+function fencedCommit(error: FenceError): PhaseCommitOutcome {
+  return { status: 'skipped', reason: `not committed: the phase ${error.refusal === 'deadline' ? 'ran out of time' : 'was stopped'} before its commit ran` };
+}
+
+/** The fence a phase's gates and commit run under: the phase signal (kill, requeue, dispose) ends it. */
+export function phaseFence(item: WorkItem, phase: Phase, signal: AbortSignal | undefined): Fence {
+  return new FenceIssuer(`phase ${phase.id} of item ${item.id}`).issue(signal === undefined ? {} : { parent: signal });
 }
 
 /** A commit that still failed: the item keeps its pass and carries this as a warning. */
@@ -381,10 +400,11 @@ function failedCommit(error: unknown): PhaseCommitOutcome {
  * fleet imply a commit happened when it did not.
  */
 export async function commitPhaseWork(
+  fence: Fence,
   item: WorkItem,
   phase: Phase,
   worktree: WorktreeOps,
-  deps: Pick<PhaseRunnerDeps, 'projectRoot' | 'itemWorktree' | 'launchDirtySnapshot' | 'cancellationSignal'>,
+  deps: Pick<PhaseRunnerDeps, 'projectRoot' | 'itemWorktree' | 'launchDirtySnapshot'>,
 ): Promise<CommitPhaseWorkResult> {
   if (phase.gate.scope === 'off') {
     return { commit: { status: 'skipped', reason: 'commit disabled for this phase (gate scope: off)' } };
@@ -403,7 +423,7 @@ export async function commitPhaseWork(
   if (deps.itemWorktree) {
     try {
       const itemWorktree = deps.itemWorktree;
-      const result = await commitWithLockRetry(() => itemWorktree.commit(`orchestration: ${item.title}, ${phase.kind} phase`, paths), deps.cancellationSignal);
+      const result = await commitWithLockRetry(fence, () => itemWorktree.commit(`orchestration: ${item.title}, ${phase.kind} phase`, paths));
       const ignoredNote = result.skippedIgnored.length > 0
         ? `${result.skippedIgnored.length} ignored path${result.skippedIgnored.length === 1 ? '' : 's'} skipped`
         : undefined;
@@ -412,7 +432,7 @@ export async function commitPhaseWork(
       }
       return { commit: { status: 'committed', hash: result.hash, ...(ignoredNote ? { reason: ignoredNote } : {}) } };
     } catch (error) {
-      return { commit: failedCommit(error) };
+      return { commit: error instanceof FenceError ? fencedCommit(error) : failedCommit(error) };
     }
   }
 
@@ -445,7 +465,7 @@ export async function commitPhaseWork(
   }
 
   try {
-    const result = await commitWithLockRetry(() => worktree.commitWorkingTree(`orchestration: ${item.title}, ${phase.kind} phase`, paths), deps.cancellationSignal);
+    const result = await commitWithLockRetry(fence, () => worktree.commitWorkingTree(`orchestration: ${item.title}, ${phase.kind} phase`, paths));
     const ignoredNote = result.skippedIgnored.length > 0
       ? `${result.skippedIgnored.length} ignored path${result.skippedIgnored.length === 1 ? '' : 's'} skipped`
       : undefined;
@@ -458,7 +478,7 @@ export async function commitPhaseWork(
       commit: { status: 'committed', hash: result.hash, ...(ignoredNote ? { reason: ignoredNote } : {}) },
     };
   } catch (error) {
-    return { exclusion, commit: failedCommit(error) };
+    return { exclusion, commit: error instanceof FenceError ? fencedCommit(error) : failedCommit(error) };
   }
 }
 
@@ -481,7 +501,7 @@ async function settleWithoutAgent(
     const summary = outcome === 'cancelled' ? 'cancelled by operator' : 'the contract runner failed the unit before an agent ran';
     return { agentStatus: outcome, result: { ...base, report: genericReport(summary), gate: { passed: false, results: [] }, completedAt: Date.now() } };
   }
-  const committed = await commitPhaseWork(item, phase, worktree, deps);
+  const committed = await commitPhaseWork(phaseFence(item, phase, deps.cancellationSignal), item, phase, worktree, deps);
   const settledCommit = committed.commit;
   return {
     agentStatus: deps.cancellationSignal?.aborted ? 'cancelled' : 'completed',
@@ -664,12 +684,20 @@ async function runPhaseWithSignal(
 
   // A contract unit only settles completed after its completion check passed,
   // which ran the gates and verified the claims; they are not run twice.
-  const gate: GateOutcome = unitSpawn ? { passed: true, results: [] } : await evaluateGate(workstream, phase, parsed, deps);
+  // The gates and the commit run under the phase fence: a kill while the gates run stops them and commits nothing.
+  const fence = phaseFence(item, phase, signal);
+  let gate: GateOutcome;
+  try {
+    gate = unitSpawn ? { passed: true, results: [] } : await evaluateGate(fence, workstream, phase, parsed, deps);
+  } catch (error) {
+    if (fence.current) throw error;
+    gate = { passed: false, results: [] };
+  }
 
   let commitExclusion: CommitExclusion | undefined;
   let commit: PhaseCommitOutcome | undefined;
-  if (gate.passed) {
-    const committed = await commitPhaseWork(item, phase, worktree, deps);
+  if (gate.passed && fence.current) {
+    const committed = await commitPhaseWork(fence, item, phase, worktree, deps);
     commitExclusion = committed.exclusion;
     commit = committed.commit;
   }

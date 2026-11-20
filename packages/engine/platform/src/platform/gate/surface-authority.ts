@@ -130,13 +130,16 @@ const ANYONE_CAN_WRITE: ReadonlySet<string> = new Set(['email', 'webhook', 'ntfy
 
 /**
  * Authority on a channel belongs to the person, not the surface. A message
- * from an admitted sender who is not the channel's owner (`isChannelOwner`)
- * runs its turn under the guest form of the channel's surface id,
- * `guest:<surface>`. That id is in no table, so it carries no command
- * authority on any surface, Telegram included: the turn may read and answer,
- * and every change it asks for is put to the owner (`surfaceRequestsReachOwner`).
- * The id is set by the daemon from the sender the adapter verified, never by
- * message content.
+ * from an admitted sender who is not the channel's owner runs a turn whose
+ * actor is a guest (`actorFromChannelSender`, security/turn-boundary.ts
+ * `withGuestTurn`); the gate reads that turn under the guest form of the
+ * channel's surface id, `guest:<surface>`, derived from the actor
+ * (`turnAuthoritySurface`) and stored nowhere. That id is in no table, so it
+ * carries no command authority on any surface, Telegram included: the turn
+ * may read and answer, and every change it asks for is put to the owner
+ * (`surfaceRequestsReachOwner`). The actor is set by the daemon from the
+ * sender the adapter verified, never by message content. The table above
+ * stays the answer for surfaces with no sender identity (email, webhook, ntfy).
  */
 const GUEST_SURFACE_PREFIX = 'guest:';
 

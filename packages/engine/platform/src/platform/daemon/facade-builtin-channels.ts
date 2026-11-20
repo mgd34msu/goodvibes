@@ -69,7 +69,7 @@ export function createBuiltinChannelRuntime(
     shellPaths: runtime.runtimeServices.shellPaths,
     routeBindings: runtime.routeBindings,
     gatewayMethods: runtime.gatewayMethods,
-    deliverStructuredNotice: (binding, notice) => surfaceDeliveryHelper.deliverStructuredNotice(binding, notice),
+    deliverStructuredNotice: (binding, notice, announces) => surfaceDeliveryHelper.deliverStructuredNotice(binding, notice, announces),
     channelOwner: (surface) => surfaceDeliveryHelper.channelOwner(surface),
     // Resolve adopted Google credentials from the daemon config, secret store
     // and runtime home, matching the calendar service.

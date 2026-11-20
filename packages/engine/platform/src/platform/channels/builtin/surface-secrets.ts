@@ -21,7 +21,8 @@ import { channelCredentials } from '../credential-holder.js';
 
 export interface SurfaceSecretReadDeps {
   readonly configManager: { get(key: string): unknown };
-  readonly serviceRegistry: {
+  /** Read only for a target that names a service slot; a reader of config-only targets (the ntfy topics) may leave it out. */
+  readonly serviceRegistry?: {
     resolveSecret(serviceName: string, field: ServiceSecretField): Promise<string | null>;
     /** The registry entry, when the registry can show it: a held credential is keyed by it. */
     get?(serviceName: string): unknown;
@@ -77,11 +78,12 @@ export async function readSurfaceSecret(
   targetId: string,
 ): Promise<SurfaceSecretReading> {
   const target = requireTarget(surface, targetId);
-  if (target.serviceName && target.serviceField && SERVICE_FIELDS.has(target.serviceField)) {
+  const registry = deps.serviceRegistry;
+  if (registry && target.serviceName && target.serviceField && SERVICE_FIELDS.has(target.serviceField)) {
     const serviceName = target.serviceName;
     const field = target.serviceField as ServiceSecretField;
-    const registered = await channelCredentials.resolve(`service:${serviceName}:${field}`, deps.serviceRegistry.get?.(serviceName),
-      () => deps.serviceRegistry.resolveSecret(serviceName, field), deps.secretsManager);
+    const registered = await channelCredentials.resolve(`service:${serviceName}:${field}`, registry.get?.(serviceName),
+      () => registry.resolveSecret(serviceName, field), deps.secretsManager);
     if (registered) return { value: registered, declared: true, source: 'service-registry' };
   }
   let configDeclared = false;
@@ -110,6 +112,27 @@ export async function resolveSurfaceSecret(
   targetId: string,
 ): Promise<string | null> {
   return (await readSurfaceSecret(deps, surface, targetId)).value;
+}
+
+/** The four ntfy topic names (each a credential), as the senders and the subscriber use them. */
+export interface NtfyTopicNames {
+  readonly topic: string;
+  readonly chatTopic: string;
+  readonly agentTopic: string;
+  readonly remoteTopic: string;
+}
+
+/**
+ * The ntfy topic names, each read like any other channel credential: its
+ * setting holds a `goodvibes://secrets/` reference resolved through the
+ * credential holder (one resolution per reference per process). An unset or
+ * unreadable topic is empty.
+ */
+export async function readNtfyTopics(deps: SurfaceSecretReadDeps): Promise<NtfyTopicNames> {
+  const [topic, chatTopic, agentTopic, remoteTopic] = await Promise.all(
+    (['topic', 'chatTopic', 'agentTopic', 'remoteTopic'] as const).map(async (id) => (await resolveSurfaceSecret(deps, 'ntfy', id))?.trim() ?? ''),
+  );
+  return { topic: topic!, chatTopic: chatTopic!, agentTopic: agentTopic!, remoteTopic: remoteTopic! };
 }
 
 /** The secret-store key a target's value is kept under: its first environment name. */

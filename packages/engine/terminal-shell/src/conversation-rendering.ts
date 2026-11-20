@@ -16,6 +16,7 @@ import { laneGlyphs } from './renderer/lane-graph-glyphs.js';
 import { beadArgument, beadName, cellText, formatBeadTime } from './renderer/bead.js';
 import { paintBeadRow } from './renderer/lane-graph-paint.js';
 import { buildTurnModel, orphanResultBead, transcriptUnits, type TranscriptUnit, type TurnModel, type WorkTreePresentation as ModelPresentation } from './work-tree-model.js';
+import { renderRegisteredTranscriptRow } from './transcript-row-renderers.js';
 import { renderSingleBead, renderTurn, type TurnRender, type WorkTreePresentation as RowPresentation } from './work-tree-render.js';
 // SystemMessageKind imported from runtime directly to avoid cycle:
 //   conversation-rendering.ts → system-message-router.ts → conversation.ts → conversation-rendering.ts
@@ -89,7 +90,11 @@ export function createConversationRenderer(presentation: ConversationPresentatio
         role: 'system';
     }>, width: number, msgIdx = -1): void {
         const sysStartLine = context.history.getLineCount();
-        const sysLines = renderSystemMessage(message.content, width, message.presentation?.severity, presentation.rows.systemAccent);
+        // A row kind with a registered renderer (transcript-row-renderers.ts) draws itself.
+        const registered = message.runtimeEvent
+            ? renderRegisteredTranscriptRow({ event: message.runtimeEvent.type, content: message.content, severity: message.presentation?.severity, messageIndex: msgIdx, width })
+            : null;
+        const sysLines = registered ?? renderSystemMessage(message.content, width, message.presentation?.severity, presentation.rows.systemAccent);
         context.history.addLines(sysLines);
         // Resolve navigability from the stored kind, defaulting to 'system'
         // (navigable) for messages added without an explicit kind tag.
@@ -137,7 +142,10 @@ export function createConversationRenderer(presentation: ConversationPresentatio
             messageLines.set(notice.messageIndex, lines.length);
             if (navigable(context, notice.messageIndex, notice.severity))
                 errorLines.push(lines.length);
-            lines.push(...renderSystemMessage(notice.content, width, notice.severity, presentation.rows.systemAccent));
+            const registered = notice.event
+                ? renderRegisteredTranscriptRow({ event: notice.event, content: notice.content, severity: notice.severity, messageIndex: notice.messageIndex, width })
+                : null;
+            lines.push(...(registered ?? renderSystemMessage(notice.content, width, notice.severity, presentation.rows.systemAccent)));
         }
         return { ...render, lines, errorLines, messageLines, trailingSeparator: true };
     }

@@ -68,7 +68,7 @@ async function resolveUsable(secrets: SecretsMetadataSource, key: string, record
   }
   try {
     const value = await secrets.get(key);
-    return { usable: value !== null && value.length > 0 };
+    return { usable: value !== null && !value.empty };
   } catch {
     return { usable: false };
   }

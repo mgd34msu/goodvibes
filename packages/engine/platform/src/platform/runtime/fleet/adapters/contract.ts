@@ -242,6 +242,7 @@ export function adaptContract(contract: ContractView, memberNodes: readonly Proc
   return {
     id: contractNodeId(contract.id),
     kind: 'contract',
+    serves: 'you',
     parentId: undefined,
     label: `contract ${contract.id}`,
     task: contract.ask,
@@ -294,6 +295,7 @@ export function adaptContractGroup(group: ContractGroupView, contract: ContractV
   return {
     id: contractGroupNodeId(contract.id, group.id),
     kind: 'contract-group',
+    serves: 'you',
     parentId: contractNodeId(contract.id),
     label: group.title,
     task: group.goal,
@@ -376,6 +378,7 @@ export function adaptContractUnit(unit: ContractUnitView, contract: ContractView
   return {
     id: contractUnitNodeId(contract.id, unit.id),
     kind: 'contract-unit',
+    serves: 'you',
     parentId: unit.attemptOf !== undefined
       ? contractUnitNodeId(contract.id, unit.attemptOf)
       : contractGroupNodeId(contract.id, unit.groupId),

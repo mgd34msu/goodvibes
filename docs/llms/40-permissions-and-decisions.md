@@ -628,7 +628,7 @@ Two limits apply, to different requests:
 - The conversation says so once when none is set or `No Decision Model` is chosen, once when a set model starts failing, and once when it answers again. A failure is not repeated every turn.
 - `goodvibes status` and `goodvibes-agent status` print the policy and a `Decision model` line.
 - A headless run prints the line on stderr and adds `diagnostics.decisionModel` to its JSON result without changing the exit code.
-- The web UI shows it as a chip in the header: "No decision model", or "Decision model failing" when a set one is failing. Opening the chip shows the same sentence `goodvibes status` prints and a link to the decision-model settings; on a phone the chip shows its icon only.
+- The web UI's header chip names the permission mode in force: `Jev decides · asking you for now` while `jev-decides` is chosen and no decision model works (on a phone `Asking you for now`), otherwise the chosen mode (`Ask me`, `Just vibes`, `YOLO`). Opening it shows why in one sentence (for example `You chose Jev decides, but decision models are switched off, so GoodVibes asks you instead for now.`) and `Change`, which opens Settings, Permissions.
 - Results that no decision model checked say so instead of claiming model verification.
 
 Without a decision model, conversation, tools, editing, commands, tests and session recovery work as usual. Work that needs one says so when none is in use: autonomous contract execution, independent semantic knowledge verification, merchant and checkout interpretation, and semantic recommendations or grading.
@@ -788,11 +788,13 @@ The `repl` tool is registered only where the sandbox is available; each evaluati
 /sandbox probe
 /sandbox doctor
 /sandbox session list
-/sandbox session start <command|mcp-server> [label]
+/sandbox session start <command|mcp-server> [--host] [label]
 /sandbox session inspect <session-id>
 /sandbox session run <session-id> <command> [args]
 /sandbox session stop <session-id>
 ```
+
+A sandbox session is contained or not started. On a host without bubblewrap, or for the `command` profile (network off) on a host whose bubblewrap cannot take the network away, `/sandbox session start` refuses and names why, with the next step (install bubblewrap). `--host` starts a host session on purpose: no boundary and the host network, whatever the profile says; the session's backend is `host` and its detail line reads `asked for with --host`.
 
 `/sandbox` is a terminal-app command; in the Agent, change `sandbox.enabled`, `sandbox.judgment` and `sandbox.mcpIsolation` with `/settings set <key> <value>`, and the two list settings in the settings workspace (`/settings sandbox`). `goodvibes status` prints an `Exec sandbox:` block: `active`, `configEnabled`, `backend` (`bubblewrap`), `available`, `network: isolation confirmed`. The QEMU backend is retired; `/sandbox qemu` and the old QEMU subcommands answer that it was retired. Old settings `sandbox.qemu*`, `sandbox.vmBackend`, `sandbox.replIsolation` and `sandbox.windowsMode` are removed from a settings file on load, and a VM `sandbox.mcpIsolation` value becomes `contained`.
 

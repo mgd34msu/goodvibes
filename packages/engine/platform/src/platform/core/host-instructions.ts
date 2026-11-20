@@ -48,6 +48,12 @@ interface Entry { readonly text: string; readonly once: boolean }
 export class HostInstructionChannel implements HostInstructions {
   readonly #entries = new Map<HostKey, Entry>();
   #rendered: ReadonlySet<Entry> = new Set();
+  readonly #onDelivered: (() => void) | undefined;
+
+  /** `onDelivered` runs after each `delivered()`: the request was accepted (conversation.ts `onRequestAccepted`). */
+  constructor(onDelivered?: () => void) {
+    this.#onDelivered = onDelivered;
+  }
 
   set(key: HostKey, text: string, options: HostInstructionOptions = {}): void {
     const previous = options.append ? this.#entries.get(key) : undefined;
@@ -91,5 +97,6 @@ export class HostInstructionChannel implements HostInstructions {
       if (entry.once && this.#rendered.has(entry)) this.#entries.delete(key);
     }
     this.#rendered = new Set();
+    this.#onDelivered?.();
   }
 }

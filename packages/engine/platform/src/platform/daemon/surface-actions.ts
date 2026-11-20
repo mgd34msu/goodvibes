@@ -13,7 +13,8 @@ import type { ControlPlaneGateway, SharedSessionBroker } from '../control-plane/
 import type { ConversationMessageEnvelope } from '../control-plane/conversation-message.js';
 import type { RouteBindingManager, ChannelPolicyManager } from '../channels/index.js';
 import { channelSenderActor } from '../channels/policy-manager.js';
-import { admitEffects } from '../security/effect-authority.js';
+import { admitEffects, type EffectId } from '../security/effect-authority.js';
+import type { Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import type { GenericWebhookAdapterContext, SurfaceAdapterContext, SurfaceControlCommand, SurfaceControlOrigin, SurfaceIngressDecision } from '../adapters/index.js';
 import type { AutomationManager } from '../automation/index.js';
 import type { ChannelPolicyDecision, ChannelIngressPolicyInput } from '../channels/index.js';
@@ -218,11 +219,10 @@ export class DaemonSurfaceActionHelper {
     const lifecycle = this.controlAbort.signal;
     // The surface policy revision the message was admitted under: one integer compare says whether it moved.
     const policyRevision = (surface: ChannelIngressPolicyInput['surface']) => this.context.channelPolicy.revision(surface);
-    let authorization: { text: string; surface: ChannelIngressPolicyInput['surface']; revision: number; operator: boolean } | null = null;
+    let authorization: { text: string; surface: ChannelIngressPolicyInput['surface']; revision: number; actor: Actor } | null = null;
     const commands = new WeakMap<SurfaceControlReading, () => void>();
-    // Commands read from an admitted sender who is not the channel's owner. They address
-    // any run or agent id and carry no origin, so only the owner may act on them.
-    const nonOperatorCommands = new WeakSet<SurfaceControlReading>();
+    // Who sent each command read from an admitted message: run control is admitted for that sender.
+    const commandSenders = new WeakMap<SurfaceControlReading, Actor>();
     const authorizationCurrent = (accepted: typeof authorization) => {
       lifecycle.throwIfAborted();
       if (!accepted || accepted !== authorization || policyRevision(accepted.surface) !== accepted.revision) {
@@ -244,8 +244,9 @@ export class DaemonSurfaceActionHelper {
           // A sender with no identity is admitted by its surface secret, which only an
           // empty allowlist allows; an identified sender is the operator only as the owner.
           // A guest's turn (`turn.start` asks the owner) runs with everything beyond a plain read put to him.
-          const operator = admitEffects(channelSenderActor(decision, input.surface, input.userId), ['turn.start']).kind === 'allowed';
-          authorization = { text: input.text ?? '', surface: input.surface, revision: policyRevision(input.surface), operator };
+          const actor = channelSenderActor(decision, input.surface, input.userId);
+          const operator = admitEffects(actor, ['turn.start']).kind === 'allowed';
+          authorization = { text: input.text ?? '', surface: input.surface, revision: policyRevision(input.surface), actor };
           if (decision.intent !== undefined && origin.current) origin.current = { ...origin.current, intent: decision.intent };
           // Authority belongs to the person: anyone else the channel admits starts a guest's turn.
           if (!operator && origin.current) origin.current = { ...origin.current, guest: true };
@@ -269,7 +270,7 @@ export class DaemonSurfaceActionHelper {
         };
         assertCurrent();
         const command = await this.parseSurfaceControlCommand(text, { ...options, signal, beforeAttempt: assertCurrent });
-        if (command && accepted?.operator === false) nonOperatorCommands.add(command);
+        if (command && accepted) commandSenders.set(command, accepted.actor);
         if (command) commands.set(command, () => {
           assertCurrent();
           const targetCurrent = this.controlTargets.get(command);
@@ -284,15 +285,9 @@ export class DaemonSurfaceActionHelper {
         commands.delete(command);
         assertCurrent();
         this.controlTargets.delete(command);
-        if (nonOperatorCommands.has(command)) {
-          return `Not done: ${command.action} ${command.id} was refused. Status, cancel and retry act on any run or agent, so only the owner of this channel may send them. Ask the owner, or have them change the channel's owner.`;
-        }
-        // A command that names its conversation acts only on what that conversation started.
-        // The reply is the same for a target that exists elsewhere and one that does not.
-        if (controlOrigin && !this.controlTargetBelongsToRoute(command.id, controlOrigin.routeId)) {
-          return `Not done: ${command.action} ${command.id} was refused. This conversation did not start ${command.id}, so it cannot act on it. Send the command from the conversation that did.`;
-        }
-        return this.performSurfaceControlCommand(command);
+        const sender = commandSenders.get(command);
+        if (!sender) throw new Error('Surface control has no admitted sender');
+        return this.performRunControl(sender, command, controlOrigin);
       },
       // The shared spawn boundary: every channel surface adapter routes its
       // spawn through the conversation-first gate (surface-conversation-gate.ts).
@@ -359,6 +354,27 @@ export class DaemonSurfaceActionHelper {
 
   /** The slice of this helper's context the conversation gate consults. Public
    * so the shared-session continuation runner gates through the SAME deps. */
+  /**
+   * At start-up: work the owner agreed to that never started (the daemon
+   * stopped between saving the "yes" and starting it) is started now, once,
+   * and recorded as started. Reads the proposal store once.
+   */
+  async resumeAgreedWork(): Promise<number> {
+    const store = this.context.workProposals;
+    if (!store) return 0;
+    let resumed = 0;
+    for (const proposal of store.listAcceptedUnstarted()) {
+      try {
+        await startAgreedWork(this.conversationGateDeps(), proposal);
+        store.markStarted(proposal.id);
+        resumed += 1;
+      } catch (error) {
+        logger.error('Agreed work saved before a restart could not be started', { proposalId: proposal.id, error: summarizeError(error) });
+      }
+    }
+    return resumed;
+  }
+
   conversationGateDeps(readingOptions: CallOptions = {}) {
     const signal = readingOptions.signal ? AbortSignal.any([readingOptions.signal, this.controlAbort.signal]) : this.controlAbort.signal;
     return {
@@ -599,8 +615,33 @@ export class DaemonSurfaceActionHelper {
     return false;
   }
 
+  /**
+   * The one way a chat sender controls a run, an agent or a session, for a
+   * typed command and a button alike: the effect (`run.cancel`, `run.retry`,
+   * or reading its status) is admitted for the sender (a channel's owner may;
+   * a guest may not), and a control that names its conversation acts only on
+   * what that conversation started. The reply is the same for a target that
+   * exists elsewhere and one that does not.
+   */
+  async performRunControl(
+    sender: Actor,
+    command: { readonly action: 'status' | 'cancel' | 'retry'; readonly id: string },
+    origin?: { readonly routeId: string } | undefined,
+    cancelReason = 'surface-cancelled',
+  ): Promise<string> {
+    const effect: EffectId = command.action === 'cancel' ? 'run.cancel' : command.action === 'retry' ? 'run.retry' : 'automation.read';
+    if (admitEffects(sender, [effect]).kind !== 'allowed') {
+      return `Not done: ${command.action} ${command.id} was refused. Status, cancel and retry act on the owner's runs and agents, so only the owner of this channel may send them. Ask the owner, or have them change the channel's owner.`;
+    }
+    if (origin && !this.controlTargetBelongsToRoute(command.id, origin.routeId)) {
+      return `Not done: ${command.action} ${command.id} was refused. This conversation did not start ${command.id}, so it cannot act on it. Send the command from the conversation that did.`;
+    }
+    return this.performSurfaceControlCommand(command, cancelReason);
+  }
+
   async performSurfaceControlCommand(
     command: { readonly action: 'status' | 'cancel' | 'retry'; readonly id: string },
+    cancelReason = 'surface-cancelled',
   ): Promise<string> {
     if (command.action === 'status') {
       const run = this.context.automationManager.getRun(command.id);
@@ -619,7 +660,7 @@ export class DaemonSurfaceActionHelper {
     }
 
     if (command.action === 'cancel') {
-      const run = await this.context.automationManager.cancelRun(command.id, 'surface-cancelled');
+      const run = await this.context.automationManager.cancelRun(command.id, cancelReason);
       if (run) {
         return `Cancelled run ${run.id}`;
       }
@@ -676,21 +717,11 @@ export class DaemonSurfaceActionHelper {
     const runMatch = actionId.match(/^gv:run:(cancel|retry):(.+)$/);
     if (runMatch) {
       const [, action, runId] = runMatch;
-      // A run button acts on the owner's work (`run.cancel`, `run.retry`): a guest is refused, as for the typed commands.
-      const sender = channelSenderActor({ policy: this.context.channelPolicy.getPolicy(surface) }, surface, userId?.trim() || undefined);
-      if (!userId?.trim() || admitEffects(sender, [action === 'cancel' ? 'run.cancel' : 'run.retry']).kind !== 'allowed') {
-        return `Not done: ${action} ${runId} was refused. Only the owner of this channel may cancel or retry a run.`;
-      }
-      if (action === 'cancel') {
-        const run = await this.context.automationManager.cancelRun(runId!, 'interactive-surface-cancel');
-        return run ? `Cancelled run ${runId}` : `Failed to cancel run ${runId}`;
-      }
-      try {
-        await this.context.automationManager.retryRun(runId!);
-        return `Retried run ${runId}`;
-      } catch (error) {
-        return error instanceof Error ? error.message : `Failed to retry run ${runId}`;
-      }
+      // A run button is the same control as the typed command, admitted the same way:
+      // a press whose sender could not be read is refused, and a guest is refused.
+      if (!userId?.trim()) return `Not done: ${action} ${runId} was refused. Only the owner of this channel may cancel or retry a run.`;
+      const sender = channelSenderActor({ policy: this.context.channelPolicy.getPolicy(surface) }, surface, userId.trim());
+      return this.performRunControl(sender, { action: action as 'cancel' | 'retry', id: runId! }, undefined, 'interactive-surface-cancel');
     }
     return `No handler for ${surface} action ${actionId}`;
   }

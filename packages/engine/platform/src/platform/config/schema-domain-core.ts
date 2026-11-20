@@ -642,7 +642,7 @@ export const coreTailConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'tools.autoHeal',
     type: 'boolean',
-    description: 'When a write or edit fails validation, try the project\'s own formatter, then its linter fix, then a model repair, each from the content as written; a repair is kept only when it fixes the errors and changes nothing else',
+    description: 'When a write or edit fails validation, try the project\'s own formatter, then its linter fix, then a model repair, each from the content as written; a repair is kept only when it fixes the errors and changes nothing else. The formatter and linter run inside a bubblewrap boundary with no network and nothing writable but their own copy of the file; where none can be built they are skipped with a warning',
   },
   {
     key: 'tools.defaultTokenBudget',

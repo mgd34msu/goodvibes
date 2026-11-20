@@ -108,6 +108,8 @@ export class ProviderRegistry {
   private customProviderDisplayNames: Map<string, string> = new Map();
   /** How many times registerDiscoveredProviders ran; a restore from the scan cache yields to a newer registration. */
   private discoveredRegistrations = 0;
+  /** Registries that hold this one's discovered servers (lendDiscoveredServers), given each new registration as it happens. */
+  private readonly discoveryBorrowers = new Set<ProviderRegistry>();
   /**
    * The API key each builtin was last built with, by provider id (the same
    * names `apiKey(name)` is asked for). A credential refresh rebuilds only the
@@ -549,6 +551,20 @@ export class ProviderRegistry {
     return this.discoveredServers;
   }
 
+  /**
+   * Keep `borrower`'s discovered servers the same as this registry's: now, and
+   * at every later registration (a scan that finds a model server started after
+   * the borrower was built). The daemon lends its discoveries to each hosted
+   * workspace's registry, so a model the daemon lists is one a live floor can
+   * run. Returns the call that stops lending (the floor closing).
+   */
+  lendDiscoveredServers(borrower: ProviderRegistry): () => void {
+    if (borrower === this) throw new Error('A provider registry cannot borrow its own discoveries');
+    this.discoveryBorrowers.add(borrower);
+    if (this.discoveredServers.length > 0) borrower.registerDiscoveredProviders([...this.discoveredServers]);
+    return () => { this.discoveryBorrowers.delete(borrower); };
+  }
+
   listProviders(): readonly LLMProvider[] {
     return [...this.providers.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -561,6 +577,7 @@ export class ProviderRegistry {
   registerDiscoveredProviders(servers: DiscoveredServer[]): void {
     this.discoveredRegistrations += 1;
     this.discoveredServers = [...servers];
+    for (const borrower of this.discoveryBorrowers) borrower.registerDiscoveredProviders([...servers]);
     // Unregister previously discovered providers
     for (const name of this.discoveredProviderNames) {
       this.providers.delete(name);
@@ -780,10 +797,17 @@ export class ProviderRegistry {
    * -> registration price ('user') -> provider-served ('provider', dated) ->
    * catalog ('catalog', dated) -> subscription -> honest unknown (never $0).
    * Manual prices are read live on every call, no restart.
+   *
+   * `signInRoute` is the sign-in that served the request being priced, as its
+   * response reports it (`ChatResponse.signInRoute.route`): a request is priced
+   * by its own route, never by whichever route last answered the same model
+   * (another request, running at the same time, may have moved it). Only a
+   * caller with no response (a restored transcript, a quote) leaves it out and
+   * gets the provider's current route.
    */
-  resolveModelPricing(modelRef: string, providerId?: string): ResolvedModelPricing {
+  resolveModelPricing(modelRef: string, providerId?: string, signInRoute?: string | null): ResolvedModelPricing {
     // A provider with more than one sign-in (OpenAI) prices by the one serving the model: a plan has no per-token price.
-    const signedIn = this.signInRouteFor(modelRef, providerId);
+    const signedIn = signInRoute !== undefined ? signInRoute : this.signInRouteFor(modelRef, providerId);
     if (signedIn === 'subscription') return { status: 'subscription' };
     const index = this.pricingIndex();
     return resolveModelPricingFromDeps(buildRegistryModelPricingDeps({

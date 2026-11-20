@@ -193,6 +193,9 @@ export const COMPANION_CHAT_MESSAGE_SCHEMA = objectSchema({
   // On assistant messages: the user message this reply answers (the
   // transcript is append-ordered, so pairing needs an explicit link).
   inReplyTo: STRING_SCHEMA,
+  // On a user message posted with a clientMessageId: that key, echoed, so
+  // the sender matches its own pending send by identity, never by text.
+  clientMessageId: STRING_SCHEMA,
 }, ['id', 'sessionId', 'role', 'content', 'attachments', 'createdAt']);
 
 export const COMPANION_CHAT_SESSION_WITH_MESSAGES_SCHEMA = objectSchema({
@@ -685,9 +688,11 @@ export const MEMORY_VECTOR_STATS_SCHEMA = objectSchema({
   indexedRecords: NUMBER_SCHEMA,
   embeddingProviderId: STRING_SCHEMA,
   embeddingProviderLabel: STRING_SCHEMA,
+  embeddingSpace: STRING_SCHEMA,
+  awaitingReembed: NUMBER_SCHEMA,
   error: STRING_SCHEMA,
   platformLimitReason: STRING_SCHEMA,
-}, ['backend', 'enabled', 'available', 'path', 'dimensions', 'indexedRecords', 'embeddingProviderId', 'embeddingProviderLabel'], { additionalProperties: true });
+}, ['backend', 'enabled', 'available', 'path', 'dimensions', 'indexedRecords', 'embeddingProviderId', 'embeddingProviderLabel', 'embeddingSpace', 'awaitingReembed'], { additionalProperties: true });
 
 export const MEMORY_DOCTOR_REPORT_SCHEMA = objectSchema({
   vector: MEMORY_VECTOR_STATS_SCHEMA,

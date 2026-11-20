@@ -149,7 +149,7 @@ export interface SessionInputsWireClient {
    * both start an agent for the same message. Optional: a client without it
    * dispatches as before.
    */
-  claimInput?(sessionId: string, inputId: string): Promise<unknown>;
+  claimInput?(sessionId: string, inputId: string, claimEpoch?: number): Promise<unknown>;
   /**
    * Be told when a session's inputs change (from the session-update stream).
    * Returns the unsubscribe. Optional: without it inputs are read on a short
@@ -167,8 +167,18 @@ export interface SessionInputsWireClient {
       readonly surfaceInstance?: string | undefined;
       readonly answer?: string | undefined;
       readonly status?: 'completed' | 'failed' | 'cancelled' | undefined;
+      /** This surface's claim token on the input (its `metadata.claimEpoch` when the claim was granted). */
+      readonly claimEpoch?: number | undefined;
     },
   ): Promise<unknown>;
+}
+
+/** The claim epoch a granted claim returned (`{ input }` with `metadata.claimEpoch`), or undefined when the reply has none. */
+export function grantedClaimEpoch(reply: unknown): number | undefined {
+  const input = typeof reply === 'object' && reply !== null && 'input' in reply ? (reply as { readonly input?: unknown }).input : reply;
+  const metadata = typeof input === 'object' && input !== null ? (input as { readonly metadata?: unknown }).metadata : undefined;
+  const epoch = typeof metadata === 'object' && metadata !== null ? (metadata as Record<string, unknown>)['claimEpoch'] : undefined;
+  return typeof epoch === 'number' && Number.isSafeInteger(epoch) && epoch > 0 ? epoch : undefined;
 }
 
 /** What an input-change subscription reports about itself. */
@@ -203,6 +213,8 @@ const MAX_RUNNER_FAILURES = 3;
  * enforces the same lease; reading it here only spares claims that cannot succeed yet.
  */
 const CLAIM_LEASE_MS = 2 * 60_000;
+/** A claim this process holds is renewed once it is this old (a quarter of the lease, so even the one-minute reconcile read renews it in time). */
+const CLAIM_RENEW_MS = CLAIM_LEASE_MS / 4;
 
 /**
  * How many dispatched runs this dispatcher will wait on answers for at once,
@@ -237,8 +249,8 @@ const MAX_ANSWER_DELIVERY_ATTEMPTS = 10;
  * second call would start a second agent for the same message.
  */
 type DispatchClaim =
-  | { readonly kind: 'agent'; readonly agentId: string }
-  | { readonly kind: 'consumed' };
+  | { readonly kind: 'agent'; readonly agentId: string; readonly claimEpoch?: number | undefined }
+  | { readonly kind: 'consumed'; readonly claimEpoch?: number | undefined };
 
 /** Bound on remembered claims; each is removed once its acknowledgement lands. */
 const MAX_DISPATCH_CLAIMS = 500;
@@ -318,12 +330,18 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
   /** `sessionId\0inputId` -> what the runner did with it, until the daemon has the acknowledgement. */
   const claims = new Map<string, DispatchClaim>();
   const claimKey = (sessionId: string, inputId: string): string => `${sessionId}\0${inputId}`;
-  /** Inputs this process claimed whose runner has not started them yet (held, or it threw); retried without claiming again. */
-  const claimedUnstarted = new Set<string>();
-  const rememberUnstarted = (key: string): void => {
-    claimedUnstarted.add(key);
+  /**
+   * Inputs this process holds the daemon's claim on and has not started yet (held, capacity-blocked, unknown, or
+   * the runner threw), with the claim's token and when it was last granted or renewed. The claim is renewed before
+   * its lease runs out, so another surface never takes an input this one still means to run; a renewal that is
+   * refused means another surface holds it now, and this one drops it.
+   */
+  const claimedUnstarted = new Map<string, { readonly epoch: number | undefined; readonly at: number }>();
+  const rememberUnstarted = (key: string, epoch: number | undefined): void => {
+    claimedUnstarted.delete(key);
+    claimedUnstarted.set(key, { epoch, at: now() });
     while (claimedUnstarted.size > MAX_DISPATCH_CLAIMS) {
-      const oldest = claimedUnstarted.values().next();
+      const oldest = claimedUnstarted.keys().next();
       if (oldest.done) break;
       claimedUnstarted.delete(oldest.value);
     }
@@ -349,8 +367,9 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
     claim: DispatchClaim,
   ): Promise<void> => {
     const key = claimKey(sessionId, inputId);
+    const token = claim.claimEpoch === undefined ? {} : { claimEpoch: claim.claimEpoch };
     if (claim.kind === 'consumed') {
-      await active.deliverInput(sessionId, inputId, { consumed: true });
+      await active.deliverInput(sessionId, inputId, { consumed: true, ...token });
       claims.delete(key);
       return;
     }
@@ -358,11 +377,11 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
     // No way to read this surface's outcomes: bind the reply, acknowledge in
     // one step, and do not pretend an answer is coming.
     if (!options.readAgentOutcome) {
-      await active.deliverInput(sessionId, inputId, { consumed: true, agentId });
+      await active.deliverInput(sessionId, inputId, { consumed: true, agentId, ...token });
       claims.delete(key);
       return;
     }
-    await active.deliverInput(sessionId, inputId, { agentId, surfaceInstance });
+    await active.deliverInput(sessionId, inputId, { agentId, surfaceInstance, ...token });
     claims.delete(key);
   };
 
@@ -451,7 +470,7 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
       for (const key of [...claims.keys()]) {
         if (key.startsWith(`${sessionId}\0`) && !stillWaiting.has(key)) claims.delete(key);
       }
-      for (const key of [...claimedUnstarted]) {
+      for (const key of [...claimedUnstarted.keys()]) {
         if (key.startsWith(`${sessionId}\0`) && !stillWaiting.has(key)) claimedUnstarted.delete(key);
       }
     }
@@ -478,16 +497,23 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
       // The daemon grants a claim to one caller. Refused: another surface holds
       // this input and will answer it. Failed to reach the daemon: it stays
       // queued and the next tick tries again, so nothing is lost either way.
-      if (active.claimInput && !claimedUnstarted.has(key)) {
+      // A claim this process already holds is renewed with its token once half
+      // its lease has passed, so it never lapses while the input waits here.
+      const held = claimedUnstarted.get(key);
+      if (active.claimInput && (held === undefined || now() - held.at >= CLAIM_RENEW_MS)) {
         try {
-          await active.claimInput(sessionId, input.id);
+          const granted = await active.claimInput(sessionId, input.id, held?.epoch);
+          rememberUnstarted(key, grantedClaimEpoch(granted) ?? held?.epoch);
         } catch (error) {
-          if (isInputClaimRefusal(error)) log.debug('[session dispatch] another surface holds this input', { sessionId, inputId: input.id });
-          else log.debug('[session dispatch] claiming an input failed; retrying next tick', { sessionId, inputId: input.id, error: summarizeError(error) });
+          if (isInputClaimRefusal(error)) {
+            // Superseded or taken: another surface holds this input now; this one must not start it.
+            claimedUnstarted.delete(key);
+            log.debug('[session dispatch] another surface holds this input', { sessionId, inputId: input.id });
+          } else log.debug('[session dispatch] claiming an input failed; retrying next tick', { sessionId, inputId: input.id, error: summarizeError(error) });
           continue;
         }
-        rememberUnstarted(key);
       }
+      const claimEpoch = claimedUnstarted.get(key)?.epoch;
       if (!current()) return;
       let claim: DispatchClaim;
       try {
@@ -497,7 +523,7 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
         if (spawned?.disposition === 'held' || spawned?.disposition === 'unknown' || spawned?.disposition === 'capacity') continue;
         if (spawned?.disposition === 'transferred') {
           if (!spawned.requestId.trim()) continue;
-          claim = { kind: 'consumed' };
+          claim = { kind: 'consumed', claimEpoch };
         } else {
           const agentId = spawned?.agentId?.trim();
           if (spawned?.disposition === 'started' && !agentId) continue;
@@ -506,7 +532,7 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
           // is still consumed, because leaving it queued would have it
           // dispatched again; there is nothing to bind a reply to, and claiming
           // otherwise would bind one to an agent that does not exist.
-          claim = agentId ? { kind: 'agent', agentId } : { kind: 'consumed' };
+          claim = agentId ? { kind: 'agent', agentId, claimEpoch } : { kind: 'consumed', claimEpoch };
         }
       } catch (error) {
         const failures = (runnerFailures.get(key) ?? 0) + 1;
@@ -522,6 +548,7 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
         if (failures >= MAX_RUNNER_FAILURES) {
           try {
             await active.deliverInput(sessionId, input.id, {
+              ...(claimEpoch === undefined ? {} : { claimEpoch }),
               consumed: true,
               status: 'failed',
               answer: `This surface could not start the message after ${failures} attempts: ${summarizeError(error)}. Send it again to retry.`,

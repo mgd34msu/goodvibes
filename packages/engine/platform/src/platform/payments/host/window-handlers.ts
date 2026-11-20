@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { PaymentReplyInboxClosedError, PaymentReplyWindowError } from '../reply-inbox.js';
 import { assertConfirmed, HandlerError, type HandlerContextEnvelope, type TypedHandler } from './handler-plumbing.js';
+import { describeCardTransportRefusal, mayCrossWithCardDetails } from '../entry-policy.js';
 import type { PaymentReplyInbox } from '../reply-inbox.js';
 import type { CheckoutOperations } from './checkout-operations.js';
 import { PaymentOperationStoreError } from './operation-store.js';
@@ -137,6 +138,8 @@ function pairedOwner(context: HandlerContextEnvelope) {
  */
 export function purchaseSecurityCodeHandler(deps: PaymentWindowHandlerDeps): TypedHandler<unknown, unknown> {
   return async ({ body, context }) => {
+    // A security code is card material: it crosses only this machine, TLS or the tailnet.
+    if (!mayCrossWithCardDetails(context.transport)) throw new HandlerError(describeCardTransportRefusal(), 'CARD_ENTRY_TRANSPORT', 403);
     assertConfirmed(body, context);
     const input = record(body);
     const purchaseId = field(input['purchaseId'], 'purchaseId');

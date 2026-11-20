@@ -4,7 +4,7 @@ import type {
   SharedSessionInputRecord,
   SharedSessionMessage,
   SharedSessionRecord,
-  SharedSessionSubmission,
+  SharedSessionSubmissionReceipt,
 } from '../../control-plane/index.js';
 import type { RuntimeTask } from '../store/domains/tasks.js';
 import type { ProviderRuntimeSnapshot, ProviderUsageSnapshot } from '../../providers/runtime-snapshot.js';
@@ -270,7 +270,7 @@ export function normalizeSharedSessionInput(record: SharedSessionInputRecord | R
   };
 }
 
-export function normalizeSharedSessionSubmission(record: Record<string, unknown>): SharedSessionSubmission {
+export function normalizeSharedSessionSubmission(record: Record<string, unknown>): SharedSessionSubmissionReceipt {
   const sessionValue = record.session;
   if (!sessionValue || typeof sessionValue !== 'object') {
     throw new Error('Shared session submission did not include a session');
@@ -281,18 +281,16 @@ export function normalizeSharedSessionSubmission(record: Record<string, unknown>
   }
   const session = normalizeSharedSessionRecord(sessionValue as Record<string, unknown>);
   const input = normalizeSharedSessionInput(inputValue as Record<string, unknown>);
-  return {
+  const base = {
     session,
     userMessage: normalizeSharedSessionMessage(
       (record.message as Record<string, unknown> | null | undefined) ?? (record.userMessage as Record<string, unknown> | null | undefined),
       input,
     ),
-    routeBinding: record.routeBinding as SharedSessionSubmission['routeBinding'],
+    routeBinding: record.routeBinding as SharedSessionSubmissionReceipt['routeBinding'],
     input,
     intent: input.intent,
-    mode: record.mode as SharedSessionSubmission['mode'],
     state: input.state,
-    task: typeof record.task === 'string' ? record.task : undefined,
     activeAgentId: typeof record.agentId === 'string'
       ? record.agentId
       : typeof record.activeAgentId === 'string'
@@ -300,6 +298,17 @@ export function normalizeSharedSessionSubmission(record: Record<string, unknown>
         : undefined,
     created: Boolean(record.created),
   };
+  const mode = record.mode;
+  switch (mode) {
+    case 'spawn':
+    case 'continued-live':
+    case 'queued-follow-up':
+    case 'queued-for-surface':
+    case 'rejected':
+      return { ...base, mode, ...(typeof record.task === 'string' ? { task: record.task } : {}) };
+    default:
+      throw new Error(`Shared session submission has an unknown mode: ${String(mode)}`);
+  }
 }
 
 export function normalizeTelemetryQueryForPlatform(

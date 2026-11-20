@@ -57,6 +57,7 @@ import { createWorkstreamDraftStore, formatWorkstreamDraftReclaim } from './work
 import { validateAttempts } from './workstream-attempts-validation.js';
 import { logger } from '../utils/logger.js';
 import { isDeepStrictEqual } from 'node:util';
+import { createHash } from 'node:crypto';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { requestRisk } from '../routing/batteries/request.js';
 import { requestState } from '../routing/request-reading.js';
@@ -71,7 +72,7 @@ export interface WorkstreamServicesDeps {
   readonly runtimeBus: RuntimeEventBus;
   readonly projectRoot: string;
   /** Starts the contract an approved draft launches as (design 10.4). */
-  readonly contractRunner: Pick<ContractRunner, 'start' | 'startFromPlan'>;
+  readonly contractRunner: Pick<ContractRunner, 'start' | 'startFromPlan'> & Partial<Pick<ContractRunner, 'startIdempotent' | 'startFromPlanIdempotent'>>;
   /** The session a launched contract belongs to: a fixed id, or read at launch time. */
   readonly sessionId: string | (() => string);
   /** Reports the remote runner sessions; the planner's remoteAvailable input is read from it for each draft. */
@@ -270,7 +271,7 @@ function createDraftFacade(
   configManager: Pick<ConfigManager, 'get' | 'getCategory'>,
   agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'>,
   projectRoot: string,
-  contractRunner: Pick<ContractRunner, 'start' | 'startFromPlan'>,
+  contractRunner: Pick<ContractRunner, 'start' | 'startFromPlan'> & Partial<Pick<ContractRunner, 'startIdempotent' | 'startFromPlanIdempotent'>>,
   sessionId: string | (() => string),
   plannerSources: PlannerInputSources,
 ): WorkstreamDraftService {
@@ -405,8 +406,12 @@ function createDraftFacade(
    * the draft is what starts it; with no decision model in use the contract
    * runs on its own no-model paths.
    */
-  function startDraftContract(draft: WorkstreamDraft, options: Parameters<ContractRunner['start']>[1]): ReturnType<ContractRunner['start']> {
+  async function startDraftContract(draft: WorkstreamDraft, options: Parameters<ContractRunner['start']>[1]): Promise<{ readonly contractId: string; readonly ownerAgentId: string }> {
     const spec = draft.spec;
+    // One contract per approved revision of a draft, also across a restart: the
+    // start is keyed by the draft and a digest of what was approved, so the same
+    // draft approved again after a crash mid-launch returns the first contract.
+    const key = { principalId: 'workstream-drafts', key: `workstream:${draft.id}:${createHash('sha256').update(JSON.stringify(spec)).digest('hex').slice(0, 16)}` };
     const launch = {
       sessionId: typeof sessionId === 'function' ? sessionId() : sessionId,
       origin: 'proposal' as const,
@@ -417,9 +422,21 @@ function createDraftFacade(
     const only = spec.items[0];
     // A single item that names attempts or files is a drafted plan of one unit, so both are carried.
     if (spec.items.length > 1 || (only !== undefined && ((only.attempts ?? 1) > 1 || (only.files?.length ?? 0) > 0))) {
-      return contractRunner.startFromPlan({ ...launch, ask: draft.task, draft: draftedPlanFromSpec(draft.task, spec) }, options);
+      const input = { ...launch, ask: draft.task, draft: draftedPlanFromSpec(draft.task, spec) };
+      if (contractRunner.startFromPlanIdempotent) {
+        const started = await contractRunner.startFromPlanIdempotent(input, key, options);
+        return { contractId: started.contract.id, ownerAgentId: started.ownerAgentId };
+      }
+      const started = await contractRunner.startFromPlan(input, options);
+      return { contractId: started.contract.id, ownerAgentId: started.owner.id };
     }
-    return contractRunner.start({ ...launch, ask: only?.task ?? draft.task }, options);
+    const input = { ...launch, ask: only?.task ?? draft.task };
+    if (contractRunner.startIdempotent) {
+      const started = await contractRunner.startIdempotent(input, key, options);
+      return { contractId: started.contract.id, ownerAgentId: started.ownerAgentId };
+    }
+    const started = await contractRunner.start(input, options);
+    return { contractId: started.contract.id, ownerAgentId: started.owner.id };
   }
 
   return {
@@ -472,7 +489,7 @@ function createDraftFacade(
       return draft;
     },
     removeDraft(id) {
-      store.remove(id);
+      if (!store.remove(id)) logger.warn('A removed workstream draft could not be deleted from disk; it may be listed again after a restart', { draftId: id });
       return drafts.delete(id);
     },
     launchDraft(id) {
@@ -491,7 +508,11 @@ function createDraftFacade(
         // While the launch is in flight the journal says "not approved": a crash between the contract
         // starting and the snapshot being removed then brings the draft back for a fresh approval
         // instead of launching it a second time on restart.
-        store.save({ ...captured, approved: false });
+        // Save, then launch: when that journal write fails the launch is refused, since the
+        // approved snapshot still on disk would launch the draft again after a restart.
+        if (!store.save({ ...captured, approved: false })) {
+          throw new Error('The workstream draft was not launched: its launch could not be recorded on disk. Nothing was started; approve it again once the project folder is writable.');
+        }
         let started: Awaited<ReturnType<typeof startDraftContract>>;
         try {
           started = await startDraftContract(captured, { assertCurrent });
@@ -502,8 +523,13 @@ function createDraftFacade(
         }
         // A later edit is a new draft; never delete it after the old launch
         // committed, or hide the already accepted contract's acknowledgement.
-        if (unchanged()) { drafts.delete(id); store.remove(id); }
-        return { contractId: started.contract.id, ownerAgentId: started.owner.id };
+        if (unchanged()) {
+          drafts.delete(id);
+          // A snapshot that could not be removed comes back unapproved after a restart; the keyed start then
+          // returns this same contract if it is approved again. Said, not hidden.
+          if (!store.remove(id)) logger.warn('A launched workstream draft could not be removed from disk; it may be listed again after a restart', { draftId: id, contractId: started.contractId });
+        }
+        return started;
       })();
       launching.set(id, operation);
       const settled = () => { if (launching.get(id) === operation) launching.delete(id); };

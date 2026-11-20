@@ -1,5 +1,6 @@
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { logger } from '../utils/logger.js';
+import { FenceIssuer, type Fence } from '../utils/owner-fence.js';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { readMultimodalPdf } from './pdf-source.js';
 import { assertJudgmentInput, captureOwnedJson } from '../gate/judgment-input.js';
@@ -268,10 +269,12 @@ export class MultimodalService {
         assertArtifact(initial);
         assertJudgmentInput({ filename: initial.filename, metadata: initial.metadata, prompt: owned.prompt, metadataInput: owned.metadata, artifactMetadata: owned.artifact?.metadata });
         const assertEntryCurrent = () => { try { contentCurrent?.(); } catch { throw new MultimodalEntityHeldError('stale'); } assertArtifact(initial); };
+        // This analysis's generation: the caller's cancel aborts it, and every effect below checks it first.
+        const fence = new FenceIssuer('multimodal analysis').issue({ parent: signal });
         let result: MultimodalAnalysisResult;
         switch (this.resolveKind(initial)) {
           case 'image': result = await this.analyzeImage(initial, owned, signal); break;
-          case 'audio': result = await this.analyzeAudio(initial, buffer, owned); break;
+          case 'audio': result = await this.analyzeAudio(initial, buffer, owned, fence); break;
           case 'video': result = await this.analyzeVideo(initial, owned, assertEntryCurrent, signal); break;
           default: result = await this.analyzeDocument(record, buffer, owned, assertEntryCurrent); break;
         }
@@ -284,6 +287,8 @@ export class MultimodalService {
           ? await assessMultimodalEntities(source.text, entityLimit(result.kind), { signal })
           : notAssessed('not-requested');
         // Write-back runs under its own request; this request's signal has no say after it returns.
+        // A cancel that landed while the provider answered holds nothing.
+        fence.check();
         return this.hold(withAssessment(result, assessment), source.text, () => { for (const artifact of artifacts) sameArtifact(artifact); });
       } catch (error) {
         // An artifact made only to hold this call's inline input has no analysis to belong to.
@@ -549,8 +554,10 @@ export class MultimodalService {
     descriptor: ArtifactDescriptor,
     buffer: Buffer,
     request: MultimodalAnalysisRequest,
+    fence: Fence,
   ): Promise<MultimodalAnalysisResult> {
     assertJudgmentInput({ metadata: descriptor.metadata, prompt: request.prompt, requestMetadata: request.metadata });
+    fence.check();
     const response = await this.voiceService.transcribe(request.audioProviderId, {
       audio: {
         mimeType: descriptor.mimeType,
@@ -562,7 +569,10 @@ export class MultimodalService {
       modelId: request.modelId,
       prompt: request.prompt,
       metadata: request.metadata,
+      // The provider request ends with the analysis: a cancel stops the transcription, not only its result.
+      signal: fence.signal,
     });
+    fence.check();
     const transcript = captureOwnedJson(response) as typeof response;
     assertJudgmentInput(transcript);
     const summary = compactText(transcript.text, 320);
@@ -705,6 +715,7 @@ export class MultimodalService {
             language: request.language,
             metadata: request.metadata,
           },
+          new FenceIssuer('multimodal video analysis').issue({ parent: signal }),
         );
         sourceTexts.push(this.sources.get(audioResult)!.text);
         sourceArtifacts.push(captureOwnedJson(audioDescriptor) as ArtifactDescriptor);

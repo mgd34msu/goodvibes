@@ -441,9 +441,8 @@ export const OCCASIONS_STATE_OUTPUT_SCHEMA = objectSchema({
   mirrors: NUMBER_SCHEMA,
   attributions: NUMBER_SCHEMA,
   lastSweep: { anyOf: [OCCASION_SWEEP_REPORT_SCHEMA, { type: 'null' }] },
-  reconciledOpenItems: NUMBER_SCHEMA,
   corruption: NULLABLE_STRING_SCHEMA,
-}, ['path', 'acknowledgements', 'giftRecords', 'openItems', 'interviews', 'mirrors', 'attributions', 'lastSweep', 'reconciledOpenItems', 'corruption']);
+}, ['path', 'acknowledgements', 'giftRecords', 'openItems', 'interviews', 'mirrors', 'attributions', 'lastSweep', 'corruption']);
 
 export const OCCASIONS_ACKNOWLEDGE_INPUT_SCHEMA = objectSchema({
   occasionId: STRING_SCHEMA,

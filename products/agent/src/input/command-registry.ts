@@ -112,6 +112,8 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   };
 
   openWorkspacePicker?: () => void;
+  /** Open the command palette (terminal-shell/command-palette.ts): every registered command, searchable; Enter runs or opens its guided path. */
+  openCommandPalette?: () => void;
 
   openAgentWorkspace?: (categoryId?: string) => void;
   dismissAgentWorkspace?: () => boolean;

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { localOwnerActor } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalSlashCommand } from './command-registry.js';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
@@ -139,7 +140,7 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
             const read = readVoiceBundle(value);
             if ('problem' in read) throw commandRefusal('Nothing was applied. ' + read.problem);
             const changes = Object.entries(read.bundle.settings).map(([key, setting]) => ({ key: key as ConfigKey, value: setting }));
-            const result = ctx.platform.configManager.setMany(changes, { kind: 'owner', surface: 'voice' });
+            const result = ctx.platform.configManager.setMany(changes, localOwnerActor());
             if (!result.ok) throw commandRefusal(`Voice bundle not applied: ${result.refusal.reason}`, result.refusal.next.join(' ') || undefined);
             // The daemon's settings in the bundle went to it as one update; it is applied only once the daemon took it.
             const refused = result.pending ? await result.pending.settle() : [];

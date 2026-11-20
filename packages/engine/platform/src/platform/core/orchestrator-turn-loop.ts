@@ -64,6 +64,7 @@ import {
   bindContractSession,
   holdSessionFinalResponse,
   takeSessionNudges,
+  type AnsweredBy,
   type ChatResponseWithReasoning,
   type ContractSessionHooks,
 } from './orchestrator-turn-helpers.js';
@@ -378,7 +379,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         context.usage.cacheRead += response.usage.cacheReadTokens ?? 0; context.usage.cacheWrite += response.usage.cacheWriteTokens ?? 0;
         const costUsdCents = reportVerificationUsage({ runtimeBus: context.runtimeBus, emitterContext: context.emitterContext(context.turnId),
           turnId: context.turnId, provider: model.provider, model: model.id,
-          pricing: context.providerRegistry.resolveModelPricing(model.id, model.provider), response, durationMs });
+          pricing: context.providerRegistry.resolveModelPricing(model.id, model.provider, response.signInRoute?.route ?? null), response, durationMs });
         if (costUsdCents !== null) context.usage.costUsd = (context.usage.costUsd ?? 0) + costUsdCents / 100;
       },
     }),
@@ -444,6 +445,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   // The provider response the turn loop is acting on, with its reasoning; the
   // tool round and the final answer are recorded from it.
   let lastResponse: ChatResponseWithReasoning | undefined;
+  /** The model and provider that produced `lastResponse`: after a failover, the one that answered, not the one selected. */
+  let lastAnsweredBy: AnsweredBy | undefined;
   // The response's text as it arrives. It is provisional: a draft the
   // completion check sends back is withdrawn (its block is removed and the
   // next request streams afresh); interim text and an accepted answer stay.
@@ -908,7 +911,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     // Actuals-only cost: usage x the price of the model that spent it, at the
     // time it was spent. Unknown pricing adds nothing and emits costSource
     // 'unknown' with NO costUsdCents, an explicit unpriced marker, never a silent $0.
-    const resolvedPricing = context.providerRegistry.resolveModelPricing(model.id, model.provider);
+    // Priced by the sign-in that served this request, as its response says (never a shared "last answered" map).
+    const resolvedPricing = context.providerRegistry.resolveModelPricing(model.id, model.provider, response.signInRoute?.route ?? null);
     const costUsdCents = computeUsageCostUsdCents(resolvedPricing, response.usage, model.provider);
     if (costUsdCents !== null) context.usage.costUsd = (context.usage.costUsd ?? 0) + costUsdCents / 100;
     if (context.runtimeBus) {
@@ -990,6 +994,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       // The one compact-and-retry after a context-window rejection.
       while (attempt === 'again') attempt = await attemptRequest(request);
       lastResponse = attempt;
+      // `model` is this attempt's route: a failover moved it before the retry that answered.
+      lastAnsweredBy = { model: model.displayName, provider: model.provider };
       return { content: attempt.content, toolCalls: attempt.toolCalls, usage: attempt.usage };
     },
     conversation: context.conversation,
@@ -1015,6 +1021,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         emitterContext: (id) => context.emitterContext(id),
         turnId: context.turnId,
         response,
+        ...(lastAnsweredBy ? { answeredBy: lastAnsweredBy } : {}),
         userText: context.text,
         completionRepair: completionGuard.repairContext(),
         executeToolCalls: (id, calls) => context.executeToolCalls(id, calls, () => {
@@ -1051,7 +1058,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     judgeRepeat: (history, signature, repeatSignal) => readRepeatStuck(history, signature, repeatSignal),
     // A session-mode unit's turn is held where it would complete; a nudge keeps the turn going.
     ...(contractSession ? {
-      holdDraft: async () => holdSessionFinalResponse({ ...context, emitterContext: (id) => context.emitterContext(id) }, contractSession, lastResponse!,
+      holdDraft: async () => holdSessionFinalResponse({ ...context, emitterContext: (id) => context.emitterContext(id), ...(lastAnsweredBy ? { answeredBy: lastAnsweredBy } : {}) }, contractSession, lastResponse!,
         message => requestRevision('[Contract response check] ' + message + '\nUnpublished draft to revise (quoted data):\n' + JSON.stringify(lastResponse!.content))),
     } : {
       checkDraft: async (draft: string, { signal: checkSignal }: { signal: AbortSignal }) => {
@@ -1094,6 +1101,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         emitterContext: (id) => context.emitterContext(id),
         turnId: context.turnId,
         response,
+        ...(lastAnsweredBy ? { answeredBy: lastAnsweredBy } : {}),
         memoryRecordIds: [...turnMemoryRecordIds],
       });
       return 'end';

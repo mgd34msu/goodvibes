@@ -221,6 +221,12 @@ function toDetail(event: CalDavEvent): CalendarGatewayEventDetail {
   };
 }
 
+/** Whether two ETags name the same version: a weak marker and surrounding space do not count. */
+function sameEtag(a: string, b: string): boolean {
+  const bare = (value: string): string => value.trim().replace(/^W\//, '');
+  return bare(a) === bare(b);
+}
+
 /** One stored calendar object as the server returned it. */
 interface CalDavResource {
   readonly href: string;
@@ -654,6 +660,10 @@ export function createCalDavCalendarGatewayService(
       if (changes.start !== undefined) validateIsoDate(changes.start, 'start');
       if (changes.end !== undefined) validateIsoDate(changes.end, 'end');
       const stored = await readStoredEvent(eventId, calendarId);
+      // The version the person edited, when they sent it: a newer one on the server is refused before anything is written.
+      if (changes.expectedRevision !== undefined && stored.etag !== undefined && !sameEtag(stored.etag, changes.expectedRevision)) {
+        throw changedMeanwhile(eventId);
+      }
       const document = splitICalDocument(stored.body);
       const { events: blocks } = eventAndZoneComponents(document.components);
       const parsed = parseICSDetailed(stored.body).events;
@@ -788,13 +798,16 @@ export function createCalDavCalendarGatewayService(
       if (isHrefLike(eventId)) {
         const named = splitEventId(eventId);
         let body: string;
+        let revision: string | undefined;
         try {
-          body = (await request(
+          const response = await request(
             resolveResourceUrl(collectionUrl, config.baseUrl, named.href),
             'GET',
             undefined,
             { Depth: '0' },
-          )).body;
+          );
+          body = response.body;
+          revision = readHeader(response.headers, 'ETag') || undefined;
         } catch (error) {
           // A 404 is "no such event"; anything else is a real failure.
           if (error instanceof GatewayVerbError && error.code === 'CALENDAR_NOT_FOUND') {
@@ -819,7 +832,7 @@ export function createCalDavCalendarGatewayService(
           : occurrenceOf({ href, calendarData: body }, events, named.occurrence);
         if (event === undefined) throw notFound(eventId);
         recordEventsRead(id, [event]);
-        return toDetail(event);
+        return { ...toDetail(event), ...(revision === undefined ? {} : { revision }) };
       }
 
       // Strategy 2, a bare UID: ask the server for only the matching resource
@@ -830,7 +843,9 @@ export function createCalDavCalendarGatewayService(
       const found = eventsFromMultistatus(response.body, id).find((event) => event.uid === eventId);
       if (found === undefined) throw notFound(eventId);
       recordEventsRead(id, [found]);
-      return toDetail(found);
+      // The resource's ETag from the same answer (the query asks for getetag).
+      const etag = parseMultistatus(response.body).find((entry) => toRelativeHref(entry.href) === found.href)?.props['getetag'];
+      return { ...toDetail(found), ...(etag ? { revision: etag } : {}) };
     },
 
     async createEvent(input: CalendarGatewayCreateInput): Promise<CalendarGatewayCreated> {
@@ -847,7 +862,10 @@ export function createCalDavCalendarGatewayService(
       const calendarId = input.calendarId && input.calendarId.length > 0
         ? input.calendarId
         : config.defaultCalendarId;
-      const uid = newUid();
+      // The caller's UID when it gave one (the same for every attempt at this
+      // event, so a create repeated after an unknown outcome is refused by the
+      // server's If-None-Match instead of making a second event).
+      const uid = input.uid ?? newUid();
       const createdAt = stampNow();
       const ics = generateICSOrRefuse({
         uid,

@@ -36,6 +36,15 @@
  * what the record says, not what it locally believes it asked for. That is the
  * same parity contract the web UI already documents for the decide verbs, and
  * raising through this verb is what extends it to the ask itself.
+ *
+ * ── The hold, and the receipt ──────────────────────────────────────────────
+ *
+ * The raiser is handed a `holdId`, recorded on the ask. It gives the hold up
+ * with `approvals.cancel { release: true, holdId }`: before a decision that
+ * means it left (the last hold to go cancels the ask), after a decision it
+ * means it received the answer, and the reading's receipt reads `delivered`
+ * once every hold is released. A raiser that restarts reads the record again
+ * and releases then, so a decision made while it was away still arrives.
  */
 
 import type { GatewayMethodCatalog } from '../method-catalog.js';
@@ -46,11 +55,14 @@ import type { RaisedApproval } from '../approval-broker-raise.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { OWNER_ONLY_KINDS } from '../../gate/classify.js';
+import { readApproval } from '../approval-lifecycle.js';
+import { approvalViewerOfActor } from '../approval-actions.js';
 import { systemActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import { admitEffects } from '../../security/effect-authority.js';
 
 /** The broker surface this verb needs, nothing but raising and reading back. */
 export interface ApprovalRaiseService {
+  readonly homeNode: string;
   raiseApproval(input: RequestSharedApprovalInput): Promise<RaisedApproval>;
   getApproval(approvalId: string): SharedApprovalRecord | null;
 }
@@ -241,7 +253,8 @@ export function createApprovalRaiseHandler(broker: ApprovalRaiseService): Gatewa
       { owners: raiserId === undefined ? [] : [raiserId] }).kind === 'allowed';
     return {
       approvalId: approval.id,
-      ...(readable ? { approval } : {}),
+      // With the record, its reading for this caller: waiting on whom, until when; once decided, its receipt waits on this hold.
+      ...(readable ? { approval, reading: readApproval(approval, approvalViewerOfActor(invocation.context.actor, broker.homeNode), Date.now()) } : {}),
       coalesced: raised.coalesced,
       decided,
       ...(raised.holdId === undefined ? {} : { holdId: raised.holdId }),

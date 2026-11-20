@@ -44,6 +44,8 @@ import { attachHandler } from './attach-handler.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { randomUUID } from 'node:crypto';
 import type { ApprovalRaiseService } from './approvals-raise.js';
+import { observedAgentRef } from '../../runtime/fleet/adapters/observed.js';
+import { compareTarget, type TargetRef } from '../../utils/target-ref.js';
 
 /**
  * `fleet.snapshot` payload cap: the registry's
@@ -206,14 +208,18 @@ const STEER_APPROVAL_TIMEOUT_MS = 5 * 60_000;
  * so typing into it is put to the owner through the approval broker: one ask
  * naming the session, its directory, the exact text and whether it is
  * submitted. "Always" for that session is held in memory until the daemon
- * stops. Without `submit: true` the text is typed and left for the person at
+ * stops, against that exact process (pid, start time, pane, kind, directory
+ * and command line): a new process given the same pid is asked about again. Without `submit: true` the text is typed and left for the person at
  * the pane; no Enter is sent. With no approval broker composed, nothing is sent.
  */
 export function createFleetObservedSteerHandler(
   registry: FleetSteerCapableRegistry,
   approvals?: FleetSteerApprovals,
 ): GatewayMethodHandler {
-  const grantedSessions = new Set<string>();
+  // "Always" is kept against the exact process (pid with its start time, pane,
+  // kind, directory and command line), so a later process given the same pid
+  // is asked about afresh.
+  const grantedSessions = new Map<string, TargetRef>();
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const id = requireString(params, 'id');
@@ -225,6 +231,9 @@ export function createFleetObservedSteerHandler(
     if (node.kind !== 'observed-external') {
       throw new GatewayVerbError('fleet.observed.steer steers only observed-external rows.', 'INVALID_ARGUMENT', 400, 'id');
     }
+    const observedProcess = observedAgentRef(node);
+    const granted = grantedSessions.get(id);
+    if (granted && (!observedProcess || compareTarget(granted, observedProcess).length > 0)) grantedSessions.delete(id);
     if (!grantedSessions.has(id)) {
       if (!approvals) {
         return { queued: false, reason: 'nothing was sent: this daemon has no approval broker to ask the owner through' };
@@ -249,11 +258,12 @@ export function createFleetObservedSteerHandler(
             target: `${node.label} (${id}) in ${directory}`,
             sideEffects: [submit ? 'types the text into the session and submits it' : 'types the text into the session without submitting it'],
           },
-          rememberOptions: [{
+          // Offered only for a process that can be told apart from a later one with its pid.
+          rememberOptions: observedProcess ? [{
             tier: 'session',
             label: `Always allow typing into this ${node.label} session`,
-            detail: `Until the daemon stops, steers to ${id} are not asked again.`,
-          }],
+            detail: `Until the daemon stops or this process ends, steers to ${id} are not asked again.`,
+          }] : [],
         },
         ...(invocation.signal ? { signal: invocation.signal } : {}),
         metadata: { fleetNodeId: id, ...(invocation.context.principalId ? { requestedBy: invocation.context.principalId } : {}) },
@@ -267,9 +277,12 @@ export function createFleetObservedSteerHandler(
           reason: `nothing was sent: the owner did not approve typing into ${node.label}${decision.reason ? ` (${decision.reason})` : ''}`,
         };
       }
-      if (decision.rememberTier !== undefined || decision.remember === true) grantedSessions.add(id);
+      if (observedProcess && (decision.rememberTier !== undefined || decision.remember === true)) grantedSessions.set(id, observedProcess);
     }
     const result = registry.steer(id, text, { submit });
+    if (result.queued === 'partial') {
+      return { queued: 'partial', submitted: result.sent.includes('Enter'), sent: [...result.sent], failed: result.failed, reason: result.reason };
+    }
     return result.queued
       ? { queued: true, submitted: submit, messageId: result.messageId }
       : { queued: false, reason: result.reason };
@@ -409,6 +422,14 @@ export interface FleetConflictsDeps {
   /** Attempt the item's integration merge again; absent, `fleet.conflicts.retry` is not registered. */
   readonly retryIntegration?: (itemId: string) => Promise<'merged' | 'conflict' | 'not-conflicted'>;
   /**
+   * Items a resolve is starting a session for, or a retry is merging: one claim set shared by the resolve and
+   * retry handlers built from the same deps, so a retry never merges and reclaims a tree a session is being started
+   * in, and a resolve never starts a session in a tree a retry is merging. Absent, each handler keeps its own.
+   */
+  readonly resolutionClaims?: Set<string>;
+  /** Stops a resolution session that started but could not be stamped on its item (the conflict ended meanwhile). */
+  readonly stopResolutionSession?: (sessionId: string) => Promise<void>;
+  /**
    * Start the seeded resolution session INSIDE the kept tree (the CI
    * fix-session machinery): the seed carries the tree path, branch, and the
    * structured conflict list. Resolves to the REAL session id, or an honest error.
@@ -457,7 +478,7 @@ export function createFleetConflictsListHandler(deps: FleetConflictsDeps): Gatew
 export function createFleetConflictsResolveHandler(deps: FleetConflictsDeps): GatewayMethodHandler {
   // Held across the await so a double click or a retry after a slow response
   // cannot start a second agent in the same worktree before the first is stamped.
-  const inFlight = new Set<string>();
+  const inFlight = deps.resolutionClaims ?? new Set<string>();
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const itemId = typeof params.itemId === 'string' ? params.itemId.trim() : '';
@@ -468,7 +489,7 @@ export function createFleetConflictsResolveHandler(deps: FleetConflictsDeps): Ga
     }
     if (inFlight.has(itemId)) {
       throw new GatewayVerbError(
-        `A resolution session for item ${itemId} is already starting. Read fleet.conflicts.list for its session id once it is stamped.`,
+        `A resolution session for item ${itemId} is already starting, or its merge is being retried. Read fleet.conflicts.list once that finishes.`,
         'FAILED_PRECONDITION',
         409,
       );
@@ -495,7 +516,21 @@ export function createFleetConflictsResolveHandler(deps: FleetConflictsDeps): Ga
       }
       // The REAL session id is stamped onto the item (the CI fix-flow stamping
       // contract), so the conflict row names where the resolution is happening.
-      deps.stampConflictSession(itemId, started.sessionId);
+      // A stamp that is refused means the conflict ended while the session
+      // started (its merge landed, or the item ended): the session must not go
+      // on working in a tree that may be reclaimed, so it is stopped.
+      if (!deps.stampConflictSession(itemId, started.sessionId)) {
+        let stopped = 'it was stopped';
+        try { await deps.stopResolutionSession?.(started.sessionId); }
+        catch (error) { stopped = `stopping it failed (${summarizeError(error)}); stop session ${started.sessionId} by hand`; }
+        if (deps.stopResolutionSession === undefined) stopped = `stop session ${started.sessionId} by hand`;
+        throw new GatewayVerbError(
+          `Item ${itemId}'s merge conflict ended while its resolution session ${started.sessionId} was starting, so the session has nothing to resolve; ${stopped}. Read fleet.conflicts.list.`,
+          'CONFLICT_RESOLVED_ELSEWHERE',
+          409,
+          'itemId',
+        );
+      }
       return { itemId, sessionId: started.sessionId, worktreePath: conflict.worktreePath, files: conflict.files };
     } finally {
       inFlight.delete(itemId);
@@ -511,8 +546,18 @@ export function createFleetConflictsResolveHandler(deps: FleetConflictsDeps): Ga
 export function createFleetConflictsRetryHandler(
   deps: FleetConflictsDeps & Required<Pick<FleetConflictsDeps, 'retryIntegration'>>,
 ): GatewayMethodHandler {
+  const claims = deps.resolutionClaims ?? new Set<string>();
   return async (invocation) => {
     const itemId = requireString(readInvocationParams(invocation), 'itemId');
+    // The resolver's claim: a session being started for the item (or another retry) owns its tree right now.
+    if (claims.has(itemId)) {
+      throw new GatewayVerbError(
+        `A resolution session for item ${itemId} is starting, or its merge is already being retried, so its merge was not retried now. Read fleet.conflicts.list once that finishes.`,
+        'FAILED_PRECONDITION',
+        409,
+        'itemId',
+      );
+    }
     const conflict = collectConflicts(deps).find((candidate) => candidate.itemId === itemId);
     if (conflict?.resolutionSessionId && deps.isSessionLive?.(conflict.resolutionSessionId)) {
       throw new GatewayVerbError(
@@ -522,6 +567,7 @@ export function createFleetConflictsRetryHandler(
         'itemId',
       );
     }
+    claims.add(itemId);
     try {
       return { itemId, outcome: await deps.retryIntegration(itemId) };
     } catch (error) {
@@ -530,6 +576,8 @@ export function createFleetConflictsRetryHandler(
         'INTEGRATION_FAILED',
         409,
       );
+    } finally {
+      claims.delete(itemId);
     }
   };
 }

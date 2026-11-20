@@ -9,6 +9,7 @@ import { captureExistingDirectory, confirmFileDurable } from '../../utils/atomic
 import { readFileObservation, fileObservationIdentity } from '../../utils/file-observation.js';
 import { assertCrossProcessLockCurrent, tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
 import type { NativeDataWriteOwner } from '../../runtime/native-reader-compatibility.js';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 const MAX_PROJECT_BINDINGS = 4096;
 const nativeApply = Reflect.apply, weakGet = WeakMap.prototype.get, weakSet = WeakMap.prototype.set;
 const confirmations = new WeakMap<RegisteredProjectIdentity, () => void>();
@@ -109,6 +110,16 @@ export class ProjectIdentityRegistry {
     try {
       current(); const existing = this.inspect(workspace);
       if (existing) { if (previousId !== null && existing.projectId !== previousId) throw new ProjectIdentityUnavailableError(); existing.assertCurrent(); invokeGuard(() => nativeWriter?.declare('project-default-bindings-v1')); current(); (nativeApply(weakGet, confirmations, [existing]) as () => void)(); current(); return existing; }
+      // Counted before publishing: binding N+1 would make every later read refuse, so the cap refuses here instead.
+      const bound = readdirSync(this.directory).filter(name => name.endsWith('.json')).length;
+      if (bound >= MAX_PROJECT_BINDINGS) {
+        throw new RefusalError(refusal({
+          code: 'PROJECT_BINDINGS_FULL',
+          state: `${bound} workspaces already have a project; this one was not given one`,
+          reason: `The project registry holds at most ${MAX_PROJECT_BINDINGS} workspaces.`,
+          next: [`Remove workspaces you no longer use from ${this.directory}, then open this one again.`],
+        }));
+      }
       const projectId = previousId ?? opaqueId();
       invokeGuard(() => nativeWriter?.declare('project-default-bindings-v1')); current();
       const suffix = randomUUID();

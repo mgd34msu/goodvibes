@@ -417,7 +417,8 @@ source material.
 Clients that already performed object-scoped retrieval can pass
 `candidateSourceIds`, `candidateNodeIds`, and `strictCandidates: true` so answer
 synthesis stays inside that candidate set instead of re-scanning unrelated
-sources in the same knowledge space.
+sources in the same knowledge space. An empty candidate list is refused with a
+400 (it selects nothing); omit the field to search every source.
 
 Answer evidence distinguishes subject tokens from broad intent tokens such as
 "features", "supports", and "specs"; sources that only match those generic words

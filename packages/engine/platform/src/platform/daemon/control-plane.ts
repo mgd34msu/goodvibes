@@ -28,6 +28,7 @@ import { readRequestedDomains } from '../control-plane/gateway-utils.js';
 import type { DistributedRuntimeManager } from '../runtime/remote/index.js';
 import { extractForwardedClientIp } from '../runtime/network/index.js';
 import { clientAddressOf, isLocalOrigin, resolveClientAddress } from './client-address.js';
+import { requestTransport } from '../runtime/network/request-transport.js';
 import { resolveGatewayPathTemplate } from './helpers.js';
 import { catalogGrantedScopes, narrowGatewayGrant, pairingTokenCaller, refuseGatewayInvocation } from './http/gateway-binding-gate.js';
 import { browserOriginAllowed, originNotAllowedResponse } from './http/browser-origin.js';
@@ -398,8 +399,11 @@ export class DaemonControlPlaneHelper {
     const bound = requestContextOf(req);
     if (bound && isPrincipalCurrent(bound.principal, this.authRevision())) return bound;
     const token = extractOperatorAuthToken(req);
-    const principal = token ? this.describeRequestPrincipal(token, isLocalOrigin(req)) : null;
-    if (!principal) return null;
+    const described = token ? this.describeRequestPrincipal(token, isLocalOrigin(req)) : null;
+    if (!described) return null;
+    // How this request reached the listener, for an effect that may only cross some links (card entry).
+    const principal: RequestPrincipal = Object.freeze({ ...described,
+      transport: requestTransport(req, { tls: req.url.startsWith('https:'), trustProxy: this.trustProxyEnabled() }) });
     const gateway = this.context.controlPlaneGateway;
     const context = createRequestContext(principal, req.signal,
       typeof gateway?.principalSignal === 'function' ? () => gateway.principalSignal(principal.principalId) : undefined);
@@ -1378,6 +1382,8 @@ export class DaemonControlPlaneHelper {
             scopes: context?.scopes,
             clientKind: context?.clientKind,
             ...(authenticated?.credentialKind ? { credentialKind: authenticated.credentialKind } : {}),
+            // How the request reached the listener, from the principal the listener authenticated; never from the caller.
+            ...(authenticated?.transport ? { transport: authenticated.transport } : {}),
             ...(context?.actor ? { actor: context.actor } : {}),
             ...(context?.explicitUserRequest === undefined
               ? {}

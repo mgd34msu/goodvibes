@@ -67,9 +67,15 @@ export async function pushNudge(
   destinations: readonly string[],
   assertCurrent: () => void = () => {},
   withNudgeDelivery?: OccasionMutationOptions['withNudgeDelivery'],
+  /**
+   * Filled with each destination's outcome as it happens, so a caller whose
+   * sweep stops after an accepted delivery (this throws then) still records
+   * what landed.
+   */
+  sink: NudgeDelivery[] = [],
 ): Promise<readonly NudgeDelivery[]> {
   if (deliverer === undefined) return [];
-  const results: NudgeDelivery[] = [];
+  const results = sink;
   try {
     for (const channel of destinations) {
       try {

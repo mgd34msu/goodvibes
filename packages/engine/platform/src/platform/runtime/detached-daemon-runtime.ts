@@ -17,6 +17,7 @@ import { rmSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { join } from 'node:path';
+import { withProcessLockSync } from '../utils/process-lock.js';
 
 /** File name of the detached-daemon runtime record within the daemon home dir. */
 export const DETACHED_DAEMON_RUNTIME_FILE = 'detached-daemon.json';
@@ -40,6 +41,19 @@ export function daemonRecordBaseUrl(record: DetachedDaemonRuntimeHint): string {
   const dialed = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
   return `${record.scheme ?? 'http'}://${dialed}:${record.port}`;
 }
+
+/**
+ * The kernel-released lock every change of the record is made under: a stop's
+ * removal (and a reader's reap) compares and removes, and a replacement daemon
+ * publishes, one at a time, so a removal can never take a record written
+ * between its compare and its unlink. Released by the kernel if a holder dies.
+ */
+function withRecordLock<T>(runtimeDir: string, fn: () => T): T {
+  return withProcessLockSync(join(runtimeDir, 'daemon-runtime.writer.sqlite'), fn, { waitMs: RECORD_LOCK_WAIT_MS });
+}
+
+/** How long a record change waits for another process's change of the same record. */
+const RECORD_LOCK_WAIT_MS = 2_000;
 
 /** Absolute path of the runtime record file for a given daemon runtime dir. */
 export function detachedDaemonRuntimePath(runtimeDir: string): string {
@@ -125,19 +139,21 @@ export function reapDetachedDaemonRuntime(
     record,
   };
   try {
-    const onDisk = readDetachedDaemonRuntime(runtimeDir);
-    if (onDisk !== null && !sameDaemonRecord(onDisk, record)) {
-      logger.info('[detached-daemon] runtime record was replaced while it was judged stale; leaving the new record', {
-        stalePid: record.pid,
-        currentPid: onDisk.pid,
-      });
-      return null;
-    }
-    rmSync(detachedDaemonRuntimePath(runtimeDir), { force: true });
+    return withRecordLock(runtimeDir, () => {
+      const onDisk = readDetachedDaemonRuntime(runtimeDir);
+      if (onDisk !== null && !sameDaemonRecord(onDisk, record)) {
+        logger.info('[detached-daemon] runtime record was replaced while it was judged stale; leaving the new record', {
+          stalePid: record.pid,
+          currentPid: onDisk.pid,
+        });
+        return null;
+      }
+      rmSync(detachedDaemonRuntimePath(runtimeDir), { force: true });
+      return receipt;
+    });
   } catch {
     return null;
   }
-  return receipt;
 }
 
 /** Whether two records describe the same daemon launch: same address, pid and (when both say) start time. */
@@ -229,14 +245,26 @@ export function publishDaemonRuntimeRecord(
     startedAt: now().toISOString(),
     ...(bound.logFilePath === undefined ? {} : { logFilePath: bound.logFilePath }),
   };
-  if (recordDetachedDaemonRuntime(runtimeDir, record) === null) return null;
+  let written: string | null;
+  try {
+    written = withRecordLock(runtimeDir, () => recordDetachedDaemonRuntime(runtimeDir, record));
+  } catch (error) {
+    logger.warn('[detached-daemon] the runtime record lock was held too long; other surfaces will not discover this daemon from its record', {
+      runtimeDir,
+      error: summarizeError(error),
+    });
+    return null;
+  }
+  if (written === null) return null;
   return {
     record,
     remove() {
       try {
-        const onDisk = readDetachedDaemonRuntime(runtimeDir);
-        if (onDisk === null || !sameDaemonRecord(onDisk, record)) return;
-        rmSync(detachedDaemonRuntimePath(runtimeDir), { force: true });
+        withRecordLock(runtimeDir, () => {
+          const onDisk = readDetachedDaemonRuntime(runtimeDir);
+          if (onDisk === null || !sameDaemonRecord(onDisk, record)) return;
+          rmSync(detachedDaemonRuntimePath(runtimeDir), { force: true });
+        });
       } catch {
         // A record left behind is reaped by the next reader that finds its pid gone.
       }

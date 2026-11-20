@@ -421,7 +421,7 @@ export class HookWorkbench {
       payload,
     };
     const matchedHooks = this.listManagedHooks()
-      .filter(({ pattern, hook }) => matchesEventPath(pattern, event.path) && matchesMatcher(hook.matcher, event.specific))
+      .filter(({ pattern, hook }) => matchesEventPath(pattern, event.path) && matchesMatcher(hook.matcher, event.specific, event.effects))
       .map(({ pattern, hook }) => ({
         pattern,
         name: hook.name ?? '(unnamed)',

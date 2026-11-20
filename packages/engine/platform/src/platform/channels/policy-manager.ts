@@ -527,18 +527,16 @@ export class ChannelPolicyManager {
         ? (policy.metadata[DECLINED_CLAIMANTS_KEY] as unknown[]).filter((entry): entry is string => typeof entry === 'string')
         : [];
       if (declined.includes(userId)) return;
-      this.updatePolicy(policy.surface, { metadata: { ...policy.metadata, [DECLINED_CLAIMANTS_KEY]: [...declined, userId].slice(-MAX_DECLINED_CLAIMANTS) } });
-      await this.persist();
+      await this.savePolicy(policy.surface, { metadata: { ...policy.metadata, [DECLINED_CLAIMANTS_KEY]: [...declined, userId].slice(-MAX_DECLINED_CLAIMANTS) } });
       return;
     }
     const group = typeof groupPolicyId === 'string' ? policy.groupPolicies.find((entry) => entry.id === groupPolicyId) : undefined;
     const owners = group ? group.allowlistUserIds ?? [] : policy.allowlistUserIds;
     if (!owners.includes(userId)) {
       const owner = policy.ownerId ? {} : { ownerId: userId, ownerSince: Date.now() };
-      this.updatePolicy(policy.surface, group
+      await this.savePolicy(policy.surface, group
         ? { groupPolicies: policy.groupPolicies.map((entry) => entry === group ? { ...entry, allowlistUserIds: [...owners, userId] } : entry), ...owner }
         : { allowlistUserIds: [...owners, userId], ...owner });
-      await this.persist();
     }
     logger.info('Channel owner claim accepted', { surface: policy.surface, userId });
     // A sender admitted to a surface that already had an owner leaves the other held senders waiting.
@@ -598,12 +596,41 @@ export class ChannelPolicyManager {
     patch: Partial<Omit<ChannelPolicyRecord, 'surface' | 'updatedAt'>>,
   ): Promise<ChannelPolicyRecord> {
     await this.start();
-    const next = this.updatePolicy(surface, patch);
-    await this.persist();
-    return next;
+    return await this.savePolicy(surface, patch);
+  }
+
+  /**
+   * Save, then publish: the patched record is written with the rest of the
+   * store and only then becomes the live policy. A failed write publishes
+   * nothing and throws, so the daemon never enforces a policy it would forget
+   * at restart, and a caller is never told a change took that did not. The
+   * record is computed inside the queued write, so two changes in flight
+   * apply in order and neither loses the other's patch.
+   */
+  private async savePolicy(surface: ChannelSurface, patch: Partial<Omit<ChannelPolicyRecord, 'surface' | 'updatedAt'>>): Promise<ChannelPolicyRecord> {
+    let saved: ChannelPolicyRecord | undefined;
+    await this.writes.run(async () => {
+      const next = this.nextPolicy(surface, patch);
+      const policies = [...this.policies.values()].filter((entry) => entry.surface !== surface);
+      policies.push(next);
+      policies.sort((a, b) => a.surface.localeCompare(b.surface));
+      await this.store.persist({ policies, audit: [...this.audit] });
+      this.policies.set(surface, next);
+      this.#moved(surface);
+      saved = next;
+    });
+    return saved!;
   }
 
   private updatePolicy(surface: ChannelSurface, patch: Partial<Omit<ChannelPolicyRecord, 'surface' | 'updatedAt'>>): ChannelPolicyRecord {
+    const owned = this.nextPolicy(surface, patch);
+    this.policies.set(surface, owned);
+    this.#moved(surface);
+    return owned;
+  }
+
+  /** The record `patch` makes of the surface's current policy; publishes nothing. */
+  private nextPolicy(surface: ChannelSurface, patch: Partial<Omit<ChannelPolicyRecord, 'surface' | 'updatedAt'>>): ChannelPolicyRecord {
     const existing = this.getPolicy(surface);
     const next: ChannelPolicyRecord = {
       ...existing,
@@ -624,11 +651,8 @@ export class ChannelPolicyManager {
       metadata: patch.metadata ?? existing.metadata,
     };
     const ownerId = settledOwner(next);
-    const owned: ChannelPolicyRecord = ownerId === next.ownerId ? next
+    return ownerId === next.ownerId ? next
       : { ...next, ownerId, ownerSince: ownerId === undefined ? undefined : Date.now() };
-    this.policies.set(surface, owned);
-    this.#moved(surface);
-    return owned;
   }
 
   /** A decision the caller already made under the current revision, or a fresh one. */

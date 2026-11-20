@@ -1,5 +1,6 @@
 import type { ScheduleEntry } from '../../../tools/workflow/index.js';
 import type { ProcessNode, ProcessState } from '../types.js';
+import { parseIntervalWords } from '@goodvibes-jev/engine/contracts';
 
 /** Schedule node ids are namespaced: entries are keyed by user-chosen names. */
 export function scheduleNodeId(name: string): string {
@@ -25,6 +26,18 @@ function scheduleActivity(entry: ScheduleEntry, now: number): ProcessNode['curre
   return { kind: 'phase', text: `${ended}${skipped}`, at: entry.lastExitAt };
 }
 
+/** When the schedule runs and how its last run ended, for the work board. */
+function scheduleFacts(entry: ScheduleEntry): NonNullable<ProcessNode['schedule']> {
+  const intervalMs = parseIntervalWords(entry.interval);
+  // A run that ended with an error or a non-zero exit failed; a clean one has no delivery to speak of.
+  const failed = !entry.running && entry.lastExitAt !== undefined && (entry.lastError !== undefined || entry.lastExitCode !== 0);
+  return {
+    ...(intervalMs !== undefined ? { cadence: { kind: 'every' as const, intervalMs } } : {}),
+    ...(entry.lastRun !== undefined ? { lastRunAt: entry.lastRun } : {}),
+    ...(failed ? { lastOutcome: 'failed' as const } : {}),
+  };
+}
+
 /**
  * ScheduleEntry -> ProcessNode. A schedule whose command is executing is
  * active ('executing-tool'); between runs it is honestly 'idle'; disabled maps
@@ -38,6 +51,8 @@ export function adaptSchedule(entry: ScheduleEntry, now: number = Date.now()): P
   return {
     id: scheduleNodeId(entry.name),
     kind: 'schedule',
+    serves: 'you',
+    schedule: scheduleFacts(entry),
     parentId: undefined,
     label: `${entry.name} (${entry.interval}, this process only)`,
     task: entry.command,

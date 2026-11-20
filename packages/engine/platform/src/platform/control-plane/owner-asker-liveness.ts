@@ -26,12 +26,13 @@
  * file exists one lock attempt (a SQLite write reservation and rollback, no
  * write) plus, when the asker may be idle, one indexed read of its questions.
  */
-import { createHash } from 'node:crypto';
-import { existsSync, unlinkSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   ProcessLockBusyError,
   acquireProcessLock,
+  holdProcessLock,
   withProcessLockSync,
   type HeldProcessLock,
 } from '../utils/process-lock.js';
@@ -200,4 +201,46 @@ function releaseOf(path: string, holding: Holding): () => void {
       held.lock = null;
     }
   };
+}
+
+/**
+ * This process as the taker of owner answers (and the applier of owner
+ * decisions) for the store at `storePath`: a random token, and a
+ * kernel-released lock named after it that this process holds while it runs.
+ * A row marked taken by a token whose lock nobody holds was taken by a process
+ * that died before the request carrying the answer was accepted, so the answer
+ * is handed again. The lock is taken on the first take (one lock file per
+ * process, beside the store) and its file is removed when the process exits.
+ */
+export function processTaker(storePath: string): string {
+  let taker = takers.get(storePath);
+  if (taker) return taker.token;
+  const token = randomBytes(12).toString('hex');
+  // A store held in memory is this process's alone: no other process can have taken from it.
+  if (storePath === ':memory:') {
+    takers.set(storePath, { token, lock: null });
+    return token;
+  }
+  const path = takerLockPath(storePath, token);
+  mkdirSync(dirname(path), { recursive: true });
+  const lock = holdProcessLock(path);
+  taker = { token, lock };
+  takers.set(storePath, taker);
+  if (lock) process.once('exit', () => { removeFile(path); });
+  return token;
+}
+
+/** True when the process that holds `token` for the store at `storePath` is gone (its lock is not held); never for this process. */
+export function isTakerGone(storePath: string, token: string): boolean {
+  if (takers.get(storePath)?.token === token || storePath === ':memory:') return false;
+  const path = takerLockPath(storePath, token);
+  // Not held: the taker died. Its file is removed on the way, under the lock.
+  return !settleAskerLock(path, () => true);
+}
+
+const takers = new Map<string, { readonly token: string; readonly lock: HeldProcessLock | null }>();
+
+function takerLockPath(storePath: string, token: string): string {
+  // The token is hex; it is still never used as a file name as given.
+  return join(dirname(storePath), 'owner-askers', `taker-${createHash('sha256').update(token).digest('hex').slice(0, 32)}.writer.sqlite`);
 }

@@ -268,6 +268,8 @@ export interface ContractRunner {
    * contract. Optional for custom runners; the factory always supplies it.
    */
   startIdempotent?(input: StartContractInput, request: IdempotentStartRequest, options?: ContractStartOptions): Promise<IdempotentStartedContract>;
+  /** {@link startFromPlan} by retry key, as {@link startIdempotent}. */
+  startFromPlanIdempotent?(input: StartFromPlanInput, request: IdempotentStartRequest, options?: ContractStartOptions): Promise<IdempotentStartedContract>;
   /**
    * Starts a contract from a plan drafted before it (a launched plan proposal
    * or workstream draft): the planner keeps the drafted units and
@@ -1147,9 +1149,23 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
 
   const idempotentStarts = new Map<string, Promise<{ readonly fingerprint: string; readonly started: IdempotentStartedContract }>>();
 
-  async function startIdempotent(input: StartContractInput, request: IdempotentStartRequest, options: ContractStartOptions = {}): Promise<IdempotentStartedContract> {
+  function startIdempotent(input: StartContractInput, request: IdempotentStartRequest, options: ContractStartOptions = {}): Promise<IdempotentStartedContract> {
+    return startKeyed(startFingerprint(input), request, options, (record) => start(input, options, record));
+  }
+
+  /** A drafted plan started by retry key: the same key replays the first contract, after a restart too. */
+  function startFromPlanIdempotent(input: StartFromPlanInput, request: IdempotentStartRequest, options: ContractStartOptions = {}): Promise<IdempotentStartedContract> {
+    const fingerprint = `${startFingerprint(input)}\u0000${JSON.stringify(input.draft)}`;
+    return startKeyed(fingerprint, request, options, (record) => startFromPlan(input, options, record));
+  }
+
+  async function startKeyed(
+    fingerprint: string,
+    request: IdempotentStartRequest,
+    options: ContractStartOptions,
+    start: (record: (contractId: string) => void) => Promise<StartedContract>,
+  ): Promise<IdempotentStartedContract> {
     const scope = `${request.principalId}\u0000${request.key}`;
-    const fingerprint = startFingerprint(input);
     // A second call with the key while the first is still starting waits for it rather than starting again.
     const inFlight = idempotentStarts.get(scope);
     if (inFlight !== undefined) {
@@ -1193,7 +1209,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
           catch (error) { throw idempotencyKeyUnrecorded(error); }
         };
         let started: StartedContract;
-        try { started = await start(input, options, record); }
+        try { started = await start(record); }
         catch (error) {
           // Nothing started: the key is free for the retry.
           if (recorded) { try { deps.store.forgetIdempotentStart(scope); } catch { /* the next start under the lock finds no contract and forgets it */ } }
@@ -1207,7 +1223,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     finally { if (idempotentStarts.get(scope) === operation) idempotentStarts.delete(scope); }
   }
 
-  function startFromPlan(input: StartFromPlanInput, options: ContractStartOptions = {}): Promise<StartedContract> {
+  function startFromPlan(input: StartFromPlanInput, options: ContractStartOptions = {}, reserved?: (contractId: string) => void): Promise<StartedContract> {
     if (disposed) throw new Error('Contract runner is disposed');
     const { draft, ...rest } = { ...input, ...captureStartInput(input) };
     const draftPlan = numberDraft(draft);
@@ -1215,6 +1231,8 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     return (async () => {
       let owner: AgentRecord | undefined;
       try {
+        // Inside the try: a key that cannot be recorded refuses the start and gives the reserved id back.
+        reserved?.(id);
         const prepared = await prepareStart(rest, id, options, creation);
         prepared.current();
         owner = spawnOwner(rest, id); prepared.current();
@@ -1771,6 +1789,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     resumeDurable,
     start,
     startIdempotent,
+    startFromPlanIdempotent,
     startFromPlan,
     startForOwner,
     startOwnedForOwner,

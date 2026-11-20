@@ -54,7 +54,10 @@ async function buildProfile(
 export async function discoverBrowserKnowledgeProfiles(
   filter: Pick<BrowserKnowledgeFilter, 'browsers' | 'homeOverride'> = {},
 ): Promise<BrowserKnowledgeProfile[]> {
-  const wanted = filter.browsers?.length ? new Set(filter.browsers) : null;
+  const selection = filter.browsers ?? { kind: 'default' as const };
+  // An explicit empty selection reads nothing; only `default` means every installed browser.
+  if (selection.kind === 'none') return [];
+  const wanted = selection.kind === 'only' ? new Set<BrowserKnowledgeKind>(selection.values) : null;
   const seen = new Set<string>();
   const profiles: BrowserKnowledgeProfile[] = [];
 

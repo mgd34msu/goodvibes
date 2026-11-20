@@ -9,6 +9,7 @@ import { GoodVibesError, RefusalError, classifyFailure, refusal } from '@goodvib
 import { summarizeError } from '../utils/error-display.js';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import { logger } from '../utils/logger.js';
+import { FenceIssuer, type Fence } from '../utils/owner-fence.js';
 import {
   emitWatcherFailed,
   emitWatcherCheckpointAdvanced,
@@ -35,7 +36,8 @@ export interface RegisterWatcherInput {
   readonly source: AutomationSourceRecord;
   readonly intervalMs?: number | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
-  readonly run?: (() => Promise<string | void> | string | void) | undefined;
+  /** The work of one run. `signal` aborts when the watcher is re-registered, stopped or removed while it runs. */
+  readonly run?: ((signal: AbortSignal) => Promise<string | void> | string | void) | undefined;
 }
 
 export interface RegisterPollingWatcherInput {
@@ -106,13 +108,12 @@ export const watcherLifecycle = defineLifecycle<WatcherState>('watcher', {
 });
 
 /**
- * Whether the outcome of a run that began while the watcher was `ranFrom` may
- * still be written to the record it finds now. A watcher stopped during its run
- * stays stopped; one that was already stopped when the run began (a manual
- * run-now) keeps recording its outcome. The move itself must be in the table.
+ * Whether the outcome of a run may still be written to the record it finds now: only while the run's generation
+ * is current (no re-registration, stop or removal since it began; a manual run-now of a stopped watcher keeps
+ * recording its outcome), and only along a move the table allows.
  */
-function runOutcomeApplies(ranFrom: WatcherState, now: WatcherState, outcome: WatcherState): boolean {
-  if (now === 'stopped' && ranFrom !== 'stopped') return false;
+function runOutcomeApplies(generation: Fence, now: WatcherState, outcome: WatcherState): boolean {
+  if (!generation.current) return false;
   return now === outcome || watcherLifecycle.can(now, outcome);
 }
 
@@ -129,7 +130,7 @@ const DEFAULT_RECOVERY_WINDOW_MINUTES = 10;
  */
 const HEARTBEAT_SAVE_DELAY_MS = 30_000;
 
-type WatcherRun = () => Promise<string | void> | string | void;
+type WatcherRun = (signal: AbortSignal) => Promise<string | void> | string | void;
 
 interface RegisteredWatcher {
   readonly record: WatcherRecord;
@@ -273,7 +274,33 @@ function sourceStatusFor(record: WatcherRecord, ts = now()): {
 export class WatcherRegistry {
   private readonly watchers = new Map<string, RegisteredWatcher>();
   private readonly timers = new Map<string, ReturnType<typeof setInterval>>();
-  private readonly inFlight = new Set<string>();
+  /** The generation each watcher's in-flight run started under: one run per generation at a time. */
+  private readonly inFlight = new Map<string, number>();
+  /**
+   * Each watcher's generation. A registration (a new definition or owner), a stop and a removal move it, so a run
+   * of the earlier generation is aborted and its outcome is never applied to the record that replaced it.
+   */
+  private readonly generations = new Map<string, FenceIssuer>();
+
+  private generation(id: string): FenceIssuer {
+    let issuer = this.generations.get(id);
+    if (issuer === undefined) { issuer = new FenceIssuer(`watcher ${id}`); this.generations.set(id, issuer); }
+    return issuer;
+  }
+
+  /** Ends the watcher's current generation: its in-flight run is aborted and its outcome dropped. */
+  private endGeneration(id: string, removed = false): void {
+    const issuer = this.generations.get(id);
+    if (issuer === undefined) return;
+    if (removed) { issuer.retire('watcher removed'); this.generations.delete(id); }
+    else issuer.issue();
+  }
+
+  /** Whether a run of the watcher's current generation is in flight. */
+  private runningNow(id: string): boolean {
+    const running = this.inFlight.get(id);
+    return running !== undefined && running === this.generations.get(id)?.epoch;
+  }
   private readonly storePath: string;
   private runtimeDispatch: DomainDispatch | null = null;
   private runtimeBus: RuntimeEventBus | null = null;
@@ -442,6 +469,7 @@ export class WatcherRegistry {
       if (timer) clearInterval(timer);
       this.timers.delete(id);
       this.watchers.delete(id);
+      this.endGeneration(id, true);
       this.groupOccurrences.delete(id);
       this.runtimeDispatch?.removeWatcher(id, 'watchers.group');
     }
@@ -459,6 +487,7 @@ export class WatcherRegistry {
       const timer = this.timers.get(item.id);
       if (timer) clearInterval(timer);
       this.timers.delete(item.id);
+      this.endGeneration(item.id);
       this.watchers.set(item.id, { record, run, ownerRun: false });
       group.adopted(item);
       this.runtimeDispatch?.syncWatcher(record, 'watchers.group');
@@ -535,7 +564,7 @@ export class WatcherRegistry {
       });
       return;
     }
-    if (!group.holdsRole() || this.inFlight.has(id)) return;
+    if (!group.holdsRole() || this.runningNow(id)) return;
     const startedAt = now();
     this.groupOccurrences.set(id, startedAt);
     void group.publish([this.groupItem(watcher.record)])
@@ -588,6 +617,8 @@ export class WatcherRegistry {
       clearInterval(timer);
       this.timers.delete(input.id);
     }
+    // Each registration is a new generation: a run of the earlier one is aborted and applies nothing.
+    this.endGeneration(record.id);
     this.watchers.set(record.id, { record, run, ownerRun });
     if (wasRunning && run !== undefined) {
       return this.startWatcher(record.id) ?? record;
@@ -705,6 +736,8 @@ export class WatcherRegistry {
     const timer = this.timers.get(id);
     if (timer) clearInterval(timer);
     this.timers.delete(id);
+    // A run in flight stops with the watcher: it is aborted and its outcome is not written.
+    this.endGeneration(id);
 
     const stopped: WatcherRecord = this.normalizeRecord({
       ...watcher.record,
@@ -747,6 +780,7 @@ export class WatcherRegistry {
     this.stopWatcher(id, 'removed');
     const removed = this.watchers.delete(id);
     if (removed) {
+      this.endGeneration(id, true);
       this.awaitingRegistration.delete(id);
       this.groupOccurrences.delete(id);
       this.persistNow();
@@ -885,15 +919,17 @@ export class WatcherRegistry {
 
   private async runWatcher(id: string): Promise<void> {
     if (!this.isEnabled()) return;
-    if (this.inFlight.has(id)) return;
+    if (this.runningNow(id)) return;
     // No timer is armed for such a watcher, but a pending interval or a stale caller must not run the stand-in either.
     if (this.awaitingRegistration.has(id)) return;
     const watcher = this.watchers.get(id);
     if (!watcher?.run) return;
     const run = watcher.run;
-    this.inFlight.add(id);
+    // The generation this run belongs to; a re-registration, stop or removal aborts it and drops its outcome.
+    const fence = this.generation(id).peek();
+    this.inFlight.set(id, fence.epoch);
     try {
-      const checkpoint = await run();
+      const checkpoint = await run(fence.signal);
       // Re-read: the watcher may have been stopped, removed or re-registered while it ran.
       const current = this.watchers.get(id);
       // A manual run of a stopped watcher records its result but does not start it: no timer would drive it.
@@ -901,7 +937,7 @@ export class WatcherRegistry {
       const undriven = watcher.record.state === 'stopped'
         || (watcher.record.state === 'failed' && !this.timers.has(id) && watcher.record.kind !== 'manual');
       const successState: WatcherState = undriven ? 'stopped' : 'running';
-      if (!current || !runOutcomeApplies(watcher.record.state, current.record.state, successState)) return;
+      if (!current || !runOutcomeApplies(fence, current.record.state, successState)) return;
       const updated: WatcherRecord = this.normalizeRecord({
         ...current.record,
         state: successState,
@@ -947,8 +983,8 @@ export class WatcherRegistry {
       }
     } catch (error) {
       const current = this.watchers.get(id);
-      if (!current || !runOutcomeApplies(watcher.record.state, current.record.state, 'failed')) {
-        logger.warn('Watcher run failed after the watcher was stopped or removed; outcome discarded', { watcherId: id, error: summarizeError(error) });
+      if (!current || !runOutcomeApplies(fence, current.record.state, 'failed')) {
+        logger.warn('Watcher run failed after the watcher was stopped, removed or registered again; outcome discarded', { watcherId: id, error: summarizeError(error) });
         return;
       }
       const failed: WatcherRecord = this.normalizeRecord({
@@ -978,7 +1014,7 @@ export class WatcherRegistry {
         });
       }
     } finally {
-      this.inFlight.delete(id);
+      if (this.inFlight.get(id) === fence.epoch) this.inFlight.delete(id);
     }
   }
 
@@ -1004,7 +1040,7 @@ export class WatcherRegistry {
 
     if (record.kind === 'webhook' || record.kind === 'polling') {
       const url = watchedUrl(record);
-      return url ? () => this.pollUrl(url, merged) : undefined;
+      return url ? (signal) => this.pollUrl(url, merged, signal) : undefined;
     }
 
     // A manual run has no source to bracket: a timestamp would "advance" on every run.
@@ -1019,7 +1055,7 @@ export class WatcherRegistry {
    * holding the watcher's in-flight slot forever, and a non-2xx answer fails
    * it too: an unreachable or unauthorised source is not a healthy one.
    */
-  private async pollUrl(url: string, merged: Record<string, unknown>): Promise<string> {
+  private async pollUrl(url: string, merged: Record<string, unknown>, generation: AbortSignal): Promise<string> {
     const headers = typeof merged.headers === 'object' && merged.headers !== null
       ? Object.fromEntries(Object.entries(merged.headers).filter(([, value]) => typeof value === 'string')) as Record<string, string>
       : undefined;
@@ -1036,7 +1072,8 @@ export class WatcherRegistry {
       const response = await this.fetchUrl(url, {
         method: typeof merged.method === 'string' ? merged.method.toUpperCase() : 'GET',
         ...(headers !== undefined ? { headers } : {}),
-        signal: AbortSignal.timeout(this.runTimeoutMs),
+        // The run's timeout, and its generation: a watcher re-registered, stopped or removed meanwhile stops the request.
+        signal: AbortSignal.any([generation, AbortSignal.timeout(this.runTimeoutMs)]),
       });
       if (!response.ok) {
         await response.body?.cancel().catch(() => undefined);

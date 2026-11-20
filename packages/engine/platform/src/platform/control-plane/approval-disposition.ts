@@ -10,6 +10,13 @@ export type ExplicitApprovalDisposition = Extract<SharedApprovalDisposition, 'ap
 /** The persisted record is richer than the unchanged ordinary prompt result. */
 export interface SharedApprovalDecision extends PermissionPromptDecision {
   readonly disposition?: SharedApprovalDisposition | undefined;
+  /**
+   * On an approval: the content digest (utils/target-ref.ts contentDigest) of
+   * the arguments the call runs with, its modified arguments or else its own,
+   * taken before a typed answer is withheld. A surface whose own approval
+   * narrowed the call differently runs this recorded decision instead.
+   */
+  readonly argsDigest?: string | undefined;
 }
 
 /** How a finished approval ended, as the record's status names it. */

@@ -164,7 +164,8 @@ export interface CancelFinalizeContext {
   readonly isShutdown: () => boolean;
   readonly publish: (event: CompanionChatTurnEvent) => void;
   /** Push the partial into the transcript, update meta, persist. */
-  readonly persistPartial: (message: CompanionChatMessage) => void;
+  /** Records the partial reply; returns whether it was written to the store. */
+  readonly persistPartial: (message: CompanionChatMessage) => boolean;
   /** Resolve the post's pending reply; `extra` carries the partial when one exists. */
   readonly resolveReply: (extra: { assistantMessageId?: string; response?: string }) => void;
   readonly settle: (result: TurnSettleResult) => void;
@@ -206,10 +207,12 @@ export function finalizeCancelledTurn(ctx: CancelFinalizeContext): void {
     ctx.commitPartialToHistory(uncommitted + TURN_INTERRUPTION_NOTE);
   }
   let persistedId: string | undefined;
+  // Whether the partial reached the store, not merely that there was text: a failed write says so.
+  let partialSaved = false;
   let envelope: ConversationMessageEnvelope | undefined;
   if (assistantContent.trim()) {
     const now = Date.now();
-    ctx.persistPartial({
+    partialSaved = ctx.persistPartial({
       id: ctx.assistantMessageId,
       sessionId,
       role: 'assistant',
@@ -233,12 +236,12 @@ export function finalizeCancelledTurn(ctx: CancelFinalizeContext): void {
     sessionId,
     turnId,
     stoppedBy,
-    partialPersisted: persistedId !== undefined,
+    partialPersisted: partialSaved,
     ...(persistedId !== undefined ? { assistantMessageId: persistedId, envelope } : {}),
   });
   ctx.resolveReply(persistedId !== undefined ? { assistantMessageId: persistedId, response: assistantContent } : {});
   ctx.settle({
-    partialPersisted: persistedId !== undefined,
+    partialPersisted: partialSaved,
     ...(persistedId !== undefined ? { assistantMessageId: persistedId } : {}),
   });
 }

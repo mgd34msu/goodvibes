@@ -65,6 +65,7 @@
  * supplied. A merchant this has never seen works or nothing does.
  */
 import { assertCartMatchesRequest, detectRecurringCharge, type RequestedLine } from './cart.js';
+import { randomUUID } from 'node:crypto';
 import { logger } from '../utils/logger.js';
 import { OrderSummaryTooLongError } from './batteries/recurring-charge.js';
 import { checkPaymentGates, type GateInput } from './gates.js';
@@ -76,7 +77,7 @@ import { readShippingTierChoice } from './shipping.js';
 import { evaluatePaymentTaint, type OwnerOriginIntent } from './taint-gate.js';
 import { extractCheckout, type ExtractedCheckout, type RawCheckoutReading } from './checkout-extraction.js';
 import { parseRequestedMaximum } from './money-parsing.js';
-import { money } from './money.js';
+import { cartDigest, compareMoney, money, settleSubmission, type OrderEvidence, type SubmissionDispatch } from './money.js';
 import {
   classifyMerchant,
   windowForPurchase,
@@ -790,7 +791,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
         return original && option.costMinorUnits === original.costMinorUnits;
       });
     if (samePrices) return refused('total-changed', isClassicOperation()
-      ? `The checkout amounts are unchanged, but code could not find the approved total together with the delivery option '${sanitizeNoticeField(expectedTerms.shippingLabel, 60)}' on the page (no decision model is in use). Nothing was submitted. Make sure that option is selected, read the checkout page again and start the purchase with what it shows.`
+      ? `The checkout amounts are unchanged, but code could not find the approved total on the order summary's total line, with the delivery option '${sanitizeNoticeField(expectedTerms.shippingLabel, 60)}' shown as selected (no decision model is in use). Nothing was submitted. Make sure that option is selected and the page shows its order total, read the checkout page again and start the purchase with what it shows; the owner is asked to approve it.`
       : 'The earlier quote could not be verified, and no changed price was established. Nothing was submitted.');
     if (isClassicOperation()) lifecycle.repricedInCode = { totalMinorUnits: expectedTerms.total.minor, currency: expectedTerms.total.currency };
     // Iterative re-entry avoids retaining earlier request/window stacks. The
@@ -869,11 +870,13 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   }
   let windowOutcome: string;
   let answeredBy: string | null = null;
-  // The owner approved this merchant, item and amount before the purchase
-  // began; a total within that amount needs no second answer. A checkout no
+  // The owner approved this merchant, item and amount (in the budget currency
+  // the purchase was admitted under) before the purchase began; a total within
+  // that amount, in that currency, needs no second answer. A checkout no
   // decision model read is not known to be that item, so it is still asked.
   const preApproved = !resumption && notChecked.length === 0 && request.ownerApprovedMaxMinorUnits !== undefined
-    && Number.isSafeInteger(request.ownerApprovedMaxMinorUnits) && draw.totalMinorUnits <= request.ownerApprovedMaxMinorUnits;
+    && Number.isSafeInteger(request.ownerApprovedMaxMinorUnits) && checkout.currency === deps.budgetCurrency
+    && compareMoney(money(draw.totalMinorUnits, checkout.currency), money(request.ownerApprovedMaxMinorUnits, deps.budgetCurrency)) <= 0;
 
   /**
    * Send one notice, persist its delivery report and deadline, and wait for
@@ -1219,19 +1222,30 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   // submitted". Everything before it is unambiguously not submitted; from here
   // until a response is seen, we cannot know, and a record in this phase is
   // reported to the owner rather than retried.
-  await registry.advance(request.purchaseId, 'submit-pending', {}, now());
+  // The one submit this click is, minted here and journaled with the phase,
+  // before the click: only evidence naming it can make the purchase `purchased`.
+  const dispatchTotal = money(draw.totalMinorUnits, checkout.currency);
+  const dispatch: SubmissionDispatch = {
+    purchaseId: request.purchaseId,
+    dispatchId: randomUUID(),
+    cartDigest: cartDigest(checkout.lines, dispatchTotal),
+    total: dispatchTotal,
+    merchantDomain,
+  };
+  await registry.advance(request.purchaseId, 'submit-pending', { dispatchId: dispatch.dispatchId, cartDigest: dispatch.cartDigest }, now());
 
   let submission: {
     readonly url: string;
     readonly orderId: string | null;
     readonly challenge?: CheckoutChallenge | null | undefined;
     readonly verified: boolean;
+    readonly evidence?: OrderEvidence | null | undefined;
   };
   try {
     const submitCurrent = () => { addressCurrent(); purchaseEvidence.assertCurrent(); };
     try { submitCurrent(); } catch { throw new CheckoutSubmitRefused('The original purchase owner, stored address or purchase evidence became unavailable before submission.'); }
     lifecycle.submitMayHaveHappened = true;
-    submission = await driver.submitOrder(controls.placeOrderTarget, { assertCurrent: submitCurrent, signal });
+    submission = await driver.submitOrder(controls.placeOrderTarget, { assertCurrent: submitCurrent, signal }, dispatch);
   } catch (error) {
     if (error instanceof CheckoutQuoteChanged) {
       lifecycle.submitMayHaveHappened = false;
@@ -1319,12 +1333,13 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     windowOutcome,
     answeredBy,
     // Committed below either way (conservative against a double-spend), but
-    // only a composition that read the merchant's own response earns
-    // 'purchased'; otherwise the record says so rather than claiming a
-    // purchase indistinguishable from a verified one.
-    outcome: submission.verified ? 'purchased' : 'submitted-unverified',
+    // only evidence about this very dispatch (an order number, or a
+    // confirmation showing its total, on the merchant's domain after this
+    // click) earns 'purchased'; anything else stays submitted-unverified for
+    // the owner to reconcile, never a purchase indistinguishable from a verified one.
+    outcome: settleSubmission(dispatch, submission.evidence ?? null),
+    merchantOrderId: submission.evidence?.kind === 'order-number' ? submission.evidence.orderId : submission.orderId,
     refusalReason: null,
-    merchantOrderId: submission.orderId,
     refundedAt: null,
     merchantRecognised: merchantVerdict.isMajor,
     merchantQualifier: merchantVerdict.basis,

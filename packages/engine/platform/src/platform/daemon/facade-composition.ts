@@ -55,6 +55,7 @@ import { emitBatchJobSettled } from '../runtime/emitters/providers.js';
 import { DaemonSurfaceActionHelper } from './surface-actions.js';
 import { DaemonTransportEventsHelper } from './transport-events.js';
 import { DaemonHttpRouter } from './http/router.js';
+import { DaemonWorkAdmission } from './work-admission.js';
 import { configuredBrowserOrigins } from './http/browser-origin.js';
 import { DaemonBatchManager } from '../batch/index.js';
 import { CloudflareTunnelConnector } from '../cloudflare/tunnel-connector.js';
@@ -770,7 +771,10 @@ export function createDaemonFacadeCollaborators(
     secretsManager: runtime.runtimeServices.secretsManager,
   });
   cloudflareTunnel.start();
+  // Closed by the auto-updater for its restart; the router refuses new work while it is.
+  const workAdmission = new DaemonWorkAdmission();
   const httpRouter = new DaemonHttpRouter({
+    workAdmission,
     idempotentReplay,
     listenerBinding: () => ({ ...options.transportBinding(), scheme: options.tlsState()?.tls ? 'https' : 'http' }),
     servingListener: options.servingListener,
@@ -876,6 +880,7 @@ export function createDaemonFacadeCollaborators(
     surfaceActionHelper,
     transportEventsHelper,
     httpRouter,
+    workAdmission,
     providerRuntime,
     builtinChannels,
     workProposals,
@@ -1033,7 +1038,11 @@ export function configureDaemonSessionContinuation(options: {
               if (!consumed || consumed.state !== 'completed') throw new Error('Work proposal source was not consumed');
               return { disposition: 'transferred', requestId: result.proposalId, inputConsumed: true };
             } catch (error) {
-              if (gateDeps.workProposals?.listPending().includes(proposal)) gateDeps.workProposals.resolve(proposal.id, 'declined');
+              if (gateDeps.workProposals?.listPending().includes(proposal)) {
+                void gateDeps.workProposals.resolve(proposal.id, 'declined').catch((settleError: unknown) => {
+                  logger.warn('Work proposal could not be declined after its source failed', { proposalId: proposal.id, error: summarizeError(settleError) });
+                });
+              }
               throw error;
             }
           }

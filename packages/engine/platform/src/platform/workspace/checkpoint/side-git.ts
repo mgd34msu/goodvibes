@@ -287,9 +287,18 @@ export class SideGitRunner {
    * (node_modules, build output, etc.) is honored with no extra
    * configuration.
    */
-  async stageAll(paths?: string[]): Promise<void> {
-    const pathspecs = paths && paths.length > 0 ? paths : ['.'];
-    await (await this.git()).raw(['add', '-A', '--', ...pathspecs]);
+  async stageAll(paths?: string[], parentTree?: string): Promise<void> {
+    if (!paths || paths.length === 0) {
+      await (await this.git()).raw(['add', '-A', '--', '.']);
+      return;
+    }
+    // A scoped snapshot is the parent's tree plus these paths and nothing else:
+    // the index persists between runs, so a failed or abandoned create could
+    // have left other paths staged. It is reset to the parent (the empty tree
+    // without one) first; the work tree is not touched. Names are literal, so
+    // a file called `a*.ts` is that file, not a pattern.
+    await (await this.git()).raw(parentTree ? ['read-tree', parentTree] : ['read-tree', '--empty']);
+    await (await this.git()).raw(['add', '-A', '--', ...paths.map(literalPathspec)]);
   }
 
   /**
@@ -430,4 +439,9 @@ export class SideGitRunner {
 /** Split `-z` git output. Names are kept byte-exact: a leading or trailing space is part of the name. */
 function splitNul(out: string): string[] {
   return out.split('\0').filter((name) => name.length > 0);
+}
+
+/** A pathspec git reads as this exact name: no wildcards, no magic. */
+export function literalPathspec(path: string): string {
+  return `:(literal)${path}`;
 }

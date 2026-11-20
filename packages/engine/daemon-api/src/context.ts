@@ -241,7 +241,7 @@ export interface DaemonSystemRouteHandlers {
   postRouteBinding(req: Request): MaybeResponse;
   patchRouteBinding(bindingId: string, req: Request): MaybeResponse;
   deleteRouteBinding(bindingId: string, req: Request): MaybeResponse;
-  getApprovals(url?: URL): MaybeResponse;
+  getApprovals(url: URL | undefined, req: Request): MaybeResponse;
   approvalAction(approvalId: string, action: 'claim' | 'approve' | 'deny' | 'cancel', req: Request): MaybeResponse;
   getConfig(req: Request): MaybeResponse;
   postConfig(req: Request): MaybeResponse;

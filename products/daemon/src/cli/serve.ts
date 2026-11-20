@@ -26,6 +26,8 @@ import { renderDaemonStartupPairing } from './startup-pairing.js';
 
 /** How long a working-directory move waits for the answer to the request that asked for it to reach the caller. */
 const MOVE_ANSWER_GRACE_MS = 100;
+/** How often a move that found a turn running (or could not tell) looks again before it stops the host. */
+const MOVE_IDLE_POLL_MS = 1_000;
 
 /** The launcher supplies real inbox composition and explicitly chooses host-only capabilities. */
 export type DaemonCliRuntime = Pick<RuntimeServicesOptions,
@@ -134,6 +136,16 @@ export function runConfiguredDaemonCli(
           host?.services?.workspaceSwap?.abandonMove(reason);
           continue;
         }
+        // A turn that started during the grace period is not cut off: the host
+        // stops only once the probe sees no busy session (a failed probe waits).
+        const swap = host?.services?.workspaceSwap;
+        for (let busy = swap?.busySessions(); busy !== undefined && (busy.kind !== 'present' || busy.value > 0); busy = swap?.busySessions()) {
+          if (closed) return;
+          await new Promise<void>((resolveWait) => { setTimeout(resolveWait, MOVE_IDLE_POLL_MS); });
+        }
+        if (closed) return;
+        // A newer move asked while this one waited replaces it.
+        if (moveTarget !== undefined) continue;
         stdout(`goodvibes-daemon moving from ${from.workingDirectory} to ${target}`);
         await retireHost();
         if (closed) return;

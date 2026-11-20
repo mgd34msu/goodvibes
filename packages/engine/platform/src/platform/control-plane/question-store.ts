@@ -13,8 +13,20 @@
  * change counter (one statement, no file read): a reader compares one integer
  * to learn whether anything changed, and re-reads the rows only when it did.
  *
- * First answer wins: an answer is written only while the row is still open; a
- * later one changes nothing and reports who answered it.
+ * First answer wins: an answer is written only while the row is still open and
+ * its deadline has not passed (both in the UPDATE that writes it); a later one
+ * changes nothing and reports who answered it.
+ *
+ * An answer reaches its asker in two steps. The asking process marks it
+ * `taken` (with its taker token, owner-asker-liveness.ts `processTaker`) when
+ * it puts the answer on a model request, and `delivered` only once the
+ * provider accepted that request. A row taken by a process that died before
+ * then (its taker lock is free) is handed again, so an answer is never marked
+ * delivered while it was only in memory.
+ *
+ * A decision item's choice is claimed (`applying_token`) before its handler
+ * runs and committed by the same token, so a second choice, a withdrawal or
+ * the deadline cannot slip in between: each is refused while the claim is held.
  */
 import { randomUUID } from 'node:crypto';
 import { watch, type FSWatcher } from 'node:fs';
@@ -95,6 +107,12 @@ export interface StoredAnswerDelivery {
   readonly at: number;
 }
 
+/** An answer put on a model request by `taker`, not yet confirmed accepted. */
+export interface StoredAnswerTaken {
+  readonly taker: string;
+  readonly at: number;
+}
+
 export interface StoredOwnerEntry {
   readonly item: StoredOwnerItem;
   readonly answer?: OwnerAnswer | undefined;
@@ -103,6 +121,10 @@ export interface StoredOwnerEntry {
   readonly closedAt?: number | undefined;
   /** Set once, after the answer: the first report wins. */
   readonly delivery?: StoredAnswerDelivery | undefined;
+  /** Put on a request by a taker that has not yet had it accepted. */
+  readonly taken?: StoredAnswerTaken | undefined;
+  /** A decision item whose choice is being applied by the holder of this token. */
+  readonly applyingToken?: string | undefined;
   readonly updatedAt: number;
 }
 
@@ -159,6 +181,16 @@ const MIGRATIONS: readonly SqliteMigration[] = [{
     db.run('CREATE INDEX owner_items_answer_agent ON owner_items(answer_agent) WHERE answer_agent IS NOT NULL');
     db.run('CREATE INDEX owner_items_closed_at ON owner_items(closed_at) WHERE closed_at IS NOT NULL');
   },
+}, {
+  // Delivery in two steps (taken, then delivered), the claim on a decision being
+  // applied, and the deadline in its own column so the answer's UPDATE checks it.
+  toVersion: 2,
+  up: (db: Database) => {
+    db.run('ALTER TABLE owner_items ADD COLUMN taker TEXT');
+    db.run('ALTER TABLE owner_items ADD COLUMN applying_token TEXT');
+    db.run('ALTER TABLE owner_items ADD COLUMN expires_at INTEGER');
+    db.run("UPDATE owner_items SET expires_at = json_extract(item, '$.expiresAt') WHERE json_extract(item, '$.expiresAt') IS NOT NULL");
+  },
 }];
 
 interface ItemRow {
@@ -171,12 +203,14 @@ interface ItemRow {
   readonly delivery_state: string | null;
   readonly delivery_reason: string | null;
   readonly delivery_at: number | null;
+  readonly taker: string | null;
+  readonly applying_token: string | null;
   readonly updated_at: number;
 }
 
-const ROW_COLUMNS = 'id, item, answer, answered_by, withdrawn_reason, closed_at, delivery_state, delivery_reason, delivery_at, updated_at';
-/** Rows an asker still has to take: open questions, and answers no one has taken or settled. */
-const UNDELIVERED = '(closed_at IS NULL OR (answer IS NOT NULL AND delivery_state IS NULL))';
+const ROW_COLUMNS = 'id, item, answer, answered_by, withdrawn_reason, closed_at, delivery_state, delivery_reason, delivery_at, taker, applying_token, updated_at';
+/** Rows an asker still has to take: open questions, and answers not yet delivered or settled (taken ones too: their taker may have died). */
+const UNDELIVERED = "(closed_at IS NULL OR (answer IS NOT NULL AND (delivery_state IS NULL OR delivery_state = 'taken')))";
 
 function isRecordObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -227,7 +261,7 @@ function isClosed(entry: StoredOwnerEntry): boolean {
  * withdrawal and delivery report on the row, even two in the same millisecond.
  */
 export function storedEntryVersion(entry: StoredOwnerEntry): string {
-  return `${entry.updatedAt}|${entry.closedAt ?? ''}|${entry.answer !== undefined ? 'a' : ''}|${entry.withdrawnReason !== undefined ? 'w' : ''}|${entry.delivery?.state ?? ''}`;
+  return `${entry.updatedAt}|${entry.closedAt ?? ''}|${entry.answer !== undefined ? 'a' : ''}|${entry.withdrawnReason !== undefined ? 'w' : ''}|${entry.delivery?.state ?? (entry.taken ? 'taken' : '')}|${entry.applyingToken ?? ''}`;
 }
 
 /** Called with the rows that changed since the last call. */
@@ -337,12 +371,12 @@ export class QuestionStore implements RevisionSource {
       }
       // Short enough to type as an answer target; 48 random bits is ample for one owner's inbox.
       const stored: StoredOwnerItem = { ...item, id: `q-${randomUUID().replace(/-/g, '').slice(0, 12)}`, createdAt: now };
-      file.db.query<never, [string, string, string | null, string | null, string | null, string, number, number]>(
-        'INSERT INTO owner_items (id, kind, item_key, answer_session, answer_agent, item, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      file.db.query<never, [string, string, string | null, string | null, string | null, string, number, number | null, number]>(
+        'INSERT INTO owner_items (id, kind, item_key, answer_session, answer_agent, item, created_at, expires_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       ).run(
         stored.id, stored.kind, stored.key ?? null,
         metadataText(stored, OWNER_ANSWER_SESSION_METADATA), metadataText(stored, OWNER_ANSWER_AGENT_METADATA),
-        JSON.stringify(stored), now, now,
+        JSON.stringify(stored), now, stored.expiresAt ?? null, now,
       );
       return { created: true, entry: { item: stored, updatedAt: now } };
     });
@@ -350,14 +384,81 @@ export class QuestionStore implements RevisionSource {
     return posted;
   }
 
-  /** Record the first answer; a later one changes nothing. Expiry is the caller's check. */
+  /**
+   * Record the first answer; a later one changes nothing. The deadline is in
+   * the same UPDATE: an answer that arrives after it changes nothing, whatever
+   * the caller read before. A decision being applied takes only its claim's commit.
+   */
   answer(id: string, answer: OwnerAnswer, by: OwnerAnswerSource, now: number): QuestionStoreAnswerResult | undefined {
-    return this.#close(id, 'answer = ?, answered_by = ?', [JSON.stringify(answer), JSON.stringify(by)], now);
+    return this.#close(id, 'answer = ?, answered_by = ?', [JSON.stringify(answer), JSON.stringify(by)], now,
+      'AND applying_token IS NULL AND (expires_at IS NULL OR expires_at > ?)', [now]);
   }
 
-  /** The producer takes an open item back (its window closed, its session ended). */
+  /** The producer takes an open item back (its window closed, its session ended). Refused while a decision on it is being applied. */
   withdraw(id: string, reason: string, now: number): QuestionStoreAnswerResult | undefined {
-    return this.#close(id, 'withdrawn_reason = ?', [reason], now);
+    return this.#close(id, 'withdrawn_reason = ?', [reason], now, 'AND applying_token IS NULL', []);
+  }
+
+  /**
+   * Claim an open decision item for applying the owner's choice: the claim is
+   * written before the handler runs, only while the item is open, unclaimed
+   * (or claimed by a process that died, `gone`) and inside its deadline.
+   * Returns the entry and whether this token now holds it.
+   */
+  claimDecision(id: string, token: string, now: number, gone: (token: string) => boolean): { readonly claimed: boolean; readonly entry: StoredOwnerEntry } | undefined {
+    const current = this.#read(id);
+    if (!current) return undefined;
+    const held = current.applyingToken;
+    if (held !== undefined && !gone(held)) return { claimed: false, entry: current };
+    const changed = this.#open().db.query<never, [string, number, string, string | null, number]>(
+      'UPDATE owner_items SET applying_token = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL AND applying_token IS ? AND (expires_at IS NULL OR expires_at > ?)',
+    ).run(token, now, id, held ?? null, now).changes;
+    if (changed > 0) this.#wrote();
+    const entry = this.#read(id);
+    return entry ? { claimed: changed > 0, entry } : undefined;
+  }
+
+  /** Commit the choice a claim applied: only the claim's holder closes it, deadline or not (the claim was taken inside it). */
+  commitDecision(id: string, token: string, answer: OwnerAnswer, by: OwnerAnswerSource, now: number): QuestionStoreAnswerResult | undefined {
+    return this.#close(id, 'answer = ?, answered_by = ?, applying_token = NULL', [JSON.stringify(answer), JSON.stringify(by)], now,
+      'AND applying_token = ?', [token]);
+  }
+
+  /** Give a claim up after its handler failed: the item is open again. */
+  releaseDecision(id: string, token: string, now: number): void {
+    const changed = this.#open().db.query<never, [number, string, string]>(
+      'UPDATE owner_items SET applying_token = NULL, updated_at = ? WHERE id = ? AND applying_token = ?',
+    ).run(now, id, token).changes;
+    if (changed > 0) this.#wrote();
+  }
+
+  /**
+   * Put an answer on a request: marks it `taken` by `taker`. Succeeds for an
+   * answer not yet delivered or settled that is untaken, taken by this same
+   * taker (handed again after its session was reopened here), or taken by a
+   * taker that is gone. One statement, conditioned on the taker it read.
+   */
+  take(id: string, taker: string, now: number, gone: (taker: string) => boolean): boolean {
+    const current = this.#read(id);
+    if (!current || current.answer === undefined || current.delivery !== undefined) return false;
+    const held = current.taken?.taker;
+    if (held !== undefined && held !== taker && !gone(held)) return false;
+    const changed = this.#open().db.query<never, [string, number, number, string, string | null]>(
+      "UPDATE owner_items SET delivery_state = 'taken', taker = ?, delivery_at = ?, updated_at = ? WHERE id = ? AND answer IS NOT NULL AND (delivery_state IS NULL OR delivery_state = 'taken') AND taker IS ?",
+    ).run(taker, now, now, id, held ?? null).changes;
+    if (changed > 0) this.#wrote();
+    return changed > 0;
+  }
+
+  /** The requests carrying these answers were accepted: what `taker` took is delivered. One statement. Returns the ids it moved. */
+  confirmDelivered(ids: readonly string[], taker: string, now: number): string[] {
+    if (ids.length === 0) return [];
+    const marks = ids.map(() => '?').join(', ');
+    const moved = this.#open().db.query<{ id: string }, (string | number)[]>(
+      `UPDATE owner_items SET delivery_state = 'delivered', delivery_at = ?, updated_at = ? WHERE delivery_state = 'taken' AND taker = ? AND id IN (${marks}) RETURNING id`,
+    ).all(now, now, taker, ...ids).map((row) => row.id);
+    if (moved.length > 0) this.#wrote();
+    return moved;
   }
 
   /**
@@ -370,6 +471,7 @@ export class QuestionStore implements RevisionSource {
     const changed = file.db.query<never, [string, string | null, number, number, string]>(
       'UPDATE owner_items SET delivery_state = ?, delivery_reason = ?, delivery_at = ?, updated_at = ? WHERE id = ? AND answer IS NOT NULL AND delivery_state IS NULL',
     ).run(state, reason ?? null, now, now, id).changes;
+    // A report is about an answer nobody here took (a connected host on another machine); a taken one is confirmed by its taker.
     if (changed > 0) this.#wrote();
     const entry = this.#read(id);
     if (!entry) return undefined;
@@ -395,10 +497,10 @@ export class QuestionStore implements RevisionSource {
         .map((entry) => entry.item.id);
       for (const id of ids) {
         file.db.query<never, [string, number, number, string]>(
-          'UPDATE owner_items SET withdrawn_reason = ?, closed_at = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL',
+          'UPDATE owner_items SET withdrawn_reason = ?, closed_at = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL AND applying_token IS NULL',
         ).run(withdrawnReason, now, now, id);
         file.db.query<never, [string, number, number, string]>(
-          "UPDATE owner_items SET delivery_state = 'undeliverable', delivery_reason = ?, delivery_at = ?, updated_at = ? WHERE id = ? AND answer IS NOT NULL AND delivery_state IS NULL",
+          "UPDATE owner_items SET delivery_state = 'undeliverable', delivery_reason = ?, delivery_at = ?, updated_at = ? WHERE id = ? AND answer IS NOT NULL AND (delivery_state IS NULL OR delivery_state = 'taken')",
         ).run(undeliverableReason, now, now, id);
       }
       return ids;
@@ -415,11 +517,11 @@ export class QuestionStore implements RevisionSource {
     this.#snapshot = null;
   }
 
-  #close(id: string, assignments: string, values: readonly string[], now: number): QuestionStoreAnswerResult | undefined {
+  #close(id: string, assignments: string, values: readonly string[], now: number, condition = '', conditionValues: readonly (string | number)[] = []): QuestionStoreAnswerResult | undefined {
     const file = this.#open();
     const changed = file.db.query<never, (string | number)[]>(
-      `UPDATE owner_items SET ${assignments}, closed_at = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL`,
-    ).run(...values, now, now, id).changes;
+      `UPDATE owner_items SET ${assignments}, closed_at = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL ${condition}`,
+    ).run(...values, now, now, id, ...conditionValues).changes;
     if (changed > 0) this.#wrote();
     const entry = this.#read(id);
     if (!entry) return undefined;
@@ -542,8 +644,11 @@ export class QuestionStore implements RevisionSource {
       const delivery = row.delivery_state === 'delivered' || row.delivery_state === 'undeliverable'
         ? { state: row.delivery_state, ...(row.delivery_reason !== null ? { reason: row.delivery_reason } : {}), at: row.delivery_at ?? row.updated_at } as const
         : undefined;
+      const taken = row.delivery_state === 'taken' && row.taker !== null ? { taker: row.taker, at: row.delivery_at ?? row.updated_at } : undefined;
       return {
         item,
+        ...(taken !== undefined ? { taken } : {}),
+        ...(row.applying_token !== null ? { applyingToken: row.applying_token } : {}),
         ...(row.answer !== null ? { answer: readAnswer(JSON.parse(row.answer)) } : {}),
         ...(row.answered_by !== null ? { answeredBy: readSource(JSON.parse(row.answered_by)) } : {}),
         ...(row.withdrawn_reason !== null ? { withdrawnReason: row.withdrawn_reason } : {}),
@@ -582,14 +687,14 @@ export class QuestionStore implements RevisionSource {
       const now = Date.now();
       file.db.query<never, [number, number]>(
         `UPDATE owner_items SET closed_at = json_extract(item, '$.expiresAt'), updated_at = ?
-          WHERE closed_at IS NULL AND answer IS NULL AND withdrawn_reason IS NULL
+          WHERE closed_at IS NULL AND answer IS NULL AND withdrawn_reason IS NULL AND applying_token IS NULL
           AND json_extract(item, '$.expiresAt') < ?`,
       ).run(now, now);
       const closed = file.db.query<{ n: number }, []>('SELECT count(*) AS n FROM owner_items WHERE closed_at IS NOT NULL').get()?.n ?? 0;
       if (closed <= MAX_CLOSED_ENTRIES) return;
       file.db.query<never, [number]>(
         `DELETE FROM owner_items WHERE closed_at IS NOT NULL
-          AND NOT (answer IS NOT NULL AND delivery_state IS NULL AND (answer_session IS NOT NULL OR answer_agent IS NOT NULL))
+          AND NOT (answer IS NOT NULL AND (delivery_state IS NULL OR delivery_state = 'taken') AND (answer_session IS NOT NULL OR answer_agent IS NOT NULL))
           AND id NOT IN (SELECT id FROM owner_items WHERE closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT ?)`,
       ).run(MAX_CLOSED_ENTRIES);
     } catch (error) {

@@ -152,6 +152,8 @@ export class SurfaceElection {
   private readonly random: () => number;
 
   private role: ClusterRole = 'stopped';
+  /** Why the consumer could not be stopped, while the surface is fenced. */
+  private drainFailure: string | null = null;
   /**
    * True from start() until stop(). Checked by every path into `probing`, so a
    * re-probe that was queued or timed before a stop cannot rejoin the election
@@ -227,15 +229,21 @@ export class SurfaceElection {
   async stop(reason = 'shutdown'): Promise<void> {
     if (!this.active && this.role === 'stopped') return;
     this.active = false;
+    let drainFailure: OwnedClusterDrainError | undefined;
     this.enqueue(async () => {
       try {
         if (this.role === 'master') await this.stopConsumerThenResign(reason, null);
+      } catch (error) {
+        // The surface stays fenced (never `stopped`) and the stop says why.
+        if (error instanceof OwnedClusterDrainError) drainFailure = error;
+        throw error;
       } finally {
         this.clearAllTimers();
       }
       if (this.role !== 'stopped') this.setRole('stopped');
     });
     await this.settled();
+    if (drainFailure) throw drainFailure;
   }
 
   /** Resolves once every queued transition has finished. */
@@ -266,6 +274,7 @@ export class SurfaceElection {
       holderNodeId: this.role === 'master' ? this.host.nodeId : this.holderNodeId,
       consuming: this.consumerRunning,
       lastHolderHeartbeatAt: this.lastHolderHeartbeatAt,
+      ...(this.role === 'fenced' && this.drainFailure !== null ? { drainFailure: this.drainFailure } : {}),
     };
   }
 
@@ -591,6 +600,7 @@ export class SurfaceElection {
         // and so does this surface: contesting it again would start a second
         // consumer beside the one that would not stop.
         if (error instanceof OwnedClusterDrainError) {
+          this.drainFailure = error.message;
           this.setRole('fenced');
           this.host.logger.error('cluster: a surface is fenced on this node until the daemon restarts', {
             surface: this.options.label,

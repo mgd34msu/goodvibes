@@ -584,10 +584,17 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
       : { type: 'batch.job.create', body, jobId, enqueuedAt };
     const budget = await reserveQueue(env, utf8Bytes(JSON.stringify(message)));
     if (!budget.allowed) return budgetRefusal(budget);
+    // The status record is written before the message is sent: the consumer may deliver the job
+    // before this request continues, and its 'delivered' must never be overwritten by a later 'queued'.
+    await kvPut(env, `job:${jobId}`, { state: 'queued', enqueuedAt, payload: useR2 ? 'r2' : 'queue' });
     const failed = await sendQueued(env, queue, message, budget,
       useR2 && artifacts ? { key: payloadKey(jobId), text: JSON.stringify(body), bucket: artifacts } : undefined);
-    if (failed) return failed;
-    await kvPut(env, `job:${jobId}`, { state: 'queued', enqueuedAt, payload: useR2 ? 'r2' : 'queue' });
+    if (failed) {
+      // Only a record still at 'queued' is corrected: a consumer that already delivered the job keeps its answer.
+      const known = await kvGet(env, `job:${jobId}`);
+      if (known && known['state'] === 'queued') await kvPut(env, `job:${jobId}`, { state: 'not-queued', enqueuedAt, failedAt: Date.now() });
+      return failed;
+    }
     return json({
       queued: true,
       jobId,

@@ -87,6 +87,11 @@ export interface TerminalCommandShellUiOpeners<Target extends ModelPickerTarget>
   getScrollTop?: () => number;
   openSessionView?: (target: { readonly kind: 'agent' | 'process'; readonly id: string }) => boolean;
   openNotifications?: () => void;
+  /**
+   * Alt+O / Alt+I on the newest failed turn's row: use another model, show
+   * the details. False when no failed turn offers it (the key does nothing).
+   */
+  failedTurnAction?: (action: 'other-model' | 'details') => boolean;
   focusPrompt?: () => void;
   openMcpWorkspace?: () => void;
 }

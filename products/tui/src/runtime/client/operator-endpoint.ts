@@ -61,6 +61,8 @@ export interface OperatorRpcUnavailable {
 export interface OperatorRpcAvailable {
   readonly available: true;
   readonly platformClient: GoodVibesPlatform;
+  /** The daemon this client calls (`DaemonTarget.origin.baseUrl`): what an attachment, a queued item or a draft records as its daemon. */
+  readonly origin: string;
 }
 
 export type OperatorRpc = OperatorRpcUnavailable | OperatorRpcAvailable;
@@ -180,12 +182,12 @@ export function resolveOperatorRpc(deps: {
       if (!endpoint.available) throw new GoodVibesError(endpoint.reason, { category: 'authorization', source: 'transport', code: 'CREDENTIAL_NOT_FOR_TARGET', recoverable: false });
       return endpoint.token;
     };
-    return { available: true, platformClient: operatorClientFor(resolution.pendingProof.baseUrl, proven, deps.fetch) };
+    return { available: true, origin: resolution.pendingProof.baseUrl, platformClient: operatorClientFor(resolution.pendingProof.baseUrl, proven, deps.fetch) };
   }
   const endpoint = endpointOf(resolution);
   if (!endpoint.available) return endpoint;
   const token = endpoint.token;
-  return { available: true, platformClient: operatorClientFor(endpoint.baseUrl, async () => token, deps.fetch) };
+  return { available: true, origin: endpoint.baseUrl, platformClient: operatorClientFor(endpoint.baseUrl, async () => token, deps.fetch) };
 }
 
 function operatorClientFor(baseUrl: string, bearer: () => Promise<string>, fetchImpl: typeof fetch | undefined): GoodVibesPlatform {
@@ -356,6 +358,47 @@ export function createDaemonVerbCaller(deps: {
       const rpc = resolve();
       if (!rpc.available) throw new Error(`cannot invoke '${methodId}': ${rpc.reason}`);
       return await rpc.platformClient.operator.invoke(methodId as never, (input ?? {}) as never) as T;
+    },
+  };
+}
+
+/** A verb caller that stays on the daemon it was first resolved to. */
+export interface PinnedDaemonVerbCaller {
+  readonly caller: DaemonVerbCaller;
+  /** The daemon every call goes to (`DaemonTarget.origin.baseUrl`). */
+  readonly origin: string;
+  /** Whether this terminal still talks to that daemon (the selection has not moved to another). */
+  readonly isCurrent: () => boolean;
+}
+
+/**
+ * A verb caller for state that belongs to one daemon (a hosted attachment):
+ * it follows a new credential for the same daemon, and when the selected
+ * daemon changes it keeps calling the daemon it was made for with the client
+ * it last held, so releasing the attachment reaches the daemon that holds it
+ * instead of sending its session id to the newly selected one.
+ */
+export function pinDaemonVerbCaller(deps: {
+  readonly configManager: ConfigManager;
+  readonly homeDirectory: string | (() => string);
+}): PinnedDaemonVerbCaller | OperatorRpcUnavailable {
+  const live = createDaemonVerbCaller(deps);
+  const first = live.probe() as unknown as OperatorRpc;
+  if (!first.available) return first;
+  const origin = first.origin;
+  let held: OperatorRpcAvailable = first;
+  const current = (): OperatorRpcAvailable => {
+    const rpc = live.probe() as unknown as OperatorRpc;
+    if (rpc.available && rpc.origin === origin) held = rpc;
+    return held;
+  };
+  return {
+    origin,
+    isCurrent: () => { const rpc = live.probe() as unknown as OperatorRpc; return rpc.available && rpc.origin === origin; },
+    caller: {
+      probe: () => current(),
+      invoke: async <T,>(methodId: string, input?: unknown): Promise<T> =>
+        await current().platformClient.operator.invoke(methodId as never, (input ?? {}) as never) as T,
     },
   };
 }

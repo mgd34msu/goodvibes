@@ -178,6 +178,7 @@ export function saveSession(
     titleSource: data.titleSource,
     returnContext: data.returnContext,
     saveSource,
+    ...(data.mirroredFrom ? { mirroredFrom: data.mirroredFrom } : {}),
   };
   manager.save(sessionId, data.messages as Array<Record<string, unknown>>, meta, undefined, data.contracts,
     data.branches === undefined ? undefined : { branches: data.branches, currentBranch: data.currentBranch ?? 'main' });

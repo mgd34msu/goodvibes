@@ -66,6 +66,8 @@ import type { MemoryEmbeddingProviderRegistry, MemoryRegistry } from '../../stat
 import { clusterGroupRouteExtension, type ClusterGroupVerbs } from './cluster-group-routes.js';
 import { buildRouterKnowledgeContext } from './router-knowledge-context.js';
 import { handleGitHubAutomationWebhook, handleSlackSurfaceWebhook, handleDiscordSurfaceWebhook, handleNtfySurfaceWebhook, handleGenericWebhookSurface } from '../../adapters/index.js';
+import type { GitHubReplyOperation } from '../../adapters/github/index.js';
+import { daemonOperationLog } from '../operations-log.js';
 import {
   handleRemotePairRequest,
   handleRemotePairVerify,
@@ -169,6 +171,8 @@ interface DaemonHttpRouterContext {
   readonly batchManager?: DaemonBatchManager | null | undefined;
   /** The daemon's Cloudflare Tunnel connector: provisioning starts it, status reports it, shutdown stops it. */
   readonly cloudflareTunnel?: CloudflareTunnelConnector | null | undefined;
+  /** Closed while the daemon restarts into an update: a request that would start or change work is refused (503). */
+  readonly workAdmission?: import('../work-admission.js').DaemonWorkAdmission | undefined;
   /** Borrowed from the runtime graph; the graph owns admission shutdown and awaited drain. */
   readonly browserJudgment?: BrowserJudgmentCapability | undefined;
   readonly githubWebhookSecret: string | null;
@@ -412,8 +416,10 @@ export class DaemonHttpRouter {
         // token-authenticates its own API calls; reserved API paths return null
         // here (API precedence) and flow to the normal auth-gated dispatch below.
         const asset = serving.serveBundle ? await serveWebuiBundle(req, serving) : null;
+        // Reads still answer while admission is closed; anything that could start or change work waits for the restart.
+        const closed = asset === null && req.method !== 'GET' && req.method !== 'HEAD' ? this.context.workAdmission?.refusal() : null;
         // An error leaves as the route wrote it: its code is the fact a client reads, so nothing is attached for a model to read.
-        const response = asset ?? await this.requests.route(req).catch((error: unknown) => {
+        const response = asset ?? (closed ? Response.json(closed, { status: 503, headers: { 'Retry-After': '5' } }) : await this.requests.route(req).catch((error: unknown) => {
           if (error instanceof DecisionModelPolicyChangedError) throw error;
           // Decision models are off (no decision model) and this feature needs one: the owner's setting, not a daemon fault.
           if (error instanceof DecisionModelsDisabledError) {
@@ -438,7 +444,7 @@ export class DaemonHttpRouter {
               code: 'INTERNAL_ERROR',
               guidance: status === 503 ? 'Retry shortly.' : 'The failure is in the daemon log; retrying the same request is unlikely to help.',
             }, { status });
-        });
+        }));
         if (response.status === 101) return response;
         // A success answers with the status its method declares (201 created, 202 accepted):
         // one declaration, read here and by the generated specs.
@@ -1145,6 +1151,8 @@ export class DaemonHttpRouter {
         await this.context.agentManager.join(agentId);
         return this.context.agentManager.getStatus(agentId);
       },
+      // The owed answer is accepted in the daemon's operation log before GitHub is answered.
+      operations: daemonOperationLog<GitHubReplyOperation>(this.context.configManager),
     });
   }
 

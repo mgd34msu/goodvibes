@@ -31,9 +31,13 @@
  * one presence check (a stat, a small file read) per answered question still
  * waiting. `revision()` is one statement over SQLite's change counters.
  */
+import { randomUUID } from 'node:crypto';
 import { refusal, type Refusal } from '@goodvibes-jev/engine/errors';
 import type { ApprovalBroker, SharedApprovalRecord } from './approval-broker.js';
-import type { ApprovalActionOutcome } from './approval-broker-owner.js';
+import { approvalViewerOfActor, localApprovalActions, type ApprovalActions } from './approval-actions.js';
+import type { Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { readApproval, type ApprovalReading, type ApprovalViewer } from './approval-lifecycle.js';
+import { FenceIssuer } from '../utils/owner-fence.js';
 import {
   OWNER_ANSWER_AGENT_METADATA,
   OWNER_ANSWER_SESSION_METADATA,
@@ -49,7 +53,7 @@ import {
 } from './question-store.js';
 import type { RevisionSource } from '../utils/revision.js';
 import { logger } from '../utils/logger.js';
-import { askerLivenessPath, sessionAskerKey, settleAskerLock, type OwnerAskerKind } from './owner-asker-liveness.js';
+import { askerLivenessPath, isTakerGone, processTaker, sessionAskerKey, settleAskerLock, type OwnerAskerKind } from './owner-asker-liveness.js';
 
 export { OWNER_ANSWER_AGENT_METADATA, OWNER_ANSWER_SESSION_METADATA, OWNER_ASKER_SESSION_FILE_METADATA };
 
@@ -70,6 +74,12 @@ export type OwnerItemStatus = 'open' | 'answered' | 'withdrawn' | 'expired';
 export interface OwnerAnswer {
   readonly option?: string | undefined;
   readonly text?: string | undefined;
+  /**
+   * For an approval: the `revision` of the approval the answer was given to
+   * (the item's `revision`). Required for approvals; a stale one is refused
+   * with the current reading. Never stored on a question's answer.
+   */
+  readonly expectedRevision?: number | undefined;
 }
 
 /** Who answered and from where. Taken from the authenticated request, never from the answer body. */
@@ -100,6 +110,10 @@ export interface OwnerItem {
   readonly metadata?: Readonly<Record<string, string | number | boolean>> | undefined;
   /** For an answered question with an asker: whether the answer reached it, waits for it, or cannot reach it. */
   readonly delivery?: OwnerAnswerDelivery | undefined;
+  /** For an approval: the record's revision (send it as `expectedRevision` when answering). */
+  readonly revision?: number | undefined;
+  /** For an approval: its reading for the viewer that listed it (approval-lifecycle.ts). */
+  readonly reading?: ApprovalReading | undefined;
 }
 
 /** What a producer posts. Approvals are raised through the approval broker, not posted. */
@@ -122,6 +136,8 @@ export interface OwnerInboxListFilter {
   readonly kinds?: readonly OwnerItemKind[] | undefined;
   readonly sessionId?: string | undefined;
   readonly limit?: number | undefined;
+  /** Who is reading, for an approval's reading; the owner when absent. */
+  readonly viewer?: ApprovalViewer | undefined;
 }
 
 /**
@@ -259,10 +275,16 @@ export interface OwnerAnswerReader {
   /** Moves when anything in the store changed, in any process. */
   revision(): number;
   get(id: string): OwnerItem | undefined;
-  /** One asker's open questions and the answers it has not taken (one indexed read). */
+  /** One asker's open questions and the answers it has not had delivered (one indexed read). */
   pendingFor(scope: QuestionAskerScope): readonly OwnerItem[];
-  /** Record that the caller took the answer into its conversation. True only for the first taker. */
-  claim(id: string): boolean;
+  /**
+   * The caller is putting the answer on a model request: it is marked taken by
+   * this process. True for the first taker, for this process taking it again,
+   * and for a take after the taker that held it died; false otherwise.
+   */
+  take(id: string): boolean;
+  /** The request carrying these answers was accepted: they are delivered. One statement. */
+  confirmDelivered(ids: readonly string[]): void;
   /** The lock file a running asker holds while it waits on a question (owner-asker-liveness.ts). */
   askerLivenessPath(kind: OwnerAskerKind, id: string): string;
 }
@@ -276,8 +298,8 @@ export type OwnerPostOutcome =
 
 export type OwnerInboxListener = (item: OwnerItem) => void;
 
-/** The part of the approval broker the inbox reads and answers through. */
-export type OwnerInboxApprovalSource = Pick<ApprovalBroker, 'listApprovals' | 'getApproval' | 'resolveApproval' | 'subscribe'>
+/** The part of the approval broker the inbox reads and answers through (through the approvals port, approval-actions.ts). */
+export type OwnerInboxApprovalSource = Pick<ApprovalBroker, 'homeNode' | 'listApprovals' | 'getApproval' | 'claimApproval' | 'resolveApproval' | 'cancelApproval' | 'releaseApproval' | 'subscribe'>
   & { readonly eventPublisher?: Pick<NonNullable<ApprovalBroker['eventPublisher']>, 'publishEvent'> | null | undefined };
 
 /**
@@ -291,7 +313,7 @@ export const OWNER_INBOX_UPDATE_WIRE_EVENT = 'owner-inbox-update';
 export interface OwnerInboxPort {
   list(filter?: OwnerInboxListFilter): Promise<readonly OwnerItem[]>;
   /** One item by id, open or closed. */
-  find(id: string): Promise<OwnerItem | undefined>;
+  find(id: string, viewer?: ApprovalViewer): Promise<OwnerItem | undefined>;
   answer(id: string, answer: OwnerAnswer): Promise<OwnerAnswerOutcome>;
 }
 
@@ -313,7 +335,7 @@ const POSTABLE_KINDS: ReadonlySet<string> = new Set<StoredOwnerItemKind>(['quest
  * made the decision; resolves with what was done, in words, or throws to say
  * why it could not be done (the item then stays open).
  */
-export type OwnerDecisionHandler = (item: OwnerItem, option: string) => Promise<string>;
+export type OwnerDecisionHandler = (item: OwnerItem, option: string, signal?: AbortSignal) => Promise<string>;
 
 /** Decision handlers of this process, by the key prefix their items are posted under. */
 const decisionHandlers = new Map<string, OwnerDecisionHandler>();
@@ -415,7 +437,8 @@ export function validateNewOwnerItem(input: NewOwnerItem): Omit<StoredOwnerItem,
 function storedStatus(entry: StoredOwnerEntry, now: number): OwnerItemStatus {
   if (entry.withdrawnReason !== undefined) return 'withdrawn';
   if (entry.answer !== undefined) return 'answered';
-  if (entry.item.expiresAt !== undefined && entry.item.expiresAt <= now) return 'expired';
+  // A decision whose choice is being applied was claimed inside its deadline: it stays open until that commits.
+  if (entry.applyingToken === undefined && entry.item.expiresAt !== undefined && entry.item.expiresAt <= now) return 'expired';
   return 'open';
 }
 
@@ -492,11 +515,16 @@ function approvalClosingSurface(record: SharedApprovalRecord): string {
   return 'unknown surface';
 }
 
-function projectApproval(record: SharedApprovalRecord): OwnerItem {
+function projectApproval(record: SharedApprovalRecord, reading?: ApprovalReading): OwnerItem {
   const status = approvalStatus(record);
   const answered = record.status === 'approved' || record.status === 'denied';
-  const options = status !== 'open' ? [APPROVE, DENY] : record.requiresOwnerDecision ? [DENY] : [APPROVE, DENY];
+  // The choices are the viewer's allowed actions when there is a reading: an agent reading the inbox is offered none.
+  const options = status !== 'open' ? [APPROVE, DENY]
+    : reading ? [...(reading.allowedActions.includes('approve') ? [APPROVE] : []), ...(reading.allowedActions.includes('deny') ? [DENY] : [])]
+      : record.requiresOwnerDecision ? [DENY] : [APPROVE, DENY];
   return {
+    revision: record.revision,
+    ...(reading !== undefined ? { reading } : {}),
     id: record.id,
     kind: 'approval',
     status,
@@ -550,6 +578,14 @@ function closedRefusal(item: OwnerItem): Refusal {
   });
 }
 
+function decisionInProgressRefusal(): Refusal {
+  return refusal({
+    code: 'DECISION_IN_PROGRESS', state: 'still open', status: 409,
+    reason: 'A choice on this decision is being applied right now.',
+    next: ['Show it again in a moment; the choice being applied decides it.'],
+  });
+}
+
 function unknownRefusal(id: string): Refusal {
   return refusal({
     code: 'NOT_FOUND',
@@ -589,6 +625,8 @@ export interface OwnerInboxOptions {
   readonly questions: QuestionStore;
   /** The approval broker of the same composition. Absent: the inbox holds only its own items. */
   readonly approvals?: OwnerInboxApprovalSource | undefined;
+  /** The approvals port to read and answer through; the local one over `approvals` when absent. */
+  readonly approvalActions?: ApprovalActions | undefined;
   /** Where askers are read from; the first probe that knows an asker answers. See {@link OwnerInbox.usePresence}. */
   readonly presence?: readonly OwnerAskerPresenceProbe[] | undefined;
   readonly now?: (() => number) | undefined;
@@ -598,10 +636,12 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   readonly id = 'owner inbox';
   readonly #questions: QuestionStore;
   readonly #approvals: OwnerInboxApprovalSource | undefined;
+  /** The approvals port over the broker: every approval item is read and answered through it. */
+  readonly #approvalActions: ApprovalActions | undefined;
   readonly #now: () => number;
   readonly #listeners = new Set<OwnerInboxListener>();
-  /** Decision items whose choice is being carried out; a second choice meanwhile is refused. */
-  readonly #applying = new Set<string>();
+  /** Decision handlers run under a fence of this inbox, narrowed to the item's deadline; dispose stops them. */
+  readonly #decisionFences = new FenceIssuer('owner decisions');
   readonly #unsubscribeApprovals: (() => void) | undefined;
   #probes: OwnerAskerPresenceProbe[];
   #approvalRevision = 0;
@@ -613,11 +653,12 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   constructor(options: OwnerInboxOptions) {
     this.#questions = options.questions;
     this.#approvals = options.approvals;
+    this.#approvalActions = options.approvalActions ?? (options.approvals ? localApprovalActions(options.approvals) : undefined);
     this.#probes = [...(options.presence ?? [])];
     this.#now = options.now ?? Date.now;
     this.#unsubscribeApprovals = this.#approvals?.subscribe((record) => {
       this.#approvalRevision += 1;
-      this.#emit(projectApproval(record));
+      this.#emit(projectApproval(record, readApproval(record, this.#viewer(undefined), this.#now())));
     });
   }
 
@@ -698,15 +739,26 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     return item;
   }
 
-  get(id: string): OwnerItem | undefined {
-    const entry = this.#questions.get(id);
-    if (entry) return this.#project(entry, this.#now());
-    const approval = this.#approvals?.getApproval(id);
-    return approval ? projectApproval(approval) : undefined;
+  /** The viewer an authenticated actor is, for approval items (no actor: the owner, in this process). */
+  viewerOf(actor: Actor | undefined): ApprovalViewer {
+    return this.#approvalActions?.viewerOf(actor) ?? approvalViewerOfActor(actor, 'local');
   }
 
-  async find(id: string): Promise<OwnerItem | undefined> {
-    return this.get(id);
+  /** The viewer an item is read for when none is named: the owner, in this process. */
+  #viewer(viewer: ApprovalViewer | undefined): ApprovalViewer {
+    return viewer ?? this.#approvalActions?.viewerOf(undefined)
+      ?? { kind: 'owner-route', scopes: ['*'], node: 'local', mayAnswer: true, mayAdminister: true };
+  }
+
+  get(id: string, viewer?: ApprovalViewer): OwnerItem | undefined {
+    const entry = this.#questions.get(id);
+    if (entry) return this.#project(entry, this.#now());
+    const row = this.#approvalActions?.get(id, this.#viewer(viewer));
+    return row ? projectApproval(row.record, row.reading) : undefined;
+  }
+
+  async find(id: string, viewer?: ApprovalViewer): Promise<OwnerItem | undefined> {
+    return this.get(id, viewer);
   }
 
   async list(filter: OwnerInboxListFilter = {}): Promise<readonly OwnerItem[]> {
@@ -720,8 +772,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     const limit = Math.min(MAX_LIST_LIMIT, Math.max(1, Math.trunc(filter.limit ?? DEFAULT_LIST_LIMIT)));
     const items: OwnerItem[] = [];
     if (!kinds || kinds.has('approval')) {
-      for (const record of this.#approvals?.listApprovals(MAX_LIST_LIMIT) ?? []) {
-        const item = projectApproval(record);
+      for (const row of this.#approvalActions?.list(this.#viewer(filter.viewer), MAX_LIST_LIMIT) ?? []) {
+        const item = projectApproval(row.record, row.reading);
         if (matchesFilter(item, filter, kinds)) items.push(item);
       }
     }
@@ -780,21 +832,20 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
    * with `applied: false` and a refusal saying why. Nothing is answered by a
    * timeout or on the owner's behalf.
    */
-  async answer(id: string, answer: OwnerAnswer, by: OwnerAnswerSource = { actor: 'owner', surface: 'local' }): Promise<OwnerAnswerOutcome> {
+  async answer(id: string, answer: OwnerAnswer, by: OwnerAnswerSource = { actor: 'owner', surface: 'local' }, viewer?: ApprovalViewer): Promise<OwnerAnswerOutcome> {
     const now = this.#now();
     const entry = this.#questions.get(id);
     if (entry) {
       const item = this.#project(entry, now);
       if (item.status !== 'open') return { applied: false, item, refusal: closedRefusal(item) };
+      if (entry.applyingToken !== undefined && !isTakerGone(this.#questions.path, entry.applyingToken)) {
+        return { applied: false, item, refusal: decisionInProgressRefusal() };
+      }
       const checked = this.#checkAnswer(item, answer);
       if ('refusal' in checked) return { applied: false, item, refusal: checked.refusal };
-      let recorded = checked.answer;
-      if (item.kind === 'decision') {
-        const applied = await this.#applyDecision(item, checked.answer);
-        if ('refusal' in applied) return { applied: false, item, refusal: applied.refusal };
-        recorded = applied.answer;
-      }
-      const result = this.#questions.answer(id, recorded, by, this.#now());
+      if (item.kind === 'decision') return this.#answerDecision(item, checked.answer, by);
+      // The deadline and "still open" are checked in the UPDATE that writes the answer.
+      const result = this.#questions.answer(id, checked.answer, by, this.#now());
       if (!result) return { applied: false, refusal: unknownRefusal(id) };
       const answered = this.#project(result.entry, now);
       if (!result.applied) return { applied: false, item: answered, refusal: closedRefusal(answered) };
@@ -802,19 +853,23 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       this.#closed(answered);
       return { applied: true, item: answered, ...(answered.delivery ? { delivery: answered.delivery } : {}) };
     }
-    const approval = this.#approvals?.getApproval(id);
-    if (!approval || !this.#approvals) return { applied: false, refusal: unknownRefusal(id) };
+    const actions = this.#approvalActions;
+    const row = actions?.get(id, this.#viewer(viewer));
+    if (!row || !actions) return { applied: false, refusal: unknownRefusal(id) };
     // Who may answer is decided before this runs: `inbox.answer` declares `approval.answer`
     // (the owner's own act) and a channel reply is admitted for its sender (approval-reply.ts).
-    return this.#answerApproval(this.#approvals, approval, answer, by);
+    return this.#answerApproval(actions, row.record, answer, by, this.#viewer(viewer));
   }
 
-  /** A producer takes back an open item it posted. Approvals are cancelled through the broker, not here. */
+  /** A producer takes back an open item it posted. Approvals are cancelled through the broker, not here. Refused while a decision on it is being applied. */
   withdraw(id: string, reason: string): OwnerAnswerOutcome {
     const now = this.#now();
     const result = this.#questions.withdraw(id, clip(reason.trim() || 'no longer needed', 500), now);
     if (!result) return { applied: false, refusal: unknownRefusal(id) };
     const item = this.#project(result.entry, now);
+    if (!result.applied && item.status === 'open' && result.entry.applyingToken !== undefined) {
+      return { applied: false, item, refusal: decisionInProgressRefusal() };
+    }
     if (!result.applied) return { applied: false, item, refusal: closedRefusal(item) };
     this.#emitStored(result.entry, item);
     this.#closed(item);
@@ -831,13 +886,27 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     return this.#questions.undelivered(scope).map((entry) => this.#project(entry, now)).filter((item) => item.status !== 'expired');
   }
 
-  /** {@link OwnerAnswerReader}: the caller took the answer into its conversation; true only for the first taker. */
-  claim(id: string): boolean {
-    const result = this.#questions.recordDelivery(id, 'delivered', undefined, this.#now());
-    if (!result?.applied) return false;
-    this.#emitStored(result.entry, this.#project(result.entry, this.#now()));
-    this.#closed(result.entry.item);
-    return true;
+  /**
+   * {@link OwnerAnswerReader}: the caller is putting the answer on a model
+   * request. Marked taken by this process (one row write); delivered only by
+   * {@link confirmDelivered} once that request was accepted. A row taken by a
+   * process that died is taken again.
+   */
+  take(id: string): boolean {
+    const path = this.#questions.path;
+    return this.#questions.take(id, processTaker(path), this.#now(), (taker) => isTakerGone(path, taker));
+  }
+
+  /** {@link OwnerAnswerReader}: the requests carrying these answers were accepted; they are delivered (one statement). */
+  confirmDelivered(ids: readonly string[]): void {
+    if (ids.length === 0) return;
+    const now = this.#now();
+    for (const id of this.#questions.confirmDelivered(ids, processTaker(this.#questions.path), now)) {
+      const entry = this.#questions.get(id);
+      if (!entry) continue;
+      this.#emitStored(entry, this.#project(entry, now));
+      this.#closed(entry.item);
+    }
   }
 
   /**
@@ -969,6 +1038,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   }
 
   dispose(): void {
+    this.#decisionFences.retire('the owner inbox closed');
     this.#unsubscribeApprovals?.();
     this.#listeners.clear();
     this.#stopListening();
@@ -1002,11 +1072,16 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   /**
    * A decision item's choice is carried out before it is recorded, by the
    * process whose gate decided, so the answer on the item says what was done.
+   * Claim, apply, commit: the item is claimed in the store before the handler
+   * runs (a second choice, a withdrawal and the deadline are refused while the
+   * claim is held), the handler runs under a fence whose deadline is the
+   * item's, and the claim's own token commits the answer.
    */
-  async #applyDecision(item: OwnerItem, answer: OwnerAnswer): Promise<{ answer: OwnerAnswer } | { refusal: Refusal }> {
+  async #answerDecision(item: OwnerItem, answer: OwnerAnswer, by: OwnerAnswerSource): Promise<OwnerAnswerOutcome> {
     const handler = decisionHandlerFor(item.key);
     if (!handler) {
       return {
+        applied: false, item,
         refusal: refusal({
           code: 'DECIDED_ELSEWHERE',
           state: 'still open',
@@ -1016,21 +1091,26 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
         }),
       };
     }
-    if (this.#applying.has(item.id)) {
-      return {
-        refusal: refusal({
-          code: 'DECISION_IN_PROGRESS', state: 'still open', status: 409,
-          reason: 'Another choice on this decision is being applied right now.',
-          next: ['Show it again in a moment; the first choice decides it.'],
-        }),
-      };
+    const path = this.#questions.path;
+    const token = `${processTaker(path)}:${randomUUID()}`;
+    const claimed = this.#questions.claimDecision(item.id, token, this.#now(), (held) => isTakerGone(path, held.split(':')[0] ?? held));
+    if (!claimed) return { applied: false, refusal: unknownRefusal(item.id) };
+    if (!claimed.claimed) {
+      const current = this.#project(claimed.entry, this.#now());
+      return { applied: false, item: current, refusal: current.status === 'open' ? decisionInProgressRefusal() : closedRefusal(current) };
     }
-    this.#applying.add(item.id);
+    this.#emitStored(claimed.entry, this.#project(claimed.entry, this.#now()));
+    const fence = this.#decisionFences.peek().narrow({ deadline: item.expiresAt });
+    let done: string;
     try {
-      const done = await handler(item, answer.option ?? '');
-      return { answer: { option: answer.option, text: clip(done, OWNER_ITEM_LIMITS.answerTextChars) } };
+      fence.check();
+      done = await handler(item, answer.option ?? '', fence.signal);
     } catch (error) {
+      this.#questions.releaseDecision(item.id, token, this.#now());
+      const released = this.#questions.get(item.id);
       return {
+        applied: false,
+        ...(released ? { item: this.#project(released, this.#now()) } : {}),
         refusal: refusal({
           code: 'DECISION_NOT_APPLIED',
           state: 'still open',
@@ -1039,9 +1119,16 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
           status: 409,
         }),
       };
-    } finally {
-      this.#applying.delete(item.id);
     }
+    const recorded: OwnerAnswer = { option: answer.option, text: clip(done, OWNER_ITEM_LIMITS.answerTextChars) };
+    const now = this.#now();
+    const result = this.#questions.commitDecision(item.id, token, recorded, by, now);
+    if (!result) return { applied: false, refusal: unknownRefusal(item.id) };
+    const answered = this.#project(result.entry, now);
+    if (!result.applied) return { applied: false, item: answered, refusal: closedRefusal(answered) };
+    this.#emitStored(result.entry, answered);
+    this.#closed(answered);
+    return { applied: true, item: answered };
   }
 
   #checkAnswer(item: OwnerItem, answer: OwnerAnswer): { answer: OwnerAnswer } | { refusal: Refusal } {
@@ -1062,44 +1149,49 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   }
 
   async #answerApproval(
-    broker: OwnerInboxApprovalSource,
+    actions: ApprovalActions,
     record: SharedApprovalRecord,
     answer: OwnerAnswer,
     by: OwnerAnswerSource,
+    viewer: ApprovalViewer,
   ): Promise<OwnerAnswerOutcome> {
-    const item = projectApproval(record);
+    const item = projectApproval(record, actions.get(record.id, viewer)?.reading);
     if (item.status !== 'open') return { applied: false, item, refusal: closedRefusal(item) };
+    // The answer names the revision of the approval it was given to; without it nothing is answered.
+    if (typeof answer.expectedRevision !== 'number' || !Number.isInteger(answer.expectedRevision)) {
+      return { applied: false, item, refusal: invalidAnswerRefusal(item, 'Send expectedRevision, the revision of the approval you were shown (the item\'s revision).') };
+    }
     const checked = this.#checkAnswer(item, answer);
     if ('refusal' in checked) return { applied: false, item, refusal: checked.refusal };
     const approved = checked.answer.option === APPROVE;
-    const outcome: ApprovalActionOutcome = {};
-    let updated: SharedApprovalRecord | null;
+    let outcome: Awaited<ReturnType<ApprovalActions['resolve']>>;
     try {
-      updated = await broker.resolveApproval(record.id, {
+      outcome = await actions.resolve(record.id, {
         approved,
         disposition: approved ? 'approved' : 'denied',
         actor: by.actor,
         actorSurface: by.surface,
+        expectedRevision: answer.expectedRevision,
         ...(checked.answer.text !== undefined ? (approved ? { note: checked.answer.text } : { reason: checked.answer.text }) : {}),
-        outcome,
-      });
+      }, viewer);
     } catch (error) {
-      const latest = broker.getApproval(record.id);
+      const latest = actions.get(record.id, viewer);
       return {
         applied: false,
-        ...(latest ? { item: projectApproval(latest) } : {}),
+        ...(latest ? { item: projectApproval(latest.record, latest.reading) } : {}),
         refusal: refusal({
           code: 'ANSWER_NOT_RECORDED',
-          state: latest && approvalStatus(latest) === 'open' ? 'still open' : 'changed while answering',
+          state: latest && approvalStatus(latest.record) === 'open' ? 'still open' : 'changed while answering',
           reason: `The answer was not recorded: ${error instanceof Error ? error.message : String(error)}`,
           next: ['List the inbox again; answer again if it is still open.'],
           retryable: true,
         }),
       };
     }
-    if (!updated) return { applied: false, refusal: unknownRefusal(record.id) };
-    const projected = projectApproval(updated);
-    if (!outcome.applied) return { applied: false, item: projected, refusal: closedRefusal(projected) };
+    if (!outcome.record) return { applied: false, refusal: unknownRefusal(record.id) };
+    const projected = projectApproval(outcome.record, outcome.reading ?? undefined);
+    // A stale or settled answer comes back with the approval's current reading and the broker's own refusal.
+    if (!outcome.applied) return { applied: false, item: projected, refusal: outcome.refusal };
     return { applied: true, item: projected };
   }
 

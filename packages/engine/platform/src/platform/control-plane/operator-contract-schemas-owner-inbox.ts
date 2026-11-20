@@ -11,6 +11,7 @@ import {
   objectSchema,
 } from './method-catalog-shared.js';
 import { METADATA_SCHEMA, enumSchema } from './operator-contract-schemas-shared.js';
+import { APPROVAL_READING_SCHEMA } from './operator-contract-schemas-approvals.js';
 
 export const OWNER_ITEM_KIND_SCHEMA = enumSchema(['approval', 'question', 'claim', 'purchase', 'queued-action', 'decision', 'report']);
 const POSTABLE_OWNER_ITEM_KIND_SCHEMA = enumSchema(['question', 'queued-action']);
@@ -61,6 +62,9 @@ export const OWNER_ITEM_SCHEMA = objectSchema({
   key: STRING_SCHEMA,
   metadata: METADATA_SCHEMA,
   delivery: OWNER_ANSWER_DELIVERY_SCHEMA,
+  // An approval item: the record's revision (answer with it as expectedRevision) and its reading for the caller.
+  revision: NUMBER_SCHEMA,
+  reading: APPROVAL_READING_SCHEMA,
 }, ['id', 'kind', 'status', 'title', 'detail', 'options', 'createdAt']);
 
 export const OWNER_INBOX_LIST_INPUT_SCHEMA = objectSchema({
@@ -79,6 +83,8 @@ export const OWNER_INBOX_ANSWER_INPUT_SCHEMA = objectSchema({
   itemId: STRING_SCHEMA,
   option: STRING_SCHEMA,
   text: STRING_SCHEMA,
+  // Required for an approval item: the revision it was shown at.
+  expectedRevision: NUMBER_SCHEMA,
 }, ['itemId']);
 export const OWNER_INBOX_ANSWER_OUTPUT_SCHEMA = objectSchema({
   applied: BOOLEAN_SCHEMA,

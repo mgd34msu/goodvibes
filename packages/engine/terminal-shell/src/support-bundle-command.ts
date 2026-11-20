@@ -1,7 +1,7 @@
 import { retainCliConfig } from './cli-config-owner.js';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { configKeyFacts, isDaemonOwnedConfigKey, isSecretBearingConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { configKeyFacts, isDaemonOwnedConfigKey, isSecretBearingConfigKey, localOwnerActor } from '@goodvibes-jev/engine/platform/platform/config';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
@@ -375,7 +375,7 @@ export function createSupportBundleCommand<
       // update as this surface's: every value is admitted before anything is written.
       const writes = daemonApplied ? local : pending;
       const result = writes.length > 0
-        ? runtime.configManager.setMany(writes.map(({ key, value }) => ({ key, value })), { kind: 'owner', surface: `${policy.commandBase(runtime)} import` },
+        ? runtime.configManager.setMany(writes.map(({ key, value }) => ({ key, value })), localOwnerActor(),
           !daemonApplied && daemonOwned.length > 0 ? { daemonNotRunning: true } : {})
         : { ok: true as const, saved: [] as readonly ConfigKey[] };
       if (!result.ok) {

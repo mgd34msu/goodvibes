@@ -25,13 +25,23 @@
  *
  * Checkout reservations remain held until commit or a known-safe release,
  * including across restarts. Elapsed time cannot prove that a charge failed.
+ *
+ * ── Currency ──────────────────────────────────────────────────────────────
+ *
+ * Every hold and spend records the currency it was made in (money.ts: an
+ * amount is minor units IN a currency). A pool counts only what was spent in
+ * the currency its limits are in, so changing `payments.currency` starts a new
+ * pool for the rest of the day, and what was spent earlier that day is shown
+ * in its own currency (`earlierSpend`), never re-read as the new one.
  */
 import { dayKey, resolveTimezone, type DayKey } from './day.js';
 import { samePaymentEvidence } from './evidence-equality.js';
-import type { BudgetPool, MinorUnits } from './types.js';
+import type { BudgetPool, CurrencyCode, MinorUnits } from './types.js';
 import type { PaymentStoreStop } from './payment-host-health.js';
 
 export interface BudgetLimits {
+  /** The currency every amount here, and every pool they bound, is in. */
+  readonly currency: CurrencyCode;
   readonly dailyItemMinorUnits: MinorUnits;
   readonly dailyOverageMinorUnits: MinorUnits;
   readonly perPurchaseCeiling: {
@@ -48,6 +58,8 @@ export interface BudgetLimits {
 export interface SpendRecord {
   readonly purchaseId: string;
   readonly atMs: number;
+  /** The currency the amounts are in: the budget's when the purchase was decided. */
+  readonly currency: CurrencyCode;
   readonly itemMinorUnits: MinorUnits;
   readonly overageMinorUnits: MinorUnits;
   readonly toleranceMinorUnits: MinorUnits;
@@ -61,6 +73,8 @@ export interface SpendRecord {
 export interface BudgetReservation {
   readonly id: string;
   readonly dayKey: DayKey;
+  /** The currency the held amounts are in. */
+  readonly currency: CurrencyCode;
   readonly itemMinorUnits: MinorUnits;
   readonly overageMinorUnits: MinorUnits;
   readonly toleranceMinorUnits: MinorUnits;
@@ -73,9 +87,21 @@ export interface BudgetReservation {
   readonly retainUntilSettled?: true;
 }
 
+/** What today spent in a currency other than the budget's: shown in its own currency, never counted in today's pools. */
+export interface EarlierCurrencySpend {
+  readonly currency: CurrencyCode;
+  readonly item: MinorUnits;
+  readonly overage: MinorUnits;
+  readonly tolerance: MinorUnits;
+}
+
 export interface PoolSnapshot {
   readonly dayKey: DayKey;
   readonly timezone: string;
+  /** The currency of every pool here (the budget's). */
+  readonly currency: CurrencyCode;
+  /** Present when today also spent in another currency before `payments.currency` changed. */
+  readonly earlierSpend?: readonly EarlierCurrencySpend[];
   readonly item: { readonly limit: MinorUnits; readonly spent: MinorUnits; readonly reserved: MinorUnits; readonly remaining: MinorUnits };
   readonly overage: { readonly limit: MinorUnits; readonly spent: MinorUnits; readonly reserved: MinorUnits; readonly remaining: MinorUnits };
   readonly tolerance: { readonly limit: MinorUnits; readonly spent: MinorUnits; readonly reserved: MinorUnits; readonly remaining: MinorUnits };
@@ -150,10 +176,10 @@ function countsToday(
  * held the payments role that day.
  */
 export interface GroupSpendSource {
-  /** What every OTHER machine has spent on `day`, from the record. */
-  othersSpent(day: DayKey): { readonly item: MinorUnits; readonly overage: MinorUnits; readonly tolerance: MinorUnits };
-  /** This machine's whole spend on `day`; written to the record (one slot per machine, only ever raised). */
-  publish(day: DayKey, own: { readonly item: MinorUnits; readonly overage: MinorUnits; readonly tolerance: MinorUnits }): void;
+  /** What every OTHER machine has spent on `day` in `currency`, from the record. */
+  othersSpent(day: DayKey, currency: CurrencyCode): { readonly item: MinorUnits; readonly overage: MinorUnits; readonly tolerance: MinorUnits };
+  /** This machine's whole spend on `day` in `currency`; written to the record (one slot per machine, only ever raised). */
+  publish(day: DayKey, currency: CurrencyCode, own: { readonly item: MinorUnits; readonly overage: MinorUnits; readonly tolerance: MinorUnits }): void;
 }
 
 export class BudgetLedger {
@@ -166,19 +192,22 @@ export class BudgetLedger {
   attachGroupSpend(source: GroupSpendSource | null): void {
     this.group = source;
     if (!source) return;
-    const days = new Set(this.spend.map((record) => record.dayKey).filter((day): day is DayKey => day !== undefined));
-    for (const day of days) this.publishDay(day);
+    const pairs = new Map<string, { day: DayKey; currency: CurrencyCode }>();
+    for (const record of this.spend) {
+      if (record.dayKey !== undefined) pairs.set(`${record.dayKey}\u0000${record.currency}`, { day: record.dayKey, currency: record.currency });
+    }
+    for (const { day, currency } of pairs.values()) this.publishDay(day, currency);
   }
 
-  /** This machine's spend on `day`, told to the group. */
-  protected publishDay(day: DayKey): void {
+  /** This machine's spend on `day` in `currency`, told to the group. */
+  protected publishDay(day: DayKey, currency: CurrencyCode): void {
     if (!this.group) return;
     let item = 0, overage = 0, tolerance = 0;
     for (const record of this.spend) {
-      if (record.dayKey !== day) continue;
+      if (record.dayKey !== day || record.currency !== currency) continue;
       item += record.itemMinorUnits; overage += record.overageMinorUnits; tolerance += record.toleranceMinorUnits;
     }
-    this.group.publish(day, { item, overage, tolerance });
+    this.group.publish(day, currency, { item, overage, tolerance });
   }
 
   private spend: SpendRecord[] = [];
@@ -204,12 +233,21 @@ export class BudgetLedger {
       return day;
     };
     // What the other machines of the group spent today counts against the same pools.
-    const others = this.group?.othersSpent(today) ?? { item: 0, overage: 0, tolerance: 0 };
+    const currency = limits.currency;
+    const others = this.group?.othersSpent(today, currency) ?? { item: 0, overage: 0, tolerance: 0 };
     let itemSpent = others.item;
     let overageSpent = others.overage;
     let toleranceSpent = others.tolerance;
+    const earlier = new Map<CurrencyCode, { item: MinorUnits; overage: MinorUnits; tolerance: MinorUnits }>();
     for (const record of this.spend) {
       if (!countsToday(record.atMs, record.timezone, record.dayKey, today, timezone, todayIn)) continue;
+      if (record.currency !== currency) {
+        // Spent before the currency changed: shown in its own currency, never counted in these pools.
+        const sum = earlier.get(record.currency) ?? { item: 0, overage: 0, tolerance: 0 };
+        sum.item += record.itemMinorUnits; sum.overage += record.overageMinorUnits; sum.tolerance += record.toleranceMinorUnits;
+        earlier.set(record.currency, sum);
+        continue;
+      }
       itemSpent += record.itemMinorUnits;
       overageSpent += record.overageMinorUnits;
       toleranceSpent += record.toleranceMinorUnits;
@@ -219,6 +257,8 @@ export class BudgetLedger {
     let overageReserved = 0;
     let toleranceReserved = 0;
     for (const reservation of this.reservations) {
+      // A hold in another currency binds no pool of this one; it settles in its own.
+      if (reservation.currency !== currency) continue;
       if (reservation.retainUntilSettled !== true
         && (reservation.expiresAtMs <= nowMs
           || (reservation.dayKey !== today && (reservation.timezone === undefined || todayIn(reservation.timezone) !== reservation.dayKey)))) continue;
@@ -234,6 +274,8 @@ export class BudgetLedger {
     return {
       dayKey: today,
       timezone,
+      currency,
+      ...(earlier.size === 0 ? {} : { earlierSpend: [...earlier].map(([spentIn, sum]) => Object.freeze({ currency: spentIn, ...sum })) }),
       item: pool(limits.dailyItemMinorUnits, itemSpent, itemReserved),
       overage: pool(limits.dailyOverageMinorUnits, overageSpent, overageReserved),
       tolerance: pool(toleranceLimit, toleranceSpent, toleranceReserved),
@@ -270,6 +312,7 @@ export class BudgetLedger {
     const reservation: BudgetReservation = Object.freeze({
       id: input.id,
       dayKey: snapshot.dayKey,
+      currency: input.limits.currency,
       itemMinorUnits: input.itemMinorUnits,
       overageMinorUnits: input.overageMinorUnits,
       toleranceMinorUnits: input.toleranceMinorUnits,
@@ -290,7 +333,7 @@ export class BudgetLedger {
     if (reservation === undefined) return null;
     const record: SpendRecord = spendFromHold(reservation, atMs);
     this.spend.push(record);
-    if (record.dayKey !== undefined) this.publishDay(record.dayKey);
+    if (record.dayKey !== undefined) this.publishDay(record.dayKey, record.currency);
     return record;
   }
 
@@ -344,7 +387,7 @@ export class BudgetLedger {
       if (receipt.outcome === 'purchased') {
         finalSpend = spendFromHold(held, receipt.atMs);
         this.spend.push(finalSpend);
-        if (finalSpend.dayKey !== undefined) this.publishDay(finalSpend.dayKey);
+        if (finalSpend.dayKey !== undefined) this.publishDay(finalSpend.dayKey, finalSpend.currency);
       }
     }
     const stored = Object.freeze({ ...receipt, reservation: held === null ? null : Object.freeze({ ...held }),
@@ -386,6 +429,7 @@ export function spendFromHold(hold: BudgetReservation, atMs: number): SpendRecor
   return Object.freeze({
     purchaseId: hold.id,
     atMs,
+    currency: hold.currency,
     itemMinorUnits: hold.itemMinorUnits,
     overageMinorUnits: hold.overageMinorUnits,
     toleranceMinorUnits: hold.toleranceMinorUnits,

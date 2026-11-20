@@ -1,4 +1,9 @@
+import { revealOrNull } from '../security/secret.js';
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { done, observe, refusal, unknownOutcome } from '@goodvibes-jev/engine/errors';
+import { effectKey, newOperationId } from '../state/operation.js';
+import { openOperationLog, type OperationLog } from '../state/operation-log.js';
 import type { ConfigKey } from '../config/schema.js';
 import { DEFAULT_CONFIG } from '../config/schema.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -162,7 +167,62 @@ export class CloudflareControlPlaneManager {
     };
   }
 
+  /** One token provision at a time: two at once would read the same earlier record and each replace it. */
+  #tokenProvision: Promise<unknown> = Promise.resolve();
+  #operations: OperationLog<CloudflareTokenOperation> | null | undefined;
+
+  /**
+   * The daemon's operation log (`operations.jsonl` beside the token record):
+   * a token create is accepted there before it is sent, its id noted as soon as
+   * Cloudflare returns it, and settled once its value is stored. Null when the
+   * daemon keeps no control-plane directory. Read once.
+   */
+  private operations(): OperationLog<CloudflareTokenOperation> | null {
+    if (this.#operations !== undefined) return this.#operations;
+    const configManager = this.options.configManager;
+    const dir = typeof configManager.getControlPlaneConfigDir === 'function' ? configManager.getControlPlaneConfigDir() : undefined;
+    this.#operations = dir ? openOperationLog<CloudflareTokenOperation>(join(dir, 'operations.jsonl')) : null;
+    return this.#operations;
+  }
+
   async createOperationalToken(input: CloudflareOperationalTokenInput): Promise<CloudflareOperationalTokenResult> {
+    const run = this.#tokenProvision.then(() => this.createOperationalTokenNow(input));
+    this.#tokenProvision = run.catch(() => undefined);
+    return run;
+  }
+
+  /**
+   * Finishes token creates a crash or a failure left open: a token whose value
+   * was never stored can never be used, so it is revoked (by the id noted at
+   * create, or found by the name the create gave it). One that cannot be found
+   * or revoked stays open and is reported.
+   */
+  private async settleOpenTokenCreates(tokenApi: NonNullable<CloudflareApiClient['user']>['tokens'], log: OperationLog<CloudflareTokenOperation>): Promise<string[]> {
+    const residual: string[] = [];
+    for (const line of log.open('cloudflare.token')) {
+      const ids: string[] = line.external ? [line.external] : [];
+      if (ids.length === 0 && line.payload?.tokenName && tokenApi.list) {
+        try {
+          for await (const token of tokenApi.list()) if (token.name === line.payload.tokenName && token.id) ids.push(token.id);
+        } catch (error: unknown) {
+          residual.push(`could not list API tokens to find ${line.payload.tokenName} (${summarizeError(error)})`);
+          continue;
+        }
+        if (ids.length === 0) { log.cancel(line.op, 'no token with its name exists at Cloudflare'); continue; }
+      }
+      if (ids.length === 0) {
+        residual.push(`a token create (${line.op}) may have made a token named ${line.payload?.tokenName ?? '(unknown)'}; delete it in the Cloudflare dashboard (My Profile > API Tokens) if it is there`);
+        continue;
+      }
+      const outcomes = await Promise.all(ids.map((id) => this.revokeOperationalToken(tokenApi, id)));
+      const failed = outcomes.filter((outcome) => !outcome.revoked);
+      if (failed.length === 0) log.cancel(line.op, `its token (${ids.join(', ')}) was never stored, so it was revoked`);
+      else residual.push(...failed.map((outcome) => `token ${outcome.tokenId} was made and never stored, and revoking it failed: ${outcome.reason ?? 'unknown reason'}`));
+    }
+    return residual;
+  }
+
+  private async createOperationalTokenNow(input: CloudflareOperationalTokenInput): Promise<CloudflareOperationalTokenResult> {
     const bootstrapToken = clean(input.bootstrapToken);
     if (!bootstrapToken) {
       throw new CloudflareControlPlaneError(
@@ -241,17 +301,39 @@ export class CloudflareControlPlaneManager {
         permissions: requirements,
       };
     }
+    const operations = this.operations();
+    const residual = operations ? await this.settleOpenTokenCreates(tokenApi, operations) : [];
     const permissionGroups = await resolvePermissionGroups(requirements, (params) => tokenApi.permissionGroups.list(params));
     const policies = buildTokenPolicies(accountId, zone?.id, permissionGroups);
-    const tokenName = clean(input.tokenName) || 'GoodVibes Cloudflare Operational';
-    const token = await tokenApi.create({
-      name: tokenName,
-      policies,
-      ...(clean(input.expiresOn) ? { expires_on: clean(input.expiresOn) } : {}),
-    });
+    // The token's name carries its operation, so a create whose answer was lost is found by name and never doubled.
+    const op = newOperationId('cloudflare.token');
+    const tokenName = `${clean(input.tokenName) || 'GoodVibes Cloudflare Operational'} ${op.slice(-12)}`;
+    if (operations) await operations.accept({ op, kind: 'cloudflare.token', effect: effectKey(op, 'token'), payload: { accountId, signature, tokenName } });
+    let token: CloudflareTokenCreateResponseLike;
+    try {
+      // Never repeated by the client: a second create after a lost answer is a second live credential.
+      token = await tokenApi.create({
+        name: tokenName,
+        policies,
+        ...(clean(input.expiresOn) ? { expires_on: clean(input.expiresOn) } : {}),
+      }, { maxRetries: 0 });
+    } catch (error: unknown) {
+      const status = error && typeof error === 'object' ? Object.getOwnPropertyDescriptor(error, 'status')?.value : undefined;
+      if (typeof status === 'number' && status >= 400 && status < 500 && ![408, 409, 425, 429].includes(status)) {
+        operations?.cancel(op, `Cloudflare refused the create (HTTP ${status})`);
+        throw error;
+      }
+      throw new CloudflareControlPlaneError(
+        `Cloudflare may have created the operational token "${tokenName}": its answer was not read (${summarizeError(error)}). Nothing was stored. Creating the token again first looks for "${tokenName}" and revokes it, since its value was never seen.`,
+        'CLOUDFLARE_TOKEN_OUTCOME_UNKNOWN',
+        502,
+        { cause: error },
+      );
+    }
+    if (operations && token.id) operations.note(op, token.id);
     await verifyCreatedTokenPolicies(token, permissionGroups, tokenApi.get ? (tokenId) => tokenApi.get!(tokenId) : undefined);
     if (!token.value) {
-      throw new CloudflareControlPlaneError('Cloudflare did not return a token value for the newly-created operational token.', 'CLOUDFLARE_TOKEN_VALUE_MISSING', 502);
+      throw new CloudflareControlPlaneError(`Cloudflare did not return a token value for the newly-created operational token${token.id ? ` (token id ${token.id})` : ''}. Creating the token again revokes that one first.`, 'CLOUDFLARE_TOKEN_VALUE_MISSING', 502);
     }
 
     let apiTokenRef: string | undefined;
@@ -267,7 +349,7 @@ export class CloudflareControlPlaneManager {
         }
       } catch (error: unknown) {
         throw new CloudflareControlPlaneError(
-          `Cloudflare created the operational token${token.id ? ` (token id ${token.id})` : ''} but it could not be stored: ${summarizeError(error)}. The token value was not saved anywhere. Delete that token in the Cloudflare dashboard (My Profile > API Tokens), fix the storage problem, then create it again.`,
+          `Cloudflare created the operational token${token.id ? ` (token id ${token.id})` : ''} but it could not be stored: ${summarizeError(error)}. The token value was not saved anywhere, so the token cannot be used: fix the storage problem, then create it again, which revokes this one first.`,
           'CLOUDFLARE_TOKEN_NOT_STORED',
           500,
           { cause: error },
@@ -287,6 +369,11 @@ export class CloudflareControlPlaneManager {
         logger.warn('cloudflare: the operational token was stored but its record was not; the next creation cannot reuse or revoke it', { tokenId: token.id, error: summarizeError(error) });
       }
     }
+    // The value is where it was asked to go (stored, or handed back): the create is finished.
+    if (operations) {
+      const seen = await observe('Cloudflare returned the token and its value was kept', () => token.id ?? tokenName);
+      operations.settle(op, seen ? done(seen) : unknownOutcome(refusal({ code: 'CLOUDFLARE_TOKEN_UNSEEN', state: 'not known', reason: 'no token id' })));
+    }
 
     return {
       ok: true,
@@ -294,6 +381,7 @@ export class CloudflareControlPlaneManager {
       tokenName,
       tokenSource: 'bootstrap',
       ...(replaced ? { replaced } : {}),
+      ...(residual.length > 0 ? { residual } : {}),
       ...(apiTokenRef ? { apiTokenRef } : {}),
       ...(input.returnGeneratedToken ? { generatedToken: token.value } : {}),
       accountId,
@@ -619,11 +707,13 @@ export class CloudflareControlPlaneManager {
       const storeSecrets = secretsStore && this.secretsStoreSecretNames(workerName);
       const placedInStore: { name: string; id: string }[] = [];
       if (secretsStore && storeSecrets) {
-        placedInStore.push(await ensureSecretsStoreSecret(client, { accountId, storeId: secretsStore.id, name: storeSecrets.operatorToken, value: operatorToken?.value ?? '' }));
-        if (accessCredentials) {
-          placedInStore.push(await ensureSecretsStoreSecret(client, { accountId, storeId: secretsStore.id, name: storeSecrets.accessClientSecret, value: accessCredentials.clientSecret }));
-        }
-        record.secretsStore = { storeId: secretsStore.id, storeName: secretsStore.name, secrets: placedInStore.map((secret) => ({ name: secret.name, id: secret.id })) };
+        // Each secret is recorded as soon as it exists, so a later failure still leaves its id where status and disable find it.
+        const place = async (name: string, value: string): Promise<void> => {
+          placedInStore.push(await ensureSecretsStoreSecret(client, { accountId, storeId: secretsStore.id, name, value }));
+          record.secretsStore = { storeId: secretsStore.id, storeName: secretsStore.name, secrets: placedInStore.map((secret) => ({ name: secret.name, id: secret.id })) };
+        };
+        await place(storeSecrets.operatorToken, operatorToken?.value ?? '');
+        if (accessCredentials) await place(storeSecrets.accessClientSecret, accessCredentials.clientSecret);
         steps.push({ name: 'secrets-store-worker-credentials', status: 'ok', message: `Stored the Worker's daemon credential${accessCredentials ? ' and Access secret' : ''} in Secrets Store ${secretsStore.name}; the Worker reads them from there.`, resourceId: secretsStore.id });
       }
       workerUploaded = await uploadWorker(client, {
@@ -937,7 +1027,7 @@ export class CloudflareControlPlaneManager {
       const fromRef = parseAccessCredentials((await this.resolveSecretRef(access.serviceTokenRef)).value);
       if (fromRef) return fromRef;
     }
-    return parseAccessCredentials(await this.options.secretsManager?.get(CLOUDFLARE_ACCESS_SERVICE_TOKEN_KEY) ?? null);
+    return parseAccessCredentials(revealOrNull(await this.options.secretsManager?.get(CLOUDFLARE_ACCESS_SERVICE_TOKEN_KEY), 'dispatch'));
   }
 
   /** Secrets Store names are account-wide, so they carry the Worker name. */
@@ -1245,4 +1335,11 @@ export class CloudflareControlPlaneManager {
     const set = this.options.configManager.set as unknown as (configKey: ConfigKey, configValue: unknown) => void;
     set.call(this.options.configManager, key, value);
   }
+}
+
+/** What a token create keeps in the operation log until it is settled: enough to find its token again. */
+interface CloudflareTokenOperation {
+  readonly accountId: string;
+  readonly signature: string;
+  readonly tokenName: string;
 }

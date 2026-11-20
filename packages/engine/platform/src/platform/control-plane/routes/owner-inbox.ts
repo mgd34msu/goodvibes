@@ -19,7 +19,7 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 
-export type OwnerInboxGatewayService = Pick<OwnerInbox, 'listNow' | 'get' | 'answer' | 'postNow' | 'withdraw' | 'reportDelivery' | 'postedBy' | 'revision' | 'subscribe'>;
+export type OwnerInboxGatewayService = Pick<OwnerInbox, 'listNow' | 'get' | 'answer' | 'postNow' | 'withdraw' | 'reportDelivery' | 'postedBy' | 'revision' | 'subscribe' | 'viewerOf'>;
 
 const LIST_STATUSES = new Set(['open', 'closed', 'all']);
 /** Every kind the list can filter by, decision included (the schema's enum). */
@@ -63,8 +63,10 @@ export function createOwnerInboxListHandler(inbox: OwnerInboxGatewayService): Ga
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const itemId = optionalString(params['itemId'], 'itemId');
+    // An approval item carries its reading for this caller: an agent reading the inbox is offered no answer.
+    const viewer = inbox.viewerOf(invocation.context.actor);
     if (itemId !== undefined) {
-      const item = inbox.get(itemId);
+      const item = inbox.get(itemId, viewer);
       return { items: item ? [item] : [], revision: inbox.revision() };
     }
     const status = optionalString(params['status'], 'status');
@@ -86,6 +88,7 @@ export function createOwnerInboxListHandler(inbox: OwnerInboxGatewayService): Ga
         ...(rawKinds !== undefined ? { kinds: rawKinds as OwnerItemKind[] } : {}),
         ...(sessionId !== undefined ? { sessionId } : {}),
         ...(typeof limit === 'number' ? { limit } : {}),
+        viewer,
       }),
       revision: inbox.revision(),
     };
@@ -121,10 +124,16 @@ export function createOwnerInboxAnswerHandler(inbox: OwnerInboxGatewayService): 
     const itemId = requireStringValue(params['itemId'], 'itemId');
     const option = optionalString(params['option'], 'option');
     const text = optionalString(params['text'], 'text');
+    const expectedRevision = params['expectedRevision'];
+    if (expectedRevision !== undefined && (typeof expectedRevision !== 'number' || !Number.isInteger(expectedRevision))) {
+      throw new GatewayVerbError('Invalid expectedRevision: expected the integer revision of the approval you were shown', 'INVALID_ARGUMENT', 400, 'expectedRevision');
+    }
     const answer = {
       ...(option !== undefined ? { option } : {}),
       ...(text !== undefined ? { text } : {}),
+      ...(typeof expectedRevision === 'number' ? { expectedRevision } : {}),
     };
+    const viewer = inbox.viewerOf(invocation.context.actor);
     const field = option !== undefined ? 'option' : 'text';
     if (inbox.get(itemId)?.kind === 'purchase') {
       const { authority, expected, forbidden } = purchaseAnswerAuthority(invocation);
@@ -134,7 +143,7 @@ export function createOwnerInboxAnswerHandler(inbox: OwnerInboxGatewayService): 
         outcome = await authority.withCurrent(expected, async (assertCurrent) => {
           assertCurrent();
           answering = true;
-          return await inbox.answer(itemId, answer, answerSource(invocation));
+          return await inbox.answer(itemId, answer, answerSource(invocation), viewer);
         });
       } catch (error) {
         // The owner's authority lapsing before the answer is a refusal; a failure of the answer itself is reported as it is.
@@ -143,7 +152,7 @@ export function createOwnerInboxAnswerHandler(inbox: OwnerInboxGatewayService): 
       }
       return outcomeResponse(outcome, field);
     }
-    const outcome = await inbox.answer(itemId, answer, answerSource(invocation));
+    const outcome = await inbox.answer(itemId, answer, answerSource(invocation), viewer);
     return outcomeResponse(outcome, field);
   };
 }

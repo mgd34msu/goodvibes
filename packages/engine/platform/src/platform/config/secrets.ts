@@ -1,5 +1,6 @@
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { assertSecurityReadSource } from '../security/read-source.js';
+import { Secret } from '../security/secret.js';
 /**
  * SecretsManager, hierarchy-aware secret resolution and persistence.
  *
@@ -1067,8 +1068,15 @@ export class SecretsManager {
     return confirmed;
   }
 
-  async get(key: string): Promise<string | null> {
-    return this.getInternal(key, new Set([key]));
+  /**
+   * The value that would be used for `key`, as a `Secret` (security/secret.ts):
+   * it prints `[secret <key>]` everywhere and its text comes out only through
+   * `reveal(purpose)` at the sink it is for (a request to its service, a
+   * child's environment, the store, or an owner's explicit "show").
+   */
+  async get(key: string): Promise<Secret | null> {
+    const value = await this.getInternal(key, new Set([key]));
+    return value === null ? null : Secret.of(value, key);
   }
 
   /** Atomic first creation for daemon-owned material, shared across process creators.
@@ -1184,11 +1192,14 @@ export class SecretsManager {
    * Returns the value exactly as stored. A `goodvibes://` reference is NOT
    * followed: a read-back compares the stored bytes.
    */
-  async getFromScope(key: string, scope: SecretScope): Promise<string | null> {
+  async getFromScope(key: string, scope: SecretScope): Promise<Secret | null> {
     for (const path of this.getAllCandidateStores()) {
       if (path.scope !== scope) continue;
       const secrets = path.secure ? this.readEncryptedFile(path.path) : this.readPlaintextFile(path.path);
-      if (secrets !== null && Object.hasOwn(secrets, key)) return secrets[key] ?? null;
+      if (secrets !== null && Object.hasOwn(secrets, key)) {
+        const value = secrets[key];
+        return value === undefined ? null : Secret.of(value, key);
+      }
     }
     return null;
   }
@@ -1243,9 +1254,9 @@ export class SecretsManager {
 
   /**
    * Undo a write of `key` in `scope`: put each medium's entry back to
-   * `previous` (as stored, in the medium it came from), but only while the
-   * entry reads would see is still `wrote`, the value the undoing caller
-   * stored. The compare and the restore run under the same store locks, so a
+   * `previous` (as stored, in the medium it came from), but only while every
+   * entry that differs from `previous` still holds `wrote`, the value the
+   * undoing caller stored. The compare and the restore run under the same store locks, so a
    * value another writer stored after that write is never rolled back:
    * `newer` says so and changes nothing. `unchanged` when the stores already
    * hold `previous` (the write never landed); `restored` when they hold it now.
@@ -1254,9 +1265,12 @@ export class SecretsManager {
     const stores = (['secure', 'plaintext'] as const).map((medium) => ({ medium, store: this.resolveWriteTarget(scope, medium) }));
     return this.withCredentialMutation(key, () => this.withStoreMutations(stores.map(({ store }) => store.path), () => {
       const now = stores.map(({ medium, store }) => ({ medium, store, values: this.readStoreForWrite(store) }));
-      if (now.every(({ medium, values }) => (Object.hasOwn(values, key) ? values[key]! : null) === previous[medium])) return 'unchanged' as const;
-      const visible = now.map(({ values }) => (Object.hasOwn(values, key) ? values[key]! : null)).find((value) => value !== null) ?? null;
-      if (visible === null || (visible !== wrote && decodeLiteralSecret(visible) !== wrote)) return 'newer' as const;
+      const held = (values: Record<string, string>): string | null => (Object.hasOwn(values, key) ? values[key]! : null);
+      const moved = now.filter(({ medium, values }) => held(values) !== previous[medium]);
+      if (moved.length === 0) return 'unchanged' as const;
+      // Every medium that differs from before must hold exactly what this caller wrote; anything else is another writer's.
+      const ours = (value: string | null): boolean => value !== null && (value === wrote || decodeLiteralSecret(value) === wrote);
+      if (!moved.every(({ values }) => ours(held(values)))) return 'newer' as const;
       let changed = false;
       try {
         for (const { medium, store, values } of now) {

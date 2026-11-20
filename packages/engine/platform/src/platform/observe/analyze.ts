@@ -86,9 +86,11 @@ export function analyzeDecisionLog(log: DecisionLog, options: ObserveOptions = {
     ...(options.until === undefined ? {} : { until: options.until }),
     ...(options.battery === undefined ? {} : { battery: options.battery }),
     ...(options.site === undefined ? {} : { site: options.site }),
+    // Calibration is left out by the log, before the limit, so the limit counts only production rows.
+    ...(options.excludeCalibration === true ? { excludeSite: CALIBRATION_SITE } : {}),
     limit,
   });
-  const entries = options.excludeCalibration === true ? queried.filter((entry) => entry.context.site !== CALIBRATION_SITE) : queried;
+  const entries = queried;
   const times = entries.map((entry) => entry.at).sort();
   return {
     window: { since: options.since, until: options.until, first: times[0] ?? null, last: times.at(-1) ?? null },

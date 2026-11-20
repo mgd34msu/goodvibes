@@ -98,7 +98,7 @@ Only one of `--continue`, `--resume` and `--fork` may be given on one launch.
 ### Rules of the command-line parser
 
 - A flag that takes a value refuses a value that begins with `-`. Use the equals form: `--prompt='- item'`.
-- `--` ends option parsing. Every word after it is a positional argument: `goodvibes run -- --literal-text`.
+- `--` ends option parsing. Every word after it is a positional argument: `goodvibes run -- --literal-text`. A command never reads one of its own options (`--yes`, `--apply`) from a word after `--`.
 - An unquoted word in a prompt that equals a command name or alias (`doctor`, `auth`, `task`) is read as that command. Quote the whole prompt.
 - After a command word, an option that command does not take is refused with exit code `2`, and the error lists the options it accepts.
 - A run-only flag (`--timeout`, `--max-turns`, `--omit-accumulated`, `--answer-permissions`) on any other command is refused with exit code `2`:
@@ -631,10 +631,10 @@ goodvibes completion fish > ~/.config/fish/completions/goodvibes.fish
 
 The screen has four regions, top to bottom.
 
-1. The header names the session and the current view. While a helper agent or background process is open full screen, the header reads `main › <agent>` in the agent's color.
+1. The header names the program, its version and the session. While a helper agent or background process is open full screen, the header reads `main › <agent>` in the agent's color. While a failover is in force it also names the model answering, with `failover from <selected model>`.
 2. The transcript shows the conversation: owner prompts, model answers, tool calls with their results, notices in square brackets (`[Permissions]`, `[Context]`, `[Failover]`), and the work tree of helper agents and background processes started in the turn.
 3. The composer is the text box where the owner types. Its label shows what Enter will do (prompt, command, shell, note, memory pin).
-4. The footer shows the model, the permission mode pill, context use, cost, status chips (for example the "sleep disabled" chip and the "used N memories" chip) and a hint saying what the next `Esc` does.
+4. The status bar, the row under the composer. Left: `Asks:` and the permission mode chosen (`Asks: Jev decides`); when the mode in force differs, ` · asking you for now · <why>` (`decision model unreachable`, `decision model failing`, `no decision model set`, `no decision model chosen`, `not measured yet`); then the `shift+tab` key that changes it. Then the chips that stay visible (`! YOLO` while an old auto-approve setting is on, the microphone, `sleep disabled`), the unread notices (`2 notices` with the `ctrl+n` key; absent at zero), what the next `Esc` does while a turn runs, and any background work. Right, two spaces apart: the cost when the model is priced, `context 34%` (amber from 65%, red at the compaction threshold; `context unknown` when the window is not known), `branch main, changed` (`, changed` while the working tree differs from the last commit; absent outside a repository), `model <name>`, and `ctrl+p menu`. A click on a segment opens its view: the mode opens the permission mode setting, the notices the notifications, context the context inspector, branch the changes, model the model picker, the cost Usage. On a narrow screen the pieces go in this order: `ctrl+p menu`, the cost, the branch, the context, the reason shortens (`decision model unreachable` to `unreachable`), the model, the reason, the notices; `Asks:` with the mode and `asking you for now` always stay.
 
 While more than one session exists (a helper agent or background process is running), a row of session chips appears under the header; `Tab` and `Shift+Tab` switch between sessions when the composer is empty.
 
@@ -717,13 +717,16 @@ The default table of the terminal app:
 | `voice-input` | `Alt+V` | First press starts recording; the second press stops it and puts the transcription in the composer. |
 | `focus-work-tree` | `Alt+Up`, `Ctrl+Up` | Move the keyboard onto the transcript's work tree: arrows move and fold, `Enter` opens, `y` copies, `Esc` returns. |
 | `cycle-permission-mode` | `Shift+Tab` | Cycle this session's permission mode (see below). |
+| `open-notifications` | `Ctrl+N` | Open the notifications; the status bar counts the unread ones. |
+| `failure-other-model` | `Alt+O` | On the newest failed turn: choose another model and send the prompt again. |
+| `failure-details` | `Alt+I` | On the newest failed turn: show what the provider said. |
 
 `Shift+Tab` cycles `ask-me` → `jev-decides` → `just-vibes` → `yolo` → `ask-me`.
 Before `yolo` it asks for confirmation (default No); declining skips to the mode after it.
 The change lasts for the session only. The saved default is changed in `/settings` (or `/config set permissions.mode <mode>`); `/permissions` shows it but does not change it.
 Plan mode is outside the cycle; `/plan` turns it on and off for this session, also without changing the saved default.
-The line `[Permissions] Mode for this session: just-vibes (the saved default is set in /settings; /permissions shows it)` confirms each change; when `yolo` was declined it begins `[Permissions] yolo skipped. Mode for this session: ask-me ...`. When the mode chosen is not the one in force (`jev-decides` with no working decision model runs as `ask-me`), the line names the mode in force, as the status pill does, and why: `[Permissions] Mode for this session: ask-me (jev-decides chosen, but judgment.policy is No Decision Model, so Jev cannot decide and every call it would decide asks you) ...`.
-A managed lock on `permissions.mode` stops the change: `[Permissions] Mode stays <mode>: <reason>`.
+Nothing is written into the conversation: the status bar's `Asks:` segment shows the new mode and flashes (drawn inverse) for 1.5 seconds. When the mode chosen is not the one in force (`jev-decides` with no working decision model runs as `ask-me`), the segment says so and why: `Asks: Jev decides · asking you for now · no decision model chosen`.
+A managed lock on `permissions.mode` stops the change, and a notice says so: `The mode stays <mode>: <reason>`.
 
 ### Changing a key
 
@@ -956,12 +959,15 @@ Failure cases:
 | The upload threw | `Upload failed: the Gist upload did not complete (<reason>). Local export saved at <path>.` | Retry. |
 
 `/fork [name]` (alias `/branch-save`) saves a named snapshot of the conversation as a branch. `/fork try-redis` prints `Forked conversation as "try-redis" (N messages).`; an existing name is refused: `Branch "try-redis" already exists; it was not replaced.`
-`/branch [name]` (alias `/br`) lists branches, or switches to one. `/branch` with none: `No branches. Use /fork [name] to create one.` An unknown name: `Branch "<name>" not found. Use /fork [name] to create one, or /branch to list.`
+`/branch [name]` (alias `/br`) lists branches, or switches to one. `/branch` with none: `No branches. Use /fork [name] to create one.` An unknown name: `Branch "<name>" not found. Use /fork [name] to create one, or /branch to list.` The branch already in use: `Already on branch "<name>"; nothing changed.`
 `/merge <name>` appends the branch's messages after the fork point. When both changed after the fork it refuses: `Branch "<name>" and the current conversation both changed after the fork, so it was not merged.`
 `/branch` and `/merge` refuse while a turn is running.
 
 `/hosted [new|list|attach|say|later|cancel|detach|kill <id>] [args]` works with daemon-hosted sessions, whose conversation loop runs in the daemon so it continues without a terminal.
 `/hosted new` starts one; `/hosted list` lists them; `/hosted attach <id or list number>` joins one; `/hosted say <text>` sends a prompt; `/hosted later <text>` queues text for after the current turn; `/hosted cancel [callId]` cancels the running tool call; `/hosted detach` leaves without ending it; `/hosted kill <id>` ends it.
+A list number is only a plain number, read against the last `/hosted list` printed. `/hosted kill` ends exactly the session its question named: if the line means another session by the time you answer (a new list, an attach that finished), the question is asked again with `Changed since you looked:` and the change on top; from a model it is refused with `TARGET_CHANGED`.
+A line typed in the Agents view for the hosted session is sent only to the session that was attached when you started typing it; if another session was attached meanwhile it is not sent (`the message was for session <id>; attach to it again to apply it there`) and the draft stays.
+An attachment belongs to the daemon it was made on. After `daemon.connectedHost.url` points elsewhere, `/hosted say`, `later`, `cancel` and `kill` of that session are refused naming both daemons, and `/hosted detach` releases it on the daemon that holds it.
 With nothing attached: `[hosted] no hosted session is attached; /hosted attach <id> first.` Hosted sessions are described under "Hosted sessions" in the daemon part.
 
 `/teleport <export|inspect|import> <path> [--yes]` exports, inspects or imports a remote session bundle (runner pools, contracts, artifacts); it is the same as `/remote session`. `import` replaces what is held here only with `--yes`.
@@ -1064,6 +1070,8 @@ A provider without subscription sign-in is refused: `OAuth is not configured for
 A password typed on the command line works but prints a warning that it stays visible.
 `http://` to another machine is refused because the credential would travel unencrypted: `... Use https://<host>. Nothing was sent.`
 A refused sign-in prints `Auth login failed (HTTP <status>). Check the base URL, username and password, then retry.`
+A sign-in that answers with a redirect is not followed: `Auth login refused: <origin> answered with a redirect to <origin>, and the password is sent only to the address you typed.`
+A listener session is stored with the address that issued it; `/auth logout listener <baseUrl>` sends it only to that address, and for any other address prints `The listener session stored as <key> was issued by <origin>; it is never sent to <baseUrl>. Nothing was sent or removed.`
 
 `/local-auth [review|panel|add-user <username> <password> [roles]|delete-user <username>|rotate-password <username> <password>|revoke-session <session-id-or-token>|clear-bootstrap-file]` (alias `/auth-local`) manages the local daemon and listener users from inside the app. `/local-auth add-user alice` without a password opens a masked prompt; roles default to `user`.
 
@@ -1241,6 +1249,8 @@ With no daemon: `Routines are kept and run by the GoodVibes daemon, so each runs
 `/profile [show|where <field>|set <field> <value>|note [--section <name>] <text>|forget <field>|forget --section <name> <text>|undo <field>|status]` reads and corrects the owner profile: `/profile where location.timezone` says where a fact came from.
 `/payments [card [remove <id>]|status|pending|approve <merchant> <item> <maximum>|standing [list|add <shops> <item> <per-purchase> <per-period> <days> [<last day>]|remove <id>]]` sets up payment cards and purchase approvals.
 `/devices [list|rename <id> <name>|revoke <id>|migrate-shared [name]|revoke-shared|nodes|grants|revoke-grant <grant-id>|captures|delete-capture <capture-id>]` (alias `/device`) manages paired devices.
+`list`, `rename`, `revoke` and `migrate-shared` act on the devices of the daemon this terminal talks to, through its operator API, so with `daemon.connectedHost.url` set they change that daemon (`Paired devices on the daemon at <origin>:`). Only when the selected daemon is this machine's and does not answer do they use this machine's pairing file, which the daemon reads when it starts.
+`/payments card` fixes the daemon before the first field; if the selection changes while the card is typed, it is not sent (`The selected daemon changed while the card was being entered ... Nothing was sent.`).
 `/qrcode [regenerate]` (aliases `/qr`, `/pair`) opens the device-pairing view; `r` there mints a new device token.
 `/host` inspects, pairs or unpairs this terminal with its host; only the owner typing it can pair or unpair (`Usage: /host pair [--bootstrap-shared] [--name <device-name>] [--apply] | /host unpair`).
 `/relay [status|pair [name]|codes|revoke <id>]` shows outbound relay status, mints a relay pairing payload for one device (it carries a relay code for that device alone, labelled with the name), lists the devices' relay codes, or revokes one (that device is refused through the relay from its next request; every other keeps working); with `relay.enabled` off, `pair` answers `Relay is disabled: turn on relay.enabled in /config relay first.`
@@ -1580,14 +1590,14 @@ The terminal app registers 28 tools (the same 28 run in the daemon's hosted sess
 | `query` | Leave the owner a question in the owner inbox and continue working. |
 | `profile` | Record and read what the owner says about themselves: dated plans, birthdays and anniversaries, profile fields, facts. |
 | `goodvibes_context` | Read the current GoodVibes runtime: settings, integrations, surfaces, providers, models, tools. |
-| `goodvibes_settings` | Apply a GoodVibes setting the owner gave a concrete value for. |
+| `goodvibes_settings` | Apply a GoodVibes setting the owner gave a concrete value for. It runs only as a call the permission gate admitted (a `write`); nothing in its own arguments confirms it. A change that loosens security is put to the owner, and is written only when he, his standing rule or the mode settled the call; in a channel guest's turn it is refused. |
 | `context_accounting` | Report what was added to the model's context this turn (memory records and why) and the recall outcome. |
 | `contract_self_check` | Inside a contract unit: read how the unit's acceptance criteria read at the last check, without ending the turn. |
 | `repl` | Evaluate one JavaScript, TypeScript, Python, SQL or GraphQL snippet inside the command sandbox. |
 
 Facts about individual tools that change how the owner works with them:
 
-- `write` modes are `fail_if_exists`, `overwrite`, `backup` (copies the original to `.goodvibes/.backups/`, keeping the newest 5 per file) and `restore` (puts the newest backup back). With `tools.autoHeal` on (default off), a written file with syntax errors is run through the formatter, the linter and a model repair.
+- `write` modes are `fail_if_exists`, `overwrite`, `backup` (copies the original to `.goodvibes/.backups/`, keeping the newest 5 per file) and `restore` (puts the newest backup back). With `tools.autoHeal` on (default off), a written file with syntax errors is run through the formatter, the linter and a model repair. The project's formatter and linter run inside a bubblewrap boundary with no network, a scrubbed environment and the project read-only (a configured language tool may change only its own hidden copy of the file); where no such boundary can be built, that stage is skipped with a warning naming why.
 - `write` and `edit` take `validate.after` (`typecheck`, `lint`, `test`, `build`), which runs the project's own script for each; a check the project does not declare is refused before anything is written.
 - `edit` results carry a `status`: `applied`, `not_found`, `ambiguous`, `conflict` or `failed`.
 - `exec` runs background processes: `bg_output <id>` shows the newest 256 KB of a process's output; a finished process's record is kept for 30 minutes.
@@ -2228,7 +2238,7 @@ A key that matches no hook point is not loaded; `goodvibes hooks validate` repor
 | `http` | POST the event to `url` (redirects are not followed). |
 | `ts` | Run a TypeScript module (`path`) whose default export handles the event. |
 
-Fields: `match`, `matcher` (an exact, case-sensitive string compared with the event's third segment, its specific name: under `Pre:tool:*`, `"matcher": "exec"` limits the hook to `exec` calls; there are no wildcards or patterns), `type`, `command` / `prompt` / `url` / `path`, `headers`, `model`, `timeout` (seconds; default 30, 60 for `agent`), `statusMessage`, `async`, `once`, `description`, `name`, `enabled` (default true).
+Fields: `match`, `matcher` (an exact, case-sensitive string compared with the event's third segment, its specific name: under `Pre:tool:*`, `"matcher": "exec"` limits the hook to `exec` calls; there are no wildcards or patterns; or `effect:<class>`, which matches every tool call the permission gate classes as `read`, `write`, `execute` or `delegate`, whichever tool made it: under `Pre:tool:*`, `"matcher": "effect:execute"` fires for every tool that runs a command, not only `exec`), `type`, `command` / `prompt` / `url` / `path`, `headers`, `model`, `timeout` (seconds; default 30, 60 for `agent`), `statusMessage`, `async`, `once`, `description`, `name`, `enabled` (default true).
 A chain step takes `match`, `capture`, `within` (`30s`, `5m`), `condition`, `optional` and `debounce`.
 
 ### The command hook contract
@@ -2245,6 +2255,7 @@ Standard input receives one JSON object, the event:
 | `timestamp` | Milliseconds since the epoch. |
 | `payload` | What happened (below). |
 | `agentId` | Present when a helper agent raised the event. |
+| `effects` | On a tool call: the permission gate's class of the call (`read`, `write`, `execute` or `delegate`), as a one-item list; also in `payload.effects`. |
 
 The payloads of the tool and file events:
 

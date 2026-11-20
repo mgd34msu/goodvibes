@@ -14,6 +14,7 @@
  * escalation step, which closes the unit's `attempts-undecided` escalation, so
  * the unit takes the attempt exactly as an owner's pick would.
  */
+import { pending } from '@goodvibes-jev/engine/errors';
 import { AttemptError } from '../orchestration/attempts.js';
 import type { WorkstreamGraphSnapshot } from '../orchestration/graph-dynamics.js';
 import type { AttemptCandidate, AttemptJudgment, AttemptPickResult, HeldMergeGroup, WorkItem } from '../orchestration/types.js';
@@ -166,10 +167,14 @@ export function createContractFleetControls(deps: ContractFleetControlsDeps): Co
         throw new AttemptError(`${winner.id} is not a passing attempt of unit ${unit.id}; the candidates are ${selection.candidateIds.join(', ')}`);
       }
       await deps.operatorPick(run, unit.id, winner.id);
+      const loserItemIds = selection.candidateIds.filter((candidate) => candidate !== winner.id).map((candidate) => qualifyId(run.id, candidate));
+      // The contract's own step cleans the losers after the pick; nothing here saw them cleaned yet.
+      const since = Date.now();
       return {
         groupId,
         winnerItemId,
-        loserItemIds: selection.candidateIds.filter((candidate) => candidate !== winner.id).map((candidate) => qualifyId(run.id, candidate)),
+        loserItemIds,
+        losers: loserItemIds.map((id) => ({ id, outcome: pending('git worktree list', since) })),
         auto: false,
       };
     },

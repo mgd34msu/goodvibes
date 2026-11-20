@@ -105,7 +105,7 @@ jobs:
           if [ "$RELEASE_MODE" = candidate ]; then test "$(git rev-parse HEAD)" = "$CANDIDATE_SOURCE"; fi
           GITHUB_REF_NAME="$RELEASE_TAG" bun packages/engine/scripts/verify-release-tag-version.ts
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      # The release being upgraded from is the nearest earlier STABLE version tag in
+      # The release being upgraded from is the highest earlier STABLE version tag in
       # this release's own history; none for the first release, which is warned about.
       - name: Resolve the previous published release
         id: previous
@@ -125,6 +125,8 @@ jobs:
     permissions:
       contents: read
       checks: read
+      # The CI workflow's runs on the commit, to tell its `CI ok` from a check run of any other source.
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

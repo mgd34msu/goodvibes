@@ -12,6 +12,7 @@ import type { AuthorityRecordFile } from '../cluster/authority-record-file.js';
 import { logger } from '../utils/logger.js';
 import type { GroupSpendSource } from './budget.js';
 import type { DayKey } from './day.js';
+import type { CurrencyCode } from './types.js';
 
 /** The record could not be read: no machine spends against a group total it cannot see. */
 export class GroupSpendUnavailableError extends Error {
@@ -21,12 +22,20 @@ export class GroupSpendUnavailableError extends Error {
 
 type Pools = { readonly item: number; readonly overage: number; readonly tolerance: number };
 
-export function recordGroupSpend(file: AuthorityRecordFile, currency: () => string): GroupSpendSource {
+/**
+ * One entry per day AND currency: a currency change mid-day starts a new
+ * group pool, and what was spent in the old currency stays in its own entry.
+ */
+function spendEntryId(day: DayKey, currency: CurrencyCode): string {
+  return `${day}:${currency}`;
+}
+
+export function recordGroupSpend(file: AuthorityRecordFile): GroupSpendSource {
   return {
-    othersSpent: (day: DayKey) => {
+    othersSpent: (day: DayKey, currency: CurrencyCode) => {
       const view = file.view();
       if (!view) throw new GroupSpendUnavailableError();
-      const entry = view.entry('budget-spend', day);
+      const entry = view.entry('budget-spend', spendEntryId(day, currency));
       const totals = { item: 0, overage: 0, tolerance: 0 };
       if (!entry) return totals;
       for (const [node, pools] of Object.entries(entry.public.spentByNode)) {
@@ -37,13 +46,14 @@ export function recordGroupSpend(file: AuthorityRecordFile, currency: () => stri
       }
       return totals;
     },
-    publish: (day: DayKey, own: Pools) => {
+    publish: (day: DayKey, currency: CurrencyCode, own: Pools) => {
+      const id = spendEntryId(day, currency);
       void file.write((view) => {
-        const entry = view.entry('budget-spend', day);
+        const entry = view.entry('budget-spend', id);
         const slot = { item: own.item, overage: own.overage, tolerance: own.tolerance };
         if (!entry) {
-          return { kind: 'issue', value: null, entries: [{ kind: 'budget-spend', id: day,
-            public: { dayKey: day, currency: currency(), spentByNode: { [file.nodeId]: slot } } }] };
+          return { kind: 'issue', value: null, entries: [{ kind: 'budget-spend', id,
+            public: { dayKey: day, currency, spentByNode: { [file.nodeId]: slot } } }] };
         }
         const mine = entry.public.spentByNode[file.nodeId] ?? {};
         // A slot only rises: a pruned local ledger never lowers what the group was told.
@@ -51,7 +61,7 @@ export function recordGroupSpend(file: AuthorityRecordFile, currency: () => stri
         if (raised.item === (mine['item'] ?? 0) && raised.overage === (mine['overage'] ?? 0) && raised.tolerance === (mine['tolerance'] ?? 0) && entry.public.spentByNode[file.nodeId]) {
           return { kind: 'none', value: null };
         }
-        return { kind: 'update', key: `budget-spend:${day}`, narrowsOrWidens: false, value: null,
+        return { kind: 'update', key: `budget-spend:${id}`, narrowsOrWidens: false, value: null,
           patch: { spentByNode: { ...entry.public.spentByNode, [file.nodeId]: raised } } };
       }).catch((error: unknown) => logger.warn('This machine\'s spend could not be written to the group\'s spend record; the other machines will count it once it is', { day, error: String(error) }));
     },

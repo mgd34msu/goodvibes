@@ -273,6 +273,10 @@ interface Plan {
     menu: boolean;
 }
 const MENU: KitHint[] = [['ctrl+p', 'menu']];
+/** A bound key as a keycap shows it ("Shift+tab" → "shift+tab"); undefined when the action is unbound. */
+export function keycapLabel(comboLabel: string): string | undefined {
+    return comboLabel === '(unbound)' ? undefined : comboLabel.toLowerCase();
+}
 /** Render the status line. */
 export function renderStatusLine(options: StatusLineOptions): Line {
     const t = activeTokens();

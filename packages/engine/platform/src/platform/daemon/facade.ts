@@ -5,7 +5,7 @@ import { channelProfileForSession, withChannelExecutionMode } from '../channel-p
 import { applyChannelProfileToSpawn } from '../channel-profiles/intake.js';
 import { applyAssignedChannelProfile, assignedChannelProfile, spawnModelOpen } from './channel-profile-assignment.js';
 import { isChannelSurfaceKind } from '../../events/surfaces.js';
-import { channelTurnSurfaceId, withTurnSurfaceId } from '../security/turn-boundary.js';
+import { channelTurnScope, withTurnSurfaceId } from '../security/turn-boundary.js';
 import { releaseDaemonActivityLog, runDaemonBootGuarantees } from './facade-boot-guarantees.js';
 import { logger } from '../utils/logger.js';
 import { jsonErrorResponse } from './http/error-response.js';
@@ -95,6 +95,9 @@ import { bindClientAddress, bindLocalOrigin, isDirectLoopbackRequest, resolveCli
 import { readControlPlaneStreamingMode, refuseUnservedListenerRequest } from './http/listener-admission.js';
 import type { ServiceCommandRunner } from './service-handover.js';
 import { inFlightWorkIds } from '../runtime/fleet/registry.js';
+import { recoverGitHubReplies, type GitHubReplyOperation } from '../adapters/github/index.js';
+import { daemonOperationLog, daemonOperationsPath } from './operations-log.js';
+import { existsSync } from 'node:fs';
 
 /**
  * The facade's configuration plus what a composing host that owns the whole
@@ -406,6 +409,7 @@ export class DaemonServer {
       // automation runs, watchers, background processes and hosted agents.
       isIdle: () => inFlightWorkIds(this.runtimeServices.processRegistry).length === 0,
       describeActiveWork: () => inFlightWorkIds(this.runtimeServices.processRegistry),
+      workAdmission: collaborators.workAdmission,
       updateArtifact: this.config.updateArtifact, // absent = host-managed updates (see DaemonUpdateArtifact)
       // Forwarded so a daemon on an overridden home cannot seize the machine's
       // service unit. Absent = the machine default, which is the only case that
@@ -806,9 +810,26 @@ export class DaemonServer {
         this.replySettlement = () => { for (const unsubscribe of unsubscribes) unsubscribe(); };
       }
       this.surfaceRegistry.syncConfiguredSurfaces();
-      // Channel answers whose send the previous process died in are sent now, once per process.
+      // Work the owner agreed to before a restart and that never started starts now.
+      if (!this.owedChannelRepliesResent) {
+        void this.workProposals.init().then(() => this.surfaceActionHelper.resumeAgreedWork()).then((resumed) => {
+          if (resumed > 0) logger.info('DaemonServer: agreed work saved before the restart was started', { resumed });
+        }, (error: unknown) => {
+          logger.error('DaemonServer: agreed work saved before the restart could not be started', { error: summarizeError(error) });
+        });
+      }
+      // Channel answers whose send the previous process died in are sent now, once per process;
+      // GitHub answers owed before the restart are posted (once) or reported.
       if (!this.owedChannelRepliesResent) {
         this.owedChannelRepliesResent = true;
+        // Only a home that ever owed one has the log; starting opens nothing otherwise.
+        if (existsSync(daemonOperationsPath(this.configManager))) void recoverGitHubReplies({
+          operations: daemonOperationLog<GitHubReplyOperation>(this.configManager),
+          awaitAgent: async (agentId) => { await this.agentManager.join(agentId); return this.agentManager.getStatus(agentId); },
+          resolveToken: async () => (await this.serviceRegistry.resolveSecret('github', 'primary')) ?? process.env.GITHUB_TOKEN ?? null,
+        }).catch((error: unknown) => {
+          logger.error('DaemonServer: GitHub answers owed before the restart could not be finished', { error: summarizeError(error) });
+        });
         void this.surfaceDeliveryHelper.resendOwedChannelReplies().then((resent) => {
           if (resent > 0) logger.info('DaemonServer: channel answers owed before the restart were sent again', { resent });
         }, (error: unknown) => {
@@ -1568,7 +1589,9 @@ export class DaemonServer {
         : channelProfiled;
       // An agent started for a session belongs to it: that session's listings and reports carry it.
       const spawnInput = sessionId !== undefined && profiled.sessionId === undefined ? { ...profiled, sessionId } : profiled;
-      const record = withTurnSurfaceId(channelTurnSurfaceId(triggerSurface), () => withChannelExecutionMode(this.sessionBroker, sessionId, () => this.agentManager.spawn(spawnInput)));
+      // A guest's turn in scope stays the guest's (its actor), so the agent never runs with the channel's own authority.
+      const scope = channelTurnScope(triggerSurface);
+      const record = withTurnSurfaceId(scope.surface, () => withChannelExecutionMode(this.sessionBroker, sessionId, () => this.agentManager.spawn(spawnInput)), scope.actor);
       this.syncSpawnedAgentTask(record, sessionId);
       // Register the agent with AgentTaskAdapter so bus events can transition its task.
       if (this.agentTaskAdapter) {

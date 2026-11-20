@@ -19,7 +19,7 @@ import {
   type UserVerificationRequirement,
 } from '../../relay/step-up-service.js';
 
-export type StepUpGatewayService = Pick<StepUpService, 'registerCredential' | 'mintChallenge' | 'listCredentials' | 'removeCredential'>;
+export type StepUpGatewayService = Pick<StepUpService, 'registerCredential' | 'mintChallenge' | 'listCredentials' | 'removeCredential' | 'offerRegistration'>;
 
 function optionalUserVerification(value: unknown): UserVerificationRequirement | undefined {
   if (value === undefined) return undefined;

@@ -24,7 +24,7 @@
  */
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { createDaemonVerbCaller } from './operator-endpoint.ts';
+import { createDaemonVerbCaller, resolveControlPlaneBaseUrl } from './operator-endpoint.ts';
 import { closeHostedAttachments } from './hosted-attachments.ts';
 import { createHostedSessionsClient } from './hosted-sessions.ts';
 import { getSharedHostedSessionFeed, type HostedSessionFeed } from '../../views/hosted-session-feed.ts';
@@ -63,7 +63,7 @@ export async function leaveHostedSessionOnExit(
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const outcome = await Promise.race([
-      closeHostedAttachments(feed, client).then(detached => detached ? 'detached' as const : 'none' as const),
+      closeHostedAttachments(feed, client, resolveControlPlaneBaseUrl(options.configManager) ?? 'the selected daemon').then(detached => detached ? 'detached' as const : 'none' as const),
       new Promise<'failed'>((resolve) => {
         timer = setTimeout(() => resolve('failed'), timeoutMs);
         timer.unref?.();

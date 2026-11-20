@@ -1,4 +1,5 @@
 import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+import { commandArgsWithLiteralMarker } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { formatOperatorGatewayFailure, invokeOperatorGatewayMethod } from '../agent/operator-gateway-call.ts';
 import { resolveAgentConnectedHostConnection } from '../agent/routine-schedule-promotion.ts';
@@ -213,7 +214,7 @@ async function handleCiWatchesCommand(runtime: CliCommandRuntime, args: readonly
 }
 
 export async function handleCiCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
-  const [sub, ...rest] = runtime.cli.commandArgs;
+  const [sub, ...rest] = commandArgsWithLiteralMarker(runtime.cli);
   switch ((sub ?? '').toLowerCase()) {
     case 'status':
       return handleCiStatus(runtime, rest);

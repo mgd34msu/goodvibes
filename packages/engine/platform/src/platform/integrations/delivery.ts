@@ -291,6 +291,8 @@ export class DeliveryQueue<TPayload = string> {
   private readonly _structuralDiagnostics: boolean;
   private readonly _dlq: DeadLetterEntry<TPayload>[] = [];
   private _store: { readonly path: string; readonly codec: DeadLetterCodec<TPayload> } | undefined;
+  /** Dead letters being replayed now: they stay listed (and on disk) until the replay's delivery succeeded. */
+  private readonly _replaying = new Set<string>();
   private readonly _pending = new Map<string, PendingEntry<TPayload>>();
   private readonly _timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly _listeners = new Set<(entry: DeadLetterEntry<TPayload>) => void>();
@@ -371,7 +373,9 @@ export class DeliveryQueue<TPayload = string> {
    * Keep dead letters in `path` from now on: entries already there (from an
    * earlier run) are loaded at once, and every change to the list is written
    * through. One document write per dead letter, replay or clear; nothing on
-   * a delivery that succeeds.
+   * a delivery that succeeds. Throws when the file cannot be written: the
+   * caller must not discard another copy of these entries (an adopted file)
+   * on the strength of a write that did not happen.
    */
   persistDeadLetters(path: string, codec: DeadLetterCodec<TPayload>): void {
     this._store = { path, codec };
@@ -388,7 +392,7 @@ export class DeliveryQueue<TPayload = string> {
       const { payload: _encoded, ...rest } = row;
       this._retainDeadLetter({ ...rest, payload }, false);
     }
-    this._writeDeadLetters();
+    this._writeDeadLetters(this._dlq);
   }
 
   /**
@@ -424,15 +428,11 @@ export class DeliveryQueue<TPayload = string> {
 
     for (const dlqEntry of entries) {
       this._assertOpen();
-      // Remove from DLQ before replaying
-      const idx = this._dlq.findIndex((e) => e.id === dlqEntry.id);
       // Another replay or an explicit clear may have already consumed this row.
-      if (idx === -1) continue;
-      this._dlq.splice(idx, 1);
-      this._deadLettered = Math.max(0, this._deadLettered - 1);
-      this._tally(dlqEntry.channel).deadLettered = Math.max(0, this._tally(dlqEntry.channel).deadLettered - 1);
-      this._writeDeadLetters();
-
+      if (this._replaying.has(dlqEntry.id) || !this._dlq.some((e) => e.id === dlqEntry.id)) continue;
+      // The row stays listed, and on disk, while it is replayed: a daemon that
+      // stops mid-replay still lists it after its restart.
+      this._replaying.add(dlqEntry.id);
       try {
         const outcome = await this.enqueue(
           dlqEntry.channel,
@@ -441,18 +441,29 @@ export class DeliveryQueue<TPayload = string> {
           () => deliver(dlqEntry),
           { target: retarget ? retarget(dlqEntry) : dlqEntry.target },
         );
+        // Settled: delivered, or dead-lettered again as its own new row. Either
+        // way this row is done, and goes with one write.
+        this._removeDeadLetter(dlqEntry);
         results.push({ id: dlqEntry.id, outcome });
-      } catch (error) {
-        // Keep retained recovery data when no replay outcome can be settled.
-        // Restoration uses the same bounded FIFO without a new send or DLQ event.
-        if (!this._dlq.some((entry) => entry.id === dlqEntry.id)) {
-          this._retainDeadLetter(dlqEntry);
-        }
-        throw error;
+      } finally {
+        // A replay with no settled outcome leaves the row where it was.
+        this._replaying.delete(dlqEntry.id);
       }
     }
 
     return results;
+  }
+
+  /** Save, then publish: the list without the row is written, then the row leaves memory. A failed write leaves it listed and throws. */
+  private _removeDeadLetter(dlqEntry: DeadLetterEntry<TPayload>): void {
+    const remaining = this._dlq.filter((entry) => entry.id !== dlqEntry.id);
+    if (remaining.length === this._dlq.length) return;
+    this._writeDeadLetters(remaining);
+    const idx = this._dlq.findIndex((e) => e.id === dlqEntry.id);
+    if (idx === -1) return;
+    this._dlq.splice(idx, 1);
+    this._deadLettered = Math.max(0, this._deadLettered - 1);
+    this._tally(dlqEntry.channel).deadLettered = Math.max(0, this._tally(dlqEntry.channel).deadLettered - 1);
   }
 
   /**
@@ -472,10 +483,11 @@ export class DeliveryQueue<TPayload = string> {
   /** Clear all dead-letter entries. */
   clearDlq(): number {
     const count = this._dlq.length;
+    // Written first: a failed write throws and the list stays as it was.
+    this._writeDeadLetters([]);
     this._dlq.length = 0;
     this._deadLettered = 0;
     for (const tally of this._channelTallies.values()) tally.deadLettered = 0;
-    this._writeDeadLetters();
     return count;
   }
 
@@ -703,27 +715,29 @@ export class DeliveryQueue<TPayload = string> {
     this._dlq.push(entry);
     this._deadLettered += 1;
     this._tally(entry.channel).deadLettered += 1;
-    if (write) this._writeDeadLetters();
-  }
-
-  /** Write the dead-letter list through to its file, when it has one. */
-  private _writeDeadLetters(): void {
-    const store = this._store;
-    if (!store) return;
-    const entries: StoredDeadLetter[] = [];
-    for (const { payload, ...entry } of this._dlq) {
-      let encoded: unknown;
-      try { encoded = store.codec.encode(payload); } catch { encoded = undefined; }
-      if (encoded !== undefined) entries.push({ ...entry, payload: encoded } as StoredDeadLetter);
-    }
+    if (!write) return;
     try {
-      writeDocument(store.path, { version: 1, entries }, { indent: null });
+      this._writeDeadLetters(this._dlq);
     } catch (error) {
-      // The list in memory is still right and still replayable; only a restart would lose it.
+      // A delivery that failed is not failed twice: the list in memory is still
+      // right and replayable, and the next successful write carries this row.
       logger.warn('DeliveryQueue: the dead-letter file could not be written; failed notifications are kept in memory only until the next successful write', {
         error: summarizeError(error),
       });
     }
+  }
+
+  /** Write `list` as the dead-letter file, when there is one. Throws when the write fails. */
+  private _writeDeadLetters(list: readonly DeadLetterEntry<TPayload>[]): void {
+    const store = this._store;
+    if (!store) return;
+    const entries: StoredDeadLetter[] = [];
+    for (const { payload, ...entry } of list) {
+      let encoded: unknown;
+      try { encoded = store.codec.encode(payload); } catch { encoded = undefined; }
+      if (encoded !== undefined) entries.push({ ...entry, payload: encoded } as StoredDeadLetter);
+    }
+    writeDocument(store.path, { version: 1, entries }, { indent: null });
   }
 
   private _computeDelay(attempt: number): number {

@@ -20,7 +20,7 @@
  * that drives liveness is measured across scan boundaries, so `active`/`quiet`
  * reflects CPU burned since the last scan, not per-query noise.
  */
-import type { ObservedAgentKind, ObservedLiveness, ObservedSteerChannel, SteerOptions, SteerResult } from '../types.js';
+import type { ObservedAgentKind, ObservedLiveness, ObservedSteerChannel, SteerOptions, SteerResult, SteerStep } from '../types.js';
 import {
   classifyObservedProcesses,
   defaultProcessTableReader,
@@ -242,9 +242,10 @@ export class ObservedAgentSource {
    * text and, only when `submit` is true, two separate Enter sends follow.
    * Without submit the text waits in the pane for the person there, so a
    * pending dialog where Enter means "yes" is never answered by this call. An
-   * honest refusal (queued:false) when the row exposes no tmux channel, when
-   * the session is no longer there, or when a send-keys call fails. STOP is
-   * never offered here, this is steer only.
+   * honest refusal (queued:false, nothing sent) when the row exposes no tmux
+   * channel, when the session is no longer there, or when the first send-keys
+   * call fails; `queued: 'partial'` with the steps that went out when a later
+   * one fails. STOP is never offered here, this is steer only.
    *
    * The row is up to a refresh interval old, and text typed into a pane whose
    * agent has exited would land in whatever has the terminal now, so the
@@ -264,16 +265,25 @@ export class ObservedAgentSource {
     if (paneForTty(this.paneReader.listPanes(), current.tty)?.paneId !== pane) {
       return { queued: false, reason: `nothing was sent: the session (pid ${row.pid}) is no longer on tmux pane ${pane}` };
     }
-    const sends: readonly (readonly string[])[] = [
-      ['send-keys', '-t', pane, '-l', '--', text],
-      ...(options?.submit === true ? [['send-keys', '-t', pane, 'Enter'], ['send-keys', '-t', pane, 'Enter']] : []),
+    const sends: readonly { readonly step: SteerStep; readonly args: readonly string[] }[] = [
+      { step: 'text', args: ['send-keys', '-t', pane, '-l', '--', text] },
+      ...(options?.submit === true ? [
+        { step: 'Enter' as const, args: ['send-keys', '-t', pane, 'Enter'] },
+        { step: 'Enter' as const, args: ['send-keys', '-t', pane, 'Enter'] },
+      ] : []),
     ];
-    for (const args of sends) {
+    const sent: SteerStep[] = [];
+    for (const { step, args } of sends) {
       const result = this.steerRunner.run(args);
       if (result.status !== 0) {
         const detail = result.stderr.trim() || 'tmux send-keys failed';
-        return { queued: false, reason: `steering ${pane} failed: ${detail}` };
+        // A failure after a step went out is not "nothing was sent": the pane already holds what was typed.
+        if (sent.length > 0) {
+          return { queued: 'partial', sent, failed: step, reason: `steering ${pane} stopped part way: ${sent.join(' and ')} reached the pane, then sending ${step} failed: ${detail}` };
+        }
+        return { queued: false, reason: `nothing was sent: steering ${pane} failed: ${detail}` };
       }
+      sent.push(step);
     }
     return { queued: true, messageId: crypto.randomUUID() };
   }

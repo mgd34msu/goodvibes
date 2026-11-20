@@ -26,6 +26,7 @@ import {
   serializeWorkstreamSnapshot,
   retainNewWorkstreamSnapshot,
   retainImportedWorkstreamSnapshot,
+  writeWorkstreamSnapshot,
   type SnapshotRoot,
 } from './persistence.js';
 import { computeClaims, firstPhase, nextPhaseAfter, sortedPhases } from './scheduler.js';
@@ -66,6 +67,7 @@ import { runWorktreeSetup, resolveEffectiveWorktreeSetup, type WorktreeSetupComm
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { OwnedScope } from '../utils/owned-work.js';
+import type { Fence } from '../utils/owner-fence.js';
 
 export interface OrchestrationEngineDeps {
   readonly nativeDataWriter?: import('../runtime/native-reader-compatibility.js').NativeDataWriteOwner | undefined;
@@ -440,6 +442,12 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
         deps.persist === false ? undefined : () => retainNewWorkstreamSnapshot(snapshotRoot, workstream));
       workstreams.set(workstream.id, workstream);
       completedResults.set(workstream.id, []);
+      // The first snapshot is published now, before the caller can mark its group running: a restart at any point
+      // after this finds a loadable snapshot and resumes the group instead of reaping the contract as a zombie.
+      // The atomic no-replace publication the creation frame retained; one write per workstream.
+      if (deps.persist !== false && !writeWorkstreamSnapshot(snapshotRoot, workstream, [])) {
+        emit({ type: 'workstream-persistence-failed', workstreamId: workstream.id });
+      }
       return workstream;
     } finally { creatingWorkstreams.delete(id); }
   }
@@ -855,7 +863,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     return index < 0 ? undefined : completedResults.get(workstream.id)?.[index]?.commit?.reason ?? 'commit failed';
   }
 
-  async function retryItemCommit(itemId: string): Promise<PhaseCommitOutcome | null> {
+  async function retryItemCommit(fence: Fence, itemId: string): Promise<PhaseCommitOutcome | null> {
     const found = findItemAndWorkstream(itemId);
     if (!found) return null;
     const { workstream, item } = found;
@@ -871,7 +879,8 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     if (!phase) return null;
     const itemWorktree = workstream.isolation === 'worktree' ? await worktreeIsolation.ensureWorktree(workstream, item) : undefined;
     const worktree = (deps.createWorktree ?? (() => new AgentWorktree(deps.projectRoot)))();
-    const { commit } = await commitPhaseWork(item, phase, worktree, { projectRoot: deps.projectRoot, itemWorktree, launchDirtySnapshot });
+    // The engine's own fence: a disposed engine commits nothing.
+    const { commit } = await commitPhaseWork(fence, item, phase, worktree, { projectRoot: deps.projectRoot, itemWorktree, launchDirtySnapshot });
     if (completedResults.get(workstream.id) !== results || results[index]?.phaseId !== phase.id) return commit;
     results[index] = { ...results[index]!, commit };
     if (commit.status !== 'failed' && item.warnings) {
@@ -1061,7 +1070,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       const resulting: string | undefined = found.item.mergeState; // mutated by the lane
       return resulting === 'merged' ? 'merged' : 'conflict';
     }),
-    retryItemCommit: (itemId) => ownedWork.run('retry item commit', () => retryItemCommit(itemId)),
+    retryItemCommit: (itemId) => ownedWork.run('retry item commit', (fence) => retryItemCommit(fence, itemId)),
     addDependency,
     requeueItem,
     getGraphSnapshot,

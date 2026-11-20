@@ -83,6 +83,7 @@ import { observesUpdateFiles } from '../runtime/update-file-io.js';
 import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { applySuiteUpdate, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration, SuiteUpdatePreparationError, SuiteUpdateRecoveryError, type SuiteUpdateResult } from '../runtime/suite-update.js';
 import { prepareHandoverBeforeStop, prepareServiceHandover, ServiceHandoverPreflightError, type PreparedServiceHandover } from './service-handover-preflight.js';
+import type { DaemonWorkAdmission } from './work-admission.js';
 import { writeFatalLine } from './fatal-boot-report.js';
 
 export interface AutoUpdateServiceActions {
@@ -159,6 +160,13 @@ export interface DaemonAutoUpdaterOptions {
   readonly updateTimeoutMs?: number | undefined;
   /** The daemon's real activity signal: true only when NO work is in flight. */
   readonly isIdle: () => boolean;
+  /**
+   * The daemon's work admission. Closed in the same synchronous step as the
+   * last idle check before the swap commits, so no work admitted after that
+   * check can start; reopened when the update does not commit or the handover
+   * is refused before the orderly stop. Absent: nothing is fenced.
+   */
+  readonly workAdmission?: DaemonWorkAdmission | undefined;
   /**
    * Ids of the work keeping the daemon busy, read only when `isIdle` said no,
    * so a waiting update can say what it waits for. Absent = not reported.
@@ -287,6 +295,8 @@ export class DaemonAutoUpdater {
   private lastHandoverPreflightRefusal: string | null = null;
   private handoverCancelled = false;
   private handoverExitRequested = false;
+  /** Set once the orderly stop for an accepted handover begins: admission then stays closed. */
+  private runtimeStopStarted = false;
   /** The orderly stop ran and the handover then did not complete; exit once any reservation is released. */
   private incompleteAfterStop = false;
   private handoverTask: Promise<void> | null = null;
@@ -686,6 +696,8 @@ export class DaemonAutoUpdater {
       const idle = this.options.isIdle();
       assertCurrent();
       if (!idle) throw busyBeforeCommit;
+      // Same synchronous step as the idle answer: nothing admitted after it can start.
+      this.options.workAdmission?.close(`it is installing v${normalizeVersion(tag)} and will restart into it`);
     };
     try {
       if (suiteConfiguration) {
@@ -785,6 +797,8 @@ export class DaemonAutoUpdater {
     }
     await this.restartIntoNewBinary(handover);
     } finally {
+      // Not stopping after all (no commit, a refused or cancelled handover): take work again, under a new generation.
+      if (!this.runtimeStopStarted) this.options.workAdmission?.reopen();
       try { if (!this.handoverExitRequested || this.handoverCancelled) await handover?.cancel(); }
       catch {
         this.handoverCancelled = true;
@@ -917,8 +931,11 @@ export class DaemonAutoUpdater {
       // Whatever can refuse an adoption is settled while the runtime still
       // serves; the files are already swapped, so a refusal is reported and the
       // process keeps running rather than stopping into an unrecoverable state.
+      // Admission is closed first (already, since the idle check before the commit).
+      this.options.workAdmission?.close(`it is restarting into v${this.appliedVersion ?? 'the installed update'}`);
       const prepared = await prepareHandoverBeforeStop(handover, abort.signal);
       if (prepared.status !== 'accepted') { this.reportIncompleteHandover(prepared); return; }
+      this.runtimeStopStarted = true;
       if (!await this.stopGracefully()) return;
       await this.requestServiceHandover(abort.signal, handover);
     });

@@ -451,21 +451,11 @@ export async function lookupBuiltinProviderDirectory(
   const surfaces = context.deps.configManager.getCategory('surfaces');
 
   if (surface === 'ntfy') {
-    const topic = String(context.deps.configManager.get('surfaces.ntfy.topic') || '');
-    // The configured defaults are what this half adds; known conversations come
-    // from the route directory whether or not any default is set.
-    if (!topic) return [];
-    return filterProviderDirectory([{
-      id: topic,
-      surface,
-      kind: 'channel',
-      label: topic,
-      handle: topic,
-      groupId: topic,
-      isGroupConversation: true,
-      searchText: topic,
-      metadata: { provider: 'ntfy', baseUrl: context.deps.configManager.get('surfaces.ntfy.baseUrl') },
-    }], needle, limit);
+    // The configured default topic is a credential (its name is all a stranger
+    // needs on a public server), so it is not listed here: a directory answer
+    // reaches tool output. A delivery that names no topic goes to it anyway;
+    // known conversations come from the route directory.
+    return [];
   }
 
   if (surface === 'homeassistant') {

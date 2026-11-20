@@ -184,6 +184,14 @@ export function useChatStream({
   // matching turn.tool_result can build a full CompletedToolCall without the daemon
   // having to repeat the input back on the result event.
   const pendingToolInputRef = useRef<Map<string, { toolName: string; activity?: ToolActivityWords; toolInput: unknown; startedAt: number }>>(new Map());
+  /**
+   * The turn this tab is showing: frames of any other turn (an earlier turn's
+   * late delta, a frame from before a reconnect) are not applied to it. Empty
+   * until a turn starts, or the first frame of a turn already running names it.
+   */
+  const currentTurnIdRef = useRef('');
+  /** Turns that already ended here: a late frame of one never reopens it. */
+  const endedTurnIdsRef = useRef<Set<string>>(new Set());
 
   // Latest turn status this hook knows of (the prop each render, plus every plain
   // write made through syncedSetTurnState), so stop()'s late catch can tell a
@@ -299,7 +307,9 @@ export function useChatStream({
     setActiveToolCalls([]);
     turnToolActivityRef.current = [];
     pendingToolInputRef.current.clear();
+    currentTurnIdRef.current = '';
     if (streamSessionRef.current !== activeSessionId) {
+      endedTurnIdsRef.current = new Set();
       streamSessionRef.current = activeSessionId;
       streamWasDownRef.current = false;
     }
@@ -350,6 +360,10 @@ export function useChatStream({
       onGap: (gap) => {
         if (cancelled || stoppedRef.current) return;
         noteRelayOverflow(gap.dropped);
+        // The dropped frames may include deltas: the live text has a hole, so it
+        // is cleared and the refetched transcript (or the frames still to come) replaces it.
+        liveTextRef.current = '';
+        setLiveText('');
         void invalidateChatState(activeSessionId);
       },
       onEvent: ({ name: eventName, payload }) => {
@@ -357,6 +371,24 @@ export function useChatStream({
         if (!eventName.startsWith('companion-chat.')) return;
         if (firstString(payload, ['sessionId']) !== activeSessionId) return;
         const type = companionEventType(eventName, payload);
+        // Frames apply only to the turn being shown: one that names another turn is dropped.
+        const frameTurnId = firstString(payload, ['turnId']);
+        if (type === 'turn.started') {
+          if (frameTurnId) {
+            if (endedTurnIdsRef.current.has(frameTurnId)) return;
+            currentTurnIdRef.current = frameTurnId;
+          }
+        } else if (type.startsWith('turn.') && frameTurnId) {
+          if (endedTurnIdsRef.current.has(frameTurnId)) return;
+          if (!currentTurnIdRef.current) currentTurnIdRef.current = frameTurnId;
+          else if (currentTurnIdRef.current !== frameTurnId) return;
+        }
+        if ((type === 'turn.completed' || type === 'turn.cancelled' || type === 'turn.error') && frameTurnId) {
+          endedTurnIdsRef.current.add(frameTurnId);
+          // A few dozen turns at most per open chat; the oldest are forgotten past 64.
+          if (endedTurnIdsRef.current.size > 64) endedTurnIdsRef.current.delete(endedTurnIdsRef.current.values().next().value!);
+          currentTurnIdRef.current = '';
+        }
 
         if (type === 'turn.started') {
           setLiveText('');

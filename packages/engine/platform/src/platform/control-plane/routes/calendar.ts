@@ -53,6 +53,12 @@ export interface CalendarGatewayEventSummary {
 export interface CalendarGatewayEventDetail extends CalendarGatewayEventSummary {
   readonly uid?: string;
   readonly recurrence?: string;
+  /**
+   * The calendar's own version of the event when it was read (Google's etag,
+   * the CalDAV resource's ETag). Send it back as `expectedRevision` on
+   * `calendar.events.update` so a change made elsewhere since is refused.
+   */
+  readonly revision?: string;
 }
 
 export interface CalendarGatewayListInput {
@@ -76,6 +82,12 @@ export interface CalendarGatewayCreateInput {
   readonly location?: string | undefined;
   readonly attendees?: readonly string[] | undefined;
   readonly calendarId?: string | undefined;
+  /**
+   * The event's UID, for the platform's own callers that need one identity for
+   * every attempt at the same event (the occasions mirror). Never read from a
+   * request: the route sets the fields above only. Absent: a new UID.
+   */
+  readonly uid?: string | undefined;
 }
 
 /** The fields `calendar.events.update` changes; a field left out keeps its current value. */
@@ -86,6 +98,13 @@ export interface CalendarGatewayUpdateInput {
   readonly description?: string | undefined;
   readonly location?: string | undefined;
   readonly attendees?: readonly string[] | undefined;
+  /**
+   * The `revision` of the event as the person saw it (from `calendar.events.get`).
+   * When the calendar holds a newer version the change is refused with 409
+   * CALENDAR_EVENT_CHANGED and nothing is written. Absent: the version read
+   * at the start of this call is the one compared.
+   */
+  readonly expectedRevision?: string | undefined;
 }
 
 export interface CalendarGatewayUpdated {
@@ -273,7 +292,8 @@ export function createCalendarEventsUpdateHandler(service: CalendarGatewayServic
       );
     }
     if (service.updateEvent === undefined) throw unsupportedWrite('update');
-    return service.updateEvent(eventId, changes, readOptionalString(params.calendarId));
+    const expectedRevision = readOptionalString(params.expectedRevision);
+    return service.updateEvent(eventId, { ...changes, ...(expectedRevision === undefined ? {} : { expectedRevision }) }, readOptionalString(params.calendarId));
   };
 }
 

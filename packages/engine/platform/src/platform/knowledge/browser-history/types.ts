@@ -1,3 +1,4 @@
+import type { Selection } from '@goodvibes-jev/engine/errors';
 import type { KnowledgeBatchIngestResult, KnowledgeSourceRecord } from '../types.js';
 
 export type BrowserKnowledgeFamily = 'chromium' | 'gecko' | 'webkit';
@@ -60,8 +61,10 @@ export interface BrowserBookmarkEntry {
 export type BrowserKnowledgeEntry = BrowserHistoryEntry | BrowserBookmarkEntry;
 
 export interface BrowserKnowledgeFilter {
-  readonly browsers?: readonly BrowserKnowledgeKind[] | undefined;
-  readonly sourceKinds?: readonly BrowserKnowledgeSourceKind[] | undefined;
+  /** Which browsers: not given (or `default`) reads every installed browser; `none` reads nothing; never "all" for an empty list. */
+  readonly browsers?: Selection<BrowserKnowledgeKind> | undefined;
+  /** Which kinds: not given (or `default`) reads history and bookmarks; `none` reads nothing. */
+  readonly sourceKinds?: Selection<BrowserKnowledgeSourceKind> | undefined;
   readonly homeOverride?: string | undefined;
   readonly limit?: number | undefined;
   readonly sinceMs?: number | undefined;

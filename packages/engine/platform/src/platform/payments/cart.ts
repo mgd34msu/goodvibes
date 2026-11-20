@@ -183,7 +183,10 @@ export async function assertCartMatchesRequest(
 
   const missing = requested.filter((line, index) => quantities.get(index) !== line.quantity);
 
-  if (unexpected.length === 0 && unconfirmed.length === 0 && missing.length === 0) {
+  // Exact success needs every cart line tied to a requested item: a line code
+  // could not tie (an unlabelled extra) is never dropped because the requested
+  // quantities happen to be met; it is reported in notChecked below.
+  if (unexpected.length === 0 && unconfirmed.length === 0 && missing.length === 0 && notChecked.length === 0) {
     return { ok: true, code: null, unexpected: [], unconfirmed: [], missing: [], notChecked: [], reason: null };
   }
 

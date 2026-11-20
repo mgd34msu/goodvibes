@@ -7,6 +7,9 @@ import type {
   ProcessUsage,
 } from '../types.js';
 import { contractNodeId, contractUnitNodeId } from './contract.js';
+import { beadArgument, beadName, toolActivityFallback, toolCallActivity } from '@goodvibes-jev/engine/contracts';
+import { toolActivityOf } from '../../../tools/registry.js';
+import { archetypeDisplayName } from '../../../agents/archetypes.js';
 
 /**
  * One activity side-table entry. Registry-owned; populated from the EXISTING
@@ -162,6 +165,18 @@ export function deriveNeedsAttention(state: ProcessState, detail?: string): Proc
   return undefined;
 }
 
+/**
+ * The call an agent is making, as a title: the tool's running verb and the
+ * call's key argument ("Writing docs/usage.md"), or the whole running phrase
+ * when the call names no argument ("Searching the web").
+ */
+function activityTitle(call: NonNullable<AgentRecord['activeCall']>): string {
+  const activity = toolActivityOf(call.name);
+  const argument = beadArgument(call);
+  const words = toolCallActivity(activity, call.arguments) ?? toolActivityFallback(call.name);
+  return argument ? `${words.doing} ${argument}` : beadName({ ...call, activity });
+}
+
 /** AgentRecord → ProcessNode. */
 export function adaptAgent(record: AgentRecord, ctx: AgentAdapterContext): ProcessNode {
   const entry = ctx.activity.get(record.id);
@@ -195,13 +210,25 @@ export function adaptAgent(record: AgentRecord, ctx: AgentAdapterContext): Proce
   }
 
   // A cohort is how a team of agents is formed, so the fleet names it on each member.
-  const role = record.contractRole ? `${record.template} (${record.contractRole})` : record.template;
+  // The archetype's display name ("Helper agent"), never its id ("general").
+  const name = archetypeDisplayName(record.template);
+  const role = record.contractRole ? `${name} (${record.contractRole})` : name;
   const label = record.cohort ? `${role} · ${record.cohort}` : role;
   const elapsedMs = Math.max(0, (record.completedAt ?? ctx.now) - record.startedAt);
+
+  // What it is doing now, in the tool's own words and the call's key argument ("Writing docs/usage.md").
+  const call = active ? record.activeCall : undefined;
+  const currentActivity = call
+    ? { kind: 'tool' as const, text: activityTitle(call), toolName: call.name, at: entry?.activity?.at ?? record.startedAt }
+    : entry?.activity;
+  const filesRead = record.filesRead ?? 0;
+  const filesChanged = record.filesChanged ?? 0;
 
   return {
     id: record.id,
     kind: 'agent',
+    serves: 'you',
+    ...(filesRead > 0 || filesChanged > 0 ? { progress: { filesRead, filesChanged } } : {}),
     parentId: resolveParentId(record, ctx),
     label,
     task: record.task,
@@ -216,7 +243,7 @@ export function adaptAgent(record: AgentRecord, ctx: AgentAdapterContext): Proce
     costState,
     ...(costSource !== undefined ? { costSource } : {}),
     ...(pricingAsOf !== undefined ? { pricingAsOf } : {}),
-    currentActivity: entry?.activity,
+    currentActivity,
     capabilities: { interruptible: active, killable: active, pausable: false, resumable: false, steerable: active && ctx.messageBusPresent },
     ...(deriveNeedsAttention(state) ? { needsAttention: deriveNeedsAttention(state) } : {}),
     sessionRef: { sessionId, agentId: record.id },

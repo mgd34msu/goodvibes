@@ -103,7 +103,7 @@ export async function startConflictResolutionSession(
   },
   /** Called with the job id and its session id before it runs, so a completion that arrives during `runNow` is not missed. */
   onJobCreated?: (jobId: string, sessionId: string) => void,
-): Promise<{ sessionId: string; jobId: string } | { error: string }> {
+): Promise<{ sessionId: string; jobId: string; runId: string } | { error: string }> {
   const prompt = [
     `Merge conflict: "${seed.title}" could not merge into the base branch.`,
     `Kept worktree: ${seed.worktreePath}`,
@@ -132,7 +132,7 @@ export async function startConflictResolutionSession(
     createdJobId = job.id;
     onJobCreated?.(job.id, sessionId);
     const run = await automation.runNow(job.id);
-    if (run.sessionId) return { sessionId: run.sessionId, jobId: job.id };
+    if (run.sessionId) return { sessionId: run.sessionId, jobId: job.id, runId: run.id };
     return { error: `the resolution run started without an attachable session (run ${run.id}, status ${run.status})` };
   } catch (error) {
     if (createdJobId) await discardUnstartedJob(automation, createdJobId);

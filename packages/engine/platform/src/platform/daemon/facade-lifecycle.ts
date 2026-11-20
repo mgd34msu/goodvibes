@@ -150,6 +150,8 @@ export interface DaemonLifecycleRuntimeOptions {
   readonly isIdle: () => boolean;
   /** Ids of the work in flight, so a waiting update can say what holds it. */
   readonly describeActiveWork?: (() => readonly string[]) | undefined;
+  /** The daemon's work admission, which the auto-updater closes for its restart. */
+  readonly workAdmission?: import('./work-admission.js').DaemonWorkAdmission | undefined;
   /** Absent = host-managed updates (the safe embedded default): no auto-update loop AND no boot promotion. */
   readonly updateArtifact?: DaemonUpdateArtifact | undefined;
   /** Injectable process exit (boot promotion hands over by exiting); tests observe instead of dying. */
@@ -1014,6 +1016,7 @@ export class DaemonLifecycleRuntime {
       firstCheckDelayMs: Math.max(0, Number.isFinite(firstCheckSeconds) ? firstCheckSeconds : 30) * 1000,
       isIdle: this.options.isIdle,
       ...(this.options.describeActiveWork ? { describeActiveWork: this.options.describeActiveWork } : {}),
+      ...(this.options.workAdmission ? { workAdmission: this.options.workAdmission } : {}),
       receipts: this.receiptStore(),
       serviceActions: this.buildServiceActions(),
       // Read from disk on every check, not captured once: the rejection this

@@ -19,7 +19,7 @@ import type { ChannelSurface } from '../types.js';
 import { readDirectoryScope, readString, readStringList } from './parsing.js';
 import type { BuiltinChannelRuntimeDeps } from './shared.js';
 import { asProviderRuntimeSurface, isManagedSurface, providerRuntimeStatus } from './surfaces.js';
-import { resolveSurfaceSecret } from './surface-secrets.js';
+import { readNtfyTopics, resolveSurfaceSecret } from './surface-secrets.js';
 import { lookupBuiltinDirectoryWithTruncation } from './targets.js';
 
 export interface BuiltinProviderOperationContext {
@@ -212,8 +212,9 @@ export const BUILTIN_PROVIDER_OPERATIONS: readonly BuiltinProviderOperation[] = 
     inputSchema: closedSchema({ topic: { type: 'string' }, since: { type: 'string' } }),
     agentTool: true,
     run: async (context, surface, input) => {
-      const topic = readString(input?.topic) ?? String(context.deps.configManager.get('surfaces.ntfy.topic') || '');
-      if (!topic) return actionRefused({ state: 'no URL was built', reason: 'No ntfy topic was given and none is configured.', next: ['Pass topic, or set surfaces.ntfy.topic.'] });
+      // The configured topics are credentials: a URL built from one would print its name, so a topic must be given.
+      const topic = readString(input?.topic);
+      if (!topic) return actionRefused({ state: 'no URL was built', reason: 'No ntfy topic was given. The configured topics are credentials, so no URL is built from them here.', next: ['Pass topic.'] });
       const ntfy = new NtfyIntegration(String(context.deps.configManager.get('surfaces.ntfy.baseUrl') || 'https://ntfy.sh'));
       const since = readString(input?.since);
       return actionOk({
@@ -235,7 +236,8 @@ export const BUILTIN_PROVIDER_OPERATIONS: readonly BuiltinProviderOperation[] = 
     inputSchema: closedSchema({ topic: { type: 'string' }, since: { type: 'string' } }),
     agentTool: true,
     run: async (context, surface, input) => {
-      const topic = readString(input?.topic) ?? String(context.deps.configManager.get('surfaces.ntfy.topic') || '');
+      // The default topic's name is read from the secret store its setting names.
+      const topic = readString(input?.topic) ?? ((await readNtfyTopics(context.deps)).topic || undefined);
       if (!topic) return actionRefused({ state: 'nothing was read', reason: 'No ntfy topic was given and none is configured.', next: ['Pass topic, or set surfaces.ntfy.topic.'] });
       const ntfy = new NtfyIntegration(
         String(context.deps.configManager.get('surfaces.ntfy.baseUrl') || 'https://ntfy.sh'),

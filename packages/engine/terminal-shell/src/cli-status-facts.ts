@@ -202,8 +202,10 @@ export function cliProviderSignInFacts(input: {
   const lists = [listedAt(join(dir, `${input.providerId}.json`)), listedAt(join(dir, `${input.providerId}.subscription.json`))]
     .filter((entry): entry is { at: number; count: number } => entry !== null);
   const now = input.now ?? Date.now();
-  const modelList = lists.length > 0
-    ? `listed by the provider ${age(now - Math.max(...lists.map((entry) => entry.at)))} ago (${new Date(Math.max(...lists.map((entry) => entry.at))).toISOString()}, ${Math.max(...lists.map((entry) => entry.count))} models); the pinned catalog fills in what it does not list`
+  // One listing, whole: the newer file's time with that file's own count, never a time from one and a count from the other.
+  const newest = lists.reduce<{ at: number; count: number } | undefined>((best, entry) => (!best || entry.at > best.at ? entry : best), undefined);
+  const modelList = newest
+    ? `listed by the provider ${age(now - newest.at)} ago (${new Date(newest.at).toISOString()}, ${newest.count} models); the pinned catalog fills in what it does not list`
     : 'the pinned catalog that ships with this release (the provider\'s own list is read once requests to it are signed in)';
   return { signIns, modelList, providerId: input.providerId, apiKeyEnvVars: input.apiKeyEnvVars };
 }

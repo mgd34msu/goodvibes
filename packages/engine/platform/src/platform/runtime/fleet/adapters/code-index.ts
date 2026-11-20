@@ -44,6 +44,8 @@ export function adaptCodeIndex(service: CodeIndexProcessSource, now: number): Pr
   return {
     id: codeIndexNodeId(),
     kind: 'code-index',
+    // The platform's own upkeep: shown on the work board only when it fails.
+    serves: 'system',
     parentId: undefined,
     label,
     state,

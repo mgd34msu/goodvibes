@@ -75,6 +75,18 @@ export function isSessionOpenElsewhere(surface: SessionIdentitySurface, sessionI
 
 /** Lock path to its release, for every session this module holds open in this process. */
 const openHere = new Map<string, () => void>();
+/** Lock paths of sessions this process took over by force (`--force`): moving to one never refuses. */
+const takenOver = new Set<string>();
+
+/** The live session cannot move to a session another running process has open. Nothing was moved. */
+export class SessionOpenElsewhereError extends Error {
+  readonly code = 'SESSION_OPEN_ELSEWHERE';
+  constructor(readonly sessionId: string) {
+    super(`Session ${sessionId} is open in another running terminal: continuing in it here would fork its live state and the two would overwrite each other's turns. `
+      + `Close it there, or run \`/session resume ${sessionId} --force\` to take it over anyway.`);
+    this.name = 'SessionOpenElsewhereError';
+  }
+}
 
 /**
  * Mark `sessionId` open in this process until {@link closeSessionHere}. Holding
@@ -101,10 +113,22 @@ export function openSessionHere(surface: SessionIdentitySurface, sessionId: stri
 export function closeSessionHere(surface: SessionIdentitySurface, sessionId: string): void {
   if (!sessionId.trim()) return;
   const path = sessionOpenLockPath(surface, sessionId);
+  takenOver.delete(path);
   const release = openHere.get(path);
   if (!release) return;
   openHere.delete(path);
   release();
+}
+
+/**
+ * Take `sessionId` over here although another process may have it open (`/session resume <id> --force`): the lock
+ * is held now if it is free, and otherwise taken at the first turn after that process lets it go. Moving the live
+ * session to it does not refuse.
+ */
+export function takeSessionOverHere(surface: SessionIdentitySurface, sessionId: string): void {
+  if (!sessionId.trim()) return;
+  takenOver.add(sessionOpenLockPath(surface, sessionId));
+  openSessionHere(surface, sessionId);
 }
 
 /**
@@ -125,9 +149,16 @@ export async function claimSessionHere(surface: SessionIdentitySurface, sessionI
   return true;
 }
 
-/** The live session of this process changed from `from` to `to`: `to` is held before `from` is let go. */
+/**
+ * The live session of this process changed from `from` to `to`: `to` is held before `from` is let go. Refused with
+ * {@link SessionOpenElsewhereError}, moving nothing, when another process has `to` open and this one neither holds
+ * it nor took it over: two processes writing one session overwrite each other. One stat and one lock attempt that
+ * never waits, on a change of the live session id only.
+ */
 export function moveSessionHere(surface: SessionIdentitySurface, from: string, to: string): void {
   if (from === to) return;
+  const path = sessionOpenLockPath(surface, to);
+  if (!openHere.has(path) && !takenOver.has(path) && isSessionOpenElsewhere(surface, to)) throw new SessionOpenElsewhereError(to);
   openSessionHere(surface, to);
   closeSessionHere(surface, from);
 }

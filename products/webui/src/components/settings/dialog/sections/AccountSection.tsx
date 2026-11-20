@@ -7,11 +7,11 @@
 import { useState, type SyntheticEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  clearStoredAuthToken,
   getCurrentAuth,
   invokeMethod,
   login,
   setExplicitAuthToken,
+  signOut,
   WEBUI_TOKEN_STORE_KEY,
 } from '../../../../lib/goodvibes';
 import { queryKeys } from '../../../../lib/queries';
@@ -52,8 +52,9 @@ export function AccountSection() {
       await queryClient.invalidateQueries();
     },
   });
+  // Clearing the stored credential is a sign-out: the daemon session it held is ended too.
   const clearTokenMutation = useMutation({
-    mutationFn: clearStoredAuthToken,
+    mutationFn: signOut,
     onSuccess: async () => {
       await queryClient.invalidateQueries();
     },
@@ -153,6 +154,11 @@ export function AccountSection() {
           </div>
         </form>
         {tokenMutation.error && <div className="banner warning">{formatError(tokenMutation.error)}</div>}
+        {clearTokenMutation.data && !clearTokenMutation.data.endedOnDaemon && (
+          <div className="banner warning" role="alert">
+            Cleared here; the daemon session could not be ended: {clearTokenMutation.data.error ?? 'no answer'}.
+          </div>
+        )}
       </SettingsBlock>
 
       <StepUpSettings />

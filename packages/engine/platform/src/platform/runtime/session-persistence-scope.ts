@@ -52,6 +52,8 @@ export type SessionSnapshot = {
   /** Side branches made with /branch, and the one open, saved with the session. */
   branches?: Readonly<Record<string, readonly object[]>> | undefined;
   currentBranch?: string | undefined;
+  /** A copy of a conversation another owner holds: that owner and its revision (SessionMeta.mirroredFrom). */
+  mirroredFrom?: import('../utils/owner-stamp.js').OwnerStamp | undefined;
 };
 
 /**

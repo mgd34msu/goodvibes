@@ -212,20 +212,44 @@ export function recoverInterruptedUpdate(receipt: Installation, purpose: 'update
   return true;
 }
 /**
- * A first install killed while it staged its release (before it wrote a receipt) leaves a program directory that
- * holds nothing but `releases/<commit>-<uuid>` directories. Only this installer writes that shape, and the caller
- * holds the program-directory lock, so the leftover is removed and the install proceeds. Returns whether it was.
+ * A first install writes this record, naming the release it is about to stage, before it creates anything else in
+ * the program directory, and removes it once the installation receipt exists. It is the receipt for the staged
+ * release: the only thing a later run may remove on its behalf.
+ */
+export const STAGING_RECORD = 'installing.json';
+export const stagingRecordPath = (prefix: string): string => join(prefix, STAGING_RECORD);
+
+/** Write the staging record of a first install, before its release directory is made. */
+export function recordFirstInstallStaging(prefix: string, release: string): void {
+  if (!RELEASE_NAME.test(release)) throw new Error(`Not a release name: ${release}`);
+  mkdirSync(prefix, { recursive: true });
+  atomicWrite(stagingRecordPath(prefix), JSON.stringify({ release }) + '\n');
+}
+
+/**
+ * A first install killed while it staged its release (before it wrote a receipt) leaves its staging record and the
+ * release it names. The caller holds the program-directory lock, so exactly that release and the record are removed
+ * and the install proceeds; nothing the record does not name is touched (anything else left in the directory is
+ * refused by the install's own check, which names the directory). Returns whether a staged release was removed.
  */
 export function discardAbandonedFirstInstall(prefix: string): boolean {
   plainPath(prefix);
   if (!present(prefix) || !lstatSync(prefix).isDirectory()) return false;
-  const entries = readdirSync(prefix);
-  if (entries.length !== 1 || entries[0] !== 'releases') return false;
+  const record = stagingRecordPath(prefix);
+  plainPath(record);
+  if (!present(record)) return false;
+  let release: unknown;
+  try { release = (JSON.parse(readFileSync(record, 'utf8')) as { release?: unknown }).release; } catch { release = undefined; }
+  if (typeof release !== 'string' || !RELEASE_NAME.test(release)) {
+    throw new Error(`The record of an interrupted first install, ${record}, cannot be read, so what it staged is unknown; nothing was removed. If nothing you need is in ${prefix}, remove it: rm -rf -- ${quote(prefix)}`);
+  }
   const releases = join(prefix, 'releases');
-  if (!lstatSync(releases).isDirectory()) return false;
-  if (!readdirSync(releases).every(name => RELEASE_NAME.test(name) && lstatSync(join(releases, name)).isDirectory())) return false;
-  rmSync(prefix, { recursive: true, force: true });
-  console.warn(`Removed the unfinished release a first install left in ${prefix} when it was stopped.`);
+  const staged = join(releases, release);
+  plainPath(staged);
+  if (present(staged)) rmSync(staged, { recursive: true, force: true });
+  if (present(releases) && lstatSync(releases).isDirectory() && readdirSync(releases).length === 0) rmSync(releases, { recursive: true, force: true });
+  rmSync(record, { force: true });
+  console.warn(`Removed the unfinished release ${release.slice(0, 12)} a first install left in ${prefix} when it was stopped.`);
   return true;
 }
 /**

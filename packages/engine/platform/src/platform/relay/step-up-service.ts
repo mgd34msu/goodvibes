@@ -23,6 +23,7 @@
 // asleep or restarted. The signature counter stays per machine, in the state
 // above: each machine refuses a counter that goes backwards from what it saw.
 
+import { revealOrNull, type Secret } from '../security/secret.js';
 import { fromBase64Url, randomBytes, toBase64Url } from '@goodvibes-jev/engine/transport-core/relay';
 import {
   coseP256ToRawPoint,
@@ -74,7 +75,7 @@ interface StepUpState {
 
 /** Minimal secret custody surface (the SecretsManager satisfies it). */
 export interface StepUpSecretStore {
-  get(key: string): Promise<string | null>;
+  get(key: string): Promise<Secret | null>;
   set(key: string, value: string): Promise<void>;
 }
 
@@ -107,7 +108,18 @@ export interface RegisterStepUpCredentialInput {
   readonly signCount?: number;
   readonly userVerification?: UserVerificationRequirement;
   readonly label?: string;
+  /**
+   * A registration made through a pairing hand-off names the pairing it was
+   * offered to (`pairing:<id>`, the principal completing the hand-off): it is
+   * accepted only when the daemon offered a passkey to that pairing
+   * (`offerRegistration`) and the offer is unused and unexpired, and it uses
+   * the offer up. Absent for the direct admin registration.
+   */
+  readonly offeredTo?: string | undefined;
 }
+
+/** How long a passkey offered in a pairing hand-off stays open: the pairing code's own 15 minutes, and time for the ceremony. */
+export const PASSKEY_REGISTRATION_OFFER_MS = 30 * 60_000;
 
 /** A public (no key material) summary of a registered credential. */
 export interface StepUpCredentialSummary {
@@ -175,6 +187,8 @@ export class StepUpService {
   private readonly randomChallenge: () => Uint8Array<ArrayBuffer>;
   private readonly logger: StepUpServiceOptions['logger'];
   private readonly challenges = new Map<string, LiveChallenge>();
+  /** Passkey registrations offered in a pairing hand-off: the pairing principal, and when the offer ends. One use each. */
+  private readonly registrationOffers = new Map<string, number>();
   /**
    * Every read-modify-write of the stored state, and every verification (which
    * reads a credential and writes its advanced counter back), runs one at a
@@ -202,7 +216,7 @@ export class StepUpService {
    * unreadable record leaves no credential: nothing is confirmed on a guess.
    */
   private async loadState(): Promise<StepUpState> {
-    const stored = parseState(await this.secrets.get(STEP_UP_STATE_KEY), this.logger);
+    const stored = parseState(revealOrNull(await this.secrets.get(STEP_UP_STATE_KEY), 'dispatch'), this.logger);
     const state = this.withRecord(stored);
     this.knownCredentialCount = state.credentials.length;
     return state;
@@ -327,6 +341,20 @@ export class StepUpService {
   }
 
   /**
+   * Offer a passkey registration to the pairing a hand-off just minted
+   * (`pairing:<id>`): that pairing, and no other caller, may register one
+   * passkey through the hand-off, once, within {@link PASSKEY_REGISTRATION_OFFER_MS}.
+   * In memory: a daemon restart withdraws the offer, and the device pairs again.
+   */
+  offerRegistration(principalId: string): { readonly expiresAt: number } {
+    const now = this.now();
+    for (const [offered, until] of this.registrationOffers) if (until <= now) this.registrationOffers.delete(offered);
+    const expiresAt = now + PASSKEY_REGISTRATION_OFFER_MS;
+    this.registrationOffers.set(principalId, expiresAt);
+    return { expiresAt };
+  }
+
+  /**
    * Register (or replace) a credential and establish the deployment policy. The
    * COSE public key must parse as an EC2 P-256 key or the registration is
    * refused, a broken key would only fail closed silently later.
@@ -336,6 +364,13 @@ export class StepUpService {
   }
 
   private async registerCredentialNow(input: RegisterStepUpCredentialInput): Promise<StepUpCredentialSummary> {
+    if (input.offeredTo !== undefined) {
+      const until = this.registrationOffers.get(input.offeredTo);
+      if (until === undefined || until <= this.now()) {
+        this.registrationOffers.delete(input.offeredTo);
+        throw new StepUpValidationError('No passkey was offered to this pairing, or the offer was used or expired. Nothing was registered. Pair the device again from the pairing screen, or register the passkey with stepup.credentials.register from an admin credential.');
+      }
+    }
     const rpId = input.rpId.trim();
     if (!rpId) throw new StepUpValidationError('rpId is required');
     const origins = normalizeOrigins(input.origin);
@@ -372,6 +407,8 @@ export class StepUpService {
     };
     state.credentials = [...state.credentials.filter((c) => c.credentialId !== credential.credentialId), credential];
     await this.saveState(state);
+    // The offer is used up by the registration it admitted.
+    if (input.offeredTo !== undefined) this.registrationOffers.delete(input.offeredTo);
     await this.publish({ register: { credential, state } });
     return {
       credentialId: credential.credentialId,

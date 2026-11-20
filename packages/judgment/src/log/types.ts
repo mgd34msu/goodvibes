@@ -117,6 +117,8 @@ export type NewDecisionEntry = Omit<AnsweredEntry, 'id' | 'notes'> | Omit<Failed
 export interface DecisionQuery {
   readonly battery?: string;
   readonly site?: string;
+  /** Leaves out entries recorded at this site; applied before `limit`, so the limit counts only what is kept. */
+  readonly excludeSite?: string;
   /** Inclusive lower bound on `at`. */
   readonly since?: string;
   /** Exclusive upper bound on `at`. */

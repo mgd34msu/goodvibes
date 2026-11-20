@@ -152,6 +152,13 @@ export interface EngineParseResult<TCommand extends string, TFlags> {
    * included.
    */
   readonly commandArgs: readonly string[];
+  /**
+   * The words typed after `--` (after the command word): literal text, never
+   * options. They are also the tail of `commandArgs`; a handler that looks for
+   * one of its own options (`--yes`, `--apply`) reads `commandArgs` without
+   * this tail (`optionArgsOf`), so a literal word is never taken as a flag.
+   */
+  readonly literalArgs: readonly string[];
   /** Every non-flag token seen, both before and after the command word. */
   readonly positionals: readonly string[];
   readonly flags: TFlags;

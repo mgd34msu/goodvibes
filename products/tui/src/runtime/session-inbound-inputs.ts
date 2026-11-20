@@ -32,9 +32,17 @@
  * so it would never be listed again). A refused claim means another surface took
  * the input: it is no longer queued, so it is not listed again. A claimed input
  * whose injection threw is retried from memory on the next tick.
+ *
+ * Each input carries the session binding (session-binding.ts) it was listed
+ * for: the session and the daemon client current when the pass began. After
+ * every wait the binding is checked again, and an input is injected only while
+ * this terminal is still on that session; one claimed for a session the
+ * terminal has switched away from is kept for that session (not dropped, not
+ * injected into the new one) and given to it when the terminal returns.
  */
 
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { SessionBindingOwner, type SessionBinding } from '@goodvibes-jev/engine/platform/platform/runtime/client/session-binding';
 import type { Page } from '@goodvibes-jev/engine/errors';
 import type {
   SharedSessionInputIntent,
@@ -74,6 +82,12 @@ export interface InboundSteer {
   readonly surfaceKind: string | undefined;
   readonly surfaceId: string | undefined;
   readonly displayName: string | undefined;
+}
+
+/** A steer and the session (and daemon client) it was listed for. */
+interface BoundSteer {
+  readonly steer: InboundSteer;
+  readonly binding: SessionBinding;
 }
 
 type InboundLogger = Pick<typeof logger, 'debug' | 'info'>;
@@ -117,8 +131,16 @@ export class SessionInboundInputPoller {
   private cursorSessionId: string | null = null;
   /** Inputs already handed to onSteer whose delivery ack has not gone through yet (wire without claims). */
   private readonly injected = new Set<string>();
-  /** Inputs this surface claimed whose injection threw; injected again on the next pass. */
-  private readonly claimedNotInjected = new Map<string, InboundSteer>();
+  /**
+   * Inputs this surface claimed and has not injected: the injection threw, or
+   * the terminal left their session while the claim was in flight. Each is
+   * injected on a later pass only while its own session is current again.
+   */
+  private readonly claimedNotInjected = new Map<string, BoundSteer>();
+  /** The session (and daemon client, by activation) each pass is for. */
+  private readonly bindings = new SessionBindingOwner();
+  /** Moves on every activate: a new client may be another daemon. */
+  private clientGeneration = 0;
 
   constructor(options: SessionInboundInputPollerOptions) {
     this.sessionId = options.sessionId;
@@ -140,6 +162,7 @@ export class SessionInboundInputPoller {
    * re-activating swaps the client without stacking timers.
    */
   activate(client: SpineInboundInputsClient): void {
+    if (client !== this.client) this.clientGeneration += 1;
     this.client = client;
     if (this.timer === null) {
       this.timer = setInterval(() => { void this.pollOnce(); }, this.intervalMs);
@@ -178,18 +201,22 @@ export class SessionInboundInputPoller {
     if (!sessionId) return 0;
 
     // A session swap resets the cursor so we never skip the new session's backlog.
+    // Steers claimed for the earlier session stay held for it.
     if (sessionId !== this.cursorSessionId) {
       this.cursor = 0;
       this.cursorSessionId = sessionId;
-      this.injected.clear();
-      this.claimedNotInjected.clear();
     }
+    const binding = this.bindings.bind(`client-${this.clientGeneration}`, sessionId);
+    // Still on the session (and daemon client) this pass listed for, after a wait.
+    const stillHere = (): boolean => this.bindings.bind(`client-${this.clientGeneration}`, this.sessionId() ?? '') === binding
+      && this.client === client;
 
     this.polling = true;
     let delivered = 0;
     try {
-      for (const [inputId, steer] of this.claimedNotInjected) {
-        if (this.inject(steer)) this.claimedNotInjected.delete(inputId);
+      for (const [inputId, held] of this.claimedNotInjected) {
+        if (!this.bindings.isSameSession(held.binding)) continue;
+        if (this.inject(held.steer)) this.claimedNotInjected.delete(inputId);
       }
       // The cursor advances across a contiguous prefix of inputs that are done
       // (acknowledged, or not ours to deliver). After the first failure it holds,
@@ -226,6 +253,7 @@ export class SessionInboundInputPoller {
             surfaceId: input.surfaceId,
             displayName: input.displayName,
           };
+          if (!stillHere()) { cursorHeld = true; break; }
           if (client.claimInput) {
             try {
               await client.claimInput(sessionId, input.id);
@@ -241,7 +269,8 @@ export class SessionInboundInputPoller {
             }
             delivered += 1;
             settle(input.createdAt);
-            if (!this.inject(steer)) this.claimedNotInjected.set(input.id, steer);
+            // The terminal moved to another session while the claim was in flight: keep it for its own.
+            if (!stillHere() || !this.inject(steer)) this.claimedNotInjected.set(input.id, { steer, binding });
             continue;
           }
           if (!this.injected.has(input.id)) {
@@ -267,7 +296,7 @@ export class SessionInboundInputPoller {
             });
           }
         }
-        if (!result?.more || cursorHeld || this.cursor === cursorBefore) break;
+        if (!result?.more || cursorHeld || this.cursor === cursorBefore || !stillHere()) break;
       }
     } catch (error) {
       // Poll failed entirely (daemon gone, transient): keep the cursor, retry next tick.

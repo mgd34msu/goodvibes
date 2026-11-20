@@ -295,7 +295,7 @@ export async function openRawServerSentEventStream(
         signal.throwIfAborted();
       } catch (error) {
         const wrapped = createStreamError(0, url, openTimedOut && !outerController.signal.aborted
-          ? `The server sent no response within ${Math.round(idleTimeoutMs / 1000)}s of the request; the connection is treated as lost`
+          ? `The server sent no response within ${idleTimeoutMs >= 1000 ? `${Math.round(idleTimeoutMs / 1000)}s` : `${idleTimeoutMs} ms`} of the request; the connection is treated as lost`
           : error instanceof Error ? error.message : String(error));
         if (!readySettled) {
           settleReady(wrapped);

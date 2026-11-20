@@ -27,6 +27,12 @@ import { decideContinuationEscalation } from '../agents/conversation-continuatio
 import type { ConversationGateConfigReader } from '../agents/conversation-gate.js';
 import { isDelegatedSessionInput } from './session-intents.js';
 import { logger } from '../utils/logger.js';
+import type { Fence } from '../utils/owner-fence.js';
+
+/** The refusal for input to a closed session: nothing was recorded or started. */
+function sessionClosedError(): Error {
+  return Object.assign(new Error('Session is closed'), { code: EngineErrorCodes.SESSION_CLOSED, status: 409 });
+}
 
 /** Max inputs retained per session bucket (moved here with handleIntent, see
  * session-broker.ts's MAX_PERSISTED_INPUTS for its former home). */
@@ -59,6 +65,11 @@ export interface HandleSharedSessionIntentDeps {
     sessionId: string,
     input: Omit<AppendSharedSessionMessageInput, 'sessionId'>,
   ): Promise<SharedSessionMessage>;
+  /**
+   * The session's close fence: `closeSession` moves its epoch, so a fence taken while the session was open is no
+   * longer current once it closed (even if it was reopened since).
+   */
+  sessionFence(sessionId: string): Fence;
   /** In-memory only: a delegated input binds before its message is published. */
   appendUnpublishedMessage(sessionId: string, input: Omit<AppendSharedSessionMessageInput, 'sessionId'>): SharedSessionMessage;
   sessionInputStore(): SharedSessionInputStore;
@@ -339,7 +350,10 @@ export async function handleSharedSessionIntent(
   // closed record are rejected before mutation; auto-create for a missing session is untouched.
   // A channel binding that landed on a closed record never reaches here, it
   // rolled over above, because no channel sender can act on this error.
-  if (session.status === 'closed') throw Object.assign(new Error('Session is closed'), { code: EngineErrorCodes.SESSION_CLOSED, status: 409 });
+  if (session.status === 'closed') throw sessionClosedError();
+  // Taken with the closed check: a close that lands while the participant is attached below moves its epoch, and
+  // the message and its input are then refused instead of recorded in a closed session.
+  const fence = deps.sessionFence(session.id);
   const updatedSession = await deps.attachParticipantAndRoute(session, input, binding ?? undefined);
   const messageInput: Omit<AppendSharedSessionMessageInput, 'sessionId'> = {
     role: 'user',
@@ -358,10 +372,10 @@ export async function handleSharedSessionIntent(
   // A retry of a message whose start failed answers the user message already
   // stored, so a redelivery never puts it in the transcript twice.
   const reused = retry && retry.sessionId === updatedSession.id ? retry : undefined;
-  const userMessage = reused ? reused.userMessage
-    : delegated
-      ? deps.appendUnpublishedMessage(updatedSession.id, messageInput)
-      : await deps.appendMessage(updatedSession.id, messageInput);
+  // The fence is checked, the message appended and its input recorded in one synchronous section: a close
+  // either lands before it (nothing is written, SESSION_CLOSED) or after it (the close cancels the queued input).
+  if (!fence.current) throw sessionClosedError();
+  const userMessage = reused ? reused.userMessage : deps.appendUnpublishedMessage(updatedSession.id, messageInput);
   const queuedInput = reused?.input ?? recordSharedSessionInput(deps.sessionInputStore(), {
     sessionId: updatedSession.id,
     intent,
@@ -371,6 +385,11 @@ export async function handleSharedSessionIntent(
     maxPersistedInputs: MAX_PERSISTED_INPUTS,
   });
   if (providerKey) deps.noteProviderMessage?.(providerKey, updatedSession.id, queuedInput.id);
+  if (!delegated && !reused) {
+    // The one write the message took before (appendMessage's), now covering the message and its input together.
+    await deps.persist();
+    deps.publishUpdate('session-message-appended', { sessionId: updatedSession.id, message: userMessage });
+  }
   if (delegated) {
     try {
       // No await between canonical row creation and this trusted host binder.

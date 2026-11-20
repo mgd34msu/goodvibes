@@ -43,6 +43,7 @@ export function adaptHostedAcpAgent(hosted: HostedAcpAgent, now: number): Proces
   return {
     id: acpHostNodeId(hosted.id),
     kind: 'acp-agent',
+    serves: 'you',
     label: hosted.title,
     task: hosted.cwd,
     state,

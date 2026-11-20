@@ -425,7 +425,7 @@ PROBLEM: typing "goodvibes" does not run the copy this installer maintains.
 Then, for each earlier copy:
 
 - A copy that is the same file reached by another path is ignored.
-- A copy the installer recognises as an earlier GoodVibes is offered for removal. It is recognised only when it is inside the home directory, answers `--version` with exactly `<command> <version>`, and is either a plain file or a link from one of the old packages `@pellux/goodvibes-tui`, `@pellux/goodvibes-daemon` or `@pellux/goodvibes-agent` installed globally by `bun` or `npm`. The installer prints the exact removal command (`rm -- '<path>'`, `bun remove -g --ignore-scripts <package>` with that Bun's global directories, or `npm --prefix <prefix> rm -g --ignore-scripts <package>`) and asks `Remove it now? [y/N]` on the terminal. With `GOODVIBES_SHADOW_REMOVE=1` it removes without asking; with `0` it never removes.
+- A copy the installer recognises as an earlier GoodVibes is offered for removal. It is recognised only when it is inside the home directory, answers `--version` with exactly `<command> <version>`, and is either a plain file this installer recorded writing (it lists every program it places in `${XDG_STATE_HOME:-~/.local/state}/goodvibes/installed-programs`; a file not listed there is reported and never removed) or a link from one of the old packages `@pellux/goodvibes-tui`, `@pellux/goodvibes-daemon` or `@pellux/goodvibes-agent` installed globally by `bun` or `npm`. The installer prints the exact removal command (`rm -- '<path>'`, `bun remove -g --ignore-scripts <package>` with that Bun's global directories, or `npm --prefix <prefix> rm -g --ignore-scripts <package>`) and asks `Remove it now? [y/N]` on the terminal. With `GOODVIBES_SHADOW_REMOVE=1` it removes without asking; with `0` it never removes.
 - Any other copy is reported as `not something we can identify as one of our programs` and is never touched. Remove it yourself, or put the install directory earlier on `PATH`.
 
 When no terminal is available to ask (a piped install with no controlling terminal), the copy is left in place, the installer says `(no terminal available to ask; leaving this copy in place for now; ...)`, and the install still succeeds.
@@ -702,6 +702,8 @@ What the daemon's service commands do on macOS, in launchctl terms:
 | `restart-service` | `bootout`, wait, then `bootstrap` of the plist, so a rewritten plist takes effect. |
 | `uninstall-service` | `bootout`, wait, then delete the plist. |
 
+On the `manual` platform (`service.platform manual`), `stop-service` sends the recorded process SIGTERM, waits up to 10 seconds, then sends SIGKILL and waits up to 2 seconds more. The pid file under `~/.goodvibes/daemon/service/` is removed only once the process is gone; when even SIGKILL does not end it, the stop fails with `the service process (pid <pid>) did not exit after SIGTERM and SIGKILL; its pid file is kept so status still finds it`, and `restart-service` starts no second process.
+
 Where the daemon's output goes:
 
 | Platform | Standard output and error | The daemon's activity log |
@@ -860,7 +862,7 @@ Only a release ("binary") installation updates itself. A program run from source
 
 1. The first check runs `update.firstCheckSeconds` (default 30) seconds after start, never later than one interval. Later checks run every `update.intervalMinutes` (default 60) minutes.
 2. A check asks the release feed named by `update.releasesUrl` for the latest tag. When it is newer than the running daemon, the daemon downloads and checksum-verifies the release.
-3. The daemon waits until no work is in flight, then replaces the files. Each replaced file is kept as `<file>.previous` for rollback.
+3. The daemon waits until no work is in flight, then replaces the files. Each replaced file is kept as `<file>.previous` for rollback. From that last idle check until it restarts, the daemon takes no new work: a request that would start or change something (any method other than `GET` or `HEAD`) is answered `503` with code `DAEMON_ADMISSION_CLOSED` and `Retry-After: 5`, and reads still answer. When the files are not replaced after all, or the service manager refuses the handover before the daemon stops, it takes work again at once.
 4. The daemon stops in order, then the service manager starts the new version. Under systemd it asks for a service restart. When it was started by hand on Linux, it installs the systemd user unit and hands over to it. On macOS a one-time launchd helper restarts it after the old process exits; a daemon on macOS that launchd does not supervise is not updated this way, so update it with the installer or `/update apply`.
 5. The daemon logs and records a receipt that begins `updated from 3.3.0 to 3.3.1 at <YYYY-MM-DD HH:MM>` and names the programs and directories it replaced.
 
@@ -1343,7 +1345,7 @@ export TYPESAFE_API_KEY='<your-typesafe-api-key>'
 
 1. Checks the system, the tools and that it runs from a clone. Downloads Bun and Node when needed.
 2. Takes a lock beside the program directory and the data directory (`<dir>.writer.sqlite`). A second install or uninstall started meanwhile is refused at once and changes nothing. The operating system releases the lock when the process ends for any reason.
-3. Recovers an update that was killed earlier (it puts the previous release back), or deletes the unfinished release copy a first install left when it was killed while copying.
+3. Recovers an update that was killed earlier (it puts the previous release back), or deletes the unfinished release copy a first install left when it was killed while copying: exactly the release named in the `installing.json` record that first install wrote before copying, and nothing else in the program directory.
 4. Checks the layout, the ownership of existing files, the systemd user manager and the port, all before building.
 5. Requires that tracked files match the commit, then builds: `bun install --frozen-lockfile`, the engine build, the daemon, terminal app, Agent and web UI builds. Checks again that the commit did not change and the build changed no tracked file.
 6. Checks everything again (a long build may have given time for changes), then copies the build into a new `releases/<commit>-<random id>/` directory: `daemon/`, `tui/`, `agent/` (each with its program, Bun runtime files, native libraries and a `playwright-core` copy), `webui/`, `runtime/bun`, `runtime/node` and `uninstall.js`. Runs each program's `--version`.

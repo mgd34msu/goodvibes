@@ -115,9 +115,31 @@ const PROCESS_CHECK_SUMMARY_SCHEMA = objectSchema({
   lastCheckAt: NUMBER_SCHEMA,
 }, ['criteria', 'met', 'judged', 'nudges']);
 
+// When a scheduled node runs and how its last run went (contracts/src/schedule-words.ts reads it).
+const PROCESS_SCHEDULE_CADENCE_SCHEMA: Record<string, unknown> = {
+  anyOf: [
+    objectSchema({ kind: enumSchema(['every']), intervalMs: NUMBER_SCHEMA }, ['kind', 'intervalMs']),
+    objectSchema({ kind: enumSchema(['cron']), expression: STRING_SCHEMA, timezone: STRING_SCHEMA }, ['kind', 'expression']),
+    objectSchema({ kind: enumSchema(['at']), at: NUMBER_SCHEMA }, ['kind', 'at']),
+  ],
+};
+const PROCESS_SCHEDULE_FACTS_SCHEMA = objectSchema({
+  cadence: PROCESS_SCHEDULE_CADENCE_SCHEMA,
+  lastRunAt: NUMBER_SCHEMA,
+  lastOutcome: enumSchema(['delivered', 'not-delivered', 'inbox', 'failed']),
+  firedCount: NUMBER_SCHEMA,
+  lastFiredAt: NUMBER_SCHEMA,
+  since: NUMBER_SCHEMA,
+}, []);
+
 export const PROCESS_NODE_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   kind: PROCESS_KIND_SCHEMA,
+  // Whom the node works for: the person ('you') or the platform's own upkeep ('system').
+  serves: enumSchema(['you', 'system']),
+  // An agent's files read and changed so far.
+  progress: objectSchema({ filesRead: NUMBER_SCHEMA, filesChanged: NUMBER_SCHEMA }, ['filesRead', 'filesChanged']),
+  schedule: PROCESS_SCHEDULE_FACTS_SCHEMA,
   parentId: STRING_SCHEMA,
   label: STRING_SCHEMA,
   task: STRING_SCHEMA,
@@ -138,7 +160,7 @@ export const PROCESS_NODE_SCHEMA = objectSchema({
   sessionRef: PROCESS_SESSION_REF_SCHEMA,
   check: PROCESS_CHECK_SUMMARY_SCHEMA,
   observed: PROCESS_OBSERVED_SCHEMA,
-}, ['id', 'kind', 'label', 'state', 'elapsedMs', 'costState', 'capabilities'], { additionalProperties: true });
+}, ['id', 'kind', 'serves', 'label', 'state', 'elapsedMs', 'costState', 'capabilities'], { additionalProperties: true });
 
 export const FLEET_SNAPSHOT_OUTPUT_SCHEMA = objectSchema({
   capturedAt: NUMBER_SCHEMA,
@@ -198,13 +220,19 @@ export const FLEET_OBSERVED_STEER_INPUT_SCHEMA = objectSchema({
 export const FLEET_OBSERVED_STEER_OUTPUT_SCHEMA = objectSchema({
   // queued:true, the text (and Enter, when submitted) reached the pane;
   // submitted says whether Enter was sent. queued:false carries the honest
-  // reason (declined, no channel, or a send-keys failure) and nothing was
-  // sent; declined:true when the owner said no.
-  queued: BOOLEAN_SCHEMA,
+  // reason (declined, no channel, or a failure of the first send-keys) and
+  // nothing was sent; declined:true when the owner said no. queued:'partial',
+  // some steps reached the pane before one failed: `sent` lists them in order
+  // ('text', then 'Enter' per Enter press), `failed` names the step that did
+  // not go out, and submitted says whether an Enter was sent. Do not send the
+  // same steer again after 'partial': the text is already in the pane.
+  queued: { anyOf: [BOOLEAN_SCHEMA, enumSchema(['partial'])] },
   submitted: BOOLEAN_SCHEMA,
   declined: BOOLEAN_SCHEMA,
   messageId: STRING_SCHEMA,
   reason: STRING_SCHEMA,
+  sent: arraySchema(enumSchema(['text', 'Enter'])),
+  failed: enumSchema(['text', 'Enter']),
 }, ['queued']);
 
 const CHECKPOINT_KIND_SCHEMA = enumSchema(['turn', 'agent-run', 'manual']);
@@ -496,6 +524,24 @@ export const FLEET_ATTEMPTS_PICK_INPUT_SCHEMA = objectSchema({
   confirm: BOOLEAN_SCHEMA,
 }, ['groupId', 'winnerItemId']);
 
+/** One losing sibling's worktree clean-up as observed (an `EffectOutcome`): done, pending with the check to run, or failed with its refusal. */
+const ATTEMPT_LOSER_OUTCOME_SCHEMA = objectSchema({
+  id: STRING_SCHEMA,
+  outcome: objectSchema({
+    state: enumSchema(['done', 'pending', 'unknown', 'failed']),
+    observed: objectSchema({ how: STRING_SCHEMA, at: NUMBER_SCHEMA }, ['how', 'at']),
+    check: STRING_SCHEMA,
+    since: NUMBER_SCHEMA,
+    refusal: objectSchema({
+      code: STRING_SCHEMA,
+      state: STRING_SCHEMA,
+      reason: STRING_SCHEMA,
+      next: STRING_LIST_SCHEMA,
+      retryable: BOOLEAN_SCHEMA,
+    }, ['code', 'state', 'reason', 'next', 'retryable']),
+  }, ['state']),
+}, ['id', 'outcome']);
+
 export const FLEET_ATTEMPTS_PICK_OUTPUT_SCHEMA = objectSchema({
   // True when the winner was actually merged and the losers cleaned; false is
   // the structured confirm refusal carrying the group so a surface renders
@@ -504,6 +550,7 @@ export const FLEET_ATTEMPTS_PICK_OUTPUT_SCHEMA = objectSchema({
   groupId: STRING_SCHEMA,
   winnerItemId: STRING_SCHEMA,
   loserItemIds: STRING_LIST_SCHEMA,
+  losers: arraySchema(ATTEMPT_LOSER_OUTCOME_SCHEMA),
   auto: BOOLEAN_SCHEMA,
   requiresConfirm: BOOLEAN_SCHEMA,
   group: HELD_MERGE_GROUP_SCHEMA,

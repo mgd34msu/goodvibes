@@ -37,6 +37,14 @@ export function adaptAutomationJob(job: AutomationJob): ProcessNode {
   return {
     id: automationJobNodeId(job.id),
     kind: 'schedule',
+    serves: 'you',
+    schedule: {
+      cadence: job.schedule.kind === 'every' ? { kind: 'every', intervalMs: job.schedule.intervalMs }
+        : job.schedule.kind === 'cron' ? { kind: 'cron', expression: job.schedule.expression, ...(job.schedule.timezone ? { timezone: job.schedule.timezone } : {}) }
+          : { kind: 'at', at: job.schedule.at },
+      ...(job.lastRunAt !== undefined ? { lastRunAt: job.lastRunAt } : {}),
+      ...(job.lastOutcome !== undefined ? { lastOutcome: job.lastOutcome } : {}),
+    },
     parentId: undefined,
     label: job.name,
     task: job.execution.prompt,

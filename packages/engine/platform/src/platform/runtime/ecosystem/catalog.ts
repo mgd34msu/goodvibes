@@ -1,7 +1,9 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../../utils/atomic-json-store.js';
 import { dirname, join, resolve, sep } from 'node:path';
 import { VERSION } from '../../version.js';
+import { logger } from '../../utils/logger.js';
+import { publishReplacement, recoverReplacements, stageReplacement } from '../../state/commit-point.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic, isClassicOperation } from '../decision-policy.js';
 import { rankClassicCatalog } from '../classic-catalog.js';
@@ -358,38 +360,39 @@ function pruneBackups(
 function replaceDirectory(
   sourcePath: string,
   targetPath: string,
+  receiptFile: string,
   commit: () => void,
 ): { ok: true } | { ok: false; error: unknown; displacedPath?: string } {
   const root = dirname(targetPath);
-  const name = targetPath.slice(root.length + 1);
-  const stagingPath = join(root, `.${name}.staging-${process.pid}`);
-  const displacedPath = join(root, `.${name}.replaced-${process.pid}`);
-  let displaced = false;
+  mkdirSync(root, { recursive: true });
+  // A swap a crash interrupted earlier is settled first: the copy in place stays
+  // only when its receipt was written after it was put there; otherwise the
+  // copy that was replaced comes back, and the receipt on disk describes it.
+  recoverReplacements(root, (path) => path !== targetPath || receiptWrittenAfter(receiptFile, path));
+  const replacement = stageReplacement(targetPath, 'directory');
+  let committed = false;
   try {
-    mkdirSync(root, { recursive: true });
-    rmSync(stagingPath, { recursive: true, force: true });
-    cpSync(sourcePath, stagingPath, { recursive: true });
-    rmSync(displacedPath, { recursive: true, force: true });
-    if (existsSync(targetPath)) {
-      renameSync(targetPath, displacedPath);
-      displaced = true;
-    }
-    renameSync(stagingPath, targetPath);
-    commit();
-    if (displaced) rmSync(displacedPath, { recursive: true, force: true });
+    cpSync(sourcePath, replacement.staged, { recursive: true });
+    // The receipt is the commit: written after the new copy is in place and
+    // before the replaced copy is removed. A receipt that fails puts the
+    // replaced copy back (a first install leaves nothing behind).
+    publishReplacement(replacement, () => { commit(); committed = true; });
     return { ok: true };
   } catch (error) {
-    rmSync(stagingPath, { recursive: true, force: true });
-    if (displaced) {
-      try {
-        rmSync(targetPath, { recursive: true, force: true });
-        renameSync(displacedPath, targetPath);
-      } catch {
-        return { ok: false, error, displacedPath };
-      }
+    // Installed and recorded: only removing the replaced copy failed, which is not a failed install.
+    if (committed) {
+      logger.warn('ecosystem catalog: the replaced copy could not be removed after the install was recorded', { target: targetPath, error: errorText(error) });
+      return { ok: true };
     }
+    rmSync(replacement.staged, { recursive: true, force: true });
+    if (replacement.previous !== null && existsSync(replacement.previous)) return { ok: false, error, displacedPath: replacement.previous };
     return { ok: false, error };
   }
+}
+
+/** Whether `receiptFile` was written after `installed` was renamed into place (a rename sets the directory's change time). */
+function receiptWrittenAfter(receiptFile: string, installed: string): boolean {
+  try { return statSync(receiptFile).mtimeMs >= statSync(installed).ctimeMs; } catch { return false; }
 }
 
 function parseVersionParts(value: string): number[] {
@@ -740,7 +743,7 @@ export function installEcosystemCatalogEntry(
       reasons: review.runtimeFit.reasons,
     },
   };
-  const replaced = replaceDirectory(review.sourcePath, targetPath, () => writeJsonFileAtomic(receiptPath(kind, entry.id, options, scope), receipt));
+  const replaced = replaceDirectory(review.sourcePath, targetPath, receiptPath(kind, entry.id, options, scope), () => writeJsonFileAtomic(receiptPath(kind, entry.id, options, scope), receipt));
   if (replaced.ok) return { ok: true, receipt };
   if (replaced.displacedPath) {
     // The displaced copy stays on disk beside the target; the message names it.
@@ -814,7 +817,7 @@ export function installVerifiedBundle(
     compatibility: { appVersion: VERSION, status: 'supported', reasons: [] },
     bundle: bundle.grant,
   };
-  const replaced = replaceDirectory(unpacked, targetPath, () => writeJsonFileAtomic(receiptPath(kind, id, options, scope), receipt));
+  const replaced = replaceDirectory(unpacked, targetPath, receiptPath(kind, id, options, scope), () => writeJsonFileAtomic(receiptPath(kind, id, options, scope), receipt));
   rmSync(unpacked, { recursive: true, force: true });
   if (replaced.ok) return { ok: true, receipt };
   if (replaced.displacedPath) {
@@ -916,7 +919,7 @@ export function rollbackInstalledEcosystemEntry(
     || typeof backup.archivedTargetPath !== 'string' || !isInside(backupRoot(options, scope), backup.archivedTargetPath)) {
     return { ok: false, error: `The ${kind} backup for ${entryId} points outside ${root}; nothing was restored.` };
   }
-  const restored = replaceDirectory(backup.archivedTargetPath, backup.targetPath,
+  const restored = replaceDirectory(backup.archivedTargetPath, backup.targetPath, receiptPath(kind, entryId, options, scope),
     () => writeJsonFileAtomic(receiptPath(kind, entryId, options, scope), backup.receipt));
   if (!restored.ok) {
     const left = restored.displacedPath

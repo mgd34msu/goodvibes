@@ -10,7 +10,7 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
-import type { SideGitRunner } from './side-git.js';
+import { literalPathspec, type SideGitRunner } from './side-git.js';
 import type { WorkspaceCheckpoint, RestoreResult } from './types.js';
 
 /**
@@ -33,7 +33,7 @@ export async function applyRestore(
     const restoredFiles: string[] = [];
     for (const path of paths) {
       try {
-        await sideGit.raw(['checkout', target.commit, '--', path]);
+        await sideGit.raw(['checkout', target.commit, '--', literalPathspec(path)]);
         restoredFiles.push(path);
       } catch (err) {
         logger.warn('WorkspaceCheckpointManager.restore: scoped path checkout failed', { id, path, error: summarizeError(err) });

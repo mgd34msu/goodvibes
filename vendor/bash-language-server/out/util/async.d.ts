@@ -9,5 +9,5 @@ type UnwrapPromise<T> = T extends Promise<infer U> ? U : T;
  * will be resolved.
  * Inspired by https://gist.github.com/ca0v/73a31f57b397606c9813472f7493a940
  */
-export declare const debounce: <F extends (...args: any[]) => any>(func: F, waitForMs: number) => (...args: Parameters<F>) => Promise<UnwrapPromise<ReturnType<F>>>;
+export declare const debounce: <F extends (...args: any[]) => any>(func: F, waitForMs: number) => (...args: Parameters<F>) => Promise<UnwrapPromise<ReturnType<F>> | undefined>;
 export {};

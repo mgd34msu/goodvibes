@@ -132,6 +132,8 @@ export interface InboundMailCompositionOptions {
   readonly deliverStructuredNotice: (
     binding: AutomationRouteBinding | undefined,
     notice: StructuredNotice,
+    /** What the notice announces (`mail:<message key>:notice`), the same for every attempt: a surface that drops repeats does so on it. */
+    announces?: string,
   ) => Promise<SurfaceNoticeDelivery>;
   /**
    * The owner user id of a channel surface (`DaemonSurfaceDeliveryHelper.channelOwner`),
@@ -197,10 +199,12 @@ type NoticeRouteAnswer =
 /**
  * Where the owner is told about inbound mail (§8), or why there is nowhere.
  *
- * A named binding id wins. `default`, the shipped value, means "inherit
- * whatever the owner already uses", and with no separate owner-notice-route
- * concept in the platform, the honest reading of that is the route binding
- * most recently seen: the one the owner last reached the daemon on.
+ * A named binding id wins. `default`, the shipped value, means the owner's
+ * own conversation most recently seen: a one-to-one conversation with the
+ * surface's owner, or a surface private by nature (owner-alert.ts,
+ * isOwnerConversation). A group or shared channel is used only when named.
+ * The send goes to the binding resolved here, by its id (intake.ts passes the
+ * one it planned with), so the route decided is the route used.
  *
  * Every arm that cannot produce a binding names ITSELF rather than collapsing
  * to one `null`, and that is the fix rather than a nicety. Three genuinely
@@ -245,7 +249,7 @@ function resolveNoticeRoute(
       detail: `surfaces.email.inbound.notice.route names the route binding "${configured.trim()}", `
         + 'and there is no binding with that id.',
       fix: 'Point surfaces.email.inbound.notice.route at a binding that exists, or set it back to '
-        + '"default" to use the route you most recently reached the daemon on.',
+        + '"default" to use your most recent one-to-one conversation with the daemon.',
     };
   }
   // The default is the owner's own: the newest one-to-one conversation with
@@ -539,9 +543,10 @@ export function composeInboundMail(
     notices: {
       resolveBinding: () => resolveNoticeRoute(configManager, options.routeBindings, options.channelOwner),
       // The binding the route was resolved to, by its id: never a second resolution that could pick another.
-      send: (notice, binding) => options.deliverStructuredNotice(
+      send: (notice, binding, announces) => options.deliverStructuredNotice(
         binding ? options.routeBindings.getBinding(binding.id) : undefined,
         notice,
+        announces,
       ),
     },
     noticeMode: () => readNoticeMode(configManager),

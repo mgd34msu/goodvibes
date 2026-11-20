@@ -104,6 +104,8 @@ export interface DaemonFacadeCollaborators {
   readonly surfaceActionHelper: DaemonSurfaceActionHelper;
   readonly transportEventsHelper: DaemonTransportEventsHelper;
   readonly httpRouter: DaemonHttpRouter;
+  /** The daemon's work admission: the auto-updater closes it for its restart, and the router refuses new work while it is closed. */
+  readonly workAdmission: import('./work-admission.js').DaemonWorkAdmission;
   readonly providerRuntime: ChannelProviderRuntimeManager;
   readonly builtinChannels: BuiltinChannelRuntime;
   /** Pending work proposals for the conversation-first spawn gate. */

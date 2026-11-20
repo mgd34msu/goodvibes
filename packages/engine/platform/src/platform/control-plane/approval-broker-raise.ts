@@ -19,6 +19,14 @@
  *    so both go through this function; it returns the record AND the pending
  *    decision and lets each caller keep the half it needs.
  *
+ * ── Write first, then let anyone see it ────────────────────────────────────
+ *
+ * A raise is written before it enters the record map: no waiter, timer, event
+ * or receipt exists for an ask a restart could not find. An identical raise
+ * that arrives while the first is being written waits for that write (the
+ * `raising` map) and joins it when it lands, or gets the same error when it
+ * fails, so two concurrent identical asks make one record and one prompt.
+ *
  * ── The coalescing rule, restated because it is subtle ─────────────────────
  *
  * A second identical in-flight ask (same raiser, session, tool and args) does
@@ -39,43 +47,42 @@ import type {
   SharedApprovalAuditRecord,
   SharedApprovalRecord,
 } from './approval-broker.js';
+import type { ApprovalRequester } from './approval-lifecycle.js';
 import { logger } from '../utils/logger.js';
 import { assertPermissionActive } from '../permissions/cancellation.js';
-import { currentTurn } from '../security/turn-boundary.js';
-import { guestChannelOf } from '../gate/surface-authority.js';
+import { currentGuestChannel } from '../security/turn-boundary.js';
 
 /** A pending ask's resolvers and its expiry timer, as the broker holds them. */
 export interface PendingApprovalEntry {
   readonly resolvers: ((decision: PermissionPromptDecision) => void)[];
   readonly timer?: ReturnType<typeof setTimeout> | undefined;
   readonly promptController?: AbortController | undefined;
-  /** Restored asks retain their durable/wire owner even without local waiters. */
+  /** Restored and wire asks retain their durable owner even without local waiters. */
   readonly externallyOwned?: boolean | undefined;
   retired?: boolean | undefined;
-  /**
-   * Surfaces that raised this ask over the wire and have not given up their
-   * claim on it: the creator plus every identical ask that attached to it.
-   * Unset (read as one) for restored records and in-process asks.
-   */
-  raiseHolds?: number | undefined;
-  /** Ids of the holds above, one per wire raiser, so a repeated release names the hold it already gave up. */
-  holdIds?: Set<string> | undefined;
 }
 
 /** Everything raising an ask needs from the broker that owns the state. */
 export interface RaiseApprovalDeps {
   /** Load persisted state before touching it, the broker's own `start()`. */
   start(): Promise<void>;
-  /** The live record map, keyed by approval id. */
-  readonly approvals: Map<string, SharedApprovalRecord>;
+  /** The live record map, keyed by approval id. Read here; written only by the broker after a write landed. */
+  readonly approvals: ReadonlyMap<string, SharedApprovalRecord>;
   /** The live pending-resolver map, keyed by approval id. */
   readonly pendingResolvers: Map<string, PendingApprovalEntry>;
-  /** Write the record map to the store. */
-  persist(): Promise<void>;
+  /** Raises being written, by coalesce key. */
+  readonly raising: Map<string, Promise<void>>;
+  /** This broker's node, stamped on the record. */
+  homeNode(): string;
+  /** Write a new record, then put it in the map. Rejects with nothing visible when the write fails. */
+  create(record: SharedApprovalRecord): Promise<void>;
+  /** Record another wire raiser's hold on an open ask; null when the ask is no longer open. */
+  addHold(approvalId: string, holdId: string): Promise<SharedApprovalRecord | null>;
   /** Fan the record out: SSE `approval-update`, surface message, listeners. */
   publish(approval: SharedApprovalRecord): void;
   /** Expire an ask whose deadline passed. */
   expire(approvalId: string, note: string): Promise<void>;
+  /** Cancel an ask every consumer left (`requester-left`). */
   cancel(approvalId: string): Promise<void>;
   /** Audit-entry factory, the broker's own, so entries stay identical. */
   buildAudit(
@@ -94,7 +101,7 @@ export interface RaisedApproval {
   readonly decision: Promise<PermissionPromptDecision>;
   /** True when this ask attached to an identical one already in flight. */
   readonly coalesced: boolean;
-  /** The hold this wire raiser owns on the ask; pass it to `releaseApproval` so a retried release is harmless. */
+  /** The hold this wire raiser owns on the ask; pass it to `releaseApproval` when leaving or once the decision arrived. */
   readonly holdId?: string | undefined;
 }
 
@@ -131,17 +138,6 @@ function joinApproval(
   });
 }
 
-/**
- * Who raised an ask, as the daemon recorded it: the authenticated principal
- * of an `approvals.raise` call (routes/approvals-raise.ts writes it, never the
- * caller), or `in-process` for an ask the daemon's own code raised.
- */
-export function approvalRaiser(metadata: Readonly<Record<string, unknown>> | undefined): string {
-  if (metadata?.['raisedVia'] !== 'approvals.raise') return 'in-process';
-  const principal = metadata['raisedByPrincipal'];
-  return typeof principal === 'string' && principal.length > 0 ? `principal:${principal}` : 'wire:unidentified';
-}
-
 /** Metadata key naming the channel whose guest's turn raised an ask; the ask is the owner's and is delivered to him. */
 export const APPROVAL_GUEST_CHANNEL_METADATA = 'guestChannel';
 
@@ -157,18 +153,51 @@ export function approvalGuestChannel(approval: { readonly metadata: Readonly<Rec
  * request: its prompt goes to the owner's own conversation, not the guest's.
  */
 function withGuestChannel(metadata: Record<string, unknown>): Record<string, unknown> {
-  const channel = guestChannelOf(currentTurn()?.surface);
+  const channel = currentGuestChannel();
   return channel === undefined ? metadata : { ...metadata, [APPROVAL_GUEST_CHANNEL_METADATA]: channel };
+}
+
+function isWireRaise(input: RequestSharedApprovalInput): boolean {
+  return input.metadata?.['raisedVia'] === 'approvals.raise';
+}
+
+/**
+ * Who raised an ask, as the daemon recorded it: the authenticated principal
+ * of an `approvals.raise` call (routes/approvals-raise.ts writes it and drops
+ * any the caller sent), or `in-process` for an ask the daemon's own code
+ * raised. Only one raiser's identical asks coalesce.
+ */
+export function approvalRaiser(metadata: Readonly<Record<string, unknown>> | undefined): string {
+  if (metadata?.['raisedVia'] !== 'approvals.raise') return 'in-process';
+  const principal = metadata['raisedByPrincipal'];
+  return typeof principal === 'string' && principal.length > 0 ? `principal:${principal}` : 'wire:unidentified';
+}
+
+/** The coalescing key of a raise: its raiser, then the broker's (session, tool, args) key. */
+function raiseKey(metadata: Readonly<Record<string, unknown>> | undefined, coalesceKey: string): string {
+  return `${approvalRaiser(metadata)}\u0000${coalesceKey}`;
+}
+
+/** An open record this raise may join: same raiser and (session, tool, args), not owner-only, with a live waiter entry. */
+function joinable(input: RequestSharedApprovalInput, key: string, deps: RaiseApprovalDeps): { record: SharedApprovalRecord; pending: PendingApprovalEntry } | null {
+  if (input.requireOwnerDecision) return null;
+  for (const existing of deps.approvals.values()) {
+    if (existing.requiresOwnerDecision || (existing.status !== 'pending' && existing.status !== 'claimed')) continue;
+    if (raiseKey(existing.metadata, deps.coalesceKey(existing.sessionId, existing.request.tool, existing.request.args)) !== key) continue;
+    const pending = deps.pendingResolvers.get(existing.id);
+    if (pending && !pending.retired) return { record: existing, pending };
+  }
+  return null;
 }
 
 /**
  * Raise an ask through the shared broker.
  *
- * Ordering is deliberate and unchanged from when this was a method: the record
- * is persisted BEFORE it is published and before any local prompt runs, and a
- * failed persist rolls the record and its resolver back out of both maps and
- * re-writes the corrected map to the file. An approval that a surface can see
- * and a restart cannot is the one failure this ordering exists to prevent.
+ * Order: the record is written first; only after the write landed does it
+ * enter the map, get its waiters and timer, and is it published and any local
+ * prompt drawn. A failed write leaves nothing behind: no record, no waiter,
+ * no event, and the caller (and every identical raise that waited on it) gets
+ * the error.
  */
 export async function raiseSharedApproval(
   input: RequestSharedApprovalInput,
@@ -180,38 +209,41 @@ export async function raiseSharedApproval(
   await deps.start();
   assertPermissionActive(signal);
   input.requireOwnerDecision?.assertCurrent();
-  const now = Date.now();
+  const wire = isWireRaise(input);
+  // Keyed by raiser too: another caller's identical ask is its own, never joined to this one.
+  const key = raiseKey(input.metadata, deps.coalesceKey(input.sessionId, input.request.tool, input.request.args));
 
-  // Duplicate in-flight asks coalesce on (raiser, session, tool, args): the
-  // second identical ask attaches to the first's pending record, ONE prompt,
-  // and one decision resolves both. No second record, no second local prompt.
-  // Only the same raiser's asks coalesce: another caller naming the same
-  // session, tool and args raises its own ask and is never handed the first
-  // raiser's record or decision.
-  const coalesceKey = deps.coalesceKey(input.sessionId, input.request.tool, input.request.args);
-  const raiser = approvalRaiser(input.metadata);
-  for (const existing of deps.approvals.values()) {
-    if (!input.requireOwnerDecision && !existing.requiresOwnerDecision
-      && (existing.status === 'pending' || existing.status === 'claimed')
-      && approvalRaiser(existing.metadata) === raiser
-      && deps.coalesceKey(existing.sessionId, existing.request.tool, existing.request.args) === coalesceKey) {
-      const pending = deps.pendingResolvers.get(existing.id);
-      if (pending && !pending.retired) {
-        const holdId = input.metadata?.['raisedVia'] === 'approvals.raise' ? randomUUID() : undefined;
-        if (holdId !== undefined) {
-          pending.raiseHolds = (pending.raiseHolds ?? 1) + 1;
-          (pending.holdIds ??= new Set()).add(holdId);
-        }
-        return {
-          approval: existing,
-          coalesced: true,
-          ...(holdId === undefined ? {} : { holdId }),
-          decision: joinApproval(existing.id, pending, deps, signal),
-        };
-      }
-    }
+  // An identical raise being written: wait for it, then join what it made (its failure is this raise's too).
+  for (;;) {
+    const writing = input.requireOwnerDecision ? undefined : deps.raising.get(key);
+    if (!writing) break;
+    await writing;
+    assertPermissionActive(signal);
   }
 
+  // Duplicate in-flight asks coalesce on (raiser, session, tool, args): the second
+  // identical ask attaches to the first's pending record, ONE prompt, and
+  // one decision resolves both. No second record, no second local prompt.
+  const existing = joinable(input, key, deps);
+  if (existing) {
+    let approval = existing.record;
+    const holdId = wire ? randomUUID() : undefined;
+    if (holdId !== undefined) {
+      // A wire raiser's hold is part of the record, so a restart keeps it and its receipt can be read.
+      const held = await deps.addHold(approval.id, holdId);
+      if (held) approval = held;
+    }
+    return {
+      approval,
+      coalesced: true,
+      ...(holdId === undefined ? {} : { holdId }),
+      decision: joinApproval(approval.id, existing.pending, deps, signal),
+    };
+  }
+
+  const now = Date.now();
+  const creatorHoldId = wire ? randomUUID() : undefined;
+  const requester: ApprovalRequester = creatorHoldId !== undefined ? { kind: 'wire', holds: [{ id: creatorHoldId }] } : { kind: 'in-process' };
   const approval: SharedApprovalRecord = {
     id: `approval-${randomUUID().slice(0, 8)}`,
     callId: input.request.callId,
@@ -222,58 +254,44 @@ export async function raiseSharedApproval(
     request: input.request,
     createdAt: now,
     updatedAt: now,
+    revision: 1,
+    homeNode: deps.homeNode(),
+    requester,
     ...(input.timeoutMs && input.timeoutMs > 0 ? { expiresAt: now + input.timeoutMs } : {}),
     metadata: withGuestChannel(input.metadata ?? {}),
     audit: [deps.buildAudit('created', 'approval-broker', 'service')],
   };
+  // An identical raise arriving now awaits this write: it joins the record, or gets this write's error.
+  const writing = deps.create(approval);
+  if (!input.requireOwnerDecision) deps.raising.set(key, writing);
+  try {
+    await writing;
+  } finally {
+    if (deps.raising.get(key) === writing) deps.raising.delete(key);
+  }
+
+  // Durable: now it gets its waiters, its timer and its event.
   const timer = input.timeoutMs && input.timeoutMs > 0
-      ? setTimeout(() => {
-        void deps.expire(approval.id, `timed out after ${input.timeoutMs}ms`).catch((error: unknown) => {
-          logger.warn('Approval expiration failed', {
-            approvalId: approval.id,
-            error: error instanceof Error ? error.message : String(error),
-          });
+    ? setTimeout(() => {
+      void deps.expire(approval.id, `timed out after ${input.timeoutMs}ms`).catch((error: unknown) => {
+        logger.warn('Approval expiration failed', {
+          approvalId: approval.id,
+          error: error instanceof Error ? error.message : String(error),
         });
-      }, input.timeoutMs)
-      : undefined;
+      });
+    }, input.timeoutMs)
+    : undefined;
   timer?.unref?.();
-  const creatorHoldId = input.metadata?.['raisedVia'] === 'approvals.raise' ? randomUUID() : undefined;
-  const pending: PendingApprovalEntry = { resolvers: [], timer, promptController: new AbortController(), raiseHolds: 1,
-    ...(creatorHoldId === undefined ? {} : { holdIds: new Set([creatorHoldId]) }) };
+  const pending: PendingApprovalEntry = { resolvers: [], timer, promptController: new AbortController(), ...(wire ? { externallyOwned: true } : {}) };
   deps.pendingResolvers.set(approval.id, pending);
   const pendingDecision = joinApproval(approval.id, pending, deps, signal);
-  deps.approvals.set(approval.id, approval);
-  try {
-    await deps.persist();
-  } catch (error) {
-    const pending = deps.pendingResolvers.get(approval.id);
-    if (pending) {
-      if (pending.timer) clearTimeout(pending.timer);
-      for (const resolve of pending.resolvers) resolve({ approved: false, remember: false });
-      deps.pendingResolvers.delete(approval.id);
-    }
-    deps.approvals.delete(approval.id);
-    // The record is out of the map; get it out of the file too, explicitly.
-    //
-    // A write that failed did not necessarily leave the file untouched by
-    // this record: a write queued BEHIND it captures the map when it runs,
-    // and whether that capture happens before or after the delete above is a
-    // question about microtask ordering, which is not a thing a payment
-    // record's durability should rest on. Writing the corrected map settles
-    // it. If this write fails too the store is simply unavailable, and the
-    // caller is already being told that by the error below, so its own
-    // failure is swallowed rather than replacing the real one.
-    await deps.persist().catch(() => undefined);
-    throw error;
-  }
   try {
     input.requireOwnerDecision?.assertCurrent();
   } catch (error) {
     await deps.cancel(approval.id);
     throw error;
   }
-  // Cancellation may have replaced this record during its initial persist.
-  // A coalesced live consumer still owns publication if the creator left.
+  // The creator's signal may have aborted during the write; that cancellation is already queued.
   if (!pending.retired && deps.approvals.get(approval.id) === approval) deps.publish(approval);
 
   return { approval: deps.approvals.get(approval.id) ?? approval, decision: pendingDecision, coalesced: false,

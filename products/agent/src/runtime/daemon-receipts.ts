@@ -33,32 +33,52 @@ function settle(acknowledge: DaemonReceiptAcknowledge, ids: readonly string[]): 
   void Promise.resolve().then(() => acknowledge(ids)).catch(() => undefined);
 }
 
+interface BufferedReceipt {
+  readonly receipt: DaemonReceipt;
+  readonly acknowledge?: DaemonReceiptAcknowledge | undefined;
+}
+
 export class AgentDaemonReceiptFeed {
-  private readonly buffered: { readonly receipt: DaemonReceipt; readonly acknowledge?: DaemonReceiptAcknowledge | undefined }[] = [];
-  private readonly seen = new Set<string>();
+  private readonly buffered: BufferedReceipt[] = [];
+  /** Receipts the sink took: marked only once delivery returned, so a throw leaves the receipt to be offered again. */
   private readonly shown = new Set<string>();
   private deliver: ((receipt: DaemonReceipt) => void) | null = null;
+
+  /** Hand one receipt to the sink; false when the sink threw (the receipt was not shown). */
+  private show(deliver: (receipt: DaemonReceipt) => void, receipt: DaemonReceipt): boolean {
+    try {
+      deliver(receipt);
+    } catch {
+      return false;
+    }
+    this.shown.add(receipt.id);
+    return true;
+  }
+
+  private buffer(receipt: DaemonReceipt, acknowledge: DaemonReceiptAcknowledge | undefined): void {
+    if (!this.buffered.some((entry) => entry.receipt.id === receipt.id)) this.buffered.push({ receipt, acknowledge });
+  }
 
   /**
    * Ingest receipts; buffers until a sink attaches. `acknowledge`, for
    * receipts read from the daemon, is called with each id once that receipt
-   * has been handed to the sink.
+   * has been handed to the sink. A receipt whose delivery threw is neither
+   * acknowledged nor marked shown: it stays buffered and is shown on the next
+   * offer or attach, and the rest are still delivered.
    */
   push(receipts: readonly DaemonReceipt[], acknowledge?: DaemonReceiptAcknowledge): void {
     const shownNow: string[] = [];
     for (const receipt of receipts) {
-      if (this.seen.has(receipt.id)) {
+      if (this.shown.has(receipt.id)) {
         // Shown before and offered again because its acknowledgement did not land.
-        if (this.shown.has(receipt.id)) shownNow.push(receipt.id);
+        shownNow.push(receipt.id);
         continue;
       }
-      this.seen.add(receipt.id);
-      if (this.deliver) {
-        this.deliver(receipt);
-        this.shown.add(receipt.id);
+      if (this.deliver && this.show(this.deliver, receipt)) {
+        this.buffered.splice(0, this.buffered.length, ...this.buffered.filter((entry) => entry.receipt.id !== receipt.id));
         shownNow.push(receipt.id);
       } else {
-        this.buffered.push({ receipt, acknowledge });
+        this.buffer(receipt, acknowledge);
       }
     }
     if (acknowledge) settle(acknowledge, shownNow);
@@ -68,14 +88,16 @@ export class AgentDaemonReceiptFeed {
   attach(deliver: (receipt: DaemonReceipt) => void): void {
     this.deliver = deliver;
     const shownBy = new Map<DaemonReceiptAcknowledge, string[]>();
-    for (const { receipt, acknowledge } of this.buffered.splice(0)) {
-      deliver(receipt);
-      this.shown.add(receipt.id);
-      if (!acknowledge) continue;
-      const ids = shownBy.get(acknowledge) ?? [];
-      ids.push(receipt.id);
-      shownBy.set(acknowledge, ids);
+    const kept: BufferedReceipt[] = [];
+    // Each buffered receipt is tried on its own: one that throws stays buffered and the rest are shown.
+    for (const entry of this.buffered.splice(0)) {
+      if (!this.show(deliver, entry.receipt)) { kept.push(entry); continue; }
+      if (!entry.acknowledge) continue;
+      const ids = shownBy.get(entry.acknowledge) ?? [];
+      ids.push(entry.receipt.id);
+      shownBy.set(entry.acknowledge, ids);
     }
+    this.buffered.push(...kept);
     for (const [acknowledge, ids] of shownBy) settle(acknowledge, ids);
   }
 }

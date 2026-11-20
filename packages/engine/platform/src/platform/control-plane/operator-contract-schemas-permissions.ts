@@ -36,6 +36,17 @@ export const PERMISSION_PROMPT_REQUEST_ANALYSIS_SCHEMA = objectSchema({
   blastRadius: PERMISSION_BLAST_RADIUS_SCHEMA,
   sideEffects: arraySchema(STRING_SCHEMA),
   host: STRING_SCHEMA,
+  riskFamily: STRING_SCHEMA,
+  // Jev's reading fact by fact, with the facts it was unsure of (permissions/types.ts GateReadingRecord).
+  reading: objectSchema({
+    family: STRING_SCHEMA,
+    stakes: PERMISSION_RISK_LEVEL_SCHEMA,
+    facts: objectSchema({
+      mutates: BOOLEAN_SCHEMA, outward: BOOLEAN_SCHEMA, secrets: BOOLEAN_SCHEMA, irreversible: BOOLEAN_SCHEMA,
+      beyondProject: BOOLEAN_SCHEMA, weakensSecurity: BOOLEAN_SCHEMA, obfuscated: BOOLEAN_SCHEMA,
+    }, ['mutates', 'outward', 'secrets', 'irreversible', 'beyondProject', 'weakensSecurity', 'obfuscated']),
+    uncertain: arraySchema(STRING_SCHEMA),
+  }, ['family', 'stakes', 'facts', 'uncertain']),
 }, ['classification', 'riskLevel', 'summary', 'reasons'], { additionalProperties: false });
 
 // Attribution for a permission ask that did NOT originate from the foreground

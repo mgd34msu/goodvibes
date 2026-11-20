@@ -36,6 +36,7 @@ export {
   actorFromPrincipal,
   actorHoldsScope,
   agentActor,
+  localOwnerActor,
   principalHasScope,
   resolveAuthenticatedPrincipal,
   resolvePrivateHostFetchOptions,

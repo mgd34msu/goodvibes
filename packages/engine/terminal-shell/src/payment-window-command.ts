@@ -267,13 +267,13 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
 }
 
 /** What `payments.checkout.approve` answered, or null when it is not that shape. */
-function readAdvanceApproval(value: unknown): { merchantDomain: string; item: string; amount: string; expiresAt: string } | null {
+function readAdvanceApproval(value: unknown): { merchantDomain: string; item: string; amount: string; currency: string; expiresAt: string } | null {
   if (typeof value !== 'object' || value === null) return null;
   const record = value as Record<string, unknown>;
-  const { approved, merchantDomain, item, amount, expiresAt } = record;
+  const { approved, merchantDomain, item, amount, currency, expiresAt } = record;
   if (approved !== true || typeof merchantDomain !== 'string' || typeof item !== 'string'
-    || typeof amount !== 'string' || typeof expiresAt !== 'string') return null;
-  return { merchantDomain, item, amount, expiresAt };
+    || typeof amount !== 'string' || typeof currency !== 'string' || typeof expiresAt !== 'string') return null;
+  return { merchantDomain, item, amount, currency, expiresAt };
 }
 
 /** `/payments approve <merchant> <item> <maximum>`: the merchant is the first word, the maximum the last. */
@@ -316,8 +316,8 @@ export function createPaymentApproveCommand<Context extends PaymentWindowCommand
     }
     const finish = () => { ownerAbort.abort(); void connection.close(); };
     const report = (message: string) => { context.print(message); context.renderRequest(); };
-    const summary = `Merchant: ${text(requested.merchantDomain)}\nItem: ${text(requested.item)}\nAt most: ${text(requested.amount)}\n\n`
-      + 'A purchase matching these three, begun in the next five minutes, needs no further answer up to this amount. The approval is used once.';
+    const summary = `Merchant: ${text(requested.merchantDomain)}\nItem: ${text(requested.item)}\nAt most: ${text(requested.amount)} in the daemon's payment currency (payments.currency)\n\n`
+      + 'A purchase matching these three, in that currency, begun in the next five minutes, needs no further answer up to this amount. The approval is used once; if the payment currency changes first, it no longer matches.';
     const approve = async () => {
       try {
         const auth = await connection.run((operator, signal) => operator.control.auth.current({}, { signal }));
@@ -329,7 +329,7 @@ export function createPaymentApproveCommand<Context extends PaymentWindowCommand
           { signal, headers: { 'x-goodvibes-explicit-user-request': 'true' } },
         )));
         if (!result) throw new Error('Unexpected approval answer.');
-        report(`[payments] Approved in advance: ${text(result.item)} from ${text(result.merchantDomain)}, at most ${text(result.amount)}, until ${new Date(result.expiresAt).toLocaleString()}.`);
+        report(`[payments] Approved in advance: ${text(result.item)} from ${text(result.merchantDomain)}, at most ${text(result.amount)} ${text(result.currency)}, until ${new Date(result.expiresAt).toLocaleString()}.`);
       } catch (error) {
         // A refusal from the daemon names what was wrong (an amount it cannot read, a full approval list); a transport error is not echoed.
         const reason = error instanceof Error && /amount|approval|payments\./i.test(error.message) ? ` ${text(error.message)}` : '';

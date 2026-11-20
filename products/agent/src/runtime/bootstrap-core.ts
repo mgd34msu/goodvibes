@@ -255,8 +255,6 @@ export async function initializeBootstrapCore(
     homeDirectory,
     // Task refs are owned by the REAL runtime session, read fresh on every call.
     resolveSessionId: () => runtimeSessionIdRef.value,
-    // The owner's last message in this conversation: a person lookup must be named in it.
-    currentOwnerMessage: () => conversation.getLastUserMessage(),
     researchReportSourceOwner: services.researchReportSourceOwner,
     // First-party local reads need no hosted screening: a code-only local owner, always bound.
     researchSourceOwner: services.localReadSourceOwner,

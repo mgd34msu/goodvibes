@@ -253,7 +253,19 @@ export interface ClipboardPasteResult {
     nextPasteId: number;
     pasted: boolean;
     kind: ClipboardPasteKind;
+    /** Lines of pasted text (0 for an image or nothing): what a receipt may say about it. */
+    lines: number;
     marker?: string | undefined;
+}
+
+/**
+ * What a paste may tell a caller other than the composer itself (a tool
+ * receipt the model reads): whether something was pasted, its kind and line
+ * count. Never the clipboard text, the marker standing for it, or the
+ * composer around it.
+ */
+export function clipboardPasteReceipt(result: Pick<ClipboardPasteResult, 'pasted' | 'kind' | 'lines'>): { readonly pasted: boolean; readonly kind: ClipboardPasteKind; readonly lines: number } {
+    return { pasted: result.pasted, kind: result.kind, lines: result.lines };
 }
 export interface ClipboardPasteSource {
     pasteImageFromClipboard: typeof pasteImageFromClipboard;
@@ -434,6 +446,7 @@ export function handleClipboardPaste(state: PasteRegistryState & {
     const img = clipboard.pasteImageFromClipboard();
     let pasted = false;
     let kind: ClipboardPasteKind = 'none';
+    let lines = 0;
     let insertedMarker: string | undefined;
     if (img) {
         state.saveUndoState();
@@ -456,6 +469,7 @@ export function handleClipboardPaste(state: PasteRegistryState & {
             state.cursorPos += marker.length;
             pasted = true;
             kind = marker.startsWith('[IMAGE:') ? 'image' : 'text';
+            lines = kind === 'text' ? raw.split(/\r\n|\r|\n/).length : 0;
             insertedMarker = marker;
         }
     }
@@ -468,6 +482,7 @@ export function handleClipboardPaste(state: PasteRegistryState & {
         nextPasteId: state.nextPasteId,
         pasted,
         kind,
+        lines,
         marker: insertedMarker,
     };
 }

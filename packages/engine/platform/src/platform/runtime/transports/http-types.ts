@@ -8,7 +8,7 @@ import type {
   SharedSessionInputRecord,
   SharedSessionMessage,
   SharedSessionRecord,
-  SharedSessionSubmission,
+  SharedSessionSubmissionReceipt,
 } from '../../control-plane/index.js';
 import type { RegisterSharedSessionInput, SharedSessionRegisterResult, SteerSharedSessionMessageInput } from '../../control-plane/index.js';
 import type { ProviderRuntimeSnapshot, ProviderUsageSnapshot } from '../../providers/runtime-snapshot.js';
@@ -93,9 +93,9 @@ export interface HttpTransportSessionsClient {
   register(input: RegisterSharedSessionInput): Promise<SharedSessionRegisterResult>;
   close(sessionId: string): Promise<SharedSessionRecord | null>;
   reopen(sessionId: string): Promise<SharedSessionRecord | null>;
-  submitMessage(sessionId: string, input: HttpSessionMessageInput): Promise<SharedSessionSubmission>;
-  steerMessage(sessionId: string, input: HttpSteerSessionMessageInput): Promise<SharedSessionSubmission>;
-  followUpMessage(sessionId: string, input: HttpSessionMessageInput): Promise<SharedSessionSubmission>;
+  submitMessage(sessionId: string, input: HttpSessionMessageInput): Promise<SharedSessionSubmissionReceipt>;
+  steerMessage(sessionId: string, input: HttpSteerSessionMessageInput): Promise<SharedSessionSubmissionReceipt>;
+  followUpMessage(sessionId: string, input: HttpSessionMessageInput): Promise<SharedSessionSubmissionReceipt>;
   cancelInput(sessionId: string, inputId: string): Promise<SharedSessionInputRecord | null>;
   deliverInput(
     sessionId: string,

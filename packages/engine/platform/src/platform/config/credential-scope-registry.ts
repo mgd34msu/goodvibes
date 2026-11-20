@@ -170,10 +170,8 @@ export const CREDENTIAL_SCOPE_DECLARATIONS: readonly CredentialScopeDeclaration[
   // TOKEN STORE that the `/calendar connect` flow writes was not, so the two
   // halves of the same connection lived in different tiers.
   { key: daemonSecretKeyFor('calendar.google.tokens'), match: 'exact', scope: 'daemon-needed', why: 'The daemon reads and writes the Google calendar with this refresh token.' },
-  { key: daemonSecretKeyFor('calendar.google.account'), match: 'exact', scope: 'daemon-needed', why: 'Names the account the daemon acts as on the calendar.' },
   { key: daemonSecretKeyFor('calendar.google.status'), match: 'exact', scope: 'daemon-needed', why: 'The connection health the daemon reports and refreshes from.' },
   { key: daemonSecretKeyFor('calendar.microsoft.tokens'), match: 'exact', scope: 'daemon-needed', why: 'The daemon reads and writes the Microsoft calendar with this refresh token.' },
-  { key: daemonSecretKeyFor('calendar.microsoft.account'), match: 'exact', scope: 'daemon-needed', why: 'Names the account the daemon acts as on the calendar.' },
   { key: daemonSecretKeyFor('calendar.microsoft.status'), match: 'exact', scope: 'daemon-needed', why: 'The connection health the daemon reports and refreshes from.' },
   {
     key: 'GOODVIBES_CALENDAR_SUB_',
@@ -188,6 +186,14 @@ export const CREDENTIAL_SCOPE_DECLARATIONS: readonly CredentialScopeDeclaration[
     match: 'prefix',
     scope: 'daemon-needed',
     why: 'The access and refresh tokens of a provider sign-in; the daemon hosts the turns that send them and renews them. The suffix is the provider id in upper case, with a digest of the id appended when it is not plain lowercase letters and digits, so two ids never share a key (subscriptions.ts subscriptionTokensKey); the record that names them is in the shared subscriptions file.',
+  },
+
+  // ── Notification webhooks ────────────────────────────────────────────────
+  {
+    key: 'GOODVIBES_NOTIFY_WEBHOOK_',
+    match: 'prefix',
+    scope: 'daemon-needed',
+    why: 'A notification webhook URL carries its key or topic, so notifications.webhookUrls holds only references to these; the daemon sends its own notices (memory pressure) to the same list and every client reads this tier. The suffix is a random id per URL (integrations/notification-webhooks.ts).',
   },
 
   // ── Payments ─────────────────────────────────────────────────────────────

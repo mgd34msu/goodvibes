@@ -9,7 +9,7 @@ import type {
   SharedSessionMessage,
   SharedSessionRecord,
   SharedSessionRegisterResult,
-  SharedSessionSubmission,
+  SharedSessionSubmissionReceipt,
 } from '../../control-plane/index.js';
 import type { RuntimeTask } from '../store/domains/tasks.js';
 import type { ProviderRuntimeSnapshot, ProviderUsageSnapshot } from '../../providers/runtime-snapshot.js';
@@ -201,17 +201,17 @@ function createOperatorClient(
         const response = await withNullOnNotFound(() => operatorApi.sessions.reopen(sessionId));
         return response?.session ? normalizeSharedSessionRecord(response.session as Record<string, unknown>) : null;
       },
-      submitMessage: async (sessionId, input): Promise<SharedSessionSubmission> =>
+      submitMessage: async (sessionId, input): Promise<SharedSessionSubmissionReceipt> =>
         normalizeSharedSessionSubmission(await operatorApi.invoke<Record<string, unknown>>(
           'sessions.messages.create',
           { sessionId, ...buildSessionMessageBody(input) },
         )),
-      steerMessage: async (sessionId, input): Promise<SharedSessionSubmission> =>
+      steerMessage: async (sessionId, input): Promise<SharedSessionSubmissionReceipt> =>
         normalizeSharedSessionSubmission(await operatorApi.invoke<Record<string, unknown>>(
           'sessions.steer',
           { sessionId, ...buildSteerSessionMessageBody(input) },
         )),
-      followUpMessage: async (sessionId, input): Promise<SharedSessionSubmission> =>
+      followUpMessage: async (sessionId, input): Promise<SharedSessionSubmissionReceipt> =>
         normalizeSharedSessionSubmission(await operatorApi.invoke<Record<string, unknown>>(
           'sessions.followUp',
           { sessionId, ...buildSessionMessageBody(input) },
@@ -226,6 +226,7 @@ function createOperatorClient(
           inputId,
           ...(options?.consumed === true ? { consumed: true } : {}),
           ...(options?.claim === true ? { claim: true } : {}),
+          ...(options?.claimEpoch !== undefined ? { claimEpoch: options.claimEpoch } : {}),
           // The agent this surface is running for the input, and (once its turn
           // ends) what it produced. Both are what let a message that arrived
           // over a channel and was dispatched HERE get its answer back there.

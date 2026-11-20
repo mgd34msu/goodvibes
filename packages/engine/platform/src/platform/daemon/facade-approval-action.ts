@@ -1,4 +1,5 @@
 import type { ApprovalBroker } from '../control-plane/approval-broker.js';
+import type { TransitionOutcome } from '../control-plane/approval-lifecycle.js';
 import type { ChannelPolicyManager } from '../channels/policy-manager.js';
 import { channelSenderActor } from '../channels/policy-manager.js';
 import { admitEffects } from '../security/effect-authority.js';
@@ -57,19 +58,17 @@ export async function handleInteractiveApprovalAction(
   const actor = context.actor(req);
   const surface = context.surface?.(req) ?? 'web';
   const note = typeof payload.note === 'string' ? payload.note : undefined;
-  if (action === 'claim') {
-    const approval = await context.broker.claimApproval(approvalId, actor, surface, note);
-    return approval
-      ? context.record(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval }))
-      : context.record(req, `/api/approvals/${approvalId}/${action}`, Response.json({ error: 'Unknown approval' }, { status: 404 }));
-  }
-  if (action === 'cancel') {
-    const approval = await context.broker.cancelApproval(approvalId, actor, surface, note);
-    return approval
-      ? context.record(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval }))
-      : context.record(req, `/api/approvals/${approvalId}/${action}`, Response.json({ error: 'Unknown approval' }, { status: 404 }));
-  }
-  const approval = await context.broker.resolveApproval(approvalId, {
+  // A chat button names the ask, not a revision of it: what it was drawn for
+  // cannot change, and an ask settled meanwhile is still refused as settled.
+  // A caller that read a revision sends it, and a stale one is refused.
+  const expectedRevision = typeof payload.expectedRevision === 'number' && Number.isInteger(payload.expectedRevision)
+    ? payload.expectedRevision : undefined;
+  const respond = (outcome: TransitionOutcome): Response => context.record(req, `/api/approvals/${approvalId}/${action}`, outcome.record
+    ? Response.json({ approval: outcome.record, applied: outcome.applied, ...(outcome.applied ? {} : { refusal: outcome.refusal.reason, code: outcome.refusal.code }) })
+    : Response.json({ error: 'Unknown approval', code: 'UNKNOWN_APPROVAL' }, { status: 404 }));
+  if (action === 'claim') return respond(await context.broker.claimApproval(approvalId, { actor, actorSurface: surface, note, expectedRevision }));
+  if (action === 'cancel') return respond(await context.broker.cancelApproval(approvalId, { actor, actorSurface: surface, note, expectedRevision }));
+  return respond(await context.broker.resolveApproval(approvalId, {
     approved: action === 'approve',
     // This path is reached from a known button action. The separate HTTP
     // route also accepts legacy generic callback reports and cannot infer it.
@@ -78,8 +77,6 @@ export async function handleInteractiveApprovalAction(
     actor,
     actorSurface: surface,
     note,
-  });
-  return approval
-    ? context.record(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval }))
-    : context.record(req, `/api/approvals/${approvalId}/${action}`, Response.json({ error: 'Unknown approval' }, { status: 404 }));
+    expectedRevision,
+  }));
 }

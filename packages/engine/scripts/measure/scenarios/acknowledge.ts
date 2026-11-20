@@ -284,14 +284,14 @@ const approvalRaiseAnswer: Scenario = {
     });
     for (let i = 0; i < PRIOR_APPROVALS; i++) {
       const raised = await broker.raiseApproval({ request: ask(`prior-${i}`) } as Parameters<ApprovalBroker['raiseApproval']>[0]);
-      await broker.resolveApproval(raised.approval.id, { approved: true, actor: 'owner', actorSurface: 'tui' });
+      await broker.resolveApproval(raised.approval.id, { approved: true, actor: 'owner', actorSurface: 'tui', expectedRevision: raised.approval.revision });
       await raised.decision;
     }
     return {
       async op(run) {
         const raised = await broker.raiseApproval({ request: ask(`measured-${run}-${Date.now()}`) } as Parameters<ApprovalBroker['raiseApproval']>[0]);
-        const resolved = await broker.resolveApproval(raised.approval.id, { approved: true, actor: 'owner', actorSurface: 'tui' });
-        assertOutcome(resolved?.status === 'approved', `the approval ended ${resolved?.status ?? 'missing'}`);
+        const resolved = await broker.resolveApproval(raised.approval.id, { approved: true, actor: 'owner', actorSurface: 'tui', expectedRevision: raised.approval.revision });
+        assertOutcome(resolved.applied && resolved.record.status === 'approved', `the approval ended ${resolved.record?.status ?? 'missing'}`);
         const decision = await raised.decision;
         assertOutcome(decision.approved === true, 'the asker was not told it was approved');
       },

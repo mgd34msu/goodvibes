@@ -9,10 +9,33 @@
  */
 import type { ObservedAgentRow, ObservedAgentSource } from '../observed/source.js';
 import type { ProcessNode, ProcessState, SteerOptions, SteerResult } from '../types.js';
+import { targetRef, type TargetRef } from '../../../utils/target-ref.js';
 
 /** Observed node ids are namespaced by pid to avoid colliding with agent/process ids. */
 export function observedNodeId(pid: number): string {
   return `observed:${pid}`;
+}
+
+/**
+ * The one process an observed row is: its pid together with its start time,
+ * the tmux pane it runs in, its kind, directory and command line. A pid is
+ * reused by the system, so anything remembered about a session (a steer
+ * grant) is kept against this reference, never the pid alone. Null when the
+ * process table gave no start time, so the process cannot be told apart from
+ * a later one with the same pid and nothing may be remembered for it.
+ */
+export function observedAgentRef(node: ProcessNode): TargetRef<'observed-agent'> | null {
+  const row = node.raw as ObservedAgentRow | undefined;
+  if (!row || typeof row.pid !== 'number' || row.startedAt === undefined) return null;
+  const pane = row.steer.kind === 'tmux' ? row.steer.paneId : null;
+  return targetRef('observed-agent', String(row.pid),
+    { startTime: row.startedAt, paneId: pane, kind: row.externalKind, cwd: row.cwd ?? null, args: row.args },
+    {
+      startTime: new Date(row.startedAt).toISOString(),
+      paneId: pane ?? 'none',
+      kind: row.externalKind,
+      cwd: row.cwd ?? 'unknown',
+    });
 }
 
 const KIND_LABEL: Record<ObservedAgentRow['externalKind'], string> = {
@@ -42,6 +65,7 @@ export function adaptObservedAgent(row: ObservedAgentRow, now: number): ProcessN
   return {
     id: observedNodeId(row.pid),
     kind: 'observed-external',
+    serves: 'you',
     label: KIND_LABEL[row.externalKind],
     task: row.cwd,
     state,

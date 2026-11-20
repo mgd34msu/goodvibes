@@ -2,6 +2,7 @@ import { getPeerEndpoint, type PeerEndpointContract } from '@goodvibes-jev/engin
 import type { DaemonRemoteManagementRouteHandlers } from './context.js';
 import { jsonErrorResponse, readJsonErrorResponse, serviceFailureStatus } from './error-response.js';
 import { requestActor } from './http-policy.js';
+import type { Selection } from '@goodvibes-jev/engine/errors';
 import {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,
@@ -170,11 +171,10 @@ function readPeerField(
     }
     case 'boolean':
       return typeof body[field] === 'boolean' ? body[field] : undefined;
-    case 'array': {
-      // An empty list is read as not sent, as before readStringArrayField returned [] for it.
-      const list = readStringArrayField(body, field, limit?.max);
-      return list?.length ? list : undefined;
-    }
+    case 'array':
+      // Not sent stays undefined; an explicit `[]` stays `[]` (a heartbeat with `commands: []`
+      // clears the stored list; one without `commands` keeps it).
+      return readStringArrayField(body, field, limit?.max);
     case 'object':
       return readRemoteMetadata(body[field]);
     default:
@@ -256,7 +256,8 @@ type RemoteOperatorNoteBody = {
   readonly label?: string | undefined;
   readonly tokenId?: string | undefined;
   readonly requeueClaimedWork?: boolean | undefined;
-  readonly scopes?: readonly string[] | undefined;
+  /** Not sent: the published scope set. Never empty: `[]` is refused. */
+  readonly scopes?: Selection<string> | undefined;
 };
 
 type RemoteInvokeBody = {
@@ -326,14 +327,21 @@ const remoteBodySchemas = createRouteBodySchemaRegistry({
     const label = readOptionalStringField(body, 'label');
     const tokenId = readOptionalStringField(body, 'tokenId');
     const scopes = readStringArrayField(body, 'scopes', MAX_REMOTE_SCOPES);
+    const [firstScope, ...otherScopes] = scopes ?? [];
+    // A token with no scope has no use, and an empty list is never "every scope".
+    if (scopes !== undefined && firstScope === undefined) {
+      return jsonErrorResponse({
+        error: 'scopes is an empty list: a peer token needs at least one scope; omit scopes for the published set.',
+        code: 'INVALID_REQUEST',
+      }, { status: 400 });
+    }
     return {
       ...(note ? { note } : {}),
       ...(reason ? { reason } : {}),
       ...(label ? { label } : {}),
       ...(tokenId ? { tokenId } : {}),
       ...(typeof body.requeueClaimedWork === 'boolean' ? { requeueClaimedWork: body.requeueClaimedWork } : {}),
-      // An empty `scopes` list is read as not sent, as before readStringArrayField returned [] for it.
-      ...(scopes?.length ? { scopes } : {}),
+      scopes: firstScope === undefined ? { kind: 'default' } : { kind: 'only', values: [firstScope, ...otherScopes] },
     };
   }),
   invoke: createRouteBodySchema<RemoteInvokeBody>('POST /api/remote/peers/:peerId/invoke', (body) => {

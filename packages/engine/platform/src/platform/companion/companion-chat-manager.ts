@@ -191,8 +191,17 @@ interface InternalSession {
   /** User messages whose turns have not started yet (queue-when-busy + steer-to-front). */
   pendingTurns?: QueuedCompanionTurn[];
   preparingTurns?: number;
-  /** Client-chosen send ids already accepted, so a re-sent request answers with the first message instead of a second turn. Memory only: forgotten with the session or on a restart. */
+  /**
+   * Client-chosen send ids already accepted (clientMessageId -> message id), so
+   * a re-sent request answers with the first message instead of a second turn.
+   * Each key is on the line that saved its message, and is read back with the
+   * transcript, so a resend after a restart finds the first too.
+   */
   clientMessageIds?: Map<string, string>;
+  /** Sends with a client key whose save is not yet synced: a resend arriving meanwhile waits for it and answers as it does. */
+  clientMessagesSaving?: Map<string, Promise<string>>;
+  /** Steers by message id with the turn each one cancelled, so a resent steer answers as the first did. Memory only. */
+  steerCancelled?: Map<string, string>;
   lastActivityAt: number;
   /** Messages whose save failed after they were already in memory; the next save of this chat writes them. */
   unsaved?: Set<string>;
@@ -556,8 +565,18 @@ export class CompanionChatManager {
     if (session.messages) return session.messages;
     if (!this.persistence) return (session.messages = []);
     const loaded = this.persistence.loadTranscript(session.meta.id);
-    const messages = loaded.messages.map((message) => this.normalizeMessage(message));
+    // A message saved with its sender's key carries that key (it is echoed on every read).
+    const keyOf = new Map([...loaded.clientMessageIds].map(([key, id]) => [id, key] as const));
+    const messages = loaded.messages.map((message) => {
+      const key = message.clientMessageId === undefined ? keyOf.get(message.id) : undefined;
+      return this.normalizeMessage(key === undefined ? message : { ...message, clientMessageId: key });
+    });
     session.messages = messages;
+    // The keys senders gave their messages, read back from the lines that saved them.
+    if (loaded.clientMessageIds.size > 0) {
+      const accepted = (session.clientMessageIds ??= new Map());
+      for (const [key, id] of loaded.clientMessageIds) if (!accepted.has(key)) accepted.set(key, id);
+    }
     const changed: CompanionChatMessage[] = [];
     for (const [index, message] of messages.entries()) {
       if (message.role !== 'user' || message.deliveryState !== 'queued') continue;
@@ -833,7 +852,9 @@ export class CompanionChatManager {
 
     // A re-sent request (the first answer never arrived) is answered with the
     // first message, before it can count against the rate limit or run again.
-    const alreadyAccepted = options.clientMessageId === undefined ? undefined : session.clientMessageIds?.get(options.clientMessageId);
+    // The transcript holds the keys of saved messages, also after a restart.
+    if (options.clientMessageId !== undefined) this.transcript(session);
+    const alreadyAccepted = await this.replayOfClientMessage(session, options.clientMessageId, content);
     if (alreadyAccepted !== undefined) return alreadyAccepted;
 
     // Rate-limit check (throws GoodVibesError on violation)
@@ -862,7 +883,7 @@ export class CompanionChatManager {
     if (this.sessions.get(sessionId) !== session || session.meta.status !== 'active') throw this.chatClosed('The chat was closed while this message was being prepared.');
 
     // A duplicate that was still being prepared when the first one landed.
-    const acceptedWhilePreparing = options.clientMessageId === undefined ? undefined : session.clientMessageIds?.get(options.clientMessageId);
+    const acceptedWhilePreparing = await this.replayOfClientMessage(session, options.clientMessageId, content);
     if (acceptedWhilePreparing !== undefined) return acceptedWhilePreparing;
 
     // A send that lands while another turn is running QUEUES (visible in the
@@ -882,25 +903,46 @@ export class CompanionChatManager {
       ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
       createdAt: now,
       ...(queuedBehindActiveTurn ? { deliveryState: 'queued' as const } : {}),
+      // Echoed on the message, so the sender finds its own send by its key.
+      ...(options.clientMessageId !== undefined ? { clientMessageId: options.clientMessageId } : {}),
     });
     const messages = this.transcript(session);
-    const meta: CompanionChatSession = { ...session.meta, messageCount: messages.length + 1, updatedAt: now };
-    // Saved before it is accepted: a message whose save failed is refused, and
-    // nothing else about the chat changes. One appended line; the summary's
-    // count and time are derived from the transcript, so it is not rewritten.
-    this.saveForRequest(session, [userMsg], undefined);
+    // Saved, and synced, before it is accepted: a message whose save failed is
+    // refused, and nothing else about the chat changes. One appended line (with
+    // the sender's key, so a resend after a restart finds it); the wait is the
+    // batch sync the append already scheduled. The summary's count and time are
+    // derived from the transcript, so it is not rewritten.
+    const clientKey = options.clientMessageId;
+    let saving: PromiseWithResolvers<string> | undefined;
+    if (clientKey !== undefined) {
+      saving = Promise.withResolvers<string>();
+      saving.promise.catch(() => undefined);
+      (session.clientMessagesSaving ??= new Map()).set(clientKey, saving.promise);
+    }
+    try {
+      this.saveForRequest(session, [userMsg], undefined, clientKey !== undefined ? new Map([[messageId, clientKey]]) : undefined);
+      try { await this.persistence?.durable(sessionId, messageId); }
+      catch (error) { throw this.saveFailed(error); }
+      if (this.sessions.get(sessionId) !== session || session.meta.status !== 'active') throw this.chatClosed('The chat was closed while this message was being saved.');
+    } catch (error) {
+      saving?.reject(error);
+      if (clientKey !== undefined && session.clientMessagesSaving?.get(clientKey) === saving?.promise) session.clientMessagesSaving?.delete(clientKey);
+      throw error;
+    }
     messages.push(userMsg);
-    session.meta = meta;
+    session.meta = { ...session.meta, messageCount: messages.length, updatedAt: now };
     session.countBehind = true;
     session.lastActivityAt = now;
 
-    if (options.clientMessageId !== undefined) {
+    if (clientKey !== undefined) {
       const accepted = (session.clientMessageIds ??= new Map());
-      accepted.set(options.clientMessageId, messageId);
+      accepted.set(clientKey, messageId);
       if (accepted.size > MAX_REMEMBERED_CLIENT_MESSAGE_IDS) {
         const oldest = accepted.keys().next().value;
         if (oldest !== undefined) accepted.delete(oldest);
       }
+      session.clientMessagesSaving?.delete(clientKey);
+      saving?.resolve(messageId);
     }
 
     if (options.pendingReply) {
@@ -921,6 +963,31 @@ export class CompanionChatManager {
     this._startNextTurn(session);
 
     return messageId;
+  }
+
+  /**
+   * The message a client key already names, for a resend: its id once saved,
+   * or the first send's answer when it is still being saved (its failure
+   * too). A key reused for a different message is refused, so a second
+   * message is never mistaken for a repeat of the first.
+   */
+  private async replayOfClientMessage(session: InternalSession, clientMessageId: string | undefined, content: string): Promise<string | undefined> {
+    if (clientMessageId === undefined) return undefined;
+    const saving = session.clientMessagesSaving?.get(clientMessageId);
+    const firstId = session.clientMessageIds?.get(clientMessageId) ?? (saving ? await saving : undefined);
+    if (firstId === undefined) return undefined;
+    const first = session.messages?.find((message) => message.id === firstId);
+    if (first && first.content !== content) {
+      throw new RefusalError(refusal({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        status: 409,
+        state: 'nothing was sent; the earlier message with this key stands',
+        reason: `The message key ${clientMessageId} was already used for a different message in this chat.`,
+        next: ['Send this message with a new key', 'To repeat the earlier message, send its exact text with the same key'],
+        retryable: false,
+      }));
+    }
+    return firstId;
   }
 
   dispose(): void { void this.close().catch(error => logger.warn('[companion-chat] close failed', { error: summarizeError(error) })); }
@@ -978,10 +1045,18 @@ export class CompanionChatManager {
     });
     let cancelledTurnId: string | undefined;
     const running = activeAtEnqueue as ActiveCompanionTurn | null;
+    // A resent steer (its key named the first) did not join the queue: it answers with what the first cancelled.
+    if (!running) cancelledTurnId = this.sessions.get(sessionId)?.steerCancelled?.get(messageId);
     if (running) {
       try {
         const result = await this.cancelTurn(sessionId, { turnId: running.turnId });
         cancelledTurnId = result.turnId;
+        const live = this.sessions.get(sessionId);
+        if (live) {
+          const cancelled = (live.steerCancelled ??= new Map());
+          cancelled.set(messageId, result.turnId);
+          if (cancelled.size > MAX_REMEMBERED_CLIENT_MESSAGE_IDS) cancelled.delete(cancelled.keys().next().value!);
+        }
       } catch (err: unknown) {
         // Benign races: the turn finished naturally (NO_ACTIVE_TURN), or the
         // slot already belongs to a newer turn, possibly this very steer
@@ -1162,14 +1237,25 @@ export class CompanionChatManager {
     return this.transcript(session).some((message) => message.inReplyTo === userMessageId && unsaved.has(message.id));
   }
 
-  /** Add a reply the turn produced to the transcript and save it. */
-  private recordReply(session: InternalSession, message: CompanionChatMessage): void {
+  /**
+   * Add a reply the turn produced to the transcript and save it. One terminal
+   * record per reply id: a second end for a reply already recorded (a publish
+   * that threw after the completed reply was stored, then the error path) is
+   * refused and changes nothing. Returns whether the reply was written to the
+   * store (false when it was refused, or kept in memory because the write failed).
+   */
+  private recordReply(session: InternalSession, message: CompanionChatMessage): boolean {
+    const transcript = this.transcript(session);
+    if (transcript.some((existing) => existing.id === message.id)) {
+      logger.warn('[companion-chat] a reply already recorded was not recorded a second time', { sessionId: session.meta.id, messageId: message.id, deliveryState: message.deliveryState ?? 'complete' });
+      return false;
+    }
     const owned = this.normalizeMessage(message);
-    this.transcript(session).push(owned);
+    transcript.push(owned);
     session.lastActivityAt = owned.createdAt;
-    session.meta = { ...session.meta, messageCount: this.transcript(session).length, updatedAt: owned.createdAt };
+    session.meta = { ...session.meta, messageCount: transcript.length, updatedAt: owned.createdAt };
     session.countBehind = true;
-    this.saveInBackground(session, [owned], false);
+    return this.saveInBackground(session, [owned], false);
   }
 
   private async _runTurn(
@@ -1248,7 +1334,7 @@ export class CompanionChatManager {
       publish,
       persistPartial: (message) => {
         const history = writer?.entriesToSave();
-        this.recordReply(session, { ...message, ...(history ? { modelHistory: history } : {}) });
+        return this.recordReply(session, { ...message, ...(history ? { modelHistory: history } : {}) });
       },
       resolveReply: (extra) => this.resolvePendingReply(userMessageId, { messageId: userMessageId, ...extra, error: 'Turn cancelled' }),
       settle: scope.settle,
@@ -1783,31 +1869,34 @@ export class CompanionChatManager {
   // ---------------------------------------------------------------------------
 
   /** Write the chat's changes now, or refuse the request that made them. */
-  private saveForRequest(session: InternalSession, changed: readonly CompanionChatMessage[], meta: CompanionChatSession | undefined): void {
+  private saveForRequest(session: InternalSession, changed: readonly CompanionChatMessage[], meta: CompanionChatSession | undefined, clientKeys?: ReadonlyMap<string, string>): void {
     if (!this.persistence) return;
     try {
-      this.write(session, changed, meta);
+      this.write(session, changed, meta, clientKeys);
     } catch (error) {
       logger.warn('[companion-chat] saving a chat change failed; the request was refused', { sessionId: session.meta.id, error: summarizeError(error) });
       throw this.saveFailed(error);
     }
   }
 
-  /** Write changes already in memory; a failure is kept for the chat's next save. */
-  private saveInBackground(session: InternalSession, changed: readonly CompanionChatMessage[], metaChanged: boolean): void {
-    if (!this.persistence) return;
+  /** Write changes already in memory; a failure is kept for the chat's next save. Returns whether the write was made. */
+  private saveInBackground(session: InternalSession, changed: readonly CompanionChatMessage[], metaChanged: boolean): boolean {
+    if (!this.persistence) return false;
     try {
       this.write(session, changed, metaChanged || session.metaUnsaved ? session.meta : undefined);
+      return true;
     } catch (error) {
       logger.warn('[companion-chat] saving a chat change failed; the next change of this chat writes it', { sessionId: session.meta.id, error: summarizeError(error) });
       const unsaved = (session.unsaved ??= new Set());
       for (const message of changed) unsaved.add(message.id);
       if (metaChanged) session.metaUnsaved = true;
       session.saveError = error;
+      return false;
     }
   }
 
-  private write(session: InternalSession, changed: readonly CompanionChatMessage[], meta: CompanionChatSession | undefined): void {
+  /** `clientKeys` (message id -> the sender's key) puts each key on the line of its message. */
+  private write(session: InternalSession, changed: readonly CompanionChatMessage[], meta: CompanionChatSession | undefined, clientKeys?: ReadonlyMap<string, string>): void {
     const persistence = this.persistence;
     if (!persistence) return;
     const owed = session.unsaved?.size && session.messages
@@ -1818,7 +1907,7 @@ export class CompanionChatManager {
       this.assertEffortPublication(summary.reasoningEffort);
       persistence.writeMeta(summary);
     }
-    persistence.appendMessages(summary?.id ?? session.meta.id, [...owed, ...changed]);
+    persistence.appendMessages(summary?.id ?? session.meta.id, [...owed, ...changed], clientKeys);
     delete session.unsaved;
     delete session.saveError;
     session.metaUnsaved = false;

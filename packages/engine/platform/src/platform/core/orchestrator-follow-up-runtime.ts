@@ -89,7 +89,9 @@ export class OrchestratorFollowUpRuntime {
   }
 
   private takeBatch(): ConversationFollowUpItem[] {
-    const batch = normalizeConversationFollowUpItems(this.queue);
+    // One batch answers one request: the items of the turn that started the first one.
+    const turnId = this.queue[0]?.turnId;
+    const batch = normalizeConversationFollowUpItems(this.queue.filter((item) => item.turnId === turnId));
     if (batch.length === 0) {
       this.queue = [];
       return [];

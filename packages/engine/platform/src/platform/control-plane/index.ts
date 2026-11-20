@@ -56,6 +56,7 @@ export type {
   SharedSessionRecord,
   SharedSessionStatus,
   SharedSessionSubmission,
+  SharedSessionSubmissionReceipt,
   SteerSharedSessionMessageInput,
   SubmitSharedSessionMessageInput,
 } from './session-types.js';
@@ -101,8 +102,33 @@ export type {
   SharedApprovalAuditRecord,
   SharedApprovalStatus,
   RequestSharedApprovalInput,
+  ApprovalActionInput,
 } from './approval-broker.js';
-export { ApprovalBroker } from './approval-broker.js';
+export { ApprovalBroker, LOCAL_APPROVAL_NODE } from './approval-broker.js';
+export {
+  approvalLifecycle,
+  readApproval,
+  formatApprovalRef,
+  parseApprovalRef,
+  isOpenApprovalStatus,
+} from './approval-lifecycle.js';
+export type {
+  ApprovalAction,
+  ApprovalActor,
+  ApprovalCause,
+  ApprovalHold,
+  ApprovalNextMove,
+  ApprovalReading,
+  ApprovalReason,
+  ApprovalReceiptState,
+  ApprovalRef,
+  ApprovalRefusalCode,
+  ApprovalRequester,
+  ApprovalTransition,
+  ApprovalViewer,
+  TransitionOutcome,
+  TransitionRequest,
+} from './approval-lifecycle.js';
 export {
   OWNER_ANSWER_AGENT_METADATA,
   OWNER_ANSWER_SESSION_METADATA,

@@ -1288,6 +1288,11 @@
       "types": "./platform/dist/platform/utils/target-ref.d.ts",
       "import": "./platform/dist/platform/utils/target-ref.js"
     },
+    "./platform/platform/utils/owner-fence": {
+      "bun": "./platform/src/platform/utils/owner-fence.ts",
+      "types": "./platform/dist/platform/utils/owner-fence.d.ts",
+      "import": "./platform/dist/platform/utils/owner-fence.js"
+    },
     "./platform/platform/workspace/registration/resolution": {
       "bun": "./platform/src/platform/workspace/registration/resolution.ts",
       "types": "./platform/dist/platform/workspace/registration/resolution.d.ts",
@@ -2068,6 +2073,16 @@
       "types": "./terminal-shell/dist/renderer/status-line.d.ts",
       "import": "./terminal-shell/dist/renderer/status-line.js"
     },
+    "./terminal-shell/footer-targets": {
+      "bun": "./terminal-shell/src/renderer/footer-targets.ts",
+      "types": "./terminal-shell/dist/renderer/footer-targets.d.ts",
+      "import": "./terminal-shell/dist/renderer/footer-targets.js"
+    },
+    "./terminal-shell/git-status": {
+      "bun": "./terminal-shell/src/git-status.ts",
+      "types": "./terminal-shell/dist/git-status.d.ts",
+      "import": "./terminal-shell/dist/git-status.js"
+    },
     "./terminal-shell/session-permission-mode": {
       "bun": "./terminal-shell/src/session-permission-mode.ts",
       "types": "./terminal-shell/dist/session-permission-mode.d.ts",
@@ -2457,6 +2472,11 @@
       "bun": "./terminal-shell/src/onboarding-markers.ts",
       "types": "./terminal-shell/dist/onboarding-markers.d.ts",
       "import": "./terminal-shell/dist/onboarding-markers.js"
+    },
+    "./terminal-shell/first-run": {
+      "bun": "./terminal-shell/src/first-run/index.ts",
+      "types": "./terminal-shell/dist/first-run/index.d.ts",
+      "import": "./terminal-shell/dist/first-run/index.js"
     },
     "./terminal-shell/input-content": {
       "bun": "./terminal-shell/src/input-content.ts",
@@ -2937,6 +2957,21 @@
       "bun": "./terminal-shell/src/plain-line-input.ts",
       "types": "./terminal-shell/dist/plain-line-input.d.ts",
       "import": "./terminal-shell/dist/plain-line-input.js"
+    },
+    "./terminal-shell/command-palette": {
+      "bun": "./terminal-shell/src/command-palette.ts",
+      "types": "./terminal-shell/dist/command-palette.d.ts",
+      "import": "./terminal-shell/dist/command-palette.js"
+    },
+    "./terminal-shell/command-palette-types": {
+      "bun": "./terminal-shell/src/command-palette-types.ts",
+      "types": "./terminal-shell/dist/command-palette-types.d.ts",
+      "import": "./terminal-shell/dist/command-palette-types.js"
+    },
+    "./terminal-shell/renderer/command-palette": {
+      "bun": "./terminal-shell/src/renderer/command-palette.ts",
+      "types": "./terminal-shell/dist/renderer/command-palette.d.ts",
+      "import": "./terminal-shell/dist/renderer/command-palette.js"
     },
     "./terminal-shell/confirm-dialog": {
       "bun": "./terminal-shell/src/confirm-dialog.ts",

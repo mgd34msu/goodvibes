@@ -8,7 +8,7 @@ import { renderDiffView } from '../renderer/diff-view.ts';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { approvalDiffText, approvalHunkDiffText } from './approval-diff.ts';
 import type { HunkSelectionState } from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
-import { buildPermissionApprovalBrief, execFileOperationLines, execRunPlace, fallbackAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { approvalQuestion, buildPermissionApprovalBrief, execFileOperationLines, execRunPlace, fallbackAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 import type {
   PermissionPromptRequest,
@@ -139,7 +139,7 @@ export class PermissionPromptUI extends PermissionPromptFacts {
       : promptHints(request, (request.replyBuffer ?? '').length > 0);
     const height = modalHeightFor(screenWidth, screenHeight, { hints }, body);
     const f = beginModal(screenWidth, screenHeight, {
-      title: brief.title,
+      title: approvalQuestion(request),
       sub: label.toLowerCase(),
       hints,
       height,

@@ -23,6 +23,11 @@ function connectedDaemon(controller: OnboardingWizardControllerLike): ReturnType
   return parseDaemonOrigin(controller.runtimeSnapshot?.bindSettings.connectedDaemonUrl);
 }
 
+/** The scheme of the daemon this terminal is connected to (`http` when none): an adopted URL keeps it. */
+export function adoptedDaemonScheme(controller: OnboardingWizardControllerLike): 'http' | 'https' {
+  return connectedDaemon(controller)?.scheme ?? 'http';
+}
+
 /**
  * Push the daemon-source radio, plus the host/port/token/connect fields when
  * 'adopt' is selected, onto the Network step's field list. Independent of the

@@ -260,9 +260,11 @@ export function createOwnerInboxCommands<Context extends OwnerInboxCommandContex
           const words = rest.join(' ').trim();
           // With options, the first word is the choice and the rest, as typed, its note.
           const space = words.search(/\s/);
+          // An approval is answered at the revision shown: one that moved meanwhile is refused with how it stands now.
+          const shown = item.revision !== undefined ? { expectedRevision: item.revision } : {};
           const answer = item.options.length > 0
-            ? { option: space < 0 ? words : words.slice(0, space), ...(space < 0 ? {} : { text: words.slice(space).trim() }) }
-            : { text: words };
+            ? { option: space < 0 ? words : words.slice(0, space), ...(space < 0 ? {} : { text: words.slice(space).trim() }), ...shown }
+            : { text: words, ...shown };
           const outcome = await inbox.answer(item.id, answer);
           if (outcome.applied) {
             say(context, `[inbox] Answered ${shortId(outcome.item.id)}: ${answerText(outcome.item)}${deliveryNotice(outcome.delivery)}`);

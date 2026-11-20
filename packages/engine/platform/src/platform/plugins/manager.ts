@@ -10,6 +10,7 @@ import {
   getPluginDirectories,
   getUserPluginDirectory,
   loadPlugin,
+  pluginContentDigest,
   unloadPlugin,
   PluginCleanupError,
   type DiscoveredPlugin,
@@ -119,6 +120,11 @@ function readTrustRecords(raw: unknown): Record<string, PluginTrustRecord> {
     records[name] = record as PluginTrustRecord;
   }
   return records;
+}
+
+/** One copy of a plugin as trust is bound to it: its directory and its content digest. */
+function copyIdentity(discovered: DiscoveredPlugin): { readonly dir: string; readonly digest: string | null } {
+  return { dir: resolve(discovered.pluginDir), digest: pluginContentDigest(discovered) };
 }
 
 const DEFAULT_STATE: PluginState = { enabled: {}, enabledDirs: {}, config: {}, trust: {}, quarantine: {}, publisherKeys: {} };
@@ -241,7 +247,7 @@ export class PluginManager {
     return this.ownOperation(async () => {
       if (deps.inFlight) this.inFlight = deps.inFlight;
       // Each start reads the plugin's current tier, including one another app set since.
-      this.deps = { ...deps, inFlight: this.inFlight, trustTier: (pluginName) => this.currentTrust().getTier(pluginName) };
+      this.deps = { ...deps, inFlight: this.inFlight, trustTier: (pluginName, copy) => this.tierOf(pluginName, copy) };
       this.loadState();
       await this.loadEnabledPlugins();
     });
@@ -261,7 +267,7 @@ export class PluginManager {
         author: d.manifest.author,
         enabled: this.isEnabled(d.manifest.name),
         active: loaded?.active ?? false,
-        trustTier: trust.getTier(d.manifest.name),
+        trustTier: trust.tierFor(d.manifest.name, copyIdentity(d)),
         quarantined: this.isQuarantined(d.manifest.name),
         ...(startFailure !== undefined ? { startFailure } : {}),
       };
@@ -298,10 +304,13 @@ export class PluginManager {
     note?: string | undefined,
   ): PluginTrustChangeResult {
     if (this.closed) return { ok: false, error: 'Plugin manager is closed' };
-    const discovered = this.findDiscoveredPlugin(name);
+    // The tier is given to one copy: the one enabled (or, when none is, the one found first).
+    const discovered = this.copyOf(name);
     if (!discovered) {
       return { ok: false, error: this.notFoundError(name) };
     }
+    const copy = copyIdentity(discovered);
+    if (copy.digest === null) return { ok: false, error: `Trust for '${name}' was not set: its entry file in ${copy.dir} cannot be read` };
 
     // Warn if trying to manually set 'trusted' without a signed manifest.
     if (tier === 'trusted') {
@@ -316,7 +325,7 @@ export class PluginManager {
 
     // Build the record off to the side and publish it only once it is on disk,
     // so a refused write leaves the live tier as it was.
-    const record = new PluginTrustStore().setTier(name, tier, { note });
+    const record = new PluginTrustStore().setTier(name, tier, { note, boundDir: copy.dir, contentDigest: copy.digest });
     const failure = this.saveTrustRecord(name, record);
     if (failure) return { ok: false, error: `Trust tier for '${name}' was not saved, ${failure}` };
     this.trustStore.importRecords({ [name]: record });
@@ -338,10 +347,12 @@ export class PluginManager {
     signatureRejected?: true | undefined;
   } {
     if (this.closed) return { ok: false, error: 'Plugin manager is closed' };
-    const discovered = this.findDiscoveredPlugin(name);
+    const discovered = this.copyOf(name);
     if (!discovered) {
       return { ok: false, error: this.notFoundError(name) };
     }
+    const copy = copyIdentity(discovered);
+    if (copy.digest === null) return { ok: false, error: `Trust for '${name}' was not set: its entry file in ${copy.dir} cannot be read` };
 
     const manifest = discovered.manifest as {
       name: string;
@@ -350,7 +361,7 @@ export class PluginManager {
       signature?: string | undefined;
     };
 
-    const result = new PluginTrustStore().trustSigned(name, manifest, publicKey);
+    const result = new PluginTrustStore().trustSigned(name, manifest, publicKey, { boundDir: copy.dir, contentDigest: copy.digest });
     if (!result.ok) {
       return { ok: false, error: result.reason, signatureRejected: true };
     }
@@ -430,7 +441,7 @@ export class PluginManager {
     }
 
     const requested = declaredPluginCapabilities(discovered.manifest) as PluginCapability[];
-    const tier = this.currentTrust().getTier(name);
+    const tier = this.tierOf(name, discovered);
     const highRisk = requested.filter((c) => isHighRiskCapability(c));
     const safe = requested.filter((c) => !isHighRiskCapability(c));
     const grant = resolvePluginGrant(name, discovered.manifest, tier);
@@ -774,7 +785,7 @@ export class PluginManager {
       this.emitLifecycle(pluginId, 'loaded', (bus, ctx) => emitPluginLoaded(bus, ctx, { pluginId, version: loaded.manifest.version, capabilities: [...((loaded.manifest as { capabilities?: string[] }).capabilities ?? [])] }));
       this.emitLifecycle(pluginId, 'active', (bus, ctx) => emitPluginActive(bus, ctx, { pluginId }));
       // Running with part of what it declares withheld by its trust tier: those registrations are refused.
-      const tier = this.currentTrust().getTier(pluginId);
+      const tier = this.tierOf(pluginId, discovered);
       const grant = resolvePluginGrant(pluginId, discovered.manifest, tier);
       const withheld = [...grant.declared].filter((capability) => !grant.granted.has(capability));
       if (withheld.length > 0) {
@@ -858,7 +869,8 @@ export class PluginManager {
         try { await this.unload(loaded, 'trust changed'); }
         catch (error) { if (!(error instanceof PluginCleanupError)) throw error; this.cleanupErrors.add(error); }
         finally { this.plugins.delete(name); }
-        const discovered = this.findDiscoveredPlugin(name);
+        // Only the copy the owner enabled starts again, at the tier given to that copy and its content.
+        const discovered = this.copyOf(name);
         if (!discovered || !this.isEnabled(name) || this.isQuarantined(name)) return { ok: true };
         const { loaded: next, failure } = await this.acquireOrFail(discovered, deps);
         if (next) { this.plugins.set(name, next); return { ok: true }; }
@@ -1115,6 +1127,22 @@ export class PluginManager {
 
   private findDiscoveredPlugin(name: string) {
     return this.discoverPlugins().find((plugin) => plugin.manifest.name === name);
+  }
+
+  /**
+   * The copy of a plugin that its name stands for: the one in the directory it
+   * was enabled from, never a same-named copy found earlier in the search order
+   * (a repository's own); the first one found only when it was never enabled.
+   */
+  private copyOf(name: string): DiscoveredPlugin | undefined {
+    const bound = this.state.enabledDirs[name];
+    if (bound === undefined) return this.findDiscoveredPlugin(name);
+    return discoverAllPlugins(this.pathOptions).find((plugin) => plugin.manifest.name === name && resolve(plugin.pluginDir) === bound);
+  }
+
+  /** The tier of one copy: what was trusted is the copy and content that runs at that tier. */
+  private tierOf(name: string, discovered: DiscoveredPlugin): PluginTrustTier {
+    return this.currentTrust().tierFor(name, copyIdentity(discovered));
   }
 
   private notFoundError(name: string): string {

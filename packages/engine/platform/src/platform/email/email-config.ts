@@ -7,6 +7,7 @@
  * credential-scope rule be exercised without a mail server.
  */
 
+import { revealOrNull, type Secret } from '../security/secret.js';
 import { ownerMessageForFailure } from './imap-open.js';
 import { isLoopbackHost } from '../utils/reachable-base-url.js';
 import type { EmailCapabilityFailureNotice } from './imap-open.js';
@@ -246,7 +247,7 @@ export class EmailCredentialUnavailableError extends Error {
  */
 export async function resolveEmailPassword(
   passwordRef: string,
-  secretsManager: { readonly get: (key: string) => Promise<string | null> },
+  secretsManager: { readonly get: (key: string) => Promise<Secret | null> },
   setting = 'surfaces.email.password',
 ): Promise<string> {
   // The store is asked for a KEY; it never parses references, so a reference of
@@ -254,7 +255,7 @@ export async function resolveEmailPassword(
   const parsed = parseEmailSecretRef(setting, passwordRef);
   if ('problem' in parsed) throw new EmailCredentialUnavailableError(`${parsed.problem}.`);
   const key = parsed.key;
-  const value = await secretsManager.get(key);
+  const value = revealOrNull(await secretsManager.get(key), 'dispatch');
   if (!value) {
     throw new EmailCredentialUnavailableError(
       `${setting} names '${key}', and no secret by that name was found.`,

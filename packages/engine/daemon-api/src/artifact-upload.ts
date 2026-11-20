@@ -55,7 +55,15 @@ export interface ArtifactStoreUploadLike {
   readonly create: (input: ArtifactCreateRequest) => Promise<unknown>;
   readonly getMaxBytes?: (() => number) | undefined;
   readonly createFromStream?: ((input: ArtifactStreamCreateRequest) => Promise<unknown>) | undefined;
+  /** Removes a stored artifact; a route that stored one and then failed to use it removes it. */
+  readonly delete?: ((id: string) => unknown) | undefined;
 }
+
+/**
+ * Checks an upload's fields before anything is stored. Returns the refusal to
+ * answer with, or undefined to store the upload.
+ */
+export type ArtifactUploadFieldCheck = (fields: ArtifactUploadFieldMap) => Response | undefined;
 
 export interface ArtifactUploadResult {
   readonly artifact: unknown;
@@ -166,13 +174,14 @@ export function isArtifactUploadRequest(req: Request): boolean {
 export async function createArtifactFromUploadRequest(
   artifactStore: ArtifactStoreUploadLike,
   req: Request,
+  checkFields?: ArtifactUploadFieldCheck,
 ): Promise<ArtifactUploadResult | Response> {
   const contentType = req.headers.get('content-type') ?? '';
   try {
     if (contentType.toLowerCase().includes('multipart/form-data')) {
-      return await createArtifactFromMultipart(artifactStore, req);
+      return await createArtifactFromMultipart(artifactStore, req, checkFields);
     }
-    return await createArtifactFromRawBody(artifactStore, req);
+    return await createArtifactFromRawBody(artifactStore, req, checkFields);
   } catch (error) {
     // Every refusal below is a thrown error that carries its own status (400, 413);
     // anything else is the store failing, which is a server fault.
@@ -246,8 +255,9 @@ function isFileLike(value: unknown): value is UploadFileLike {
 async function createArtifactFromMultipart(
   artifactStore: ArtifactStoreUploadLike,
   req: Request,
+  checkFields: ArtifactUploadFieldCheck | undefined,
 ): Promise<ArtifactUploadResult | Response> {
-  if (req.body) return createArtifactFromStreamingMultipart(artifactStore, req);
+  if (req.body) return createArtifactFromStreamingMultipart(artifactStore, req, checkFields);
 
   let form: FormData;
   try {
@@ -277,6 +287,8 @@ async function createArtifactFromMultipart(
   }
 
   if (!file) return jsonErrorResponse({ error: 'Multipart upload requires a file field.' }, { status: 400 });
+  const refused = checkFields?.(fields);
+  if (refused) return refused;
   const maxBytes = artifactStore.getMaxBytes?.();
   if (typeof maxBytes === 'number' && typeof file.size === 'number' && file.size > maxBytes) {
     return jsonErrorResponse({ error: `Artifact exceeds the ${maxBytes}-byte limit.` }, { status: 413 });
@@ -298,10 +310,13 @@ async function createArtifactFromMultipart(
 async function createArtifactFromStreamingMultipart(
   artifactStore: ArtifactStoreUploadLike,
   req: Request,
+  checkFields: ArtifactUploadFieldCheck | undefined,
 ): Promise<ArtifactUploadResult | Response> {
   let spooled: MultipartUploadSpool | null = null;
   try {
     spooled = await spoolMultipartUpload(req, artifactStore.getMaxBytes?.());
+    const refused = checkFields?.(spooled.fields);
+    if (refused) return refused;
     const artifact = await createArtifactFromStream(artifactStore, {
       stream: readFileChunks(spooled.filePath),
       fields: spooled.fields,
@@ -326,6 +341,7 @@ async function createArtifactFromStreamingMultipart(
 async function createArtifactFromRawBody(
   artifactStore: ArtifactStoreUploadLike,
   req: Request,
+  checkFields: ArtifactUploadFieldCheck | undefined,
 ): Promise<ArtifactUploadResult | Response> {
   if (!req.body) return jsonErrorResponse({ error: 'Raw artifact upload requires a request body.' }, { status: 400 });
   const url = new URL(req.url);
@@ -337,6 +353,11 @@ async function createArtifactFromRawBody(
     // metadata the caller sent would report success for a record that lost it.
     await drainUnreadBody(req.body);
     return readServiceErrorResponse(error);
+  }
+  const refused = checkFields?.(fields);
+  if (refused) {
+    await drainUnreadBody(req.body);
+    return refused;
   }
   const contentType = req.headers.get('content-type')?.split(';')[0]?.trim();
   const maxBytes = artifactStore.getMaxBytes?.();

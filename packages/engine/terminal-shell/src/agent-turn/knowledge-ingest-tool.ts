@@ -276,6 +276,9 @@ function requestForArgs(args: AgentKnowledgeIngestToolArgs): AgentKnowledgeInges
     const requestedLimit = readImportLimit(args.limit);
     const limit = Math.min(requestedLimit, BROWSER_HISTORY_LIMIT_MAX);
     const sinceWindowMs = readSinceWindowMs(args.sinceDays);
+    // A list not given is omitted, so the host applies its default (every installed browser; history and
+    // bookmarks); one given is sent as given, and an empty one is refused there: it selects nothing.
+    const browsersGiven = args.browsers !== undefined && args.browsers !== null, kindsGiven = args.sourceKinds !== undefined && args.sourceKinds !== null;
     const browsers = readStringList(args.browsers), kinds = readStringList(args.sourceKinds);
     const homeOverride = readOptionalString(args.homeOverride);
     return {
@@ -285,16 +288,16 @@ function requestForArgs(args: AgentKnowledgeIngestToolArgs): AgentKnowledgeInges
       label: 'browser-history import',
       batch: true,
       details: [
-        `browsers ${browsers.length > 0 ? browsers.join(', ') : 'all'}`,
-        `source kinds ${kinds.length > 0 ? kinds.join(', ') : 'all'}`,
+        `browsers ${browsersGiven ? browsers.join(', ') || 'none' : 'all'}`,
+        `source kinds ${kindsGiven ? kinds.join(', ') || 'none' : 'all'}`,
         `limit ${limit}`,
         `window ${sinceWindowMs === undefined ? 'none (all history up to the limit)' : `last ${Math.round(sinceWindowMs / 86_400_000)} day(s)`}`,
         ...(homeOverride ? [`profile home ${homeOverride}`] : []),
       ],
       ...(requestedLimit > limit ? { notes: [`The limit was capped at ${limit} (requested ${requestedLimit}).`] } : {}),
       payload: {
-        browsers: [...browsers],
-        sourceKinds: [...kinds],
+        ...(browsersGiven ? { browsers: [...browsers] } : {}),
+        ...(kindsGiven ? { sourceKinds: [...kinds] } : {}),
         homeOverride,
         limit,
         sinceMs: sinceWindowMs === undefined ? undefined : Date.now() - sinceWindowMs,

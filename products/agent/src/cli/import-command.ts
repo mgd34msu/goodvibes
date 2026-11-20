@@ -1,4 +1,5 @@
 import { isAbsolute, resolve } from 'node:path';
+import { optionArgsOf } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
 import { assertNoSecretLikeMemoryText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/memory-safety';
 import { withMemoryCommandStore } from './memory-command-access.ts';
 import { buildAgentSkillRequirements } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
@@ -284,7 +285,8 @@ function usageImport(): string {
 
 export async function handleImportCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
   try {
-    const [sourceRaw, ...rest] = runtime.cli.commandArgs;
+    // --apply and --apply-permissions are read only from what was typed before `--`.
+    const [sourceRaw, ...rest] = optionArgsOf(runtime.cli);
     const source = (sourceRaw ?? '').toLowerCase();
     if (!source) return failure(runtime, 'invalid_import_command', usageImport(), 2);
     if (source !== 'openclaw') {
@@ -292,7 +294,7 @@ export async function handleImportCommand(runtime: CliCommandRuntime): Promise<C
     }
     const withPermissions = rest.includes('--apply-permissions');
     const apply = rest.includes('--apply') || withPermissions;
-    const pathArg = rest.find((arg) => !arg.startsWith('--'));
+    const pathArg = rest.find((arg) => !arg.startsWith('--')) ?? runtime.cli.literalArgs?.[0];
     const sourcePath = resolveSourcePath(runtime, pathArg);
     const plan = scanOpenClawWorkspace(sourcePath);
     if (!plan.exists) {

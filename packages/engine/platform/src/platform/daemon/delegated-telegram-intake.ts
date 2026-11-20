@@ -354,8 +354,9 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
       // Once the broker has recorded the owner's answer, a later failure must not look retryable.
       let resolved = false;
       try {
-      const settled = await pending.approval.resolveOwnerDecision({ decision: { approved: input.approved, ...(input.approved ? { modifiedArgs: input } : {}) }, actor: expectedOwner.principalId, actorSurface: 'paired-owner-command', assertCurrent: assert });
+      const outcome = await pending.approval.resolveOwnerDecision({ decision: { approved: input.approved, ...(input.approved ? { modifiedArgs: input } : {}) }, actor: expectedOwner.principalId, actorSurface: 'paired-owner-command', assertCurrent: assert });
       resolved = true;
+      const settled = outcome.applied ? outcome.record : null;
       assertOwner();
       if (input.approved && (settled?.status !== 'approved' || settled.decision?.disposition !== 'approved' || JSON.stringify(settled.decision.modifiedArgs) !== JSON.stringify(input))) { pending.sourceController.abort(); throw new DelegatedIntakeRefusal('not-durably-resolved'); }
       if (!input.approved) {
@@ -438,7 +439,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     if (record) { if (!delegatedReviewOwnership(owner)(record)) throw new DelegatedIntakeRefusal('not-owner'); }
     else if (pending && sameNativeInboundSourceRef(pending.ref, ref)) { if (!isDeepStrictEqual(pending.configuration.expected, owner)) throw new DelegatedIntakeRefusal('not-owner'); }
     else return delegatedHold('missing-source-proof');
-    if (pending) { pending.sourceController.abort(); movePending(pending, 'cancelled'); await this.deps.approvals.cancelApproval(pending.approval.approval.id, owner.principalId, 'paired-owner-command'); assertCurrent(); }
+    if (pending) { pending.sourceController.abort(); movePending(pending, 'cancelled'); await this.deps.approvals.cancelApproval(pending.approval.approval.id, { actor: owner.principalId, actorSurface: 'paired-owner-command', expectedRevision: undefined /* the asker withdrawing its own ask */ }); assertCurrent(); }
     await this.retireQueuedInput(ref); assertCurrent();
     await this.receiver.cancel(ref); assertCurrent(); return { outcome: 'cancelled', execution: 'not-started' };
   }

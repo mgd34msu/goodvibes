@@ -56,6 +56,8 @@ import type { SmtpSendResult } from './smtp-client.js';
 import type { EmailSenderClaim, EmailSenderClaimDescriber } from './sender-claim.js';
 import { mailboxAuthservIds, readSenderAuthentication } from '../google/sender-authentication.js';
 import type { Socket } from 'node:net';
+import { createHash, randomUUID } from 'node:crypto';
+import { DraftAppendUnconfirmedError } from './imap-client.js';
 
 // Re-exported so this module stays the one entry point callers already import.
 export type { EmailInboxUnreadableResponse, EmailMessageRead } from './email-read-results.js';
@@ -603,26 +605,43 @@ export class EmailService {
     const chosen = input.mailbox ?? (config.draftsMailbox.length > 0 ? config.draftsMailbox : undefined);
     const remembered = chosen === undefined ? this.#draftsMailboxes.get(account) : undefined;
     const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
+    // One Message-ID per draft, kept for every attempt: after a save whose answer was lost, the
+    // next save of the same draft looks for it under that id (one UID SEARCH) before any second APPEND.
+    const draftKey = draftIdentityKey(account, { ...input, from, mailbox: chosen });
+    const uncertain = this.#unconfirmedDrafts.get(draftKey);
+    const messageId = uncertain ?? `<${randomUUID()}@${messageIdDomain(from)}>`;
     try {
-      const result = await withEmailReadConnection(this.deps, config, sourceRead, undefined, (client) => client.appendDraft({
-        to: input.to,
-        subject: input.subject,
-        body: input.body,
-        from,
-        inReplyTo: input.inReplyTo,
-        references: input.references,
-        mailbox: chosen ?? remembered,
-      }));
+      const result = await withEmailReadConnection(this.deps, config, sourceRead, undefined, async (client) => {
+        if (uncertain !== undefined) {
+          const found = await client.findDraft(messageId, chosen ?? remembered);
+          if (found) return found;
+        }
+        return client.appendDraft({
+          to: input.to,
+          subject: input.subject,
+          body: input.body,
+          from,
+          inReplyTo: input.inReplyTo,
+          references: input.references,
+          mailbox: chosen ?? remembered,
+          messageId,
+        });
+      }, { effect: true });
+      this.#unconfirmedDrafts.delete(draftKey);
       // Discovery costs a LIST (and, on a server that flags nothing, a model
       // reading); the folder it found does not move between drafts.
       if (chosen === undefined) this.#draftsMailboxes.set(account, result.mailbox);
       return result;
     } catch (error) {
+      if (error instanceof DraftAppendUnconfirmedError) rememberBounded(this.#unconfirmedDrafts, draftKey, messageId);
       // A remembered folder that stopped working is discovered again next time.
       if (remembered !== undefined) this.#draftsMailboxes.delete(account);
       throw error;
     }
   }
+
+  /** Drafts whose save got no answer, by what they say: the Message-ID the next save of the same draft looks for first. */
+  readonly #unconfirmedDrafts = new Map<string, string>();
 
   /**
    * Replace one saved draft with an edited one, so the Drafts folder keeps one
@@ -655,7 +674,8 @@ export class EmailService {
       mailbox: chosen ?? remembered,
       uid: input.uid,
       uidValidity: input.uidValidity,
-    }));
+      messageId: `<${randomUUID()}@${messageIdDomain(from)}>`,
+    }), { effect: true });
     if (chosen === undefined) this.#draftsMailboxes.set(account, result.mailbox);
     return result;
   }
@@ -669,7 +689,7 @@ export class EmailService {
     const config = this.getValidatedConfig('read');
     const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
     return withEmailReadConnection(this.deps, config, sourceRead, undefined,
-      (client) => client.applyMessageAction(uid, action, uidValidity));
+      (client) => client.applyMessageAction(uid, action, uidValidity), { effect: true });
   }
 
   /**
@@ -891,4 +911,25 @@ function smtpSettingFor(config: EmailConfig): string {
 /** The mailbox account a drafts folder belongs to. */
 function draftsAccountKey(config: EmailConfig): string {
   return JSON.stringify([config.imapHost, config.imapPort, config.username]);
+}
+
+/** What makes two saves the same draft: the account, the folder asked for and every field of the message. */
+function draftIdentityKey(account: string, draft: { readonly to: string; readonly subject: string; readonly body: string; readonly from: string; readonly inReplyTo?: string | undefined; readonly references?: string | undefined; readonly mailbox?: string | undefined }): string {
+  return createHash('sha256').update(JSON.stringify([account, draft.mailbox ?? '', draft.from, draft.to, draft.subject, draft.body, draft.inReplyTo ?? '', draft.references ?? ''])).digest('hex');
+}
+
+/** The domain of a From address for a Message-ID, or `goodvibes.invalid` when it has none this id may carry. */
+function messageIdDomain(from: string): string {
+  const domain = /@([A-Za-z0-9.-]+)>?\s*$/.exec(from.trim())?.[1];
+  return domain && domain.length > 0 ? domain.toLowerCase() : 'goodvibes.invalid';
+}
+
+/** Remembers at most 128 unconfirmed drafts; the oldest goes first. */
+function rememberBounded(map: Map<string, string>, key: string, value: string): void {
+  map.delete(key);
+  map.set(key, value);
+  if (map.size > 128) {
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) map.delete(oldest);
+  }
 }

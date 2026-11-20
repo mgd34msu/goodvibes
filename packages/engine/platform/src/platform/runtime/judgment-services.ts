@@ -1,3 +1,4 @@
+import { revealOrNull, type Secret } from '../security/secret.js';
 import { composeJudgmentVolumeMonitor, type JudgmentVolumeMonitorHandle } from './judgment-volume-monitor.js';
 import { activateClassicFallback, configureDecisionModelPolicy, noteDecisionModelAnswered, noteDecisionModelFailure, resetDecisionModelEpisode } from './decision-policy.js';
 import { assertDecisionModelsEnabled } from '@goodvibes-jev/engine/errors';
@@ -44,7 +45,7 @@ export interface JudgmentSettingsSource {
     onDidChangeIncarnation?(listener: () => void): () => void;
   };
   readonly secrets: {
-    get(key: string): Promise<string | null>;
+    get(key: string): Promise<Secret | null>;
     getCredentialMutationState?(): Readonly<{ generation: number; pending: boolean }>;
     onDidInvalidateCredentials?(listener: () => void): () => void;
     /** Local alias/scope observation; its value and revision stay private. */
@@ -87,7 +88,7 @@ async function storedKey(secrets: JudgmentSettingsSource['secrets'], name: strin
       cancelled = () => reject(new JudgmentError('aborted', 'the judgment call was cancelled'));
       signal?.addEventListener('abort', cancelled, { once: true });
     });
-    const value = (await Promise.race([secrets.get(name), expired]))?.trim();
+    const value = revealOrNull(await Promise.race([secrets.get(name), expired]), 'dispatch')?.trim();
     return value === '' ? undefined : value;
   } catch (error) {
     if (signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');

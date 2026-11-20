@@ -113,6 +113,10 @@ import { evaluateSessionMaintenance } from '@/runtime/index.ts';
 import { createCancelGeneration, runOwnedTurnRetry } from './core/turn-cancellation.ts';
 import { wireInteractionSeams, createMemoryProvenanceUi } from './runtime/interaction-seams.ts';
 import { createPowerChipSource } from './core/power-chip-source.ts';
+import { createModeWordsSource, getSharedModeFlash } from '@goodvibes-jev/engine/terminal-shell/session-permission-mode';
+import { keycapLabel } from '@goodvibes-jev/engine/terminal-shell/status-line';
+import { drawSplashAdditions } from '@goodvibes-jev/engine/terminal-shell/first-run';
+import { getSharedNotificationFeed } from './views/notifications-feed.ts';
 import { keepAwakeHolding } from './core/power-status.ts';
 import { createKeepAwakeForwarder, readServedKeepAwakeState, watchDaemonPowerEvents, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 import { resolveOperatorRpc } from './input/commands/operator-rpc.ts';
@@ -437,6 +441,11 @@ async function main(prepared: PreparedShellCliRuntime) {
   });
   unsubs.push(uiServices.events.turns.on('TURN_COMPLETED', () => powerChipSource.refresh()));
   unsubs.push(powerChipSource.stop, unsubscribeKeepAwakeForward);
+  // The status bar's mode words, recomputed only when the mode in force can change (session-permission-mode.ts);
+  // its flash after Shift+Tab, and the unread notices count, each repaint when they change.
+  const modeWords = createModeWordsSource(configManager, () => render());
+  getSharedModeFlash().onChange = () => render();
+  unsubs.push(() => modeWords.stop(), getSharedNotificationFeed().subscribe(() => render()));
   // Turning wake detection on from anywhere (settings, /config, a model's settings
   // call) runs the same voice setup as /voice wake setup and shows its plan.
   unsubs.push(configManager.subscribe('voice.wake.enabled', (enabled) => {
@@ -1044,11 +1053,18 @@ async function main(prepared: PreparedShellCliRuntime) {
       },
       showExitNotice: input.showExitNotice,
       lastCopyTime: input.lastCopyTime,
-      model: activeModel.footerModel, // prices the cost; the header names the model
-      workingDir,
-      homeDirectory,
+      model: activeModel.footerModel, // prices the cost
+      // The model's display name; while serving differs from the selection, the serving id (the header says why).
+      modelLabel: activeModel.diverged ? activeModel.headerModel : currentModel.displayName || activeModel.headerModel,
       view: viewFrame?.footer ?? null,
-      branch: lastGitInfoRef.value?.branch,
+      // '?' is the git read's "no repository here (or no answer yet)": no branch segment.
+      branch: lastGitInfoRef.value && lastGitInfoRef.value.branch !== '?' ? lastGitInfoRef.value.branch : undefined,
+      branchChanged: lastGitInfoRef.value?.dirty === true,
+      modeWords: modeWords.current(),
+      modeKey: keycapLabel(ctx.services.keybindingsManager.getComboLabel('cycle-permission-mode')),
+      modeFlash: getSharedModeFlash().active(),
+      unreadNotices: getSharedNotificationFeed().unreadCount(),
+      noticesKey: keycapLabel(ctx.services.keybindingsManager.getComboLabel('open-notifications')),
       contextWindow: knownContextWindow,
       contextStatusHint,
       submissionStatus,
@@ -1139,7 +1155,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     let viewport = viewFrame
       ? viewFrame.body(vHeight)
       : conversation.isSplashShowing()
-        ? centerViewportContent(conversationViewport!.viewport, conversationViewport!.effectiveHeight, conversationWidth)
+        ? drawSplashAdditions(centerViewportContent(conversationViewport!.viewport, conversationViewport!.effectiveHeight, conversationWidth), conversationViewport!.effectiveHeight, conversationWidth, { modeKey: keycapLabel(ctx.services.keybindingsManager.getComboLabel('cycle-permission-mode')) })
         : conversationViewport!.viewport;
 
     if (orchestrator.isThinking && !viewFrame) {

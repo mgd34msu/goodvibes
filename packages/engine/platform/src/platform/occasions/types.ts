@@ -432,16 +432,6 @@ export interface OccasionStateDisclosure {
   readonly attributions: number;
   /** Records dropped by the last sweep, by reason. */
   readonly lastSweep: OccasionSweepReport | null;
-  /**
-   * Open items whose raise ledger was rebuilt when this file was loaded.
-   *
-   * The receipt for the migration off the old repeating cadence. A machine that
-   * had been raising one occurrence every hour loads with items carrying a
-   * raise count and no served boundaries; they are kept open, marked as having
-   * already spoken, and counted here, so the machine going quiet is a stated
-   * fact rather than a mystery.
-   */
-  readonly reconciledOpenItems: number;
   /** Non-null when the file existed and could not be read. */
   readonly corruption: string | null;
 }

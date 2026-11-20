@@ -154,8 +154,8 @@ export async function createDaemonHandlerComposition(
         isPaymentsLeader: () => coordinator.holdsRole('payments'),
         // The day's spend is counted across the group: a role that moves mid-day
         // leaves one daily budget, not one per machine that held it.
-        ...(coordinator.enabled && options.authorityRecord ? { groupSpend: recordGroupSpend(options.authorityRecord,
-          () => String(options.configManager.get('payments.currency' as ConfigKey) ?? '')) } : {}),
+        // Each day's spend is kept per currency: the ledger names the currency of every draw.
+        ...(coordinator.enabled && options.authorityRecord ? { groupSpend: recordGroupSpend(options.authorityRecord) } : {}),
         paymentsHolder: () => {
           const holder = coordinator.roleHolder('payments');
           return holder === null ? null : options.clusterMemberName?.(holder) ?? holder;

@@ -146,10 +146,6 @@ const AGENT_TOOL_DEFINITION: ToolDefinition = {
         enum: ['parent-only', 'parent-and-children', 'cohort', 'direct'],
         description: 'Permitted communication lane for the spawned agent (mode: spawn). Default: parent-only for children, direct for root workers.',
       },
-      parentAgentId: {
-        type: 'string',
-        description: 'Parent agent whose capability ceiling and communication lane this worker inherits (mode: spawn).',
-      },
       orchestrationGraphId: {
         type: 'string',
         description: 'Explicit orchestration graph id to attach the spawned worker to (mode: spawn).',
@@ -208,7 +204,6 @@ const AGENT_TOOL_DEFINITION: ToolDefinition = {
             executionProtocol: { type: 'string', enum: ['direct', 'gather-plan-apply'], description: 'Execution discipline.' },
             reviewMode: { type: 'string', enum: ['none', 'contract'], description: 'Whether the work is checked as a contract.' },
             communicationLane: { type: 'string', enum: ['parent-only', 'parent-and-children', 'cohort', 'direct'], description: 'Permitted communication lane.' },
-            parentAgentId: { type: 'string', description: 'Parent agent to inherit capability ceiling from.' },
             orchestrationGraphId: { type: 'string', description: 'Graph id to attach the worker to.' },
             orchestrationNodeId: { type: 'string', description: 'Explicit node id for the worker.' },
             parentNodeId: { type: 'string', description: 'Parent node id for the worker.' },
@@ -274,6 +269,9 @@ export const AGENT_INPUT_FIELD_RULES = {
   authoritativeTask: 'host-stamped',
   captureAuthority: 'host-only', systemPromptAddendum: 'host-only', proposedUnits: 'host-only',
   replyStyle: 'host-only', workingDirectory: 'host-only', routing: 'host-only', sessionId: 'host-only',
+  // The agent whose call this is, set by the host from the turn it runs in (security/turn-boundary.ts
+  // callerAgentId): a model can neither name another agent's ceiling nor drop its own.
+  parentAgentId: 'host-only',
   tools: 'contract-fence', restrictTools: 'contract-fence', writeScope: 'contract-fence', executionIntent: 'contract-fence',
   model: 'standalone-only', provider: 'standalone-only', fallbackModels: 'standalone-only', reasoningEffort: 'standalone-only',
   successCriteria: 'standalone-only', requiredEvidence: 'standalone-only', executionProtocol: 'standalone-only',
@@ -424,7 +422,6 @@ export interface AgentInput {
     executionProtocol?: 'direct' | 'gather-plan-apply' | undefined;
     reviewMode?: 'none' | 'contract' | undefined;
     communicationLane?: 'parent-only' | 'parent-and-children' | 'cohort' | 'direct' | undefined;
-    parentAgentId?: string | undefined;
     orchestrationGraphId?: string | undefined;
     orchestrationNodeId?: string | undefined;
     parentNodeId?: string | undefined;

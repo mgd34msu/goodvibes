@@ -3,8 +3,10 @@ import type { CommandContext, CommandRegistry } from '../input/command-registry.
 import type { InputHandler } from '../input/handler.ts';
 import type { SelectionItem } from '../input/selection-modal.ts';
 import type { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { hasResumableWizardProgress, readOnboardingCheckMarker, readWizardProgress } from '../runtime/onboarding/index.ts';
-import { startOnboardingFastPath } from '../runtime/onboarding/fast-path.ts';
+import { readOnboardingCheckMarker, writeOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
+import { installSplashAdditions, startFirstRun, type FirstRunDeps } from '@goodvibes-jev/engine/terminal-shell/first-run';
+import { requireSecretsManager, requireServiceRegistry, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
+import { scanThisComputerNow } from '../runtime/startup-provider-registration.ts';
 import { readLastSessionPointer, type SessionSurface } from '@/runtime/index.ts';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { writeFatalLine } from '@goodvibes-jev/engine/platform/platform/daemon';
@@ -117,39 +119,30 @@ export function applyInitialTuiCliState(options: {
   // Seeded prompt is always applied synchronously, regardless of session branch.
   applySeededCliPrompt(cli, input);
 
-  // The normal first-run steps: the onboarding fast path for a new user, or the
-  // wizard where a returning user left it.
+  // What the empty conversation shows under the splash: the starting prompts, and first run's lines.
+  installSplashAdditions({
+    workingDirectory: shellPaths.workingDirectory,
+    configManager: commandContext.platform.configManager,
+    // /setup once it is registered; until then the setup screens open with /onboarding.
+    setupCommand: commandRegistry.get('setup') ? '/setup' : '/onboarding',
+    fillComposer: (text) => {
+      if (input.prompt !== '') return;
+      input.prompt = text;
+      input.cursorPos = text.length;
+      render();
+    },
+    splashShowing: () => input.conversationManager?.isSplashShowing() ?? false,
+    renderRequest: render,
+  });
+
+  // First run: when the model this session will use is not ready, choose a
+  // provider, sign in, and land in the conversation (first-run-flow.ts).
+  // Trust stays undecided here on purpose: the first non-read tool request is
+  // what raises the trust question (main.ts's trustPromptRef).
   const runFirstRunSteps = (): void => {
-    if (!globalOnboardingMarker.exists) {
-      // Fast path: get a brand-new user to a working session in the fewest steps.
-      // Falls back to the full wizard when the surface can't detect providers.
-      // Trust stays undecided here on purpose, the first non-read tool
-      // request is what raises the trust question now (see main.ts's
-      // trustPromptRef), not this startup branch.
-      startOnboardingFastPath({ input, commandContext, shellPaths, render });
-    } else {
-      // User has completed onboarding before but left a wizard session in progress.
-      // Reopen the wizard at the last saved step so they can continue or dismiss.
-      const progressState = readWizardProgress(shellPaths);
-      if (hasResumableWizardProgress(shellPaths, { state: progressState })) {
-        const { payload } = progressState;
-        if (payload !== null) {
-          input.openOnboardingWizard({
-            mode: payload.mode,
-            reset: true,
-            preload: (wizard) => {
-              wizard.setStep(payload.stepIndex);
-              for (const [fieldId, value] of payload.toggleState) wizard.toggleState.set(fieldId, value);
-              for (const [fieldId, value] of payload.radioState) wizard.radioState.set(fieldId, value);
-              for (const [fieldId, value] of payload.textState) wizard.textState.set(fieldId, value);
-            },
-          });
-        }
-      }
-      // Returning user, no wizard to resume, nothing else to do at startup:
-      // trust (if still undecided) is asked at the first non-read tool
-      // request, not here, see main.ts's trustPromptRef wiring.
-    }
+    void startFirstRun(firstRunDeps(commandContext, shellPaths, render, globalOnboardingMarker.payload !== null)).catch((error: unknown) => {
+      logger.warn('First run could not start', { error: summarizeError(error) });
+    });
   };
   // --continue or bare --resume with no saved conversation: say so, then start
   // as a plain launch would rather than opening an unexplained empty session.
@@ -205,6 +198,24 @@ export function applyInitialTuiCliState(options: {
   } else {
     runFirstRunSteps();
   }
+}
+
+/** What first run needs from the terminal app. */
+function firstRunDeps(commandContext: CommandContext, shellPaths: TuiStartupShellPaths, render: () => void, markedDone: boolean): FirstRunDeps {
+  return {
+    providerRegistry: commandContext.provider.providerRegistry,
+    configManager: commandContext.platform.configManager,
+    secrets: requireSecretsManager(commandContext),
+    subscriptions: requireSubscriptionManager(commandContext),
+    serviceConfig: (provider) => requireServiceRegistry(commandContext).get(provider),
+    pushSurfaceModal: commandContext.pushSurfaceModal,
+    renderRequest: render,
+    completeModelSelection: commandContext.completeModelSelection,
+    openProviderPicker: commandContext.openProviderPicker,
+    scanThisComputer: () => { scanThisComputerNow(); },
+    markDone: () => { writeOnboardingCheckMarker(shellPaths, { source: 'command' }); },
+    isMarkedDone: () => markedDone,
+  };
 }
 
 /**

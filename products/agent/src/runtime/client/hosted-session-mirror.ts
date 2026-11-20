@@ -23,6 +23,17 @@
  * process died mid-turn and is now catching up on what happened without it).
  */
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { OwnerStamp } from '@goodvibes-jev/engine/platform/platform/utils';
+
+/**
+ * The stamp a mirror carries: the hosted session it copies and the host's
+ * message count when copied. A mirror whose stamp no longer matches the host's
+ * count is behind the host; a stored conversation without a stamp continued
+ * here and is never overwritten by the host's copy.
+ */
+export function hostedMirrorStamp(sessionId: string, hostMessageCount: number): OwnerStamp {
+  return { owner: `hosted-session:${sessionId}`, revision: String(hostMessageCount) };
+}
 
 /** The daemon's history row shape (platform/hosted-sessions HostedSessionHistoryMessage). */
 export interface HostedHistoryMessage {
@@ -60,7 +71,7 @@ export interface HostedSessionMirrorDeps {
    */
   readonly persist: (
     sessionId: string,
-    snapshot: { messages: Array<Record<string, unknown>>; timestamp?: number; title?: string },
+    snapshot: { messages: Array<Record<string, unknown>>; timestamp?: number; title?: string; mirroredFrom?: OwnerStamp },
     model: string,
     provider: string,
     title?: string,
@@ -141,7 +152,8 @@ export async function mirrorHostedSessionToStore(
   try {
     deps.persist(
       sessionId,
-      { messages, timestamp: options.timestamp ?? (deps.now ?? Date.now)(), ...(title ? { title } : {}) },
+      { messages, timestamp: options.timestamp ?? (deps.now ?? Date.now)(), ...(title ? { title } : {}),
+        mirroredFrom: hostedMirrorStamp(sessionId, reply.session?.messageCount ?? history.length) },
       reply.session?.modelId ?? deps.fallbackModel,
       reply.session?.providerId ?? deps.fallbackProvider,
       title,
@@ -174,8 +186,8 @@ export interface HostedListReply {
 export interface HostedRecoveryDeps extends HostedSessionMirrorDeps {
   /** Only sessions for the workspace this surface is working in are recovered. */
   readonly workspaceRoot: string;
-  /** Session ids the agent's own store already holds. */
-  readonly knownSessionIds: () => readonly string[];
+  /** The sessions the agent's own store holds, by id, with the mirror stamp each carries (none: it continued here). */
+  readonly knownSessions: () => ReadonlyMap<string, OwnerStamp | undefined>;
   /** Bound on how many orphans one boot will pull back. */
   readonly maxRecovered?: number;
   /** When the session the last-session pointer names was saved, or null when it names none; a recovered conversation older than it leaves the pointer alone. */
@@ -216,13 +228,23 @@ export async function recoverUnmirroredHostedSessions(
     return [];
   }
 
-  const known = new Set(deps.knownSessionIds());
+  const known = deps.knownSessions();
+  // Not stored here, or stored as a mirror the host has moved past (a turn that
+  // finished on the host after this process stopped). A stored copy without a
+  // mirror stamp continued here and is left as it is.
+  const behind = (session: HostedAttachedSession): boolean => {
+    if (!known.has(session.id)) return true;
+    const stamp = known.get(session.id);
+    if (!stamp) return false;
+    const host = hostedMirrorStamp(session.id, session.messageCount ?? 0);
+    return stamp.owner === host.owner && stamp.revision !== host.revision;
+  };
   const unknown = (reply?.sessions ?? []).filter((session) =>
     session.workspaceRoot === deps.workspaceRoot
     // Only conversations a terminal started: a channel conversation handed to
     // the host is not a crashed terminal session.
     && session.nativeConversation === true
-    && !known.has(session.id)
+    && behind(session)
     && (session.messageCount ?? 0) > 0);
   const ended = unknown.filter((session) => session.status === 'terminated');
   if (ended.length > 0) {

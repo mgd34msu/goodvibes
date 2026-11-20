@@ -48,6 +48,7 @@ import type { PaymentReplyInbox } from '../reply-inbox.js';
 import { PaymentsGatewayServiceImpl } from '../payments-gateway-service.js';
 import { readConfirmEveryPurchase, readCvvHandling, readDefaultCardId, readPaymentsEnabled, readPaymentsServiceConfig } from '../payments-config.js';
 import { parseRequestedMaximum } from '../money-parsing.js';
+import { formatMoney, money, type Money } from '../money.js';
 import { readPurchaseOutcome } from '../operation-view.js';
 import { paymentHostStop, PaymentHostStoppedError, type PaymentStoreHealth, type PaymentStoreStop } from '../payment-host-health.js';
 import type { CurrencyCode } from '../types.js';
@@ -588,20 +589,23 @@ export const CHECKOUT_APPROVAL_ACTION = 'payments.checkout.begin';
  * The owner types the approval and the agent types the begin call, so the
  * fields are compared by meaning, not spelling: the merchant as its
  * registrable domain in lower case, the item with case and spacing folded,
- * and the amount as whole minor units of the budget currency ("25" and
- * "25.00" are the same approval). One parser for both verbs.
+ * and the amount as `Money`, whole minor units IN a currency ("25" and
+ * "25.00" are the same approval; 25 USD and 25 EUR are two). A change of
+ * `payments.currency` after an approval is therefore a different purchase,
+ * never the same approval read in the new unit. One parser for both verbs.
  */
 export function checkoutApprovalContent(input: {
   readonly merchantDomain: string;
   readonly item: string;
-  readonly amountMinorUnits: number | undefined;
+  readonly amount: Money | undefined;
 }): Readonly<Record<string, string | undefined>> {
   return { merchant: standingMerchant(input.merchantDomain), item: standingItem(input.item),
-    amount: input.amountMinorUnits === undefined ? undefined : String(input.amountMinorUnits) };
+    amount: input.amount === undefined ? undefined : String(input.amount.minor),
+    currency: input.amount?.currency };
 }
 
 /** How a begin call names the approve verb when it refuses, per mismatch. */
-function approvalRefusalMessage(mismatch: string): string {
+function approvalRefusalMessage(mismatch: string, amount: Money | undefined): string {
   if (mismatch === 'invalid-window') {
     return 'The purchase approval time window cannot be verified. Check the host clock, then obtain a new '
       + 'owner approval with payments.checkout.approve before beginning this purchase.';
@@ -611,8 +615,9 @@ function approvalRefusalMessage(mismatch: string): string {
       + 'payments.checkout.approve again with the same merchantDomain, item and amount, then begin promptly.';
   }
   if (mismatch === 'different-content' || mismatch === 'no-content-binding') {
-    return 'The owner approval on file was for a different purchase: its merchant, item or amount does not '
-      + 'match this begin call (the amount is compared against requestedMax). payments.confirmEveryPurchase is on, '
+    return 'The owner approval on file was for a different purchase: its merchant, item, amount or currency does not '
+      + `match this begin call (the amount is compared against requestedMax${amount ? `, ${formatMoney(amount)}` : ''}; an approval is for an amount in the currency `
+      + 'payments.currency named when it was given, so a currency change since then is a different purchase). payments.confirmEveryPurchase is on, '
       + 'so ask the owner to approve exactly this merchant, item and amount with /payments approve (payments.checkout.approve), then begin again.';
   }
   return 'payments.confirmEveryPurchase is on and this purchase has no owner approval on file. Ask the owner to '
@@ -672,7 +677,7 @@ export function checkoutApproveHandler(deps: PaymentsHandlerDeps): TypedHandler<
     try {
       approval = deps.checkout.approvals.grant({
         action: CHECKOUT_APPROVAL_ACTION,
-        content: checkoutApprovalContent({ merchantDomain, item, amountMinorUnits }),
+        content: checkoutApprovalContent({ merchantDomain, item, amount: money(amountMinorUnits, currency) }),
       });
     } catch (error) {
       // A full store is a plain refusal that names its cap; nothing was recorded.
@@ -690,6 +695,7 @@ export function checkoutApproveHandler(deps: PaymentsHandlerDeps): TypedHandler<
       merchantDomain,
       item,
       amount,
+      currency,
       expiresAt: approval.expiresAt,
     };
   };
@@ -768,7 +774,8 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
       const stop = holder.hostStop({ approvals: confirmEvery && standingId === undefined });
       if (stop) throw new PaymentHostStoppedError(stop);
       const amountMinorUnits = input.requestedMax === undefined ? undefined : parseRequestedMaximum(input.requestedMax, config.budgetCurrency) ?? undefined;
-      const content = checkoutApprovalContent({ merchantDomain: input.merchantDomain, item: input.item, amountMinorUnits });
+      const content = checkoutApprovalContent({ merchantDomain: input.merchantDomain, item: input.item,
+        amount: amountMinorUnits === undefined ? undefined : money(amountMinorUnits, config.budgetCurrency) });
       const operation = await holder.admit(id, input, source, admission.assertCurrent, admitted => {
         if (standingId !== undefined && standing) {
           let reserved: ReturnType<DaemonStandingAuthorizations['reserve']>;
@@ -791,7 +798,7 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
         try { taken = takeCheckoutApproval(deps.checkout.approvals, content); }
         catch (error) { if (confirmEvery) throw error; return admitted; }
         if (!taken.taken) {
-          if (confirmEvery) throw new HandlerError(approvalRefusalMessage(taken.mismatch), 'OWNER_APPROVAL_REQUIRED', 403);
+          if (confirmEvery) throw new HandlerError(approvalRefusalMessage(taken.mismatch, money(amountMinorUnits, config.budgetCurrency)), 'OWNER_APPROVAL_REQUIRED', 403);
           return admitted;
         }
         approvalSpent = true;

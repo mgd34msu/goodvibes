@@ -12,9 +12,23 @@ import {
   HOME_ASSISTANT_DEFAULT_EVENT_TYPE,
   HOME_ASSISTANT_WEBHOOK_PATH,
 } from './homeassistant.js';
+import { daemonSecretKeyFor } from '../../config/daemon-secret-keys.js';
 
 /** On a public ntfy server the topic name is the only secret, so an empty topic gets an unguessable one. */
 const NTFY_GENERATED_TOPIC_DETAIL = 'Leave empty to have an unguessable name generated and saved when ntfy starts; on the public ntfy server the name is the only secret.';
+
+/**
+ * The four ntfy topics as secret targets: id, label, setting and what it is
+ * for. Kept in the secret store under the setting's derived key
+ * (`GOODVIBES_SURFACES_NTFY_CHAT_TOPIC`, ...), read back through
+ * `readSurfaceSecret` like any other channel credential.
+ */
+export const NTFY_TOPIC_TARGETS = [
+  ['topic', 'Default delivery topic', 'surfaces.ntfy.topic', 'Where notifications are published when a delivery names no topic.'],
+  ['chatTopic', 'Chat topic', 'surfaces.ntfy.chatTopic', 'Messages posted here attach to the active terminal session.'],
+  ['agentTopic', 'Agent topic', 'surfaces.ntfy.agentTopic', 'Messages posted here start agent work.'],
+  ['remoteTopic', 'Remote topic', 'surfaces.ntfy.remoteTopic', 'Messages posted here start a remote session in the daemon.'],
+] as const;
 
 export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSchema {
   switch (surface) {
@@ -149,10 +163,12 @@ export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSche
         fields: [
           setupField('enabled', 'Enabled', 'boolean', false, { configKey: 'surfaces.ntfy.enabled', defaultValue: false }),
           setupField('baseUrl', 'Base URL', 'url', false, { configKey: 'surfaces.ntfy.baseUrl', placeholder: 'https://ntfy.sh' }),
-          setupField('topic', 'Default delivery topic', 'string', false, { configKey: 'surfaces.ntfy.topic' }),
-          setupField('chatTopic', 'Chat topic', 'string', false, { configKey: 'surfaces.ntfy.chatTopic', detail: NTFY_GENERATED_TOPIC_DETAIL }),
-          setupField('agentTopic', 'Agent topic', 'string', false, { configKey: 'surfaces.ntfy.agentTopic', detail: NTFY_GENERATED_TOPIC_DETAIL }),
-          setupField('remoteTopic', 'Remote topic', 'string', false, { configKey: 'surfaces.ntfy.remoteTopic', detail: NTFY_GENERATED_TOPIC_DETAIL }),
+          // A topic name is all a stranger needs to post to it or read it on a public server:
+          // each topic is a credential, kept in the secret store with a reference in its setting.
+          setupField('topic', 'Default delivery topic', 'secret', false, { configKey: 'surfaces.ntfy.topic', secretTargetId: 'topic' }),
+          setupField('chatTopic', 'Chat topic', 'secret', false, { configKey: 'surfaces.ntfy.chatTopic', secretTargetId: 'chatTopic', detail: NTFY_GENERATED_TOPIC_DETAIL }),
+          setupField('agentTopic', 'Agent topic', 'secret', false, { configKey: 'surfaces.ntfy.agentTopic', secretTargetId: 'agentTopic', detail: NTFY_GENERATED_TOPIC_DETAIL }),
+          setupField('remoteTopic', 'Remote topic', 'secret', false, { configKey: 'surfaces.ntfy.remoteTopic', secretTargetId: 'remoteTopic', detail: NTFY_GENERATED_TOPIC_DETAIL }),
           setupField('token', 'Access token', 'secret', false, { configKey: 'surfaces.ntfy.token', secretTargetId: 'primary' }),
         ],
         secretTargets: [
@@ -162,6 +178,10 @@ export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSche
             envKeys: ['NTFY_ACCESS_TOKEN'],
             configKeys: ['surfaces.ntfy.token'],
           }),
+          ...NTFY_TOPIC_TARGETS.map(([id, label, configKey, detail]) => secretTarget(surface, id, label, false, detail, {
+            envKeys: [daemonSecretKeyFor(configKey)],
+            configKeys: [configKey],
+          })),
         ],
         externalSteps: [
           'Subscribe the daemon to the configured chat, agent, and remote ntfy topics.',

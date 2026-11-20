@@ -211,20 +211,21 @@ The top-level help (`goodvibes-daemon --help`) lists codes `0` to `5` as in this
 
 `status`, `pair`, `sessions`, `mcp serve`, `update` and `cluster` talk to a running daemon over HTTP. With no `--host` they ask:
 
-- the daemon named by `daemon.connectedHost.url`, when that key holds an address in the daemon program's own settings (`goodvibes-daemon config get daemon.connectedHost.url`; it is kept in `~/.goodvibes/daemon-host/settings.json`). The scheme and port come from that URL (`https://` without a port means 443). The credential is still this machine's operator token unless `--token` is given, so set `--token` or clear the key (`goodvibes-daemon config unset daemon.connectedHost.url`) when that daemon is another machine;
+- the daemon named by `daemon.connectedHost.url`, when that key holds an address in the daemon program's own settings (`goodvibes-daemon config get daemon.connectedHost.url`; it is kept in `~/.goodvibes/daemon-host/settings.json`). The scheme and port come from that URL (`https://` without a port means 443). This machine's operator token is never sent there: give `--token`, or the command is refused with `no credential is stored for <origin>; this machine's operator token is never sent to another daemon`;
 - otherwise the daemon on this machine, at the port in its settings, with this machine's operator token.
 
 | Flag | Effect |
 | --- | --- |
 | `--host <name>` | The machine to ask. For another machine it must start with `http://` or `https://`, for example `--host https://10.0.0.7:3421` or `--host https://homelab.example`. `http://` sends the token unencrypted over the network. |
 | `--port <n>` | That daemon's control-plane port. A `--host` URL is read as a browser reads it: the port written in it (`--host http://10.0.0.7:3422`, `--host https://goodvibes.example.com:443`), else `--port`, else the scheme's port, 443 for `https://` and 80 for `http://`. So a daemon behind a proxy on 443 is `--host https://goodvibes.example.com`, and a daemon serving directly on 3421 is `--host https://10.0.0.7:3421`. A port in the URL and a different `--port` are refused. With a bare host name for this machine, or no `--host`, the default is this machine's `controlPlane.port` (3421). |
-| `--token <t>` | The operator token or device token for that daemon. Default: this machine's own operator token, which is not the right credential for a different machine. |
+| `--token <t>` | The operator token or device token for that daemon. Default: for this machine's own daemon (a loopback or local address at its `controlPlane.port`, or its `controlPlane.publicBaseUrl` once that address answers the daemon identity check without the token), this machine's operator token; in a terminal app's `/cluster`, the token or `/auth login daemon` session stored for that exact address; for any other daemon, nothing: the command is refused (`token-missing`) and nothing is sent. |
 
 Errors these commands print, and what to do:
 
 | Message | Cause | Next step |
 | --- | --- | --- |
 | `no operator token was found for this machine` | The daemon has never started here, or `--daemon-home` points elsewhere. | Start the daemon once (`goodvibes-daemon`), or pass `--token`. |
+| `no credential is stored for <origin>; this machine's operator token is never sent to another daemon` | `--host` (or `daemon.connectedHost.url`) names a daemon that is not this machine's, and no `--token` was given. | Pass that daemon's own token with `--token`. |
 | `could not reach the daemon on this machine` | Nothing answers at that host and port. | `goodvibes-daemon service-status`; check `--port`. |
 | `'<host>' is another machine, and its connection type was not stated` | `--host` named another machine without a scheme. | Use `--host https://<host>:<port>` or `--host http://<host>:<port>`; without a port the URL means 443 or 80. |
 | `'10.0.0.7:3422' is not a usable --host: the port goes in --port` (exit `1`) | A bare `host:port` without a scheme. | `--host 10.0.0.7 --port 3422`, or the URL form `--host http://10.0.0.7:3422`. |
@@ -672,7 +673,7 @@ No restart is needed. The listener reads the setting on every request, and a run
 
 ### The webhook listener
 
-The webhook listener receives inbound webhooks from external services. It opens only when `danger.httpListener` is `true`. It binds `httpListener.host:httpListener.port` (default `127.0.0.1:3422`) and accepts the bearer token in `GOODVIBES_HTTP_TOKEN`, or the operator token when that is not set. `httpListener.trustCloudflare` (with `httpListener.trustProxy`) reads the client address from `CF-Connecting-IP`, but only from a peer inside a published Cloudflare range. `goodvibes listener test` (terminal app) checks it.
+The webhook listener receives inbound webhooks from external services. It opens only when `danger.httpListener` is `true`. It binds `httpListener.host:httpListener.port` (default `127.0.0.1:3422`) and accepts the bearer token in `GOODVIBES_HTTP_TOKEN`, or the operator token when that is not set. `POST /webhook` fires the owner's hooks, so it needs what the daemon's own hook routes need: the operator token, an admin sign-in or a paired device with full authority; a narrowed device token or a sign-in without the admin role is refused `403` `ADMIN_REQUIRED` naming the `hook.fire` effect, and nothing fires. `httpListener.trustCloudflare` (with `httpListener.trustProxy`) reads the client address from `CF-Connecting-IP`, but only from a peer inside a published Cloudflare range. `goodvibes listener test` (terminal app) checks it.
 
 ### Settings for listeners and exposure
 
@@ -733,14 +734,14 @@ The bundle itself is public: anyone who can reach the listener can load the page
 
 ### Signing in to the web UI
 
-The web UI shows "Sign in to GoodVibes" until it has a credential. Four ways in:
+The web UI shows "Sign in to GoodVibes" until it has a credential, with one sentence, `Run goodvibes pair on your computer and scan the code.`, and the button `Scan the code`. Four ways in:
 
-1. Open a pairing link (`.../#pair=<token>`) or scan its QR code with the device's camera. The token travels in the URL fragment, which a browser never sends to a server, so it does not appear in any access log.
-2. Scan the QR code from inside the sign-in page ("Scan the QR from your terminal").
-3. Paste a token into "Operator token" and press "Sign in with token".
-4. Sign in with a username and password ("Username", "Password"), which creates a 12-hour sign-in.
+1. Open a pairing link (`.../#pair=<token>`) or scan its QR code with the device's camera. The code travels in the URL fragment, which a browser never sends to a server, so it does not appear in any access log.
+2. Scan the QR code from inside the sign-in page (`Scan the code`). A code that names another daemon address than this page's is not sent here: the page says `That code is for GoodVibes at <origin>, and this page is at <origin>. It was not sent here` and offers `Open the daemon at <origin>`, which opens that daemon's page with the sign-in code in the URL fragment (a username and password are typed again there).
+3. Under `Other ways to sign in`, paste a code into `Sign-in code` and press `Sign in`.
+4. Under `Other ways to sign in`, `Use a username and password` ("Username", "Password"), which creates a 12-hour sign-in.
 
-A rejected pairing token shows "The pairing link was rejected" and asks for a fresh QR code. A pasted token the daemon refuses stays in the field to correct, with "The daemon did not accept that token". The page reaches the daemon whatever the browser says about its own network: with no network beyond the machine (no interface but loopback), a daemon on loopback is still used, and "Can't reach the daemon" means the daemon itself did not answer. A relay pairing code (`gvrelay1.…`, see "The relay") can also be pasted there, but it only provides a route to the daemon; a token is still needed to sign in.
+`Other ways to sign in` also holds the relay code (`Not on the same network as your computer?`) and `Where do I find a code?`: `goodvibes pair` shows one, and the GoodVibes service prints one when it starts. A refused pairing link or pasted code shows `That code didn't work. It may have expired; run goodvibes pair again.`; a pasted code stays in the field to correct. The page reaches the daemon whatever the browser says about its own network: with no network beyond the machine (no interface but loopback), a daemon on loopback is still used, and "Can't reach the daemon" means the daemon itself did not answer. A daemon that answers the sign-in check with a server fault (any `5xx`) shows "The daemon could not answer" instead: the code is kept and the check is repeated every 5 seconds; only a refusal of the code (`401`) shows the sign-in page. A relay code (`gvrelay1.…`, see "The relay") only provides a route to the daemon; a sign-in code is still needed to sign in.
 
 ### Views
 
@@ -749,9 +750,9 @@ The web UI has five destinations, chosen in the sidebar and reflected in the add
 | View | `?view=` | Tabs (`&tab=`) | What it shows |
 | --- | --- | --- | --- |
 | Chat | `chat` | none; `&session=<id>` opens one session | Conversations with the model: messages, tool activity (kept with each reply, so it shows after a reload), artifacts, queued messages (listed once, above the composer, until they are sent), search, a composer with attachments and voice. An approval the chat's own turn is waiting on is shown above the composer with Approve and Deny (one that needs an answer or a choice of edits opens in Work). The model menu lists the providers that are set up. |
-| Work | `work` | `all`, `sessions`, `agents`, `processes`, `checkpoints`, `plan` | Everything running or finished: hosted and shared sessions, agents, contracts and their units, approvals, owner questions, tasks, CI watches, background processes, checkpoints and rewind, the work plan, and steering of a running session. |
-| Library | `library` | `memory`, `knowledge`, `review` | Memory records, the knowledge base and its map, and items waiting for review. |
-| Personal | `personal` | `calendar`, `mail`, `occasions` | Calendar, mail and dates the owner cares about. |
+| Work | `work` | `all`, `sessions`, `agents`, `processes`, `checkpoints`, `plan` | Everything running or finished: hosted and shared sessions, agents, contracts and their units, approvals, owner questions, tasks, CI watches, background processes, checkpoints and rewind, the work plan, and steering of a running session. A hunk marked Reviewed in a session's changes keeps the mark only while its lines are exactly what was reviewed: after a refresh, changed content reads unreviewed. Messages saved in this browser under another pairing are shown only as a count (`Sign in as that pairing to recover them`); their text is not shown. |
+| Library | `library` | `memory`, `knowledge`, `review` | Memory records; what the knowledge base knows, by subject (each fact with `From <source> · <when>`; the sources it read; the graph's nodes, issues and wiki projections under Details), its map, packet and activity; items waiting for review. |
+| Personal | `personal` | `calendar`, `mail`, `occasions` | Calendar, mail and dates the owner cares about. In Mail, Mark read, Archive and Delete send the message's mailbox generation with its UID; a draft opened from Drafts and saved again replaces that draft (the folder keeps one copy); opening a reply or a draft while the composer holds unsaved writing asks first. |
 | Phone | `phone` | none | Lets this browser act as a device node (camera, location, clipboard on request). |
 
 Old addresses still work: `?view=sessions` and `?view=hosted-sessions` open Work on `sessions`; `?view=fleet` and `?view=approvals-tasks` open Work on `all`; `?view=knowledge`, `?view=memory` open Library; `?view=calendar`, `?view=mail`, `?view=dates` open Personal; `?view=admin`, `?view=providers`, `?view=principals` and `?view=checkin` open the settings dialog.
@@ -768,7 +769,7 @@ The settings dialog opens from the account menu, or with `?settings=<section>` i
 | Voice | `voice` | Dictation, spoken replies, wake word. |
 | Notifications | `notifications`, `checkins` Check-ins | Push notifications, installing the app, occasion reminders; check-in settings. |
 | Memory | `memory` | Memory provenance and diagnostics. |
-| Permissions | `permissions` | Approval rules, MCP tool rules, the sandbox, tool policy. |
+| Permissions | `permissions` | The four modes (Ask me, Jev decides, Just vibes, YOLO) as cards, each with what it does; picking one sets `permissions.mode`. Under the chosen card, when it is not the mode in force, why (`Asking you for now: no decision model chosen`). Under Advanced: approval rules, MCP tool rules, the permission evaluator and its simulation, the sandbox, tool policy. |
 
 Every setting the daemon knows appears in exactly one section; a namespace no section lists appears under Advanced.
 
@@ -805,7 +806,7 @@ The offers:
 | --- | --- |
 | Notifications | Registers this browser for web push. Needs a secure context (HTTPS or `localhost`). |
 | Relay | Stores the relay route so the device can reach the daemon off the local network. Offered only when `relay.enabled` is `true`. |
-| Passkey | Registers a WebAuthn passkey used for step-up confirmation of sensitive actions. |
+| Passkey | Registers a WebAuthn passkey used for step-up confirmation of sensitive actions. Offered only to a pairing with full authority, and accepted only from the device that paired with that hand-off's token, once, within 30 minutes; completing the hand-off needs what `stepup.credentials.register` needs (admin authority, never the Agent's credential). |
 
 ### Managing paired devices
 
@@ -1022,7 +1023,7 @@ There is no `goodvibes-daemon` command for Cloudflare. The integration is driven
 | --- | --- | --- |
 | `cloudflare.status` | `GET /api/cloudflare/status` | Whether it is on and ready, which settings and credentials are configured (booleans only), warnings, and the tunnel connector's state (`not-configured`, `not-installed`, `starting`, `connected`, `failed`, `stopped`). Changes nothing. |
 | `cloudflare.token.requirements.get` | `POST /api/cloudflare/token/requirements` | The API permissions each selected component needs, and how to make the one-off bootstrap token. Reads nothing from Cloudflare. |
-| `cloudflare.token.create` | `POST /api/cloudflare/token/create` | Uses a bootstrap token once (never stored) to create a narrower operational token; `storeApiToken` saves it as a `goodvibes://` secret. |
+| `cloudflare.token.create` | `POST /api/cloudflare/token/create` | Uses a bootstrap token once (never stored) to create a narrower operational token; `storeApiToken` saves it as a `goodvibes://` secret. Creates run one at a time and are recorded in `operations.jsonl` before they are sent; the token's name ends in the create's id. A create whose answer was lost fails with `CLOUDFLARE_TOKEN_OUTCOME_UNKNOWN`; the next create revokes any token an earlier one made but never stored, and lists what it could not in `residual`. |
 | `cloudflare.credentials.verify` | `POST /api/cloudflare/validate` | Checks an API token and returns its account. |
 | `cloudflare.resources.list` | `POST /api/cloudflare/discover` | Lists the account's zones, subdomain and existing resources. Read-only. |
 | `cloudflare.provision` | `POST /api/cloudflare/provision` | Creates or updates the selected components, answered `202` with one step per resource (`ok`, `skipped`, `warning`). Creates billable resources. |
@@ -1069,7 +1070,7 @@ Pairing a remote node:
 
 A peer token is on the authority record: a peer paired with one machine of a group is accepted by every machine (the first call to another machine takes the peer in there), and a token rotated or revoked on any machine is refused on all of them.
 
-One address may make 10 `pair.request` calls per minute; past that the daemon answers `429` `RATE_LIMITED` with `Retry-After: 60`. The owner manages peers with `remote.peers.list`, `remote.peers.get`, `remote.peers.disconnect`, `remote.peers.token.rotate`, `remote.peers.token.revoke`, `remote.peers.invoke`, `remote.work.list`, `remote.work.cancel` and `remote.snapshot` (`GET /api/remote`). `goodvibes remote` in the terminal app prints the posture.
+One address may make 10 `pair.request` calls per minute; past that the daemon answers `429` `RATE_LIMITED` with `Retry-After: 60`. The owner manages peers with `remote.peers.list`, `remote.peers.get`, `remote.peers.disconnect`, `remote.peers.token.rotate`, `remote.peers.token.revoke`, `remote.peers.invoke`, `remote.work.list`, `remote.work.cancel` and `remote.snapshot` (`GET /api/remote`). `goodvibes remote` in the terminal app prints the posture. `remote.peers.token.rotate` takes an optional `scopes` list: left out, the new token holds every published peer scope; `scopes: []` is refused with `400` (`a peer token needs at least one scope; omit scopes for the published set`). A peer heartbeat without `capabilities` or `commands` keeps the stored lists; one with `[]` clears them.
 
 ## Clusters
 
@@ -1474,7 +1475,7 @@ goodvibes-daemon status --json | python3 -c "import json,sys;c=json.load(sys.std
 
 Each entry of `surfaces` is one inbound surface this node can serve: `label` (`ntfy:cecb9f3b`, a digest, never the topic or bot name), `kind`, this node's `role` for it (`master` when it holds it, `standby`, `probing`, `electing`, `awaiting-handoff`, `resigning`, `fenced`, `stopped`), `holderNodeId` (the node this one believes holds it), and `consuming`. `peers` lists the other nodes with their `version` and the surface digests each `holds`. Match `holderNodeId` against `cluster nodes` to get the machine's name.
 
-A surface cannot be moved by command. To move one, stop its holder (`goodvibes-daemon stop-service` on that machine): a clean stop hands it over at once; a crash is noticed after `cluster.masterTimeoutSeconds`. A `fenced` role means the consumer did not stop when told to; only a restart of that daemon clears it.
+A surface cannot be moved by command. To move one, stop its holder (`goodvibes-daemon stop-service` on that machine): a clean stop hands it over at once; a crash is noticed after `cluster.masterTimeoutSeconds`. A `fenced` role means the consumer did not stop when told to; only a restart of that daemon clears it. Such a surface carries `drainFailure`, the reason its consumer did not stop, and stays listed as `fenced` (never `stopped`) after the cluster is stopped, whose stop then fails naming it.
 
 ### Cluster failure codes
 

@@ -12,9 +12,11 @@
  * Sources folded in (the one-broker session-spine effort, see CHANGELOG 1.0.0):
  *  1. Companion chat files, ~/.goodvibes/companion-chat/sessions/*.json
  *     (home-scoped, projectless → project 'unknown'); INCLUDING closed sessions.
- *  2. Per-project broker snapshots, <root>/.goodvibes/<surface>/control-plane/
- *     sessions.json (the old project-scoped store path); stamped project = <root>.
- *  3. The stale agent-fork store, same broker-snapshot shape under its surface.
+ *  2. Per-project broker stores, <root>/.goodvibes/<surface>/control-plane/
+ *     sessions.json (the old project-scoped store path), read with the broker
+ *     store's own loader: the session index plus each session's log, or the
+ *     older whole-store snapshot; stamped project = <root>.
+ *  3. The stale agent-fork store, same broker-store shape under its surface.
  *
  * No session is dropped (closed included); deletion remains the GC's job. Corrupt
  * or partial files are logged and skipped per-file, the run never aborts.
@@ -29,9 +31,8 @@ import { join, resolve } from 'node:path';
 import { PersistentStore } from '../state/persistent-store.js';
 import { CompanionChatPersistence } from '../companion/companion-chat-persistence.js';
 import { defaultSessionsDir } from '../companion/companion-chat-persistence.js';
-import { loadSessionBrokerState, sortInputs, sortMessages } from './session-broker-state.js';
+import { sortInputs, sortMessages } from './session-broker-state.js';
 import { SessionBrokerFileStorage, type SessionBrokerLoadResult, type SessionBrokerStateView } from './session-broker-store.js';
-import type { SharedSessionStoreSnapshot } from './session-broker-helpers.js';
 import type {
   SharedSessionMessage,
   SharedSessionRecord,
@@ -42,7 +43,7 @@ import { summarizeError } from '../utils/error-display.js';
 
 /** A legacy store to fold into the home store. */
 export interface LegacySessionSource {
-  /** 'broker-store' = a SharedSessionStoreSnapshot JSON file; 'companion-dir' = a dir of PersistedChatSession files. */
+  /** 'broker-store' = a broker session store (index and per-session logs, or a whole-store snapshot); 'companion-dir' = a dir of PersistedChatSession files. */
   readonly kind: 'broker-store' | 'companion-dir';
   /** File path (broker-store) or directory path (companion-dir). */
   readonly path: string;
@@ -244,11 +245,15 @@ async function mergeBrokerStore(
   source: LegacySessionSource,
   skippedFiles: string[],
 ): Promise<void> {
-  let loaded: ReturnType<typeof loadSessionBrokerState>;
+  // Read with the broker store's own loader, the one that wrote it: a project
+  // store is a session index plus one log per session, and a reader of the
+  // index alone would see every session with no messages and no inputs.
+  const storage = new SessionBrokerFileStorage(source.path);
+  let loaded: SessionBrokerLoadResult;
   try {
-    const snapshot = await new PersistentStore<SharedSessionStoreSnapshot>(source.path).load();
-    loaded = loadSessionBrokerState(snapshot);
+    loaded = await storage.load();
   } catch (error) {
+    storage.close();
     logger.warn('[session-import] broker store failed to load; skipping', {
       path: source.path,
       error: summarizeError(error),
@@ -256,21 +261,40 @@ async function mergeBrokerStore(
     skippedFiles.push(source.path);
     return;
   }
-  for (const record of loaded.sessions.values()) {
-    const stamped = record.project === 'unknown' && source.project
-      ? { ...record, project: source.project }
-      : record;
-    foldSession(state, stamped);
-  }
-  for (const bucket of loaded.messages.values()) {
-    for (const message of bucket) {
-      if (state.added.has(message.sessionId) && !state.messages.has(message.id)) state.messages.set(message.id, message);
+  try {
+    for (const record of loaded.sessions.values()) {
+      const stamped = record.project === 'unknown' && source.project
+        ? { ...record, project: source.project }
+        : record;
+      // Only a session this run adds needs its history; any other is only recorded as folded.
+      const adding = state.added.has(stamped.id) || (!state.folded.has(stamped.id) && !state.sessions.has(stamped.id));
+      if (!adding) {
+        foldSession(state, stamped);
+        continue;
+      }
+      let messages: readonly SharedSessionMessage[] = loaded.messages.get(stamped.id) ?? [];
+      let inputs: readonly SharedSessionInputRecord[] = loaded.inputs.get(stamped.id) ?? [];
+      if (loaded.deferred.has(stamped.id)) {
+        try {
+          ({ messages, inputs } = storage.loadSession(stamped.id));
+        } catch (error) {
+          // Not folded: the session is taken, with its history, on a later start.
+          logger.warn('[session-import] a session log failed to load; the session is left for the next start', {
+            path: source.path,
+            sessionId: stamped.id,
+            error: summarizeError(error),
+          });
+          skippedFiles.push(`${source.path} (session ${stamped.id})`);
+          continue;
+        }
+      }
+      // Folded only now that its messages and inputs are in hand.
+      if (!foldSession(state, stamped)) continue;
+      for (const message of messages) if (!state.messages.has(message.id)) state.messages.set(message.id, message);
+      for (const inputRecord of inputs) if (!state.inputs.has(inputRecord.id)) state.inputs.set(inputRecord.id, inputRecord);
     }
-  }
-  for (const bucket of loaded.inputs.values()) {
-    for (const inputRecord of bucket) {
-      if (state.added.has(inputRecord.sessionId) && !state.inputs.has(inputRecord.id)) state.inputs.set(inputRecord.id, inputRecord);
-    }
+  } finally {
+    storage.close();
   }
 }
 

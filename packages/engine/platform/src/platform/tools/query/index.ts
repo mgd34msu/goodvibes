@@ -61,7 +61,11 @@ export function createQueryTool(options: QueryToolOptions): Tool {
       name: 'query',
       description: QUERY_TOOL_SCHEMA.description,
       parameters: QUERY_TOOL_SCHEMA.parameters,
-      sideEffects: ['workflow', 'state'],
+      // Every mode reads or writes only the owner inbox, the app's own state: with the
+      // tool's 'read' category (ENGINE_TOOL_CATEGORIES) the gate settles it without
+      // asking anyone, in every mode. Asking the owner for permission to ask him a
+      // question reached no one the question would not.
+      sideEffects: ['state'],
       concurrency: 'serial',
     },
 

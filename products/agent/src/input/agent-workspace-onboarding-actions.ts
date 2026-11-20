@@ -58,6 +58,28 @@ export function completeOnboardingAction(params: CompleteOnboardingParams): Comp
 
   try {
     const marker = { scope: 'user', source: 'wizard', mode: 'new', workspaceRoot: shellPaths.workingDirectory } as const;
+    // The same route check the ready view runs: setup is marked complete only
+    // when a usable model route exists. Otherwise what was set stays saved,
+    // onboarding stays open, and the result says what is missing.
+    const route = computeOnboardingStateFromSnapshot(runtimeSnapshot, shellPaths);
+    if (route === null || !route.readyToChat) {
+      writeOnboardingCheckMarker(shellPaths, marker);
+      const routeSteps = route?.steps.filter((step) => (step.id === 'provider-access' || step.id === 'local-model-readiness') && step.status !== 'ready') ?? [];
+      const missing = route === null
+        ? 'The setup check could not be read, so it is not known whether a model route works.'
+        : `No usable model route: ${routeSteps.map((step) => `${step.label} (${step.nextLabel})`).join('; ') || 'set up a provider or a local model'}.`;
+      return {
+        dismissed: false,
+        awaitingRecapDismiss: false,
+        status: 'Onboarding is not complete: no usable model route yet.',
+        lastActionResult: {
+          kind: 'error',
+          title: 'Onboarding not complete',
+          detail: `${missing} Your settings are saved; onboarding stays open until a model route works.`,
+          safety: 'safe',
+        },
+      };
+    }
     writeOnboardingCheckMarker(shellPaths, marker);
     writeOnboardingCompletionMarker(shellPaths, marker);
     const obs = computeOnboardingStateFromSnapshot(runtimeSnapshot, shellPaths);

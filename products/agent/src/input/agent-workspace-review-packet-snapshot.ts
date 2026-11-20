@@ -300,8 +300,9 @@ export function buildReviewPacketDefaults(
   // Every later step of the packet is taken from the newest comparison's own chain.
   // Picking the newest of each kind separately mixes artifacts of unrelated comparisons.
   const comparisonId = readArtifactMetadataString(latestComparison?.metadata ?? {}, 'comparisonId');
+  // No comparison means no chain: an empty id selects nothing, never every artifact.
   const inComparison = (artifact: ArtifactDescriptor): boolean => (
-    comparisonId.length === 0 || readArtifactMetadataString(artifact.metadata, 'comparisonId') === comparisonId
+    comparisonId.length > 0 && readArtifactMetadataString(artifact.metadata, 'comparisonId') === comparisonId
   );
   const newest = (matches: (artifact: ArtifactDescriptor) => boolean): ArtifactDescriptor | null => (
     artifacts.filter((artifact) => matches(artifact) && inComparison(artifact)).sort((left, right) => right.createdAt - left.createdAt)[0] ?? null
@@ -329,7 +330,9 @@ export function buildReviewPacketDefaults(
   // The saved preset fills gaps only when it belongs to the same comparison; otherwise its
   // judgment, handoff and route would be attached to a comparison they never covered.
   const presetComparisonArtifactId = readArtifactMetadataString(presetMetadata, 'comparisonArtifactId');
-  const presetFitsComparison = !latestComparison || presetComparisonArtifactId === latestComparison.id;
+  // With no comparison recorded, the preset's chain is used only when the preset names its own comparison:
+  // an absent comparison selects nothing.
+  const presetFitsComparison = latestComparison ? presetComparisonArtifactId === latestComparison.id : presetComparisonArtifactId.length > 0;
   const chainPreset = (key: string): string => (presetFitsComparison ? readArtifactMetadataString(presetMetadata, key) : '');
   const liveRelatedArtifactIds = uniqueStrings([
     latestDocumentExport?.id,
@@ -358,6 +361,7 @@ export function buildReviewPacketDefaults(
   const summary = [
     documentId ? `document ${documentId}` : '',
     sourceArtifactId ? `source ${sourceArtifactId}` : '',
+    documentId && !comparisonArtifactId ? 'no comparison yet' : '',
     handoffArtifactId ? `handoff ${handoffArtifactId}` : '',
     relatedArtifactIds.length > 0 ? `${relatedArtifactIds.length} related` : '',
     latestPreset ? `preset ${latestPreset.id}` : '',
@@ -419,12 +423,15 @@ export function buildReviewPacketWizard(
   const latestDocument = documents.find((document) => document.id === defaults.documentId) ?? null;
   const openComments = latestDocument?.comments.filter((comment) => comment.status === 'open').length ?? 0;
   const proposedSuggestions = latestDocument?.suggestions.filter((suggestion) => suggestion.status === 'proposed').length ?? 0;
-  const documentReviewed = Boolean(latestDocument && openComments === 0 && proposedSuggestions === 0);
+  // Reviewed means the owner marked this revision reviewed (an edit puts it back to draft)
+  // and nothing is still open on it; a draft with no comments is not reviewed.
+  const documentReviewed = Boolean(latestDocument && latestDocument.status === 'reviewed' && openComments === 0 && proposedSuggestions === 0);
   const documentExported = Boolean(defaults.documentExportArtifactId || latestDocument?.lastArtifactId);
   const judgmentReady = Boolean(defaults.revealedJudgmentArtifactId);
   const handoffReady = Boolean(defaults.handoffArtifactId && defaults.relatedArtifactIds.length > 0);
   const archiveReady = Boolean(defaults.handoffArchiveArtifactId);
-  const routeDecisionDone = Boolean(defaults.routeDecisionArtifactId || archiveReady);
+  // Only a recorded route decision is one; an archive existing does not decide the route.
+  const routeDecisionDone = Boolean(defaults.routeDecisionArtifactId);
   const presetLineage = defaults.reviewPacketPresetLineage;
   const finalArchiveReview = archiveReady
     ? [
@@ -447,8 +454,10 @@ export function buildReviewPacketWizard(
     status: documentReviewed ? 'done' : 'current',
     detail: latestDocument
       ? documentReviewed
-        ? `${latestDocument.title} has no open comments or proposed suggestions.`
-        : `${latestDocument.title} has ${openComments} open comment(s) and ${proposedSuggestions} proposed suggestion(s) to resolve before export.`
+        ? `${latestDocument.title} is marked reviewed at its current revision, with no open comments or proposed suggestions.`
+        : openComments > 0 || proposedSuggestions > 0
+          ? `${latestDocument.title} has ${openComments} open comment(s) and ${proposedSuggestions} proposed suggestion(s) to resolve before export.`
+          : `${latestDocument.title} is not marked reviewed at its current revision; mark it reviewed before export.`
       : 'Create or select a document draft before building a reviewer packet.',
     userRoute: latestDocument ? `${documentsPage()} -> Show document draft` : `${documentsPage()} -> Create document draft`,
     modelRoute: latestDocument

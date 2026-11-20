@@ -52,12 +52,52 @@ import {
  */
 const MULTI_LABEL_SUFFIXES: ReadonlySet<string> = new Set(PUBLIC_SUFFIX_MULTI_LABEL);
 
+const NON_ASCII = /[^\x00-\x7f]/;
+
+/**
+ * A host or suffix in the form URL.hostname gives it: lowercase ASCII, an
+ * internationalised label as its `xn--` (punycode) form. Null when it is not a
+ * valid host. ASCII input is only lowercased, so the common case parses nothing.
+ */
+function asciiHost(value: string): string | null {
+  const lowered = value.toLowerCase();
+  if (!NON_ASCII.test(lowered)) return lowered;
+  try {
+    const hostname = new URL(`http://${lowered}`).hostname;
+    return hostname.length > 0 && !NON_ASCII.test(hostname) ? hostname : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The tables as lookups read them. The snapshot holds internationalised
+ * suffixes in Unicode (`andøy.no`) while a URL's host is punycode
+ * (`xn--andy-ira.no`), so every non-ASCII entry is also kept in its punycode
+ * form; a host is converted the same way before the lookup. Without this an
+ * IDN suffix fell back to the last two labels and two registrants under it
+ * compared equal. Only the few hundred non-ASCII entries are converted, once.
+ */
+function withAsciiForms(entries: Iterable<string>): ReadonlySet<string> {
+  const set = new Set<string>();
+  for (const entry of entries) {
+    set.add(entry);
+    if (NON_ASCII.test(entry)) {
+      const ascii = asciiHost(entry);
+      if (ascii) set.add(ascii);
+    }
+  }
+  return set;
+}
+
+const MULTI_LABEL_LOOKUP: ReadonlySet<string> = withAsciiForms(PUBLIC_SUFFIX_MULTI_LABEL);
+
 /**
  * `*.parent` rules: every label directly under one of these is itself a
  * suffix, so two instances under it are different registrants.
  */
 const WILDCARD_SUFFIX_PARENTS: readonly string[] = PUBLIC_SUFFIX_WILDCARD_PARENTS;
-const WILDCARD_PARENT_SET: ReadonlySet<string> = new Set(WILDCARD_SUFFIX_PARENTS);
+const WILDCARD_PARENT_SET: ReadonlySet<string> = withAsciiForms(WILDCARD_SUFFIX_PARENTS);
 
 /**
  * `!exception` rules: the exception itself is registrable despite matching a
@@ -66,7 +106,7 @@ const WILDCARD_PARENT_SET: ReadonlySet<string> = new Set(WILDCARD_SUFFIX_PARENTS
  * Checked before every other rule, which is the order the PSL algorithm
  * requires, an exception that lost to its own wildcard would do nothing.
  */
-const SUFFIX_EXCEPTIONS: ReadonlySet<string> = new Set(PUBLIC_SUFFIX_EXCEPTIONS);
+const SUFFIX_EXCEPTIONS: ReadonlySet<string> = withAsciiForms(PUBLIC_SUFFIX_EXCEPTIONS);
 
 /**
  * The bundled snapshot, for the drift check.
@@ -99,8 +139,11 @@ export function isPublicSuffix(host: string): boolean {
  * equal to itself and let a malformed host through.
  */
 export function registrableDomain(host: string): string | null {
-  const normalized = host.trim().toLowerCase().replace(/\.+$/, '');
-  if (normalized.length === 0) return null;
+  const trimmed = host.trim().replace(/\.+$/, '');
+  if (trimmed.length === 0) return null;
+  // Compared in punycode, the form a URL's host has: `andøy.no` and `xn--andy-ira.no` are one host.
+  const normalized = asciiHost(trimmed.normalize('NFKC'));
+  if (normalized === null || normalized.length === 0) return null;
   const labels = normalized.split('.');
   if (labels.length < 2 || labels.some((label) => label.length === 0)) return null;
 
@@ -117,7 +160,7 @@ export function registrableDomain(host: string): string | null {
   for (let start = 0; start < labels.length; start += 1) {
     const candidate = labels.slice(start).join('.');
     const wildcard = start + 1 < labels.length && WILDCARD_PARENT_SET.has(labels.slice(start + 1).join('.'));
-    if (wildcard || (start < labels.length - 1 && MULTI_LABEL_SUFFIXES.has(candidate))) {
+    if (wildcard || (start < labels.length - 1 && MULTI_LABEL_LOOKUP.has(candidate))) {
       if (start === 0) return null; // the host IS the suffix
       return labels.slice(start - 1).join('.');
     }

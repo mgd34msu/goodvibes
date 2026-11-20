@@ -1358,6 +1358,9 @@ export const client = {
       draft: {
         create: (input: EmailDraftCreateInput) =>
           invokeOperator('email.draft.create', input),
+        // Replaces the saved draft (uid + uidValidity from email.drafts.list): the folder keeps one copy. ws-only.
+        update: (input: OperatorMethodInput<'email.draft.update'>) =>
+          invokeGatewayMethod('email.draft.update', input),
       },
     },
     // Occasions and plans (occasions.*, docs/occasions.md).
@@ -2070,7 +2073,8 @@ export async function getCurrentAuth(): Promise<unknown> {
   const lifetime = getClientLifetime();
   const snapshot = await client.auth.current();
   const record = asRecord(snapshot);
-  if ('authenticated' in record && record.authenticated !== true) {
+  // Only an explicit `authenticated: true` is signed in: a reply without the field is a failed read, never a pass.
+  if (record.authenticated !== true) {
     throw Object.assign(new Error('Operator token rejected: the daemon reports the session is not authenticated.'), {
       status: 401,
       category: 'authentication',
@@ -2143,6 +2147,10 @@ async function readJson(response: Response): Promise<unknown> {
 }
 
 export async function login(username: string, password: string): Promise<unknown> {
+  // The browser's identity generation this sign-in started under. A sign-out, or another sign-in
+  // that stored its credential while this one was in flight, is newer and wins: this reply is then
+  // dropped (and its daemon session ended), never stored over it.
+  const startedUnder = getClientLifetime();
   const url = buildLoginUrl();
   // routedFetch so sign-in works when the daemon is only reachable over the relay; on the
   // direct route this is the plain global fetch.
@@ -2176,6 +2184,15 @@ export async function login(username: string, password: string): Promise<unknown
   }
 
   const result = body;
+  if (getClientLifetime() !== startedUnder) {
+    void endDaemonSignIn(result.token);
+    throw Object.assign(new Error('This sign-in finished after this browser signed out or signed in another way, so it was not kept. Sign in again if you still want this account.'), {
+      status: 409,
+      url,
+      method: 'POST',
+      category: 'superseded',
+    });
+  }
   await tokenStore.setTokenEntry(result.token, result.expiresAt);
   return {
     authenticated: result.authenticated,
@@ -2229,6 +2246,64 @@ export async function setExplicitAuthToken(rawToken: string): Promise<unknown> {
 
 export async function clearStoredAuthToken(): Promise<void> {
   await client.auth.clearToken();
+}
+
+/** What a sign-out did: always signed out here; `endedOnDaemon` false when the daemon's session could not be ended. */
+export interface SignOutOutcome {
+  readonly endedOnDaemon: boolean;
+  readonly error?: string | undefined;
+}
+
+/**
+ * The bearer whose daemon session a sign-out could not end, held in memory only (never stored)
+ * so the retry can end it. Gone on reload; the daemon session then ends by its own expiry.
+ */
+let unendedSignIn: string | null = null;
+
+/** `POST /logout` with `token`: ends that sign-in session on the daemon. A credential that is not a sign-in session leaves nothing to end. */
+async function endDaemonSignIn(token: string): Promise<SignOutOutcome> {
+  try {
+    const response = await routedFetch(`${GOODVIBES_BASE_URL.replace(/\/+$/, '')}/logout`, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (response.ok) return { endedOnDaemon: true };
+    const body = asRecord(await readJson(response));
+    // A pasted operator or device token is not a sign-in session (and an ended one is already gone): nothing is left to end.
+    if (response.status === 401 && body.code === 'SESSION_UNKNOWN') return { endedOnDaemon: true };
+    const reason = typeof body.error === 'string' ? body.error : response.statusText;
+    return { endedOnDaemon: false, error: `the daemon answered ${response.status}${reason ? ` (${reason})` : ''}` };
+  } catch (error) {
+    return { endedOnDaemon: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Sign out: the stored credential is cleared first (which starts a new identity generation, so
+ * every reply, login or transcript still in flight for the old one is dropped), then the daemon
+ * session it held is ended with `POST /logout`, so the old bearer stops working everywhere.
+ */
+export async function signOut(): Promise<SignOutOutcome> {
+  const token = await tokenStore.getToken();
+  await client.auth.clearToken();
+  const outcome = token ? await endDaemonSignIn(token) : { endedOnDaemon: true };
+  unendedSignIn = outcome.endedOnDaemon ? null : token;
+  return outcome;
+}
+
+/** Try again to end the daemon session a sign-out could not end. */
+export async function retryDaemonSignOut(): Promise<SignOutOutcome> {
+  const token = unendedSignIn;
+  if (!token) return { endedOnDaemon: true };
+  const outcome = await endDaemonSignIn(token);
+  if (outcome.endedOnDaemon && unendedSignIn === token) unendedSignIn = null;
+  return outcome;
+}
+
+/** Give up ending the daemon session (it ends by its own expiry); the held bearer is forgotten. */
+export function forgetUnendedSignIn(): void {
+  unendedSignIn = null;
 }
 
 export function isRuntimeDomain(value: string): value is RuntimeEventDomain {

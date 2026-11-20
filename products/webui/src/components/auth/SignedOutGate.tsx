@@ -18,6 +18,12 @@
  *
  * `pairingError` is set when a pairing link's code was refused (an expired or
  * malformed QR), so a failed scan is never a silent bounce back to this screen.
+ *
+ * A scanned code that names another daemon address is never sent to this
+ * page's daemon: a credential goes only to the daemon it was issued for. The
+ * page offers "Open the daemon at <origin>", which carries a sign-in code
+ * there in the URL fragment (never sent to any server); a username and
+ * password are not carried and are typed again there.
  */
 
 import { Camera, KeyRound, Radio, ShieldCheck } from 'lucide-react';
@@ -65,6 +71,9 @@ let typedToken = '';
 // Whether "Other ways to sign in" is open. Kept beside the typed code for the same
 // reason: a refused code remounts this gate, and its message must not be folded away.
 let otherWaysOpenNow = false;
+// A scanned pairing for another daemon address, held in memory only (never in
+// component state, never rendered) until the person opens that daemon or scans again.
+let scannedElsewhere: { readonly origin: string; readonly token: string | null } | null = null;
 
 /** A failure belongs to the gate that showed it: a later sign-out must open on a clean gate. */
 function retireSignInError(): void {
@@ -184,9 +193,15 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
   function acceptScan(scanned: ScannedPairing) {
     setScanOpen(false);
     setScanNotice(describeScannedPairing(scanned));
-    setScanOriginNote(
-      isDifferentOrigin(scanned.url, GOODVIBES_BASE_URL) ? (scanned.url ?? null) : null,
-    );
+    scannedElsewhere = null;
+    // A sign-in for another daemon is never submitted here: it is offered for that daemon instead.
+    if (scanned.kind !== 'relay' && scanned.url && isDifferentOrigin(scanned.url, GOODVIBES_BASE_URL)) {
+      const origin = new URL(scanned.url).origin;
+      scannedElsewhere = { origin, token: scanned.kind === 'token' ? scanned.token : null };
+      setScanOriginNote(origin);
+      return;
+    }
+    setScanOriginNote(null);
     switch (scanned.kind) {
       case 'token':
         tokenMutation.mutate(scanned.token);
@@ -249,8 +264,21 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
         {scanOriginNote != null && (
           <div className="banner warning" role="status">
             That code is for GoodVibes at <code>{scanOriginNote}</code>, and this page is at{' '}
-            <code>{GOODVIBES_BASE_URL}</code>. That is often the same computer reached by another
-            address; if sign-in fails, check this first.
+            <code>{GOODVIBES_BASE_URL}</code>. It was not sent here: a sign-in goes only to the
+            daemon it was made for.
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                const held = scannedElsewhere;
+                if (!held) return;
+                scannedElsewhere = null;
+                // The code rides in the fragment, which no server receives; a password is typed again there.
+                window.location.assign(held.token ? `${held.origin}/#pair=${encodeURIComponent(held.token)}` : `${held.origin}/`);
+              }}
+            >
+              Open the daemon at {scanOriginNote}
+            </Button>
           </div>
         )}
 

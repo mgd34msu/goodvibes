@@ -525,15 +525,34 @@ function parseTar(buffer: Buffer): ArchiveEntry[] {
     const nameRaw = header.subarray(0, 100).toString('utf-8').replace(/\0.*/, '');
     if (!nameRaw) { pos += 512; continue; }
 
-    // File size: octal string at offset 124, length 12
-    const sizeOctal = header.subarray(124, 136).toString('utf-8').replace(/\0.*/g, '').trim();
-    const size = parseInt(sizeOctal, 8) || 0;
+    // File size: octal digits at offset 124, length 12. Anything else (a sign,
+    // a non-octal digit, a size past the buffer) is a malformed archive, never
+    // a size that moves the cursor backwards.
+    const sizeField = header.subarray(124, 136);
+    let size: number;
+    if ((sizeField[0]! & 0x80) !== 0) {
+      // GNU base-256 for sizes past 8 GiB: big-endian bytes after the marker
+      // byte (0x80); 0xff marks a negative number, which no size can be.
+      if (sizeField[0] !== 0x80) throw new Error(`malformed tar archive: entry ${JSON.stringify(nameRaw)} has an invalid size field`);
+      size = 0;
+      for (let index = 1; index < sizeField.length; index += 1) size = size * 256 + sizeField[index]!;
+    } else {
+      const sizeOctal = sizeField.toString('latin1').replace(/\0.*/g, '').trim();
+      if (sizeOctal.length > 0 && !/^[0-7]+$/.test(sizeOctal)) {
+        throw new Error(`malformed tar archive: entry ${JSON.stringify(nameRaw)} has an invalid size field`);
+      }
+      size = sizeOctal.length === 0 ? 0 : parseInt(sizeOctal, 8);
+    }
+    if (!Number.isSafeInteger(size) || size < 0) {
+      throw new Error(`malformed tar archive: entry ${JSON.stringify(nameRaw)} has an invalid size`);
+    }
 
     entries.push({ name: nameRaw, size });
 
-    // Advance past header + data blocks (512-byte aligned)
-    const dataBlocks = Math.ceil(size / 512);
-    pos += 512 + dataBlocks * 512;
+    // Advance past header + data blocks (512-byte aligned); the cursor only moves forward.
+    const next = pos + 512 + Math.ceil(size / 512) * 512;
+    if (!(next > pos)) throw new Error('malformed tar archive: an entry does not advance');
+    pos = next;
   }
   return entries;
 }

@@ -27,14 +27,21 @@
  * command spells each one once.
  */
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { replaceHostedAttachment, detachHostedAttachments, forgetHostedAttachment, hasHostedAttachments } from '../../runtime/client/hosted-attachments.ts';
+import {
+  replaceHostedAttachment, detachHostedAttachments, forgetHostedAttachment, hasHostedAttachments,
+  assertHostedBindingCurrent, currentHostedBinding, hostedAttachmentOrigin,
+} from '../../runtime/client/hosted-attachments.ts';
 import { describeOperatorRpcError } from '../../runtime/client/operator-endpoint.ts';
 import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 import {
   createDaemonVerbCaller,
+  pinDaemonVerbCaller,
   resolveDaemonEndpoint,
   type DaemonEndpoint,
 } from '../../runtime/client/operator-endpoint.ts';
+import type { SessionBinding } from '@goodvibes-jev/engine/platform/platform/runtime/client/session-binding';
+import { TargetChangedError, targetRef, type TargetRef } from '@goodvibes-jev/engine/platform/platform/utils/target-ref';
+import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
 import {
   createHostedSessionsClient,
   describeDetachEffect,
@@ -119,6 +126,8 @@ export function readDetachOverride(args: readonly string[]): {
 
 interface HostedCommandSeams {
   readonly client: HostedSessionsClient;
+  /** The daemon `client` calls (its origin), or null when none can be reached (each verb then says why). */
+  readonly origin: string | null;
   /** Where the live stream is opened and its bearer, or why it cannot be: resolved when the stream opens. */
   readonly endpoint: () => Promise<DaemonEndpoint>;
 }
@@ -135,10 +144,23 @@ interface HostedCommandSeams {
 function resolveSeams(context: CommandContext): HostedCommandSeams | null {
   const configManager = context.platform.configManager;
   const homeDirectory = (): string => requireShellPaths(context).homeDirectory;
-  const client = createHostedSessionsClient(createDaemonVerbCaller({ configManager, homeDirectory }));
+  // Pinned to the daemon selected now: an attachment made through it is released there later.
+  const pinned = pinDaemonVerbCaller({ configManager, homeDirectory });
+  const client = createHostedSessionsClient('caller' in pinned ? pinned.caller : createDaemonVerbCaller({ configManager, homeDirectory }));
   // An endpoint that cannot be resolved is a stream that cannot be opened; the
   // verbs report their own refusal, so this is not a refusal of the command.
-  return { client, endpoint: () => resolveDaemonEndpoint({ configManager, homeDirectory }) };
+  return { client, origin: 'caller' in pinned ? pinned.origin : null, endpoint: () => resolveDaemonEndpoint({ configManager, homeDirectory }) };
+}
+
+/**
+ * Why an act on the attached session `sessionId` may not go to the daemon
+ * selected now, or null: the attachment was made on another daemon (the
+ * selection moved since), whose session id means nothing here.
+ */
+function attachmentElsewhere(feed: HostedSessionFeed, sessionId: string, seams: Pick<HostedCommandSeams, 'origin'>): string | null {
+  const origin = hostedAttachmentOrigin(feed, sessionId);
+  if (origin === undefined || seams.origin === null || origin === seams.origin) return null;
+  return `hosted session ${sessionId} is on the daemon at ${origin}, and this terminal now talks to ${seams.origin}; nothing was sent. /hosted detach releases it there; attach a session on ${seams.origin} to continue here.`;
 }
 
 /**
@@ -149,13 +171,25 @@ function resolveSeams(context: CommandContext): HostedCommandSeams | null {
 export async function sayToHosted(
   context: CommandContext,
   text: string,
-  seams: Pick<HostedCommandSeams, 'client'> | null = resolveSeams(context),
+  seams: Pick<HostedCommandSeams, 'client' | 'origin'> | null = resolveSeams(context),
+  /** The attachment the text was written for (a draft opened in the Agents view); default: the one attached now. */
+  binding: SessionBinding | null = null,
 ): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> {
-  const attachedId = getSharedHostedSessionFeed().getState().record?.id ?? null;
-  if (!attachedId) return { ok: false, error: 'no hosted session is attached; /hosted attach <id> first.' };
-  if (!seams) return { ok: false, error: 'the daemon is not reachable from this terminal.' };
+  const feed = getSharedHostedSessionFeed();
+  const captured = binding ?? currentHostedBinding(feed);
+  if (!captured) return { ok: false, error: 'no hosted session is attached; /hosted attach <id> first.' };
+  // A draft goes only to the session it was written for: an attach that completed meanwhile does not redirect it.
   try {
-    await seams.client.steer(attachedId, text);
+    assertHostedBindingCurrent(feed, captured, 'the message');
+  } catch (error) {
+    const refused = readRefusal(error);
+    return { ok: false, error: refused ? formatRefusal(refused) : describeOperatorRpcError(error) };
+  }
+  if (!seams) return { ok: false, error: 'the daemon is not reachable from this terminal.' };
+  const elsewhere = attachmentElsewhere(feed, captured.sessionId, seams);
+  if (elsewhere) return { ok: false, error: elsewhere };
+  try {
+    await seams.client.steer(captured.sessionId, text);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: describeOperatorRpcError(error) };
@@ -177,6 +211,11 @@ async function openStream(
   if (signal.aborted) return;
   if (!endpoint.available) {
     feed.setStreaming(false, `nothing can be watched live: ${endpoint.reason}`);
+    return;
+  }
+  // The stream watches the daemon the session was attached on, never one selected since.
+  if (seams.origin !== null && endpoint.baseUrl !== seams.origin) {
+    feed.setStreaming(false, `nothing can be watched live: the session is on ${seams.origin} and this terminal now talks to ${endpoint.baseUrl}`);
     return;
   }
   const token = endpoint.token;
@@ -209,7 +248,8 @@ async function attachSession(
   feed: HostedSessionFeed,
   context: CommandContext,
 ): Promise<void> {
-  const attachment = await replaceHostedAttachment(feed, seams.client, sessionId,
+  if (seams.origin === null) throw new Error('no daemon can be reached from this terminal; /settings daemon shows the connection');
+  const attachment = await replaceHostedAttachment(feed, seams.client, seams.origin, sessionId,
     (result, signal) => openStream(seams, result.session.id, feed, signal, result.historyAsOf ?? newestHistoryTime(result.history)));
   context.print([
     `[hosted] attached to ${hostedSessionLabel(attachment.session)} (${attachment.history.length} message(s) backfilled)`,
@@ -218,13 +258,20 @@ async function attachSession(
   context.openAgents?.({ hosted: true });
 }
 
-/** Turn `attach 2` into the id the user just read off `/hosted list`. */
+/** Turn `attach 2` into the id the user just read off `/hosted list`; only a plain number is a list number. */
 function resolveIdArgument(argument: string): string {
-  const index = Number.parseInt(argument, 10);
-  if (Number.isInteger(index) && index >= 1 && index <= lastListedIds.length) {
+  if (!/^\d+$/.test(argument)) return argument;
+  const index = Number(argument);
+  if (index >= 1 && index <= lastListedIds.length) {
     return lastListedIds[index - 1] as string;
   }
   return argument;
+}
+
+/** The session `/hosted kill [id|n]` names now, as a reference the confirmation shows and the handler compares. */
+function killTarget(args: readonly string[]): TargetRef<'hosted-session'> | null {
+  const id = args[1] ? resolveIdArgument(args[1]) : getSharedHostedSessionFeed().getState().record?.id;
+  return id ? targetRef('hosted-session', id, { id }, { session: id }) : null;
 }
 
 export function registerHostedRuntimeCommands(registry: CommandRegistry): void {
@@ -238,16 +285,19 @@ export function registerHostedRuntimeCommands(registry: CommandRegistry): void {
     rawRest: (args) => (['new', 'say', 'later'].includes((args[0] ?? '').toLowerCase()) ? 1 : undefined),
     confirm(args) {
       if ((args[0] ?? '').toLowerCase() !== 'kill') return undefined;
-      const target = args[1] ? resolveIdArgument(args[1]) : getSharedHostedSessionFeed().getState().record?.id;
-      if (!target) return undefined;
+      const reviewed = killTarget(args);
+      if (!reviewed) return undefined;
+      const target = reviewed.id;
       // A list number is resolved against the last list printed in this process, which may be stale: show what it means.
       return {
         title: `End hosted session ${target}?`,
         detail: `This ends session ${target} and its running turn, whatever its detach policy says. It cannot be undone.${args[1] && args[1] !== target ? ` (${args[1]} currently means ${target}.)` : ''}`,
         confirmLabel: 'End session',
+        // The handler ends exactly this session; if the line now means another, the owner is asked again.
+        reviewed,
       };
     },
-    async handler(args, ctx) {
+    async handler(args, ctx, reviewed?: unknown) {
       const feed = getSharedHostedSessionFeed();
       const sub = (args[0] ?? '').toLowerCase();
 
@@ -327,12 +377,16 @@ export function registerHostedRuntimeCommands(registry: CommandRegistry): void {
             if (!attachedId) { ctx.print('[hosted] no hosted session is attached; /hosted attach <id> first.'); return; }
             const body = args.slice(1).join(' ').trim();
             if (!body) { ctx.print('Usage: /hosted later <text>'); return; }
+            const elsewhere = attachmentElsewhere(feed, attachedId, seams);
+            if (elsewhere) { ctx.print(`[hosted] not queued: ${elsewhere}`); return; }
             await seams.client.followUp(attachedId, body);
             ctx.print('[hosted] queued: it runs after the current turn.');
             return;
           }
           case 'cancel': {
             if (!attachedId) { ctx.print('[hosted] no hosted session is attached.'); return; }
+            const elsewhere = attachmentElsewhere(feed, attachedId, seams);
+            if (elsewhere) { ctx.print(`[hosted] not cancelled: ${elsewhere}`); return; }
             const running = feed.getState().runningToolCalls;
             const callId = args[1] ?? running[0]?.callId;
             if (!callId) { ctx.print('[hosted] no tool call is running in this session. Pass a callId to cancel a specific one.'); return; }
@@ -344,7 +398,8 @@ export function registerHostedRuntimeCommands(registry: CommandRegistry): void {
           }
           case 'detach': {
             if (!hasHostedAttachments(feed)) { ctx.print('[hosted] no hosted session is attached.'); return; }
-            const records = await detachHostedAttachments(feed, seams.client);
+            // Each attachment is released through the client it was made with, on its own daemon.
+            const records = await detachHostedAttachments(feed, seams.client, seams.origin ?? 'the selected daemon');
             if (records.length === 0) { ctx.print('[hosted] no hosted session is attached.'); return; }
             for (const record of records) {
               ctx.print(record.status === 'terminated'
@@ -354,8 +409,16 @@ export function registerHostedRuntimeCommands(registry: CommandRegistry): void {
             return;
           }
           case 'kill': {
-            const target = args[1] ? resolveIdArgument(args[1]) : attachedId;
+            const now = killTarget(args);
+            const shown = reviewed as TargetRef<'hosted-session'> | undefined;
+            // Confirmed: end the session that was shown, and only while the line still means it.
+            if (shown && (now === null || now.id !== shown.id)) {
+              throw new TargetChangedError(shown, [{ field: 'session', was: shown.id, now: now?.id ?? null }], `/hosted kill ${args.slice(1).join(' ')}`.trim());
+            }
+            const target = shown?.id ?? now?.id;
             if (!target) { ctx.print('Usage: /hosted kill <id> (or attach one first)'); return; }
+            const elsewhere = target === attachedId ? attachmentElsewhere(feed, target, seams) : null;
+            if (elsewhere) { ctx.print(`[hosted] not ended: ${elsewhere}`); return; }
             const record = await seams.client.kill(target);
             forgetHostedAttachment(feed, target);
             if (target === feed.getState().record?.id) feed.clear();
@@ -367,6 +430,8 @@ export function registerHostedRuntimeCommands(registry: CommandRegistry): void {
             return;
         }
       } catch (error) {
+        // A changed kill target goes back to the confirmation, which asks again with the change on top.
+        if (error instanceof TargetChangedError) throw error;
         ctx.print(`[hosted] ${describeOperatorRpcError(error)}`);
       }
     },

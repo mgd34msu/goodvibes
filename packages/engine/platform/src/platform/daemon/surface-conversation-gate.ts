@@ -344,7 +344,7 @@ async function spawnOrSettle(
   // A guest's message starts a guest's turn: the spawn runs in that scope, so the
   // agent (and any agent it starts) carries it to every tool call it makes.
   const spawned = origin?.guest === true
-    ? withGuestTurn(origin.surface, () => deps.trySpawnAgent(input, logLabel, sessionId))
+    ? withGuestTurn(origin.surface, () => deps.trySpawnAgent(input, logLabel, sessionId), origin.userId)
     : deps.trySpawnAgent(input, logLabel, sessionId);
   if (!(spawned instanceof Response)) return spawned;
   const held = spawned.status === 429 && sessionId ? findHeldInput(deps, origin, sessionId) : undefined;

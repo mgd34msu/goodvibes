@@ -16,6 +16,7 @@ export function adaptWorkflow(instance: WorkflowInstance, now: number): ProcessN
   return {
     id: instance.id,
     kind: 'workflow',
+    serves: 'you',
     parentId: undefined,
     label: instance.definition,
     task: instance.task,

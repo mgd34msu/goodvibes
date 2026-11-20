@@ -172,8 +172,6 @@ export interface InputFeedContext {
   readonly openProviderModelPickerWithTarget: (target: ModelPickerTarget, source?: 'settings' | 'onboarding') => boolean;
   readonly onModelPickerCommit: () => boolean;
   readonly onOnboardingAction: (action: OnboardingWizardAction) => void;
-  /** Called after any wizard step navigation so the handler can persist progress. */
-  readonly onStepChange?: () => void;
   readonly exitApp: () => void;
 }
 
@@ -187,7 +185,6 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
       configModal: context.configModal,
       onboardingWizard: context.onboardingWizard,
       onOnboardingAction: context.onOnboardingAction,
-      onStepChange: context.onStepChange,
     },
     token,
   ),

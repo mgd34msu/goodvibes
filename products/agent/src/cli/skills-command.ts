@@ -1,4 +1,5 @@
 import { discoverSkills, type SkillRecord } from '../agent/skill-discovery.ts';
+import { commandArgsWithLiteralMarker } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
 import { buildAgentSkillRequirements, evaluateAgentSkillReadiness, formatAgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
 import { type AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry-types';
@@ -153,7 +154,7 @@ function skillPayloadFromOptions(options: ParsedOptions): {
 
 export async function handleSkillsCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
   try {
-    const [sub = 'list', ...rest] = runtime.cli.commandArgs;
+    const [sub = 'list', ...rest] = commandArgsWithLiteralMarker(runtime.cli);
     const normalized = sub.toLowerCase();
     if (normalized === 'bundle' || normalized === 'bundles') return handleSkillBundleCommand(runtime, rest);
     const registry = skillRegistry(runtime);

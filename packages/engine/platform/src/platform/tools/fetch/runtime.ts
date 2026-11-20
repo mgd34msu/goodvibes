@@ -267,6 +267,11 @@ interface PreparedFetchRequest {
   body?: string | Uint8Array | FormData | undefined;
 }
 
+/** Response headers whose values carry a credential or session; verbose output names them without their value. */
+const WITHHELD_RESPONSE_HEADERS: ReadonlySet<string> = new Set([
+  'set-cookie', 'set-cookie2', 'cookie', 'authorization', 'proxy-authorization', 'x-api-key', 'x-auth-token', 'x-amz-security-token',
+]);
+
 function applyAuthHeaders(headers: Record<string, string>, auth: FetchAuthInput): void {
   switch (auth.type) {
     case 'bearer':
@@ -773,14 +778,19 @@ async function fetchOne(
     if (fetched.droppedHeaders.length > 0) result.redirect_dropped_headers = [...fetched.droppedHeaders];
 
     let effectiveSanitizeMode = sanitizationEnabled ? sanitizeMode : 'none' as const;
+    // The content came from the host the last hop answered on: after a redirect
+    // its trust is that host's, never the starting host's (a trusted host that
+    // redirects to an unknown one does not lend it its trust).
+    const finalHost = fetched.redirects > 0 ? extractHostname(fetched.finalUrl) : null;
+    const contentTrustResult = finalHost !== null ? classifyHostTrustTier(finalHost, trustTierConfig) : initialTrustResult;
     if (sanitizationEnabled && hostname !== null) {
-      const hostTrustResult = initialTrustResult ?? classifyHostTrustTier(hostname, trustTierConfig);
+      const hostTrustResult = contentTrustResult ?? classifyHostTrustTier(hostname, trustTierConfig);
       result.host_trust_tier = hostTrustResult.tier;
       if (hostTrustResult.tier === 'unknown' && effectiveSanitizeMode === 'none') {
         effectiveSanitizeMode = 'safe-text';
       }
-    } else if (hostname !== null && initialTrustResult !== null) {
-      result.host_trust_tier = initialTrustResult.tier;
+    } else if (hostname !== null && contentTrustResult !== null) {
+      result.host_trust_tier = contentTrustResult.tier;
     }
 
     if (verbosity === 'minimal') {
@@ -815,9 +825,11 @@ async function fetchOne(
     }
 
     if (verbosity === 'verbose') {
+      // Credential-bearing response headers are named but never returned:
+      // a cookie or token the server set is not the model's to read or repeat.
       const respHeaders: Record<string, string> = {};
       response.headers.forEach((value, key) => {
-        respHeaders[key] = value;
+        respHeaders[key] = WITHHELD_RESPONSE_HEADERS.has(key.toLowerCase()) ? '[withheld: carries a credential]' : value;
       });
       result.metadata = {
         headers: respHeaders,

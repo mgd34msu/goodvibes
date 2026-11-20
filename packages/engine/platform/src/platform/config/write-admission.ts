@@ -76,6 +76,13 @@ export function credentialValueRefusal(key: string, value: unknown): { readonly 
     return { code: 'CONFIG_SECRET_LITERAL', reason: `${key} holds a credential, and a settings file keeps only a reference to it.`,
       next: `Save the credential with /secrets set <KEY> <value> (or the credentials route), then set ${key} to goodvibes://secrets/goodvibes/<KEY>.` };
   }
+  // A list of credentials (notifications.webhookUrls): every member is a reference.
+  if (facts.secret && Array.isArray(value) && value.some((member) => typeof member === 'string' && member.trim() !== '' && !isSecretReferenceValue(member))) {
+    return { code: 'CONFIG_SECRET_LITERAL', reason: `${key} is a list of credentials, and a settings file keeps only a reference to each.`,
+      next: key === 'notifications.webhookUrls'
+        ? 'Add each URL with /notify add <url>, which stores it in the secret store and saves its reference.'
+        : `Save each credential with /secrets set <KEY> <value>, then list goodvibes://secrets/goodvibes/<KEY> in ${key}.` };
+  }
   return null;
 }
 

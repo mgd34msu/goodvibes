@@ -1,3 +1,4 @@
+import type { Selection } from '@goodvibes-jev/engine/errors';
 import { logger } from '../../utils/logger.js';
 import { PersistentStore } from '../../state/persistent-store.js';
 import { StoreWriteQueue } from '../../state/store-write-queue.js';
@@ -240,7 +241,8 @@ export class DistributedRuntimeManager implements DistributedRuntimeManagerState
     input: {
       readonly actor?: string | undefined;
       readonly label?: string | undefined;
-      readonly scopes?: readonly string[] | undefined;
+      /** Not given: the published scope set; never empty. */
+      readonly scopes?: Selection<string> | undefined;
     } = {},
   ): Promise<{ peer: DistributedPeerRecord; token: DistributedPeerTokenRecord & { value: string } } | null> {
     const finish = this.beginPeerMutation(peerId);

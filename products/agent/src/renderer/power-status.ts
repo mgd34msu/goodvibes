@@ -21,19 +21,19 @@ export function describePowerStatus(state: Pick<PowerState, 'work' | 'keepAwake'
 }
 
 /**
- * The status line's power chip and the full note behind it. The status line
- * keeps a chip at any width, so the chip is one short label (with a count when
- * more than one note applies); the full note is read in the notifications,
- * where it is posted when it changes. Null when nothing applies.
+ * The status line's power chip and the full note behind it. The chip names
+ * only a state the owner holds or should see at a glance (sleep disabled,
+ * keep-awake refused, sleep held); an operational warning (the sleep-edge
+ * hooks being off) is never status-bar text, only the notice. The full note
+ * is read in the notifications, where it is posted when it changes. Chip null
+ * when no state applies; null when nothing applies at all.
  */
-export function describePowerChip(state: Pick<PowerState, 'work' | 'keepAwake'> & Partial<Pick<PowerState, 'sleepEdge'>>): { readonly chip: string; readonly detail: string } | null {
+export function describePowerChip(state: Pick<PowerState, 'work' | 'keepAwake'> & Partial<Pick<PowerState, 'sleepEdge'>>): { readonly chip: string | null; readonly detail: string } | null {
   const detail = describePowerStatus(state);
   if (detail === null) return null;
-  const labels: string[] = [];
-  if (state.keepAwake.enabled) labels.push(keepAwakeCondition(state.keepAwake) === 'refused' ? 'keep-awake refused' : 'sleep disabled');
-  else if (state.work.held && state.work.reasons.length > 0) labels.push('sleep held');
-  if (state.sleepEdge?.note) labels.push('sleep hooks off');
-  const chip = labels.length > 1 ? `${labels[0]} +${labels.length - 1}` : (labels[0] ?? 'power');
+  const chip = state.keepAwake.enabled
+    ? (keepAwakeCondition(state.keepAwake) === 'refused' ? 'keep-awake refused' : 'sleep disabled')
+    : state.work.held && state.work.reasons.length > 0 ? 'sleep held' : null;
   return { chip, detail };
 }
 

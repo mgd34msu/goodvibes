@@ -725,7 +725,12 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     assert.deepEqual(productDefinitions(), [], 'Uninstall must retire its original native service.');
     const stopped = await runOwnedCommand(...(process.platform === 'linux' ? ['systemctl', ['--user', 'is-active', serviceUnit]]
       : ['launchctl', ['print', `gui/${account.uid}/${label}`]]), { env });
-    assert.notEqual(stopped.code, 0, 'The original service must stop before uninstall is acknowledged.');
+    // Proof is the probe's own "not installed / not running" answer, never any failure: a probe
+    // killed by a signal, or failing for another reason, proves nothing about the service.
+    // systemctl is-active: 3 inactive, 4 no such unit; launchctl print: 113 no such service.
+    assert.equal(stopped.exitSignal, undefined, 'A terminated status probe cannot prove the original service was retired.');
+    assert.ok((process.platform === 'linux' ? [3, 4] : [113]).includes(stopped.code),
+      `The original service must stop before uninstall is acknowledged (status probe exited ${String(stopped.code)}).`);
   };
   const host = {
     async admit() { assertHome(); },

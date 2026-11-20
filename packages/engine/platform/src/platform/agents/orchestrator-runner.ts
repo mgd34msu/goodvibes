@@ -36,6 +36,7 @@ import { moveAgentRun } from '../tools/agent/record.js';
 import type { LLMProvider, StreamDelta } from '../providers/interface.js';
 import type { ToolResult } from '../types/tools.js';
 import { emitAgentAwaitingTool, emitCommunicationConsumed } from '../runtime/emitters/index.js';
+import { toolCallFileCounts } from '@goodvibes-jev/engine/contracts';
 import { compactAgentConversation, maybeCompactAfterModelContextWarning, setAgentProgress, summarizeToolArgs } from './orchestrator-utils.js';
 import { assertOrchestratorKnowledgeCurrent, buildLayeredOrchestratorSystemPrompt, buildOrchestratorSystemPrompt, permissionModeLine, prepareOrchestratorPromptContext, resolveSpawnKnowledgeInjections, withOpenTierProfileBlock } from './orchestrator-prompts.js';
 import { completeOrRegenerate, recoverEmptyConversationalReply } from './conversational-reply-recovery.js';
@@ -202,6 +203,8 @@ async function executeToolCalls(
     // The tool trace: for the TUI's activity surfaces, never for a channel.
     setAgentProgress(record, `Turn ${turn} · ${call.name}${argsSummary}`, 'operator');
     record.toolCallCount++;
+    // The work board's title for this agent names the call that started last ("Writing docs/usage.md").
+    record.activeCall = { id: call.id, name: call.name, arguments: call.arguments as Record<string, unknown> };
     context.emitAgentProgress(record.id, record.progress ?? '', 'operator');
     // Marks the call as running so the fleet view does not read its silence as a stall.
     if (context.runtimeBus) emitAgentAwaitingTool(context.runtimeBus, context.emitterContext(record.id), { agentId: record.id, callId: call.id, tool: call.name });
@@ -226,6 +229,13 @@ async function executeToolCalls(
     // executed / threw branches below stay uniform.
     const recordResult = (result: ToolResult, argsJson: string, toolName = call.name): void => {
       results[index] = result;
+      // The work board's "2 files read": two integer additions per settled call, in memory.
+      if (result.success !== false) {
+        const files = toolCallFileCounts({ name: toolName, arguments: call.arguments as Record<string, unknown> });
+        if (files.read > 0) record.filesRead = (record.filesRead ?? 0) + files.read;
+        if (files.changed > 0) record.filesChanged = (record.filesChanged ?? 0) + files.changed;
+      }
+      if (record.activeCall?.id === call.id) record.activeCall = undefined;
       session.appendMessage({
         type: 'tool_execution',
         turn,
@@ -625,7 +635,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
           reportVerificationUsage({ runtimeBus: context.runtimeBus, emitterContext: context.emitterContext(record.id), turnId: record.id,
             provider: activeRoute.provider.name, model: activeRoute.modelId,
             // Priced like every other request, so fleet cost counts the verification spend.
-            pricing: context.providerRegistry.resolveModelPricing(activeRoute.modelId, activeRoute.provider.name), response, durationMs });
+            pricing: context.providerRegistry.resolveModelPricing(activeRoute.modelId, activeRoute.provider.name, response.signInRoute?.route ?? null), response, durationMs });
         },
       }),
     });

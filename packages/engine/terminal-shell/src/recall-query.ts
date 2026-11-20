@@ -140,6 +140,7 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
       `  available: ${stats.available ? 'yes' : 'no'}`,
       `  dimensions: ${stats.dimensions}`,
       `  indexed records: ${stats.indexedRecords}`,
+      ...(stats.awaitingReembed > 0 ? [`  awaiting re-embedding: ${stats.awaitingReembed} (embedded by an earlier provider or model; left out of search until a rebuild)`] : []),
       ...(stats.path ? [`  path: ${stats.path}`] : []),
       ...(stats.error ? [`  error: ${stats.error}`] : []),
     ].join('\n');

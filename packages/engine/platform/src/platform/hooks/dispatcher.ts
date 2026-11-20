@@ -351,7 +351,7 @@ export class HookDispatcher {
           // in hooks.json. Strict === false preserves the default (undefined = enabled).
           if (hook.enabled === false) continue;
           const specificValue = event.specific;
-          if (matchesMatcher(hook.matcher, specificValue)) {
+          if (matchesMatcher(hook.matcher, specificValue, event.effects)) {
             matchingEntries.push({ pattern, hook });
           }
         }

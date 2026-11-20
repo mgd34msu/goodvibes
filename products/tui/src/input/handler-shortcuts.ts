@@ -6,8 +6,8 @@ import {
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { CommandContext } from './command-registry.ts';
 import type { KillRing } from './kill-ring.ts';
-import { nextPermissionMode, permissionModeLabel, type PermissionModeValue } from '../core/permission-mode.ts';
-import { describePermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { cycleSessionPermissionMode, getSharedModeFlash } from '@goodvibes-jev/engine/terminal-shell/session-permission-mode';
+import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
 
 export type GlobalShortcutRouteState = GlobalShortcutState & {
   commandContext?: CommandContext;
@@ -30,7 +30,7 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
       // xterm back-tab CSI Z as tab-with-shift). Only when the composer owns
       // focus: modal/picker routes run earlier and keep their reverse-tab.
       if (state.keybindingsManager.lookup(token) === 'cycle-permission-mode') {
-        void cycleSessionPermissionMode(state);
+        void cycleMode(state);
         return true;
       }
 
@@ -85,6 +85,19 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
           state.requestRender();
           return true;
 
+        case 'open-notifications':
+          // Ctrl+N: the notices the status bar counts.
+          state.commandContext?.openNotifications?.();
+          state.requestRender();
+          return true;
+
+        case 'failure-other-model':
+        case 'failure-details':
+          // Alt+O / Alt+I on the newest failed turn's row; consumed either way, never typed text.
+          state.commandContext?.failedTurnAction?.(action === 'failure-other-model' ? 'other-model' : 'details');
+          state.requestRender();
+          return true;
+
         default:
           return undefined;
       }
@@ -93,49 +106,21 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
 }
 
 /**
- * Cycle this session's permission mode (Shift+Tab). The change is a runtime
- * override: the PermissionManager, the orchestrator's plan-mode instruction
- * and the footer pill (subscribed to the key in turn-event-wiring) read it at
- * once, and it ends with the session. The saved default changes only in
- * /permissions or Settings. Entering the mode with no approvals asks once
- * (default No); declining it (or having no dialog to ask in) moves on to the
- * mode after it, so the key always comes round to the strictest mode.
+ * Shift+Tab: this session's permission mode (session-permission-mode.ts). The
+ * status bar's mode segment shows the new words and flashes; nothing is
+ * written into the conversation. A change that cannot be made is a notice.
  */
-async function cycleSessionPermissionMode(state: GlobalShortcutRouteState): Promise<void> {
+async function cycleMode(state: GlobalShortcutRouteState): Promise<void> {
   const context = state.commandContext;
   const configManager = context?.platform?.configManager;
   if (!context || !configManager) return;
-  const current = configManager.get('permissions.mode') as PermissionModeValue | undefined;
-  let next = nextPermissionMode(current);
-  let skipped: PermissionModeValue | null = null;
-  if (next === 'yolo') {
-    const confirmed = await context.confirm?.({
-      title: `Switch this session to ${permissionModeLabel(next)}?`,
-      body: 'Every tool call in this session runs without asking you, including commands, file changes and messages. The saved default is not changed; it ends with the session.',
-      confirmLabel: `Use ${permissionModeLabel(next)}`,
-      tone: 'danger',
-    }) ?? false;
-    if (!confirmed) {
-      skipped = next;
-      next = nextPermissionMode(next);
-    }
-  }
-  // A managed lock on the setting makes the override throw; report it, do not crash the input loop.
-  try {
-    configManager.setRuntimeOverride('permissions.mode', next);
-  } catch (error) {
-    context.print(`[Permissions] Mode stays ${permissionModeLabel(current ?? 'ask-me')}: ${error instanceof Error ? error.message : String(error)}`);
-    state.requestRender();
-    return;
-  }
-  const skippedNote = skipped ? `${permissionModeLabel(skipped)} skipped. ` : '';
-  // The mode in force can differ from the one chosen (jev-decides with no
-  // working decision model runs as ask-me): the line names what the status
-  // pill shows and why, never only the choice.
-  const inForce = describePermissionModeInForce(configManager, { chosen: next, explicitlyChosen: true });
-  const modeLine = inForce.mode === inForce.chosen
-    ? permissionModeLabel(next)
-    : `${permissionModeLabel(inForce.mode)} (${permissionModeLabel(next)} chosen, but ${inForce.reason})`;
-  context.print(`[Permissions] ${skippedNote}Mode for this session: ${modeLine} (the saved default is set in /settings; /permissions shows it)`);
-  state.requestRender();
+  await cycleSessionPermissionMode({
+    configManager,
+    confirm: context.confirm,
+    flash: getSharedModeFlash(),
+    refused: (message) => {
+      getSharedNotificationFeed().recordNotice({ domain: 'permissions', level: 'warning', title: message, body: undefined, timestamp: Date.now(), restored: false });
+    },
+    requestRender: () => state.requestRender(),
+  });
 }

@@ -9,7 +9,11 @@
  * revision with the one it last looked at; only when that integer moved does it
  * read its questions, and each answer it finds it first records as taken (the
  * first taker wins, so two processes holding the same session never both use
- * it), then puts on that request (`replay`, sent once). An asker with nothing
+ * it), then puts on that request (`replay`, sent until a request carrying it
+ * is accepted). Only once the provider accepted that request is the answer
+ * recorded delivered: the agent's run reports it (`accepted`), a session's
+ * conversation through `onRequestAccepted`. An answer taken by a process that
+ * died before then is taken again by the next one. An asker with nothing
  * pending does nothing; nothing polls and no timer runs.
  *
  * A session or agent opened again reads what waited for it once (one indexed
@@ -126,6 +130,8 @@ class AnswerWatch {
 
   clear(): void {
     this.#pending.clear();
+    // Taken but not confirmed: they stay taken by this process, and its next open of the session hands them again.
+    this.#taken.length = 0;
     this.#seen = -1;
     this.sync();
   }
@@ -133,6 +139,26 @@ class AnswerWatch {
   dispose(): void {
     this.clear();
     watches.delete(this);
+  }
+
+  /** Answers this watch put on a request that no accepted request has carried yet, in the order handed. */
+  readonly #taken: string[] = [];
+
+  /** The request carrying everything handed so far was accepted: it is delivered. */
+  confirm(count = this.#taken.length): void {
+    const source = reader;
+    if (!source || count <= 0) return;
+    const ids = this.#taken.splice(0, Math.min(count, this.#taken.length));
+    try {
+      source.confirmDelivered(ids);
+    } catch (error) {
+      logger.debug('[owner-inbox] could not record answers delivered; they are handed again by the next process if this one stops', { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /** How many answers this watch took and has not had confirmed. */
+  get unconfirmed(): number {
+    return this.#taken.length;
   }
 
   /** Hand over what closed since the last look. Returns how many texts went onto the next request. */
@@ -160,7 +186,10 @@ class AnswerWatch {
       this.#pending.delete(id);
       if (route === 'drop') continue;
       // Taken elsewhere (another process holding this session, or the model read it with query show), or settled as not deliverable.
-      if (item.status === 'answered' && !source.claim(id)) continue;
+      if (item.status === 'answered') {
+        if (!source.take(id)) continue;
+        this.#taken.push(id);
+      }
       host.set('replay', questionClosedText(item), { once: true, append: true });
       handed += 1;
     }
@@ -179,6 +208,8 @@ interface OpenInlet {
   handed: number;
   /** Texts carried by a request the provider accepted. */
   read: number;
+  /** For each answer taken (in order), the hand-in count after it: confirmed once a request carrying that many was accepted. */
+  readonly takenMarks: number[];
 }
 
 const inlets = new Map<string, OpenInlet>();
@@ -227,7 +258,7 @@ export function openAgentInlet(agentId: string, host: HostInstructions, running:
   ];
   const inlet: OpenInlet = {
     watch: new AnswerWatch(() => (running() ? host : undefined), () => askers, agentRoute(agentId)),
-    host, running, handed: 0, read: 0,
+    host, running, handed: 0, read: 0, takenMarks: [],
   };
   inlets.set(agentId, inlet);
   const source = reader;
@@ -241,10 +272,23 @@ export function openAgentInlet(agentId: string, host: HostInstructions, running:
       logger.debug('[owner-inbox] reading what waited for an agent failed; it is read at its next run', { agentId, error: error instanceof Error ? error.message : String(error) });
     }
   }
-  const take = (): void => { inlet.handed += inlet.watch.pull(); };
+  const take = (): void => {
+    const before = inlet.watch.unconfirmed;
+    inlet.handed += inlet.watch.pull();
+    for (let index = before; index < inlet.watch.unconfirmed; index += 1) inlet.takenMarks.push(inlet.handed);
+  };
   return {
     beforeRequest: () => { take(); return inlet.handed; },
-    accepted: (mark) => { if (mark > inlet.read) inlet.read = mark; },
+    accepted: (mark) => {
+      if (mark > inlet.read) inlet.read = mark;
+      // The answers this accepted request carried are delivered; later ones wait for their own request.
+      let carried = 0;
+      while (carried < inlet.takenMarks.length && inlet.takenMarks[carried]! <= mark) carried += 1;
+      if (carried > 0) {
+        inlet.takenMarks.splice(0, carried);
+        inlet.watch.confirm(carried);
+      }
+    },
     unread: () => { take(); return inlet.handed > inlet.read; },
     // A later run of the same agent (a wake) has its own inlet, which this one never closes.
     close: () => {
@@ -280,10 +324,12 @@ export function forgetOwnerQuestion(questionId: string): void {
   for (const watch of watches) watch.forget(questionId);
 }
 
-/** A conversation that can be asked to look just before each model request. */
+/** A conversation that can be asked to look just before each model request, and told when one was accepted. */
 export interface RequestingConversation {
   readonly hostInstructions: Pick<HostInstructions, 'set'>;
   onRequest(hook: () => void): () => void;
+  /** Runs after the provider accepted a request (its host message was delivered). */
+  onRequestAccepted(hook: () => void): () => void;
 }
 
 /** The answers one conversation's session waits on. */
@@ -343,6 +389,8 @@ export function watchSessionAnswers(
     watch.clear();
   };
   const stop = conversation.onRequest(() => { follow(); watch.pull(); });
+  // Everything handed before the accepted request rode it (handed in its request hook): delivered now.
+  const stopAccepted = conversation.onRequestAccepted(() => { watch.confirm(); });
   return {
     get sessionId() { return current(); },
     open(sessionId) {
@@ -365,6 +413,6 @@ export function watchSessionAnswers(
     },
     refresh() { follow(); },
     close() { closed = true; follow(); },
-    dispose() { stop(); closed = true; tracked = undefined; watch.dispose(); },
+    dispose() { stop(); stopAccepted(); closed = true; tracked = undefined; watch.dispose(); },
   };
 }

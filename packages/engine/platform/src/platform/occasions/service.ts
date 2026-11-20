@@ -35,7 +35,7 @@ import {
 } from './acknowledge.js';
 import { resolveNudgeDestinations } from './destinations.js';
 import { composeConflictMessage, composeInterviewResumeMessage, prepareNudge, subjectFor } from './nudge.js';
-import { pushNudge, type OccasionNudgeDeliverer } from './push.js';
+import { pushNudge, type NudgeDelivery, type OccasionNudgeDeliverer } from './push.js';
 import { storedGiftEvidence } from './stored-reading-evidence.js';
 import { removePlan, updateOccasion, updatePlan, type OccasionEditOutcome, type UpdateOccasionInput, type UpdatePlanInput } from './edit.js';
 import { logger } from '../utils/logger.js';
@@ -730,17 +730,25 @@ export class OccasionsService {
         op.assertCurrent, () => {},
       );
 
-      const deliveries = nudge === null
-        ? []
-        : await pushNudge(this.deps.deliverer, nudge, destinations, op.assertCurrent, options.withNudgeDelivery);
+      // Recorded with no freshness check: what a destination accepted is a fact
+      // about the past, and recording it whatever changed during the send is
+      // what stops the same reminder being pushed again next pass. Recorded in
+      // a finally, so a sweep that stops after an accepted delivery (the stopped
+      // receipt is thrown then) still records the destinations that took it.
+      const nudgeSent: NudgeDelivery[] = [];
+      let deliveries: readonly NudgeDelivery[] = [];
+      try {
+        deliveries = nudge === null
+          ? []
+          : await pushNudge(this.deps.deliverer, nudge, destinations, op.assertCurrent, options.withNudgeDelivery, nudgeSent);
+      } finally {
+        if (awaitingNudge.length > 0 && nudgeSent.some((entry) => entry.delivered)) {
+          await this.deps.state.putOpenItems(awaitingNudge, op.record, () => {});
+        }
+      }
       const landed = deliveries.filter((entry) => entry.delivered);
       if (awaitingNudge.length > 0) {
-        // Recorded with no freshness check: what a destination accepted is a
-        // fact about the past, and recording it whatever changed during the send
-        // is what stops the same reminder being pushed again next pass.
-        if (landed.length > 0) {
-          await this.deps.state.putOpenItems(awaitingNudge, op.record, () => {});
-        } else {
+        if (landed.length === 0) {
           // Nothing accepted it. An item already stored keeps its unspent
           // boundary as it is; a new one is opened unspent so the pull lists it
           // and the next sweep tries again.
@@ -757,17 +765,22 @@ export class OccasionsService {
       // destination accepted them. Unaccepted, nothing is written, so a new one
       // is raised again next pass and a stored one stays due. Each line names
       // the occasion and never a date.
-      const reminderDeliveries = awaitingReminders.length === 0
-        ? []
-        : await pushNudge(this.deps.deliverer, {
-          id: `occasions-reminders-${now}`,
-          raisedAt: now,
-          subjects: [],
-          message: reminderLines.join('\n'),
-          answerable: false,
-        }, destinations, op.assertCurrent, options.withNudgeDelivery);
-      if (reminderDeliveries.some((entry) => entry.delivered)) {
-        await this.deps.state.putOpenItems(awaitingReminders, op.record, () => {});
+      const remindersSent: NudgeDelivery[] = [];
+      let reminderDeliveries: readonly NudgeDelivery[] = [];
+      try {
+        reminderDeliveries = awaitingReminders.length === 0
+          ? []
+          : await pushNudge(this.deps.deliverer, {
+            id: `occasions-reminders-${now}`,
+            raisedAt: now,
+            subjects: [],
+            message: reminderLines.join('\n'),
+            answerable: false,
+          }, destinations, op.assertCurrent, options.withNudgeDelivery, remindersSent);
+      } finally {
+        if (remindersSent.some((entry) => entry.delivered)) {
+          await this.deps.state.putOpenItems(awaitingReminders, op.record, () => {});
+        }
       }
 
       return {

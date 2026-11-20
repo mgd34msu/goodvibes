@@ -46,6 +46,7 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { PROFILE_FIELDS, PROSE_ONLY_SECTIONS, captureProfileDelegation } from '@goodvibes-jev/engine/platform/platform/owner-profile';
+import { currentTurn } from '@goodvibes-jev/engine/platform/platform/security';
 import { captureProfileGatewayCurrent, captureProfileGatewayLocalState, type ProfileGatewayInvoke } from './profile-gateway.js';
 import { captureCatalogSnapshot } from './catalog-data.js';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './local-state-admission.js';
@@ -143,8 +144,17 @@ type ToolOutcome = { readonly success: boolean; readonly output: string };
 
 interface AgentProfileToolDeps {
   readonly invoke: ProfileGatewayInvoke;
-  /** The owner's own message for the turn this call belongs to, from the runtime; never from the model. */
-  readonly currentOwnerMessage?: (() => string | null | undefined) | undefined;
+}
+
+/**
+ * The owner's own message for the turn this call belongs to: the turn
+ * record's owner request text (security/turn-boundary.ts), set when the owner
+ * or an authenticated operator sent the turn's message and null for a turn a
+ * channel, an automation or an agent started. Never from the model, and never
+ * a message queued after the turn began.
+ */
+function currentOwnerMessage(): string | null {
+  return currentTurn()?.ownerRequestText ?? null;
 }
 
 /** Case, width and spacing folded, so "Sam" matches "sam's" and "my  wife" matches "My wife". */
@@ -594,7 +604,7 @@ export function createAgentProfileTool(deps: AgentProfileToolDeps): Tool {
             case 'get':
               return handleGet(currentDeps, fieldId);
             case 'person':
-              return handlePerson(currentDeps, readString(deps.currentOwnerMessage?.()), readString(args.name), readString(args.namedInInstruction));
+              return handlePerson(currentDeps, readString(currentOwnerMessage()), readString(args.name), readString(args.namedInInstruction));
             case 'provenance':
               return handleProvenance(currentDeps, fieldId);
             case 'status':
@@ -639,8 +649,6 @@ export function createAgentProfileTool(deps: AgentProfileToolDeps): Tool {
 
 export interface RegisterAgentProfileToolOptions {
   readonly invoke: ProfileGatewayInvoke;
-  /** The owner's message for the current turn; a person lookup is refused unless it names the person. */
-  readonly currentOwnerMessage?: (() => string | null | undefined) | undefined;
 }
 
 export function registerAgentProfileTool(
@@ -656,7 +664,7 @@ export function registerAgentProfileTool(
     }
     return;
   }
-  registry.register(createAgentProfileTool({ invoke: options.invoke, currentOwnerMessage: options.currentOwnerMessage }), {
+  registry.register(createAgentProfileTool({ invoke: options.invoke }), {
     inputProjection: createAgentLocalStateInputProjector(args => {
       const action = normalizeProfileAction(args.action) ?? normalizeProfileAction(args.mode);
       const method = action ? ACTION_METHODS[action] : undefined;

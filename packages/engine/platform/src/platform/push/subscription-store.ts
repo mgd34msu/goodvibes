@@ -103,6 +103,12 @@ export function pushEndpointHash(endpoint: string): string {
  */
 export interface PushOutcomeStamp {
   readonly subscriptionId: string;
+  /**
+   * The endpoint the attempt was sent to. A subscription refreshed in place
+   * keeps its id and gets a new endpoint, so a late answer about the old
+   * endpoint (a 410 for it) must not touch the refreshed record.
+   */
+  readonly endpoint: string;
   readonly evidence: 'delivered' | 'unproven' | 'rejected' | 'gone';
   /** Plain-language reason, written into the removal when the record is dropped. */
   readonly detail: string;
@@ -114,6 +120,8 @@ export interface AppliedPushOutcome {
   readonly consecutiveFailures: number;
   /** Present when the stamp removed the record. */
   readonly removed?: PushSubscriptionRemoval | undefined;
+  /** True when the record's endpoint changed since the attempt, so the stamp was not applied. */
+  readonly superseded?: true | undefined;
 }
 
 /** A principal's devices and the latest removal among them: the push status. */
@@ -512,6 +520,13 @@ export class PushSubscriptionStore {
         const stamp = byId.get(prior.id);
         if (!stamp) {
           kept.push(prior);
+          continue;
+        }
+        if (stamp.endpoint !== prior.endpoint) {
+          // The device registered a new endpoint while this attempt was out:
+          // what the push service said about the old one says nothing here.
+          kept.push(prior);
+          applied.set(prior.id, { consecutiveFailures: prior.consecutiveFailures ?? 0, superseded: true });
           continue;
         }
         if (stamp.evidence === 'gone') {

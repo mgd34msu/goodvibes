@@ -167,6 +167,8 @@ export async function readDaemonStatusPayload(
   connection: DaemonStatusConnection,
   options: { readonly timeoutMs?: number; readonly fetchImpl?: typeof fetch } = {},
 ): Promise<unknown | null> {
+  // A surface that may not dial the daemon (switch off, no credential bound to it) reads nothing.
+  if (connection.unavailable !== undefined) return null;
   const fetchImpl = options.fetchImpl ?? fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => { controller.abort(); }, options.timeoutMs ?? 2000);

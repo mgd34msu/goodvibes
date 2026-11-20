@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { isLivePaymentOperation, canReconcilePaymentOperation, paymentOperationDescription, type PaymentWindowView, type PaymentOperationView, type PaymentSecurityCodeRequestView } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import { describeCardTransportRefusal, isLivePaymentOperation, canReconcilePaymentOperation, mayCrossWithCardDetails, paymentOperationDescription, type PaymentWindowView, type PaymentOperationView, type PaymentSecurityCodeRequestView } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import { cardEntryTransport } from '../../lib/insecure-origin';
 import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { minorUnitsToMajorText } from '../../lib/money';
@@ -19,7 +20,8 @@ const IDLE_POLL_MS = 30_000;
 
 /** The daemon owns amounts, deadlines and outcomes. This view sends only the
  * exact notice reference selected by an explicit owner click; it never retries. */
-export function PaymentWindows() {
+/** `currency`: payments.currency's live value, the currency an advance approval is given in. */
+export function PaymentWindows({ currency = 'USD' }: { readonly currency?: string } = {}) {
   const queryClient = useQueryClient();
   const active = useRef<AbortController | null>(null);
   const [pending, setPending] = useState<string | null>(null);
@@ -115,8 +117,8 @@ export function PaymentWindows() {
     if (active.current || !requested.merchantDomain || !requested.item || !requested.amount) return;
     const ok = await confirm.ask({
       title: 'Approve this purchase in advance?',
-      target: `${requested.item} from ${requested.merchantDomain}, at most ${requested.amount}`,
-      description: 'A purchase matching these three, begun in the next five minutes, needs no further answer up to this amount. The approval is used once.',
+      target: `${requested.item} from ${requested.merchantDomain}, at most ${requested.amount} ${currency}`,
+      description: `A purchase matching these three, in ${currency}, begun in the next five minutes, needs no further answer up to this amount. The approval is used once; if the payment currency changes first, it no longer matches.`,
       confirmLabel: 'Approve',
     });
     if (!ok || active.current) return;
@@ -125,7 +127,7 @@ export function PaymentWindows() {
     try {
       const result = await platformClient.operator.payments.checkout.approve(requested, controller.signal);
       if (controller.signal.aborted) return;
-      setMessage(`Approved in advance: ${result.item} from ${result.merchantDomain}, at most ${result.amount}, until ${new Date(result.expiresAt).toLocaleString()}.`);
+      setMessage(`Approved in advance: ${result.item} from ${result.merchantDomain}, at most ${result.amount} ${currency}, until ${new Date(result.expiresAt).toLocaleString()}.`);
       setAdvance({ merchantDomain: '', item: '', amount: '' });
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -163,7 +165,8 @@ export function PaymentWindows() {
       <h4>Security code needed</h4>
       <p>The approved purchase from {request.merchantDomain} is ready to pay with the card ending {request.cardLast4} and waits for its security code. It is used for this purchase only and kept nowhere. Never send it in a chat.</p>
       <p>Deadline: {new Date(request.deadlineMs).toLocaleString()}</p>
-      <form onSubmit={(event) => { event.preventDefault(); void supplyCode(request); }}>
+      {/* The daemon takes a security code only over this machine, TLS or the tailnet; no field is offered elsewhere. */}
+      {!mayCrossWithCardDetails(cardEntryTransport()) ? <p role="alert">{describeCardTransportRefusal()}</p> : <form onSubmit={(event) => { event.preventDefault(); void supplyCode(request); }}>
         <Field label="Card security code">
           <Input
             type="password"
@@ -179,7 +182,7 @@ export function PaymentWindows() {
         <Button type="submit" disabled={pending !== null || code.windowId !== request.windowId || !/^\d{3,4}$/.test(code.value)}>
           {pending === request.windowId ? 'Sending code…' : 'Hand the code to this purchase'}
         </Button>
-      </form>
+      </form>}
     </section>)}
     {windows.data?.windows.map(window => <section key={window.windowId} aria-label={`Purchase ${window.purchaseId}`}>
       <h4>{window.kind === 'approval' ? 'Approval required' : 'Purchase veto window'}</h4>

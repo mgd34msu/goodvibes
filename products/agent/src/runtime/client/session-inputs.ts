@@ -63,9 +63,10 @@ export function createAgentSessionInputsClient(verbs: DaemonVerbCaller, connecti
     },
 
     // One caller is granted an input; the rest are refused (409), which the
-    // dispatcher reads as "another surface holds it".
-    async claimInput(sessionId, inputId) {
-      return await verbs.invoke<unknown>('sessions.inputs.deliver', { sessionId, inputId, claim: true });
+    // dispatcher reads as "another surface holds it". A renewal sends the
+    // claim's token (its epoch), so a held input stays this surface's.
+    async claimInput(sessionId, inputId, claimEpoch) {
+      return await verbs.invoke<unknown>('sessions.inputs.deliver', { sessionId, inputId, claim: true, ...(claimEpoch === undefined ? {} : { claimEpoch }) });
     },
 
     async deliverInput(sessionId, inputId, options) {
@@ -82,6 +83,8 @@ export function createAgentSessionInputsClient(verbs: DaemonVerbCaller, connecti
         ...(options?.surfaceInstance === undefined ? {} : { surfaceInstance: options.surfaceInstance }),
         ...(options?.answer === undefined ? {} : { answer: options.answer }),
         ...(options?.status === undefined ? {} : { status: options.status }),
+        // This surface's claim token on the input; a superseded claimant's report is refused.
+        ...(options?.claimEpoch === undefined ? {} : { claimEpoch: options.claimEpoch }),
       });
     },
   };

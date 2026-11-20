@@ -66,6 +66,14 @@ export interface PluginTrustRecord {
   signatureAlgorithm?: 'ed25519-v1' | undefined;
   /** Optional human-readable note attached by the operator. */
   note?: string | undefined;
+  /**
+   * The copy the tier was given to: its directory and the content digest of
+   * its manifest and entry file (plugins/loader.ts pluginContentDigest). The
+   * tier applies to that copy only; a same-named copy elsewhere, or this copy
+   * after its code changed, starts untrusted until trust is given to it.
+   */
+  boundDir?: string | undefined;
+  contentDigest?: string | undefined;
 }
 
 // ── Signature Validation ──────────────────────────────────────────────────────
@@ -209,6 +217,18 @@ export class PluginTrustStore {
   }
 
   /**
+   * The tier of one copy of a plugin: the record's tier when the record was
+   * given to this copy (same directory, same content digest), else
+   * `untrusted`. What runs is what was trusted.
+   */
+  tierFor(pluginName: string, copy: { readonly dir: string; readonly digest: string | null }): PluginTrustTier {
+    const record = this.records.get(pluginName);
+    if (!record) return 'untrusted';
+    if (record.boundDir !== copy.dir || copy.digest === null || record.contentDigest !== copy.digest) return 'untrusted';
+    return record.tier;
+  }
+
+  /**
    * setTier, Explicitly assign a trust tier to a plugin.
    *
    * Intended for operator use via `/plugin trust`.
@@ -217,7 +237,7 @@ export class PluginTrustStore {
   setTier(
     pluginName: string,
     tier: PluginTrustTier,
-    options: { note?: string | undefined } = {},
+    options: { note?: string | undefined; boundDir?: string | undefined; contentDigest?: string | undefined } = {},
   ): PluginTrustRecord {
     const record: PluginTrustRecord = {
       pluginName,
@@ -225,6 +245,8 @@ export class PluginTrustStore {
       updatedAt: Date.now(),
       grantedBy: 'operator',
       note: options.note,
+      ...(options.boundDir !== undefined ? { boundDir: options.boundDir } : {}),
+      ...(options.contentDigest !== undefined ? { contentDigest: options.contentDigest } : {}),
     };
     this.records.set(pluginName, record);
     logger.info(`[plugin-trust] ${pluginName}: tier set to '${tier}'${options.note ? `, ${options.note}` : ''}`);
@@ -239,6 +261,7 @@ export class PluginTrustStore {
     pluginName: string,
     manifest: { name: string; version: string; capabilities?: string[] | undefined; signature?: string | undefined },
     publicKey?: string,
+    binding: { readonly boundDir?: string | undefined; readonly contentDigest?: string | undefined } = {},
   ): { ok: true; record: PluginTrustRecord } | { ok: false; reason: string } {
     let captured: typeof manifest;
     try { captured = captureOwnedJson(manifest, nodeTypes.isProxy) as typeof manifest; }
@@ -257,6 +280,8 @@ export class PluginTrustStore {
       grantedBy: 'signed-manifest',
       signatureFingerprint: validation.fingerprint,
       signatureAlgorithm: 'ed25519-v1',
+      ...(binding.boundDir !== undefined ? { boundDir: binding.boundDir } : {}),
+      ...(binding.contentDigest !== undefined ? { contentDigest: binding.contentDigest } : {}),
     };
     this.records.set(pluginName, record);
     logger.info(`[plugin-trust] ${pluginName}: elevated to 'trusted' via signed manifest (fingerprint=${validation.fingerprint})`);

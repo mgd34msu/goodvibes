@@ -634,17 +634,28 @@ class Analyzer {
      * particular order.
      */
     getOrderedReachableUris({ fromUri }) {
-        let uris = this.findAllSourcedUris({ uri: fromUri });
-        for (const u1 of uris) {
-            for (const u2 of this.findAllSourcedUris({ uri: u1 })) {
-                if (uris.has(u2)) {
-                    uris.delete(u2);
-                    uris.add(u2);
-                }
+        // GoodVibes patch: a depth-first walk over the direct `source` edges,
+        // each file visited once, each listed after every file it sources.
+        // Upstream re-appended members of the Set it was iterating, which never
+        // ends when two files source each other.
+        const uris = [];
+        const visited = new Set([fromUri]);
+        const visit = (uri) => {
+            var _a;
+            const sourcedUris = (_a = this.uriToAnalyzedDocument[uri]) === null || _a === void 0 ? void 0 : _a.sourcedUris;
+            if (!sourcedUris) {
+                return;
             }
-        }
-        uris = Array.from(uris);
-        uris.reverse();
+            sourcedUris.forEach((sourcedUri) => {
+                if (visited.has(sourcedUri)) {
+                    return;
+                }
+                visited.add(sourcedUri);
+                visit(sourcedUri);
+                uris.push(sourcedUri);
+            });
+        };
+        visit(fromUri);
         uris.push(fromUri);
         if (this.includeAllWorkspaceSymbols) {
             uris.push(...Object.keys(this.uriToAnalyzedDocument).filter((u) => !uris.includes(u)));

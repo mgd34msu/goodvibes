@@ -281,6 +281,8 @@ export interface CloudflareOperationalTokenResult {
   readonly reused?: boolean | undefined;
   /** The token this one replaced: revoked, or why it could not be. */
   readonly replaced?: { readonly tokenId: string; readonly revoked: boolean; readonly reason?: string | undefined } | undefined;
+  /** Tokens an earlier create left at Cloudflare (made, never stored) that could not be found or revoked, each with what to do. */
+  readonly residual?: readonly string[] | undefined;
   readonly apiTokenRef?: string | undefined;
   readonly generatedToken?: string | undefined;
   readonly accountId: string;
@@ -514,9 +516,11 @@ export interface CloudflareApiClient {
         readonly name: string;
         readonly policies: readonly CloudflareTokenPolicyParam[];
         readonly expires_on?: string | undefined;
-      }): Promise<CloudflareTokenCreateResponseLike>;
+      }, options?: { readonly maxRetries?: number | undefined }): Promise<CloudflareTokenCreateResponseLike>;
       get?(tokenId: string): Promise<CloudflareTokenCreateResponseLike>;
       delete?(tokenId: string): Promise<unknown>;
+      /** The account owner's API tokens (id, name, status; never a value). */
+      list?(): AsyncIterable<CloudflareTokenCreateResponseLike>;
       verify(): Promise<CloudflareTokenVerifyResponseLike>;
       readonly permissionGroups: {
         list(params?: { readonly name?: string; readonly scope?: string }): AsyncIterable<CloudflarePermissionGroupLike>;

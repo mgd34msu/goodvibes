@@ -680,6 +680,21 @@ export class AgentResearchRunRegistry {
     });
   }
 
+  /**
+   * Links the report of a run that completed without one. It sets the report,
+   * not the state: the run stays completed, and a run that has a report keeps it.
+   */
+  public attachReport(id: string, reportArtifactId: string): AgentResearchRunRecord {
+    const artifactId = reportArtifactId.trim();
+    if (!artifactId) throw new Error('reportArtifactId is required.');
+    assertRunContentSafe([artifactId]);
+    return this.update(id, (run) => {
+      if (run.status !== 'completed') throw new Error(`Cannot attach a report to ${run.status} research run ${run.id}: only a completed run takes one; complete it with reportArtifactId instead.`);
+      if (run.reportArtifactId) throw new Error(`Research run ${run.id} already has report ${run.reportArtifactId}; nothing was changed.`);
+      return { ...run, reportArtifactId: artifactId, updatedAt: nowIso() };
+    });
+  }
+
   public fail(id: string, error: string): AgentResearchRunRecord {
     const finalError = error.trim();
     if (!finalError) throw new Error('failure note is required.');

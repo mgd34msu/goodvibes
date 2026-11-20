@@ -1,4 +1,5 @@
 import { discoverPersonas, type DiscoveredPersonaRecord } from '../agent/persona-discovery.ts';
+import { commandArgsWithLiteralMarker } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
 import type { AgentPersonaRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
 import type { CliCommandOutput } from './types.ts';
@@ -106,7 +107,7 @@ function usagePersonas(): string {
 
 export async function handlePersonasCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
   try {
-    const [sub = 'list', ...rest] = runtime.cli.commandArgs;
+    const [sub = 'list', ...rest] = commandArgsWithLiteralMarker(runtime.cli);
     const normalized = sub.toLowerCase();
     const registry = personaRegistry(runtime);
     const snapshot = registry.snapshot();

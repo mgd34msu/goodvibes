@@ -150,6 +150,9 @@ export interface InputFeedContext {
   readonly getScrollTop: () => number;
   readonly scroll: (delta: number) => void;
   requestRender: () => void;
+  /** What a status bar segment at this screen cell opens on a click (footer-targets.ts). */
+  readonly footerTargetAt: (row: number, col?: number) => import('../renderer/footer-targets.ts').FooterTarget | undefined;
+  readonly openFooterTarget: (target: import('../renderer/footer-targets.ts').FooterTarget) => void;
   /** The agent or process view controls (null before the shell wires them). */
   readonly getSessionView: () => import('./handler-session-view-route.ts').SessionViewControls | null;
   readonly handleEscape: () => void;
@@ -223,7 +226,11 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
     },
     token,
   ),
-  mouse: (context, token, environment) => handleMouseToken(captureMouseFeedState(context, environment), token),
+  mouse: (context, token, environment) => handleMouseToken({
+    ...captureMouseFeedState(context, environment),
+    footerTargetAt: context.footerTargetAt,
+    openFooterTarget: context.openFooterTarget,
+  }, token),
   shortcut: (context, token, { viewportHeight }) => {
     const shortcutState = {
       ...captureShortcutFeedState(context),

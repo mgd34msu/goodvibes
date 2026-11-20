@@ -24,7 +24,8 @@ export interface PowerNoteSourceDeps {
 
 /** The status line's short power chip and the full note behind it (posted to the notifications when it changes). */
 export interface PowerNote {
-  readonly chip: string;
+  /** Null when only a warning applies (it is a notice, never status-bar text). */
+  readonly chip: string | null;
   readonly detail: string;
 }
 

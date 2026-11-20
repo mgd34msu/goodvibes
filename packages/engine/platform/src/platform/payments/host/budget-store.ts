@@ -19,6 +19,7 @@ import { fileObservationIdentity, readFileObservation, type FileObservation } fr
 import { lstatSync } from 'node:fs';
 import { logger } from '../../utils/logger.js';
 import { BudgetLedger } from '../budget.js';
+import { parseCurrencyCode } from '../types.js';
 import type { PaymentStoreStop } from '../payment-host-health.js';
 import type {
   BudgetLimits,
@@ -84,11 +85,17 @@ function isOptionalName(value: unknown): boolean {
   return value === undefined || (typeof value === 'string' && value.length > 0);
 }
 
+/** The currency a draw was made in: a three-letter code (types.ts parseCurrencyCode). */
+function isCurrency(value: unknown): boolean {
+  return typeof value === 'string' && parseCurrencyCode(value) !== null;
+}
+
 function isSpendRecord(value: unknown): value is SpendRecord {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
   return typeof record['purchaseId'] === 'string' && record['purchaseId'].length > 0
     && isValidTimestampMs(record['atMs'])
+    && isCurrency(record['currency'])
     && isOptionalName(record['timezone']) && isOptionalName(record['dayKey'])
     && (record['timezone'] === undefined) === (record['dayKey'] === undefined)
     && isFiniteNonNegativeAmount(record['itemMinorUnits'])
@@ -101,6 +108,7 @@ function isReservation(value: unknown): value is BudgetReservation {
   const record = value as Record<string, unknown>;
   return typeof record['id'] === 'string' && record['id'].length > 0
     && typeof record['dayKey'] === 'string' && record['dayKey'].length > 0
+    && isCurrency(record['currency'])
     && isOptionalName(record['timezone'])
     && isFiniteNonNegativeAmount(record['itemMinorUnits'])
     && isFiniteNonNegativeAmount(record['overageMinorUnits'])

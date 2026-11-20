@@ -1,3 +1,4 @@
+import { revealOrNull } from '../security/secret.js';
 import { captureFileIdentities } from '../security/read-source.js';
 /**
  * ServiceRegistry, named service credential resolution.
@@ -451,7 +452,7 @@ export class ServiceRegistry {
       }
     }
 
-    return keyOrRef ? secrets.get(keyOrRef) : null;
+    return keyOrRef ? revealOrNull(await secrets.get(keyOrRef), 'dispatch') : null;
   }
 
   /**

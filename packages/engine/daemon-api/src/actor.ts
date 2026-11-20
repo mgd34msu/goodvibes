@@ -134,6 +134,15 @@ export function agentActor(turn: Actor): Actor {
   return Object.freeze({ class: acting.class, id: acting.id, scopes: acting.scopes, via: acting.via, agentFor: acting });
 }
 
+/**
+ * The owner at a command surface of his own machine: a settings screen, a
+ * terminal command, a daemon CLI command run by the person who owns it. The
+ * `local` credential's actor, built the same way.
+ */
+export function localOwnerActor(): Actor {
+  return actorFromPrincipal({ principalId: 'local', credentialKind: 'local' }, NO_OWNER_USER, 'local');
+}
+
 /** The program itself, for a purpose named in records (`system:<purpose>`). */
 export function systemActor(purpose: string): Actor {
   return Object.freeze({ class: 'system', id: `system:${purpose}`, scopes: 'all', via: 'in-process' });

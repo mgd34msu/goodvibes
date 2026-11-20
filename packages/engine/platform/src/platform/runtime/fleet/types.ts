@@ -11,6 +11,7 @@
  * and lets each surface reorder/filter independently.
  */
 import type { FleetAttentionReason, FleetNodeKind, FleetNodeState } from '../../../events/fleet.js';
+import type { ScheduleCadence, ScheduleRunOutcome } from '@goodvibes-jev/engine/contracts';
 
 /** The source family a ProcessNode was adapted from. */
 export type ProcessKind = FleetNodeKind;
@@ -148,10 +149,46 @@ export interface ProcessControlFailure {
   readonly at: number;
 }
 
+/**
+ * Whom a node works for. `system`: the platform's own upkeep (its heartbeat
+ * and poller watchers, the code index), shown only when unhealthy. `you`:
+ * everything the person or an agent started (agents, contracts, workflows,
+ * schedules, triggers, hook actions, background processes, observed agents).
+ * Set by each adapter from a table, never inferred from a label.
+ */
+export type ProcessServes = 'you' | 'system';
+
+/** What an agent has done so far, counted in memory from its settled read and write calls. */
+export interface ProcessProgress {
+  readonly filesRead: number;
+  readonly filesChanged: number;
+}
+
+/**
+ * When a scheduled node runs and how its last run went, for the work board's
+ * schedule words (contracts/src/schedule-words.ts). Present on schedule,
+ * trigger and hook-action nodes.
+ */
+export interface ProcessScheduleFacts {
+  /** When it runs; absent for a node that runs on an event (a stream or on-exit trigger, a hook action). */
+  readonly cadence?: ScheduleCadence | undefined;
+  readonly lastRunAt?: number | undefined;
+  readonly lastOutcome?: ScheduleRunOutcome | undefined;
+  /** A trigger: how many times it fired, when it last did, and since when it has been watching. */
+  readonly firedCount?: number | undefined;
+  readonly lastFiredAt?: number | undefined;
+  readonly since?: number | undefined;
+}
+
 /** One normalized process in the fleet. Flat record; `parentId` expresses the tree. */
 export interface ProcessNode {
   readonly id: string;
   readonly kind: ProcessKind;
+  readonly serves: ProcessServes;
+  /** An agent's files read and changed so far; absent on every other kind. */
+  readonly progress?: ProcessProgress | undefined;
+  /** A schedule's or trigger's cadence and last run; absent on every other kind. */
+  readonly schedule?: ProcessScheduleFacts | undefined;
   readonly parentId?: string | undefined;
   readonly label: string;
   readonly task?: string | undefined;
@@ -381,7 +418,17 @@ export interface SteerOptions {
  */
 export type SteerResult =
   | { readonly queued: true; readonly messageId: string; readonly woke?: boolean | undefined }
-  | { readonly queued: false; readonly reason: string };
+  | { readonly queued: false; readonly reason: string }
+  /**
+   * Some steps reached the target and a later one failed (an observed tmux
+   * session: the text was typed, then an Enter send failed). `sent` lists the
+   * steps that went out, in order; `failed` is the one that did not. Never
+   * "nothing was sent": sending the whole steer again would type the text twice.
+   */
+  | { readonly queued: 'partial'; readonly sent: readonly SteerStep[]; readonly failed: SteerStep; readonly reason: string };
+
+/** One step of a steer into a terminal: the typed text, or an Enter key press. */
+export type SteerStep = 'text' | 'Enter';
 
 /**
  * The live process registry surface.

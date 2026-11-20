@@ -435,8 +435,9 @@ async function releaseIfUnused(daemon: SharedDaemon): Promise<void> {
  * The session a pending approval belongs to: the one whose submissions went to
  * the approval's shared session; else the one whose submission started the
  * agent that asked, or started the contract that agent works on, or went to the
- * shared session that agent works for; else the one session with a run in
- * flight, else the daemon's only session. `undefined` when none can be named.
+ * shared session that agent works for. Nothing else names a session: an ask
+ * with no exact attribution is `undefined`, never guessed onto the session that
+ * happens to be running or the only one.
  */
 function memberForApproval(daemon: SharedDaemon, server: AgentOwnershipSource, approval: SharedApprovalRecord): Member | undefined {
   const members = [...daemon.members];
@@ -462,9 +463,9 @@ function memberForApproval(daemon: SharedDaemon, server: AgentOwnershipSource, a
     const byAgentSession = sessionId === undefined ? undefined : only((member) => member.sessionIds.has(sessionId));
     if (byAgentSession) return byAgentSession;
   }
-  const running = members.filter((member) => member.liveRuns.size > 0);
-  if (running.length === 1) return running[0];
-  return members.length === 1 ? members[0] : undefined;
+  // Only an exact attribution names a session: the one session in flight, or
+  // the only session, is a guess that hands another embedder's ask to this one.
+  return undefined;
 }
 
 /**
@@ -475,8 +476,9 @@ function memberForApproval(daemon: SharedDaemon, server: AgentOwnershipSource, a
  */
 function bridgeApprovals(daemon: SharedDaemon, server: AgentOwnershipSource, approvals: ApprovalBroker): void {
   const handled = new Set<string>();
-  const deny = (approvalId: string, reason: string): Promise<unknown> =>
-    approvals.resolveApproval(approvalId, { approved: false, reason, actor: 'embed', actorSurface: 'embed' })
+  // Every decision here is for the record this bridge was shown, at the revision it was shown at.
+  const deny = (approvalId: string, revision: number, reason: string): Promise<unknown> =>
+    approvals.resolveApproval(approvalId, { approved: false, reason, actor: 'embed', actorSurface: 'embed', expectedRevision: revision })
       .catch((error: unknown) => {
         logger.warn('createEmbeddedSession: could not record a denial for an approval', {
           approvalId,
@@ -495,7 +497,7 @@ function bridgeApprovals(daemon: SharedDaemon, server: AgentOwnershipSource, app
         tool: approval.request.tool,
         sessions: members.length,
       });
-      void deny(approval.id, `${members.length} embedded sessions share this daemon and none of them started the agent that asked, so the ask was not shown to any of them.`)
+      void deny(approval.id, approval.revision, `${members.length === 1 ? 'The embedded session on this daemon' : `${members.length} embedded sessions share this daemon and none of them`} did not start the agent that asked, so the ask was not shown to any of them.`)
         .finally(() => handled.delete(approval.id));
       return;
     }
@@ -510,29 +512,35 @@ function bridgeApprovals(daemon: SharedDaemon, server: AgentOwnershipSource, app
         approvalId: approval.id,
         tool: approval.request.tool,
       });
-      void deny(approval.id, 'This approval needs the owner decision and cannot be approved from an embedded client.')
+      void deny(approval.id, approval.revision, 'This approval needs the owner decision and cannot be approved from an embedded client.')
         .finally(() => handled.delete(approval.id));
       return;
     }
     void handler(approval.request)
       .then(async (decision) => {
         try {
-          await approvals.resolveApproval(approval.id, {
+          const answer = (expectedRevision: number) => approvals.resolveApproval(approval.id, {
             approved: decision.approved,
             actor: 'embed',
             actorSurface: 'embed',
+            expectedRevision,
             ...(decision.remember !== undefined ? { remember: decision.remember } : {}),
             ...(decision.modifiedArgs !== undefined ? { modifiedArgs: decision.modifiedArgs } : {}),
           });
+          const outcome = await answer(approval.revision);
+          // The request a callback answered never changes; a claim or note made meanwhile moved only the
+          // revision. An ask still open is answered at its current revision; a settled one stays settled.
+          if (!outcome.applied && outcome.refusal.code === 'APPROVAL_CHANGED' && outcome.record
+            && (outcome.record.status === 'pending' || outcome.record.status === 'claimed')) await answer(outcome.record.revision);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           logger.warn('createEmbeddedSession: the embedder\'s decision was refused; denying the approval', { approvalId: approval.id, error: message });
-          await deny(approval.id, `The embedder's decision could not be applied: ${message}`);
+          await deny(approval.id, approval.revision, `The embedder's decision could not be applied: ${message}`);
         }
       }, async (error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
         logger.warn('createEmbeddedSession: the permission callback failed; denying the approval', { approvalId: approval.id, error: message });
-        await deny(approval.id, 'The embedder\'s permission callback failed.');
+        await deny(approval.id, approval.revision, 'The embedder\'s permission callback failed.');
       })
       .finally(() => handled.delete(approval.id));
   });

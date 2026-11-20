@@ -1,3 +1,4 @@
+import { revealOrNull } from '../security/secret.js';
 import { spawn } from 'node:child_process';
 import { accessSync, constants as fsConstants } from 'node:fs';
 import { delimiter, join } from 'node:path';
@@ -56,7 +57,8 @@ export interface CloudflareTunnelConnectorHandle {
   /** Bring the connector in line with the settings; `force` runs it even while the integration is still off (during provisioning). */
   reconcile(options?: { readonly force?: boolean }): Promise<CloudflareTunnelConnectorStatus>;
   waitUntilSettled(timeoutMs: number): Promise<CloudflareTunnelConnectorStatus>;
-  stop(): Promise<void>;
+  /** Resolves once the connector's child exited; the report names one whose exit was not seen. */
+  stop(): Promise<CloseReport | void>;
 }
 
 const CONNECTED_LINE = /Registered tunnel connection/i;
@@ -256,7 +258,7 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
       if (fromRef.value) return fromRef.value;
     }
     try {
-      return await this.options.secretsManager?.get(CLOUDFLARE_TUNNEL_TOKEN_KEY) ?? null;
+      return revealOrNull(await this.options.secretsManager?.get(CLOUDFLARE_TUNNEL_TOKEN_KEY), 'child-env');
     } catch (error: unknown) {
       logger.warn('cloudflare tunnel: stored token could not be read', { error: summarizeError(error) });
       return null;

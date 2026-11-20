@@ -57,6 +57,13 @@ export interface WebuiServingPosture {
    * never answered from the bundle directory, see {@link reservedApiPathRoots}.
    */
   readonly reservedApiPaths: readonly string[];
+  /**
+   * The relay the browser reaches this daemon through off the network
+   * (`relay.url`, as the origins a page connects to: its ws/wss and http/https
+   * forms), empty when none is set. The shell's Content-Security-Policy lets
+   * the page connect only to itself and these.
+   */
+  readonly relayOrigins: readonly string[];
 }
 
 /**
@@ -171,7 +178,18 @@ export function resolveWebuiServingPosture(
     cors: { enabled: corsEnabled, allowedOrigins },
     openaiPathPrefix: typeof openaiPrefixRaw === 'string' && openaiPrefixRaw.trim() ? openaiPrefixRaw.trim() : '/v1',
     reservedApiPaths: reservedApiPathsFor(routeAuthority),
+    relayOrigins: relayOriginsOf(readTrimmedString(configManager, 'relay.url')),
   };
+}
+
+/** The relay's origins in the forms a page connects with: its socket and its https twin. Empty for no (or an unparseable) relay. */
+function relayOriginsOf(relayUrl: string): readonly string[] {
+  if (!relayUrl) return [];
+  let parsed: URL;
+  try { parsed = new URL(relayUrl); } catch { return []; }
+  const secure = parsed.protocol === 'wss:' || parsed.protocol === 'https:';
+  if (!secure && parsed.protocol !== 'ws:' && parsed.protocol !== 'http:') return [];
+  return [`${secure ? 'wss' : 'ws'}://${parsed.host}`, `${secure ? 'https' : 'http'}://${parsed.host}`];
 }
 
 // ---------------------------------------------------------------------------
@@ -308,21 +326,46 @@ function cacheControlFor(pathname: string, isShell: boolean): string {
   return 'public, max-age=3600';
 }
 
-/** The images a served page may load (control-plane/gateway-web-ui.ts sends the same policy). */
-const WEBUI_IMAGE_POLICY = "img-src 'self' data: blob:";
+/**
+ * The served shell's Content-Security-Policy, built from what the bundle
+ * needs: its own scripts, styles, fonts and workers; WebAssembly compiled from
+ * its own bytes (the wake-word and noise models), and blob: modules (the mic's
+ * audio worklet, the model runtime's workers); its own, data: and blob:
+ * images only, so an image URL in model or tool text is never fetched; and
+ * connections only to this daemon and the configured relay. No plugin
+ * content, no framing by another page, no form posted elsewhere. A script an
+ * attacker manages to put into the page cannot send the stored credential
+ * anywhere else.
+ */
+function webuiShellPolicy(posture: WebuiServingPosture): string {
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'wasm-unsafe-eval' blob:",
+    "worker-src 'self' blob:",
+    "style-src 'self'",
+    "img-src 'self' data: blob:",
+    "media-src 'self' blob:",
+    "font-src 'self' data:",
+    `connect-src 'self'${posture.relayOrigins.map((origin) => ` ${origin}`).join('')}`,
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+}
 
 async function fileResponse(
   req: Request,
   file: ReturnType<typeof Bun.file>,
   pathname: string,
   isShell: boolean,
+  posture: WebuiServingPosture,
 ): Promise<Response> {
   const headers: Record<string, string> = {
     'Content-Type': contentTypeFor(pathname),
     'Cache-Control': cacheControlFor(pathname, isShell),
-    // A page shows only its own images, data: and blob: images: an image URL in
-    // model or tool text is never fetched by rendering it.
-    ...(isShell || extensionOf(pathname) === 'html' ? { 'Content-Security-Policy': WEBUI_IMAGE_POLICY } : {}),
+    // Every served page carries the shell's policy (webuiShellPolicy).
+    ...(isShell || extensionOf(pathname) === 'html' ? { 'Content-Security-Policy': webuiShellPolicy(posture) } : {}),
   };
   if (req.method === 'HEAD') {
     const size = await file.size;
@@ -368,7 +411,7 @@ export async function serveWebuiBundle(req: Request, posture: WebuiServingPostur
     if (canonical !== root && !canonical.startsWith(root + sep)) return new Response('Forbidden', { status: 403 });
     const file = Bun.file(canonical);
     if (!await file.exists()) return null;
-    return fileResponse(req, file, path, isShell);
+    return fileResponse(req, file, path, isShell, posture);
   };
   const response = await serveFile(resolved, resolved === resolve(root, 'index.html'));
   if (response) return response;

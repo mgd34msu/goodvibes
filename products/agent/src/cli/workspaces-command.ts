@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { optionArgsOf } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
 import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { createShellPathService } from '@/runtime/index.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -74,8 +75,9 @@ export async function handleWorkspacesCommand(runtime: CliCommandRuntime): Promi
   });
 
   const store = createWorkspaceRegistrationStore(shellPaths);
-  const [sub = 'list', ...rawRest] = runtime.cli.commandArgs;
-  const values = commandValues(rawRest);
+  // Options are read only from what was typed before `--`; words after it are paths, never flags.
+  const [sub = 'list', ...rawRest] = optionArgsOf(runtime.cli);
+  const values = [...commandValues(rawRest), ...(runtime.cli.literalArgs ?? [])];
 
   if (sub === 'list' || sub === 'ls') {
     const snapshot = await store.snapshot();

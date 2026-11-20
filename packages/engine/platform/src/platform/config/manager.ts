@@ -48,6 +48,8 @@ import { persistCategoryKeyRemoval, persistCategoryPatch, type CategoryIoDeps } 
 import { configKeyFacts } from './config-key-facts.js';
 import { refusal as buildRefusal, type Refusal } from '@goodvibes-jev/engine/errors';
 import type { ToolDecision } from '../types/tools.js';
+import { localOwnerActor, type Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { admitEffects } from '../security/effect-authority.js';
 import { HostSettings, type HostBooleanSettingHandle, type HostManagedSettingLocks, type HostSetting, type HostSettingValue, type HostSettingValues } from './host-settings.js';
 import { HostSettingsReadError, hostSettingsFileExists, readHostSettingValues, readHostSettingsFile, recoverHostSettingsWriteFailure } from './manager-host-settings.js';
 import { ConfigRuntimeState, captureRuntimeValue } from './manager-runtime-state.js';
@@ -198,6 +200,13 @@ export type { ConfigKeyTier, ConfigKeySource } from './manager-key-source.js';
 export interface ConfigSetOptions {
   bypassManagedLock?: boolean | undefined;
   /**
+   * For a write a model makes (an actor with `agentFor`): the gate's decision
+   * on that tool call. A change that loosens security stands only when the
+   * owner, the owner's standing rule or the mode settled it, never on Jev's
+   * reading alone. Read by {@link ConfigManager.setMany}.
+   */
+  decision?: ToolDecision | undefined;
+  /**
    * The caller established that no daemon is running to apply a daemon-owned
    * setting, so it is written to the daemon's settings file for the daemon to
    * read when it starts. Only the routed write (daemon-config-route.ts and the
@@ -272,18 +281,6 @@ export interface ConfigChange {
   readonly value: unknown;
 }
 
-/** Who asked for a settings write; decides whether a change that loosens security is admitted. */
-export type WriteOrigin =
-  /** A person at a command surface: a settings screen, `/config set`, a CLI command. */
-  | { readonly kind: 'owner'; readonly surface: string }
-  /**
-   * An agent's tool call. `decision` is the gate's decision on that call; a
-   * change that loosens security is admitted only when the owner, the owner's
-   * standing rule or the mode settled it, never on Jev's reading alone.
-   */
-  | { readonly kind: 'agent'; readonly surface: string; readonly decision?: ToolDecision | undefined }
-  /** The program itself: a migration, a product default, a command that applies a fixed set of values. */
-  | { readonly kind: 'system'; readonly purpose: string };
 
 /**
  * The outcome of {@link ConfigManager.setMany}. `saved` names every key that
@@ -438,6 +435,12 @@ export class ConfigManager {
   private readonly durablePolicy: DurablePolicyEpochOwner;
   /** This process wrote a settings file; the durable revision moves before it is next read. */
   #durableDirty = false;
+  /**
+   * Per settings file, the document as this process last loaded or wrote it:
+   * what a bulk save compares the file with under its lock, so a change
+   * another process made since is merged by key instead of written over.
+   */
+  readonly #fileBaselines = new Map<string, Record<string, unknown>>();
   /** The durable revision has read the files since the last load. */
   #durableObserved = false;
   #durableCache: { readonly incarnation: number; readonly value: string } | undefined;
@@ -1312,6 +1315,7 @@ export class ConfigManager {
       const raw = read(path);
       if (mutate(raw) === false) return raw;
       writeJsonFileAtomic(path, raw);
+      this.#fileBaselines.set(path, structuredClone(raw));
       this.#durableDirty = true;
       if (!foreign) this._fileWatch?.acknowledge(path);
       else queueMicrotask(() => this._fileWatch?.poll());
@@ -1637,11 +1641,32 @@ export class ConfigManager {
   }
 
   /**
+   * Why `actor` may not change `key` to `value` because the change loosens a
+   * security, permission, judgment or payment setting, or null when it does
+   * not loosen one or the actor may (`settings.loosen`, the effect table). A
+   * model acting for someone (`agentFor`) also needs the gate's decision on
+   * its call to be the owner's, his rule's or the mode's. The one check every
+   * settings write path asks, the routed write to the daemon included.
+   */
+  loosenRefusal(key: string, value: unknown, actor: Actor, decision?: ToolDecision | undefined):
+    { readonly code: string; readonly reason: string; readonly next: readonly string[]; readonly status: number } | null {
+    const loosening = this.describeLoosening(key, value);
+    if (loosening === null) return null;
+    const admission = admitEffects(actor, ['settings.loosen']);
+    if (admission.kind === 'allowed' && (actor.agentFor === undefined || ownerSettled(decision))) return null;
+    return admission.kind === 'ask-owner'
+      ? { code: 'OWNER_APPROVAL_REQUIRED', reason: `Changing ${key} would ${loosening}, which is the owner's to decide; nothing was changed.`,
+        next: ['Send the change through the daemon\'s config.set or config.setMany, which puts it to the owner as an approval.'], status: 403 }
+      : { code: 'OWNER_ONLY', reason: `Changing ${key} would ${loosening}, which only the owner decides.`,
+        next: ['Ask the owner to make this change, or to approve it when asked.'], status: 403 };
+  }
+
+  /**
    * Update daemon-owned, non-credential settings in the daemon's one settings
    * file, through {@link setMany}: one admission, one write, one revision.
    * Throws a ConfigError naming the setting and the reason; never echoes a value.
    */
-  setDaemonValues(patch: DaemonConfigPatch, by: WriteOrigin = { kind: 'owner', surface: 'daemon' }): void {
+  setDaemonValues(patch: DaemonConfigPatch, by: Actor = localOwnerActor()): void {
     this.requireWritable();
     if (!this.daemonTierPath) throw new ConfigError('A daemon settings file is required for this update.');
     const changes: ConfigChange[] = [];
@@ -1665,17 +1690,20 @@ export class ConfigManager {
    *
    * Admission reads the key's facts (config-key-facts.ts): card material is
    * refused, a credential is accepted only as a `goodvibes://secrets/…`
-   * reference, and a change that loosens security from an agent stands only
-   * when the owner, the owner's rule or the mode settled the call. An agent's
-   * settings tool writes here with that origin and the gate's decision on its
-   * call (gate/admitted-decision.ts, read by tools/goodvibes-runtime/config-routing.ts);
-   * a write routed to the daemon was admitted by this process's gate before it left.
+   * reference, and a change that loosens a security, permission, judgment or
+   * payment setting is admitted for the actor making it (`settings.loosen` in
+   * the effect table, security/effect-authority.ts): the owner and the program
+   * make it, an admin's is the owner's to decide and is refused here (the
+   * daemon's routes put it to him first), anyone else is refused; a model
+   * (`agentActor`) makes it only when the owner, his standing rule or the mode
+   * settled the call (`options.decision`, the gate's decision, read by
+   * tools/goodvibes-runtime/config-routing.ts from gate/admitted-decision.ts).
    *
    * Changes landing in different files (daemon, shared, project, this
    * surface's) are written one file after another; if a later file cannot be
    * written, what reached disk is published and named in `saved`.
    */
-  setMany(changes: readonly ConfigChange[], by: WriteOrigin, options: ConfigSetOptions = {}): SetResult {
+  setMany(changes: readonly ConfigChange[], by: Actor, options: ConfigSetOptions = {}): SetResult {
     const refuse = (init: { code: string; reason: string; next: readonly string[]; retryable?: boolean; status?: number },
       saved: readonly ConfigKey[] = []): SetResult => ({
       ok: false, saved,
@@ -1731,10 +1759,8 @@ export class ConfigManager {
       catch { return invalid(key, 'no such setting; check the spelling against the settings list'); }
       // Weighed against the value features act on: an unset setting the owner
       // profile fills (the zone, the currency) is loosened from that value.
-      if (by.kind === 'agent' && this.describeLoosening(key, value) !== null && !ownerSettled(by.decision)) {
-        return refuse({ code: 'OWNER_ONLY', reason: `Changing ${key} would ${facts.loosening ?? 'loosen security'}, which only the owner decides.`,
-          next: ['Ask the owner to make this change, or to approve it when asked.'], status: 403 });
-      }
+      const loosening = this.loosenRefusal(key, value, by, options.decision);
+      if (loosening) return refuse(loosening);
       writeRawDotPath(projected, key, structuredClone(value));
       admitted.push({ key, value, tier: 'global' });
     }
@@ -1763,7 +1789,9 @@ export class ConfigManager {
     // file for it to read at start; an agent's waits for the daemon.
     const daemonChange = admitted.find(change => change.tier === 'daemon');
     const route = daemonChange ? this.#routedDaemonWrite(daemonChange.key, options) : null;
-    const fileWritable = this.daemonTierOwner || options.daemonNotRunning === true || (by.kind === 'owner' && this.#mayWriteDaemonFile(options));
+    // A person's write lands in the daemon's file when none runs; a model's or the program's waits for the daemon.
+    const byPerson = by.agentFor === undefined && by.class !== 'system';
+    const fileWritable = this.daemonTierOwner || options.daemonNotRunning === true || (byPerson && this.#mayWriteDaemonFile(options));
     if (daemonChange && !route && !fileWritable) {
       return refuse({ code: 'CONFIG_DAEMON_OWNED', reason: daemonOwnedRefusal(daemonChange.key).message,
         next: [`goodvibes-daemon config set ${daemonChange.key} <value>`], status: 409 });
@@ -2057,27 +2085,27 @@ export class ConfigManager {
     // A bulk save writes the working view: load any outside edit first, so it is kept, not erased.
     this._fileWatch?.poll();
     this.advanceConfigurationIncarnation();
-    const baseline: Record<string, unknown> = {};
-    const minimal = this.destinationSnapshot('global', this.configPath, baseline);
+    const minimal = this.destinationSnapshot('global', this.configPath);
     this.preserveHostSettingsForBulkSave(minimal, this.configPath);
     const staged = this.runtimeState.fork();
     staged.acceptBulkSnapshot(this.withoutDaemonOwned(minimal), 'global', this.hostSettings.keys());
     const effective = staged.compose();
-    this.#saveBulkSnapshot(this.configPath, minimal, baseline);
+    this.#saveBulkSnapshot(this.configPath, minimal);
     this.publishState(staged, effective);
   }
 
   /**
    * Write a bulk save's snapshot under the file's lock, compared with what the
-   * file held when the snapshot was taken (`baseline`, read once after the
-   * watcher was polled). Unchanged since: the snapshot replaces it. Changed by
-   * another writer in between: per key, a key this save did not change keeps
-   * the other writer's value, a key only this save changed takes this save's,
-   * and a key both changed differently refuses the whole save, naming it,
-   * with nothing written; the other writer's change is then loaded. Costs no
-   * read beyond the one the lock already does.
+   * file held when this process last loaded or wrote it (`#fileBaselines`).
+   * Unchanged since: the snapshot replaces it. Changed by another writer in
+   * between: per key, a key this save did not change keeps the other writer's
+   * value, a key only this save changed takes this save's, and a key both
+   * changed differently refuses the whole save, naming it, with nothing
+   * written; the other writer's change is then loaded. Costs no read beyond
+   * the one the lock already does.
    */
-  #saveBulkSnapshot(path: string, ours: Record<string, unknown>, baseline: Record<string, unknown>): void {
+  #saveBulkSnapshot(path: string, ours: Record<string, unknown>): void {
+    const baseline = this.#fileBaselines.get(path) ?? {};
     let conflicts: string[] = [];
     try {
       this.#updateSettingsFile(path, raw => {
@@ -2107,16 +2135,14 @@ export class ConfigManager {
    * The reader-floor marker and values the loader could not read are kept as
    * they are on disk, so a bulk save never erases what it did not understand.
    */
-  private destinationSnapshot(tier: 'global' | 'project', path: string, baseline: Record<string, unknown>): Record<string, unknown> {
+  private destinationSnapshot(tier: 'global' | 'project', path: string): Record<string, unknown> {
     // Read without quarantining: an unreadable file contributes nothing here, and
-    // the write below replaces it exactly as a bulk save always has. What was
-    // read is also `baseline`, the state the save compares with under the lock.
+    // the write below replaces it exactly as a bulk save always has.
     let disk: Record<string, unknown> = {};
     try {
       const parsed: unknown = existsSync(path) ? JSON.parse(readFileSync(path, 'utf-8')) : {};
       if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) disk = parsed as Record<string, unknown>;
     } catch { /* unreadable: nothing to preserve */ }
-    Object.assign(baseline, structuredClone(disk));
     const snapshot = this.runtimeState.bulkSnapshot();
     // A project save is the explicit "write the effective config here" snapshot,
     // so global values may come along; values owned by the shared and daemon
@@ -2165,13 +2191,12 @@ export class ConfigManager {
     if (!this.projectConfigPath) {
       throw new Error('ConfigManager.saveProject requires an explicit workingDir.');
     }
-    const baseline: Record<string, unknown> = {};
-    const minimal = this.destinationSnapshot('project', this.projectConfigPath, baseline);
+    const minimal = this.destinationSnapshot('project', this.projectConfigPath);
     this.preserveHostSettingsForBulkSave(minimal, this.projectConfigPath);
     const staged = this.runtimeState.fork();
     staged.acceptBulkSnapshot(this.withoutDaemonOwned(minimal), 'project', this.hostSettings.keys());
     const effective = staged.compose();
-    this.#saveBulkSnapshot(this.projectConfigPath, minimal, baseline);
+    this.#saveBulkSnapshot(this.projectConfigPath, minimal);
     this.publishState(staged, effective);
   }
 
@@ -2246,9 +2271,13 @@ export class ConfigManager {
     this.hostLoadSources = this.hostSettings.active ? new Map() : null;
     try {
       this.ingestionNotices = [];
+      this.#fileBaselines.delete(this.configPath);
+      if (this.projectConfigPath) this.#fileBaselines.delete(this.projectConfigPath);
       if (this.hostSettings.active ? hostSettingsFileExists(this.configPath) : existsSync(this.configPath)) {
         try {
-          const migrated = this.ingest(JSON.parse(readFileSync(this.configPath, 'utf-8')) as Record<string, unknown>, this.configPath);
+          const document = JSON.parse(readFileSync(this.configPath, 'utf-8')) as Record<string, unknown>;
+          this.#fileBaselines.set(this.configPath, structuredClone(document));
+          const migrated = this.ingest(document, this.configPath);
           staged.nonRuntime = sanitizeConfigShape(deepMerge(staged.nonRuntime, migrated) as GoodVibesConfig);
           staged.recordLayer(migrated, 'global');
         } catch (error) { throw this.loadFailure('Global', this.configPath, error); }
@@ -2258,7 +2287,9 @@ export class ConfigManager {
       if (this.projectConfigPath && this.projectConfigPath !== this.configPath
         && (this.hostSettings.active ? hostSettingsFileExists(this.projectConfigPath) : existsSync(this.projectConfigPath))) {
         try {
-          const ingested = this.ingest(JSON.parse(readFileSync(this.projectConfigPath, 'utf-8')) as Record<string, unknown>, this.projectConfigPath);
+          const document = JSON.parse(readFileSync(this.projectConfigPath, 'utf-8')) as Record<string, unknown>;
+          this.#fileBaselines.set(this.projectConfigPath, structuredClone(document));
+          const ingested = this.ingest(document, this.projectConfigPath);
           const restricted = restrictProjectLayer(ingested, staged.nonRuntime, this.projectConfigPath, this.hostSettings);
           for (const notice of restricted.notices) { announceIngestionNotice(notice); this.recordIngestionNotice(notice); }
           const migrated = restricted.layer;

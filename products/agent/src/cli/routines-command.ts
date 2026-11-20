@@ -1,4 +1,5 @@
 import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+import { commandArgsWithLiteralMarker } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
 import { createShellPathService } from '@/runtime/index.ts';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
 import { discoverRoutines, type DiscoveredRoutineRecord } from '../agent/routine-discovery.ts';
@@ -456,7 +457,7 @@ function latestAttemptFor(
 }
 
 export async function handleRoutinesCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
-  const [sub = 'list', ...rest] = runtime.cli.commandArgs;
+  const [sub = 'list', ...rest] = commandArgsWithLiteralMarker(runtime.cli);
   const registry = routineRegistry(runtime);
   const snapshot = registry.snapshot();
   const normalized = sub.toLowerCase();

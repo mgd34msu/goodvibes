@@ -40,8 +40,15 @@ const DEFAULT_PROBE_TIMEOUT_MS = 1_500;
 
 export interface SessionSpineRestConnection {
   readonly baseUrl: string;
+  /** The bearer for `baseUrl`'s origin only (the resolver binds it, daemon-target-resolver.ts). */
   readonly token: string | null;
   readonly tokenPath?: string;
+  /**
+   * Set when this surface may not dial the daemon at all (the connected-host
+   * switch is off, or no credential is bound to that daemon): every call ends
+   * as offline with this reason and no request is made.
+   */
+  readonly unavailable?: string | undefined;
 }
 
 export type SessionSpineRestFailureKind =
@@ -100,6 +107,10 @@ function classifyHttpFailure(status: number, body: unknown): SessionSpineRestFai
   };
 }
 
+function unavailableFailure(reason: string): SessionSpineRestFailure {
+  return { ok: false, kind: 'connected_host_unavailable', error: reason };
+}
+
 function missingTokenFailure(connection: SessionSpineRestConnection): SessionSpineRestFailure {
   return {
     ok: false,
@@ -116,6 +127,7 @@ export async function postSessionSpineRegister(
   input: RegisterSharedSessionInput,
   options: { readonly timeoutMs?: number } = {},
 ): Promise<SessionSpineRegisterResult> {
+  if (connection.unavailable !== undefined) return unavailableFailure(connection.unavailable);
   if (!connection.token) return missingTokenFailure(connection);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_REGISTER_TIMEOUT_MS);
@@ -151,6 +163,7 @@ export async function postSessionSpineClose(
   sessionId: string,
   options: { readonly timeoutMs?: number } = {},
 ): Promise<SessionSpineCloseResult> {
+  if (connection.unavailable !== undefined) return unavailableFailure(connection.unavailable);
   if (!connection.token) return missingTokenFailure(connection);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_CLOSE_TIMEOUT_MS);
@@ -220,17 +233,27 @@ async function defaultProbe(
   timeoutMs: number,
   onDaemonFloor?: (floor: string | undefined) => void,
 ): Promise<boolean> {
+  // A surface that may not dial the daemon sends nothing, not even a probe.
+  if (connection.unavailable !== undefined) return false;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    // Any HTTP response (even 401) means the host answered -> reachable. Auth
-    // is a separate concern surfaced by register/close results, not the probe.
+    // Reachable means the daemon answered: its running status, or its own
+    // refusal of the credential (auth is a separate concern surfaced by
+    // register/close). Any other answer (another program on the port, a proxy
+    // error page) is not the daemon. The bearer is the one bound to this
+    // origin, so the floor header an authenticated read carries is still read.
     // This is a LIVENESS read only: a plain /status read never delivers (or
     // marks delivered) the daemon's undelivered honesty receipts.
     const response = await fetch(`${connection.baseUrl}/status`, {
       ...(connection.token ? { headers: { authorization: `Bearer ${connection.token}` } } : {}),
+      redirect: 'manual',
       signal: controller.signal,
     });
+    const body = await readResponseBody(response).catch(() => null);
+    const daemonAnswered = (response.ok && isRecord(body) && body.status === 'running')
+      || ((response.status === 401 || response.status === 403) && isRecord(body) && typeof body.code === 'string');
+    if (!daemonAnswered) return false;
     onDaemonFloor?.(readClientCompatibilityFloor(response.headers));
     return true;
   } catch {
@@ -288,6 +311,7 @@ async function readStatusBody(
   query: Readonly<Record<string, string>>,
   timeoutMs: number,
 ): Promise<unknown> {
+  if (connection.unavailable !== undefined) return null;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

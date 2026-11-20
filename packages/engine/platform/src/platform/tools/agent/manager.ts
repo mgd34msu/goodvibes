@@ -1,7 +1,8 @@
 import { bindContractInputAuthority } from '../../contract/input-authority.js';
 import { classicAgentInput } from './classic-policy.js';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { currentTurn, withTurnSurfaceId } from '../../security/turn-boundary.js';
+import { currentTurn, withAgentTurn, type TurnContext } from '../../security/turn-boundary.js';
+import type { Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import { currentExecutionModeOwner, detachedFromInvocation, type ExecutionModeOwner } from '../../gate/execution-context.js';
 import { AgentCapacityError } from './capacity-error.js';
 import { bindContractActionSource, bindContractActionSignal, bindContractPlanConsumer } from './contract-binding.js';
@@ -145,7 +146,10 @@ export class AgentManager {
   private agents = new Map<string, AgentRecord>();
   private readonly executionModeOwners = new WeakMap<AgentRecord, ExecutionModeOwner>();
   /** The third-party surface an agent was started for, so a later wake runs under it instead of the waker's. */
-  private readonly triggerSurfaces = new WeakMap<AgentRecord, string>();
+  /** The channel turn an agent was started from: its surface, and its actor when that was a guest. */
+  private readonly triggerSurfaces = new WeakMap<AgentRecord, { readonly surface: string; readonly actor?: Actor | undefined }>();
+  /** The turn whose tool call started each agent: its request, and the id work it leaves is recovered against. */
+  private readonly spawnTurns = new WeakMap<AgentRecord, TurnContext>();
   private readonly restoredContractUnits = new Set<string>();
   /** Agents with an admitted wake that has not started yet. */
   private readonly queuedWakes = new Set<string>();
@@ -450,7 +454,8 @@ export class AgentManager {
   private spawnInternal(input: AgentInput, spawnBinding?: AgentConstructionBinding, owned?: OwnedSpawnContext): AgentRecord {
     if (spawnBinding === undefined) input = classicAgentInput(input);
     const executionModeOwner = currentExecutionModeOwner();
-    const triggerSurface = currentTurn()?.surface;
+    const triggerTurn = currentTurn();
+    const triggerSurface = triggerTurn?.surface;
     const { unit: binding, owner: ownerBinding } = splitContractBinding(spawnBinding);
     const task = input.task;
     if (!task || typeof task !== 'string' || task.trim() === '') {
@@ -634,7 +639,8 @@ export class AgentManager {
         }
       }
       if (executionModeOwner) this.executionModeOwners.set(record, executionModeOwner);
-      if (triggerSurface !== undefined) this.triggerSurfaces.set(record, triggerSurface);
+      if (triggerSurface !== undefined) this.triggerSurfaces.set(record, { surface: triggerSurface, ...(triggerTurn?.actor !== undefined ? { actor: triggerTurn.actor } : {}) });
+      if (triggerTurn) this.spawnTurns.set(record, triggerTurn);
       this.pruneTerminalRecords();
       this.agents.set(id, record);
       return this.reserveExecution(id);
@@ -874,9 +880,28 @@ export class AgentManager {
     return { woke: true, reason: previous ? 'wake admitted; waiting for prior execution cleanup' : `re-triggered from ${wakeCompleted ? 'completed' : 'failed'} state with steer` };
   }
 
-  /** Runs under the surface the agent was started for; an owner-started agent runs unscoped even when the waker is a channel turn. */
+  /**
+   * Runs as a turn of the agent itself: under the surface (and guest actor)
+   * it was started for, so an owner-started agent runs as the owner's even
+   * when the waker is a channel turn; with its own id as the caller, so what
+   * it spawns names it as the parent; with the request it was started for.
+   */
   private runUnderTriggerSurface<T>(record: AgentRecord, run: () => T): T {
-    return withTurnSurfaceId(this.triggerSurfaces.get(record), run);
+    const trigger = this.triggerSurfaces.get(record);
+    const spawnTurn = this.spawnTurns.get(record);
+    return withAgentTurn({
+      agentId: record.id,
+      surface: trigger?.surface,
+      ...(trigger?.actor !== undefined ? { actor: trigger.actor } : {}),
+      sessionId: record.sessionId ?? spawnTurn?.ownerSessionId ?? null,
+      requestText: spawnTurn?.requestText ?? null,
+    }, run);
+  }
+
+  /** The id of the turn whose call started an agent; undefined for an agent no turn started (a schedule, a channel spawn outside one). */
+  requestTurnOf(agentId: string): string | undefined {
+    const record = this.agents.get(agentId);
+    return record ? this.spawnTurns.get(record)?.turnId : undefined;
   }
 
   /**

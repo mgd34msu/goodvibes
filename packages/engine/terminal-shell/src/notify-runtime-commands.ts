@@ -1,10 +1,37 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { NotificationDeadLetter, NotificationDeadLetterSource, WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import type { TerminalCommandRegistry } from './command-registry.js';
+import {
+  forgetNotificationWebhook,
+  resolveNotificationWebhook,
+  shownNotificationWebhook,
+  storeNotificationWebhook,
+  type NotificationDeadLetter,
+  type NotificationDeadLetterSource,
+  type NotificationWebhookSecretStore,
+  type WebhookNotifier,
+} from '@goodvibes-jev/engine/platform/platform/integrations';
+import { secretArg, type TerminalCommandRegistry } from './command-registry.js';
 import { commandRefusal, stripYesFlag, takeYesFromText } from './command-confirmation.js';
 interface NotifyContext {
-  readonly platform: { readonly configManager: Pick<ConfigManager, 'getCategory' | 'mergeCategory'> };
+  readonly platform: {
+    readonly configManager: Pick<ConfigManager, 'getCategory' | 'mergeCategory'>;
+    /** Where each webhook URL is kept; the settings list holds a reference to it. */
+    readonly secretsManager?: NotificationWebhookSecretStore | null | undefined;
+  };
   print(message: string): void;
+}
+
+/**
+ * Where a `/notify add <url>` or `/notify remove <url>` line holds a URL: the
+ * word after the subcommand (`--yes` is not a word of the line). A webhook URL
+ * carries its key, so the input history keeps `<redacted>` there and the
+ * handler reads it with `secretArg`. A list number is not a URL.
+ */
+function notifyUrlPositions(args: readonly string[]): number[] {
+  const words = args.map((token, index) => ({ token, index })).filter((entry) => entry.token !== '--yes');
+  const sub = words[0]?.token.toLowerCase();
+  const target = words[1];
+  if (!target || (sub !== 'add' && sub !== 'remove')) return [];
+  return sub === 'remove' && /^\d+$/.test(target.token) ? [] : [target.index];
 }
 
 /** The part of a dead-letter id a person types: the random tail after the last colon. */
@@ -33,16 +60,8 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
   },
 ) {
   const emptyList = `No webhook URLs configured. Add one with /notify add <url>`;
-  /** A stored URL as the transcript shows it: the path holds the secret topic or token, so a masked policy shows only the origin. */
-  const shownUrl = (url: string): string => {
-    if (!policy.maskUrls) return url;
-    try {
-      const parsedUrl = new URL(url);
-      return parsedUrl.pathname === '/' && !parsedUrl.search ? parsedUrl.origin : `${parsedUrl.origin}/…`;
-    } catch {
-      return '(invalid URL)';
-    }
-  };
+  /** A URL as the transcript shows it: the path holds the secret topic or token, so a masked policy shows only the origin. */
+  const shownUrl = (url: string | null): string => (!policy.maskUrls && url !== null ? url : shownNotificationWebhook(url));
   function registerNotifyRuntimeCommands(registry: Pick<TerminalCommandRegistry<Context>, 'register'>): void {
     registry.register({
       name: 'notify',
@@ -53,19 +72,25 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
       description: policy.description,
       usage: policy.usage,
       argsHint: policy.argsHint,
+      secretArgs: { select: notifyUrlPositions },
       async handler(args, ctx) {
         const parsed = { rest: stripYesFlag(args).rest };
         const commandArgs = [...parsed.rest];
         const notifications = ctx.platform.configManager.getCategory('notifications');
+        // Each member is a goodvibes://secrets/ reference to a stored URL.
         const urls: string[] = Array.isArray(notifications.webhookUrls) ? [...notifications.webhookUrls] : [];
         const notifier = requireWebhookNotifier(ctx);
         const sub = commandArgs[0];
+        const secrets = ctx.platform.secretsManager ?? undefined;
+        const resolve = async (entry: string): Promise<string | null> => secrets ? resolveNotificationWebhook(entry, secrets) : null;
 
         if (!sub || sub === 'list') {
           const showFull = !policy.maskUrls || commandArgs.includes('--show');
           if (urls.length === 0) ctx.print(emptyList);
           else {
-            const display = urls.map((u, i) => `  ${i + 1}. ${showFull ? u : shownUrl(u)}`);
+            // --show is the owner's explicit request to see the stored URLs.
+            const resolved = await Promise.all(urls.map(resolve));
+            const display = resolved.map((url, i) => `  ${i + 1}. ${showFull && url !== null ? url : shownNotificationWebhook(url)}`);
             ctx.print([
               `Webhook URLs (${urls.length}):`,
               ...display,
@@ -76,9 +101,14 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
         }
 
         if (sub === 'add') {
-          const url = commandArgs[1];
+          const position = notifyUrlPositions(args)[0];
+          // Read through the declared secret position, which the input history masked.
+          const url = position === undefined ? undefined : secretArg(position).reveal('store-write');
           if (!url) {
             throw commandRefusal(`Usage: /notify add <url>\nExample: /notify add https://ntfy.sh/my-topic`);
+          }
+          if (!secrets) {
+            throw commandRefusal('Nothing was added: this session has no secret store, and a webhook URL carries its key, so it is never written into the settings file.');
           }
           let target: URL;
           try {
@@ -95,14 +125,21 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
           if (problem !== undefined) {
             throw commandRefusal(`Nothing was added: ${problem}`);
           }
-          if (urls.includes(url)) {
+          if ((await Promise.all(urls.map(resolve))).includes(url)) {
             ctx.print(`Already configured: ${shownUrl(url)}`);
             return;
           }
-          urls.push(url);
-          ctx.platform.configManager.mergeCategory('notifications', { webhookUrls: urls });
+          // The URL goes to the secret store; the list keeps its reference.
+          const reference = await storeNotificationWebhook(url, secrets);
+          urls.push(reference);
+          try {
+            ctx.platform.configManager.mergeCategory('notifications', { webhookUrls: urls });
+          } catch (error) {
+            await forgetNotificationWebhook(reference, secrets).catch(() => undefined);
+            throw error;
+          }
           notifier.setUrls(urls);
-          ctx.print(`Webhook added: ${shownUrl(url)}`);
+          ctx.print(`Webhook added: ${shownUrl(url)} (kept in the secret store; the settings list holds its reference)`);
           return;
         }
 
@@ -111,25 +148,32 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
           if (!given) {
             throw commandRefusal(`Usage: /notify remove <n|url>  (n is the number /notify list shows)`);
           }
-          // The list number names a stored URL without printing its secret topic to remove it.
+          // The list number names a stored URL without printing its secret topic to remove it;
+          // a typed URL is a declared secret position and is matched against the stored ones.
           const position = /^\d+$/.test(given) ? Number(given) : undefined;
-          const url = position !== undefined ? urls[position - 1] : given;
-          if (url === undefined) {
+          const typedPosition = position === undefined ? notifyUrlPositions(args)[0] : undefined;
+          const typed = typedPosition === undefined ? undefined : secretArg(typedPosition).reveal('dispatch');
+          const resolved = await Promise.all(urls.map(resolve));
+          const index = position !== undefined ? position - 1 : resolved.findIndex((url) => url !== null && url === typed);
+          const entry = urls[index];
+          if (position !== undefined && entry === undefined) {
             throw commandRefusal(`No webhook has the number ${given}; /notify list shows ${urls.length === 0 ? 'none configured' : `1 to ${urls.length}`}.`);
           }
-          const next = urls.filter((u) => u !== url);
-          if (next.length === urls.length) {
-            throw commandRefusal(`Not found: ${shownUrl(url)}. /notify list shows the stored URLs by number.`);
+          if (entry === undefined) {
+            throw commandRefusal(`Not found: ${shownUrl(typed ?? null)}. /notify list shows the stored URLs by number.`);
           }
+          const next = urls.filter((_, at) => at !== index);
           ctx.platform.configManager.mergeCategory('notifications', { webhookUrls: next });
           notifier.setUrls(next);
-          ctx.print(`Webhook removed: ${shownUrl(url)}`);
+          if (secrets) await forgetNotificationWebhook(entry, secrets).catch(() => undefined);
+          ctx.print(`Webhook removed: ${shownUrl(resolved[index] ?? null)}`);
           return;
         }
 
         if (sub === 'clear') {
           ctx.platform.configManager.mergeCategory('notifications', { webhookUrls: [] });
           notifier.setUrls([]);
+          if (secrets) for (const entry of urls) await forgetNotificationWebhook(entry, secrets).catch(() => undefined);
           ctx.print('All webhook URLs cleared.');
           return;
         }
@@ -142,12 +186,11 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
           ctx.print(`Testing ${urls.length} webhook${urls.length !== 1 ? 's' : ''}...`);
           notifier.setUrls(urls);
           const results = await notifier.test();
+          // A result names the list member (its reference); the host is read back for the line.
+          const shown = await Promise.all(results.map(async (r) => shownUrl(await resolve(r.url))));
           ctx.print(
             results
-              .map((r) => {
-                const shown = shownUrl(r.url);
-                return r.ok ? `  [ok] ${shown}` : `  [fail] ${shown}: ${r.error ?? 'unknown error'}`;
-              })
+              .map((r, i) => (r.ok ? `  [ok] ${shown[i]}` : `  [fail] ${shown[i]}: ${r.error ?? 'unknown error'}`))
               .join('\n'),
           );
           return;

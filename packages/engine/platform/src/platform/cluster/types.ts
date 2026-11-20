@@ -249,6 +249,8 @@ export interface ClusterSurfaceStatus {
   /** True when this node's consumer for the surface is running. */
   readonly consuming: boolean;
   readonly lastHolderHeartbeatAt: number | null;
+  /** Role `fenced`: why the consumer could not be stopped (its drain failure). */
+  readonly drainFailure?: string | undefined;
 }
 
 /**

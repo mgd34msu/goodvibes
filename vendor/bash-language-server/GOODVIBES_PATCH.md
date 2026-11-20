@@ -40,6 +40,19 @@ Patch:
   returned nothing; the script also sources system completion code that can
   run the typed program. `getCommandOptions` now returns an empty list without
   spawning anything.
+- `out/util/async.js` `debounce` resolves a call superseded by a later one
+  with `undefined` at once (upstream left it pending forever, leaking each
+  superseded lint's awaiting analysis). `out/server.js` returns from a
+  superseded `analyzeAndLintDocument` without reporting (the later edit's
+  analysis reports), stores ShellCheck quick fixes with the document version
+  they were computed for, and `onCodeAction` offers them only while that is
+  still the document's version, so a quick fix never edits text it was not
+  computed from. Keep all three when refreshing.
+- `out/analyser.js` `getOrderedReachableUris` orders the sourced files with a
+  depth-first walk over the direct `source` edges and a visited set (each file
+  listed once, after every file it sources). Upstream re-appended members of
+  the Set it was iterating, which never ends when two scripts source each
+  other. Keep it when refreshing.
 - `dependencies.editorconfig` is changed from `2.0.1` to `3.0.2`.
 - `out/util/fs.js` imports the checked-in fast-glob source by relative path.
   Its discovery walks without following symbolic links (`followSymbolicLinks:

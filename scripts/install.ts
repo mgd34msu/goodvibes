@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { PAIRING_DEFERRED_EXIT } from '../products/tui/scripts/pairing-exit.ts';
-import { COMMANDS, CommandError, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, discardAbandonedFirstInstall, isReleaseInUse, plainPath, present, quote, readDataId, readInstallation, receiptPath, recoverInterruptedUpdate, run, stopService, switchRelease, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
+import { COMMANDS, CommandError, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, discardAbandonedFirstInstall, isReleaseInUse, recordFirstInstallStaging, stagingRecordPath, plainPath, present, quote, readDataId, readInstallation, receiptPath, recoverInterruptedUpdate, run, stopService, switchRelease, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
 
 export interface Options extends Layout { port: number; service: boolean; runtimeDir: string; nodePath?: string; workspace?: string; decisionPolicy?: DecisionModelPolicy }
 const ROOT = resolve(import.meta.dir, '..');
@@ -183,7 +183,8 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
   const execute = hooks.execute ?? run;
   await withLock(options.prefix, () => withLock(options.dataDir, async () => {
     const old = readInstallation(options.prefix);
-    if (old) recoverInterruptedUpdate(old);
+    // A first install stopped between writing its receipt and dropping its staging record leaves the record behind.
+    if (old) { recoverInterruptedUpdate(old); rmSync(stagingRecordPath(options.prefix), { force: true }); }
     else discardAbandonedFirstInstall(options.prefix);
     preflight(options, old, execute);
     // A port held by anything but this installation's own service is refused
@@ -196,6 +197,9 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
     const id = old?.id ?? readDataId(options) ?? randomUUID();
     const releaseName = `${commit}-${randomUUID()}`;
     const release = join(options.prefix, 'releases', releaseName);
+    // A first install names what it stages before staging it, so a run killed now leaves a record of exactly what
+    // a later run may remove; an update is covered by its receipt.
+    if (!old) recordFirstInstallStaging(options.prefix, releaseName);
     mkdirSync(release, { recursive: true, mode: 0o700 });
     let published = false;
     let stopAttempted = false;
@@ -293,7 +297,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       // A first install owns everything it is about to publish from here on, so a run killed outright leaves an
       // ordinary receipt-owned installation that uninstall removes and a re-run updates. An update keeps the
       // previous receipt until the new release is ready; `current` naming another release marks it interrupted.
-      if (!old) atomicWrite(receiptPath(options), JSON.stringify(receipt, null, 2) + '\n');
+      if (!old) { atomicWrite(receiptPath(options), JSON.stringify(receipt, null, 2) + '\n'); rmSync(stagingRecordPath(options.prefix), { force: true }); }
       switchRelease(options.prefix, releaseName); published = true;
       mkdirSync(options.binDir, { recursive: true });
       for (const name of COMMANDS) {

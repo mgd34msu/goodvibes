@@ -331,7 +331,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     repeat: 'unsafe',
     title: 'Create Email Draft',
     description:
-      'Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field. To change a saved draft, use email.draft.update with its uid and uidValidity: a second create leaves two drafts.',
+      'Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field. To change a saved draft, use email.draft.update with its uid and uidValidity: a second create leaves two drafts. A save whose answer from the mail server was lost is reported as one that may have been saved, never as not saved; creating the same draft again in this daemon run looks for it in the Drafts folder first (by the Message-ID it was saved under) and returns it instead of saving a second copy.',
     category: 'email',
     effects: ['email.administer'],
     http: { method: 'POST', path: '/api/email/drafts' },

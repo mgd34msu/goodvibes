@@ -23,6 +23,7 @@
  * fields are called. The model identifies the fields on whatever page it is on;
  * the daemon does the typing.
  */
+import type { OrderEvidence, SubmissionDispatch } from './money.js';
 import type { CardFieldKind } from './card-redaction.js';
 import type { CartLine } from './cart.js';
 import type { MinorUnits } from './types.js';
@@ -136,7 +137,8 @@ export interface CheckoutPageDriver {
    * other throw means the click may have reached the merchant and the caller
    * cannot tell; only that case is genuinely ambiguous.
    */
-  submitOrder(target: string, ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<{
+  submitOrder(target: string, ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined },
+    dispatch?: SubmissionDispatch): Promise<{
     readonly url: string;
     readonly orderId: string | null;
     /**
@@ -159,6 +161,13 @@ export interface CheckoutPageDriver {
      * false value.
      */
     readonly verified: boolean;
+    /**
+     * What the landing page showed about THIS dispatch: an order number, or a
+     * confirmation that shows the dispatch's own total, on the merchant's
+     * domain after this click. Null when it showed neither. The flow records
+     * `purchased` only through `settleSubmission(dispatch, evidence)`.
+     */
+    readonly evidence?: OrderEvidence | null | undefined;
   }>;
 }
 

@@ -17,6 +17,7 @@ import { AGENT_TEMPLATES, AgentManager, type AgentRecord, type OwnedAgentExecuti
 import { evaluateOrchestrationSpawn, ORCHESTRATION_CAP_KEYS } from '../../runtime/orchestration/spawn-policy.js';
 import { isNativeConversationTurn, NATIVE_TURN_EXECUTION_REFUSAL } from '../../core/native-turn-scope.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { currentTurn } from '../../security/turn-boundary.js';
 import {
   buildChildFailureEnvelope,
   isChildFailureTerminal,
@@ -144,7 +145,7 @@ function batchTaskToSpawnInput(input: AgentInput, taskDef: NonNullable<AgentInpu
     executionProtocol: taskDef.executionProtocol ?? input.executionProtocol,
     reviewMode: taskDef.reviewMode ?? input.reviewMode,
     communicationLane: taskDef.communicationLane ?? input.communicationLane,
-    parentAgentId: taskDef.parentAgentId ?? input.parentAgentId,
+    parentAgentId: input.parentAgentId,
     orchestrationGraphId: taskDef.orchestrationGraphId ?? input.orchestrationGraphId,
     orchestrationNodeId: taskDef.orchestrationNodeId,
     parentNodeId: taskDef.parentNodeId ?? input.parentNodeId,
@@ -381,7 +382,10 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     }
     // The session is the host's, never the model's: every agent started here belongs to it, and every agent read here must.
     const session = config.resolveSessionId();
-    const input = classicAgentInput({ ...modelAgentInput(args as unknown as AgentInput), sessionId: session });
+    // The parent is the agent this call runs inside, as the host recorded it on the turn; none for the conversation's own turn.
+    const callerAgentId = currentTurn()?.callerAgentId ?? undefined;
+    const input = classicAgentInput({ ...modelAgentInput(args as unknown as AgentInput), sessionId: session,
+      ...(callerAgentId ? { parentAgentId: callerAgentId } : {}) });
     const completionRepair = readCompletionRepairContext();
     if (isNativeConversationTurn() && decisionModelPolicyState().operation !== 'no-decision-model' && (input.mode === 'spawn' || input.mode === 'batch-spawn')) {
       return { success: false, error: NATIVE_TURN_EXECUTION_REFUSAL };

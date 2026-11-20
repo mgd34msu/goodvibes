@@ -20,7 +20,7 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import type { MintedPairingToken, PairingTokenManager } from '../../pairing/pairing-token-store.js';
-import { PairingLimitReachedError, PairingMinterRevokedError, pairingTokenIdOfPrincipal } from '../../pairing/pairing-token-store.js';
+import { PairingLimitReachedError, PairingMinterRevokedError, pairingPrincipalId, pairingTokenIdOfPrincipal } from '../../pairing/pairing-token-store.js';
 import type { StepUpGatewayService } from './stepup.js';
 import type { PushGatewayService } from './push.js';
 import {
@@ -46,7 +46,7 @@ export interface PairingHandoffDeps {
   /** The push service, VAPID key for the notifications offer + subscription registration. */
   readonly push: Pick<PushGatewayService, 'getPublicKey' | 'subscribe'>;
   /** WebAuthn step-up; present ⇒ the passkey offer is available. */
-  readonly stepUp?: Pick<StepUpGatewayService, 'registerCredential'> | undefined;
+  readonly stepUp?: Pick<StepUpGatewayService, 'registerCredential' | 'offerRegistration'> | undefined;
   /** Whether the rendezvous relay is available ⇒ the relay offer is available. */
   readonly relayAvailable: () => boolean;
   /** The configured web-app origin the QR points at; absent ⇒ only a fragment is returned. */
@@ -93,7 +93,10 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
       throw new GatewayVerbError('fromSharedToken is for a client signed in with the shared operator token; this credential is not.', 'INVALID_ARGUMENT', 400, 'fromSharedToken');
     }
     const available = availableOffers(deps);
-    const offers = requestedOffers(params.offers).filter((kind) => available.has(kind));
+    // A pairing minted narrower than full authority cannot register a passkey
+    // (stepup.credential.register needs admin), so it is not offered one.
+    const narrowed = mintedPairingScopes(invocation.context, undefined) !== undefined;
+    const offers = requestedOffers(params.offers).filter((kind) => available.has(kind) && !(kind === 'passkey' && narrowed));
 
     // Resolved before minting: a token whose secret is never returned would still count toward the paired-node cap.
     const offerDetails = await Promise.all(offers.map(async (kind) => {
@@ -135,6 +138,10 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
         throw error;
       }
     })();
+    // A passkey offer is made to this pairing alone: only the device that pairs with
+    // this token may register one passkey through the hand-off, once (checked at
+    // registerCredential), and only with the authority a direct registration needs.
+    if (offers.includes('passkey')) deps.stepUp?.offerRegistration(pairingPrincipalId(minted.id));
     const fragment = buildPairingHandoffFragment({ token: minted.token, offers });
     const webOrigin = deps.webOrigin?.();
     const deepLink = webOrigin ? buildPairingHandoffLink({ webOrigin, token: minted.token, offers }) : undefined;
@@ -210,7 +217,6 @@ function createHandoffCompleteHandler(deps: PairingHandoffDeps): GatewayMethodHa
     const accept = (params.accept && typeof params.accept === 'object' ? params.accept : {}) as Record<string, unknown>;
     const available = availableOffers(deps);
     const results: OfferResult[] = [];
-
     for (const kind of PAIRING_HANDOFF_OFFER_KINDS) {
       const offered = accept[kind];
       if (offered === undefined || offered === false) {
@@ -237,6 +243,8 @@ function createHandoffCompleteHandler(deps: PairingHandoffDeps): GatewayMethodHa
             origin: requireStringValue(offer.origin, 'passkey.origin'),
             credentialId: requireStringValue(offer.credentialId, 'passkey.credentialId'),
             publicKeyCose: requireStringValue(offer.publicKeyCose, 'passkey.publicKeyCose'),
+            // Accepted only when this daemon offered a passkey to this very pairing, unused and unexpired.
+            offeredTo: principalId,
           });
           results.push({ kind, status: 'completed' });
         } else if (kind === 'relay') {

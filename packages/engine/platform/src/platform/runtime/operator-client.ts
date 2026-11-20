@@ -10,6 +10,9 @@ import type {
   SteerSharedSessionMessageInput,
   SubmitSharedSessionMessageInput,
 } from '../control-plane/index.js';
+import type { ApprovalActionInput } from '../control-plane/approval-broker.js';
+import type { ResolveSharedApprovalInput } from '../control-plane/approval-broker-owner.js';
+import type { TransitionOutcome } from '../control-plane/approval-lifecycle.js';
 import type { RequestSharedApprovalInput } from '../control-plane/index.js';
 import type { PermissionPromptDecision } from '../permissions/prompt.js';
 import { buildAuthInspectionSnapshot, type AuthInspectionSnapshot } from './auth/inspection.js';
@@ -77,6 +80,8 @@ export interface SurfaceInputDeliveryOptions {
   readonly surfaceInstance?: string | undefined;
   readonly answer?: string | undefined;
   readonly status?: 'completed' | 'failed' | 'cancelled' | undefined;
+  /** The surface's claim token on the input (`metadata.claimEpoch` of its granted claim): renews the claim with `claim`, and must be current on every other report. */
+  readonly claimEpoch?: number | undefined;
 }
 
 export interface OperatorTasksClient {
@@ -90,24 +95,12 @@ export interface OperatorApprovalsClient {
   list(limit?: number): readonly SharedApprovalRecord[];
   get(approvalId: string): SharedApprovalRecord | null;
   request(input: RequestSharedApprovalInput): Promise<PermissionPromptDecision>;
-  claim(approvalId: string, actor: string, actorSurface?: string, note?: string): Promise<SharedApprovalRecord | null>;
-  resolve(
-    approvalId: string,
-    input: {
-      readonly approved: boolean;
-      readonly disposition?: 'approved' | 'denied' | 'amended' | undefined;
-      readonly remember?: boolean | undefined;
-      readonly actor: string;
-      readonly actorSurface?: string | undefined;
-      readonly note?: string | undefined;
-      /** Optional per-hunk selection (edit-tool approvals), the broker filters
-       * the approval's own edit list to these indices server-side. */
-      readonly selectedHunks?: readonly number[] | undefined;
-    },
-  ): Promise<SharedApprovalRecord | null>;
-  approve(approvalId: string, actor: string, actorSurface?: string, note?: string): Promise<SharedApprovalRecord | null>;
-  deny(approvalId: string, actor: string, actorSurface?: string, note?: string): Promise<SharedApprovalRecord | null>;
-  cancel(approvalId: string, actor: string, actorSurface?: string, note?: string): Promise<SharedApprovalRecord | null>;
+  /** Every action names the revision it acted on (`expectedRevision`); a stale or settled one is refused with the current record. */
+  claim(approvalId: string, input: ApprovalActionInput): Promise<TransitionOutcome>;
+  resolve(approvalId: string, input: ResolveSharedApprovalInput): Promise<TransitionOutcome>;
+  approve(approvalId: string, input: ApprovalActionInput): Promise<TransitionOutcome>;
+  deny(approvalId: string, input: ApprovalActionInput): Promise<TransitionOutcome>;
+  cancel(approvalId: string, input: ApprovalActionInput): Promise<TransitionOutcome>;
   update(
     approvalId: string,
     input: {
@@ -116,7 +109,7 @@ export interface OperatorApprovalsClient {
       readonly note?: string | undefined;
       readonly metadata?: Record<string, unknown> | undefined;
     },
-  ): Promise<SharedApprovalRecord | null>;
+  ): Promise<TransitionOutcome>;
 }
 
 export type OperatorSessionEnsureInput = NonNullable<Parameters<OperatorClientServices['sessionBroker']['ensureSession']>[0]>;
@@ -198,37 +191,21 @@ export function createOperatorClient(services: OperatorClientServices): Operator
     list: (limit = 100): readonly SharedApprovalRecord[] => services.approvalBroker.listApprovals(normalizeLimit(limit)),
     get: (approvalId: string): SharedApprovalRecord | null => services.approvalBroker.getApproval(approvalId),
     request: (input: RequestSharedApprovalInput): Promise<PermissionPromptDecision> => services.approvalBroker.requestApproval(input),
-    claim: (approvalId: string, actor: string, actorSurface = 'operator', note?: string): Promise<SharedApprovalRecord | null> => services.approvalBroker.claimApproval(approvalId, actor, actorSurface, note),
-    resolve: (approvalId: string, input: {
-      readonly approved: boolean;
-      readonly disposition?: 'approved' | 'denied' | 'amended' | undefined;
-      readonly remember?: boolean | undefined;
-      readonly actor: string;
-      readonly actorSurface?: string | undefined;
-      readonly note?: string | undefined;
-      readonly selectedHunks?: readonly number[] | undefined;
-    }): Promise<SharedApprovalRecord | null> => services.approvalBroker.resolveApproval(approvalId, input),
-    approve: (approvalId: string, actor: string, actorSurface = 'operator', note?: string): Promise<SharedApprovalRecord | null> => services.approvalBroker.resolveApproval(approvalId, {
-      approved: true,
-      disposition: 'approved',
-      actor,
-      actorSurface,
-      note,
+    claim: (approvalId: string, input: ApprovalActionInput): Promise<TransitionOutcome> => services.approvalBroker.claimApproval(approvalId, { actorSurface: 'operator', ...input }),
+    resolve: (approvalId: string, input: ResolveSharedApprovalInput): Promise<TransitionOutcome> => services.approvalBroker.resolveApproval(approvalId, input),
+    approve: (approvalId: string, input: ApprovalActionInput): Promise<TransitionOutcome> => services.approvalBroker.resolveApproval(approvalId, {
+      actorSurface: 'operator', ...input, approved: true, disposition: 'approved',
     }),
-    deny: (approvalId: string, actor: string, actorSurface = 'operator', note?: string): Promise<SharedApprovalRecord | null> => services.approvalBroker.resolveApproval(approvalId, {
-      approved: false,
-      disposition: 'denied',
-      actor,
-      actorSurface,
-      note,
+    deny: (approvalId: string, input: ApprovalActionInput): Promise<TransitionOutcome> => services.approvalBroker.resolveApproval(approvalId, {
+      actorSurface: 'operator', ...input, approved: false, disposition: 'denied',
     }),
-    cancel: (approvalId: string, actor: string, actorSurface = 'operator', note?: string): Promise<SharedApprovalRecord | null> => services.approvalBroker.cancelApproval(approvalId, actor, actorSurface, note),
+    cancel: (approvalId: string, input: ApprovalActionInput): Promise<TransitionOutcome> => services.approvalBroker.cancelApproval(approvalId, { actorSurface: 'operator', ...input }),
     update: (approvalId: string, input: {
       readonly actor: string;
       readonly actorSurface?: string | undefined;
       readonly note?: string | undefined;
       readonly metadata?: Record<string, unknown> | undefined;
-    }): Promise<SharedApprovalRecord | null> => services.approvalBroker.recordRemoteUpdate(approvalId, input),
+    }): Promise<TransitionOutcome> => services.approvalBroker.recordRemoteUpdate(approvalId, input),
   } satisfies OperatorApprovalsClient;
 
   const providers = {

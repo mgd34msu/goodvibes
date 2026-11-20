@@ -1,7 +1,7 @@
 import type { GatewayEventDescriptor } from './method-catalog-shared.js';
 import { STRING_SCHEMA,NUMBER_SCHEMA,JSON_OBJECT_SCHEMA,arraySchema,objectSchema,eventDescriptor,runtimeDomainEvent } from './method-catalog-shared.js';
 import { CONTROL_PLANE_SURFACE_MESSAGE_SCHEMA } from './operator-contract-schemas.js';
-import { SHARED_APPROVAL_RECORD_SCHEMA } from './operator-contract-schemas-approvals.js';
+import { APPROVAL_READING_SCHEMA, SHARED_APPROVAL_RECORD_SCHEMA } from './operator-contract-schemas-approvals.js';
 import { OWNER_ITEM_SCHEMA } from './operator-contract-schemas-owner-inbox.js';
 import { HOSTED_SESSION_RECORD_SCHEMA } from './method-catalog-hosted-sessions.js';
 import { RUNTIME_EVENT_DOMAINS, type RuntimeEventDomain } from '../../events/domain-map.js';
@@ -279,7 +279,12 @@ export const builtinGatewayEventDescriptors: readonly GatewayEventDescriptor[] =
       + 'domain narrowing receives it as before. '
       + 'The record is the daemon\'s, not the subscriber\'s: several surfaces see the same transition and the '
       + 'daemon remains the single source of the applied result, a surface renders what the record says '
-      + 'rather than what it locally decided.',
+      + 'rather than what it locally decided. '
+      + 'The payload also carries `reading`, the record\'s reading for an admin who may answer (what is waiting, '
+      + 'on whom, the deadline, the decision and whether the asker received it), and every record carries '
+      + '`revision`. A subscriber applies a frame only when its revision is higher than the one it holds, so a '
+      + 'late or repeated frame never makes a settled approval actionable again; after a gap or a reconnect it '
+      + 'reads approvals.list once, because frames are not replayed.',
     category: 'transport',
     transport: ['sse', 'ws'],
     scopes: ['read:events'],
@@ -287,6 +292,7 @@ export const builtinGatewayEventDescriptors: readonly GatewayEventDescriptor[] =
     domains: ['gate'],
     outputSchema: objectSchema({
       approval: SHARED_APPROVAL_RECORD_SCHEMA,
+      reading: APPROVAL_READING_SCHEMA,
       createdAt: NUMBER_SCHEMA,
     }, ['approval', 'createdAt']),
   }),

@@ -392,18 +392,19 @@ class DaemonSurfaceRegistrar {
   }
 
   private async reconcileOnce(refresh: boolean): Promise<void> {
-    this.reconcileNtfy();
+    await this.reconcileNtfy();
     await this.reconcileSockets(refresh);
     await this.reconcileTelegram();
   }
 
-  private reconcileNtfy(): void {
+  private async reconcileNtfy(): Promise<void> {
     const config = this.runtime.configManager;
     const providerRuntime = this.collaborators.providerRuntime;
     const wanted = new Map<string, { topic: string; baseUrl: string }>();
     if (config.get('surfaces.ntfy.enabled')) {
       const baseUrl = providerRuntime.ntfyBaseUrl();
-      const topics = providerRuntime.ntfyTopics();
+      // Each topic name is read from the secret store its setting names (an unset one is generated there).
+      const topics = await providerRuntime.ntfyTopics();
       if (topics.length === 0) {
         if (!this.ntfyInertReported) {
           this.ntfyInertReported = true;

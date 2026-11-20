@@ -41,6 +41,8 @@ import { isValidConfigKey, type ConfigKey } from '../../config/schema.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { agentSettingsWriteRefusal } from '../../gate/policy/agent-settings-refusals.js';
 import { currentAdmittedToolDecision } from '../../gate/admitted-decision.js';
+import { agentActor, localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { currentTurn } from '../../security/turn-boundary.js';
 import { ConfigError } from '../../types/errors.js';
 
 /**
@@ -291,6 +293,18 @@ export async function applyRoutedConfigWrite(
   value: unknown,
   options: ConfigRoutingOptions = {},
 ): Promise<RoutedConfigWrite> {
+  // A model's write: the model acting for whoever's turn it is (a guest's
+  // turn stays the guest's), with the gate's decision on its call. The settings
+  // owner applies its own rule (`loosenRefusal`): a change that loosens
+  // security stands only for an actor that may make it, and for a model only
+  // when the owner, his rule or the mode settled the call. The same check runs
+  // before a write is sent to the daemon or to another surface's file, so
+  // routing cannot skip it.
+  const decision = currentAdmittedToolDecision();
+  const writer = agentActor(currentTurn()?.actor ?? localOwnerActor());
+  const loosening = configManager.loosenRefusal(key, value, writer, decision);
+  if (loosening) throw new ConfigError(loosening.reason);
+
   // A client-owned key for a turn that belongs to ANOTHER surface is written to
   // that surface's own file, and to nothing else. The host's ConfigManager is
   // not consulted and not mutated: it describes a different surface, and its
@@ -321,15 +335,9 @@ export async function applyRoutedConfigWrite(
   }
 
   const deps = resolveRouterDeps(configManager, options);
-  // Inside an agent's admitted tool call the write carries the agent's origin
-  // and the gate's decision, so the settings owner applies its own rule: a
-  // change that loosens security stands only when the owner, the owner's rule
-  // or the mode settled the call. A person's command runs outside any call.
-  const decision = currentAdmittedToolDecision();
   const outcome = await applyConfigWrite(key, value, {
     setDynamic: (k, v, o) => {
-      if (!decision) { configManager.setDynamic(k as ConfigKey, v, o ?? {}); return; }
-      const result = configManager.setMany([{ key: k as ConfigKey, value: v }], { kind: 'agent', surface: options.clientOwnedStore?.surface ?? 'agent', decision }, o ?? {});
+      const result = configManager.setMany([{ key: k as ConfigKey, value: v }], writer, { ...(o ?? {}), decision });
       if (!result.ok) throw new ConfigError(result.refusal.reason);
     },
     get: (k) => configManager.get(k as ConfigKey),

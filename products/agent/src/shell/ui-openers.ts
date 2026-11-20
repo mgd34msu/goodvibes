@@ -1,4 +1,6 @@
 import { createModelPickerCommandOpeners } from '@goodvibes-jev/engine/terminal-shell/model-picker-open';
+import { openCommandPaletteOn } from '@goodvibes-jev/engine/terminal-shell/command-palette';
+import { runPickedCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn/provider-model';
 import { createSettingsWorkspaceOpener } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
 import { modelPickerCatalogServices } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
@@ -304,6 +306,22 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   commandContext.confirm = (confirmOptions) => confirmThrough(input.surfaceModals, confirmOptions);
   // A described command's guided panel (command-actions/panel.ts) is a kit modal on the same stack.
   commandContext.pushSurfaceModal = (modal) => input.surfaceModals.push(modal);
+  // The command palette the TUI has (terminal-shell/command-palette.ts): every
+  // registered command, built when it opens; Enter on a described command opens its guided path.
+  commandContext.openCommandPalette = () => openCommandPaletteOn({
+    modals: input.surfaceModals,
+    commands: () => input.commandRegistry?.getAll(),
+    categories: () => new Map((input.commandRegistry?.getAll() ?? []).flatMap((command) => command.described ? [[command.name, command.described.group] as const] : [])),
+    run: (name) => runPickedCommand(commandContext.executeCommand, name, [], (message) => commandContext.print(message)),
+    fill: (name) => {
+      input.prompt = `/${name} `;
+      input.cursorPos = input.prompt.length;
+      input.commandMode = true;
+      input.autocomplete?.reset();
+      commandContext.focusPrompt?.();
+    },
+    render,
+  });
   commandContext.openSettingsModal = createSettingsWorkspaceOpener({
     configure: () => {
       input.settingsModal.open(configManager, featureFlags, subscriptionManager, serviceRegistry, mcpRegistry, secretsManager, {

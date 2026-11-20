@@ -1,3 +1,4 @@
+import type { Selection } from '@goodvibes-jev/engine/errors';
 import type { ArtifactStoreUploadLike } from './artifact-upload.js';
 import type { JsonRecord } from './route-helpers.js';
 
@@ -32,7 +33,9 @@ export const KNOWLEDGE_BROWSER_KINDS = [
   'firefox', 'zen', 'librewolf', 'waterfox', 'floorp', 'safari', 'orion', 'epiphany',
 ] as const;
 export type KnowledgeBrowserKind = typeof KNOWLEDGE_BROWSER_KINDS[number];
-export type KnowledgeBrowserSourceKind = 'history' | 'bookmark';
+/** What a browser sync can read from each browser. */
+export const KNOWLEDGE_BROWSER_SOURCE_KINDS = ['history', 'bookmark'] as const;
+export type KnowledgeBrowserSourceKind = typeof KNOWLEDGE_BROWSER_SOURCE_KINDS[number];
 export type KnowledgeAnswerMode = 'concise' | 'standard' | 'detailed';
 export type KnowledgeJobRunMode = 'inline' | 'background';
 
@@ -178,8 +181,10 @@ export interface KnowledgeConnectorIngestRequest extends KnowledgeIngestCommon {
 }
 
 export interface KnowledgeBrowserSyncRequest {
-  readonly browsers?: readonly KnowledgeBrowserKind[] | undefined;
-  readonly sourceKinds?: readonly KnowledgeBrowserSourceKind[] | undefined;
+  /** Not sent: every installed browser. An explicit empty list is refused at the route, never "all". */
+  readonly browsers?: Selection<KnowledgeBrowserKind> | undefined;
+  /** Not sent: history and bookmarks. */
+  readonly sourceKinds?: Selection<KnowledgeBrowserSourceKind> | undefined;
   readonly homeOverride?: string | undefined;
   readonly limit?: number | undefined;
   readonly sinceMs?: number | undefined;

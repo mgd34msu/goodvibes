@@ -86,6 +86,7 @@ export function createOwnerInboxClient(verbs: Pick<DaemonVerbCaller, 'probe' | '
         itemId: id,
         ...(answer.option !== undefined ? { option: answer.option } : {}),
         ...(answer.text !== undefined ? { text: answer.text } : {}),
+        ...(answer.expectedRevision !== undefined ? { expectedRevision: answer.expectedRevision } : {}),
       }));
     },
     async post(item) {

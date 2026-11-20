@@ -56,9 +56,18 @@ export class AgentWorkspace {
   private _localEditor: AgentWorkspaceLocalEditor | null = null;
   /** The import plan the open confirm form shows; applying writes exactly this. */
   private pendingSettingsImport: TuiSettingsImportPlan | null = null;
+  /**
+   * Which open form this is: it changes when the editor closes or a different
+   * form opens, not when a field of the open one is edited, so a save that
+   * settles later touches only the form it was started from.
+   */
+  private editorInstance = 0;
   get localEditor(): AgentWorkspaceLocalEditor | null { return this._localEditor; }
   set localEditor(editor: AgentWorkspaceLocalEditor | null) {
     if (editor?.kind !== 'settings-import') this.pendingSettingsImport = null;
+    const current = this._localEditor;
+    if (editor === null || current === null || editor.kind !== current.kind || editor.mode !== current.mode
+      || editor.recordId !== current.recordId || editor.title !== current.title) this.editorInstance += 1;
     this._localEditor = editor ? settleEditorMessageTone(this._localEditor, editor) : null;
   }
   public actionSearchActive = false;
@@ -327,6 +336,18 @@ export class AgentWorkspace {
       return;
     }
     const title = this.localEditor.title;
+    if (this.memorySaveInFlight && this.memorySaveEditor === this.editorInstance) {
+      // The save is already running and cannot be taken back: the form closes,
+      // and the save's own result is shown when it settles.
+      this.localEditor = null;
+      this.status = `${title}: saving; the result will be shown when it finishes.`;
+      this.lastActionResult = {
+        kind: 'guidance',
+        title: `${title}: saving`,
+        detail: 'The form was closed while its save was running. The save was not stopped; whether it was written is shown here when it finishes.',
+      };
+      return;
+    }
     this.localEditor = null;
     this.status = `${title} cancelled.`;
     this.lastActionResult = {
@@ -683,13 +704,15 @@ export class AgentWorkspace {
 
   private editorField(id: string): string {
     const editor = this.localEditor;
-    return editor?.fields.find((field) => field.id === id)?.value.trim() ?? '';
+    const field = editor?.fields.find((candidate) => candidate.id === id);
+    if (!field) return '';
+    return field.verbatim ? field.value : field.value.trim();
   }
 
   private missingEditorField(): AgentWorkspaceEditorField | null {
     const editor = this.localEditor;
     if (!editor) return null;
-    return editor.fields.find((field) => field.required && field.value.trim().length === 0) ?? null;
+    return editor.fields.find((field) => field.required && (field.verbatim ? field.value.length === 0 : field.value.trim().length === 0)) ?? null;
   }
 
   private submitLocalEditor(requestRender?: () => void): void {
@@ -939,14 +962,20 @@ export class AgentWorkspace {
     };
   }
   private memorySaveInFlight = false;
+  /** The form instance whose memory save is running. */
+  private memorySaveEditor = -1;
   private async submitMemoryEditor(editor: AgentWorkspaceLocalEditor): Promise<void> {
+    const instance = this.editorInstance;
+    this.memorySaveEditor = instance;
     try {
       this.status = 'Saving Agent memory...';
       const result = await submitAgentWorkspaceMemoryEditor(editor, this.memoryApi(), (id) => this.editorField(id));
-      this.finishMemoryEditor(result.record, result.verb);
+      this.finishMemoryEditor(result.record, result.verb, instance);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      this.localEditor = { ...editor, message: detail };
+      // The form is reopened with the reason only when it is still the one
+      // shown; a form opened since is never replaced by this one.
+      if (this.editorInstance === instance && this.localEditor !== null) this.localEditor = { ...editor, message: detail };
       this.status = detail;
       this.lastActionResult = {
         kind: 'error',
@@ -956,10 +985,12 @@ export class AgentWorkspace {
     }
   }
 
-  private finishMemoryEditor(record: MemoryRecord, verb: 'Created' | 'Updated'): void {
-    this.localEditor = null;
+  private finishMemoryEditor(record: MemoryRecord, verb: 'Created' | 'Updated', instance: number): void {
+    // Only the form this save started from closes; one opened since stays open.
+    const stillShown = this.editorInstance === instance && this.localEditor !== null;
+    if (stillShown) this.localEditor = null;
     this.runtimeSnapshot = this.context ? buildAgentWorkspaceRuntimeSnapshot(this.context) : this.runtimeSnapshot;
-    const categoryIndex = this.categories.findIndex((category) => category.id === 'memory');
+    const categoryIndex = this.localEditor === null ? this.categories.findIndex((category) => category.id === 'memory') : -1;
     if (categoryIndex >= 0) {
       this.selectedCategoryIndex = categoryIndex;
       this.selectedActionIndex = 0;

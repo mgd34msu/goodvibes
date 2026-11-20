@@ -24,22 +24,6 @@ export function fallbackAnalysis(request: PermissionPromptRequest): PermissionRe
   };
 }
 
-function titleForRisk(decisionModeLabel: string): string {
-  const TITLES: Partial<Record<string, string>> = {
-    delegation: 'Agent Delegation Approval',
-    'shell-read': 'Shell Execution Approval',
-    'shell-execution': 'Shell Execution Approval',
-    'network-egress': 'Network Access Approval',
-    'external-access': 'Network Access Approval',
-    'config-mutation': 'Configuration Mutation Approval',
-    'mcp-escalation': 'MCP Trust Escalation Approval',
-  };
-  const mapped = TITLES[decisionModeLabel]!;
-  if (mapped) return mapped;
-  const headline = decisionModeLabel.replace(/-/g, ' ');
-  return headline.replace(/\b\w/g, (char) => char.toUpperCase()) + ' Approval';
-}
-
 function decisionModeLabelForRisk(family: string): string {
   switch (family) {
     case 'shell-read':
@@ -69,7 +53,6 @@ export function buildPermissionApprovalBrief(request: PermissionPromptRequest): 
   const decisionModeLabel = decisionModeLabelForRisk(risk.family);
   const subject = permissionSubject(request.tool, request.args);
   return {
-    title: titleForRisk(decisionModeLabel),
     subjectLabel: subject.label,
     subjectKind: subject.kind,
     subjectValues: subject.values,

@@ -196,6 +196,18 @@ export function readStringArrayField(body: JsonRecord, key: string, max = 128): 
   return output;
 }
 
+/**
+ * The 400 for a free-text list field sent as `[]` where the field selects
+ * what to act on: an explicit empty selection selects nothing, never "all".
+ * `defaultMeaning` says what omitting the field does ("refine every open gap").
+ */
+export function refuseEmptySelection(field: string, defaultMeaning: string): Response {
+  return jsonErrorResponse({
+    error: `${field} is an empty list, which selects nothing; omit ${field} to ${defaultMeaning}.`,
+    code: 'INVALID_REQUEST',
+  }, { status: 400 });
+}
+
 function invalidSelection(message: string): Response {
   return jsonErrorResponse({ error: message, code: 'INVALID_REQUEST' }, { status: 400 });
 }

@@ -117,7 +117,11 @@ export type ApprovalTransition =
   | { readonly to: 'cancelled'; readonly actor: ApprovalActor; readonly cause: ApprovalCause; readonly note?: string | undefined }
   | { readonly to: 'expired'; readonly cause: 'deadline' | 'deadline-while-down'; readonly note?: string | undefined }
   /** No status change: metadata merged (a prompt that could not be delivered, a remote run's report). */
-  | { readonly to: 'updated'; readonly actor: ApprovalActor; readonly metadata?: Record<string, unknown> | undefined; readonly note?: string | undefined }
+  | {
+    readonly to: 'updated'; readonly actor: ApprovalActor; readonly metadata?: Record<string, unknown> | undefined; readonly note?: string | undefined;
+    /** Another wire raiser attached to this open ask: its hold is recorded, so the ask stays open until it too leaves. */
+    readonly addHold?: string | undefined;
+  }
   /** A wire raiser gives up its hold: on an open ask it leaves, on a decided one it confirms it received the answer. */
   | { readonly to: 'released'; readonly actor: ApprovalActor; readonly holdId?: string | undefined; readonly note?: string | undefined };
 
@@ -139,8 +143,7 @@ export type ApprovalRefusalCode =
   | 'ILLEGAL_TRANSITION'
   | 'OWNER_DECISION_REQUIRED'
   | 'APPROVAL_EXPIRED'
-  | 'UNKNOWN_APPROVAL'
-  | 'APPROVAL_HELD';
+  | 'UNKNOWN_APPROVAL';
 
 export type TransitionOutcome =
   | { readonly applied: true; readonly record: SharedApprovalRecord }
@@ -406,12 +409,6 @@ export function approvalRefusal(code: ApprovalRefusalCode, record: SharedApprova
         code, state, status: 403,
         reason: detail ?? 'This approval needs the owner\'s own decision on the device that raised it. Deny and cancel are allowed here.',
         next: ['Approve it with the paired-owner decision on the device that raised it, or deny it here.'],
-      });
-    case 'APPROVAL_HELD':
-      return refusal({
-        code, state, status: 409,
-        reason: detail ?? 'Another surface that asked is still waiting on it, so this release left it open for them.',
-        next: ['Nothing to do; it stays open for the surfaces still waiting.'],
       });
     case 'ILLEGAL_TRANSITION':
       return refusal({ code, state, status: 409, reason: detail ?? 'That move is not one an approval can make now.', next: ['Read the approval again.'] });

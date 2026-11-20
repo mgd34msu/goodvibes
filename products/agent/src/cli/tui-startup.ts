@@ -4,6 +4,11 @@ import type { InputHandler } from '../input/handler.ts';
 // Startup diagnostics must not initialize the Agent runtime/onboarding barrels:
 // they pull in feature-enablement's eager metadata lookups before boot begins.
 import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
+import { writeOnboardingCheckMarker } from '../runtime/onboarding/markers.ts';
+import { installSplashAdditions, startFirstRun, type FirstRunDeps } from '@goodvibes-jev/engine/terminal-shell/first-run';
+import { requireSecretsManager, requireServiceRegistry, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
+import { scanThisComputerNow } from '../runtime/lan-scan-consent.ts';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { GoodVibesCliParseResult } from './types.ts';
 import { checkRecoveryFile, readLastSessionPointer, type SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { resolveResumableSession, surfaceResumeRelaunchNotice } from './resume-relaunch-notice.ts';
@@ -153,6 +158,29 @@ export function applyInitialTuiCliState(options: {
   const { cli, input, commandRegistry, commandContext, shellPaths, surface, render } = options;
   // The one answer to "has setup been done" (completion.ts), as status and the setup screen read it.
   const onboardingDone = isOnboardingComplete(shellPaths);
+  // What the empty conversation shows under the splash: the starting prompts, and first run's lines.
+  installSplashAdditions({
+    workingDirectory: shellPaths.workingDirectory,
+    configManager: commandContext.platform.configManager,
+    // /setup once it is registered; until then the setup screens open with /onboarding.
+    setupCommand: commandRegistry.get('setup') ? '/setup' : '/onboarding',
+    fillComposer: (text) => {
+      if (input.prompt !== '') return;
+      input.prompt = text;
+      input.cursorPos = text.length;
+      render();
+    },
+    splashShowing: () => input.conversationManager?.isSplashShowing() ?? false,
+    renderRequest: render,
+  });
+  // First run: when the model this session will use is not ready, choose a
+  // provider, sign in, and land in the conversation (first-run-flow.ts). The
+  // workspace's setup screens stay one key away (and /onboarding).
+  const runFirstRun = (): void => {
+    void startFirstRun(firstRunDeps(commandContext, shellPaths, render, onboardingDone)).catch((error: unknown) => {
+      logger.warn('First run could not start', { error: summarizeError(error) });
+    });
+  };
   if (cli.command === 'onboarding') {
     input.openAgentWorkspace(commandContext, undefined, 'ONBOARDING');
   } else if ((cli.command === 'sessions' && cli.commandArgs[0] === 'resume') || cli.flags.resume !== undefined) {
@@ -167,11 +195,14 @@ export function applyInitialTuiCliState(options: {
       // Nothing to continue: say so, then start as a plain launch would, so a
       // new user who starts with --resume still gets setup.
       commandContext.print('No previous conversation to continue. This is a new one; /session list shows saved ones.');
-      if (!onboardingDone) input.openAgentWorkspace(commandContext, 'setup', 'ONBOARDING');
+      runFirstRun();
     }
-  } else if (!onboardingDone) {
-    input.openAgentWorkspace(commandContext, 'setup', 'ONBOARDING');
   } else {
+    runFirstRun();
+    if (!onboardingDone) {
+      applySeededCliPrompt(cli, input);
+      return;
+    }
     // Normal relaunch: onboarding is done and the user didn't ask for
     // onboarding or an explicit `sessions resume`. Surface an honest,
     // non-blocking resume affordance instead of silently starting fresh
@@ -189,4 +220,27 @@ export function applyInitialTuiCliState(options: {
   }
 
   applySeededCliPrompt(cli, input);
+}
+
+/** What first run needs from the Agent. */
+function firstRunDeps(
+  commandContext: CommandContext,
+  shellPaths: Parameters<typeof writeOnboardingCheckMarker>[0],
+  render: () => void,
+  markedDone: boolean,
+): FirstRunDeps {
+  return {
+    providerRegistry: commandContext.provider.providerRegistry,
+    configManager: commandContext.platform.configManager,
+    secrets: requireSecretsManager(commandContext),
+    subscriptions: requireSubscriptionManager(commandContext),
+    serviceConfig: (provider) => requireServiceRegistry(commandContext).get(provider),
+    pushSurfaceModal: commandContext.pushSurfaceModal,
+    renderRequest: render,
+    completeModelSelection: commandContext.completeModelSelection,
+    openProviderPicker: commandContext.openProviderPicker,
+    scanThisComputer: () => { scanThisComputerNow(); },
+    markDone: () => { writeOnboardingCheckMarker(shellPaths, { source: 'command' }); },
+    isMarkedDone: () => markedDone,
+  };
 }

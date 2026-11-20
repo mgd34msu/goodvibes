@@ -1,4 +1,5 @@
 import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+import { commandArgsWithLiteralMarker } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
 import { isSettableGatePresetName, SESSION_GATE_PRESET_NAMES } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { formatOperatorGatewayFailure, invokeOperatorGatewayMethod } from '../agent/operator-gateway-call.ts';
@@ -171,7 +172,7 @@ async function handleChannelProfilesDelete(runtime: CliCommandRuntime, args: rea
 }
 
 export async function handleChannelProfilesCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
-  const [sub = 'list', ...rest] = runtime.cli.commandArgs;
+  const [sub = 'list', ...rest] = commandArgsWithLiteralMarker(runtime.cli);
   switch (sub.toLowerCase()) {
     case 'list':
       return handleChannelProfilesList(runtime);

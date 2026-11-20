@@ -13,6 +13,7 @@ import { recordKnowledgeNodeRevisions, writeKnowledgeNodeRow } from './store-nod
 import { prepareKnowledgeIssueRecord, writeKnowledgeIssueRow } from './store-node-issue-writes.js';
 import { retainKnowledgeNodeObservation } from './store-node-observation.js';
 import type { KnowledgeStore } from './store.js';
+import type { OwnerStamp } from '../utils/owner-stamp.js';
 import type { KnowledgeEdgeRecord, KnowledgeEdgeUpsertInput, KnowledgeExtractionRecord, KnowledgeExtractionUpsertInput,
   KnowledgeIssueRecord, KnowledgeIssueUpsertInput, KnowledgeNodeRecord, KnowledgeNodeRevisionRecord, KnowledgeNodeUpsertInput,
   KnowledgeSourceRecord, KnowledgeSourceUpsertInput } from './types.js';
@@ -63,7 +64,17 @@ export interface KnowledgeImportGraph {
   readonly edges: readonly KnowledgeEdgeUpsertInput[];
   readonly issues: readonly KnowledgeIssueUpsertInput[];
   readonly assertCurrent?: (() => void) | undefined;
+  /**
+   * The graph is the whole of what one owner (a source's compilation) produces
+   * at `revision`: every edge that owner stamped at another revision and this
+   * graph does not write again is removed in the same transaction. Edges the
+   * owner did not stamp (authored links, enrichment) are never touched.
+   */
+  readonly supersedes?: OwnerStamp | undefined;
 }
+
+/** Where a generated edge came from: written into its metadata as `compiledFrom`. */
+export const KNOWLEDGE_EDGE_STAMP_KEY = 'compiledFrom';
 export type PrepareKnowledgeImportGraph = (stage: KnowledgeImportStage) => Promise<KnowledgeImportGraph>;
 const NativePublicationMap = Map;
 const nativePublicationApply = Reflect.apply;
@@ -159,7 +170,21 @@ export async function applyKnowledgeImport(store: KnowledgeStore, view: Knowledg
   const nodePublicationSnapshots = new NativePublicationMap<KnowledgeNodeRecord, KnowledgeRecordSnapshot>();
   for (const { record, existing } of nodes) if (record !== existing) view.beforeNodeWrite?.(record);
   for (const record of issueWrites) view.beforeIssueWrite?.(record);
+  const supersedes = graph.supersedes;
+  const supersededEdgeIds: string[] = [];
   await view.sqlite.publishPrepared((sqlite) => {
+    if (supersedes) {
+      // The owner's edges at any other revision that this graph does not write again: one indexed read, then their deletes.
+      const rewritten = new Set(edgeWrites.map((record) => record.id));
+      const rows = sqlite.exec(`SELECT id FROM knowledge_edges WHERE from_kind = 'source' AND from_id = ?
+        AND json_extract(metadata, '$.${KNOWLEDGE_EDGE_STAMP_KEY}.owner') = ? AND json_extract(metadata, '$.${KNOWLEDGE_EDGE_STAMP_KEY}.revision') IS NOT ?`,
+      [supersedesSourceId(supersedes), supersedes.owner, supersedes.revision])[0]?.values ?? [];
+      for (const [id] of rows) {
+        if (typeof id !== 'string' || rewritten.has(id)) continue;
+        sqlite.run('DELETE FROM knowledge_edges WHERE id = ?', [id]);
+        supersededEdgeIds.push(id);
+      }
+    }
     for (const record of sourceWrites) writeKnowledgeSourceRow(sqlite, record);
     for (const record of extractionWrites) writeKnowledgeExtractionRow(sqlite, record);
     for (const { record, existing, now } of nodes) {
@@ -179,6 +204,7 @@ export async function applyKnowledgeImport(store: KnowledgeStore, view: Knowledg
     }
     for (const { record } of nodes) view.nodes.set(record.id, record);
     for (const [id, records] of revisions) view.nodeRevisions.set(id, records);
+    for (const id of supersededEdgeIds) view.edges.delete(id);
     for (const record of edgeWrites) view.edges.set(record.id, record);
     for (const record of issueWrites) view.issues.set(record.id, record);
     nodes.forEach(({ existing, record, observationEvidence, preserveObservation }, index) => {
@@ -195,4 +221,15 @@ export async function applyKnowledgeImport(store: KnowledgeStore, view: Knowledg
   // artifact references; only a durable acknowledgment reaches this callback.
   notifyKnowledgeCommitted(onCommitted);
   return receipt;
+}
+
+/** The owner of a source's compiled edges is `knowledge-source:<id>`. */
+export function knowledgeSourceCompileOwner(sourceId: string): string {
+  return `knowledge-source:${sourceId}`;
+}
+
+function supersedesSourceId(stamp: OwnerStamp): string {
+  const prefix = 'knowledge-source:';
+  if (!stamp.owner.startsWith(prefix)) throw new Error(`Knowledge import cannot supersede edges of owner ${stamp.owner}`);
+  return stamp.owner.slice(prefix.length);
 }

@@ -23,7 +23,7 @@ import type { PermissionPromptDecision, PermissionPromptRequest, RememberTier } 
 
 /** The broker seam this helper answers through, a subset of ApprovalBroker. */
 export interface BrokerApprovalCardBroker extends ApprovalRequesterLookup {
-  getApproval(approvalId: string): { readonly status: string; readonly request: PermissionPromptRequest } | null;
+  getApproval(approvalId: string): BrokerCardRecord | null;
   resolveApproval(
     approvalId: string,
     input: {
@@ -37,17 +37,28 @@ export interface BrokerApprovalCardBroker extends ApprovalRequesterLookup {
       readonly selectedHunks?: readonly number[];
       readonly actor: string;
       readonly actorSurface?: string;
+      /** The revision of the record the card showed. */
+      readonly expectedRevision: number | undefined;
     },
-  ): Promise<unknown>;
+  ): Promise<BrokerCardOutcome>;
 }
 
+/** The record a card is drawn from. */
+export interface BrokerCardRecord {
+  readonly id: string;
+  readonly callId: string;
+  readonly status: string;
+  readonly revision: number;
+  readonly request: PermissionPromptRequest;
+}
+
+/** What the broker did with the card's answer: applied, or refused with the record as it is now. */
+export type BrokerCardOutcome =
+  | { readonly applied: true; readonly record: BrokerCardRecord }
+  | { readonly applied: false; readonly record: BrokerCardRecord | null; readonly refusal: { readonly code: string; readonly reason: string } };
+
 export interface BrokerApprovalChangeParams {
-  readonly approval: {
-    readonly id: string;
-    readonly callId: string;
-    readonly status: string;
-    readonly request: PermissionPromptRequest;
-  };
+  readonly approval: BrokerCardRecord;
   readonly getPending: () => PendingPermissionState | null;
   readonly setPending: (pending: PendingPermissionState | null) => void;
   readonly broker: BrokerApprovalCardBroker;
@@ -96,7 +107,14 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
           ...(decision.selectedHunks ? { selectedHunks: decision.selectedHunks } : {}),
           actor: 'tui',
           actorSurface: 'tui',
-        }).catch((error: unknown) => {
+          // The record this card was drawn from: a stale answer is refused and the card is drawn again from the current one.
+          expectedRevision: current.revision,
+        }).then((outcome) => {
+          if (outcome.applied || !outcome.record || !isActiveStatus(outcome.record.status)) return;
+          params.notify?.(`[Approval] ${outcome.refusal.reason} It is shown again.`);
+          const latest = outcome.record;
+          defer(() => handleBrokerApprovalChange({ ...params, approval: latest }));
+        }, (error: unknown) => {
           // The card is already cleared, so without this the answer would vanish and the tool call would keep waiting.
           params.notify?.(`[Approval] Your answer for ${current.request.tool} was not recorded (${error instanceof Error ? error.message : String(error)}). The request is asked again if it is still waiting.`);
           defer(() => handleBrokerApprovalChange(params));

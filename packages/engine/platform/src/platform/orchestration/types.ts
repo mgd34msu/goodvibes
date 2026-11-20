@@ -13,6 +13,7 @@
  * shift or invalidate.
  */
 
+import type { EffectOutcome } from '@goodvibes-jev/engine/errors';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import type { QualityGateResult } from '../contract/gates.js';
 import type { ContractCommitScope } from '../contract/config.js';
@@ -690,10 +691,18 @@ export interface HeldMergeGroup {
 }
 
 /** Result of picking a best-of-N winner: the winner integrates via the merge lane; losers' worktrees are cleaned. */
+/** One losing sibling's worktree clean-up, as observed: done (worktree seen gone), pending (still cleaning past the pick's deadline; `check` tells), or failed (kept or not cleaned, with why). */
+export interface AttemptLoserOutcome {
+  readonly id: string;
+  readonly outcome: EffectOutcome;
+}
+
 export interface AttemptPickResult {
   readonly groupId: string;
   readonly winnerItemId: string;
   readonly loserItemIds: readonly string[];
+  /** Each loser's clean-up outcome, in `loserItemIds` order. */
+  readonly losers: readonly AttemptLoserOutcome[];
   /** True when a judge proposal auto-picked (group opted in); false for an explicit operator pick. */
   readonly auto: boolean;
 }

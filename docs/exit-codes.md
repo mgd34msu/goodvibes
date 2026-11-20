@@ -33,6 +33,7 @@ Branching rules that hold for every program:
 - Do not retry on `3` from `run`; inspect first.
 - Standard 128+signal codes are not used except `130`.
 - `goodvibes-agent doctor` exits `1` for a must-fix (`risk`) finding and `0` otherwise; `--strict` makes any finding exit `1`.
+- A batch command (`goodvibes-agent knowledge import-urls`, `import-bookmarks`, `import-browser-history`, `ingest-connector`) exits `0` only when every item was done (or there was nothing to import). A partial batch exits `1`, as does one where nothing was done; each failed item is listed with its reason, and `--output json` carries them under `outcome` (`state` `partial` or `none-done`). It is not a new code: `1` still means the command ran and did not fully succeed.
 
 `run --output json|stream-json` also names why it stopped in `stopReason`:
 

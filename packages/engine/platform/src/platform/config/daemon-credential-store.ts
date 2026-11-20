@@ -1,3 +1,4 @@
+import { revealOrNull } from '../security/secret.js';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { SecretsManager, SecretScope } from './secrets.js';
 import { daemonSecretKeyFor } from './daemon-secret-keys.js';
@@ -78,14 +79,14 @@ export function createDaemonCredentialStore(secrets: Pick<SecretsManager, 'get' 
     } : {}),
     async resolveRef(ref: string): Promise<string | null> {
       const key = isSecretReferenceValue(ref) ? secretKeyFromReference(ref) : ref;
-      return secrets.get(key);
+      return revealOrNull(await secrets.get(key), 'dispatch');
     },
     async resolveBoundRef(configKey: string, ref: string): Promise<string | null> {
       const key = isSecretReferenceValue(ref) ? secretKeyFromReference(ref) : ref;
-      return key === daemonSecretKeyFor(configKey) ? secrets.get(key) : null;
+      return key === daemonSecretKeyFor(configKey) ? revealOrNull(await secrets.get(key), 'dispatch') : null;
     },
     async resolveConfigSecret(configKey: string): Promise<string | null> {
-      return secrets.get(daemonSecretKeyFor(configKey));
+      return revealOrNull(await secrets.get(daemonSecretKeyFor(configKey)), 'dispatch');
     },
     async put(
       secretKey: string,
@@ -99,7 +100,7 @@ export function createDaemonCredentialStore(secrets: Pick<SecretsManager, 'get' 
     },
     async has(secretKey: string): Promise<boolean> {
       const value = await secrets.get(secretKey);
-      return value !== null && value.length > 0;
+      return value !== null && !value.empty;
     },
   };
 }

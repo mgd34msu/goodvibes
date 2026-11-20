@@ -83,6 +83,8 @@ import {
 import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled, requireFeatureGate } from '../runtime/feature-flags/index.js';
 import { GroupJobFamily, type GroupJobItem, type GroupWorkLink } from '../cluster/group-work.js';
+import { FenceIssuer } from '../utils/owner-fence.js';
+import { OwnedScope, type CloseReport } from '../utils/owned-work.js';
 
 export type {
   CreateAutomationJobInput,
@@ -170,6 +172,20 @@ export class AutomationManager {
   private readonly warnedDeliveryGapJobs = new Set<string>();
   /** The group's copy of the jobs (cluster/group-work.ts), once attached; it acts only while this machine is in a group. */
   private group: GroupJobFamily | null = null;
+  /**
+   * The runs this manager is starting, owned until their start settles. `stop()` closes it: its fence is retired,
+   * so a start still in flight spawns and saves nothing; a later `start()` opens a new one.
+   */
+  private scope = new OwnedScope('automation manager');
+  /** The last stop's close report: what was still starting when the manager stopped. */
+  private closing: Promise<CloseReport> | null = null;
+  /**
+   * The group's automation role as this machine holds it: losing the role moves its epoch, so a run of a shared job
+   * started while it was held is refused at its next effect (a job never runs on two machines).
+   */
+  private readonly roleIssuer = new FenceIssuer('automation role');
+  /** The fence of each run being started, by run id, so cancelling the run retires its fence too. */
+  private readonly runFences = new Map<string, FenceIssuer>();
 
   constructor(config: AutomationManagerConfig) {
     this.configManager = config.configManager;
@@ -413,6 +429,7 @@ export class AutomationManager {
         if (this.mutationLifetime !== lifetime) return;
         this.running = true;
         this.reconcileActiveRuns();
+        this.deliverOwedRuns();
         this.reconcileTimer = setInterval(() => {
           this.reconcileActiveRuns();
         }, 2_000);
@@ -427,6 +444,13 @@ export class AutomationManager {
 
   stop(): void {
     this.mutationLifetime = {};
+    // Every run still starting is refused at its next effect; the report says what had not settled by the deadline.
+    const scope = this.scope;
+    this.scope = new OwnedScope('automation manager');
+    this.closing = scope.close('automation manager stopped');
+    void this.closing.then((report) => {
+      if (report.stillRunning.length > 0) logger.warn('AutomationManager: run starts still settling after stop; they save nothing', { stillRunning: report.stillRunning.map((entry) => entry.label) });
+    });
     for (const timer of this.timers.values()) {
       clearTimeout(timer);
     }
@@ -453,6 +477,11 @@ export class AutomationManager {
     this.checkinEvaluator = evaluator;
   }
 
+  /** The report of the last `stop()`: run starts that ended inside the deadline, and any still settling. */
+  closed(): Promise<CloseReport> {
+    return this.closing ?? Promise.resolve({ stopped: [], killed: [], stillRunning: [] });
+  }
+
   /**
    * Keep the jobs on the group's record (cluster/group-work.ts). In a group, a
    * job made, changed, disabled or removed on any machine is the same on
@@ -472,6 +501,8 @@ export class AutomationManager {
     });
     link.roles.onRoleChange('automation', (held) => {
       if (!held) {
+        // Runs of shared jobs started while the role was held are refused from here on.
+        this.roleIssuer.issue();
         this.dropGroupTimers();
         return;
       }
@@ -796,6 +827,8 @@ export class AutomationManager {
 
   /** Stop a running run's agent and settle the run as cancelled. */
   private cancelRunNow(run: AutomationRun, reason: string): AutomationRun {
+    // A run still starting (a check-in evaluating) is stopped through its fence: it delivers and saves nothing more.
+    this.runFences.get(run.id)?.retire(reason);
     if (run.agentId) {
       this.requireCancelTask()(run.agentId);
     }
@@ -929,9 +962,25 @@ export class AutomationManager {
     const reservation = Symbol(job.id);
     this.startingRuns.add(reservation);
     const release = () => { this.startingRuns.delete(reservation); };
+    // The run's fence: its own generation, under the manager's scope and, for a job the group shares, the role.
+    const issuer = new FenceIssuer(`automation job ${job.id}`);
+    const shared = this.group !== null && this.sharedWithGroup(job) && this.group.shared();
+    let runId: string | undefined;
+    const scope = this.scope;
     try {
-      return await executeAutomationJob({ ...this.runtimeExecutionContext(), onRunRecorded: release }, job, trigger, dueRun, attempt, operation);
-    } finally { release(); }
+      return await scope.run(`run of automation job ${job.id}`, (scopeFence) => {
+        const runFence = issuer.issue({ parent: scopeFence.signal });
+        const fence = shared ? runFence.narrow({ signal: this.roleIssuer.peek().signal }) : runFence;
+        return executeAutomationJob(fence, {
+          ...this.runtimeExecutionContext(),
+          onRunRecorded: release,
+          onRunMinted: (id) => { runId = id; this.runFences.set(id, issuer); },
+        }, job, trigger, dueRun, attempt, operation);
+      });
+    } finally {
+      release();
+      if (runId !== undefined && this.runFences.get(runId) === issuer) this.runFences.delete(runId);
+    }
   }
 
   private async syncExecutionRoute(job: AutomationJob, run: AutomationRun): Promise<void> {
@@ -1118,15 +1167,53 @@ export class AutomationManager {
     emitAutomationManagerRunCompleted(this.runtimeBus, job, run, outcome, failure);
   }
 
-  private maybeDeliverRun(job: AutomationJob, run: AutomationRun): void {
-    maybeDeliverAutomationRun({
+  /**
+   * At start: a run that ended and still owes its answer (the daemon stopped
+   * between the run's end and the write that records its delivery) is
+   * delivered now, under the same identity as the first attempt. Once per
+   * start; a run whose job is gone is logged and left owed.
+   */
+  private deliverOwedRuns(): void {
+    for (const run of [...this.runs.values()]) {
+      if (run.delivery?.state !== 'owed' || run.status === 'running' || run.status === 'queued') continue;
+      const job = this.jobs.get(run.jobId);
+      if (!job) {
+        logger.warn('AutomationManager: a run owes its answer but its job is gone; it was not delivered', { runId: run.id, jobId: run.jobId });
+        continue;
+      }
+      this.maybeDeliverRun(job, run);
+    }
+  }
+
+  private maybeDeliverRun(job: AutomationJob, run: AutomationRun): boolean {
+    return maybeDeliverAutomationRun({
       runs: this.runs,
       deliveryInFlight: this.deliveryInFlight,
       deliveryManager: this.deliveryManager,
       unattendedRuns: this.unattendedRuns,
       syncRunToRuntime: (nextRun, source) => this.syncRunToRuntime(nextRun, source),
       saveRuns: () => this.saveRuns(),
+      noteJobOutcome: (jobId, outcome) => this.noteJobOutcome(jobId, outcome),
+      removeOneShotJob: (jobId) => {
+        if (!this.jobs.has(jobId)) return;
+        this.removeJobRecord(jobId, 'one-shot-complete');
+        void this.saveJobs().catch((error: unknown) => {
+          logger.warn('AutomationManager: job persistence failed', { reason: 'one-shot job removed after its delivery', jobId, error: summarizeError(error) });
+        });
+      },
     }, job, run);
+  }
+
+  /** How the last run's answer reached the person, on the job record: one job write per scheduled run, never per turn. */
+  private noteJobOutcome(jobId: string, outcome: NonNullable<AutomationJob['lastOutcome']>): void {
+    const job = this.jobs.get(jobId);
+    if (!job || job.lastOutcome === outcome) return;
+    const updated: AutomationJob = { ...job, lastOutcome: outcome };
+    this.jobs.set(jobId, updated);
+    this.syncJobToRuntime(updated, 'automation.delivery');
+    void this.saveJobs().catch((error: unknown) => {
+      logger.warn('AutomationManager: job persistence failed', { reason: 'last outcome', jobId, error: summarizeError(error) });
+    });
   }
 }
 

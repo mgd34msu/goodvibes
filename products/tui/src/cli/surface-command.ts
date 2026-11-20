@@ -1,6 +1,7 @@
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { buildGoodVibesSecretKey, buildGoodVibesSecretRef, createRuntimeSecretsManager, resolveDaemonEnabled, resolveGoodVibesDaemonHome, resolveSecretInput } from '@goodvibes-jev/engine/platform/platform/config';
 import { ensureNtfyTopics, resolveGoodVibesNtfyTopics } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { enableFeatureFlags, getMissingSurfaceFeatureFlags, getServerSurfaceFeatureFlags, surfaceFeatureGateSettingsKeys } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { classifyBindPosture, isNetworkFacing } from '@goodvibes-jev/engine/terminal-shell';
@@ -122,6 +123,29 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
   };
 }
 
+/**
+ * The secret store this command reads and writes ntfy topic names in. A topic
+ * name is a credential (declared secret-bearing), so it is kept in the daemon
+ * tier and its setting holds a reference; this command is the owner's own, so
+ * it shows the names he must subscribe to.
+ */
+function ntfyTopicSecrets(runtime: CliCommandRuntime) {
+  return createRuntimeSecretsManager({
+    projectRoot: runtime.workingDirectory,
+    globalHome: runtime.homeDirectory,
+    surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
+    configManager: runtime.configManager,
+    daemonHome: resolveGoodVibesDaemonHome(runtime.homeDirectory),
+  });
+}
+
+/** A topic setting's name for the owner's screen: the stored name its reference names, or the setting as written. */
+async function ntfyTopicName(runtime: CliCommandRuntime, secrets: ReturnType<typeof ntfyTopicSecrets>, key: string): Promise<string> {
+  const value = runtime.configManager.get(key as ConfigKey);
+  if (typeof value !== 'string' || value.trim() === '') return '';
+  return (await resolveSecretInput(value, { resolveLocalSecret: (name) => secrets.get(name), homeDirectory: secrets.getGlobalHome() }))?.trim() ?? '';
+}
+
 async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly output: string; readonly exitCode: number }> {
   const config = runtime.configManager;
   const [sub = 'list', ...rest] = runtime.cli.commandArgs;
@@ -191,10 +215,20 @@ async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly o
       config.setDynamic(`surfaces.${resolved.id}.enabled` as ConfigKey, enabled);
       if (enabled && resolved.id === 'ntfy') {
         // On the public server a topic name is the only secret: each unset inbound topic gets an unguessable one.
-        generatedNtfyTopics.push(...ensureNtfyTopics({
-          get: (key) => config.get(key as ConfigKey),
-          set: (key, value) => config.setDynamic(key as ConfigKey, value),
-        }));
+        // Each name is a credential: it goes to the daemon's secret tier and the setting holds its reference.
+        const secrets = ntfyTopicSecrets(runtime);
+        try {
+          generatedNtfyTopics.push(...await ensureNtfyTopics({
+            get: (key) => config.get(key as ConfigKey),
+            store: async (key, topic) => {
+              const secretKey = buildGoodVibesSecretKey(key);
+              await secrets.set(secretKey, topic, { scope: 'daemon' });
+              config.setDynamic(key as ConfigKey, buildGoodVibesSecretRef(secretKey));
+            },
+          }));
+        } finally {
+          secrets.close();
+        }
       }
     }
     if (enabled) {
@@ -267,10 +301,17 @@ async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly o
     };
   });
   const filteredSurfaces = !target ? externalSurfaces : externalSurfaces.filter((surface) => surface.id === externalTarget);
+  // The owner's own command shows the topic names he subscribes to; each is read from the secret store its setting names.
+  const showsNtfy = filteredSurfaces.some((surface) => surface.id === 'ntfy');
+  const topicSecrets = showsNtfy ? ntfyTopicSecrets(runtime) : null;
+  const topicNames = topicSecrets
+    ? await Promise.all(['surfaces.ntfy.chatTopic', 'surfaces.ntfy.agentTopic', 'surfaces.ntfy.remoteTopic', 'surfaces.ntfy.topic']
+      .map((key) => ntfyTopicName(runtime, topicSecrets, key))).finally(() => topicSecrets.close())
+    : ['', '', '', ''];
   const ntfyTopics = resolveGoodVibesNtfyTopics({
-    chatTopic: String(config.get('surfaces.ntfy.chatTopic' as ConfigKey) || ''),
-    agentTopic: String(config.get('surfaces.ntfy.agentTopic' as ConfigKey) || ''),
-    remoteTopic: String(config.get('surfaces.ntfy.remoteTopic' as ConfigKey) || ''),
+    chatTopic: topicNames[0],
+    agentTopic: topicNames[1],
+    remoteTopic: topicNames[2],
     baseUrl: String(config.get('surfaces.ntfy.baseUrl' as ConfigKey) || ''),
   });
   const readinessIssues: string[] = [];
@@ -356,7 +397,7 @@ async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly o
       `  agent: ${ntfyTopics.agentTopic || '(none)'}`,
       `  daemon-only remote: ${ntfyTopics.remoteTopic || '(none)'}`,
       ...ntfyTopics.refused.map((refused) => `  not subscribed: ${refused.reason}`),
-      `  default delivery topic: ${String(config.get('surfaces.ntfy.topic') || '(none)')}`,
+      `  default delivery topic: ${topicNames[3] || '(none)'}`,
     ] : []),
     ...(includeProbe ? [
       readinessIssues.length === 0 ? 'Readiness: ready' : 'Readiness: needs attention',

@@ -22,10 +22,13 @@ import {
 import { executeCheckinJob, type AutomationCheckinEvaluator } from './checkin-execution.js';
 import { markWorkAuthorized } from '../agents/conversation-continuation.js';
 import type { AutomationRunSettlement } from './manager-runtime-reconcile.js';
+import type { Fence } from '../utils/owner-fence.js';
 
 export interface AutomationManagerExecutionContext {
   /** Transfer a reserved startup slot to the now-visible run record. */
   readonly onRunRecorded?: () => void;
+  /** Hears the new run's id as soon as it is minted, so a cancel of that run can retire the fence it starts under. */
+  readonly onRunMinted?: (runId: string) => void;
   readonly configManager: ConfigManager;
   readonly routeBindings: RouteBindingManager;
   readonly sessionBroker: SharedSessionBroker;
@@ -140,7 +143,14 @@ function resolveHostSurfaceId(
   return context.defaultSurfaceId ?? `surface:${surfaceKind}`;
 }
 
+/**
+ * Starts one run of `job` under `fence`: the run's generation of its owner (the manager's scope, the group's
+ * automation role for a shared job, and the run itself). The fence is checked right before the agent is spawned
+ * and before the run is saved, so a run whose manager stopped, whose role moved to another machine, or that was
+ * cancelled meanwhile spawns nothing and saves nothing.
+ */
 export async function executeAutomationJob(
+  fence: Fence,
   context: AutomationManagerExecutionContext,
   job: AutomationJob,
   trigger: AutomationRunTrigger,
@@ -149,13 +159,14 @@ export async function executeAutomationJob(
   operation?: ExternalOperationSource,
 ): Promise<AutomationRun> {
   const assertSource = () => {
+    fence.check();
     if (job.execution.requiresSourceOwner && !operation) throw new Error('Automation original source owner is unavailable');
     operation?.assertCurrent(); operation?.signal?.throwIfAborted();
     if (operation && context.jobs.get(job.id)?.mutationRevision !== job.mutationRevision) throw new Error('Source-owned automation job changed or was removed');
   };
   assertSource();
   if (job.kind === 'checkin' && context.checkinEvaluator) {
-    return await executeCheckinJob(context, context.checkinEvaluator, job, trigger, dueRun, attempt);
+    return await executeCheckinJob(fence, context, context.checkinEvaluator, job, trigger, dueRun, attempt);
   }
   const now = Date.now();
   const prompt = job.execution.prompt ?? job.description ?? job.name;
@@ -218,6 +229,7 @@ export async function executeAutomationJob(
     cancelledReason: undefined,
     agentId: resolved.agentId,
   };
+  context.onRunMinted?.(run.id);
 
   // What starting a run writes on its job: the run counters, and the session
   // a pinned target was given on its first run.
@@ -245,6 +257,7 @@ export async function executeAutomationJob(
       context.onRunRecorded?.();
       await context.syncExecutionRoute(updatedJob, runningRun);
       context.pruneRunHistory(updatedJob.id);
+      fence.check();
       await Promise.all([context.saveJobs(), context.saveRuns()]);
       context.syncRunToRuntime(runningRun, 'automation.execute');
       context.syncJobToRuntime(updatedJob, 'automation.execute');
@@ -281,6 +294,7 @@ export async function executeAutomationJob(
     context.onRunRecorded?.();
     await context.syncExecutionRoute(updatedJob, runningRun);
     context.pruneRunHistory(updatedJob.id);
+    fence.check();
     await Promise.all([context.saveJobs(), context.saveRuns()]);
     context.syncRunToRuntime(runningRun, 'automation.execute');
     context.syncJobToRuntime(updatedJob, 'automation.execute');
@@ -288,6 +302,16 @@ export async function executeAutomationJob(
     return runningRun;
   } catch (error) {
     const message = summarizeError(error);
+    if (!fence.current) {
+      // The run's owner ended (the manager stopped, the role moved, the run was cancelled): its agent is stopped
+      // and nothing more is written under it; the next owner reconciles what is recorded.
+      if (spawnedAgentId !== undefined) {
+        try { context.cancelTask?.(spawnedAgentId); }
+        catch (cancelError) { logger.warn('AutomationManager: could not cancel the agent of a run whose owner ended', { jobId: job.id, runId: run.id, agentId: spawnedAgentId, error: summarizeError(cancelError) }); }
+      }
+      logger.info('AutomationManager: a run start was stopped because its owner ended; nothing was saved for it', { jobId: job.id, runId: run.id, reason: message });
+      throw error;
+    }
     const stored = context.runs.get(run.id);
     if (!canSettleStoredRun(stored, 'failed')) {
       // Cancelled (or otherwise settled) while the start was in flight: the

@@ -8,7 +8,7 @@ import { recordFeatureEnablement } from './onboarding/onboarding-feature-units.t
 import { handleConnectExistingDaemonForHandler } from './handler-onboarding-daemon-adopt.ts';
 import { OnboardingWizardController, type OnboardingWizardAction, type OnboardingWizardApplyFeedback } from './onboarding/onboarding-wizard.ts';
 import { handleCloudflareOnboardingActionForHandler, maybeProvisionCloudflareOnFinalApplyForHandler } from './handler-onboarding-cloudflare.ts';
-import { applyOnboardingRequest, deleteWizardProgress, verifyOnboardingRequest, writeOnboardingCheckMarker, writeWizardProgress } from '../runtime/onboarding/index.ts';
+import { applyOnboardingRequest, verifyOnboardingRequest, writeOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
 import type { OnboardingApplyRequest, OnboardingVerificationItem } from '../runtime/onboarding/index.ts';
 import { beginOnboardingOperation, endOnboardingOperation } from './onboarding-operation.ts';
 import {
@@ -330,7 +330,6 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
             source: 'wizard',
             mode: request.mode,
           });
-          deleteWizardProgress(handler.uiServices.environment.shellPaths);
         } catch (markerError) {
           handler.commandContext?.print?.(
             `Onboarding check marker could not be written: ${summarizeError(markerError)}`,
@@ -576,32 +575,6 @@ export async function handleOpenAiSubscriptionFinishForHandler(handler: InputHan
       endOnboardingOperation(handler);
     }
   }
-
-/**
- * Persist the current wizard field state to onboarding-progress.json.
- *
- * Called after each step navigation so the user can resume a partially
- * completed wizard after a restart. Values typed into masked fields are held
- * apart from the text state as they are typed, so none reaches the file.
- *
- * This is a best-effort write: if it fails the wizard continues normally.
- */
-export function saveWizardProgressForHandler(handler: InputHandler): void {
-  const wizard = handler.onboardingWizard;
-  if (!wizard.active) return;
-  try {
-    // The text state iterates only unmasked fields: masked values are held apart as they are typed.
-    writeWizardProgress(handler.uiServices.environment.shellPaths, {
-      mode: wizard.mode,
-      stepIndex: wizard.stepIndex,
-      toggleState: [...wizard.toggleState.entries()],
-      radioState: [...wizard.radioState.entries()],
-      textState: [...wizard.textState.entries()],
-    });
-  } catch {
-    // Best-effort: never block wizard interaction on a progress write failure.
-  }
-}
 
 export function syncRuntimeFromOnboardingRequestForHandler(handler: InputHandler, request: ReturnType<OnboardingWizardController['buildApplyRequest']>): void {
     const runtime = handler.commandContext?.session.runtime;

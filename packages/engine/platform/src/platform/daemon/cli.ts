@@ -55,6 +55,8 @@ function installServiceAndExit(config: ConfigManager, workingDir: string, homeDi
 
 /** How long a working-directory move waits for the answer to the request that asked for it to reach the caller. */
 const MOVE_ANSWER_GRACE_MS = 100;
+/** How often a move that found a turn running (or could not tell) looks again before it stops the host. */
+const MOVE_IDLE_POLL_MS = 1_000;
 
 /** One host on one working directory: its listeners, services and the owner of its root. */
 interface ServingHost {
@@ -110,6 +112,13 @@ async function main(): Promise<void> {
 
   async function runMoves(): Promise<void> {
     for (let host = serving(); moveTarget !== undefined && !ending && host; host = serving()) {
+      // A turn that started during the grace period is not cut off: the host
+      // stops only once the probe sees no busy session (a failed probe waits).
+      for (let busy = host.swapManager.busySessions(); busy.kind !== 'present' || busy.value > 0; busy = host.swapManager.busySessions()) {
+        if (ending) return;
+        await new Promise<void>((resolveWait) => { setTimeout(resolveWait, MOVE_IDLE_POLL_MS); });
+      }
+      if (ending || moveTarget === undefined) return;
       const target = moveTarget;
       moveTarget = undefined;
       const from = host.workingDir;

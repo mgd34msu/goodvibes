@@ -15,6 +15,7 @@ import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { assertDeliveryCurrent, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
 import { isRecord } from '../utils/record-coerce.js';
 import { classifyFailure, RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { fetchFailurePhase } from '../state/operation.js';
 
 /** What the built-in generation providers are given by the product that registers them. */
 export interface MediaGenerationDeps {
@@ -69,6 +70,11 @@ class ProviderKey {
     this.#stored = { revision, value };
     return value;
   }
+}
+
+/** Whether the caller still wants this delivery (not cancelled, still current). */
+function deliveryStillCurrent(lifetime: DeliveryLifetime): boolean {
+  try { assertDeliveryCurrent(lifetime); return true; } catch { return false; }
 }
 
 /** A job the provider itself reported as failed or cancelled, or finished without a usable output: nothing is left running. */
@@ -234,13 +240,38 @@ interface Transport {
   sleep(delayMs: number): Promise<void>;
 }
 
-function transportFor(label: string, lifetime: DeliveryLifetime): Transport {
+/** The provider may have taken a job whose answer this request never read: it may be running and charged, with no task id here. */
+function submissionOutcomeUnknown(label: string, cause: unknown): RefusalError {
+  return new RefusalError(refusal({
+    code: 'MEDIA_SUBMIT_OUTCOME_UNKNOWN',
+    state: `the job was sent to ${label}; whether it was accepted is not known`,
+    reason: `${label}'s answer to the submission was not read (${cause instanceof Error ? cause.message : String(cause)}), so no task id is known`,
+    next: [`Look for the job in ${label}'s own console before submitting it again: it may be running and charged`],
+    retryable: false,
+  }), { cause });
+}
+
+/**
+ * `follow` (polling, downloads): the caller's cancellation aborts a request in
+ * flight and is checked before and after each one. `submit`: a cancellation is
+ * checked before the request is sent, but once it is sent the answer is read
+ * whatever happens to the caller, because an accepted job is paid for and its
+ * task id is the only handle on it; a submission whose answer cannot be read
+ * is reported as of unknown outcome, never as not sent.
+ */
+function transportFor(label: string, lifetime: DeliveryLifetime, phase: 'submit' | 'follow' = 'follow'): Transport {
   const response = async (url: string, init: RequestInit, timeoutMs = 120_000): Promise<Response> => {
     assertDeliveryCurrent(lifetime);
     const deadline = AbortSignal.timeout(timeoutMs);
-    const signal = lifetime.signal ? AbortSignal.any([deadline, lifetime.signal]) : deadline;
-    const answered = await instrumentedFetch(url, { ...init, signal });
-    assertDeliveryCurrent(lifetime);
+    const signal = phase === 'follow' && lifetime.signal ? AbortSignal.any([deadline, lifetime.signal]) : deadline;
+    let answered: Response;
+    try {
+      answered = await instrumentedFetch(url, { ...init, signal });
+    } catch (error) {
+      if (phase === 'submit' && fetchFailurePhase(error) === 'sent') throw submissionOutcomeUnknown(label, error);
+      throw error;
+    }
+    if (phase === 'follow') assertDeliveryCurrent(lifetime);
     if (!answered.ok) {
       try { await answered.body?.cancel(); } catch { /* the status is what is reported */ }
       throw httpFailure(label, answered.status, answered.headers.get('retry-after'));
@@ -251,8 +282,13 @@ function transportFor(label: string, lifetime: DeliveryLifetime): Transport {
     signal: lifetime.signal,
     response,
     async json(url, init, timeoutMs) {
-      const result: unknown = await (await response(url, init, timeoutMs)).json();
-      assertDeliveryCurrent(lifetime);
+      const answered = await response(url, init, timeoutMs);
+      let result: unknown;
+      try { result = await answered.json(); } catch (error) {
+        if (phase === 'submit') throw submissionOutcomeUnknown(label, error);
+        throw error;
+      }
+      if (phase === 'follow') assertDeliveryCurrent(lifetime);
       return result;
     },
     async sleep(delayMs) {
@@ -291,9 +327,12 @@ export async function pollTask<T>(
   options: { readonly deadline: number; readonly intervalMs: number; readonly sleep: (ms: number) => Promise<void>; readonly signal?: AbortSignal | undefined },
 ): Promise<{ readonly done: true; readonly value: T } | { readonly done: false }> {
   let transientFailures = 0;
+  // The first check always runs, so a zero wait polls once as documented; later ones only while time is left.
+  let polled = false;
   for (;;) {
     options.signal?.throwIfAborted();
-    if (Date.now() >= options.deadline) return { done: false };
+    if (polled && Date.now() >= options.deadline) return { done: false };
+    polled = true;
     let step: Awaited<ReturnType<typeof poll>> | undefined;
     try {
       step = await poll();
@@ -435,6 +474,27 @@ function createGenerationProvider(spec: GenerationSpec, deps: MediaGenerationDep
     metadata: { verified: false, outputs: [...spec.outputs] },
   });
 
+  /** The provider accepted the job and then the request was cancelled: the remote job is cancelled when the provider can, and the task stays in the result either way. */
+  const acceptedThenCancelled = async (task: MediaProviderTask, keyValue: string | null, model: string | undefined): Promise<MediaGenerationResult> => {
+    let cancelled = false;
+    if (spec.cancel) {
+      try { await spec.cancel(task, keyValue); cancelled = true; } catch { cancelled = false; }
+    }
+    return {
+      providerId: spec.id,
+      artifacts: [],
+      pending: task,
+      metadata: {
+        taskId: task.taskId,
+        ...(model ? { model } : {}),
+        state: cancelled ? 'cancelled' : 'pending',
+        note: cancelled
+          ? `${spec.label} accepted task ${task.taskId} before the request was cancelled; the task was then cancelled at ${spec.label}`
+          : `${spec.label} accepted task ${task.taskId} before the request was cancelled; it may still run and be charged: collect it with this task id${spec.cancel ? ' (cancelling it there failed)' : ''}`,
+      },
+    };
+  };
+
   const finish = async (task: MediaProviderTask, keyValue: string | null, transport: Transport, waitMs: number, model: string | undefined): Promise<MediaGenerationResult> =>
     afterSubmission(spec.label, task, transport.signal, spec.cancel ? () => spec.cancel!(task, keyValue) : undefined, async () => {
       const waited = await pollTask(async () => {
@@ -467,10 +527,11 @@ function createGenerationProvider(spec: GenerationSpec, deps: MediaGenerationDep
       const kind = requestedKind(spec, request, options);
       const keyValue = await key.resolve();
       if (!keyValue && !spec.keyOptional) throw refuseMissingKey(spec);
-      const transport = transportFor(spec.label, lifetime);
-      const submitted = await spec.submit(request, kind, { key: keyValue, options, transport });
+      const submitted = await spec.submit(request, kind, { key: keyValue, options, transport: transportFor(spec.label, lifetime, 'submit') });
       const task: MediaProviderTask = { providerId: spec.id, taskId: submitted.taskId, resume: { ...submitted.resume, output: kind } };
-      return finish(task, keyValue, transport, waitMsFrom(options['waitSeconds']), submitted.model);
+      // Cancelled while the provider was answering: the job was accepted, so the result carries its task id instead of an error.
+      if (!deliveryStillCurrent(lifetime)) return await acceptedThenCancelled(task, keyValue, submitted.model);
+      return finish(task, keyValue, transportFor(spec.label, lifetime), waitMsFrom(options['waitSeconds']), submitted.model);
     },
     async collect(task: MediaProviderTask, options: MediaCollectOptions = {}, lifetime: DeliveryLifetime = {}): Promise<MediaGenerationResult> {
       const taskId = trimString(task.taskId);

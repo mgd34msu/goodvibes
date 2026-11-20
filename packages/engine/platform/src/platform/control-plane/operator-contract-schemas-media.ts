@@ -11,6 +11,7 @@ import {
   GENERIC_LIST_SCHEMA,
   METADATA_SCHEMA,
   STRING_LIST_SCHEMA,
+  enumSchema,
   recordSchema,
 } from './operator-contract-schemas-shared.js';
 import {
@@ -258,10 +259,26 @@ export const MULTIMODAL_WRITEBACK_RESULT_SCHEMA = objectSchema({
   metadata: METADATA_SCHEMA,
 }, ['analysisArtifact', 'metadata']);
 
+/**
+ * A requested write-back as an outcome: `done` with what was stored (`value`),
+ * or `failed` with its refusal (the analysis still finished; the answer is 207).
+ */
+const MULTIMODAL_WRITEBACK_OUTCOME_SCHEMA = objectSchema({
+  state: enumSchema(['done', 'failed']),
+  value: MULTIMODAL_WRITEBACK_RESULT_SCHEMA,
+  refusal: objectSchema({
+    code: STRING_SCHEMA,
+    state: STRING_SCHEMA,
+    reason: STRING_SCHEMA,
+    next: STRING_LIST_SCHEMA,
+    retryable: BOOLEAN_SCHEMA,
+  }, ['code', 'state', 'reason', 'next', 'retryable']),
+}, ['state']);
+
 export const MULTIMODAL_ANALYZE_OUTPUT_SCHEMA = objectSchema({
   analysis: MULTIMODAL_ANALYSIS_RESULT_SCHEMA,
   packet: MULTIMODAL_PACKET_SCHEMA,
-  writeback: MULTIMODAL_WRITEBACK_RESULT_SCHEMA,
+  writeback: MULTIMODAL_WRITEBACK_OUTCOME_SCHEMA,
 }, ['analysis']);
 
 export const MULTIMODAL_PACKET_OUTPUT_SCHEMA = objectSchema({

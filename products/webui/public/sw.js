@@ -30,6 +30,8 @@
 const CACHE_VERSION = 'v1';
 const SHELL_CACHE = `goodvibes-shell-${CACHE_VERSION}`;
 const ASSET_CACHE = `goodvibes-assets-${CACHE_VERSION}`;
+/** Every cache name this worker ever creates starts with one of these; activation cleans only those. */
+const OWN_CACHE_PREFIXES = ['goodvibes-shell-', 'goodvibes-assets-'];
 
 // The minimal shell precached on install: the document itself and the app
 // icons. Hashed JS/CSS chunks are filled in at runtime (cache-first) the first
@@ -86,6 +88,9 @@ self.addEventListener('activate', (event) => {
       .then((keys) =>
         Promise.all(
           keys
+            // Only this app's own earlier caches: another app served on the same
+            // origin (behind one reverse proxy) keeps its caches.
+            .filter((key) => OWN_CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)))
             .filter((key) => key !== SHELL_CACHE && key !== ASSET_CACHE)
             .map((key) => caches.delete(key)),
         ),

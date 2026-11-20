@@ -192,12 +192,16 @@ export class ClusterElection {
     this.unsubscribeRegistry = null;
     this.cancelWatchdog?.();
     this.cancelWatchdog = null;
-    await Promise.all([
+    const results = await Promise.allSettled([
       ...[...this.elections.values()].map((election) => election.stop(reason)),
       ...this.retirements.values(),
     ]);
-    this.elections.clear();
+    // A fenced surface stays listed, so status names it (and its drain failure) instead of reading stopped.
+    for (const [surfaceId, election] of this.elections) if (election.currentRole !== 'fenced') this.elections.delete(surfaceId);
     await this.options.transport.stop();
+    const failures = results.flatMap((result) => result.status === 'rejected' ? [result.reason as unknown] : []);
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, 'Cluster surfaces did not stop cleanly');
   }
 
   /** Resolves once every surface's queued transitions have finished. */
@@ -252,7 +256,7 @@ export class ClusterElection {
   }
 
   private aggregateRole(surfaces: readonly ClusterSurfaceStatus[]): ClusterRole {
-    if (!this.running) return 'stopped';
+    if (!this.running) return surfaces.some((surface) => surface.role === 'fenced') ? 'fenced' : 'stopped';
     if (surfaces.some((surface) => surface.role === 'master')) return 'master';
     // Ahead of `electing`: a fenced surface will not move on by itself, and
     // reading it as "between roles" would have an operator wait for nothing.

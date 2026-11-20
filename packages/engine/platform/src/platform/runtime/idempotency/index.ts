@@ -8,18 +8,21 @@
  *
  * Lifecycle:
  *   1. Before executing a tool, call `checkAndRecord(key)`.
- *      - `'new'`       → proceed with execution.
+ *      - `'new'`       → proceed with execution; the result carries the caller's `claim`.
  *      - `'in-flight'` → a prior submission is still running; reject or wait.
  *      - `'duplicate'` → a prior submission completed; return cached result.
- *   2. On success, call `markComplete(key, result)` to cache the result.
- *   3. On failure, call `markFailed(key)` to allow a retry on the next attempt.
+ *   2. On success, call `claim.complete(result)` to cache the result.
+ *   3. On failure, call `claim.fail()` to allow a retry on the next attempt.
+ *
+ * A claim settles only the record it created: an abandoned in-flight record
+ * that was replaced under the same key has a new epoch, so the original
+ * owner's late `complete` or `fail` changes nothing and returns false.
  *
  * TTL-based eviction runs automatically whenever the store exceeds `maxRecords`.
  * An in-flight record is evicted only once it is older than `inFlightTimeoutMs`,
  * which marks its caller as gone.
  */
 
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import type {
   IdempotencyKeyContext,
@@ -52,17 +55,15 @@ const DEFAULT_IN_FLIGHT_TIMEOUT_MS = 2 * 60 * 60 * 1_000;
 /** Default maximum stored records before eviction sweep. */
 const DEFAULT_MAX_RECORDS = 5_000;
 
-function missingRecordError(operation: 'markComplete' | 'markFailed', key: string): GoodVibesError {
-  return new GoodVibesError(
-    `IdempotencyStore.${operation}: no record found for key ${key}`,
-    {
-      code: 'IDEMPOTENCY_RECORD_NOT_FOUND',
-      category: 'internal',
-      source: 'runtime',
-      recoverable: false,
-      operation,
-    },
-  );
+/** The owner's hold on the record `checkAndRecord` created for it. */
+export interface IdempotencyClaim {
+  readonly key: string;
+  /** The record's epoch at creation; a replacement record under the same key has another. */
+  readonly epoch: number;
+  /** Caches the result. False (nothing changed) when the record was replaced or is already finalized. */
+  complete(result?: unknown): boolean;
+  /** Lets the next submission retry. False (nothing changed) when the record was replaced or is already finalized. */
+  fail(): boolean;
 }
 
 /**
@@ -78,7 +79,7 @@ function missingRecordError(operation: 'markComplete' | 'markFailed', key: strin
  * const check = store.checkAndRecord(key);
  * if (check.status === 'new') {
  *   const result = await doWork();
- *   store.markComplete(key, result);
+ *   check.claim.complete(result);
  *   return result;
  * } else if (check.status === 'duplicate') {
  *   return check.record.result; // cached
@@ -93,6 +94,8 @@ export class IdempotencyStore {
   private readonly maxRecords: number;
   private readonly inFlightTimeoutMs: number;
   private readonly now: () => number;
+  /** The epoch the next created record gets; one integer per record. */
+  private nextEpoch = 1;
 
   constructor(config: IdempotencyStoreConfig = {}) {
     this.ttlMs = config.ttlMs ?? DEFAULT_TTL_MS;
@@ -135,7 +138,7 @@ export class IdempotencyStore {
   checkAndRecord(
     key: string,
   ):
-    | { readonly status: 'new' }
+    | { readonly status: 'new'; readonly claim: IdempotencyClaim }
     | { readonly status: 'in-flight'; readonly record: IdempotencyRecord }
     | { readonly status: 'duplicate'; readonly record: IdempotencyRecord } {
     const existing = this.store.get(key);
@@ -158,53 +161,31 @@ export class IdempotencyStore {
       key,
       status: 'in-flight',
       createdAt: this.now(),
+      epoch: this.nextEpoch++,
     };
     this.store.set(key, record);
     this._maybeSweep();
 
-    return { status: 'new' };
+    return { status: 'new', claim: this._claim(record) };
   }
 
   /**
-   * Mark a previously recorded key as `completed` and cache the result.
-   *
-   * Throws if the key is not in the store. In-flight records are not eligible
-   * for eviction, so a missing key indicates an invalid finalization path.
-   *
-   * @param key    - Idempotency key.
-   * @param result - Optional result to cache for duplicate callers.
+   * The claim on `record`: it finalizes the record only while the store still
+   * holds that record (same epoch) and it is in flight. Finalized once, so a
+   * late call cannot rewrite the outcome; a failed record lets the next
+   * `checkAndRecord` with the key register a fresh in-flight record.
    */
-  markComplete(key: string, result?: unknown): void {
-    const record = this.store.get(key);
-    if (!record) throw missingRecordError('markComplete', key);
-    // Finalized once: a no-op unless in-flight, so a late call cannot rewrite the outcome.
-    if (!idempotencyLifecycle.can(record.status, 'completed')) return;
-    record.status = 'completed';
-    record.completedAt = this.now();
-    if (result !== undefined) {
-      record.result = result;
-    }
-  }
-
-  /**
-   * Mark a previously recorded key as `failed`, allowing a subsequent retry.
-   *
-   * The record transitions from `in-flight` → `failed`. On the next call to
-   * `checkAndRecord` with the same key the failed record is deleted and the
-   * caller receives `'new'`, allowing a fresh retry.
-   *
-   * Throws if the key is not in the store. In-flight records are not eligible
-   * for eviction, so a missing key indicates an invalid finalization path.
-   *
-   * @param key - Idempotency key.
-   */
-  markFailed(key: string): void {
-    const record = this.store.get(key);
-    if (!record) throw missingRecordError('markFailed', key);
-    // A completed record keeps its cached result; only an in-flight record can fail.
-    if (!idempotencyLifecycle.can(record.status, 'failed')) return;
-    record.status = 'failed';
-    record.completedAt = this.now();
+  private _claim(record: IdempotencyRecord): IdempotencyClaim {
+    const { key, epoch } = record;
+    const settle = (to: 'completed' | 'failed', result?: unknown): boolean => {
+      const current = this.store.get(key);
+      if (current === undefined || current.epoch !== epoch || !idempotencyLifecycle.can(current.status, to)) return false;
+      current.status = to;
+      current.completedAt = this.now();
+      if (to === 'completed' && result !== undefined) current.result = result;
+      return true;
+    };
+    return Object.freeze({ key, epoch, complete: (result?: unknown) => settle('completed', result), fail: () => settle('failed') });
   }
 
   // ---------------------------------------------------------------------------

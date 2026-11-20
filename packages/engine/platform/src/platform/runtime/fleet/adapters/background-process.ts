@@ -28,6 +28,7 @@ export function adaptBackgroundProcess(record: BackgroundProcess, now: number): 
   return {
     id: record.id,
     kind: 'background-process',
+    serves: 'you',
     parentId: undefined,
     label: record.cmd,
     state,

@@ -15,8 +15,6 @@ type OnboardingRouteState = {
     source?: 'settings' | 'onboarding',
   ) => boolean;
   onAction?: (action: OnboardingWizardAction) => void;
-  /** Called after any step navigation so the handler can persist progress. */
-  onStepChange?: () => void;
 };
 
 function activateSelection(state: OnboardingRouteState): void {
@@ -80,13 +78,11 @@ export function handleOnboardingWizardToken(state: OnboardingRouteState, token: 
       }
     } else if (token.logicalName === 'left') {
       state.onboardingWizard.prevStep();
-      state.onStepChange?.();
     } else if (token.logicalName === 'right') {
       state.onboardingWizard.nextStep();
-      state.onStepChange?.();
     } else if (token.logicalName === 'tab') {
-      if (token.shift) { state.onboardingWizard.prevStep(); state.onStepChange?.(); }
-      else { state.onboardingWizard.nextStep(); state.onStepChange?.(); }
+      if (token.shift) state.onboardingWizard.prevStep();
+      else state.onboardingWizard.nextStep();
     } else if (token.logicalName === 'up') {
       state.onboardingWizard.moveSelection(-1, visibleFields);
     } else if (token.logicalName === 'down') {

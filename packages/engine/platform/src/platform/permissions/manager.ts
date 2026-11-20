@@ -31,12 +31,13 @@ import { judgmentInputBoundary, runBoundary, type BoundaryCheckName } from '../g
 import { readToolCall, shellCommandsIn } from '../gate/reading.js';
 import { currentExecutionMode, currentExecutionModeForReadDecision, currentExecutionModeOwner, isInvocationAdmitted, withExecutionMode, type ExecutionModeOwner } from '../gate/execution-context.js';
 import type { UntrustedContentLedger } from '../security/untrusted-content.js';
-import { currentTurn } from '../security/turn-boundary.js';
+import { currentTurnAuthoritySurface } from '../security/turn-boundary.js';
 import { effectPermittedForProvenance } from '../gate/surface-authority.js';
 import { isStateMutation } from '../gate/policy/state-policy.js';
 import { resolve } from 'node:path';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import { buildDurableRuleForDecision, buildRememberOptions, compileRules, sessionApprovalKey, type CompiledRules, type RememberTier } from './approval-rules.js';
+import { undoFactOf } from './ask-consequence.js';
 import { canonicalJson } from '../utils/target-ref.js';
 import { callCommands, callRecipients, changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
 import { OWNER_ADDRESS_CONFIG_KEYS, splitRecipients } from '../security/owner-identity.js';
@@ -815,7 +816,8 @@ export class PermissionManager {
     this.hookDispatcher = hookDispatcher;
     this.featureFlags = featureFlags;
     this.userRuleStore = userRuleStore;
-    this.gate = { surfaceOf: () => currentTurn()?.surface, ...gate };
+    // A guest's turn reads as the guest form of its surface: the guest is the turn's actor (turn-boundary.ts).
+    this.gate = { surfaceOf: () => currentTurnAuthoritySurface(), ...gate };
   }
 
   /** Settle the existing rule/config owners before taking a new authority snapshot. */
@@ -1339,17 +1341,25 @@ export class PermissionManager {
     /** The answer covers this one call only: nothing is offered to remember. */
     readonly single?: boolean | undefined;
   }): Promise<SafetyOutcome> {
-    const reply = await awaitPermission(() => this.requestPermission({
+    // A channel's request is approved one call at a time: no remembered answer can stand in for the owner there.
+    // What code or a confident reading says cannot be undone is asked about every time: an answer to it is never kept.
+    const rememberOptions = o.ownerOnly === 'channel-request' || o.single === true
+      || undoFactOf(input.toolName, input.args, analysis.reading, o.ownerOnly).cannotUndo
+      ? [] : buildRememberOptions(input.toolName, input.args, this.rememberedRulesHere());
+    const asked = await awaitPermission(() => this.requestPermission({
       callId: input.callId, tool: input.toolName, args: input.args, category: input.category,
       analysis: { ...analysis, reasons: [...analysis.reasons, ...o.reasons] },
       workingDirectory: input.workingDirectory,
       ...(input.attribution ? { attribution: input.attribution } : {}),
-      // A channel's request is approved one call at a time: no remembered answer can stand in for the owner there.
-      rememberOptions: o.ownerOnly === 'channel-request' || o.single === true ? [] : buildRememberOptions(input.toolName, input.args, this.rememberedRulesHere()),
+      rememberOptions,
       ...(o.ownerOnly ? { ownerOnly: o.ownerOnly } : {}),
       ...(o.containable === true && o.ownerOnly === undefined ? { containable: true as const } : {}),
     }, { signal: input.signal }), input.signal);
     input.assertCurrent();
+    // Only a tier the ask offered is kept: a reply asking to remember anything else stands for this call alone.
+    const askedTier = asked.rememberTier ?? (asked.remember === true ? 'session' : undefined);
+    const reply: PermissionPromptDecision = askedTier === undefined || rememberOptions.some((option) => option.tier === askedTier)
+      ? asked : { ...asked, remember: false, rememberTier: undefined };
     if (reply.settledBy !== undefined) return { result: this.settledBelow(input, analysis, reply, o.containable === true && o.ownerOnly === undefined, o.boundary) };
     const modified = reply.modifiedArgs === undefined ? undefined : captureOwnedJson(reply.modifiedArgs) as Record<string, unknown>;
     const notSaved = await this.rememberReply(input.toolName, input.args, reply, modified, o.ownerOnly);
@@ -1832,11 +1842,13 @@ export class PermissionManager {
     const dispatcher = this.hookDispatcher;
     if (!dispatcher) return { args };
     let result: Awaited<ReturnType<HookDispatcher['fire']>>;
+    // The call's effect as the gate classes it, so a hook bound to an effect fires for nested calls too.
+    const effects = [this.getCategory(toolName, args)];
     try {
       result = await dispatcher.fire({
         path: `Pre:tool:${toolName}`, phase: 'Pre', category: 'tool', specific: toolName,
-        sessionId: sessionOfCheck.getStore() ?? 'nested', timestamp: Date.now(),
-        payload: { callId, tool: toolName, args, nested: true },
+        sessionId: sessionOfCheck.getStore() ?? 'nested', timestamp: Date.now(), effects,
+        payload: { callId, tool: toolName, args, nested: true, effects },
       });
     } catch (error) {
       assertPermissionActive(signal);

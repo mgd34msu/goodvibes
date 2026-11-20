@@ -1,6 +1,7 @@
 import type { Refusal } from '@goodvibes-jev/engine/errors';
 import type { JsonRecord } from './route-helpers.js';
 import type { CredentialKind } from './http-policy.js';
+import type { Actor } from './actor.js';
 import { AUTOMATION_SURFACE_KINDS, type AutomationSurfaceKind } from './runtime-route-types.js';
 export type { AutomationSurfaceKind };
 
@@ -47,7 +48,8 @@ export interface ConfigManagerLike {
    */
   setMany?(
     changes: readonly { readonly key: string; readonly value: unknown }[],
-    by: { readonly kind: 'owner'; readonly surface: string },
+    /** Who the write is from; a change that loosens security is admitted for this actor (`settings.loosen`). */
+    by: Actor,
   ):
     | { readonly ok: true; readonly revision: number; readonly saved: readonly string[] }
     | { readonly ok: false; readonly refusal: Refusal; readonly saved: readonly string[] };
@@ -206,22 +208,41 @@ export type ApprovalRememberTier = 'session' | 'exact' | 'command-class' | 'path
 
 export const APPROVAL_REMEMBER_TIERS: readonly ApprovalRememberTier[] = ['session', 'exact', 'command-class', 'path', 'tool'];
 
-export interface ApprovalBrokerLike {
-  /** One approval record, or null; read to tell an ask only the owner's own credential may answer. */
-  getApproval?(approvalId: string): unknown | null;
-  claimApproval(approvalId: string, actor: string, actorSurface: string, note?: string, outcome?: { applied?: boolean | undefined }): Promise<unknown | null>;
-  cancelApproval(approvalId: string, actor: string, actorSurface: string, note?: string, outcome?: { applied?: boolean | undefined }): Promise<unknown | null>;
-  releaseApproval?(approvalId: string, actor: string, actorSurface: string, note?: string, outcome?: { applied?: boolean | undefined }, holdId?: string): Promise<unknown | null>;
-  resolveApproval(
-    approvalId: string,
-    input: {
+/** Who reads or acts on an approval, built by the port from the authenticated actor. Opaque to the routes. */
+export type ApprovalViewerLike = object;
+
+/** An action's outcome with the current reading for the same viewer. Records and readings are passed through as the port built them. */
+export type ApprovalActionResultLike =
+  | { readonly applied: true; readonly record: unknown; readonly reading: unknown }
+  | { readonly applied: false; readonly record: unknown | null; readonly reading: unknown | null; readonly refusal: Refusal };
+
+/** Who acts, and the revision of the record they acted on. */
+export interface ApprovalActionInputLike {
+  readonly actor: string;
+  readonly actorSurface?: string | undefined;
+  readonly note?: string | undefined;
+  readonly expectedRevision: number | undefined;
+}
+
+/**
+ * The approvals port (platform control-plane/approval-actions.ts): every row
+ * and every outcome carries the reading for the caller, and every action
+ * names the revision it acted on.
+ */
+export interface ApprovalActionsLike {
+  viewerOf(actor: Actor | undefined): ApprovalViewerLike;
+  list(viewer: ApprovalViewerLike, limit?: number): readonly { readonly record: unknown; readonly reading: unknown }[];
+  get(ref: string, viewer: ApprovalViewerLike): { readonly record: unknown; readonly reading: unknown } | null;
+  claim(ref: string, input: ApprovalActionInputLike, viewer: ApprovalViewerLike): Promise<ApprovalActionResultLike>;
+  cancel(ref: string, input: ApprovalActionInputLike, viewer: ApprovalViewerLike): Promise<ApprovalActionResultLike>;
+  release(ref: string, input: Omit<ApprovalActionInputLike, 'expectedRevision'> & { readonly holdId?: string | undefined }, viewer: ApprovalViewerLike): Promise<ApprovalActionResultLike>;
+  resolve(
+    ref: string,
+    input: ApprovalActionInputLike & {
       readonly approved: boolean;
       /** Explicit producer evidence; absent on legacy callback reports. */
       readonly disposition?: 'approved' | 'denied' | 'amended' | undefined;
       readonly remember: boolean;
-      readonly actor: string;
-      readonly actorSurface: string;
-      readonly note?: string | undefined;
       /**
        * Optional per-hunk selection (edit-tool approvals only). The broker
        * filters the approval's own edit list to these indices server-side. An
@@ -238,10 +259,9 @@ export interface ApprovalBrokerLike {
        * command's terminal prompt). selectedHunks, when present, supersedes it.
        */
       readonly modifiedArgs?: Record<string, unknown> | undefined;
-      /** Set by the broker to whether this call itself moved the record. */
-      readonly outcome?: { applied?: boolean | undefined } | undefined;
     },
-  ): Promise<unknown | null>;
+    viewer: ApprovalViewerLike,
+  ): Promise<ApprovalActionResultLike>;
 }
 
 export interface WorkspaceSwapManagerLike {
@@ -327,7 +347,7 @@ export interface DaemonSystemRouteContext {
   /** Optional adopted lane; absent hosts fail closed without changing legacy writes. */
   readonly settingsPrecondition?: import('./settings-precondition.js').SettingsPreconditionHandler | undefined;
   readonly settingsImportPrecondition?: import('./settings-import-precondition.js').SettingsImportPreconditionHandler | undefined;
-  readonly approvalBroker: ApprovalBrokerLike;
+  readonly approvalBroker: ApprovalActionsLike;
   readonly configManager: ConfigManagerLike;
   /**
    * What changing `key` to `value` (to its default with `toDefault`) would
@@ -384,7 +404,7 @@ export interface DaemonSystemRouteContext {
    * The principal the gate authenticated; approval decisions are attributed to
    * it, and an answer presented with the Agent's credential is refused.
    */
-  readonly resolveAuthenticatedPrincipal?: ((req: Request) => { readonly principalId: string; readonly credentialKind?: CredentialKind | null | undefined } | null) | undefined;
+  readonly resolveAuthenticatedPrincipal?: ((req: Request) => { readonly principalId: string; readonly credentialKind?: CredentialKind | null | undefined; readonly actor?: Actor | undefined } | null) | undefined;
   readonly routeBindings: RouteBindingManagerLike;
   /** Manages runtime.workingDir swaps. Null when workspace swapping is not available. */
   readonly swapManager: WorkspaceSwapManagerLike | null;

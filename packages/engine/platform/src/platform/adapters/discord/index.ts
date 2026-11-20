@@ -5,7 +5,7 @@ import type { SurfaceAdapterContext } from '../types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { resolveSurfaceSecret } from '../../channels/builtin/surface-secrets.js';
 import { ingressAnswer, readTextBodyWithinLimit } from '../helpers.js';
-import { answerSurfaceControl, gateAnswerText, runSurfaceMessage, submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
+import { answerSurfaceControl, gateAnswerText, runSurfaceMessage, savedWithin, submitSurfaceMessageSaved, SURFACE_ACK_DEADLINE_MS, surfaceAckStillSaving, surfaceOutcomeResponse } from '../surface-message.js';
 
 /** Discord message flag: only the user who ran the command sees the reply. */
 const EPHEMERAL_MESSAGE_FLAG = 64;
@@ -156,59 +156,67 @@ async function dispatchDiscordInteraction(
       });
     };
 
-    setImmediate(() => {
-      void (async () => {
-        const outcome = await submitSurfaceMessage(context, binding, {
-          surface: 'discord',
-          text: task,
-          logLabel: 'handleDiscordSurfaceWebhook',
-          control: false,
-          ...(interaction.id ? { providerMessageId: interaction.id } : {}),
-          externalId: interaction.channelId ?? interaction.id,
-          threadId: interaction.channelId,
-          userId: interaction.userId,
-          displayName: interaction.userId,
-          title: interaction.commandName ?? 'discord',
-          metadata: { applicationId: appId },
-          committed,
-          replyBinding: (replyTo) => ({ ...replyTo, metadata: { ...replyTo.metadata, interactionToken: token } }),
-        });
-        switch (outcome.kind) {
-          case 'continued':
-            await editResponse(outcome.agentId ? `Continuing session ${outcome.sessionId} via agent ${outcome.agentId}.` : `Queued for session ${outcome.sessionId}; it will run when the agent now starting finishes.`);
-            return;
-          case 'started':
-            await editResponse('', [discord.formatAgentResult(
-              outcome.agentId,
-              task,
-              `Session ${outcome.sessionId} active. Result will be posted here when complete.`,
-            )]);
-            return;
-          case 'answered':
-            // The gate already answered in the channel; the deferred "thinking" reply says what happened.
-            await editResponse(gateAnswerText(outcome.outcome));
-            return;
-          case 'not-started':
-            logger.error('handleDiscordSurfaceWebhook: the agent was not started', { error: outcome.error });
-            context.reportIngressFailure?.('discord', outcome.error);
-            await editResponse(`Nothing was started: ${outcome.error}`);
-            return;
-          case 'control':
-            return;
-        }
-      })().catch((error: unknown) => {
-        // The slash command was answered with a deferred response before this
-        // ran, so a throw has no caller; it is logged, reported on the
-        // surface's ingress alarm, and the deferred reply is not left waiting.
-        const detail = summarizeError(error);
-        logger.error('handleDiscordSurfaceWebhook: slash-command processing failed after the deferred reply', {
-          error: detail,
-        });
-        context.reportIngressFailure?.('discord', detail);
-        return editResponse('Nothing was started: the request failed after it was received. Send it again.');
-      }).finally(finished);
+    // Save, then acknowledge: the command is stored (its session input row, keyed by the interaction id)
+    // before Discord hears the deferred answer; the work after the save goes on behind the answer.
+    const { submitted, saved } = submitSurfaceMessageSaved(context, binding, {
+      surface: 'discord',
+      text: task,
+      logLabel: 'handleDiscordSurfaceWebhook',
+      control: false,
+      ...(interaction.id ? { providerMessageId: interaction.id } : {}),
+      externalId: interaction.channelId ?? interaction.id,
+      threadId: interaction.channelId,
+      userId: interaction.userId,
+      displayName: interaction.userId,
+      title: interaction.commandName ?? 'discord',
+      metadata: { applicationId: appId },
+      committed,
+      replyBinding: (replyTo) => ({ ...replyTo, metadata: { ...replyTo.metadata, interactionToken: token } }),
     });
+    void (async () => {
+      const outcome = await submitted;
+      switch (outcome.kind) {
+        case 'continued':
+          await editResponse(outcome.agentId ? `Continuing session ${outcome.sessionId} via agent ${outcome.agentId}.` : `Queued for session ${outcome.sessionId}; it will run when the agent now starting finishes.`);
+          return;
+        case 'started':
+          await editResponse('', [discord.formatAgentResult(
+            outcome.agentId,
+            task,
+            `Session ${outcome.sessionId} active. Result will be posted here when complete.`,
+          )]);
+          return;
+        case 'answered':
+          // The gate already answered in the channel; the deferred "thinking" reply says what happened.
+          await editResponse(gateAnswerText(outcome.outcome));
+          return;
+        case 'not-started':
+          logger.error('handleDiscordSurfaceWebhook: the agent was not started', { error: outcome.error });
+          context.reportIngressFailure?.('discord', outcome.error);
+          await editResponse(`Nothing was started: ${outcome.error}`);
+          return;
+        case 'control':
+          return;
+      }
+    })().catch((error: unknown) => {
+      // A throw after the acknowledgement has no caller; it is logged, reported
+      // on the surface's ingress alarm, and the deferred reply is not left waiting.
+      const detail = summarizeError(error);
+      logger.error('handleDiscordSurfaceWebhook: slash-command processing failed after the deferred reply', {
+        error: detail,
+      });
+      context.reportIngressFailure?.('discord', detail);
+      return editResponse('Nothing was started: the request failed after it was received. Send it again.');
+    }).finally(finished);
 
+    // Discord drops an acknowledgement later than 3 seconds: past 2.5 the answer says the save is still running.
+    const state = await savedWithin(saved, SURFACE_ACK_DEADLINE_MS);
+    if (state === 'pending') {
+      return Response.json({ type: DiscordInteractionResponseType.ChannelMessageWithSource, data: { content: surfaceAckStillSaving(task) } });
+    }
+    if (state === 'failed') {
+      return Response.json({ type: DiscordInteractionResponseType.ChannelMessageWithSource, data: { content: 'Nothing was saved or started; send the command again.', flags: EPHEMERAL_MESSAGE_FLAG } });
+    }
     return deferredResponse;
   }
 

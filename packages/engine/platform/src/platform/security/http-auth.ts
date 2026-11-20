@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
+import { actorFromPrincipal, type Actor, type OwnerIdentity } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import type { UserAuthManager } from './user-auth.js';
 import type { AuthenticatedNativePairingToken, SettingsPairingAuthority, NativeContinuationGrant, NativeContinuationAuthority, NativeCredential } from '../pairing/pairing-token-store.js';
 import type { RevisionSource } from '../utils/revision.js';
@@ -247,6 +248,28 @@ export function isOperatorAdmin(authenticated: AuthenticatedOperatorRequest | nu
   // A paired device holds the same operator authority as the shared token.
   if (authenticated.kind === 'pairing-token') return true;
   return authenticated.roles.includes('admin');
+}
+
+/**
+ * The actor an authenticated operator request is (daemon-api/src/actor.ts), for
+ * a listener that has no method catalog of its own (the webhook listener): the
+ * operator token is the owner; a pairing or sign-in with full authority is the
+ * owner or an admin as the control plane decides it; a narrowed credential
+ * holds its stored list. What it may cause is then the effect table's answer.
+ */
+export function operatorRequestActor(authenticated: AuthenticatedOperatorRequest, owner: OwnerIdentity, loopback = false): Actor {
+  const admin = isOperatorAdmin(authenticated);
+  const principalId = authenticated.kind === 'shared-token' ? 'shared-token'
+    : authenticated.kind === 'pairing-token' ? `pairing:${authenticated.tokenId}` : authenticated.username;
+  const stored = authenticated.kind === 'shared-token' ? undefined : authenticated.scopes;
+  return actorFromPrincipal({
+    principalId,
+    principalKind: authenticated.kind === 'session' ? 'user' : 'token',
+    credentialKind: credentialKindOf(authenticated, loopback),
+    ownerDevice: authenticated.kind === 'pairing-token' && authenticated.ownerDevice === true && authenticated.client === undefined,
+    admin,
+    ...(stored !== undefined ? { scopes: stored } : {}),
+  }, owner);
 }
 
 export function buildOperatorSessionCookie(token: string, options: SessionCookieOptions): string {

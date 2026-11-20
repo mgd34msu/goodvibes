@@ -72,7 +72,6 @@ export {
   startTurnForOwnerRequest,
   currentTurn,
   withTurn,
-  withTurnSurface,
   type TurnContext,
 } from './turn-boundary.js';
 export {
@@ -103,5 +102,5 @@ export type {
 } from './source-screening/types.js';
 export { EFFECTS, EFFECT_IDS, admitEffects, admitRules, declaredAccessRules, effectFacts, isEffectId } from './effect-authority.js';
 export type { EffectAdmission, EffectClass, EffectFacts, EffectId, EffectRule } from './effect-authority.js';
-export { Secret, bearerHeader, isSecret } from './secret.js';
+export { Secret, bearerHeader, isSecret, revealOrNull } from './secret.js';
 export type { RevealPurpose } from './secret.js';

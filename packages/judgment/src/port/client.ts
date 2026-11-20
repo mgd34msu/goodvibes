@@ -40,6 +40,42 @@ function classifyJudgmentError(error: unknown): JudgmentError {
   return new JudgmentError('internal', 'The decision client failed internally. The operation has stopped.');
 }
 
+/** Largest response body read from the decision endpoint; a decision answer is a few kilobytes. */
+export const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+
+class ResponseTooLargeError extends Error {
+  constructor(readonly maxBytes: number) { super(`System One answered with more than ${maxBytes} bytes`); }
+}
+
+/**
+ * The body as text, read up to `maxBytes`: a larger body is cancelled and is a
+ * connection failure naming the cap, so an endpoint cannot make this process
+ * hold an unbounded answer.
+ */
+async function readTextBounded(response: Response, maxBytes: number): Promise<string> {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new ResponseTooLargeError(maxBytes);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) return '';
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    if (received > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new ResponseTooLargeError(maxBytes);
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
 /** A request body already serialized by the caller, sent as is. */
 export class PreparedBody {
   constructor(readonly text: string) {}
@@ -65,10 +101,10 @@ export async function requestWithoutDeadline(
   try {
     signal.throwIfAborted();
     response = await interruptible(recordingRequestIds(base)(url, init), signal);
-    text = await interruptible(response.text(), signal);
+    text = await interruptible(readTextBounded(response, MAX_RESPONSE_BYTES), signal);
   } catch (error) {
     if (signal.aborted) throw new APIUserAbortError(undefined, { cause: error });
-    throw new APIConnectionError('System One transport failed', { cause: error });
+    throw new APIConnectionError(error instanceof ResponseTooLargeError ? error.message : 'System One transport failed', { cause: error });
   }
   let parsed: unknown;
   try { parsed = JSON.parse(text); } catch { parsed = text; }

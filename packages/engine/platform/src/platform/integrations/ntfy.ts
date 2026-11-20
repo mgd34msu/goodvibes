@@ -112,10 +112,14 @@ export function resolveGoodVibesNtfyTopics(config: GoodVibesNtfyTopicConfig = {}
   };
 }
 
-/** The part of a config manager that topic generation reads and writes. */
+/**
+ * What topic generation reads and writes. A topic setting is declared
+ * secret-bearing (the name is the credential on a public server), so `store`
+ * puts a generated name in the secret store and a reference in the setting.
+ */
 export interface NtfyTopicConfigStore {
   get(key: string): unknown;
-  set(key: string, value: string): void;
+  store(key: string, topic: string): Promise<void>;
 }
 
 /**
@@ -124,7 +128,7 @@ export interface NtfyTopicConfigStore {
  * settings written, so the caller can say which names to subscribe to on the
  * phone. A topic already set, even to an old shipped name, is left to its owner.
  */
-export function ensureNtfyTopics(config: NtfyTopicConfigStore): readonly { readonly setting: string; readonly topic: string }[] {
+export async function ensureNtfyTopics(config: NtfyTopicConfigStore): Promise<readonly { readonly setting: string; readonly topic: string }[]> {
   const written: { setting: string; topic: string }[] = [];
   const roleNames: Record<NtfyTopicRole, 'chat' | 'agent' | 'remote'> = { chatTopic: 'chat', agentTopic: 'agent', remoteTopic: 'remote' };
   for (const role of NTFY_TOPIC_ROLES) {
@@ -132,7 +136,7 @@ export function ensureNtfyTopics(config: NtfyTopicConfigStore): readonly { reado
     const current = config.get(setting);
     if (typeof current === 'string' && current.trim() !== '') continue;
     const topic = generateNtfyTopic(roleNames[role]);
-    config.set(setting, topic);
+    await config.store(setting, topic);
     written.push({ setting, topic });
   }
   return written;

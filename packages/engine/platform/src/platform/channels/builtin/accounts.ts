@@ -13,6 +13,17 @@ import { getBuiltinSetupSchema } from './setup-schema.js';
 import type { BuiltinChannelRuntimeDeps } from './shared.js';
 import { readSurfaceSecret } from './surface-secrets.js';
 import { asProviderRuntimeSurface, resolveBuiltinConfigSecret } from './surfaces.js';
+import { displaySettingValue } from '../../config/config-key-facts.js';
+
+/**
+ * A setting as an account record shows it. The record reaches operator
+ * screens and the model's tool output (the `<surface>_account` tool), so a
+ * credential-bearing setting (a webhook URL, an ntfy topic name) goes through
+ * the one display projection: its reference, or `(secret)`.
+ */
+function shownSetting(deps: BuiltinChannelRuntimeDeps, key: string): unknown {
+  return displaySettingValue(key, deps.configManager.get(key));
+}
 
 interface BuiltinAccountContext {
   readonly deps: BuiltinChannelRuntimeDeps;
@@ -93,14 +104,15 @@ export async function buildBuiltinAccount(
         surface,
         label: 'ntfy',
         enabled: context.deps.surfaceDeliveryEnabled('ntfy'),
-        accountId: String(context.deps.configManager.get('surfaces.ntfy.topic') || '') || 'surface:ntfy',
+        // One account per node; a topic name is a credential, never an id.
+        accountId: 'surface:ntfy',
         secrets,
         metadata: {
           baseUrl: context.deps.configManager.get('surfaces.ntfy.baseUrl'),
-          topic: context.deps.configManager.get('surfaces.ntfy.topic'),
-          chatTopic: context.deps.configManager.get('surfaces.ntfy.chatTopic'),
-          agentTopic: context.deps.configManager.get('surfaces.ntfy.agentTopic'),
-          remoteTopic: context.deps.configManager.get('surfaces.ntfy.remoteTopic'),
+          topic: shownSetting(context.deps, 'surfaces.ntfy.topic'),
+          chatTopic: shownSetting(context.deps, 'surfaces.ntfy.chatTopic'),
+          agentTopic: shownSetting(context.deps, 'surfaces.ntfy.agentTopic'),
+          remoteTopic: shownSetting(context.deps, 'surfaces.ntfy.remoteTopic'),
           providerRuntime: context.providerRuntimeStatus('ntfy'),
         },
       });
@@ -117,7 +129,7 @@ export async function buildBuiltinAccount(
         accountId: 'surface:webhook',
         secrets,
         metadata: {
-          defaultTarget: context.deps.configManager.get('surfaces.webhook.defaultTarget'),
+          defaultTarget: shownSetting(context.deps, 'surfaces.webhook.defaultTarget'),
           timeoutMs: context.deps.configManager.get('surfaces.webhook.timeoutMs'),
         },
       });

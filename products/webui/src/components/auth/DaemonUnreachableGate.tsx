@@ -23,20 +23,24 @@ export interface DaemonUnreachableGateProps {
   readonly retrying?: boolean;
   /** Trigger an immediate re-probe (the auth query refetch). */
   readonly onRetry?: () => void;
+  /** The daemon answered with a server fault (5xx) rather than not answering at all. */
+  readonly serverFault?: boolean;
 }
 
-export function DaemonUnreachableGate({ detail, retrying, onRetry }: DaemonUnreachableGateProps) {
+export function DaemonUnreachableGate({ detail, retrying, onRetry, serverFault }: DaemonUnreachableGateProps) {
   return (
     <div className="signed-out-gate" role="main">
       <div className="signed-out-card">
         <div className="signed-out-mark">
           <PlugZap size={24} aria-hidden="true" />
         </div>
-        <h1>Can&rsquo;t reach the daemon</h1>
+        <h1>{serverFault ? 'The daemon could not answer' : <>Can&rsquo;t reach the daemon</>}</h1>
         <p className="signed-out-lede">
-          The operator shell can&rsquo;t reach the GoodVibes daemon right now. Your token is
+          {serverFault
+            ? 'The GoodVibes daemon answered with a server fault, so it could not say who is signed in. Your token is still saved. This is not a sign-in problem. The shell asks again and picks up where it left off as soon as the daemon answers.'
+            : <>The operator shell can&rsquo;t reach the GoodVibes daemon right now. Your token is
           still saved. This is a connection problem, not a sign-in problem. The shell will
-          reconnect and pick up where it left off as soon as the daemon is back.
+          reconnect and pick up where it left off as soon as the daemon is back.</>}
         </p>
 
         <div className="banner warning" role="status" aria-live="polite">

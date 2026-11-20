@@ -344,6 +344,13 @@ export function recordMatchesPostSqlFilter(record: MemoryRecord, filter: MemoryS
     if (!states.includes(record.reviewState)) return false;
   }
   if (filter.staleOnly && !isReviewFlagged(record)) return false;
+  // The vector table's confidence and review state are copies taken when the row
+  // was embedded: the live row decides, as the literal path's SQL does.
+  if (filter.minConfidence !== undefined && record.confidence < filter.minConfidence) return false;
+  if (!filter.staleOnly && record.reviewState === 'contradicted') {
+    const states = filter.reviewState ? (Array.isArray(filter.reviewState) ? filter.reviewState : [filter.reviewState]) : [];
+    if (!states.includes('contradicted')) return false;
+  }
   return true;
 }
 

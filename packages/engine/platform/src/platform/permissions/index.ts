@@ -11,6 +11,10 @@ export * from './user-rule-store.js';
 export * from './subject.js';
 export * from './briefs/build.js';
 export * from './briefs/types.js';
+export { approvalQuestion, askKindOf, presentApprovalAsk, presentInboxAsk } from './ask-presentation.js';
+export type { AskChoice, AskFacts, AskKind, AskPresentation, PurchaseAskFacts, RememberTierView } from './ask-presentation.js';
+export { codeUndoFact, commandEffect, composeConsequence, FAMILY_SENTENCES, readingAnswer, undoFactOf } from './ask-consequence.js';
+export type { CommandEffect, Consequence, ConsequenceInput, ReadingAnswer, SandboxFact, UndoFact } from './ask-consequence.js';
 
 export { decideAutonomousTool, captureAutonomousSource, captureAutonomousChoices, assertAutonomousData } from './autonomous.js';
 export type { AutonomousToolSource, AutonomousToolRevision, AutonomousToolChoices, AutonomousToolDecisionInput, AutonomousToolDecision } from './autonomous.js';

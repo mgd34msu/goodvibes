@@ -165,6 +165,8 @@ export class ReferenceNodeHostClient {
   private readonly backoff: ExponentialBackoff;
   private stopped = false;
   private ready = false;
+  /** Whether the state file was read; a save before it would replace the saved pairing with only this call's fields. */
+  private loaded = false;
 
   constructor(
     private readonly config: ReferenceNodeHostConfig,
@@ -194,6 +196,7 @@ export class ReferenceNodeHostClient {
       unreadable = `State file could not be read (${error instanceof Error ? error.message : String(error)}); kept as ${keptAs}. Pairing again.`;
     }
     this.state = loaded ?? (unreadable === undefined ? {} : { lastError: unreadable });
+    this.loaded = true;
     if (this.state.contract) {
       this.contract = this.state.contract;
     }
@@ -208,6 +211,8 @@ export class ReferenceNodeHostClient {
   }
 
   async fetchContract(): Promise<DistributedNodeHostContract> {
+    // The saved pairing (peer, token) is kept: the state is read before it is written.
+    if (!this.loaded) await this.loadState();
     const response = await fetch(new URL('/api/remote/node-host/contract', this.config.baseUrl).toString(), {
       headers: this.operatorHeaders(),
     });
@@ -225,6 +230,7 @@ export class ReferenceNodeHostClient {
   }
 
   async requestPairing(): Promise<PairRequestResponse> {
+    if (!this.loaded) await this.loadState();
     const body = {
       peerKind: this.config.peerKind,
       requestedId: this.config.requestedId,

@@ -34,6 +34,12 @@ export type DomainEventConnector<
    * Not called for the cleanup function the feed itself invoked.
    */
   onEnded?: (end?: DomainEventConnectionEnd) => void,
+  /**
+   * Aborts when the feed no longer wants the connection it is still waiting
+   * for (its last listener left before it opened). The connector then stops
+   * waiting, rejects with an AbortError, and drops an open nobody else wants.
+   */
+  signal?: AbortSignal,
 ) => void | Promise<() => void>;
 
 /** How a connection ended, as its connector reports it. */
@@ -164,7 +170,7 @@ function createRemoteDomainEventFeed<
 
   // The connection the feed currently believes in. A late onEnded from a
   // connection the feed already let go of must not tear down its successor.
-  let activeAttempt: { ended: boolean; handedOver: boolean; final: boolean } | null = null;
+  let activeAttempt: { ended: boolean; handedOver: boolean; final: boolean; readonly cancel?: AbortController } | null = null;
   // Reopening after a connection that ended or could not be made: one timer,
   // a capped backoff, and a count that resets once an event arrives.
   let reopenTimer: ReturnType<typeof setTimeout> | null = null;
@@ -189,7 +195,7 @@ function createRemoteDomainEventFeed<
 
   const maybeConnect = (): void => {
     if (connected || disconnect || connectPromise || reopenTimer) return;
-    const attempt = { ended: false, handedOver: false, final: false };
+    const attempt = { ended: false, handedOver: false, final: false, cancel: new AbortController() };
     activeAttempt = attempt;
     const onEnded = (end?: DomainEventConnectionEnd): void => {
       if (attempt.ended) return;
@@ -213,7 +219,7 @@ function createRemoteDomainEventFeed<
       for (const listener of [...(envelopeListeners.get(eventType) ?? [])]) {
         dispatchToListener(listener, typedEnvelope, domain, options);
       }
-    }, onEnded)).then((cleanup) => {
+    }, onEnded, attempt.cancel.signal)).then((cleanup) => {
       attempt.handedOver = true;
       // when connect() returns a non-function cleanup (void), we have no
       // way to honour a pending disconnect request. Log the gap and bail. Callers
@@ -298,6 +304,8 @@ function createRemoteDomainEventFeed<
     }
     if (connectPromise) {
       disconnectPending = true;
+      // The open still in flight is not waited for: the connector stops it now.
+      activeAttempt?.cancel?.abort();
     }
   };
 

@@ -103,8 +103,8 @@ export interface WorkstreamDraftStore {
    * (and, after an edit, retire the older file that is still on disk).
    */
   save(draft: WorkstreamDraft): boolean;
-  /** Delete one draft's snapshot (on launch or cancel). Missing file ⇒ no-op. */
-  remove(id: string): void;
+  /** Delete one draft's snapshot (on launch or cancel). Missing file ⇒ no-op. Returns false when the file could not be removed. */
+  remove(id: string): boolean;
   /** Summary of the most recent `loadAll()` that reclaimed something; null otherwise. */
   readonly lastReclaim: WorkstreamDraftReclaim | null;
 }
@@ -284,9 +284,14 @@ export function createWorkstreamDraftStore(
       if (clock() - lastSweepAt >= sweepIntervalMs) reap(draft.id);
       return written;
     },
-    remove(id: string): void {
-      if (!isSafeId(id)) return;
-      discard(fileFor(id));
+    remove(id: string): boolean {
+      if (!isSafeId(id)) return false;
+      try {
+        rmSync(fileFor(id), { force: true });
+        return true;
+      } catch {
+        return false;
+      }
     },
   };
 }

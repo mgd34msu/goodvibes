@@ -166,7 +166,8 @@ export async function buildProviderAccountSnapshot(
     .map(async (providerId) => {
       const subscription = subscriptions.get(providerId);
       const pending = subscriptions.getPending(providerId);
-      const jwtPayload = subscription ? decodeJwtPayload(subscription.accessToken) : null;
+      // Only the token's own claims (account and plan) are read, to show the owner which sign-in this is.
+      const jwtPayload = subscription ? decodeJwtPayload(subscription.accessToken.reveal('owner-screen')) : null;
       const serviceOauth = serviceOauthByProvider.get(providerId);
       let runtimeMetadata: ProviderRuntimeMetadata | undefined;
       try {

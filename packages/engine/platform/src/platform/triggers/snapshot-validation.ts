@@ -19,7 +19,7 @@ function observation(value: unknown): boolean {
     && optional(value, 'hash', text) && optional(value, 'truncated', entry => typeof entry === 'boolean');
 }
 function termination(value: unknown): boolean {
-  return object(value) && oneOf(value['state'], ['exited', 'signalled', 'timed-out', 'unknown'])
+  return object(value) && oneOf(value['state'], ['exited', 'signalled', 'timed-out', 'cancel-requested', 'unknown'])
     && oneOf(value['reason'], ['normal', 'nonzero-exit', 'signal', 'max-duration', 'daemon-restart', 'cancelled'])
     && (value['exitCode'] === null || (finite(value['exitCode']) && Number.isInteger(value['exitCode'])))
     && (value['signal'] === null || text(value['signal'])) && typeof value['timedOut'] === 'boolean'

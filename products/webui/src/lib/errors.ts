@@ -179,6 +179,19 @@ export function isDaemonUnreachableError(error: unknown): boolean {
 }
 
 /**
+ * True when the daemon answered with a server fault (any 5xx): it is there
+ * but could not answer. Like an unreachable daemon, this is not being signed
+ * out: the token is kept and the request is tried again.
+ */
+export function isServerFaultError(error: unknown): boolean {
+  if (!error) return false;
+  const serialized = serializeError(error);
+  const transport = asRecord(serialized.transport);
+  const status = readNumber(serialized, 'status') ?? readNumber(transport, 'status');
+  return status !== undefined && status >= 500 && status <= 599;
+}
+
+/**
  * True for a 401 / `category: 'authentication'` rejection, a token that was valid
  * when the request/stream opened but has since expired or been revoked. Distinct from
  * `isDaemonUnreachableError` (network/status-0, daemon unreachable): this is a genuine

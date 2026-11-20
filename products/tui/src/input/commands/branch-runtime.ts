@@ -46,6 +46,10 @@ export function registerBranchRuntimeCommands(registry: CommandRegistry): void {
         ctx.print(`A turn is still running. Stop it with Esc or let it finish, then /branch ${name}.`);
         return;
       }
+      if (name === ctx.session.conversationManager.getCurrentBranch()) {
+        ctx.print(`Already on branch "${name}"; nothing changed.`);
+        return;
+      }
       const ok = ctx.session.conversationManager.switchBranch(name);
       if (!ok) {
         ctx.print(`Branch "${name}" not found. Use /fork [name] to create one, or /branch to list.`);

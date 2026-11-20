@@ -31,8 +31,8 @@ export function* wireLines(raw: string | Uint8Array, complete: boolean, literalC
       if (complete) throw new Error('Incomplete IMAP literal');
       break;
     }
-    const payload = bytes.subarray(offset, offset + length).toString('utf8');
+    const octets = bytes.subarray(offset, offset + length);
     offset += length;
-    yield { syntax: syntax.slice(0, literal.index), literal: payload, end: offset };
+    yield { syntax: syntax.slice(0, literal.index), literal: octets.toString('utf8'), literalBytes: octets, end: offset };
   }
 }

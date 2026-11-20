@@ -31,11 +31,11 @@ export interface NativeIntakeBrowserJournal {
   /** How many stored records could not be read (damaged, or written by another build). They are kept until discarded. */
   unreadable(): Promise<number>;
   /**
-   * Records of the same daemon and project saved under another paired principal (this browser
-   * paired again). The daemon answers only their own owner, so they can be shown and discarded,
-   * not inspected or continued.
+   * How many records of the same daemon and project were saved under another paired
+   * principal (this browser paired again). Only the count leaves the store: their text
+   * belongs to that principal, who sees them by signing in as that pairing.
    */
-  listOthers(binding: NativeIntakeBrowserBinding): Promise<NativeIntakeBrowserRecord[]>;
+  countOthers(binding: NativeIntakeBrowserBinding): Promise<number>;
   /** Delete every record that cannot be read. Returns how many were deleted. */
   discardUnreadable(): Promise<number>;
 }
@@ -386,17 +386,15 @@ export function createNativeIntakeBrowserJournal(
     async unreadable() {
       return transaction((_records, _store, unreadable) => unreadable);
     },
-    async listOthers(binding) {
+    async countOthers(binding) {
       const snapshot = bindingSnapshot(binding);
       return transaction((records) =>
-        records
-          .filter(
-            (record) =>
-              record.binding.endpoint === snapshot.endpoint &&
-              record.binding.projectId === snapshot.projectId &&
-              record.binding.principalId !== snapshot.principalId
-          )
-          .sort((left, right) => left.createdAt - right.createdAt)
+        records.filter(
+          (record) =>
+            record.binding.endpoint === snapshot.endpoint &&
+            record.binding.projectId === snapshot.projectId &&
+            record.binding.principalId !== snapshot.principalId
+        ).length
       );
     },
     async discardUnreadable() {

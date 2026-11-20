@@ -61,7 +61,8 @@
  */
 import { useCallback, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { describeCardEntryRefusal } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import { describeCardEntryRefusal, describeCardTransportRefusal, mayCrossWithCardDetails } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import { cardEntryTransport } from '../../lib/insecure-origin';
 import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { Button } from '../ui/Button';
@@ -100,7 +101,10 @@ export function PaymentCardEntry({ currency = 'USD', surface = WEBUI_CARD_ENTRY_
   const [removingId, setRemovingId] = useState<string | null>(null);
   const confirm = useConfirm();
 
-  const offered = mayOfferCardEntryHere(surface);
+  // The daemon takes a card only over this machine, TLS or the tailnet (card.enter);
+  // the form is offered only where the daemon would take it.
+  const transportOk = mayCrossWithCardDetails(cardEntryTransport());
+  const offered = mayOfferCardEntryHere(surface) && transportOk;
 
   // Metadata only, there is no daemon method that returns card material, so
   // this query cannot carry any however it is cached. Not run at all when the
@@ -194,7 +198,7 @@ export function PaymentCardEntry({ currency = 'USD', surface = WEBUI_CARD_ENTRY_
     return (
       <section className="settings-card-entry" data-testid="payment-card-entry-refused">
         <div className="banner warning" role="alert">
-          {describeCardEntryRefusal(surface)}
+          {transportOk ? describeCardEntryRefusal(surface) : describeCardTransportRefusal()}
         </div>
       </section>
     );

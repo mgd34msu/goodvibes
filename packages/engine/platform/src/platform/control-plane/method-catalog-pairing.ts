@@ -181,9 +181,10 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'pairing.handoff.complete',
     repeat: 'safe',
-    effects: ['control-plane.write', 'owner.act'],
+    // It can register a step-up passkey, so it is held to what stepup.credentials.register is.
+    effects: ['control-plane.write', 'owner.act', 'stepup.credential.register'],
     title: 'Complete Pairing Hand-off',
-    description: 'Apply the surface\'s per-offer decisions in ONE pass: an accepted notifications offer registers the browser push subscription (endpoint + keys, optional deviceId), an accepted passkey offer registers the WebAuthn credential, an accepted relay offer is acknowledged. Each offer returns an honest per-offer result (completed / declined / unavailable / failed); an omitted or false offer is reported as declined, never silently half-applied.',
+    description: 'Apply the surface\'s per-offer decisions in ONE pass: an accepted notifications offer registers the browser push subscription (endpoint + keys, optional deviceId), an accepted passkey offer registers the WebAuthn credential, an accepted relay offer is acknowledged. Each offer returns an honest per-offer result (completed / declined / unavailable / failed); an omitted or false offer is reported as declined, never silently half-applied. Because it can register a step-up passkey it needs what stepup.credentials.register needs (admin, write:relay, never the Agent\'s credential), and a passkey is accepted only when pairing.handoff.create offered one to this very pairing (the caller is the device that paired with that hand-off\'s token), once, within 30 minutes; otherwise the passkey offer fails and nothing is registered. A pairing minted narrower than full authority is not offered a passkey.',
     category: 'pairing',
     transport: ['ws'],
     inputSchema: objectSchema({

@@ -2,6 +2,7 @@ import type { DaemonMediaRouteHandlers } from './context.js';
 import { resolvePrivateHostFetchOptions } from './http-policy.js';
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import { jsonErrorResponse, readJsonErrorResponse, readServiceErrorResponse, summarizeErrorForRecord } from './error-response.js';
+import { refusal } from '@goodvibes-jev/engine/errors';
 import { createArtifactFromUploadRequest, isArtifactUploadRequest } from './artifact-upload.js';
 import {
   createRouteBodySchema,
@@ -776,11 +777,20 @@ async function handleMultimodalAnalyze(context: DaemonMediaRouteContext, req: Re
       writebackFailure = summarizeErrorForRecord(error);
     }
   }
+  // The write-back is reported as an outcome: `done` with what was stored, or `failed` with why (207).
+  const writebackOutcome = writebackFailure !== undefined
+    ? { state: 'failed' as const, refusal: refusal({
+      code: 'MULTIMODAL_WRITEBACK_FAILED',
+      state: 'the analysis finished; it was not written back to knowledge',
+      reason: `The write-back did not complete: ${writebackFailure}`,
+      next: ['Send this analysis to multimodal.writeback to store it, or run the analysis again.'],
+      retryable: true,
+    }) }
+    : writebackResult ? { state: 'done' as const, value: writebackResult } : undefined;
   return Response.json({
     analysis,
     ...(packet ? { packet } : {}),
-    ...(writebackResult ? { writeback: writebackResult } : {}),
-    ...(writebackFailure !== undefined ? { writebackError: writebackFailure } : {}),
+    ...(writebackOutcome ? { writeback: writebackOutcome } : {}),
   }, { status: writebackFailure !== undefined ? 207 : 201 });
 }
 

@@ -490,13 +490,13 @@ export class OpenAISubscriptionRoute {
   /** A stored, unrevoked ChatGPT sign-in. Expiring tokens refresh inside chat(); their age does not unset the route. */
   isConfigured(): boolean {
     const subscription = this.subscriptionManager.get('openai');
-    return Boolean(subscription?.accessToken && subscription.revokedAt === undefined);
+    return Boolean(subscription && !subscription.accessToken.empty && subscription.revokedAt === undefined);
   }
 
   /** The stored access token (for listing models), or null when not signed in. */
   storedAccessToken(): string | null {
     const subscription = this.subscriptionManager.get('openai');
-    return subscription?.accessToken && subscription.revokedAt === undefined ? subscription.accessToken : null;
+    return subscription && !subscription.accessToken.empty && subscription.revokedAt === undefined ? subscription.accessToken.reveal('dispatch') : null;
   }
 
   /** A usable access token for a request off the chat path (listing models), renewed when near expiry; null when not signed in or ended. */

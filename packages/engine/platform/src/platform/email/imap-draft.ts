@@ -79,7 +79,13 @@ export function validateDraftInput(input: ImapAppendDraftInput): void {
   if (input.references !== undefined) {
     validateDraftHeaderValue(input.references, 'references');
   }
+  if (input.messageId !== undefined && !DRAFT_MESSAGE_ID.test(input.messageId)) {
+    throw new Error('A draft Message-ID must be <local@domain> of letters, digits and . _ - characters.');
+  }
 }
+
+/** The Message-ID a draft is saved under: printable, no spaces or quotes, so it is a safe IMAP search string. */
+const DRAFT_MESSAGE_ID = /^<[A-Za-z0-9._-]+@[A-Za-z0-9.-]+>$/;
 
 // ---------------------------------------------------------------------------
 // Message composition
@@ -91,9 +97,9 @@ export function validateDraftInput(input: ImapAppendDraftInput): void {
  * agree on the wire. The caller must count the literal in bytes: this string
  * is longer in bytes than in characters for any body that is not pure ASCII.
  *
- * No `Message-ID` is written. The message has not been sent, and the id that
- * matters is the one the sending path stamps at send time; a second one
- * invented here would never match it.
+ * The `Message-ID` is the one the caller minted for this draft (one per
+ * draft, the same for every attempt to save it), as a mail program writes one
+ * into each draft it saves; it is what finds a draft whose save had no answer.
  *
  * @throws Error when any field would forge a header.
  */

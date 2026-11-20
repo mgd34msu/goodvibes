@@ -1,5 +1,8 @@
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { BackgroundProviderDiscoveryOptions } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { startBackgroundProviderDiscovery, type BackgroundProviderDiscoveryOptions } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+
+/** The options start-up registered with, so first run can look for model servers on this computer. */
+let startupOptions: BackgroundProviderDiscoveryOptions | null = null;
 
 /**
  * Report the servers an earlier /scan saved, without probing this machine or
@@ -11,6 +14,7 @@ import type { BackgroundProviderDiscoveryOptions } from '@goodvibes-jev/engine/p
  * saved model back in force and says what was restored.
  */
 export function registerStartupProviders(options: BackgroundProviderDiscoveryOptions): void {
+  startupOptions = options;
   const { configManager, providerRegistry, runtime, requestRender, restoreRuntimeModel, systemMessageRouter } = options;
   void providerRegistry.ready().then(() => {
     const restored = providerRegistry.listDiscoveredServers();
@@ -25,4 +29,17 @@ export function registerStartupProviders(options: BackgroundProviderDiscoveryOpt
   }).catch((error: unknown) => {
     logger.warn('[bootstrap] Saved provider restore failed', { error: summarizeError(error) });
   });
+}
+
+/**
+ * Look for model servers on this computer now (never the network): first
+ * run's offer of "a model on this computer", started when first run opens
+ * and when the person asks it to look again. The servers found are
+ * registered and remembered as a /scan would; first run shows them, so
+ * nothing is printed. False before start-up registered its options.
+ */
+export function scanThisComputerNow(): boolean {
+  if (!startupOptions) return false;
+  startBackgroundProviderDiscovery({ ...startupOptions, registerNetworkServers: false, report: {} });
+  return true;
 }

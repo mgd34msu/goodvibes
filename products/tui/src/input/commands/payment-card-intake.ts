@@ -1,4 +1,7 @@
-import { createCardEntryPrompter, createPaymentCardHost, createPaymentCardCommands, renderCardList, describeCard, describeCardFailure, CARD_ENTRY_FIELDS } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
+import { createCardEntryPrompter, createPaymentCardHost, createPaymentCardCommands, renderCardList, describeCard, describeCardFailure, CARD_ENTRY_FIELDS, CardHostError, type CardField } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
+import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
+import { bindCredential, daemonTarget } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
 /**
  * /payments card, capture a payment card through the composer's concealed
  * input mode and store it on the selected paired daemon with one
@@ -77,13 +80,50 @@ async function renderCardStatus(ctx: CommandContext): Promise<string[]> {
 /** Card fields in prompt order, exported for tests that need to drive the chain field-by-field. */
 export { CARD_ENTRY_FIELDS };
 
-const promptCardFields = createCardEntryPrompter<CommandContext>(
-  (ctx, card) => cardHost.create(ctx, card),
+/**
+ * The daemon a card entry is for (`DaemonTarget.id`: its origin and the
+ * fingerprint of the credential this terminal holds for it), read from the same
+ * selection the card host uses, or null when none is usable.
+ */
+function selectedCardDaemon(ctx: CommandContext): string | null {
+  const selection = ownerOperatorConnectionPolicy.read(ctx, new OwnedSelectionObservation());
+  const origin = selection ? parseDaemonOrigin(selection.baseUrl) : null;
+  return selection && origin ? daemonTarget(origin, bindCredential(origin, selection.token, 'pairing'), false).id : null;
+}
+
+/** The daemon each card entry was started for, chosen before its first field. */
+const cardEntryDaemons = new WeakMap<CommandContext, string>();
+
+const promptCardChain = createCardEntryPrompter<CommandContext>(
+  (ctx, card) => {
+    const chosen = cardEntryDaemons.get(ctx);
+    cardEntryDaemons.delete(ctx);
+    const now = selectedCardDaemon(ctx);
+    // The card goes only to the daemon that was selected when its entry began.
+    if (!chosen || now !== chosen) {
+      const where = (id: string | null | undefined): string => id ? id.replace(/#.*$/, '') : 'none';
+      return Promise.reject(new CardHostError(`The selected daemon changed while the card was being entered (it was ${where(chosen)}, now ${where(now)}${chosen && now && where(chosen) === where(now) ? ', with another credential' : ''}). Run /payments card again to enter it for the daemon selected now.`));
+    }
+    return cardHost.create(ctx, card);
+  },
   {
     prompt: (field) => `[payments] Enter ${field.label} (e.g. ${field.placeholder}): masked; Enter to continue, Esc to stop.`,
     stored: (card) => `\n[payments] Card stored on the selected daemon: ${describeCard(card)}. Billing/shipping address and the rest of the payment capability are ordinary config values; set them via /config payments or the Settings > Payments category.`,
   },
 );
+
+/** Card entry: the daemon is resolved before the first field, and the card is created only on that one. */
+function promptCardFields(ctx: CommandContext, fields: readonly CardField[], index: number): void {
+  if (index === 0) {
+    const daemon = selectedCardDaemon(ctx);
+    if (!daemon) {
+      ctx.print('[payments] No paired daemon is selected, or its credential cannot be read. Check the selected host and pairing (/host), then run /payments card again. Nothing was asked or sent.');
+      return;
+    }
+    cardEntryDaemons.set(ctx, daemon);
+  }
+  promptCardChain(ctx, fields, index);
+}
 
 export const { startCardEntryFlow, runPaymentsCommand, registerPaymentCardCommands } = createPaymentCardCommands<CommandContext>({
   surface: CARD_ENTRY_SURFACE,

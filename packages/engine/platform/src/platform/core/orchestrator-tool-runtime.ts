@@ -502,6 +502,8 @@ async function executeToolCallsInMode(
     if (deps.hookDispatcher) {
       const hookStartedAt = Date.now();
       let refusal: string | undefined;
+      // The call's effect as the gate classes it, so a hook bound to an effect (`effect:execute`) fires for every tool that causes it.
+      const preEffects = [gateCategory(deps.permissionManager, call.name, call.arguments, deps.toolRegistry)];
       try {
         const preResult = await deps.hookDispatcher.fire({
           path: `Pre:tool:${call.name}`,
@@ -510,7 +512,8 @@ async function executeToolCallsInMode(
           specific: call.name,
           sessionId: deps.sessionId,
           timestamp: Date.now(),
-          payload: { callId: call.id, tool: call.name, args: call.arguments },
+          effects: preEffects,
+          payload: { callId: call.id, tool: call.name, args: call.arguments, effects: preEffects },
         });
         assertTurnActive();
         if (preResult.decision === 'deny') {
@@ -811,7 +814,8 @@ async function executeToolCallsInMode(
             specific: call.name,
             sessionId: deps.sessionId,
             timestamp: Date.now(),
-            payload: { callId: call.id, tool: call.name, error: message },
+            effects: [checkResult.category ?? requestedCategory],
+            payload: { callId: call.id, tool: call.name, error: message, effects: [checkResult.category ?? requestedCategory] },
           });
         }
       } finally {
@@ -835,7 +839,8 @@ async function executeToolCallsInMode(
           specific: call.name,
           sessionId: deps.sessionId,
           timestamp: Date.now(),
-          payload: { callId: call.id, tool: call.name, result },
+          effects: [checkResult.category ?? requestedCategory],
+          payload: { callId: call.id, tool: call.name, result, effects: [checkResult.category ?? requestedCategory] },
         });
       }
 

@@ -1577,7 +1577,15 @@ export class McpRegistry {
     if (getSandboxConfigSnapshot(configManager).mcpIsolation === 'disabled') return null;
 
     assertCurrent?.();
-    const session = await this.sandboxSessions.start('mcp-server', `${serverConfig.name} MCP`, configManager);
+    let session: Awaited<ReturnType<SandboxSessionRegistry['start']>>;
+    try { session = await this.sandboxSessions.start('mcp-server', `${serverConfig.name} MCP`, configManager); }
+    catch (error) {
+      throw new Error(
+        `MCP server '${serverConfig.name}' was not started: sandbox.mcpIsolation is 'contained' but this host cannot contain it `
+        + `(${summarizeError(error)}). Install bubblewrap, or set sandbox.mcpIsolation to disabled to run MCP servers as host processes.`,
+        { cause: error },
+      );
+    }
     const plan = session.launchPlan;
     if (!plan || plan.backend !== 'bubblewrap') {
       this.sandboxSessions.stop(session.id);

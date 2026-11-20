@@ -32,6 +32,7 @@ type AgentResearchAction =
   | 'resume'
   | 'cancel'
   | 'complete'
+  | 'attach_report'
   | 'fail'
   | 'delete_run'
   | 'add_source'
@@ -135,6 +136,7 @@ function normalizeResearchAction(value: unknown): AgentResearchAction | null {
   if (action === 'resume' || action === 'resume_run') return 'resume';
   if (action === 'cancel' || action === 'cancel_run') return 'cancel';
   if (action === 'complete' || action === 'complete_run') return 'complete';
+  if (action === 'attach_report' || action === 'link_report') return 'attach_report';
   if (action === 'fail' || action === 'fail_run') return 'fail';
   if (action === 'delete_run' || action === 'remove_run') return 'delete_run';
   if (action === 'add_source' || action === 'capture_source' || action === 'new_source') return 'add_source';
@@ -148,7 +150,7 @@ function normalizeResearchAction(value: unknown): AgentResearchAction | null {
 
 const RESEARCH_ACTIONS: readonly AgentResearchAction[] = [
   'briefing', 'plan', 'runner', 'runs', 'run', 'sources', 'source', 'bundle', 'search', 'reports', 'report_artifact',
-  'create_run', 'start_run', 'checkpoint', 'pause', 'resume', 'cancel', 'complete', 'fail', 'delete_run',
+  'create_run', 'start_run', 'checkpoint', 'pause', 'resume', 'cancel', 'complete', 'attach_report', 'fail', 'delete_run',
   'add_source', 'review_source', 'reject_source', 'use_source', 'delete_source', 'report',
 ];
 const RUN_STATUS_WORDS = ['planned', 'running', 'paused', 'blocked'] as const;
@@ -523,6 +525,7 @@ export function createAgentResearchTool(deps: AgentResearchToolDeps): Tool {
       if (action === 'resume') return dispatch(runsTool, runMutationArgs(args, 'resume'));
       if (action === 'cancel') return dispatch(runsTool, runMutationArgs(args, 'cancel'));
       if (action === 'complete') return dispatch(runsTool, runMutationArgs(args, 'complete'));
+      if (action === 'attach_report') return dispatch(runsTool, runMutationArgs(args, 'attach_report'));
       if (action === 'fail') return dispatch(runsTool, runMutationArgs(args, 'fail'));
       if (action === 'delete_run') return dispatch(runsTool, runMutationArgs(args, 'delete'));
       if (action === 'add_source') return dispatch(sourcesTool, addSourceArgs(args));

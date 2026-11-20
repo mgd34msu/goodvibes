@@ -39,6 +39,7 @@ import {
 } from './self-improvement-gap-context.js';
 import {
   SELF_IMPROVEMENT_RETRY_DELAY_MS,
+  gapRetryAt,
   markGapRepairAttempt,
   suppressGap,
 } from './self-improvement-gap-state.js';
@@ -311,8 +312,8 @@ type StoredGapState =
 
 /** What the stored gap and its task already say: inside its retry window, final, or ready to work. */
 function storedGapState(store: KnowledgeStore, spaceId: string, gap: KnowledgeNodeRecord): StoredGapState {
-  const nextAttemptAt = gap.metadata.nextRepairAttemptAt;
-  if (readString(gap.metadata.repairStatus) !== 'repaired' && typeof nextAttemptAt === 'number' && nextAttemptAt > Date.now()) return { kind: 'waiting', nextAttemptAt };
+  const nextAttemptAt = gapRetryAt(gap.metadata);
+  if (readString(gap.metadata.repairStatus) !== 'repaired' && nextAttemptAt !== undefined && nextAttemptAt > Date.now()) return { kind: 'waiting', nextAttemptAt };
   const task = storedRefinementTaskForGap(store, spaceId, gap.id);
   if (task && isTerminalRefinementState(task.state)) return task.state === 'suppressed' ? { kind: 'suppressed', task } : { kind: 'final', task };
   return { kind: 'ready' };
@@ -561,7 +562,7 @@ async function persistGapRepairFailure(context: SelfImproveContext, gap: Knowled
         status: 'deferred', reason, assertCurrent: owner.assertCurrent,
       });
       owner.acceptGap(deferredGap);
-      const nextRepairAttemptAt = deferredGap.metadata.nextRepairAttemptAt as number;
+      const nextRepairAttemptAt = gapRetryAt(deferredGap.metadata);
       owner.acceptTask(await updateRefinementTask(context.store, task, 'blocked', failure.cause === 'run_budget'
         ? 'Repair was deferred after exhausting the current run budget.'
         : 'Repair was deferred after a request timed out.', {

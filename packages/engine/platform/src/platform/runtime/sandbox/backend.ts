@@ -3,6 +3,7 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, resolve, sep } from 'node:path';
 import { buildBwrapArgv, hostSandboxAvailability, runResolverConfigPath } from '../../tools/exec/sandbox.js';
+import { ContainmentUnavailableError } from './contained-spawn.js';
 import type {
   SandboxBackendProbe,
   SandboxLaunchPlan,
@@ -29,22 +30,39 @@ export function probeSandboxBackends(): SandboxBackendProbe {
 /**
  * The launch plan for a session of this profile. Nothing is spawned here; each
  * process the session runs is wrapped with {@link sandboxCommandWrapper}.
+ *
+ * A session is contained or it is not started: with no boundary on this host,
+ * or a profile with network off on a host whose boundary cannot take the
+ * network away, it throws ContainmentUnavailableError naming why and what to
+ * do. A host session (no boundary, host network) is planned only when the
+ * person asked for one (`host: true`, `--host`), and its summary says so.
  */
 export function buildSandboxLaunchPlan(
   profile: SandboxProfile,
   workspaceRoot: string,
   writableExtras: readonly string[] = [],
+  options: { readonly host?: boolean | undefined } = {},
 ): SandboxLaunchPlan {
   const root = resolve(workspaceRoot);
-  const availability = hostSandboxAvailability();
-  if (!availability.available || !availability.bwrapPath) {
+  if (options.host === true) {
     return Object.freeze({
       backend: 'host',
       workspaceRoot: root,
       writableExtras: [],
       network: 'enabled',
-      summary: `host process in ${root}, no boundary (${availability.reason})`,
+      summary: `host process in ${root}, asked for with --host: no boundary, host network shared${profile.network === 'disabled' ? ' (the profile\'s network off does not apply)' : ''}`,
     });
+  }
+  const availability = hostSandboxAvailability();
+  if (!availability.available || !availability.bwrapPath) {
+    throw new ContainmentUnavailableError(
+      `A ${profile.id} sandbox session was not started: no boundary is available on this host (${availability.reason}).`,
+      'Install bubblewrap (the bwrap program), or start a host session with no boundary and the host network on purpose: /sandbox session start <profile> --host.');
+  }
+  if (profile.network === 'disabled' && !availability.networkIsolationGuaranteed) {
+    throw new ContainmentUnavailableError(
+      `A ${profile.id} sandbox session was not started: its profile has network off, and this host's boundary cannot take the network away.`,
+      'Allow user namespaces with network isolation for bubblewrap on this host, or start a host session on purpose: /sandbox session start <profile> --host.');
   }
   const extras = writableExtras.filter((path) => isAbsolute(path));
   return Object.freeze({

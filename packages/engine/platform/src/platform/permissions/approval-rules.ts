@@ -36,9 +36,9 @@ export type RememberTier = 'session' | 'exact' | 'command-class' | 'path' | 'too
 /** One offerable remember tier, rendered by whatever surface shows the ask. */
 export interface RememberTierOption {
   readonly tier: RememberTier;
-  /** Human-readable option label, e.g. `Always allow git commands`. */
+  /** What the person reads, e.g. `Any git command in this project` (ask-presentation.ts shows it). */
   readonly label: string;
-  /** What the resulting durable rule will match, stated concretely. */
+  /** What the resulting rule matches, stated concretely: the command, the folder, or how long it lasts. */
   readonly detail: string;
 }
 
@@ -66,15 +66,15 @@ export function buildRememberOptions(toolName: string, args: Record<string, unkn
   if (toolName === 'exec' && commands.length > 0) {
     options.push({
       tier: 'exact',
-      label: commands.length === 1 ? 'this exact command' : 'these exact commands',
+      label: commands.length === 1 ? 'This exact command' : 'These exact commands',
       detail: commands.join(' ; '),
     });
     const classes = uniqueSorted(commands.map(commandClassOf).filter((cls) => cls.length > 0));
     if (classes.length > 0) {
       const classOption: RememberTierOption = {
         tier: 'command-class',
-        label: `every ${classes.join(' / ')} command`,
-        detail: classes.map((cls) => `${cls} ...`).join(' ; '),
+        label: `Any ${classes.join(' or ')} command in this project`,
+        detail: classes.map((cls) => `${cls} …`).join(' ; '),
       };
       if (classes.every((cls) => exactAnswersForClass(remembered, toolName, cls) >= REPEATED_EXACT_ANSWERS)) options.unshift(classOption);
       else options.push(classOption);
@@ -85,23 +85,38 @@ export function buildRememberOptions(toolName: string, args: Record<string, unkn
     const dirs = uniqueSorted(paths.map((path) => dirname(path)));
     options.push({
       tier: 'path',
-      label: dirs.length === 1 ? `edits under ${dirs[0]}` : 'edits under these directories',
-      detail: dirs.map((dir) => `${dir}/**`).join(' ; '),
+      label: dirs.length === 1 ? `Edits under ${dirs[0]} in this project` : 'Edits under these folders in this project',
+      detail: dirs.map((dir) => `everything under ${dir}/`).join(' ; '),
     });
   }
 
   options.push({
     tier: 'tool',
-    label: `always for the ${toolName} tool in this project`,
-    detail: `every ${toolName} call, any arguments`,
+    label: `Any ${toolNoun(toolName)} in this project`,
+    detail: 'whatever it names, until you remove the rule',
   });
   const session = sessionScope(toolName, args);
   options.push({
     tier: 'session',
-    label: `${session} this session`,
-    detail: 'in-memory only; forgotten when the session ends',
+    label: `${session}, this session only`,
+    detail: 'forgotten when this session ends',
   });
   return options;
+}
+
+/** What one call of a tool is, as a person names it: never the tool's id ("the exec tool"). */
+const TOOL_NOUNS: Readonly<Record<string, string>> = {
+  exec: 'command', write: 'file change', edit: 'file change', fetch: 'web request', web_search: 'web search',
+  read: 'file read', find: 'file search', analyze: 'code analysis', inspect: 'project inspection',
+  agent: 'agent', delegate: 'hand-off', workflow: 'workflow step', mcp: 'tool server call', state: 'saved-state change',
+  goodvibes_settings: 'settings change', query: 'question',
+};
+
+/** "command", "file change", "web request"; a tool with no noun of its own: "call to <its name>". */
+export function toolNoun(toolName: string): string {
+  if (Object.hasOwn(TOOL_NOUNS, toolName)) return TOOL_NOUNS[toolName]!;
+  const short = toolName.includes('__') ? toolName.split('__').pop()! : toolName;
+  return `call to ${short}`;
 }
 
 /** Exact answers for one command class after which the class tier is offered first. */
@@ -167,14 +182,18 @@ export function ruleCovers(broader: PolicyRule, narrower: PolicyRule): boolean {
 function sessionScope(toolName: string, args: Record<string, unknown>): string {
   const commands = extractCommandArgs(args);
   if (toolName === 'exec' && commands.length > 0) {
-    if (commands.some(isCompound)) return commands.length === 1 ? 'this exact command' : 'these exact commands';
+    if (commands.some(isCompound)) return commands.length === 1 ? 'This exact command' : 'These exact commands';
     const classes = uniqueSorted(commands.map(commandClassOf).filter((cls) => cls.length > 0));
-    if (classes.length > 0) return `every ${classes.join(' / ')} command`;
+    if (classes.length > 0) return `Any ${classes.join(' or ')} command`;
   }
   const paths = extractPathArgs(args);
-  if (execShellCommands(args).length > 0) return `this exact ${toolName} command`;
-  if (paths.length > 0) return `${toolName} on ${uniqueSorted(paths).join(', ')}`;
-  return `every ${toolName} call`;
+  if (execShellCommands(args).length > 0) return 'This exact command';
+  const noun = toolNoun(toolName);
+  if (paths.length > 0) {
+    const lead = noun === 'file change' ? 'Changes to' : noun === 'file read' ? 'Reads of' : `${noun.charAt(0).toUpperCase()}${noun.slice(1)}s on`;
+    return `${lead} ${uniqueSorted(paths).join(', ')}`;
+  }
+  return `Any ${noun}`;
 }
 
 /** A command with a control operator, substitution or redirection is more than its first word. */

@@ -6,6 +6,7 @@ import { buildDurableRuleForDecision, compileRules, type CompiledRuleMatch } fro
 import type { ControlPlaneSurfaceMessage } from './types.js';
 import { logger } from '../utils/logger.js';
 import { isRecord } from '../utils/record-coerce.js';
+import { contentDigest } from '../utils/target-ref.js';
 import { resolveApprovalHunkSelection } from './approval-hunk-apply.js';
 import { raiseSharedApproval, type PendingApprovalEntry, type RaisedApproval } from './approval-broker-raise.js';
 import { OwnerApprovalAuthority, type OwnerApprovalGuard, type OwnerApprovalProof, type RaisedOwnerApproval, type ResolveSharedApprovalInput } from './approval-broker-owner.js';
@@ -602,6 +603,10 @@ export class ApprovalBroker {
     // The text typed for a command's prompt is usually a password: it travels
     // with THIS transition to the waiter and nowhere else. The stored,
     // published and returned record carries a marker instead.
+    // Which arguments this approval runs the call with, taken before a typed
+    // answer is withheld: a surface that approved the same ask with another
+    // narrowing compares it and runs this recorded decision instead of its own.
+    const argsDigest = approved && approval ? contentDigest(modifiedArgs ?? approval.request.args) : undefined;
     let withheldAnswer: string | undefined;
     if (approved && approval?.request.attribution?.kind === 'exec-prompt' && typeof modifiedArgs?.['answer'] === 'string') {
       withheldAnswer = modifiedArgs['answer'];
@@ -614,6 +619,7 @@ export class ApprovalBroker {
       ...(input.rememberTier !== undefined ? { rememberTier: input.rememberTier } : {}),
       ...(input.reason !== undefined ? { reason: input.reason } : {}),
       ...(modifiedArgs !== undefined ? { modifiedArgs } : {}),
+      ...(argsDigest !== undefined ? { argsDigest } : {}),
     };
     let outcome: TransitionOutcome;
     try {
@@ -887,7 +893,7 @@ export class ApprovalBroker {
     let ownerCheck: (() => void) | undefined;
     if (transition.to === 'approved' && current.requiresOwnerDecision) {
       try {
-        ownerCheck = this.#ownerApprovals.check(current, { approved: true, decision: transition.decision }, transition.ownerProof);
+        ownerCheck = this.#ownerApprovals.check(current, transition.decision, transition.ownerProof);
       } catch {
         return { request, current, refusal: approvalRefusal('OWNER_DECISION_REQUIRED', current) };
       }
@@ -926,11 +932,10 @@ export class ApprovalBroker {
     }
     const holds: ApprovalHold[] = requester.holds.map((entry) => (entry === hold ? { id: entry.id, releasedAt: now } : entry));
     const released = this.#next(current, { to: 'updated', actor: transition.actor, note: transition.note ?? (open ? 'the asking surface left' : 'the asking surface received the answer') }, now, undefined, { kind: 'wire', holds });
-    const pending = this.pendingResolvers.get(current.id);
-    const othersWaiting = holds.some((entry) => entry.releasedAt === undefined) || (pending !== undefined && pending.resolvers.length > 0);
-    if (!open || othersWaiting) return { request, current, next: released };
+    // Another surface that raised it still waits: it stays open for them.
+    if (!open || holds.some((entry) => entry.releasedAt === undefined)) return { request, current, next: released };
     const cancelled = this.#next(released, { to: 'cancelled', actor: transition.actor, cause: 'requester-left', note: 'every surface that asked stopped waiting' }, now);
-    return { request, current, next: { ...cancelled, revision: current.revision + 1, audit: [...released.audit.slice(0, -1), ...cancelled.audit.slice(-1)] } };
+    return { request, current, next: { ...cancelled, revision: current.revision + 1 } };
   }
 
   /** The record after one transition: revision + 1, updated now, one audit entry. */

@@ -75,6 +75,7 @@
  * delivered (the daemon was unreachable at that moment) still expires.
  */
 import { logger, summarizeError } from '../../utils/index.js';
+import { contentDigest } from '../../utils/target-ref.js';
 import { assertPermissionActive, awaitPermission } from '../../permissions/cancellation.js';
 import { WITHHELD_PROMPT_ANSWER, type PermissionExecutionOptions, type PermissionPromptDecision, type PermissionPromptRequest } from '../../permissions/prompt.js';
 import type { RememberTier } from '../../permissions/approval-rules.js';
@@ -163,6 +164,8 @@ interface RaisedRecord {
     readonly rememberTier?: unknown;
     readonly reason?: unknown;
     readonly modifiedArgs?: unknown;
+    /** The digest of the arguments the recorded approval runs the call with. */
+    readonly argsDigest?: unknown;
   } | undefined;
 }
 
@@ -431,6 +434,7 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
   const arbitrateLocalDecision = async (
     raised: Promise<RaisedOnDaemon | null> | RaisedOnDaemon,
     local: PermissionPromptDecision,
+    requestArgs: Record<string, unknown>,
   ): Promise<PermissionPromptDecision> => {
     // An answer given before the raise landed waits for its id too, inside the
     // same bound: the record may be one another surface already answered.
@@ -444,10 +448,15 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
       const record = await Promise.race([reporting, deadline]);
       if (record === 'deadline' || record === null) return local;
       const final = readRemoteDecision(record);
+      if (!final || final.approved !== local.approved) return final ?? local;
+      // Both approved, but another surface may have answered first with another
+      // narrowing (other hunks, other edited arguments): the recorded approval
+      // is the one that runs, on every surface, whenever its arguments differ.
+      const recordedDigest = local.approved ? record.decision?.argsDigest : undefined;
+      if (typeof recordedDigest === 'string' && recordedDigest !== contentDigest(local.modifiedArgs ?? requestArgs)) return final;
       // The record agrees with this surface: run the local answer, which keeps
       // the fields only this surface holds (a typed answer, the remember tier).
-      if (!final || final.approved === local.approved) return local;
-      return final;
+      return local;
     } finally {
       if (timer !== undefined) clearTimeout(timer);
     }
@@ -522,7 +531,7 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
       if (winner.source === 'remote') return winner.decision;
       // The daemon decides: the local answer is sent there and the record's
       // final state is what runs (the local answer when no daemon answers in time).
-      return await arbitrateLocalDecision(raisedOnDaemon ?? raising, winner.decision);
+      return await arbitrateLocalDecision(raisedOnDaemon ?? raising, winner.decision, input.request.args);
     } finally {
       settled = true;
       left = true;

@@ -28,8 +28,14 @@ export interface ListConfigSetting extends Omit<ConfigSetting, 'key' | 'type' | 
   readonly type: 'object';
 }
 
-/** An http or https URL, the only kind a notification webhook can post to. */
+/**
+ * A notification webhook list member: a `goodvibes://secrets/` reference to
+ * the stored URL (the form `/notify add` writes), or an http or https URL, the
+ * only kind a webhook can post to. A literal URL is refused at the write
+ * (write-admission.ts): the list is declared secret-bearing.
+ */
 function webhookUrl(entry: string): boolean {
+  if (entry.trim().startsWith('goodvibes://secrets/')) return true;
   try {
     const url = new URL(entry);
     return url.protocol === 'https:' || url.protocol === 'http:';
@@ -85,13 +91,13 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
   },
   {
     // Declared a credential (secret-bearing-config-keys.ts): an incoming webhook
-    // URL carries its key, so every list, export and event masks it.
+    // URL carries its key, so the list holds references and the URLs are in the secret store.
     key: 'notifications.webhookUrls',
     type: 'object',
-    description: 'Webhook URLs that receive the notifications this machine sends (turn ends, approvals waiting, budget alerts). Each URL carries its own key, so the list is shown masked. Applies at the next start',
+    description: 'Webhook URLs that receive the notifications this machine sends (turn ends, approvals waiting, budget alerts). Each URL carries its own key, so it is kept in the secret store and this list holds a goodvibes://secrets/ reference to each; add one with /notify add <url>. Screens show only each URL\'s host. Applies at the next start',
     validate: (value) => stringList(value) && value.every(webhookUrl),
     closedShape: true,
-    validationHint: 'list of http(s) URLs, for example ["https://hooks.example.com/abc"]',
+    validationHint: 'list of goodvibes://secrets/ references to stored webhook URLs; add a URL with /notify add <url>',
   },
   {
     key: 'sandbox.egressAllowlist',

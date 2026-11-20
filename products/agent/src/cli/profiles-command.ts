@@ -18,6 +18,7 @@ import {
   type AgentRuntimeProfileInfo,
 } from '../agent/runtime-profile.ts';
 import { existsSync } from 'node:fs';
+import { optionArgsOf } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
 import { claimSurfaceHome, SurfaceHomeInUseError } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
@@ -210,8 +211,9 @@ function renderProfilesOutput(result: AgentRuntimeProfileCommandResult, format: 
 }
 
 export async function handleProfilesCommand(runtime: ProfilesCommandRuntime): Promise<CliCommandOutput> {
-  const [sub = 'list', ...rawRest] = runtime.cli.commandArgs;
-  const values = commandValues(rawRest);
+  // Options are read only from what was typed before `--`; words after it are names, never flags.
+  const [sub = 'list', ...rawRest] = optionArgsOf(runtime.cli);
+  const values = [...commandValues(rawRest), ...(runtime.cli.literalArgs ?? [])];
 
   try {
     if (sub === 'list' || sub === 'ls') {

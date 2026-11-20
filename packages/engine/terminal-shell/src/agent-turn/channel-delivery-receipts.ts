@@ -4,6 +4,7 @@ import { formatJsonStoreWriteReport, readJsonStore, updateJsonStore, type JsonSt
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import type { AgentChannelDeliveryInput, AgentChannelDeliveryResult } from './channel-delivery.js';
 import { readString } from './tool-args.js';
+import { isSecret } from '@goodvibes-jev/engine/platform/platform/security';
 
 export type AgentChannelDeliveryReceiptSource = 'command' | 'model-tool';
 export type AgentChannelDeliveryReceiptStatus = 'sent';
@@ -122,7 +123,8 @@ function summarizeTarget(result: AgentChannelDeliveryResult): AgentChannelDelive
       ...(target.label ? { label: target.label } : {}),
     };
   }
-  return summarizeAddress(target.address, target.kind);
+  // A secret address (a webhook URL) is summarized from what may be shown of it: scheme and host.
+  return summarizeAddress(isSecret(target.address) ? target.addressShown : target.address, target.kind);
 }
 
 function targetInput(input: AgentChannelDeliveryInput): string {

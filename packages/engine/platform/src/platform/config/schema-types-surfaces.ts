@@ -228,7 +228,7 @@ export interface InboundEmailConfig {
     maxBackoffSeconds: number;
   };
   notice: {
-    /** A route binding id, or the literal `'default'` to inherit the owner's existing notice route. */
+    /** A route binding id, or the literal `'default'` for the owner's most recent one-to-one conversation. */
     route: string;
     mode: InboundEmailNoticeMode;
   };

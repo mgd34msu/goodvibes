@@ -32,6 +32,7 @@ export type {
   AttemptJudgeInput,
   AttemptJudgeVerdict,
   AttemptJudgment,
+  AttemptLoserOutcome,
   AttemptPickResult,
   HeldMergeGroup,
 } from './types.js';

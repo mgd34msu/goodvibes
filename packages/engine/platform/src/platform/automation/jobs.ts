@@ -8,6 +8,7 @@ import type { AutomationScheduleDefinition } from './schedules.js';
 import type { AutomationExecutionPolicy } from './session-targets.js';
 import type { AutomationEntityBase, AutomationJobStatus } from './types.js';
 import type { AutomationSourceRecord } from './sources.js';
+import type { ScheduleRunOutcome } from '@goodvibes-jev/engine/contracts';
 
 /**
  * The job type discriminator on the shared automation scheduler. `standard`
@@ -34,6 +35,13 @@ export interface AutomationJob extends AutomationEntityBase {
   readonly nextRunAt?: number | undefined;
   readonly lastRunAt?: number | undefined;
   readonly lastRunId?: string | undefined;
+  /**
+   * How the last run ended for the person: its answer delivered to a target,
+   * not delivered (every target failed; it went to the inbox instead), sent to
+   * the inbox (the job names no target), or the run failed. Written when that
+   * is known (manager-runtime-delivery.ts, manager-runtime-reconcile.ts).
+   */
+  readonly lastOutcome?: ScheduleRunOutcome | undefined;
   /**
    * In a group (cluster/group-work.ts): the planned time of the last scheduled
    * occurrence a machine started, written before the run starts. Absent

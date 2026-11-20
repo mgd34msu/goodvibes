@@ -2737,6 +2737,8 @@ shadow_removal_plan() {
     [ "$shadow_plan_bin" = '-' ] || shadow_is_within "$shadow_plan_bin" "$HOME" || return 0
     printf 'package\t%s\t%s\n' "$shadow_plan_package" "$shadow_plan_global"
   else
+    # A standalone file is removed only when this installer recorded writing it.
+    shadow_in_receipt "$shadow_plan_path" || shadow_in_receipt "$shadow_plan_resolved" || return 0
     printf 'file\t%s\n' "$shadow_plan_path"
   fi
 }
@@ -2890,8 +2892,9 @@ check_command_shadowing() {
     shadow_plan=$(shadow_removal_plan "$shadow_copy" "$shadow_command")
     if [ -z "$shadow_plan" ]; then
       say ""
-      say "  $shadow_copy (version $shadow_copy_version) is not something we can identify as"
-      say "  one of our programs, so it will not be touched. Remove it yourself, or put"
+      say "  $shadow_copy (version $shadow_copy_version) is not a program this installer"
+      say "  recorded writing (in $SHADOW_PROGRAM_RECEIPT) or a GoodVibes package it can name,"
+      say "  so it will not be touched. Remove it yourself, or put"
       say "  $shadow_install_dir earlier on your PATH."
       shadow_remaining=1
       IFS='
@@ -2973,8 +2976,40 @@ run_shadow_removal() (
   esac
 )
 
+# The installer's own record of the program files it has written, one absolute
+# path per line, across every install directory it was ever pointed at. A
+# standalone shadowing copy is removed only when it is listed here: a file that
+# merely answers --version as one of our programs is not proof this installer
+# put it there.
+SHADOW_PROGRAM_RECEIPT="${XDG_STATE_HOME:-$HOME/.local/state}/goodvibes/installed-programs"
+
+# True when $1 (an absolute path) is listed in the program receipt.
+shadow_in_receipt() {
+  [ -f "$SHADOW_PROGRAM_RECEIPT" ] && [ ! -L "$SHADOW_PROGRAM_RECEIPT" ] || return 1
+  grep -Fxq -- "$1" "$SHADOW_PROGRAM_RECEIPT"
+}
+
+# Record the programs this run placed in $INSTALL_DIR. Best effort: a receipt
+# that cannot be written only means an old copy is reported, never removed.
+record_installed_programs() {
+  _receipt_dir=$(dirname "$SHADOW_PROGRAM_RECEIPT")
+  mkdir -p "$_receipt_dir" 2>/dev/null || return 0
+  [ ! -L "$SHADOW_PROGRAM_RECEIPT" ] || return 0
+  _receipt_install_dir=$(shadow_trim_dir "$INSTALL_DIR")
+  for _receipt_command in goodvibes goodvibes-daemon goodvibes-agent; do
+    _receipt_path="$_receipt_install_dir/$_receipt_command"
+    [ -f "$_receipt_path" ] || continue
+    shadow_in_receipt "$_receipt_path" || printf '%s\n' "$_receipt_path" >> "$SHADOW_PROGRAM_RECEIPT" 2>/dev/null || :
+    _receipt_real=$(shadow_existing_path "$_receipt_path") || _receipt_real=''
+    if [ -n "$_receipt_real" ] && [ "$_receipt_real" != "$_receipt_path" ]; then
+      shadow_in_receipt "$_receipt_real" || printf '%s\n' "$_receipt_real" >> "$SHADOW_PROGRAM_RECEIPT" 2>/dev/null || :
+    fi
+  done
+}
+
 # The whole-install verdict, run after everything is placed.
 resolve_path_shadows() {
+  record_installed_programs
   SHADOW_PATH=$(shadow_effective_path)
   for shadow_each in goodvibes goodvibes-daemon goodvibes-agent; do
     if ! check_command_shadowing "$shadow_each"; then

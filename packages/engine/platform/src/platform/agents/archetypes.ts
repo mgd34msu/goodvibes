@@ -53,7 +53,24 @@ export interface AgentArchetype {
   sections?: readonly string[] | undefined;
 }
 
-const BUILT_IN_ARCHETYPES: readonly AgentArchetype[] = BUILTIN_AGENT_TEMPLATES.map((template) => ({
+/** What a person reads for each built-in archetype: "Helper agent", never the id "general". */
+const ARCHETYPE_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  general: 'Helper agent',
+  orchestrator: 'Coordinating agent',
+  planner: 'Planning agent',
+  engineer: 'Engineering agent',
+  reviewer: 'Review agent',
+  tester: 'Testing agent',
+  researcher: 'Research agent',
+  integrator: 'Integration agent',
+};
+
+/** The display name of an archetype: the built-in's name, or a custom archetype's own name. */
+export function archetypeDisplayName(name: string): string {
+  return Object.hasOwn(ARCHETYPE_DISPLAY_NAMES, name) ? ARCHETYPE_DISPLAY_NAMES[name]! : name;
+}
+
+const BUILT_IN_ARCHETYPES: readonly AgentArchetype[] =BUILTIN_AGENT_TEMPLATES.map((template) => ({
   name: template.name,
   description: template.description,
   tools: [...template.tools],

@@ -1,4 +1,5 @@
 import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+import { commandArgsWithLiteralMarker } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
 import type {
   AttemptCandidate,
   AttemptJudgment,
@@ -95,10 +96,22 @@ export function renderGroupList(groups: readonly HeldMergeGroup[]): string {
   return [`Best-of-N held-merge groups (${groups.length})`, ...groups.map(renderGroup)].join('\n\n');
 }
 
+/** One loser's clean-up as observed: cleaned only when its worktree was seen gone. */
+function renderLoser(loser: AttemptPickResult['losers'][number]): string {
+  const { outcome } = loser;
+  switch (outcome.state) {
+    case 'done': return `    ${loser.id}: cleaned`;
+    case 'pending': return `    ${loser.id}: still cleaning; check with \`${outcome.check}\``;
+    case 'unknown':
+    case 'failed': return `    ${loser.id}: not cleaned: ${outcome.refusal.reason}${outcome.refusal.next[0] ? ` ${outcome.refusal.next[0]}` : ''}`;
+  }
+}
+
 export function renderPickResult(result: AttemptPickResult): string {
   return [
     `Picked winner ${result.winnerItemId} for group ${result.groupId}`,
-    `  losers cleaned: ${result.loserItemIds.length === 0 ? 'none' : result.loserItemIds.join(', ')}`,
+    result.losers.length === 0 ? '  losers: none' : '  losers:',
+    ...result.losers.map(renderLoser),
     `  auto-picked ${result.auto ? 'yes (judge auto-accept)' : 'no (explicit operator pick)'}`,
   ].join('\n');
 }
@@ -143,7 +156,9 @@ async function handleFleetAttemptsPick(runtime: CliCommandRuntime, args: readonl
       'fleet.attempts.pick', { groupId, winnerItemId, confirm: true },
     );
     const { applied: _applied, ...result } = answer;
-    return { output: jsonOrText(runtime, { ok: true, ...result }, renderPickResult(result)), exitCode: 0 };
+    // The winner merged; a loser whose clean-up failed is reported and exits 1, one still cleaning exits 0 with its check.
+    const failed = result.losers.some((loser) => loser.outcome.state === 'failed' || loser.outcome.state === 'unknown');
+    return { output: jsonOrText(runtime, { ok: !failed, ...result }, renderPickResult(result)), exitCode: failed ? 1 : 0 };
   } catch (error) {
     return errorFailure(runtime, error);
   }
@@ -176,7 +191,7 @@ async function handleFleetAttemptsCommand(runtime: CliCommandRuntime, args: read
 }
 
 export async function handleFleetCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
-  const [sub, ...rest] = runtime.cli.commandArgs;
+  const [sub, ...rest] = commandArgsWithLiteralMarker(runtime.cli);
   switch ((sub ?? '').toLowerCase()) {
     case 'attempts':
       return handleFleetAttemptsCommand(runtime, rest);

@@ -396,7 +396,7 @@ export class SessionViews implements SessionViewControls {
         if (contract)
             return this.replyToOwner(contract, text, onFailure);
         const result = this.deps.steer(target.id, text);
-        if (!result.queued) {
+        if (result.queued !== true) {
             this.say(`${name} did not take the message: ${result.reason ?? 'refused'}.`, 'error');
             return false;
         }

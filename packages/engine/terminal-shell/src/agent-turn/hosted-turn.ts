@@ -94,8 +94,6 @@ export interface AgentTurnToolDeps {
    * credential agent-call-credential.ts names for each call.
    */
   readonly remote?: FamilyGatewayRemote | undefined;
-  /** The owner's message for the current turn; a person lookup is refused unless it names the person. */
-  readonly currentOwnerMessage?: (() => string | null | undefined) | undefined;
   /** The turn's workspace and home: the Agent's project and user stores are resolved against it. */
   readonly shellPaths: ShellPathService;
   /** The home's artifact store, which artifacts, documents and review packets are kept in. */
@@ -159,7 +157,6 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
   };
   registerAgentProfileTool(registry, {
     invoke: createProfileGatewayInvoke(family),
-    ...(deps.currentOwnerMessage ? { currentOwnerMessage: deps.currentOwnerMessage } : {}),
   });
   registerAgentOccasionsTool(registry, { invoke: createOccasionsGatewayInvoke(family) });
   registerAgentArtifactsTool(registry, deps.artifactStore, { projectRoot: deps.shellPaths.workingDirectory });
@@ -335,7 +332,7 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
     // admission and the Agent's settings routing. This registry has no harness,
     // so goodvibes_context stays the platform's, declared as a read, as here.
     decorateWorkerRegistry: (registry) => decorateAgentWorkerRegistry(registry),
-    registerTools({ registry, workspaceRoot, sessionId, floor, daemonRequests, providerRegistry, ownerTurnText }) {
+    registerTools({ registry, workspaceRoot, sessionId, floor, daemonRequests, providerRegistry }) {
       // The daemon keeps one project work plan, for its own project; a session in
       // another workspace has no plan of its own here and is told so on a call.
       const ownProject = resolve(deps.workPlan.projectRoot) === resolve(workspaceRoot);
@@ -357,8 +354,6 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
         // write the Agent makes for the owner its delegated one, which the daemon
         // gives that pairing's scopes and native authority.
         remote: connectedHostFamilyRemote({ ...connectedHost, actor: 'agent' }),
-        // A person lookup is checked against the operator's own message for this turn.
-        ...(ownerTurnText ? { currentOwnerMessage: ownerTurnText } : {}),
         memoryRegistry: deps.memoryRegistry,
         memoryAccess: deps.memoryAccess,
         shellPaths: createShellPathService({ workingDirectory: workspaceRoot, homeDirectory: deps.homeDirectory }),

@@ -18,6 +18,42 @@
  * that would fail when pressed.
  */
 
+import type { Fence } from '@goodvibes-jev/engine/platform/platform/utils/owner-fence';
+
+/** How long a browser may take to start a captured stream playing and paint its first frame. */
+const FRAME_DEADLINE_MS = 10_000;
+
+/**
+ * `work` raced against the fence: it rejects the moment the fence ends (the node
+ * stopped, unpaired, or the deadline passed), and a value that arrives after is
+ * handed to `onLate` (a camera stream is stopped there) instead of being used.
+ */
+function raceFence<T>(fence: Fence, work: Promise<T>, what: string, onLate?: (value: T) => void): Promise<T> {
+  const abandoned = (): Error => {
+    const reason: unknown = fence.signal.reason;
+    return new Error(`${what} was abandoned: ${reason instanceof Error ? reason.message : 'the node stopped'}`);
+  };
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(abandoned());
+    if (fence.signal.aborted) onAbort();
+    else fence.signal.addEventListener('abort', onAbort, { once: true });
+    work.then((value) => {
+      fence.signal.removeEventListener('abort', onAbort);
+      if (fence.signal.aborted) { onLate?.(value); return; }
+      resolve(value);
+    }, (error: unknown) => {
+      fence.signal.removeEventListener('abort', onAbort);
+      reject(error instanceof Error ? error : new Error(String(error)));
+    });
+  });
+}
+
+function stopTracks(stream: MediaStream): void {
+  for (const track of stream.getTracks()) {
+    try { track.stop(); } catch { /* a track that refuses to stop must not block the rest */ }
+  }
+}
+
 /** Capability ids this binding implements, mirroring the platform contract's ids. */
 export type WebNodeCapabilityId =
   | 'device.camera.rear.capture'
@@ -123,16 +159,22 @@ async function bytesFromBlob(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
-/** Grab one frame from a live track, scale it, and encode it as a PNG. */
-async function frameFromStream(stream: MediaStream, maxWidth: number | undefined): Promise<CapabilityRunResult> {
+/**
+ * Grab one frame from a live track, scale it, and encode it as a PNG. Starting
+ * playback, the first painted frame and the encode race the run's fence with a
+ * 10 s deadline, so a stream that never plays cannot hold the camera on; the
+ * tracks are stopped however the run ends.
+ */
+async function frameFromStream(stream: MediaStream, maxWidth: number | undefined, runFence: Fence): Promise<CapabilityRunResult> {
+  const fence = runFence.narrow({ deadline: Date.now() + FRAME_DEADLINE_MS });
   try {
     const video = document.createElement('video');
     video.srcObject = stream;
     video.muted = true;
     video.playsInline = true;
-    await video.play();
+    await raceFence(fence, video.play(), 'Starting the camera picture');
     // One animation frame is enough for the first decoded frame to be painted.
-    await new Promise<void>((resolve) => { requestAnimationFrame(() => resolve()); });
+    await raceFence(fence, new Promise<void>((resolve) => { requestAnimationFrame(() => resolve()); }), 'Waiting for the first frame');
 
     const sourceWidth = video.videoWidth || 1280;
     const sourceHeight = video.videoHeight || 720;
@@ -144,7 +186,7 @@ async function frameFromStream(stream: MediaStream, maxWidth: number | undefined
     if (!context) return { ok: false, error: 'This browser could not open a 2D canvas to encode the picture.' };
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    const blob = await new Promise<Blob | null>((resolve) => { canvas.toBlob((result) => resolve(result), 'image/png'); });
+    const blob = await raceFence(fence, new Promise<Blob | null>((resolve) => { canvas.toBlob((result) => resolve(result), 'image/png'); }), 'Encoding the picture');
     if (!blob) return { ok: false, error: 'This browser could not encode the captured frame.' };
     return {
       ok: true,
@@ -153,22 +195,23 @@ async function frameFromStream(stream: MediaStream, maxWidth: number | undefined
       data: { width: canvas.width, height: canvas.height },
     };
   } finally {
-    for (const track of stream.getTracks()) track.stop();
+    stopTracks(stream);
   }
 }
 
-async function capturePhoto(bindings: BrowserBindings, facingMode: 'environment' | 'user', maxWidth: number | undefined): Promise<CapabilityRunResult> {
+async function capturePhoto(bindings: BrowserBindings, facingMode: 'environment' | 'user', maxWidth: number | undefined, fence: Fence): Promise<CapabilityRunResult> {
   if (!bindings.mediaDevices?.getUserMedia) return { ok: false, error: 'This browser does not offer camera access.' };
-  const stream = await bindings.mediaDevices.getUserMedia({ video: { facingMode }, audio: false });
-  return frameFromStream(stream, maxWidth);
+  // A camera granted after the run was stopped is switched off at once, never used.
+  const stream = await raceFence(fence, bindings.mediaDevices.getUserMedia({ video: { facingMode }, audio: false }), 'Opening the camera', stopTracks);
+  return frameFromStream(stream, maxWidth, fence);
 }
 
-async function captureScreen(bindings: BrowserBindings): Promise<CapabilityRunResult> {
+async function captureScreen(bindings: BrowserBindings, fence: Fence): Promise<CapabilityRunResult> {
   if (typeof bindings.mediaDevices?.getDisplayMedia !== 'function') {
     return { ok: false, error: 'This browser does not offer screen capture.' };
   }
-  const stream = await bindings.mediaDevices.getDisplayMedia({ video: true, audio: false });
-  return frameFromStream(stream, undefined);
+  const stream = await raceFence(fence, bindings.mediaDevices.getDisplayMedia({ video: true, audio: false }), 'Opening the screen capture', stopTracks);
+  return frameFromStream(stream, undefined, fence);
 }
 
 async function readLocation(bindings: BrowserBindings, precise: boolean, maxAgeSeconds: number | undefined): Promise<CapabilityRunResult> {
@@ -213,16 +256,17 @@ async function readLocation(bindings: BrowserBindings, precise: boolean, maxAgeS
 export async function runWebNodeCapability(
   capabilityId: string,
   input: Record<string, unknown>,
+  fence: Fence,
   bindings: BrowserBindings = readBrowserBindings(),
 ): Promise<CapabilityRunResult> {
   try {
     switch (capabilityId) {
       case 'device.camera.rear.capture':
-        return await capturePhoto(bindings, 'environment', readNumber(input, 'maxWidth'));
+        return await capturePhoto(bindings, 'environment', readNumber(input, 'maxWidth'), fence);
       case 'device.camera.front.capture':
-        return await capturePhoto(bindings, 'user', readNumber(input, 'maxWidth'));
+        return await capturePhoto(bindings, 'user', readNumber(input, 'maxWidth'), fence);
       case 'device.screen.capture':
-        return await captureScreen(bindings);
+        return await captureScreen(bindings, fence);
       case 'device.location.coarse':
         return await readLocation(bindings, false, readNumber(input, 'maxAgeSeconds'));
       case 'device.location.precise':

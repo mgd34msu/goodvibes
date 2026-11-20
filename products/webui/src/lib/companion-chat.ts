@@ -166,36 +166,13 @@ export function writeStoredActiveCompanionSessionId(sessionId: string) {
   }
 }
 
-function comparableMessageText(message: unknown): string {
-  return firstString(message, ['body', 'content', 'text', 'message']).trim();
-}
-
-function comparableMessageAttachments(message: unknown): string {
-  const attachments = readPath(message, ['attachments']);
-  if (!Array.isArray(attachments)) return '';
-  return attachments
-    .map((attachment) => (
-      firstString(attachment, ['artifactId', 'id'])
-      || firstString(attachment, ['label', 'filename', 'name'])
-    ))
-    .filter(Boolean)
-    .sort()
-    .join('|');
-}
-
-function comparableMessageRole(message: unknown): string {
-  return firstString(message, ['role', 'author', 'kind', 'source']).toLowerCase();
-}
-
-/** How far a fetched message's timestamp may trail the local one and still be
- *  read as that message (browser and daemon clocks are not synchronized). */
-const FETCHED_CLOCK_SKEW_MS = 5 * 60_000;
-
-function messageCreatedAt(message: unknown): number | null {
-  const value = asRecord(message).createdAt;
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
+/**
+ * The daemon's messages, plus each local message the daemon does not list yet.
+ * A local message is the daemon's message only by identity: the server id it
+ * was accepted under, or the `clientMessageId` it was posted with, which the
+ * daemon echoes on that message. Text is never compared: two sends of the
+ * same words are two messages, and a pending or failed send stays visible.
+ */
 export function mergeCompanionMessages(
   fetchedMessages: unknown[],
   localMessages: LocalCompanionMessage[],
@@ -203,31 +180,10 @@ export function mergeCompanionMessages(
 ): unknown[] {
   const rendered = [...fetchedMessages];
   const fetchedIds = new Set(fetchedMessages.map(extractMessageId).filter(Boolean));
-  // Each fetched message stands in for at most one local message.
-  const consumed = new Set<number>();
+  const fetchedClientIds = new Set(fetchedMessages.map((message) => firstString(message, ['clientMessageId'])).filter(Boolean));
   for (const message of localMessages) {
     if (message.sessionId !== sessionId) continue;
-    if (fetchedIds.has(message.id)) continue;
-    // A failed or still-pending send must stay visible, even when the same
-    // text was sent earlier and the daemon lists that earlier message. Text
-    // matching is only for sent messages whose client id the daemon did not echo.
-    if (message.deliveryState !== 'failed' && message.deliveryState !== 'local') {
-      const localText = comparableMessageText(message);
-      const localRole = comparableMessageRole(message);
-      const localAttachments = comparableMessageAttachments(message);
-      const match = fetchedMessages.findIndex((fetched, index) => {
-        if (consumed.has(index)) return false;
-        const fetchedAt = messageCreatedAt(fetched);
-        if (fetchedAt === null || fetchedAt < message.createdAt - FETCHED_CLOCK_SKEW_MS) return false;
-        return comparableMessageText(fetched) === localText
-          && comparableMessageRole(fetched) === localRole
-          && comparableMessageAttachments(fetched) === localAttachments;
-      });
-      if (match >= 0) {
-        consumed.add(match);
-        continue;
-      }
-    }
+    if (fetchedIds.has(message.id) || fetchedClientIds.has(message.id)) continue;
     rendered.push(message);
   }
   return rendered;

@@ -514,8 +514,9 @@ export class TerminalConversationManager extends PlatformConversationManager {
      * Returns true on success, false if the branch does not exist.
      */
     public override switchBranch(name: string): boolean {
+        const already = name === this.getCurrentBranch();
         const result = super.switchBranch(name);
-        if (result) {
+        if (result && !already) {
             this.retireNoticePublications();
             this.replacementGeneration++;
             // The other branch's turns sit at these indices now; folds, outcomes and kinds keyed to the old ones must not follow.

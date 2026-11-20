@@ -82,6 +82,7 @@ import {
   type InboundCapabilityPolicy,
 } from './capability-policy.js';
 import { anySignal } from './any-signal.js';
+import { OwnedScope } from '../../utils/owned-work.js';
 import type { MailboxCursorStore } from './cursor-store.js';
 import { DEFAULT_INBOUND_WATCHER_SETTINGS } from './ports.js';
 import type {
@@ -235,6 +236,8 @@ export class GmailMailSource implements InboundMailSource {
   private readonly capabilityRecheckMs: number;
   private readonly capabilityPolicy: InboundCapabilityPolicy;
   private readonly halt = new AbortController();
+  /** Owns the pass in flight: stop() waits for it (bounded), and a retired pass writes no cursor. */
+  private readonly passes = new OwnedScope('gmail mail source');
   private recheckWake: AbortController | null = null;
   private terminal: InboundMailTerminalFailure | null = null;
   /** When the current unbroken run of 403s with no named cause began, see `transientVerdict`. */
@@ -319,10 +322,16 @@ export class GmailMailSource implements InboundMailSource {
   async start(signal: AbortSignal): Promise<InboundCapabilityVerdict> {
     const combined = anySignal([signal, this.halt.signal]);
     try {
-      return await this.pollOnce(combined.signal);
+      return await this.pass(combined.signal);
     } finally {
       combined.dispose();
     }
+  }
+
+  /** One pass, owned by the source; after stop() none starts. */
+  private pass(signal: AbortSignal): Promise<InboundCapabilityVerdict> {
+    if (this.passes.closed) return Promise.resolve(this.verdict);
+    return this.passes.run('gmail poll', () => this.pollOnce(signal));
   }
 
   /**
@@ -349,7 +358,7 @@ export class GmailMailSource implements InboundMailSource {
         }
         if (combined.signal.aborted) return;
         try {
-          await this.pollOnce(combined.signal);
+          await this.pass(combined.signal);
         } catch (error) {
           // A store write or an injected dependency that threw. Not a
           // capability verdict, nothing about the grant is known to have
@@ -384,10 +393,17 @@ export class GmailMailSource implements InboundMailSource {
     this.historyRequested = true;
   }
 
-  /** Stop polling. Safe to call twice, and safe to call before `start`. */
+  /**
+   * Stop polling and wait for the pass in flight to end (up to 5 s). Safe to
+   * call twice, and safe to call before `start`. A pass still running then is
+   * logged by name; it is retired, so it writes no cursor.
+   */
   async stop(): Promise<void> {
     this.halt.abort();
-    await Promise.resolve();
+    const report = await this.passes.close('the Gmail source was stopped');
+    if (report.stillRunning.length > 0) {
+      this.note('delivery-failed', `The Gmail poll of '${this.deps.mailbox}' had not ended 5 s after the source stopped; it is retired and writes no position.`);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -479,7 +495,11 @@ export class GmailMailSource implements InboundMailSource {
    * (see the header); it is never announced.
    */
   private async establish(afterExpiry: boolean, signal: AbortSignal): Promise<InboundCapabilityVerdict> {
+    // The position this source last read: the store replaces a cursor only while it still holds this one.
+    const expectedHistoryId = afterExpiry ? this.position : null;
     const fresh = await this.deps.currentHistoryId();
+    // Stopped (or replaced by another source) while Google answered: this source writes no cursor.
+    if (signal.aborted || !this.passes.fence.current) return this.verdict;
     if (!fresh.ok) return this.recordFailure(fresh);
     if (!isHistoryId(fresh.value)) {
       // Refused rather than persisted: the store would reject it anyway, and
@@ -498,6 +518,7 @@ export class GmailMailSource implements InboundMailSource {
       mailbox: this.deps.mailbox,
       currentHistoryId: fresh.value,
       historyExpired: afterExpiry,
+      expectedHistoryId,
     });
     this.position = resolution.cursor.historyId;
     this.historyWindow = windowOf(resolution.cursor);

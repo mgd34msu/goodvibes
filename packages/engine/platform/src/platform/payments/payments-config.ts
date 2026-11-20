@@ -147,8 +147,9 @@ export function readNotifyChannels(config: PaymentsConfigReader): readonly strin
  * inheriting a number nobody chose, see `decidePurchase`, which treats a zero
  * item budget as a terminal refusal.
  */
-export function readBudgetLimits(config: PaymentsConfigReader, currency: string): BudgetLimits {
+export function readBudgetLimits(config: PaymentsConfigReader, currency: CurrencyCode): BudgetLimits {
   return {
+    currency,
     dailyItemMinorUnits: readMoneyMinorUnits(config, 'payments.budget.dailyItem', currency),
     dailyOverageMinorUnits: readMoneyMinorUnits(config, 'payments.budget.dailyOverage', currency),
     perPurchaseCeiling: {

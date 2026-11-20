@@ -106,6 +106,17 @@ The `bash-language-server` vendor-patch override is omitted from this snippet;
 it is a file-path override (`file:vendor/...`) specific to this repo's Bash LSP
 bundling, not a remediation an application root reproduces.
 
+`picomatch` is not in this list because no override can fix it: GHSA-fc5q-39xc-vjpf
+(exponential backtracking from a glob star inside a repeated extglob) has no fixed
+picomatch release. This repository patches every picomatch it installs
+(`patches/picomatch@*.patch`); an application root does not inherit a workspace
+patch. In the engine's dependency graph picomatch 2.x arrives only with the
+optional language servers (`bash-language-server`, `vscode-langservers-extracted`),
+whose file discovery reads glob patterns from the language servers' own settings,
+never from a web page, a file's content or a model. An application root that
+installs those optional packages and wants the fix applies the same patch with its
+own package manager's patch support.
+
 ## Reporting a vulnerability
 
 **Please do not file public GitHub issues for security vulnerabilities.**

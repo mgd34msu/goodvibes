@@ -461,6 +461,22 @@ export function hasFetchResponse(lines: readonly (string | ImapFetchFrame)[]): b
  * short sections may be quoted strings, and absent sections may be NIL. Returns null when there was no FETCH response at all, which is how a
  * UID that no longer exists is told apart from a section that is empty.
  */
+/**
+ * The octets of the one body section a FETCH returned: a literal byte for
+ * byte (an `8bit` or `binary` part is not passed through text), a quoted
+ * string as its text. Null when the response carries no such section or the
+ * server sent `NIL`: a missing section is not an empty one.
+ */
+export function extractFetchSectionBytes(frames: readonly ImapFetchFrame[]): Uint8Array | null {
+  const response = parseFetchResponses(frames)[0];
+  if (response === undefined || response.parseError !== null) return null;
+  const literalFrame = frames.find((frame) => frame.literalBytes !== undefined && /BODY\[[^\]]*\](?:<\d+>)?\s*$/i.test(frame.syntax));
+  if (literalFrame?.literalBytes !== undefined) return literalFrame.literalBytes;
+  const value = fetchSection(response, () => true);
+  if (value === null || value === '') return null;
+  return Buffer.from(value, 'utf8');
+}
+
 export function extractFetchSection(lines: readonly (string | ImapFetchFrame)[]): string | null {
   if (lines.some(line => typeof line !== 'string')) {
     const response = parseFetchResponses(lines)[0];

@@ -9,6 +9,7 @@ import { captureStrictJudgmentJson } from '../gate/judgment-result.js';
 import { observeImportFile, assertImportFileCurrent, type ImportFileObservation, type PreparedImportTransitionFacts } from './prepared-import.js';
 import type { PreparedConfigMutationReceipt } from './prepared-mutation.js';
 import type { SecretsManager } from './secrets.js';
+import { Secret, isSecret } from '../security/secret.js';
 import {
   buildOAuthAuthorizationStart,
   createOAuthState,
@@ -86,7 +87,13 @@ export interface PendingSubscriptionLogin {
   readonly createdAt: number;
 }
 
-export interface ProviderSubscription {
+/**
+ * A sign-in as it is kept at rest and carried in an import or export file:
+ * the access and refresh tokens as text. Only the store, an import and an
+ * export the owner asked for handle this shape; everything else reads a
+ * {@link ProviderSubscription}, whose tokens are `Secret`s.
+ */
+export interface SubscriptionGrant {
   readonly provider: string;
   readonly accessToken: string;
   readonly refreshToken?: string | undefined;
@@ -118,6 +125,46 @@ export interface ProviderSubscription {
    * file keeps the record and this number.
    */
   readonly tokenRevision?: number | undefined;
+}
+
+/**
+ * A stored sign-in as the manager hands it out. The two tokens are `Secret`s:
+ * a record printed, logged, serialized to JSON (`--output json`), put in a
+ * receipt or handed to a model shows `[secret ...]`, never a token. A sink
+ * that needs the text takes it with `reveal('dispatch')` (the request to the
+ * provider the token is for). `getAccessToken` and `resolveAccessToken`
+ * already return the text for the request that sends it.
+ */
+export interface ProviderSubscription extends Omit<SubscriptionGrant, 'accessToken' | 'refreshToken'> {
+  readonly accessToken: Secret;
+  readonly refreshToken?: Secret | undefined;
+}
+
+/** A grant with its tokens as `Secret`s, labelled with the provider they are for. */
+function exposeSubscription(grant: SubscriptionGrant): ProviderSubscription {
+  const { accessToken, refreshToken, ...record } = grant;
+  return {
+    ...record,
+    accessToken: Secret.of(accessToken, `${grant.provider} subscription access token`),
+    ...(refreshToken ? { refreshToken: Secret.of(refreshToken, `${grant.provider} subscription refresh token`) } : {}),
+  };
+}
+
+/** The at-rest form of a sign-in handed to the manager to store: a `Secret`'s text is taken for the store write. */
+function grantOf(subscription: ProviderSubscription | SubscriptionGrant): SubscriptionGrant {
+  const { accessToken, refreshToken, ...record } = subscription;
+  const text = (token: string | Secret): string => isSecret(token) ? token.reveal('store-write') : token;
+  return { ...record, accessToken: text(accessToken), ...(refreshToken ? { refreshToken: text(refreshToken) } : {}) };
+}
+
+/**
+ * A sign-in in the at-rest form an export file holds, for `/subscription
+ * bundle export`: the owner asked for a file that carries the tokens to another
+ * machine, which is a store of his choosing, so the tokens are taken out for a
+ * store write. The one place a handed-out record becomes text again.
+ */
+export function subscriptionExportForm(subscription: ProviderSubscription): SubscriptionGrant {
+  return grantOf(subscription);
 }
 
 /** The secret store a manager keeps sign-in tokens in. */
@@ -171,12 +218,12 @@ function parseTokenEntry(value: unknown): TokenEntry | null {
 }
 
 /** A record as the file holds it: the tokens are in the secret store, or inline in a file written before that. */
-type StoredSubscription = Omit<ProviderSubscription, 'accessToken' | 'refreshToken'> & {
+type StoredSubscription = Omit<SubscriptionGrant, 'accessToken' | 'refreshToken'> & {
   readonly accessToken?: string | undefined;
   readonly refreshToken?: string | undefined;
 };
 
-function storedForm(subscription: ProviderSubscription, revision: number): StoredSubscription {
+function storedForm(subscription: SubscriptionGrant, revision: number): StoredSubscription {
   const { accessToken: _access, refreshToken: _refresh, ...record } = subscription;
   return { ...record, tokenRevision: revision };
 }
@@ -202,11 +249,11 @@ const REFRESH_LEASE_MS = 35_000;
 const LEASE_POLL_FIRST_MS = 25;
 const LEASE_POLL_MAX_MS = 500;
 
-function sameGrant(a: Pick<ProviderSubscription, 'accessToken' | 'refreshToken'>, b: Pick<ProviderSubscription, 'accessToken' | 'refreshToken'>): boolean {
+function sameGrant(a: Pick<SubscriptionGrant, 'accessToken' | 'refreshToken'>, b: Pick<SubscriptionGrant, 'accessToken' | 'refreshToken'>): boolean {
   return a.accessToken === b.accessToken && a.refreshToken === b.refreshToken;
 }
 
-function withoutRefreshState(record: ProviderSubscription): ProviderSubscription {
+function withoutRefreshState(record: SubscriptionGrant): SubscriptionGrant {
   const { refreshingUntil: _lease, revokedAt: _revoked, ...rest } = record;
   return rest;
 }
@@ -222,15 +269,15 @@ function signedOutDuringRefresh(provider: string): Error {
 }
 
 type RefreshClaim =
-  | { readonly kind: 'settled'; readonly record: ProviderSubscription }
-  | { readonly kind: 'claimed'; readonly record: ProviderSubscription }
-  | { readonly kind: 'leased'; readonly record: ProviderSubscription; readonly until: number };
+  | { readonly kind: 'settled'; readonly record: SubscriptionGrant }
+  | { readonly kind: 'claimed'; readonly record: SubscriptionGrant }
+  | { readonly kind: 'leased'; readonly record: SubscriptionGrant; readonly until: number };
 type RefreshWrite =
-  | { readonly kind: 'saved' | 'newer'; readonly record: ProviderSubscription }
+  | { readonly kind: 'saved' | 'newer'; readonly record: SubscriptionGrant }
   | { readonly kind: 'gone' };
 type FailedRefreshSettlement =
   | { readonly kind: 'released' | 'gone' }
-  | { readonly kind: 'newer'; readonly record: ProviderSubscription };
+  | { readonly kind: 'newer'; readonly record: SubscriptionGrant };
 
 interface SubscriptionStore {
   readonly version: 1;
@@ -243,7 +290,7 @@ declare const subscriptionImportTransitionBrand: unique symbol;
 export interface PreparedSubscriptionImport { readonly [subscriptionImportBrand]: true }
 export interface PreparedSubscriptionImportTransition { readonly [subscriptionImportTransitionBrand]: true }
 export type SubscriptionImportEntry =
-  | { readonly kind: 'active'; readonly value: ProviderSubscription }
+  | { readonly kind: 'active'; readonly value: SubscriptionGrant }
   | { readonly kind: 'pending'; readonly value: PendingSubscriptionLogin };
 export interface PreparedSubscriptionImportFacts {
   readonly operation: 'import';
@@ -294,7 +341,7 @@ export const SUBSCRIPTION_EXPIRING_SOON_MS = 24 * 60 * 60 * 1000;
  * within {@link SUBSCRIPTION_EXPIRING_SOON_MS} of it. `revoked` and `expired`
  * need a new sign-in.
  */
-export function subscriptionState(record: Pick<ProviderSubscription, 'expiresAt' | 'refreshToken' | 'revokedAt'>, now = Date.now()): SubscriptionState {
+export function subscriptionState(record: Pick<SubscriptionGrant, 'expiresAt' | 'revokedAt'> & { readonly refreshToken?: string | Secret | undefined }, now = Date.now()): SubscriptionState {
   if (record.revokedAt !== undefined) return 'revoked';
   if (record.refreshToken || typeof record.expiresAt !== 'number' || !Number.isFinite(record.expiresAt)) return 'active';
   if (record.expiresAt <= now) return 'expired';
@@ -307,7 +354,7 @@ export function subscriptionState(record: Pick<ProviderSubscription, 'expiresAt'
  * lapsed with no refresh token is `expired`; a lapsed access token with a
  * refresh token is renewed on the next request, so it is `healthy`.
  */
-export function subscriptionAuthFreshness(record: Pick<ProviderSubscription, 'expiresAt' | 'refreshToken' | 'revokedAt'>, now = Date.now()): 'healthy' | 'expiring' | 'expired' {
+export function subscriptionAuthFreshness(record: Pick<SubscriptionGrant, 'expiresAt' | 'revokedAt'> & { readonly refreshToken?: string | Secret | undefined }, now = Date.now()): 'healthy' | 'expiring' | 'expired' {
   const state = subscriptionState(record, now);
   return state === 'revoked' || state === 'expired' ? 'expired' : state === 'expiring' ? 'expiring' : 'healthy';
 }
@@ -343,7 +390,7 @@ export class SubscriptionManager {
   private readonly path: string;
   private importGeneration = 0;
   /** One token refresh per provider at a time in this process; across processes the record's claim does the same. */
-  private readonly refreshes = new Map<string, Promise<ProviderSubscription>>();
+  private readonly refreshes = new Map<string, Promise<SubscriptionGrant>>();
   private readonly preparedImports = new WeakMap<PreparedSubscriptionImport, SubscriptionImportRecord>();
 
   /** Capture privately without invoking legacy recovery or publishing any token. */
@@ -433,8 +480,8 @@ export class SubscriptionManager {
       if (item.kind !== 'active') continue;
       const imported = subscriptions[item.provider];
       if (!imported || typeof imported.accessToken !== 'string' || !imported.accessToken) continue;
-      const revision = await this.storeTokens(imported as ProviderSubscription, this.read().subscriptions[item.provider]?.tokenRevision);
-      subscriptions[item.provider] = storedForm(imported as ProviderSubscription, revision);
+      const revision = await this.storeTokens(imported as SubscriptionGrant, this.read().subscriptions[item.provider]?.tokenRevision);
+      subscriptions[item.provider] = storedForm(imported as SubscriptionGrant, revision);
     }
     return { ...record.store, subscriptions };
   }
@@ -475,7 +522,7 @@ export class SubscriptionManager {
   private readonly movedInline = new Set<string>();
 
   /** The record with its tokens, or null when they are not where it says (signed out). */
-  private withTokens(record: StoredSubscription | undefined): ProviderSubscription | null {
+  private withTokens(record: StoredSubscription | undefined): SubscriptionGrant | null {
     if (!record) return null;
     if (record.tokenRevision === undefined || !this.secrets) {
       if (typeof record.accessToken !== 'string' || !record.accessToken) return null;
@@ -483,9 +530,9 @@ export class SubscriptionManager {
       // and moved into the secret store once, off this read.
       if (this.secrets && !this.movedInline.has(record.provider)) {
         this.movedInline.add(record.provider);
-        void this.moveInlineTokens(record as ProviderSubscription);
+        void this.moveInlineTokens(record as SubscriptionGrant);
       }
-      return record as ProviderSubscription;
+      return record as SubscriptionGrant;
     }
     const secret = this.readTokenSecret(record.provider);
     const entry = secret?.revision === record.tokenRevision ? secret
@@ -521,7 +568,7 @@ export class SubscriptionManager {
    * written after, naming it, so a reader never sees a record whose tokens
    * are not stored yet.
    */
-  private async storeTokens(subscription: ProviderSubscription, after: number | undefined): Promise<number> {
+  private async storeTokens(subscription: SubscriptionGrant, after: number | undefined): Promise<number> {
     const secret = this.readTokenSecret(subscription.provider);
     const revision = Math.max(after ?? 0, secret?.revision ?? 0) + 1;
     const value: TokenSecret = {
@@ -537,7 +584,7 @@ export class SubscriptionManager {
   }
 
   /** The form a record is written in: tokens in the secret store when there is one. */
-  private async storable(subscription: ProviderSubscription, after: number | undefined): Promise<StoredSubscription> {
+  private async storable(subscription: SubscriptionGrant, after: number | undefined): Promise<StoredSubscription> {
     if (!this.secrets) return subscription;
     return storedForm(subscription, await this.storeTokens(subscription, after));
   }
@@ -547,14 +594,14 @@ export class SubscriptionManager {
    * secret store, then drop them from its record. A record that changed
    * meanwhile (a new sign-in, a renewal) already has its tokens in the store.
    */
-  private async moveInlineTokens(inline: ProviderSubscription): Promise<void> {
+  private async moveInlineTokens(inline: SubscriptionGrant): Promise<void> {
     try {
       const revision = await this.storeTokens(inline, inline.tokenRevision);
       this.mutate((store) => {
         const current = store.subscriptions[inline.provider];
         if (!current || current.tokenRevision !== inline.tokenRevision
           || current.accessToken !== inline.accessToken || current.refreshToken !== inline.refreshToken) return false;
-        store.subscriptions[inline.provider] = storedForm({ ...(current as ProviderSubscription) }, revision);
+        store.subscriptions[inline.provider] = storedForm({ ...(current as SubscriptionGrant) }, revision);
         return true;
       }, (moved) => moved);
     } catch (error) {
@@ -637,8 +684,9 @@ export class SubscriptionManager {
   public list(): ProviderSubscription[] {
     return Object.values(this.read().subscriptions)
       .map((record) => this.withTokens(record))
-      .filter((record): record is ProviderSubscription => record !== null)
-      .sort((a, b) => a.provider.localeCompare(b.provider));
+      .filter((record): record is SubscriptionGrant => record !== null)
+      .sort((a, b) => a.provider.localeCompare(b.provider))
+      .map(exposeSubscription);
   }
 
   public listPending(): PendingSubscriptionLogin[] {
@@ -654,11 +702,17 @@ export class SubscriptionManager {
   }
 
   public get(provider: string): ProviderSubscription | null {
+    const grant = this.getGrant(provider);
+    return grant ? exposeSubscription(grant) : null;
+  }
+
+  /** The stored sign-in with its tokens as text, for this manager's own token handling only. */
+  private getGrant(provider: string): SubscriptionGrant | null {
     return this.withTokens(this.read().subscriptions[provider]);
   }
 
   public getAccessToken(provider: string): string | null {
-    const subscription = this.get(provider);
+    const subscription = this.getGrant(provider);
     if (!subscription?.overrideAmbientApiKeys) return null;
     return subscription.accessToken;
   }
@@ -677,7 +731,7 @@ export class SubscriptionManager {
     config: OAuthProviderConfig,
     options: { readonly rejectedAccessToken?: string | undefined } = {},
   ): Promise<string | null> {
-    const subscription = this.get(provider);
+    const subscription = this.getGrant(provider);
     if (!subscription) return null;
     if (subscription.revokedAt !== undefined) throw new SubscriptionSessionEndedError(provider);
     const rejected = options.rejectedAccessToken;
@@ -688,10 +742,10 @@ export class SubscriptionManager {
       return subscription.accessToken;
     }
     try {
-      return (await this.refreshOAuthToken(provider, config, { heldAccessToken: subscription.accessToken })).accessToken;
+      return (await this.refreshGrant(provider, config, { heldAccessToken: subscription.accessToken })).accessToken;
     } catch (error) {
       // Signed out while the refresh was in flight: there is no token to use.
-      if (this.get(provider) === null) return null;
+      if (this.getGrant(provider) === null) return null;
       throw error;
     }
   }
@@ -734,7 +788,7 @@ export class SubscriptionManager {
       state: pending.state,
     });
     const now = Date.now();
-    const subscription: ProviderSubscription = {
+    const subscription: SubscriptionGrant = {
       provider,
       accessToken: tokenResponse.accessToken,
       ...(typeof tokenResponse.refreshToken === 'string' && tokenResponse.refreshToken.length > 0
@@ -767,7 +821,7 @@ export class SubscriptionManager {
       this.assertLoginCurrent(provider, pending.state, superseded);
     }
     this.notifyChanged(provider);
-    return { ...subscription, ...(stored.tokenRevision !== undefined ? { tokenRevision: stored.tokenRevision } : {}) };
+    return exposeSubscription({ ...subscription, ...(stored.tokenRevision !== undefined ? { tokenRevision: stored.tokenRevision } : {}) });
   }
 
   /** Throws when `state` is no longer `provider`'s pending login: signed out, or a newer login started. */
@@ -799,7 +853,7 @@ export class SubscriptionManager {
   /**
    * Refresh a provider's access token, for every provider and every process
    * the same way. Callers in this process share one request; across processes
-   * the record itself carries the claim ({@link ProviderSubscription.refreshingUntil}),
+   * the record itself carries the claim ({@link SubscriptionGrant.refreshingUntil}),
    * taken under the store lock, so a rotating refresh token is sent once and
    * the other processes wait for its answer. `heldAccessToken` is the token
    * the caller has: a record that already holds a different one was renewed
@@ -807,11 +861,19 @@ export class SubscriptionManager {
    * The answer is merged into the store as it is after the request, never
    * over a logout or a newer sign-in.
    */
-  public refreshOAuthToken(
+  public async refreshOAuthToken(
     provider: string,
     config: OAuthProviderConfig,
     options: { readonly heldAccessToken?: string | undefined } = {},
   ): Promise<ProviderSubscription> {
+    return exposeSubscription(await this.refreshGrant(provider, config, options));
+  }
+
+  private refreshGrant(
+    provider: string,
+    config: OAuthProviderConfig,
+    options: { readonly heldAccessToken?: string | undefined } = {},
+  ): Promise<SubscriptionGrant> {
     const inFlight = this.refreshes.get(provider);
     if (inFlight) return inFlight;
     const refresh = this.refreshOAuthTokenOnce(provider, config, options.heldAccessToken).finally(() => {
@@ -825,7 +887,7 @@ export class SubscriptionManager {
     provider: string,
     config: OAuthProviderConfig,
     heldAccessToken: string | undefined,
-  ): Promise<ProviderSubscription> {
+  ): Promise<SubscriptionGrant> {
     let held = heldAccessToken;
     const deadline = Date.now() + 2 * REFRESH_LEASE_MS;
     let pause = LEASE_POLL_FIRST_MS;
@@ -866,8 +928,8 @@ export class SubscriptionManager {
   private async completeClaimedRefresh(
     provider: string,
     config: OAuthProviderConfig,
-    claimed: ProviderSubscription,
-  ): Promise<ProviderSubscription> {
+    claimed: SubscriptionGrant,
+  ): Promise<SubscriptionGrant> {
     let tokenResponse: Awaited<ReturnType<typeof refreshOAuthAccessToken>>;
     try {
       tokenResponse = await refreshOAuthAccessToken(config, claimed.refreshToken!);
@@ -922,7 +984,7 @@ export class SubscriptionManager {
    * when the provider refused it. Returns the stored record instead when it no
    * longer holds the grant this attempt spent (renewed or replaced meanwhile).
    */
-  private settleFailedRefresh(provider: string, claimed: ProviderSubscription, refused: boolean): ProviderSubscription | null {
+  private settleFailedRefresh(provider: string, claimed: SubscriptionGrant, refused: boolean): SubscriptionGrant | null {
     let settled: FailedRefreshSettlement;
     try {
       settled = this.mutate((store): FailedRefreshSettlement => {
@@ -945,12 +1007,12 @@ export class SubscriptionManager {
   }
 
   private refreshedRecord(
-    current: ProviderSubscription,
-    existing: ProviderSubscription,
+    current: SubscriptionGrant,
+    existing: SubscriptionGrant,
     tokenResponse: Awaited<ReturnType<typeof refreshOAuthAccessToken>>,
-  ): ProviderSubscription {
+  ): SubscriptionGrant {
     const now = Date.now();
-    const refreshed: ProviderSubscription = {
+    const refreshed: SubscriptionGrant = {
       ...withoutRefreshState(current),
       accessToken: tokenResponse.accessToken,
       refreshToken: typeof tokenResponse.refreshToken === 'string' && tokenResponse.refreshToken.length > 0
@@ -998,13 +1060,15 @@ export class SubscriptionManager {
     this.mutate((store) => { delete store.pending[provider]; });
   }
 
-  public async saveSubscription(subscription: ProviderSubscription): Promise<ProviderSubscription> {
+  /** Store a sign-in: one this manager handed out, or one read from an import or export file. */
+  public async saveSubscription(saved: ProviderSubscription | SubscriptionGrant): Promise<ProviderSubscription> {
+    const subscription = grantOf(saved);
     const stored = await this.storable(subscription, this.read().subscriptions[subscription.provider]?.tokenRevision);
     this.mutate((store) => {
       store.subscriptions[subscription.provider] = stored;
       delete store.pending[subscription.provider];
     });
     this.notifyChanged(subscription.provider);
-    return { ...subscription, ...(stored.tokenRevision !== undefined ? { tokenRevision: stored.tokenRevision } : {}) };
+    return exposeSubscription({ ...subscription, ...(stored.tokenRevision !== undefined ? { tokenRevision: stored.tokenRevision } : {}) });
   }
 }

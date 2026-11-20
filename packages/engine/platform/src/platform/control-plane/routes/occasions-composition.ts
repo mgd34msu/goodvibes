@@ -98,23 +98,42 @@ export interface OccasionsCompositionDeps {
   readonly sweepsHere?: (() => boolean) | undefined;
 }
 
+/** The calendar UID of one occurrence's mirrored event: the same for every attempt at it. */
+export function occasionMirrorUid(occasionId: string, occurrence: string): string {
+  return `goodvibes-occasion-${occasionId.replace(/[^A-Za-z0-9._-]/g, '_')}-${occurrence}`;
+}
+
 /**
  * Mirror an occasion as one all-day event on the connected calendar. Only the
  * title is written, never the person or the profile's own wording of the line.
  * An occurrence that already has an external id is not written again.
+ *
+ * The event carries a UID fixed per occurrence, so a create whose answer was
+ * lost (outcome unknown) and is tried again on the next sweep is refused by
+ * the calendar as already existing; that event is then looked up by its UID
+ * (one query) and recorded, instead of a second event being made.
  */
 export function createOccasionCalendarMirror(
-  calendar: Pick<CalendarGatewayService, 'createEvent'>,
+  calendar: Pick<CalendarGatewayService, 'createEvent' | 'getEvent'>,
 ): OccasionCalendarMirror {
   return {
     mirror: async ({ occasion, occurrence, existingExternalId }) => {
       if (existingExternalId !== undefined) return existingExternalId;
-      const created = await calendar.createEvent({
-        title: occasion.title,
-        start: occurrence,
-        end: addDays(occurrence, 1),
-      });
-      return created.eventId;
+      const uid = occasionMirrorUid(occasion.id, occurrence);
+      try {
+        const created = await calendar.createEvent({
+          title: occasion.title,
+          start: occurrence,
+          end: addDays(occurrence, 1),
+          uid,
+        });
+        return created.eventId;
+      } catch (error) {
+        // An earlier attempt may have made it: look for it by its UID before reporting a failure.
+        const found = await calendar.getEvent(uid).catch(() => undefined);
+        if (found !== undefined) return found.id;
+        throw error;
+      }
     },
   };
 }
@@ -291,7 +310,7 @@ export interface OccasionsInstallDeps {
   readonly surfaceRoot: string;
   readonly channelDeliveryRouter?: Pick<ChannelDeliveryRouter, 'deliver'> | undefined;
   /** The connected calendar, when there is one to mirror into. */
-  readonly calendarGateway?: Pick<CalendarGatewayService, 'createEvent'> | undefined;
+  readonly calendarGateway?: Pick<CalendarGatewayService, 'createEvent' | 'getEvent'> | undefined;
   /** Carries the "a reminder is waiting" event to connected Agents. */
   readonly runtimeBus?: Pick<RuntimeEventBus, 'emit'> | undefined;
   /** Which group roles this machine holds; the reminders run where the occasions role is held. */

@@ -3,6 +3,9 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
 import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
+import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
+import { isThisMachineHost } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target-resolver';
+import { bindCredential, daemonAuthHeaders, daemonTarget, type BoundCredentialSource, type DaemonTarget } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
 export type LiveVerificationStatus = 'pass' | 'warn' | 'fail' | 'skip';
 export interface LiveVerificationCheck {
   id: string;
@@ -196,7 +199,7 @@ export function createVerificationPrimitives(policy: {
     id: string,
     title: string,
     url: string,
-    token: string | undefined,
+    target: DaemonTarget,
     validate: (
       status: number,
       body: string,
@@ -206,17 +209,19 @@ export function createVerificationPrimitives(policy: {
       detail?: string | undefined;
     },
   ): Promise<LiveVerificationCheck> {
-    if (!token) {
+    if (!target.credential) {
       return {
         id,
         title,
         status: 'skip',
-        summary: policy.missingBearer,
+        summary: target.thisMachine ? policy.missingBearer
+          : `${policy.missingBearer} No token is held for ${target.origin.baseUrl}; this machine's daemon token is never sent to another daemon (pass its own token).`,
       };
     }
     try {
+      // The one header builder: refuses a URL on any origin but the target's.
       const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: daemonAuthHeaders(target, url),
         signal: AbortSignal.timeout(5000),
       });
       const body = await response.text();
@@ -309,17 +314,7 @@ export function verificationDaemonHome(homeDir: string, env: NodeJS.ProcessEnv =
   return env['GOODVIBES_DAEMON_HOME']?.trim() ? resolveGoodVibesDaemonHome(homeDir, env) : join(homeDir, 'daemon');
 }
 
-/**
- * Read-only verifier discovery. Product-specific environment precedence is supplied explicitly;
- * `tokenPath` overrides the live operator token file of the daemon home (see verificationDaemonHome).
- */
-export function readVerificationHostToken(
-  homeDir: string,
-  envKeys: readonly string[],
-  readJson: (path: string) => unknown,
-  tokenPath: string = operatorTokenPath(verificationDaemonHome(homeDir)),
-): string | undefined {
-  for (const key of envKeys) if (process.env[key]) return process.env[key];
+function readLocalOperatorToken(tokenPath: string, readJson: (path: string) => unknown): string | undefined {
   if (!existsSync(tokenPath)) return undefined;
   try {
     const data = readJson(tokenPath);
@@ -328,6 +323,63 @@ export function readVerificationHostToken(
     return undefined;
   }
   return undefined;
+}
+
+/** The control-plane port the product's own settings file names, else 3421. */
+function verificationLocalPort(settingsPath: string, readJson: (path: string) => unknown): number {
+  if (!existsSync(settingsPath)) return 3421;
+  try {
+    const value = (readJson(settingsPath) as { controlPlane?: { port?: unknown } })?.controlPlane?.port;
+    return typeof value === 'number' && Number.isFinite(value) ? value : 3421;
+  } catch {
+    return 3421;
+  }
+}
+
+export interface VerificationHostTargetInput {
+  readonly homeDir: string;
+  /** The daemon URL the run checks (see {@link resolveVerificationHostUrl}). */
+  readonly url: string;
+  /** A token the person passed for this run: bound to `url`'s origin. */
+  readonly explicitToken?: string | undefined;
+  /** Environment variables holding a token the person set for the host being checked (the connected host). */
+  readonly hostEnvKeys?: readonly string[] | undefined;
+  /** Environment variables holding this machine's daemon token (GOODVIBES_DAEMON_TOKEN). */
+  readonly localEnvKeys?: readonly string[] | undefined;
+  readonly readJson: (path: string) => unknown;
+  /** The product's own settings file, whose `controlPlane.port` is this machine's daemon port. */
+  readonly settingsPath?: string | undefined;
+  /** Overrides the operator token file of the daemon home (see verificationDaemonHome). */
+  readonly tokenPath?: string | undefined;
+}
+
+/**
+ * The daemon a verification run talks to and the credential bound to it: a
+ * token passed or set for the host being checked goes to that host; this
+ * machine's daemon token (its environment override or the operator token
+ * file) only when the URL is this machine's daemon, a local address at the
+ * port the settings name. Any other daemon gets no credential, so its checks
+ * are skipped instead of carrying this machine's token there.
+ */
+export function verificationHostTarget(input: VerificationHostTargetInput): DaemonTarget {
+  let origin: ReturnType<typeof parseDaemonOrigin> = null;
+  try { origin = parseDaemonOrigin(new URL(input.url).origin); } catch { origin = null; }
+  if (!origin) throw new TypeError(`${input.url} is not a daemon address (scheme://host:port).`);
+  const thisMachine = isThisMachineHost(origin.host)
+    && origin.port === verificationLocalPort(input.settingsPath ?? join(input.homeDir, 'tui', 'settings.json'), input.readJson);
+  const bound = (token: string, source: BoundCredentialSource): DaemonTarget => daemonTarget(origin!, bindCredential(origin!, token, source), thisMachine);
+  if (input.explicitToken?.trim()) return bound(input.explicitToken, 'explicit');
+  for (const key of input.hostEnvKeys ?? []) {
+    const value = process.env[key]?.trim();
+    if (value) return bound(value, 'environment');
+  }
+  if (!thisMachine) return daemonTarget(origin, null, false);
+  for (const key of input.localEnvKeys ?? []) {
+    const value = process.env[key]?.trim();
+    if (value) return bound(value, 'environment');
+  }
+  const local = readLocalOperatorToken(input.tokenPath ?? operatorTokenPath(verificationDaemonHome(input.homeDir)), input.readJson);
+  return local ? bound(local, 'local-daemon') : daemonTarget(origin, null, true);
 }
 /** `settingsPath` is the calling product's own settings file; it defaults to the terminal product's. */
 export function resolveVerificationHostUrl(

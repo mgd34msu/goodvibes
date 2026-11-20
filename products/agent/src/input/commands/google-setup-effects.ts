@@ -1,4 +1,4 @@
-import { SecretWriteCommittedError } from '@goodvibes-jev/engine/platform/platform/config';
+import { SecretWriteCommittedError, localOwnerActor } from '@goodvibes-jev/engine/platform/platform/config';
 import { formatRefusal } from '@goodvibes-jev/engine/errors';
 /** Exact setup writes consume an observation once and retain independent request authority. */
 import type { ConfigManager, SecretsManager, ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
@@ -41,7 +41,7 @@ export function googleSetupWritePorts(config: ConfigManager, secrets: SecretsMan
         ownership.assertCurrent(); ownership.consumeObservation();
         // One admission and one write: the same checks a direct settings change gets, including
         // the rules across settings and a stricter project value.
-        const result = config.setMany([{ key: key as ConfigKey, value }], { kind: 'owner', surface: 'agent' });
+        const result = config.setMany([{ key: key as ConfigKey, value }], localOwnerActor());
         if (!result.ok) {
           stopped = true;
           if (result.saved.length > 0) throw new GoogleSetupWriteCommittedError();

@@ -33,6 +33,7 @@ const CALENDAR_EVENT_DETAIL_SCHEMA = objectSchema({
   description: STRING_SCHEMA,
   attendees: arraySchema(STRING_SCHEMA),
   recurrence: STRING_SCHEMA,
+  revision: STRING_SCHEMA,
 }, ['id', 'title', 'start', 'end']);
 
 /**
@@ -84,7 +85,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.events.get',
     title: 'Get Calendar Event',
-    description: 'Return the full event object including attendees, recurrence, and raw iCalendar UID. An occurrence id from calendar.events.list returns that occurrence (its own start, end and any change made to it), not the first of its series.',
+    description: 'Return the full event object including attendees, recurrence, raw iCalendar UID and revision (the calendar\'s version of it, to send back as expectedRevision on calendar.events.update). An occurrence id from calendar.events.list returns that occurrence (its own start, end and any change made to it), not the first of its series.',
     category: 'calendar',
     effects: ['calendar.read'],
     http: { method: 'GET', path: '/api/calendar/events/{eventId}' },
@@ -125,7 +126,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
     replay: IDEMPOTENCY_KEY_REPLAY,
     recipients: ['attendees[]'],
     title: 'Update Calendar Event',
-    description: 'Change an event on the configured calendar (Google or CalDAV): only the fields sent change (attendees replaces the guest list; start and end are both dates for an all-day event or both date-times). Requires explicit confirmation (confirm: true). An unknown eventId is a 404; an id that names a whole recurring series is refused with 409 CALENDAR_SERIES_NOT_SUPPORTED (on Google, one occurrence is changed by the id calendar.events.list gives it); an event that changed on the calendar after it was read is refused with 409 CALENDAR_EVENT_CHANGED and nothing is written. A backend that cannot change events answers 501 CALENDAR_NOT_SUPPORTED.',
+    description: 'Change an event on the configured calendar (Google or CalDAV): only the fields sent change (attendees replaces the guest list; start and end are both dates for an all-day event or both date-times). Requires explicit confirmation (confirm: true). An unknown eventId is a 404; an id that names a whole recurring series is refused with 409 CALENDAR_SERIES_NOT_SUPPORTED (on Google, one occurrence is changed by the id calendar.events.list gives it); an event that changed on the calendar after it was read is refused with 409 CALENDAR_EVENT_CHANGED and nothing is written. Send expectedRevision (the revision calendar.events.get returned when the event was shown) so a change made elsewhere after it was shown is refused the same way; read the event again and repeat the change. A backend that cannot change events answers 501 CALENDAR_NOT_SUPPORTED.',
     category: 'calendar',
     effects: ['calendar.administer', 'outward.send'],
     dangerous: true,
@@ -139,6 +140,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
       attendees: arraySchema(STRING_SCHEMA),
       location: STRING_SCHEMA,
       calendarId: STRING_SCHEMA,
+      expectedRevision: STRING_SCHEMA,
       confirm: BOOLEAN_SCHEMA,
     }, ['eventId', 'confirm']),
     outputSchema: objectSchema({

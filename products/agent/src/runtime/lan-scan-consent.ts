@@ -131,3 +131,13 @@ export function startLanScanNow(): boolean {
   startPass(lastGateOptions, true);
   return true;
 }
+
+/**
+ * Look for model servers on this computer again (never the network): first
+ * run's "look again" when none was found. False before the start-up pass ran.
+ */
+export function scanThisComputerNow(): boolean {
+  if (!lastGateOptions) return false;
+  startPass(lastGateOptions, false);
+  return true;
+}

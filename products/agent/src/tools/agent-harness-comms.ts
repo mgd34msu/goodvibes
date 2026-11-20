@@ -258,7 +258,12 @@ export async function unifiedInboxSummary(
     sources: inbox.sources.map(({ error: _error, ...source }) => source),
     routeBindingItems: inbox.routeBindingItems,
     inboundChannelFeed: inbox.inboundChannelFeed.available
-      ? { available: true, methodId: inbox.inboundChannelFeed.methodId, total: inbox.inboundChannelFeed.total, truncated: inbox.inboundChannelFeed.truncated }
+      ? {
+        available: true, methodId: inbox.inboundChannelFeed.methodId, total: inbox.inboundChannelFeed.total, truncated: inbox.inboundChannelFeed.truncated,
+        partial: inbox.inboundChannelFeed.partial, more: inbox.inboundChannelFeed.page.more,
+        ...(inbox.inboundChannelFeed.page.next !== undefined ? { nextCursor: inbox.inboundChannelFeed.page.next } : {}),
+        providers: inbox.inboundChannelFeed.providers.map(({ provider, state }) => ({ provider, state })),
+      }
       : { available: false, methodId: inbox.inboundChannelFeed.methodId, reason: inbox.inboundChannelFeed.reason },
     // The third-party text goes to the model once, in `untrusted`; `formatted` names where it is.
     formatted: formatUnifiedInbox(inbox, { thirdParty: 'elsewhere' }),

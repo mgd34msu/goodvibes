@@ -6,6 +6,7 @@
  */
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { adoptedDaemonUrl } from './onboarding/onboarding-wizard-helpers.ts';
+import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config';
 import { readConnectedDaemonToken, writeConnectedDaemonToken } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-credentials';
 import { beginOnboardingOperation, endOnboardingOperation } from './onboarding-operation.ts';
 import type { InputHandlerLike as InputHandler } from './handler-types.ts';
@@ -66,7 +67,8 @@ export async function handleConnectExistingDaemonForHandler(handler: InputHandle
   handler.requestRender();
   const configManager = handler.uiServices.platform.configManager;
   const homeDirectory = handler.uiServices.environment.homeDirectory;
-  const url = adoptedDaemonUrl(host, port);
+  // The scheme of the daemon this terminal already talks to is kept: an https daemon stays https.
+  const url = adoptedDaemonUrl(host, port, parseDaemonOrigin(configManager.get('daemon.connectedHost.url'))?.scheme ?? 'http');
   // A failed attempt puts back this terminal's own address and the token it held
   // for that address; nothing shared with the local daemon was changed.
   const previous = {

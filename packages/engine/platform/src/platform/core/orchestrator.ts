@@ -28,7 +28,8 @@ import type { ContentPart } from '../providers/interface.js';
 import { notifyCompletion } from '../utils/notify.js';
 import { logger } from '../utils/logger.js';
 import type { PermissionManager } from '../permissions/manager.js';
-import { startTurnForOwnerInput, withTurnSurface } from '../security/turn-boundary.js';
+import { currentTurn, inputOriginIsOwnerDirect, startTurnForOwnerInput, turnSurfaceOf, withTurn } from '../security/turn-boundary.js';
+import type { Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import {
   isPassiveCodeInjectionEnabled,
   isPassiveKnowledgeInjectionEnabled,
@@ -50,7 +51,7 @@ import type { ContractIntake, ContractRunner } from '../contract/index.js';
 import { randomUUID } from 'node:crypto';
 import { TurnSubmissionOwner } from './turn-submission.js';
 import { CacheHitTracker } from '../providers/cache-strategy.js';
-import { IdempotencyStore } from '../runtime/idempotency/index.js';
+import { IdempotencyStore, type IdempotencyClaim } from '../runtime/idempotency/index.js';
 import { toolFormatTelemetry } from '../runtime/telemetry/tool-format-telemetry.js';
 import { type ReconciliationReason } from './tool-reconciliation.js';
 import type { FeatureFlagManager } from '../runtime/feature-flags/manager.js';
@@ -138,6 +139,44 @@ export interface OrchestratorUserInputOptions {
    * named it. The message goes to the contract as the answer, with no model request.
    */
   readonly answersContractQuestion?: string | undefined;
+  /**
+   * An authenticated operator sent this text (a hosted session's operator
+   * message): the turn's request is the owner's, as owner-direct input is.
+   * Set by the host that authenticated the sender, never from a message body.
+   */
+  readonly ownerRequest?: boolean | undefined;
+}
+
+/** The request a turn answered, kept so work it started is recovered against it and nothing else. */
+interface TurnRequest {
+  readonly text: string;
+  readonly content?: ContentPart[] | undefined;
+  readonly origin: TurnInputOrigin | undefined;
+  readonly ownerRequest: boolean;
+  readonly guest?: GuestCaller | undefined;
+}
+
+/** A channel guest whose turn a message arrived in (security/turn-boundary.ts withGuestTurn): who, and on which channel. */
+interface GuestCaller {
+  readonly actor: Actor;
+  readonly surface: string | undefined;
+}
+
+/** The guest of the turn in scope, or undefined when it is not a guest's. */
+function guestCaller(): GuestCaller | undefined {
+  const turn = currentTurn();
+  return turn?.actor?.class === 'guest' ? { actor: turn.actor, surface: turn.surface } : undefined;
+}
+
+/** How many turns' requests are kept for recovering the background work they started. */
+const MAX_TURN_REQUESTS = 32;
+
+/** Whether a conversation's user message is the recorded request (same text, or the same parts). */
+function sameRequestContent(content: string | ContentPart[], request: TurnRequest): boolean {
+  if (typeof content !== 'string') return request.content !== undefined && JSON.stringify(content) === JSON.stringify(request.content);
+  // Images a model cannot read are stripped when the message is added, leaving its text.
+  const textOnly = request.content?.filter((part): part is { type: 'text'; text: string } => part.type === 'text').map((part) => part.text).join('');
+  return content === request.text || (textOnly !== undefined && content === textOnly);
 }
 
 /**
@@ -255,7 +294,9 @@ export class Orchestrator {
   public streamingInputTokens = 0;
   /** Output tokens received so far in the current streaming turn (one per delta chunk). */
   public streamingOutputTokens = 0;
-  public messageQueue: { id: string; queuedAt: number; text: string; content?: ContentPart[] | undefined; options?: OrchestratorUserInputOptions | undefined; nativeTurn?: NativeConversationTurnAdmission | undefined; settlement?: QueuedInputSettlement | undefined }[] = [];
+  public messageQueue: { id: string; queuedAt: number; text: string; content?: ContentPart[] | undefined; options?: OrchestratorUserInputOptions | undefined; nativeTurn?: NativeConversationTurnAdmission | undefined; settlement?: QueuedInputSettlement | undefined;
+    /** The channel guest the message was sent by, taken when it was queued. */
+    guest?: GuestCaller | undefined }[] = [];
 
   private animInterval: ReturnType<typeof setInterval> | null = null;
   private abortController: AbortController | null = null;
@@ -269,7 +310,8 @@ export class Orchestrator {
   /** Monotonic id source for queued-message ids. */
   private queuedMessageSeq = 0;
   /** Where the most recent user turn's input arrived, so a background-work recovery turn runs under the same authority. */
-  private lastUserTurnOrigin: TurnInputOrigin | undefined;
+  /** The request of each recent turn, by turn id: background work names the turn that started it. */
+  private readonly turnRequests = new Map<string, TurnRequest>();
   private nativeConversationProjectId: string | undefined;
   private activeNativeConversationPermit: NativeConversationTurnPermit | undefined;
   private nativeAdmissionAbort: AbortController | null = null;
@@ -329,7 +371,7 @@ export class Orchestrator {
   public currentSubmissionKey: string | null = null;
   private readonly submissionOwner = new TurnSubmissionOwner();
 
-  /** True when the turn failed (set in catch; read in finally for markComplete vs markFailed). */
+  /** True when the turn failed (set in catch; read in finally to settle the submission claim complete or failed). */
   private _turnFailed = false;
   /** The failover move in force for the running turn (providers/failover.ts), cleared when the turn ends. */
   private turnFailover: { readonly configuredRegistryKey: string; readonly servingRegistryKey: string } | null = null;
@@ -593,20 +635,32 @@ export class Orchestrator {
   private async resumeBackgroundWork(items: readonly ConversationFollowUpItem[], signal: AbortSignal): Promise<void> {
     signal.throwIfAborted();
     if (this.disposed) return;
-    const lastUser = this.conversation.getMessageSnapshot().findLast(message => message.role === 'user');
-    if (!lastUser || lastUser.role !== 'user' || lastUser.cancelled) return;
-    const content = typeof lastUser.content === 'string' ? undefined : lastUser.content;
-    const text = typeof lastUser.content === 'string' ? lastUser.content
-      : lastUser.content.filter(part => part.type === 'text').map(part => part.text).join('\n');
-    const evidence = '[Background work evidence] ' + JSON.stringify(items)
+    // Work is recovered against the request of the turn that started it, never
+    // against whatever user message happens to be the latest. That request must
+    // still be in the conversation (not rewound or compacted away); work no turn
+    // of this conversation started is reported and not rerun.
+    // A batch holds the work of one turn (orchestrator-follow-up-runtime.ts takeBatch).
+    const turnId = items[0]?.turnId;
+    const request = turnId === undefined ? undefined : this.turnRequests.get(turnId);
+    const evidence = '[Background work evidence] ' + JSON.stringify(items.map(({ turnId: _turn, ...item }) => item))
       + '\nReconcile these outcomes with the original request. Recover unfinished authorized work using tools and deliver all requested output. An internal failure does not cancel the request.';
     // Shown here; the recovery turn below carries the same evidence to the model.
     this.conversation.addNotice(evidence, { level: 'info', kind: 'operational' });
+    const present = request !== undefined && this.conversation.getMessageSnapshot().some((message) => message.role === 'user'
+      && !message.cancelled && sameRequestContent(message.content, request));
+    if (!present) {
+      this.conversation.addNotice(turnId === undefined
+        ? '[Background work] This work was not started by a request in this conversation, so nothing was run again for it.'
+        : '[Background work] The request that started this work is no longer in the conversation (it was rewound, compacted or never here), so nothing was run again for it. Ask again if the work is still wanted.',
+      { level: 'info', kind: 'operational' });
+      this.requestRender();
+      return;
+    }
     // Native execution still requires its owning host's live permit; a background
     // notice can never manufacture a fresh native grant.
     if (this.nativeConversationProjectId) { this.requestRender(); return; }
-    // The recovery turn continues the last user's request, so it runs under that request's input surface, not the context that happened to schedule the flush.
-    try { await withTurnSurface(this.lastUserTurnOrigin, () => this.runTurn(text, content, undefined, undefined, evidence)); }
+    // The recovery turn continues that request, under that request's own input surface and authority.
+    try { await this.runScopedTurn(request.text, request.content, request.origin ? { origin: request.origin, ...(request.ownerRequest ? { ownerRequest: true } : {}) } : (request.ownerRequest ? { ownerRequest: true } : undefined), undefined, evidence, request.guest); }
     finally {
       // Retire the background batch before the queued user's startThinking()
       // cancels pending background work; otherwise it requeues this finished batch.
@@ -754,6 +808,8 @@ export class Orchestrator {
     content?: ContentPart[],
     options?: OrchestratorUserInputOptions | undefined,
   ): Promise<void> {
+    // Read now: a queued message runs later, inside whatever turn drains the queue.
+    const callerGuest = guestCaller();
     // Authenticate and detach before any queue, transcript, or event mutation.
     if (options?.nativeConversationTurnPermit) {
       if (!this.nativeConversationProjectId) throw new NativeConversationTurnAdmissionError('identity_mismatch');
@@ -775,7 +831,7 @@ export class Orchestrator {
       const id = `qm-${this.queuedMessageSeq}`;
       let settled: Promise<void> | undefined, settlement: QueuedInputSettlement | undefined;
       if (options?.awaitQueuedTurn) settled = new Promise<void>((resolve, reject) => { settlement = { resolve, reject }; });
-      this.messageQueue.push({ id, queuedAt: Date.now(), text, content, options, nativeTurn, settlement });
+      this.messageQueue.push({ id, queuedAt: Date.now(), text, content, options, nativeTurn, settlement, ...(callerGuest ? { guest: callerGuest } : {}) });
       this.emitQueueChange('enqueued', id);
       this.requestRender();
       return settled;
@@ -785,8 +841,7 @@ export class Orchestrator {
     getSessionLineageTracker(this.coreServices, this.ownedSessionLineageTracker).setOriginalTask(text);
 
     // Run this turn, then any messages queued while it was occupied.
-    this.lastUserTurnOrigin = options?.origin;
-    try { await withTurnSurface(options?.origin, () => this.runTurn(text, content, options, nativeTurn)); }
+    try { await this.runScopedTurn(text, content, options, nativeTurn, undefined, callerGuest); }
     finally {
       if (options?.requireImmediateNativeTurn && nativeTurn) {
         // The native owner joins only this input. Other queued turns have their
@@ -840,8 +895,7 @@ export class Orchestrator {
       const next = this.messageQueue.shift()!;
       this.emitQueueChange('delivered', next.id);
       try {
-        this.lastUserTurnOrigin = next.options?.origin;
-        await withTurnSurface(next.options?.origin, () => this.runTurn(next.text, next.content, next.options, next.nativeTurn));
+        await this.runScopedTurn(next.text, next.content, next.options, next.nativeTurn, undefined, next.guest);
         next.settlement?.resolve();
       } catch (error) {
         next.settlement?.reject(error);
@@ -918,12 +972,51 @@ export class Orchestrator {
     this.requestRender();
   }
 
+  /**
+   * Run one turn inside its own turn record (security/turn-boundary.ts): its
+   * id, session, input surface and origin, the request it answers and, when the
+   * owner or an authenticated operator sent it, the same text as the owner's.
+   * Tools read the turn from there, so a message queued behind it, or another
+   * session's turn in the same process, can never change what this turn sees.
+   */
+  private runScopedTurn(
+    text: string,
+    content: ContentPart[] | undefined,
+    options: OrchestratorUserInputOptions | undefined,
+    nativeTurn?: NativeConversationTurnAdmission,
+    resume?: string,
+    guest?: GuestCaller,
+  ): Promise<void> {
+    const turnId = randomUUID();
+    const origin = options?.origin;
+    // A guest's message is never the owner's request, whatever its origin says.
+    const ownerRequest = guest === undefined && (options?.ownerRequest === true || inputOriginIsOwnerDirect(origin));
+    if (!resume) {
+      this.turnRequests.set(turnId, Object.freeze({ text, ...(content ? { content } : {}), origin, ownerRequest, ...(guest ? { guest } : {}) }));
+      while (this.turnRequests.size > MAX_TURN_REQUESTS) this.turnRequests.delete(this.turnRequests.keys().next().value!);
+    }
+    return withTurn({
+      turnId,
+      sessionId: this.currentSessionId || null,
+      // A guest's turn keeps the guest and the channel it came in on (the gate reads both).
+      surface: guest ? guest.surface : turnSurfaceOf(origin),
+      ...(guest ? { actor: guest.actor } : {}),
+      origin,
+      requestText: text,
+      ownerRequestText: ownerRequest ? text : null,
+      // A turn of this conversation runs as no agent; an agent's own loop sets its id.
+      callerAgentId: currentTurn()?.callerAgentId ?? null,
+      ownerSessionId: this.currentSessionId || null,
+    }, () => this.runTurn(text, content, options, nativeTurn, resume, turnId));
+  }
+
   private async runTurn(
     text: string,
     content?: ContentPart[],
     options?: OrchestratorUserInputOptions | undefined,
     nativeTurn?: NativeConversationTurnAdmission,
     resume?: string,
+    turnId: string = randomUUID(),
   ): Promise<void> {
     // Ordinary owner input begins a new exposure window even if configuration
     // cannot be read. Native deliveries acquire this boundary only after their
@@ -944,7 +1037,7 @@ export class Orchestrator {
           const classic = nativeTurn.source.sourceRef.classic;
           if (classic?.policy === 'Hybrid' && classic.reason === 'unavailable') inheritClassicDecisionFallback();
         }
-        await this.runTurnBody(text, content, options, nativeTurn, resume);
+        await this.runTurnBody(text, content, options, nativeTurn, resume, turnId);
       }
       catch (error) { if (nativeTurn) failNativeConversationTurn(nativeTurn, false); throw error; }
       finally {
@@ -997,10 +1090,11 @@ export class Orchestrator {
 
   private async runTurnBody(
     text: string,
-    content?: ContentPart[],
-    options?: OrchestratorUserInputOptions,
-    nativeTurn?: NativeConversationTurnAdmission,
-    resume?: string,
+    content: ContentPart[] | undefined,
+    options: OrchestratorUserInputOptions | undefined,
+    nativeTurn: NativeConversationTurnAdmission | undefined,
+    resume: string | undefined,
+    scopedTurnId: string,
   ): Promise<void> {
     // Where "this turn" acquires a beginning: an owner-started turn ends the
     // previous untrusted-content window, a channel- or schedule-started one
@@ -1019,9 +1113,9 @@ export class Orchestrator {
     const providerRegistry = requireProviderRegistry(this.coreServices);
 
     // --- Phase 1: Preflight, idempotency, event emission, plan injection ---
-    const preflight = this.runTurnPreflight(text, content, options, !!resume);
+    const preflight = this.runTurnPreflight(text, content, options, !!resume, scopedTurnId);
     if (!preflight) return; // duplicate in-flight turn was rejected and reported
-    const { submissionKey, turnId } = preflight;
+    const { submissionKey, submissionClaim, turnId } = preflight;
     const hookOwner = this.turnHookOwner!;
     // `answered`: the checked final answer is in the transcript and its
     // completion is registered. From then on the turn's outcome is that
@@ -1080,7 +1174,7 @@ export class Orchestrator {
       // A user turn sent after the failure completed: the failed prompt is no longer offered again.
       const failed = this.lastFailedUserTurn;
       if (failed && userTurnSeq !== undefined && !this._turnFailed && userTurnSeq > failed.clearsAfterSeq) this.lastFailedUserTurn = null;
-      this.finalizeTurn(turnStartTime, submissionKey, turnId, configManager);
+      this.finalizeTurn(turnStartTime, submissionKey, submissionClaim, turnId, configManager);
     }
   }
 
@@ -1090,8 +1184,9 @@ export class Orchestrator {
     text: string,
     content: ContentPart[] | undefined,
     options: OrchestratorUserInputOptions | undefined,
-    resume = false,
-  ): { submissionKey: string; turnId: string } | null {
+    resume: boolean,
+    turnId: string,
+  ): { submissionKey: string; submissionClaim: IdempotencyClaim | undefined; turnId: string } | null {
     const idempotencyStore = getIdempotencyStore(this.coreServices, this.ownedIdempotencyStore);
     const submissionKey = this.submissionOwner.keyFor({
       sessionId: this.currentSessionId,
@@ -1099,8 +1194,8 @@ export class Orchestrator {
     }, !!options?.nativeConversationTurnPermit);
     const submissionCheck = idempotencyStore.checkAndRecord(submissionKey);
     // A retried prompt can have the same transcript position. Execution IDs
-    // must never alias an old cancellation target, even before admission.
-    const turnId = randomUUID();
+    // must never alias an old cancellation target, even before admission:
+    // `turnId` is the fresh id the turn's own scope was opened with.
 
     if (submissionCheck.status === 'in-flight') {
       const reason = 'Duplicate turn submission rejected because an equivalent turn is already in flight.';
@@ -1124,6 +1219,8 @@ export class Orchestrator {
       return null;
     }
     this.currentSubmissionKey = submissionKey;
+    // This turn's hold on its submission record: only the record it created is settled by it.
+    const submissionClaim = submissionCheck.status === 'new' ? submissionCheck.claim : undefined;
 
     // Reserve and bind before publishing TURN_SUBMITTED, so any observer of it
     // (the bus delivers on a microtask) already sees this turn as the owner.
@@ -1145,7 +1242,7 @@ export class Orchestrator {
       // render callback, say) must release what was reserved: otherwise the orchestrator
       // stays occupied and the same text is refused as an in-flight duplicate.
       this.turnCancellation.end(turnId);
-      try { idempotencyStore.markFailed(submissionKey); } finally {
+      try { submissionClaim?.fail(); } finally {
         this.submissionOwner.release(submissionKey);
         if (this.currentSubmissionKey === submissionKey) this.currentSubmissionKey = null;
         try { this.stopThinking(); } finally { this.phase = this.activeNativeConversationPermit === undefined ? 'idle' : 'settling'; }
@@ -1153,7 +1250,7 @@ export class Orchestrator {
       throw error;
     }
 
-    return { submissionKey, turnId };
+    return { submissionKey, submissionClaim, turnId };
   }
 
   /** Phase 2: Execute the LLM streaming loop and tool dispatch. */
@@ -1387,6 +1484,7 @@ export class Orchestrator {
   private finalizeTurn(
     turnStartTime: number,
     submissionKey: string,
+    submissionClaim: IdempotencyClaim | undefined,
     turnId: string,
     configManager: ReturnType<typeof requireConfigManager>,
   ): void {
@@ -1403,15 +1501,12 @@ export class Orchestrator {
     // the abort state before stopThinking() releases the controller.
     const outcome = !this._turnFailed ? 'complete' : this.abortController?.signal.aborted ? 'cancelled' : 'failed';
 
-    // --- Submission key: mark turn complete or failed ---
-    // Success: markComplete caches the result for duplicate callers.
-    // Failure: markFailed allows retry on the next submission.
+    // --- Submission key: settle this turn's own record complete or failed ---
+    // Success caches the result for duplicate callers; failure allows retry on the next submission.
+    // The claim settles only the record this turn created, never one that replaced it.
     try {
-      if (this._turnFailed) {
-        getIdempotencyStore(this.coreServices, this.ownedIdempotencyStore).markFailed(submissionKey);
-      } else {
-        getIdempotencyStore(this.coreServices, this.ownedIdempotencyStore).markComplete(submissionKey);
-      }
+      if (this._turnFailed) submissionClaim?.fail();
+      else submissionClaim?.complete();
     } finally {
       this.submissionOwner.release(submissionKey);
       if (this.currentSubmissionKey === submissionKey) this.currentSubmissionKey = null;

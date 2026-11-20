@@ -305,7 +305,9 @@ export async function collectBrowserKnowledge(
   const entries: BrowserKnowledgeEntry[] = [];
   const errors: string[] = [];
   const perProfileLimit = Math.max(1, Math.ceil((filter.limit ?? 1000) / Math.max(1, profiles.length)));
-  const sourceKinds = filter.sourceKinds ?? ['history', 'bookmark'] satisfies readonly BrowserKnowledgeSourceKind[];
+  const selected = filter.sourceKinds ?? { kind: 'default' as const };
+  const sourceKinds: readonly BrowserKnowledgeSourceKind[] = selected.kind === 'default' ? ['history', 'bookmark']
+    : selected.kind === 'none' ? [] : selected.values;
 
   for (const profile of profiles) {
     try {

@@ -1,3 +1,4 @@
+import { revealOrNull, type Secret } from '../security/secret.js';
 import { resolveSecretInput } from '../config/secret-refs.js';
 import {
   CLOUDFLARE_API_TOKEN_KEY,
@@ -19,7 +20,7 @@ import { clean } from './utils.js';
 
 export interface TokenResolverContext {
   readonly secretsManager?: Pick<{
-    get(key: string): Promise<string | null>;
+    get(key: string): Promise<Secret | null>;
     getGlobalHome(): string | undefined;
   }, 'get' | 'getGlobalHome'> | null | undefined;
   readonly authToken?: (() => string | null) | undefined;
@@ -72,7 +73,7 @@ export async function resolveApiToken(
   if (fromRef.value) return { value: fromRef.value, source: 'config-ref' };
   const envToken = clean(process.env['CLOUDFLARE_API_TOKEN']);
   if (envToken) return { value: envToken, source: 'env' };
-  const stored = await ctx.secretsManager?.get(CLOUDFLARE_API_TOKEN_KEY) ?? null;
+  const stored = revealOrNull(await ctx.secretsManager?.get(CLOUDFLARE_API_TOKEN_KEY), 'dispatch');
   if (stored) return { value: stored, source: 'goodvibes-secret' };
   return { value: null, source: 'missing' };
 }
@@ -86,7 +87,7 @@ export async function resolveOperatorToken(
   const ref = clean(input.operatorTokenRef) || ctx.readConfig().workerTokenRef;
   const fromRef = await resolveSecretRef(ctx, ref);
   if (fromRef.value) return { value: fromRef.value, source: 'config-ref' };
-  const stored = await ctx.secretsManager?.get(CLOUDFLARE_WORKER_OPERATOR_TOKEN_KEY) ?? null;
+  const stored = revealOrNull(await ctx.secretsManager?.get(CLOUDFLARE_WORKER_OPERATOR_TOKEN_KEY), 'dispatch');
   if (stored) return { value: stored, source: 'goodvibes-secret' };
   const authToken = clean(ctx.authToken?.() ?? undefined);
   if (authToken) return { value: authToken, source: 'auth-token' };
@@ -104,7 +105,7 @@ export async function resolveWorkerClientToken(
   if (fromRef.value) return { value: fromRef.value, source: 'config-ref' };
   const envToken = clean(process.env['GOODVIBES_CLOUDFLARE_WORKER_TOKEN']);
   if (envToken) return { value: envToken, source: 'env' };
-  const stored = await ctx.secretsManager?.get(CLOUDFLARE_WORKER_CLIENT_TOKEN_KEY) ?? null;
+  const stored = revealOrNull(await ctx.secretsManager?.get(CLOUDFLARE_WORKER_CLIENT_TOKEN_KEY), 'dispatch');
   if (stored) return { value: stored, source: 'goodvibes-secret' };
   return { value: null, source: 'missing' };
 }

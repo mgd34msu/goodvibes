@@ -971,6 +971,31 @@ export function formatBeadTime(ms: number): string {
     return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
 }
 
+/**
+ * How many files one settled call read and changed, from its arguments: a
+ * read counts the files it named, a write the files it wrote, an edit the
+ * files its edits named. Any other tool counts none. The work board's
+ * "2 files read" adds these per call.
+ */
+export function toolCallFileCounts(call: ToolCallInput): { readonly read: number; readonly changed: number } {
+    const family = toolFamily(call.name);
+    if (family === 'read')
+        return { read: new Set(readPaths(call)).size, changed: 0 };
+    if (family === 'write') {
+        const written = writtenFiles(call).map((f) => f.path);
+        const paths = written.length > 0 ? written : typeof call.arguments.path === 'string' ? [call.arguments.path] : [];
+        return { read: 0, changed: new Set(paths).size };
+    }
+    if (family === 'edit') {
+        const edits = Array.isArray(call.arguments.edits) ? call.arguments.edits : [];
+        const paths = edits.map((e) => (e && typeof e === 'object' ? (e as Json).path : undefined)).filter((p): p is string => typeof p === 'string');
+        if (paths.length === 0 && typeof call.arguments.path === 'string')
+            paths.push(call.arguments.path);
+        return { read: 0, changed: new Set(paths).size };
+    }
+    return { read: 0, changed: 0 };
+}
+
 /** The state of a call a surface knows besides its result text. */
 export interface ToolCallState {
     /** The platform execution outcome, when recorded. */

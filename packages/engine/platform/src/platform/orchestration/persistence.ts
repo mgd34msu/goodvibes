@@ -84,18 +84,23 @@ export function deserializeWorkstream(serialized: SerializedWorkstream): Workstr
 
 /** JSON.stringify a schema-versioned envelope. Returns null on serialization failure rather than throwing. */
 export function serializeWorkstreamSnapshot(workstream: Workstream, completedResults: readonly PhaseResult[]): string | null {
-  const snapshot: WorkstreamSnapshot = {
-    schemaVersion: CURRENT_WORKSTREAM_SCHEMA_VERSION,
-    writtenAt: Date.now(),
-    workstream: serializeWorkstream(workstream),
-    completedResults,
-  };
+  const content = serializeWorkstreamContent(workstream, completedResults);
+  return content === null ? null : snapshotText(content);
+}
+
+/** The part of a snapshot that changes with the workstream (no write time): what a write compares with the last one. */
+function serializeWorkstreamContent(workstream: Workstream, completedResults: readonly PhaseResult[]): string | null {
   try {
-    return JSON.stringify(snapshot);
+    return JSON.stringify({ workstream: serializeWorkstream(workstream), completedResults });
   } catch (error) {
     logger.error('orchestration persistence: JSON serialization failed', { workstreamId: workstream.id, error: summarizeError(error) });
     return null;
   }
+}
+
+/** The snapshot envelope around serialized content: the same JSON `serializeWorkstreamSnapshot` always wrote. */
+function snapshotText(content: string): string {
+  return `{"schemaVersion":${CURRENT_WORKSTREAM_SCHEMA_VERSION},"writtenAt":${Date.now()},${content.slice(1)}`;
 }
 
 /**
@@ -241,6 +246,8 @@ interface SnapshotWriteFrame {
 }
 const nativeApply = Reflect.apply, nativeWeakGet = WeakMap.prototype.get, nativeWeakSet = WeakMap.prototype.set;
 const snapshotWriteFrames = new WeakMap<Workstream, SnapshotWriteFrame>();
+/** What this process last published for each workstream (content without the write time): an identical next write is skipped. */
+const lastPublishedContent = new WeakMap<Workstream, string>();
 const snapshotReadFrames = new WeakMap<SerializedWorkstream, SnapshotWriteFrame>();
 const currentSnapshotPhysical = (path: string): string | null => {
   try { return fileObservationIdentity(path); }
@@ -309,8 +316,12 @@ export function writeWorkstreamSnapshot(projectRoot: SnapshotRoot, workstream: W
     }
     const assertCurrent = () => { assertSnapshotFrame(frame); if (release) assertCrossProcessLockCurrent(release); };
     assertCurrent();
-    const json = serializeWorkstreamSnapshot(workstream, completedResults);
-    if (json === null) return true;
+    const content = serializeWorkstreamContent(workstream, completedResults);
+    if (content === null) return true;
+    // The same content this process last published, at the same file: nothing to write (the first snapshot is
+    // published at creation, so the first event after it usually finds nothing changed).
+    if (frame.physical !== null && lastPublishedContent.get(workstream) === content) return true;
+    const json = snapshotText(content);
     assertCurrent();
     let publication: string | undefined;
     writeFileAtomic(path, json, { replaceExisting: frame.physical !== null, assertCurrent, cleanupStaleTemps: false, onEffect(published) {
@@ -326,6 +337,7 @@ export function writeWorkstreamSnapshot(projectRoot: SnapshotRoot, workstream: W
     frame.parent.assertCurrent();
     if (release) assertCrossProcessLockCurrent(release);
     if (publication === undefined || fileObservationIdentity(frame.path) !== publication) throw new Error('Original snapshot publication changed');
+    lastPublishedContent.set(workstream, content);
     return true;
   } catch (error) {
     logger.error('orchestration persistence: snapshot write failed; original preserved', { path, error: summarizeError(error) });

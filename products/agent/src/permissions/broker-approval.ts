@@ -38,7 +38,7 @@ import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/pla
 
 /** The broker seam this module answers through, a subset of ApprovalBroker. */
 export interface BrokerApprovalBroker {
-  getApproval(approvalId: string): { readonly status: string; readonly request: PermissionPromptRequest } | null;
+  getApproval(approvalId: string): BrokerCardRecord | null;
   resolveApproval(
     approvalId: string,
     input: {
@@ -49,17 +49,28 @@ export interface BrokerApprovalBroker {
       readonly selectedHunks?: readonly number[];
       readonly actor: string;
       readonly actorSurface?: string;
+      /** The revision of the record the card showed. */
+      readonly expectedRevision: number | undefined;
     },
-  ): Promise<unknown>;
+  ): Promise<BrokerCardOutcome>;
 }
 
+/** The record a card is drawn from. */
+export interface BrokerCardRecord {
+  readonly id: string;
+  readonly callId: string;
+  readonly status: string;
+  readonly revision: number;
+  readonly request: PermissionPromptRequest;
+}
+
+/** What the broker did with the card's answer: applied, or refused with the record as it is now. */
+export type BrokerCardOutcome =
+  | { readonly applied: true; readonly record: BrokerCardRecord }
+  | { readonly applied: false; readonly record: BrokerCardRecord | null; readonly refusal: { readonly code: string; readonly reason: string } };
+
 export interface BrokerApprovalChangeParams {
-  readonly approval: {
-    readonly id: string;
-    readonly callId: string;
-    readonly status: string;
-    readonly request: PermissionPromptRequest;
-  };
+  readonly approval: BrokerCardRecord;
   readonly getPending: () => PendingPermissionState | null;
   readonly setPending: (pending: PendingPermissionState | null) => void;
   readonly broker: BrokerApprovalBroker;
@@ -109,7 +120,13 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
           ...(approved && extras?.selectedHunks ? { selectedHunks: extras.selectedHunks } : {}),
           actor: 'agent',
           actorSurface: 'agent',
-        }).catch((error: unknown) => {
+          // The record this card was drawn from: a stale answer is refused and the card is drawn again from the current one.
+          expectedRevision: current.revision,
+        }).then((outcome) => {
+          if (outcome.applied || !outcome.record || !isActiveStatus(outcome.record.status) || getPending()) return;
+          const latest = outcome.record;
+          defer(() => handleBrokerApprovalChange({ ...params, approval: latest }));
+        }, (error: unknown) => {
           // The key press already cleared the card. If the broker still holds the ask open
           // (the answer was not recorded), bring the card back so the ask is not left
           // pending with nothing on screen; an ask that is already resolved needs nothing.

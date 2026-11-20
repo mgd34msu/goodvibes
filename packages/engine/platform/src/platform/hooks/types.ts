@@ -24,6 +24,14 @@ export interface HookEvent {
   payload: Record<string, unknown>;
   /** For agent-scoped events */
   agentId?: string | undefined;
+  /**
+   * What the event's call causes, set by the runtime (never by the call's
+   * arguments). On a tool call: the permission gate's class of that call,
+   * `read`, `write`, `execute` or `delegate`, so a hook whose `matcher` is
+   * `effect:execute` fires for every tool that runs a command, whichever tool
+   * the model chose. Also in the payload as `effects`.
+   */
+  effects?: readonly string[] | undefined;
 }
 
 /** Result returned by a hook handler */
@@ -55,7 +63,12 @@ export interface HookDefinition {
    * uses it as the event path the action reports.
    */
   match?: string | undefined;
-  /** Further filter within the match (e.g., specific tool name) */
+  /**
+   * Further filter within the match: the event's specific value (a tool
+   * name), or `effect:<id>` for every event whose call causes that effect
+   * (on a tool call `effect:read`, `effect:write`, `effect:execute` or
+   * `effect:delegate`, the permission gate's class of the call).
+   */
   matcher?: string | undefined;
   /** Hook type */
   type: HookType;

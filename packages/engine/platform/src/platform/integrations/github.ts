@@ -411,6 +411,33 @@ export class GitHubIntegration {
     await this.postIssueComment(target.owner, target.repo, target.number, body, token);
   }
 
+  /**
+   * Whether a reply carrying `marker` (a hidden `<!-- goodvibes:op=<id> -->`
+   * line) is already on the issue or pull request: one GET of the comments (or
+   * reviews) created since `sinceMs`. Read before posting an answer again after
+   * a restart, so an answer whose post landed is not posted twice.
+   */
+  async hasReplyWithMarker(target: GitHubReplyTarget, marker: string, sinceMs: number, token: string): Promise<boolean> {
+    const base = `https://api.github.com/repos/${target.owner}/${target.repo}`;
+    const url = target.kind === 'pr-review'
+      ? `${base}/pulls/${target.number}/reviews?per_page=100`
+      : `${base}/issues/${target.number}/comments?per_page=100&since=${encodeURIComponent(new Date(sinceMs).toISOString())}`;
+    const res = await fetchWithTimeout(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new HttpStatusError(`GitHub API error ${res.status}: ${text.slice(0, 200)}`, { status: res.status });
+    }
+    const items = await res.json() as unknown;
+    return Array.isArray(items) && items.some((item) => typeof (item as { body?: unknown }).body === 'string' && ((item as { body: string }).body).includes(marker));
+  }
+
   // -------------------------------------------------------------------------
   // Outbound GitHub API
   // -------------------------------------------------------------------------

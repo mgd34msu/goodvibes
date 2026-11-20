@@ -23,6 +23,8 @@ if (args.includes('--help') || args.includes('-h')) {
     '                       GOODVIBES_HOME, or ~/.goodvibes when that is unset.',
     '  --binary <path>      Compiled goodvibes binary. Defaults to dist/goodvibes.',
     '  --daemon-url <url>   Daemon base URL. Defaults to configured control-plane port on 127.0.0.1.',
+    '  --token <token>      That daemon\'s token. This machine\'s daemon token is sent only to this',
+    '                       machine\'s daemon; checks of another daemon without --token are skipped.',
     '  --strict            Treat warnings and skipped checks as failures.',
     '  --json              Print JSON instead of Markdown.',
     '  --out <dir>         Write live-verification.{json,md} to a directory.',
@@ -39,6 +41,7 @@ const report = await buildLiveVerificationReport({
   binaryPath: readArgValue(args, '--binary') ?? join(resolve(join(import.meta.dir, '..')), 'dist', 'goodvibes'),
   projectRoot: resolve(join(import.meta.dir, '..')),
   daemonBaseUrl: readArgValue(args, '--daemon-url'),
+  ...(readArgValue(args, '--token') ? { token: readArgValue(args, '--token') } : {}),
   strict: args.includes('--strict'),
 });
 

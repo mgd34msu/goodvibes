@@ -1,4 +1,5 @@
 import { putToOwner } from '../../control-plane/owner-act.js';
+import { localApprovalActions } from '../../control-plane/approval-actions.js';
 import { admitEffects } from '../../security/effect-authority.js';
 import type { Actor } from '../http-policy.js';
 import type { ConfigManager } from '../../config/manager.js';
@@ -218,7 +219,8 @@ export function buildSystemRouteContext(input: {
   }
 
   return {
-    approvalBroker: input.approvalBroker,
+    // Every approval row and action outcome carries the reading for the caller.
+    approvalBroker: localApprovalActions(input.approvalBroker),
     configManager: input.configManager,
     configLoosening: (key, value, options) => input.configManager.describeLoosening(key, value, options),
     putToOwner: (request) => putToOwner(input.approvalBroker, request),

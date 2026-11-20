@@ -62,7 +62,7 @@ const PROVIDER_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceProviderComma
     fields: [
       { id: 'name', label: 'Provider name', value: '', required: true, multiline: false, hint: 'Letters, numbers, hyphens, and underscores only.' },
       { id: 'baseUrl', label: 'Base URL', value: '', required: true, multiline: false, hint: 'OpenAI-compatible base URL, such as http://127.0.0.1:8000/v1.' },
-      { id: 'apiKey', label: 'API key', value: '', required: false, multiline: false, hint: 'Optional API key. Prefer a local provider or a secret-backed provider config when possible.', redact: true },
+      { id: 'apiKey', label: 'API key', value: '', required: false, multiline: false, hint: 'Optional API key. Prefer a local provider or a secret-backed provider config when possible.', redact: true, verbatim: true },
       { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /provider add with --yes.' },
     ],
   },

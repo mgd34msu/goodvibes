@@ -20,6 +20,7 @@ import type { AutomationRunTrigger } from './types.js';
 import type { AutomationManagerExecutionContext } from './manager-runtime-execution.js';
 import type { AutomationRunSettlement } from './manager-runtime-reconcile.js';
 import { logger } from '../utils/logger.js';
+import type { Fence } from '../utils/owner-fence.js';
 
 /** What a single check-in evaluation decided, the outcome the evaluator returns. */
 export interface AutomationCheckinOutcome {
@@ -33,8 +34,12 @@ export interface AutomationCheckinOutcome {
   readonly error?: string | undefined;
 }
 
-/** The check-in evaluator the CheckinService attaches to the AutomationManager. */
-export type AutomationCheckinEvaluator = (job: AutomationJob) => Promise<AutomationCheckinOutcome>;
+/**
+ * The check-in evaluator the CheckinService attaches to the AutomationManager. `signal` is the run's fence signal:
+ * it aborts when the run is cancelled, its job removed, the manager stopped or the automation role moved, and the
+ * evaluator stops before its judgment and its delivery when it does.
+ */
+export type AutomationCheckinEvaluator = (job: AutomationJob, signal?: AbortSignal) => Promise<AutomationCheckinOutcome>;
 
 /**
  * Run a check-in job to a terminal AutomationRun via the attached evaluator.
@@ -43,6 +48,7 @@ export type AutomationCheckinEvaluator = (job: AutomationJob) => Promise<Automat
  * other job, the run is simply terminal on return rather than pending an agent.
  */
 export async function executeCheckinJob(
+  fence: Fence,
   context: AutomationManagerExecutionContext,
   evaluator: AutomationCheckinEvaluator,
   job: AutomationJob,
@@ -71,6 +77,7 @@ export async function executeCheckinJob(
     attempt,
     deliveryIds: [],
   };
+  context.onRunMinted?.(baseRun.id);
 
   const current = context.jobs.get(job.id) ?? job;
   const runningJob: AutomationJob = {
@@ -87,14 +94,14 @@ export async function executeCheckinJob(
 
   let evaluation: AutomationCheckinOutcome;
   try {
-    evaluation = await evaluator(job);
+    evaluation = await evaluator(job, fence.signal);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return await settleCheckinRun(context, baseRun, { status: 'failed', endedAt: Date.now(), error: message, failure: { error } });
+    return await settleCheckinRun(fence, context, baseRun, { status: 'failed', endedAt: Date.now(), error: message, failure: { error } });
   }
   const end = Date.now();
   const result = { checkin: evaluation.outcome, summary: evaluation.summary };
-  return await settleCheckinRun(context, baseRun, evaluation.outcome === 'error'
+  return await settleCheckinRun(fence, context, baseRun, evaluation.outcome === 'error'
     ? { status: 'failed', endedAt: end, error: evaluation.error ?? evaluation.summary, failure: { error: evaluation.error ?? evaluation.summary } }
     : { status: 'completed', endedAt: end, result }, evaluation);
 }
@@ -106,6 +113,7 @@ export async function executeCheckinJob(
  * check-in's own delivery id and outcome stay on the record.
  */
 async function settleCheckinRun(
+  fence: Fence,
   context: AutomationManagerExecutionContext,
   baseRun: AutomationRun,
   settlement: AutomationRunSettlement,
@@ -129,6 +137,11 @@ async function settleCheckinRun(
   }
   const terminal = context.settleRun(context.runs.get(baseRun.id) ?? baseRun, settlement, 'automation.checkin');
   context.pruneRunHistory(baseRun.jobId);
+  // A manager that stopped (or a role that moved) while the check-in ran saves nothing more for it.
+  if (!fence.current) {
+    logger.info('AutomationManager: a check-in ended after its owner ended; its outcome was not saved', { jobId: baseRun.jobId, runId: baseRun.id, status: terminal.status });
+    return terminal;
+  }
   try { await Promise.all([context.saveJobs(), context.saveRuns()]); }
   catch (error) {
     // The outcome is recorded in memory and announced; only saving it failed.

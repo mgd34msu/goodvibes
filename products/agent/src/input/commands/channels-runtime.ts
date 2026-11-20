@@ -9,6 +9,8 @@ import { buildAgentChannelDeliveryPreview, deliverAgentChannelMessage, formatAge
 import { formatAgentChannelDeliveryReceiptLine, readAgentChannelDeliveryReceipts, recordAgentChannelDeliveryReceipt } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery-receipts';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
 import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
+import { secretArg } from '@goodvibes-jev/engine/terminal-shell/command-registry';
+import type { Secret } from '@goodvibes-jev/engine/platform/platform/security';
 
 type ChannelFilter = 'all' | 'ready' | 'attention';
 type JsonRecord = Record<string, unknown>;
@@ -18,7 +20,8 @@ interface ChannelSendArgs {
   readonly title?: string;
   readonly channel?: string;
   readonly route?: string;
-  readonly webhook?: string;
+  /** Read with `secretArg` (a declared secret flag): an incoming webhook URL carries its token. */
+  readonly webhook?: Secret;
   readonly link?: string;
   readonly yes: boolean;
   readonly errors: readonly string[];
@@ -62,14 +65,19 @@ function readFlagValue(args: readonly string[], index: number, flag: string, err
   return value;
 }
 
-function parseChannelSendArgs(args: readonly string[]): ChannelSendArgs {
+/**
+ * `args` are the arguments after `send`; `offset` is where they start in the
+ * command's own arguments, so the webhook URL is read at the position the
+ * input history masked (`secretArgs.flags`).
+ */
+function parseChannelSendArgs(args: readonly string[], offset: number): ChannelSendArgs {
   const parsed = stripYesFlag([...args]);
   const errors: string[] = [];
   const messageParts: string[] = [];
   let title: string | undefined;
   let channel: string | undefined;
   let route: string | undefined;
-  let webhook: string | undefined;
+  let webhook: Secret | undefined;
   let link: string | undefined;
 
   for (let index = 0; index < parsed.rest.length; index += 1) {
@@ -82,7 +90,7 @@ function parseChannelSendArgs(args: readonly string[]): ChannelSendArgs {
       else if (arg === '--message') messageParts.push(value);
       else if (arg === '--channel') channel = value;
       else if (arg === '--route') route = value;
-      else if (arg === '--webhook') webhook = value;
+      else if (arg === '--webhook') webhook = secretArg(offset + args.lastIndexOf('--webhook') + 1);
       else link = value;
     } else if (arg?.startsWith('--')) {
       errors.push(`Unknown channel send flag ${arg}`);
@@ -378,6 +386,8 @@ export function registerChannelsRuntimeCommands(registry: CommandRegistry): void
     description: 'Inspect Agent channel readiness or send an explicitly confirmed delivery message',
     firstScreen: false,
     usage: '[list|readiness|ready|attention|triage [limit]|guide [id]|show <id>|deliveries [limit]|send --channel <id> --message <text> --yes|accounts|policies|status|doctor <id>|setup <id>|telegram-cursor]',
+    // `send --webhook <url>`: the URL carries the webhook's token, so the input history keeps `<redacted>`.
+    secretArgs: { flags: ['--webhook'] },
     argsHint: 'list|readiness|ready|attention|triage|guide|show|deliveries|send|accounts|policies|status|doctor|setup|telegram-cursor',
     async handler(args, ctx) {
       if (args[0]?.trim().toLowerCase() === 'telegram-cursor') { await openTelegramCursorRecovery(ctx); return; }
@@ -434,7 +444,7 @@ export function registerChannelsRuntimeCommands(registry: CommandRegistry): void
           ctx.print('Channel delivery is not available in this Agent runtime.');
           return;
         }
-        const parsed = parseChannelSendArgs(args.slice(1));
+        const parsed = parseChannelSendArgs(args.slice(1), 1);
         if (parsed.errors.length > 0) {
           ctx.print(`[channels] ${parsed.errors.join('\n[channels] ')}`);
           return;

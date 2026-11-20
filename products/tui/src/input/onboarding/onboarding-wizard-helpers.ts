@@ -43,10 +43,14 @@ export function isLoopbackAddress(value: string): boolean {
   return isLoopbackHostValue(value);
 }
 
-/** The `daemon.connectedHost.url` value for a daemon adopted at host:port. */
-export function adoptedDaemonUrl(host: string, port: number): string {
+/**
+ * The `daemon.connectedHost.url` value for a daemon adopted at host:port.
+ * `scheme` is the one the connection already uses: the host and port are what
+ * the person edits, so re-applying setup never turns an `https` daemon into `http`.
+ */
+export function adoptedDaemonUrl(host: string, port: number, scheme: 'http' | 'https' = 'http'): string {
   const bare = host.trim().replace(/^\[(.*)\]$/, '$1');
-  return `http://${bare.includes(':') ? `[${bare}]` : bare}:${port}`;
+  return `${scheme}://${bare.includes(':') ? `[${bare}]` : bare}:${port}`;
 }
 
 export function uniqueNonEmpty(values: readonly string[]): readonly string[] {

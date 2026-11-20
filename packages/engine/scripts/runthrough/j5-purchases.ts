@@ -4,10 +4,14 @@
  * No real money and no real card: the card is the test number 4111 1111 1111
  * 1111 and the merchant is an HTTPS page this script serves on 127.0.0.1 with a
  * self-signed certificate. The product only buys on https, on the standard
- * port, from a named host, so the browser is pointed at the merchant by its
- * flags (`--host-resolver-rules` maps shop.rt-merchant.test to the loopback
- * port and every other name to nothing, `--ignore-certificate-errors` accepts
- * the self-signed certificate). No product check is relaxed.
+ * port, from a named host, and the agent's browser opens only a host whose
+ * name resolves and whose address passes the destination rule, so the
+ * merchant is shop.rt-merchant.localhost (every *.localhost name resolves to
+ * loopback) and the owner names it in fetch.allowedPrivateHosts, as an owner
+ * lets the agent reach a machine of their own. The browser is pointed at the
+ * merchant's port by its flags (`--host-resolver-rules` maps the name to the
+ * loopback port and every other name to nothing, `--ignore-certificate-errors`
+ * accepts the self-signed certificate). No product check is relaxed.
  *
  * The browser is one the owner started with a loopback remote-debugging port
  * and the agent attached to, the kind of browser a purchase can outlive a
@@ -39,7 +43,7 @@ import { textOf, type ChatMessage } from './fake-model.ts';
 import { answerAsAModelWould, startFakeDecision } from './fake-decision.ts';
 
 const journey = new Journey('j5-purchases');
-const MERCHANT_HOST = 'shop.rt-merchant.test';
+const MERCHANT_HOST = 'shop.rt-merchant.localhost';
 const submissions: Array<{ path: string; body: string }> = [];
 const decision = startFakeDecision();
 // The scripted decision model answers as a model would (fake-decision.ts): the cart line is the item asked for and
@@ -89,11 +93,11 @@ const lastCall = (messages: readonly ChatMessage[]) => [...messages].reverse().f
 
 try {
   const browserUp = await waitFor(async () => (await fetch(`${cdpEndpoint}/json/version`).then((response) => response.ok, () => false)) ? true : undefined, 15_000, 250);
-  journey.check('a loopback HTTPS merchant and the owner\'s browser are ready', 'openssl self-signed certificate for shop.rt-merchant.test; Bun TLS server on 127.0.0.1; chromium with a loopback debugging port',
+  journey.check('a loopback HTTPS merchant and the owner\'s browser are ready', 'openssl self-signed certificate for shop.rt-merchant.localhost; Bun TLS server on 127.0.0.1; chromium with a loopback debugging port',
     `openssl exit ${madeCert.exitCode}; merchant port ${merchant.port}; browser pid ${ownerBrowser.pid} on ${cdpEndpoint} ${browserUp === true}`,
     madeCert.exitCode === 0 && typeof merchant.port === 'number' && browserUp === true);
   const settings: Array<[string, string]> = [
-    ['payments.enabled', 'true'], ['payments.currency', 'USD'],
+    ['payments.enabled', 'true'], ['payments.currency', 'USD'], ['fetch.allowedPrivateHosts', MERCHANT_HOST],
     ...(['shippingAddress', 'billingAddress'] as const).flatMap((kind): Array<[string, string]> => [
       [`payments.${kind}.name`, 'Run Through'], [`payments.${kind}.line1`, '1 Loopback Way'], [`payments.${kind}.city`, 'Localhost'],
       [`payments.${kind}.region`, 'CA'], [`payments.${kind}.postalCode`, '"94000"'], [`payments.${kind}.country`, 'US']]),
@@ -137,7 +141,7 @@ try {
       const button = /"ref"\s*:\s*"(e\d+)"\s*,\s*"role"\s*:\s*"button"/.exec(all)?.[1];
       void step;
       return { calls: [{ name: 'agent_operator_method', args: { methodId: 'payments.checkout.begin', input: {
-        requestId, sessionId: browserSession, pageId, merchantDomain: 'rt-merchant.test', checkoutUrl: url, item: 'Test widget', cardId,
+        requestId, sessionId: browserSession, pageId, merchantDomain: 'rt-merchant.localhost', checkoutUrl: url, item: 'Test widget', cardId,
         requestedLines: [{ label: 'Test widget', quantity: 1 }], lines: [{ label: 'Test widget', quantity: '1', unitPrice: price }],
         shippingOptions: [{ label: 'Standard', cost: '0.00' }], statedTotal, currency: 'USD',
         cardFields: [{ field: 'cardholderName', ref: ref('Name on card') }, { field: 'number', ref: ref('Card number') }, { field: 'expiry', ref: ref('Expiry') }, { field: 'cvv', ref: ref('CVC') }],
@@ -210,7 +214,7 @@ try {
   // retailer he trusts: an in-budget purchase there is told to him (a veto window, here the shortest, one minute)
   // and goes ahead unless he objects.
   const limits = [await daemonSet('payments.budget.perPurchaseCeiling', '20'), await daemonSet('payments.budget.dailyOverage', '5'),
-    await daemonSet('payments.majorRetailersAdditional', 'rt-merchant.test'), await daemonSet('payments.windows.vetoMinutes', '1')];
+    await daemonSet('payments.majorRetailersAdditional', 'rt-merchant.localhost'), await daemonSet('payments.windows.vetoMinutes', '1')];
   await s.restartDaemon();
   owner = operatorToken(s.home);
   const before = submissions.length;

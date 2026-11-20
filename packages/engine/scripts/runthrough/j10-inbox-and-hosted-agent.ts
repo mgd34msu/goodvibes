@@ -60,14 +60,15 @@ try {
       await tui.waitFor(/\S{3,}/, 20_000);
       await Bun.sleep(4_000);
       let mark = tui.raw().length;
-      await tui.type('/questions');
+      // A bare /questions opens its list of actions; the typed word lists what waits.
+      await tui.type('/questions list');
       tui.press('\r');
       listed = await tui.waitFor(/(\S+)\s+question\s+RTJ10 which colour should the release banner be\?/, 20_000, mark);
       if (listed) {
         mark = tui.raw().length;
         await tui.type(`/questions answer ${listed[1]} green`);
         tui.press('\r');
-        replied = await tui.waitFor(/\[inbox\] (Answered [^\n]*?green[^\n]{0,80}|[^\n]{0,160})/, 20_000, mark);
+        replied = await tui.waitFor(/Answered [^\n]*?green[^\n]{0,80}/, 20_000, mark);
       }
     } finally {
       await tui.close();
@@ -75,7 +76,7 @@ try {
     const after = ((await invoke(s.daemon, owner, 'inbox.list', { status: 'all' })).body as { items?: Array<Record<string, unknown>> }).items ?? [];
     const answeredItem = after.find((entry) => entry.id === item.id);
     const answer = answeredItem?.answer as { option?: string } | undefined;
-    journey.check('the owner answers it in the TUI with keystrokes, and the answer says tui', 'goodvibes (TUI) in a pseudo-terminal: type /questions, then /questions answer <id> green; inbox.list',
+    journey.check('the owner answers it in the TUI with keystrokes, and the answer says tui', 'goodvibes (TUI) in a pseudo-terminal: type /questions list, then /questions answer <id> green; inbox.list',
       `listed ${listed ? `id ${listed[1]}` : `no; screen ${short(tui.screen().slice(-600), 600)}`}; reply ${short(replied?.[0] ?? 'none', 200)}; item ${answeredItem?.status} ${JSON.stringify(answer ?? null)} by ${short(answeredItem?.answeredBy ?? 'nobody', 120)}`,
       listed !== null && /Answered/.test(replied?.[0] ?? '') && answeredItem?.status === 'answered' && answer?.option === 'green'
         // The answer is attributed to the app it was given in.

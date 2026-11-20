@@ -16,6 +16,7 @@
  */
 import { formatRefusal } from '@goodvibes-jev/engine/errors';
 import type { OwnerAnswerDelivery, OwnerInboxPort, OwnerItem } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand } from './command-actions/define.js';
@@ -34,6 +35,8 @@ export interface OwnerInboxCommandPolicy<Context> {
   readonly inbox: (context: Context) => OwnerInboxPort | { readonly unavailable: string };
   /** True only when the owner typed `command` at this terminal. */
   readonly isOwner: (context: Context, command: string) => boolean;
+  /** Withdraw a request for approval this owner raised, at the revision shown (`approvals.cancel` on the daemon). */
+  readonly withdraw: (context: Context, input: OperatorMethodInput<'approvals.cancel'>) => Promise<OperatorMethodOutput<'approvals.cancel'>>;
 }
 
 const SHORT_ID_CHARS = 14;
@@ -200,6 +203,19 @@ const ALL_ITEMS = defineList<unknown>({
   },
   operator: { method: 'inbox.list', input: { status: 'all' }, rows: { from: 'items', value: 'id', label: 'title', state: 'status' } },
 });
+/** Open requests for approval the reading says this viewer raised and may still withdraw. */
+async function withdrawable(ctx: unknown): Promise<readonly OwnerItem[]> {
+  return (await inboxOf(ctx).list({ status: 'open', kinds: ['approval'], limit: LIST_LIMIT }))
+    .filter((item) => item.reading?.requester.mine === true && item.reading.allowedActions.includes('cancel'));
+}
+const MY_REQUESTS = defineList<unknown>({
+  name: 'inbox.my-requests',
+  async read(ctx) {
+    return (await withdrawable(ctx)).map((item): ListRow => ({ value: shortId(item.id), label: text(item.title), detail: when(item.createdAt) }));
+  },
+  operator: TERMINAL_ONLY,
+});
+
 const OPEN_DECISIONS = defineList<unknown>({
   name: 'inbox.decisions',
   async read(ctx) {
@@ -301,6 +317,30 @@ export function registerOwnerInboxCommands<Context extends OwnerInboxCommandCont
           if (!outcome.applied) throw commandRefusal(formatRefusal(outcome.refusal));
           ctx.renderRequest();
           return `Answered ${shortId(outcome.item.id)}: ${answerText(outcome.item)}${deliveryNotice(outcome.delivery)}`;
+        },
+      },
+      {
+        id: 'withdraw', label: 'Withdraw a request you raised', word: 'withdraw',
+        inputs: [
+          listInput({ id: 'request', label: 'Request', help: 'Requests for approval you raised that still wait', list: MY_REQUESTS, other: 'the id of a request you raised' }),
+          textInput({ id: 'note', label: 'Why', help: 'A note kept with it', why: 'your own words', kind: 'long-text', typed: { tail: true }, optional: { default: '', means: 'no note' } }),
+        ],
+        sentence: 'Your request {request} stops waiting and is cancelled; nobody can approve it any more.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone',
+        ownerOnly: { reason: 'withdrawing a request is the owner\'s act', instead: 'Ask the owner to withdraw it with /questions withdraw.' },
+        operator: { method: 'approvals.cancel', fields: { approvalId: 'request', note: 'note' } }, example: { request: 'apr-41a2' },
+        async run(values, ctx) {
+          ownerOnly(ctx, 'questions', 'withdraws a request');
+          const mine = await withdrawable(ctx);
+          const wanted = values.request!.trim();
+          const item = mine.find((entry) => entry.id === wanted || shortId(entry.id) === wanted || entry.id.startsWith(wanted));
+          if (!item || item.revision === undefined) throw commandRefusal(`No waiting request you raised is ${wanted}; nothing was withdrawn.`, '/questions withdraw lists the ones you can.');
+          let outcome;
+          // Sent at the revision shown: a request that moved meanwhile is refused with how it stands now.
+          try { outcome = await policy.withdraw(ctx, { approvalId: item.id, expectedRevision: item.revision, ...(values.note ? { note: values.note } : {}) }); } catch (error) { return failed('withdraw the request', error); }
+          if (!outcome.applied) throw commandRefusal(`Not withdrawn: ${outcome.refusal?.reason ?? 'the daemon refused it'}. Nothing was changed.`);
+          ctx.renderRequest();
+          return `Withdrew ${shortId(item.id)}: ${text(item.title)}.`;
         },
       },
     ],

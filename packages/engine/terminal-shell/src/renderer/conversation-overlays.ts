@@ -61,7 +61,7 @@ export function composeConversationLayers(options: {
   readonly headerRows?: number | undefined;
   readonly footerRows?: number | undefined;
   /** The toast state: held while a layer below would be covered, then read for this frame. */
-  readonly toasts: { hold(held: boolean): void; visible(): readonly ToastSpec[] };
+  readonly toasts: { hold(held: boolean, drop?: boolean): void; visible(): readonly ToastSpec[] };
   /** A full-screen flow (the onboarding wizard) owns the screen, so toasts wait as they do over a modal. */
   readonly screenOwned?: boolean | undefined;
 }): SurfaceLayer[] {
@@ -78,9 +78,10 @@ export function composeConversationLayers(options: {
     if (layer) layers.push(layer);
   }
   if (options.permission) layers.push(options.permission);
-  // A toast never covers a modal, the permission card or a full-screen flow:
-  // it waits until they close (toast-center.ts hold).
-  options.toasts.hold(layers.length > 0 || options.screenOwned === true);
+  // A toast never covers a modal or the permission card: it waits until they
+  // close. Over the splash or a first-run screen nothing is drawn and nothing
+  // waits: those notices are only in the status bar's count (toast-center.ts hold).
+  options.toasts.hold(layers.length > 0 || options.screenOwned === true, options.screenOwned === true);
   const toasts = renderToasts(width, height, options.toasts.visible(), {
     top: options.headerRows ?? 1,
     bottom: height - (options.footerRows ?? 2),

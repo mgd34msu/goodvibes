@@ -49,12 +49,20 @@ export class ToastCenter {
         readonly durationMs: number;
     }> = [];
     private nextId = 1;
-    /** While a modal or a full-screen flow is open, toasts wait instead of covering it. */
+    /** While a modal is open, toasts wait instead of covering it. */
     private held = false;
+    /**
+     * While the splash or the first-run screens own the screen, nothing is drawn
+     * over them and nothing waits to be: a notice raised then is only in the
+     * notifications' unread count, read with the notices key.
+     */
+    private dropped = false;
     /** Called whenever the visible set changes (wired to the render request). */
     onChange: (() => void) | null = null;
     constructor(private readonly clock: () => number = Date.now, private readonly schedule: ToastScheduler = defaultScheduler) { }
     show(spec: ToastSpec, durationMs: number = TOAST_DURATION_MS): void {
+        if (this.dropped)
+            return;
         if (this.held || this.toasts.length >= MAX_TOASTS) {
             this.waiting.push({ spec, durationMs });
             if (this.waiting.length > MAX_WAITING) {
@@ -79,7 +87,13 @@ export class ToastCenter {
      * they are shown as places free. Called by the frame that knows what is
      * open, which draws the result itself, so no change is announced.
      */
-    hold(held: boolean): void {
+    hold(held: boolean, drop = false): void {
+        if (drop && !this.dropped) {
+            // The splash or first run took the screen: what was up or waiting goes (it stays in the history and the count).
+            this.toasts = [];
+            this.waiting = [];
+        }
+        this.dropped = drop;
         if (held === this.held)
             return;
         this.held = held;

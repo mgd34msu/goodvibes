@@ -132,7 +132,7 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
     headerRows: context.headerRows,
     footerRows: context.footerRows,
     toasts: getSharedToastCenter(),
-    // First run's screens own the screen: notices wait.
-    screenOwned: firstRunOwnsScreen(),
+    // First run's screens and the splash own the screen: notices go only to the count.
+    screenOwned: firstRunOwnsScreen() || context.conversation.isSplashShowing(),
   });
 }

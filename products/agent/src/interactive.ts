@@ -212,7 +212,8 @@ async function main(prepared: PreparedShellCliRuntime) {
 
   // Re-surface pre-bootstrap launch-update lines in-session (the alternate
   // screen wipes the stdout copies written before the renderer existed).
-  for (const line of launchUpdateLines) systemMessageRouter.high(`[Update] ${line}`);
+  // A notice in the count, as in the terminal app: never a toast over the splash.
+  for (const line of launchUpdateLines) systemMessageRouter.low(`[Update] ${line}`);
   for (const line of reachabilityLines) systemMessageRouter.high(`[Install] ${line}`);
   // The print level (behavior.hitlMode) follows the setting, whoever changes it.
   applyConfiguredHitlMode(configManager, modeManager);

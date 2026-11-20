@@ -22,18 +22,22 @@ export function describePowerStatus(state: Pick<PowerState, 'work' | 'keepAwake'
 
 /**
  * The status line's power chip and the full note behind it. The chip names
- * only a state the owner holds or should see at a glance (sleep disabled,
- * keep-awake refused, sleep held); an operational warning (the sleep-edge
+ * only the owner's keep-awake switch (sleep disabled, keep-awake refused); an operational warning (the sleep-edge
  * hooks being off) is never status-bar text, only the notice. The full note
  * is read in the notifications, where it is posted when it changes. Chip null
  * when no state applies; null when nothing applies at all.
  */
 export function describePowerChip(state: Pick<PowerState, 'work' | 'keepAwake'> & Partial<Pick<PowerState, 'sleepEdge'>>): { readonly chip: string | null; readonly detail: string } | null {
-  const detail = describePowerStatus(state);
+  // The notice says only what the person needs: the keep-awake switch and the
+  // sleep-edge hooks being off. Sleep held while a turn or job runs is not news.
+  const held = state.keepAwake.enabled ? describeHeld(state) : null;
+  const edge = state.sleepEdge?.note ? `sleep hooks off: ${state.sleepEdge.note}` : null;
+  const detail = held && edge ? `${held}; ${edge}` : held ?? edge;
   if (detail === null) return null;
+  // Only the owner's own keep-awake switch is a chip.
   const chip = state.keepAwake.enabled
     ? (keepAwakeCondition(state.keepAwake) === 'refused' ? 'keep-awake refused' : 'sleep disabled')
-    : state.work.held && state.work.reasons.length > 0 ? 'sleep held' : null;
+    : null;
   return { chip, detail };
 }
 

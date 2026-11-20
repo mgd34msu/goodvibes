@@ -138,6 +138,7 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
     footerRows: context.footerRows,
     toasts: getSharedToastCenter(),
     // The onboarding wizard and first run's screens own the screen: notices wait.
-    screenOwned: onboarding || firstRunOwnsScreen(),
+    // Onboarding, first run's screens and the splash own the screen: notices go only to the count.
+    screenOwned: onboarding || firstRunOwnsScreen() || context.conversation.isSplashShowing(),
   });
 }

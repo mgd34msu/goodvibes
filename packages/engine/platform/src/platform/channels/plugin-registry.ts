@@ -210,10 +210,12 @@ export class ChannelPluginRegistry {
       // Adapters answer a failure they cannot process with a failure status
       // rather than throwing. A refused or unauthenticated request says nothing
       // about processing, so it neither starts nor ends a failure run.
-      this.ingressAlarm.record(plugin.surface, ingressOutcome(response), `${plugin.surface} inbound answered HTTP ${response?.status ?? 'nothing'}`);
+      // A failure status tells the webhook provider to send the message again.
+      this.ingressAlarm.record(plugin.surface, ingressOutcome(response), `${plugin.surface} inbound answered HTTP ${response?.status ?? 'nothing'}`, 'redelivered');
       return response;
     } catch (error) {
-      this.ingressAlarm.recordFailure(plugin.surface, summarizeError(error));
+      // Re-thrown below: the provider sees the failure and sends the message again.
+      this.ingressAlarm.recordFailure(plugin.surface, summarizeError(error), 'redelivered');
       throw error;
     }
   }

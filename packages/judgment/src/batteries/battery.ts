@@ -126,23 +126,28 @@ export interface BatteryDefinition<Items extends BatteryItems> {
   readonly model?: string;
 }
 
-export interface BatteryRun<Items extends BatteryItems> {
-  readonly readings: { readonly [K in keyof Items]: ReadingFor<Items[K]> };
+/**
+ * A run's readings: one per question asked. `Asked` is every question, or the
+ * `only` subset, so a run that asked some questions is typed with exactly
+ * those and a reading that was not asked cannot be read as if it were.
+ */
+export interface BatteryRun<Items extends BatteryItems, Asked extends keyof Items & string = keyof Items & string> {
+  readonly readings: { readonly [K in Asked]: ReadingFor<Items[K]> };
   readonly result: Omit<JudgmentResult<Questions>, 'answers'>;
   /** Records what code did with these readings in the decision log. */
   recordAction(action: string): void;
 }
 
-export interface RunOptions<Items extends BatteryItems> extends CallOptions {
-  /** Ask only these questions; the rest are left out of the request. */
-  readonly only?: readonly (keyof Items & string)[];
+export interface RunOptions<Items extends BatteryItems, Asked extends keyof Items & string = keyof Items & string> extends CallOptions {
+  /** Ask only these questions; the rest are left out of the request (and out of the readings' type). */
+  readonly only?: readonly Asked[];
   /** The pattern running this battery, recorded in the decision log. */
   readonly pattern?: PatternName;
 }
 
 export interface Battery<Items extends BatteryItems> extends BatteryDefinition<Items>, NamedDecision {
   /** Asks every question (or the `only` subset) about one state in a single request. */
-  run(port: JudgmentPort, state: EntryType, options?: RunOptions<Items>): Promise<BatteryRun<Items>>;
+  run<Asked extends keyof Items & string = keyof Items & string>(port: JudgmentPort, state: EntryType, options?: RunOptions<Items, Asked>): Promise<BatteryRun<Items, Asked>>;
 }
 
 export type AnyReading = YesNoReading | ChoiceReading | ScoreReading;
@@ -246,7 +251,8 @@ export function defineBattery<const Items extends BatteryItems>(definition: Batt
       const readings = Object.fromEntries(asked.map((itemName) => [itemName, readItem(items[itemName]!, answers[itemName])]));
       recordReadings(port, result, readings);
       return {
-        readings: readings as BatteryRun<Items>['readings'],
+        // Built from exactly the asked names, which is what the readings' type says.
+        readings: readings as { readonly [K in keyof Items & string]: ReadingFor<Items[K]> },
         result,
         recordAction: (action) => recordAction(port, result.decisionId, action),
       };

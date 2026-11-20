@@ -42,18 +42,29 @@ export interface ChannelIngressFailureState {
   readonly at: number;
   /** How many messages this run has failed to process. */
   readonly count: number;
+  /**
+   * What happens to a message that failed, a fact of how the surface receives
+   * it: `skipped` (a polled feed advances past it; nothing sends it again) or
+   * `redelivered` (a webhook answered with an error; the provider sends it again).
+   */
+  readonly delivery: IngressFailureDelivery;
 }
 
+export type IngressFailureDelivery = 'skipped' | 'redelivered';
+
 /**
- * The failure as the surface's health reason: what failed and that the skipped
- * messages are not retried, so the owner knows to send them again.
+ * The failure as the surface's health reason: what failed and what became of
+ * the messages, from how the surface receives them. A skipped message is gone
+ * (send it again); a webhook message is sent again by its provider, so sending
+ * it again by hand would deliver it twice.
  */
 export function describeIngressFailure(state: ChannelIngressFailureState | null | undefined): string | undefined {
   if (!state) return undefined;
-  const skipped = state.count === 1
-    ? '1 arriving message was skipped and will not be retried; send it again once this works'
-    : `${state.count} arriving messages were skipped and will not be retried; send them again once this works`;
-  return `${state.detail} (${skipped})`;
+  const one = state.count === 1;
+  const what = state.delivery === 'redelivered'
+    ? `${one ? '1 arriving message' : `${state.count} arriving messages`} could not be processed; the provider sends ${one ? 'it' : 'them'} again on its own, so do not resend ${one ? 'it' : 'them'}`
+    : `${one ? '1 arriving message was' : `${state.count} arriving messages were`} skipped and will not be retried; send ${one ? 'it' : 'them'} again once this works`;
+  return `${state.detail} (${what})`;
 }
 
 export interface ChannelIngressAlarmDeps {
@@ -132,8 +143,8 @@ export class ChannelIngressAlarm {
     return this.states.has(surface) ? undefined : this.processedAfterFailure.get(surface);
   }
 
-  /** One inbound message could not be processed and was skipped. */
-  recordFailure(surface: ChannelSurface, detail: string): void {
+  /** One inbound message could not be processed: skipped (a polled feed) or left for its provider to send again (a webhook). */
+  recordFailure(surface: ChannelSurface, detail: string, delivery: IngressFailureDelivery): void {
     const at = this.now();
     const previous = this.states.get(surface);
     const state: ChannelIngressFailureState = {
@@ -141,11 +152,12 @@ export class ChannelIngressAlarm {
       since: previous?.since ?? at,
       at,
       count: (previous?.count ?? 0) + 1,
+      delivery,
     };
     this.states.set(surface, state);
     // ERROR, not warn: the previous version of this condition was a warn line
     // in a debug file, which is why it went unseen for a day.
-    logger.error('An inbound message could not be processed and was skipped', {
+    logger.error(delivery === 'redelivered' ? 'An inbound message could not be processed; its provider will send it again' : 'An inbound message could not be processed and was skipped', {
       surface,
       detail,
       failedSinceStart: state.count,
@@ -171,9 +183,9 @@ export class ChannelIngressAlarm {
   }
 
   /** Record one message's outcome: only `processed` ends a run, only `failed` starts or extends one. */
-  record(surface: ChannelSurface, outcome: IngressOutcome, detail: string): void {
+  record(surface: ChannelSurface, outcome: IngressOutcome, detail: string, delivery: IngressFailureDelivery): void {
     if (outcome === 'processed') this.recordSuccess(surface);
-    else if (outcome === 'failed') this.recordFailure(surface, detail);
+    else if (outcome === 'failed') this.recordFailure(surface, detail, delivery);
   }
 
   /** A listener must never take down the caller that was already handling a failure. */
@@ -233,13 +245,13 @@ export class IngressProcessingHealth {
    */
   recordFailure(detail: string, context: Record<string, unknown> = {}): void {
     const at = Date.now();
-    this.failure = { detail, since: this.failure?.since ?? at, at, count: (this.failure?.count ?? 0) + 1 };
+    this.failure = { detail, since: this.failure?.since ?? at, at, count: (this.failure?.count ?? 0) + 1, delivery: 'skipped' };
     logger.error('An inbound message could not be processed; advancing past it', {
       surface: this.surface,
       ...context,
       error: detail,
     });
-    this.alarm?.recordFailure(this.surface, detail);
+    this.alarm?.recordFailure(this.surface, detail, 'skipped');
   }
 
   /** A message processed cleanly, ending any run of failures. */

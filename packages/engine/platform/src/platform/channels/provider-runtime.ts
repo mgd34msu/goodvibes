@@ -476,13 +476,14 @@ export class ChannelProviderRuntimeManager {
     } catch (error) {
       const detail = summarizeError(error);
       logger.error('ChannelProviderRuntimeManager: Slack Socket Mode payload failed; Slack will deliver it again', { error: detail });
-      this.deps.ingressAlarm?.recordFailure('slack', detail);
+      this.deps.ingressAlarm?.recordFailure('slack', detail, 'redelivered');
       throw error;
     }
     // Either way the person is answered, so the envelope is accepted; the
     // alarm hears only whether the message was processed (see ingressOutcome).
     if (response instanceof Response) {
-      this.deps.ingressAlarm?.record('slack', ingressOutcome(response), `Slack request could not be started (HTTP ${response.status})`);
+      // The envelope is accepted either way, so Slack does not send a failed one again.
+      this.deps.ingressAlarm?.record('slack', ingressOutcome(response), `Slack request could not be started (HTTP ${response.status})`, 'skipped');
     } else {
       this.deps.ingressAlarm?.recordSuccess('slack');
     }
@@ -527,7 +528,7 @@ export class ChannelProviderRuntimeManager {
     await handleDiscordGatewayDispatchPayload(dispatch, this.deps.buildSurfaceAdapterContext(), discord)
       .then((response) => {
         if (response instanceof Response) {
-          this.deps.ingressAlarm?.record('discord', ingressOutcome(response), `Discord request could not be started (HTTP ${response.status})`);
+          this.deps.ingressAlarm?.record('discord', ingressOutcome(response), `Discord request could not be started (HTTP ${response.status})`, 'skipped');
         } else {
           this.deps.ingressAlarm?.recordSuccess('discord');
         }
@@ -535,7 +536,7 @@ export class ChannelProviderRuntimeManager {
       .catch((error: unknown) => {
         const detail = summarizeError(error);
         logger.error('ChannelProviderRuntimeManager: Discord Gateway dispatch failed', { eventType: dispatch.t, error: detail });
-        this.deps.ingressAlarm?.recordFailure('discord', detail);
+        this.deps.ingressAlarm?.recordFailure('discord', detail, 'skipped');
       });
   }
 
@@ -569,7 +570,7 @@ export class ChannelProviderRuntimeManager {
         // policy does not allow): neither is a processing failure, and a
         // refusal says the same thing every time, so it is not delivered again.
         if (message.id) this.ntfyMessageFailures.delete(`${topic}\u0000${message.id}`);
-        this.deps.ingressAlarm?.record('ntfy', outcome, '');
+        this.deps.ingressAlarm?.record('ntfy', outcome, '', 'skipped');
         return;
       }
       detail = `ntfy dispatch failed (HTTP ${response.status})`;
@@ -596,7 +597,7 @@ export class ChannelProviderRuntimeManager {
     logger.error('ChannelProviderRuntimeManager: ntfy message dispatch failed; skipping it so the topic keeps moving', {
       topic, messageId: message.id ?? '(none)', attempts: attempt, error: detail,
     });
-    this.deps.ingressAlarm?.recordFailure('ntfy', detail);
+    this.deps.ingressAlarm?.recordFailure('ntfy', detail, 'skipped');
   }
 
   /** A topic whose stream keeps dropping is not reading, whatever `running` says. */

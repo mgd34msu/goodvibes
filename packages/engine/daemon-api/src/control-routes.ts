@@ -354,13 +354,10 @@ export function createDaemonControlRouteHandlers(
       if (!descriptor) {
         return jsonErrorResponse({ error: 'Unknown gateway method', code: EngineErrorCodes.METHOD_NOT_FOUND }, { status: 404 });
       }
-      const access = descriptor.access ?? 'admin';
-      if (access === 'admin' || access === 'remote-peer') {
-        const admin = context.requireAdmin(req);
-        if (admin) return admin;
-      }
+      // Who may call it is decided once, in dispatch, from the method's effects for the
+      // request's actor (the same check the REST route and the WebSocket call get).
       const principal = context.resolveAuthenticatedPrincipal(req);
-      if (access === 'authenticated' && !principal) {
+      if (descriptor.access !== 'public' && descriptor.access !== 'remote-peer' && !principal) {
         return authenticationRequiredResponse();
       }
       const parsedBody = await context.parseOptionalJsonBody(req);
@@ -418,13 +415,9 @@ export function createDaemonControlRouteHandlers(
       // above uses, identical access gate, identical in-process handler.
       const { methodId, req, params } = invocation;
       const descriptor = context.gatewayMethods.get(methodId);
-      const access = descriptor?.access ?? 'admin';
-      if (access === 'admin' || access === 'remote-peer') {
-        const admin = context.requireAdmin(req);
-        if (admin) return admin;
-      }
+      // Admission is dispatch's, from the method's effects for the request's actor.
       const principal = context.resolveAuthenticatedPrincipal(req);
-      if (access === 'authenticated' && !principal) {
+      if (descriptor?.access !== 'public' && descriptor?.access !== 'remote-peer' && !principal) {
         return authenticationRequiredResponse();
       }
       const parsedBody = await context.parseOptionalJsonBody(req);

@@ -1,8 +1,10 @@
 # Native work ledger foundation
 
-This additive engine seam does not wire a runner, create another executor,
-persist a second database or replace the planning UX. Production persistence,
-runner and product integration require end-to-end validation. Import the supported
+This engine seam does not wire a runner, create another executor or replace the
+planning UX. It is persisted, live, in the project's knowledge store: the
+`work_ledgers` and `work_ledger_events` tables, through the KnowledgeStore adapter
+(`knowledge/store-work-ledger.ts`, opened by `KnowledgeStore` for each project),
+never a second database. Import the supported
 narrow `@goodvibes-jev/engine/platform/platform/workflow/work-ledger` subpath. The platform
 root and broad workflow barrel deliberately do not re-export this authority seam.
 

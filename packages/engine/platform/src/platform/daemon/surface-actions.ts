@@ -322,7 +322,8 @@ export class DaemonSurfaceActionHelper {
       ...(this.context.ingressAlarm
         ? {
           reportIngressFailure: (surface: import('../channels/types.js').ChannelSurface, detail: string) => {
-            this.context.ingressAlarm?.recordFailure(surface, detail);
+            // Reported after the request was answered: nothing sends the message again.
+            this.context.ingressAlarm?.recordFailure(surface, detail, 'skipped');
           },
         }
         : {}),

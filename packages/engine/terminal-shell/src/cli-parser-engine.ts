@@ -23,8 +23,8 @@
  *
  * A catalog that lets an unmatched first word through (a terminal app seeds
  * its first prompt from it) still refuses a lone word that is a mistyped
- * command (isCommandTypo: five or more letters, one edit from a command, a
- * swap of two neighbours counting as one): `goodvibes stauts` is a typo, not a
+ * command (mistypedCommand: five or more letters, one slip of the fingers
+ * from a command): `goodvibes stauts` is a typo, not a
  * prompt, and opening the full-screen app for it hides the mistake. `--`
  * before the word keeps it as a prompt. Any other lone word (`hello`, `fix`,
  * `frobnicate`) is a one-word prompt; when it is two edits from a command a
@@ -136,18 +136,47 @@ function findCommandWordToken(
 }
 
 /**
- * Whether a lone word is a mistyped command rather than a one-word prompt: a
- * bare word (letters, digits, hyphens) of five or more letters one edit from a
- * command name or alias, an edit being one letter changed, added or dropped or
- * two neighbours swapped (`staus`, `stauts`, `modles`). Read against the
- * command list, no ordinary word of five or more letters sits one edit from a
- * command except other forms of the command itself (`model`, `secret`); a
- * shorter word does (`host`: cost, most, post; `pair`: fair, hair; `help`:
- * held), as does any word two edits away (`hello` from `help`), so those stay
- * prompts and only a warning names the command.
+ * Whether `word` is `command` typed with one slip of the fingers: two
+ * neighbouring letters swapped (`stauts`, `modles`) or one letter pressed
+ * twice (`statuss`).
  */
-function isCommandTypo(token: string, distance: number): boolean {
-  return distance <= 1 && token.length >= 5 && /^[a-z][a-z0-9-]*$/i.test(token);
+function isOneSlip(word: string, command: string): boolean {
+  if (word.length === command.length) {
+    const at = [...word].findIndex((ch, i) => ch !== command[i]);
+    return at >= 0 && at + 1 < word.length && word[at] === command[at + 1] && word[at + 1] === command[at]
+      && word.slice(at + 2) === command.slice(at + 2);
+  }
+  if (word.length !== command.length + 1) return false;
+  let at = 0;
+  while (at < command.length && word[at] === command[at]) at += 1;
+  // One letter added that repeats its neighbour: a key pressed twice.
+  return word.slice(at + 1) === command.slice(at) && (word[at] === word[at - 1] || word[at] === word[at + 1]);
+}
+
+/**
+ * The command a lone word is a mistyped form of, or undefined when the word is
+ * a one-word prompt. A mistype is a bare word of five or more letters that is
+ * one slip ({@link isOneSlip}) from a command name or alias. Read against the
+ * command list and a 50,000-word English list, a swap or a doubled letter
+ * turns no command into an ordinary word, while a changed, added or dropped
+ * letter does (`books`, `looks` from `hooks`; `modes`, `modem` from `models`;
+ * `remove` from `remote`; `demon` from `daemon`; `ridge`, `bride` from
+ * `bridge`; `provide` from `providers`; `states`, `helps`), and a word under
+ * five letters is one edit from many (`cost`, `post` from `host`; `hair`
+ * from `pair`). Those stay prompts, and a warning names the near command.
+ */
+function mistypedCommand<TCommand extends string, TField extends string>(
+  catalog: Pick<CliCatalog<TCommand, TField, unknown>, 'commands'>,
+  token: string,
+): string | undefined {
+  const word = token.toLowerCase();
+  if (word.length < 5 || !/^[a-z][a-z0-9-]*$/.test(word)) return undefined;
+  for (const spec of catalog.commands) {
+    for (const candidate of [spec.name, ...spec.aliases]) {
+      if (isOneSlip(word, candidate)) return candidate;
+    }
+  }
+  return undefined;
 }
 
 /** Edit distance with adjacent transpositions, capped: anything above `limit` reports `limit + 1`. */
@@ -328,8 +357,9 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
       // command stays the catalog default and sawCommand stays false, so the
       // REST of argv is also parsed in the pre-command (strict) posture,
       // matching a single unmatched word never partially unlocking anything.
-      const near = nearestCommandMatch(catalog, found.token);
-      if (near !== undefined) nearMiss = { token: found.token, suggestion: near.word, typo: isCommandTypo(found.token, near.distance) };
+      const mistyped = mistypedCommand(catalog, found.token);
+      const near = mistyped ?? nearestCommandMatch(catalog, found.token)?.word;
+      if (near !== undefined) nearMiss = { token: found.token, suggestion: near, typo: mistyped !== undefined };
     } else {
       command = resolved;
       rawCommand = found.token;

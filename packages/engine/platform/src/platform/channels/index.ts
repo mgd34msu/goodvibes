@@ -66,7 +66,7 @@ export {
 } from './health.js';
 export type { ChannelHealthInput } from './health.js';
 export { ChannelIngressAlarm } from './ingress-alarm.js';
-export type { ChannelIngressAlarmDeps, ChannelIngressFailureState } from './ingress-alarm.js';
+export type { ChannelIngressAlarmDeps, ChannelIngressFailureState, IngressFailureDelivery } from './ingress-alarm.js';
 export { ChannelHealthWatcher } from './health-watcher.js';
 export type { ChannelHealthAlert, ChannelHealthWatcherDeps } from './health-watcher.js';
 export type { UpsertRouteBindingInput } from './route-manager.js';

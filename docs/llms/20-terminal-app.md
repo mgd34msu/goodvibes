@@ -108,16 +108,14 @@ $ goodvibes status --timeout 5
 --timeout, --max-turns, --omit-accumulated and --answer-permissions apply only to the run command.
 ```
 
-- A lone first argument that is one bare word (letters, digits and hyphens) and not a command is refused as an unknown command, with exit code `2`; the error names the nearest command when one is close:
+- A lone first word that is a command mistyped by one slip of the fingers is refused, with exit code `2`: five or more letters, and the command with two neighbouring letters swapped or one letter doubled:
 
 ```text
-$ goodvibes staus
-Unknown command: staus. Did you mean `goodvibes status`? To start with "staus" as the first prompt instead, run: goodvibes -- staus
-$ goodvibes frobnicate
-Unknown command: frobnicate. Run `goodvibes --help` for the commands. To start with "frobnicate" as the first prompt instead, run: goodvibes -- frobnicate
+$ goodvibes stauts
+Unknown command: stauts. Did you mean `goodvibes status`? To start with "stauts" as the first prompt instead, run: goodvibes -- stauts
 ```
 
-- A first prompt is a quoted line (`goodvibes "review this repo"`) or words after `--`. A lone argument that is not a bare word (`goodvibes "staus?"`) is taken as the first prompt; when it is close to a command a warning names that command.
+- Any other lone word is a one-word prompt and starts the app with it (`goodvibes hello`, `goodvibes fix`, `goodvibes frobnicate`). When it is one or two letters from a command (`hello`, `staus`), a warning names that command.
 
 ### Environment variables the terminal app reads
 

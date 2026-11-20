@@ -638,6 +638,12 @@ export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspac
       { text: 'Autonomy queue: review visible schedules, runs, receipts, and cancel routes first.', fg: PALETTE.good },
       { text: 'Reminders and routine promotion require confirmation.', fg: PALETTE.warn },
     );
+  } else if (category.id === 'host') {
+    // Whether the host answers, and whether this Agent may use it, lead the page: every action here needs both.
+    for (const id of ['runtime', 'connected-host-auth']) {
+      const item = snapshot.setupChecklist.find((entry) => entry.id === id);
+      if (item) base.push({ text: `${item.label}: ${setupStatusLabel(item.status).toLowerCase()}. ${item.detail}`, fg: setupStatusColor(item.status), bold: item.status === 'blocked' });
+    }
   } else if (category.id === 'finish') {
     base.push(
       { text: 'Apply & close marks onboarding finished for this user.', fg: PALETTE.good },

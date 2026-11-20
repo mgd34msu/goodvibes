@@ -186,11 +186,8 @@ export function settingContextLines(modal: SettingsModal): HelpLine[] {
   if (modal.searchFocused) {
     const selected = modal.getSelected();
     if (selected) return buildSettingHelp(modal, selected);
-    return [
-      helpText(modal.searchQuery.trim().length === 0
-        ? 'Type a query to search across all settings categories.'
-        : 'No settings matched the search query.'),
-    ];
+    // A search that matches nothing is said once, by the list's own empty row.
+    return modal.searchQuery.trim().length === 0 ? [helpText('Type a query to search across all settings categories.')] : [];
   }
   const lines: HelpLine[] = [];
   if (category === 'mcp') lines.push(...buildMcpHelp(modal, modal.getSelectedMcp()));

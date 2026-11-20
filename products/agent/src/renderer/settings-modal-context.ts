@@ -214,8 +214,8 @@ export function settingContextLines(modal: SettingsModal): HelpLine[] {
   const lines: HelpLine[] = [];
   if (modal.searchFocused) {
     const selected = modal.getSelected();
+    // A search that matches nothing is said once, by the list's own empty row.
     if (selected) lines.push(...buildSettingHelp(modal, selected));
-    else lines.push(helpText('Search'), helpText('No setting matches the search.'));
     return lines;
   }
   if (category === 'flags') lines.push(...buildFlagHelp(modal.getSelectedFlag()));

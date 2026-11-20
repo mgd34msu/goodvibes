@@ -244,25 +244,25 @@ The terminal app's model has no mail tool of its own: the owner sends mail with 
 
 ## The approval prompt
 
-In the terminal app, an ask appears as an amber card that shows the whole call: every command in full, the target paths, the URL, or the whole argument object for a tool with no known subject. Writes and edits show the change of every file. Risk shows as a chip.
+In the terminal app and the Agent, an ask appears as the same card. Its title is the question in a sentence (`Run this command?`, `Change a file outside this folder?`, `Turn <setting> off?`), with the folder it runs in on the right (`in ~/projects/sample-app`) and, when more asks wait behind it, `1 more waiting`. Under it: what the call acts on (every command in full, the paths, the address), for a write or edit the change itself, then one sentence saying what it will do (`Runs your tests.`, `Removes the folder dist and everything in it. GoodVibes keeps no copy.`). The question and that sentence are red, with `This can't be undone.`, only for a call the program knows cannot be undone: a delete code recognises (`rm -r`, `git clean -f`, an unrecoverable file operation), an operator action a tool declares irreversible, or a call the decision model read as irreversible with confidence. With no decision model nothing else is red, and the details say `Not checked: no decision model is set, so GoodVibes can't tell whether this can be undone.` There are no risk chips.
 
 | Key | Action |
 | --- | --- |
-| Left, Right | Choose a button. |
-| Enter | Confirm the chosen button. |
-| `y` | Allow once. |
-| `a` then Enter | Allow for the session (when no remember tiers are offered). |
-| `1` to `9` then Enter | Allow and remember with that tier (when tiers are offered). |
-| `n` | Deny. |
-| Any other typing | Starts a denial with a reason; Enter sends it. |
-| `d` | Details: directory, sandbox, policy judgment, review reasons, raw arguments. |
-| Space, `a`, Up, Down, PgUp, PgDn | In a hunk-selectable edit: toggle hunks, select all, move, scroll. |
+| `y` | Yes, once. |
+| `a` | `Yes, and don't ask again…`: opens the remember choices (when the ask offers them). |
+| Up, Down, `1` to `9`, Enter | In the remember choices: move, pick, and allow and remember with that choice. Esc goes back. |
+| `n` | No. |
+| `d` | Details: why you are asked, the tool, the folder, the sandbox, the decision, effects, review reasons, the checklist and the raw arguments. |
+| Left, Right, Tab | Choose a button. |
+| Enter | Press the chosen button. The card opens on `Yes, once`, or on `No` for what cannot be undone and for owner-only asks whose effect cannot be taken back (money spent, a payment step, a message sent as you), so Enter never allows those and never remembers anything. |
+| Any other typing | Starts `Why not:`; Enter refuses with that reason, Esc goes back. |
+| Space, `a`, Up, Down, PgUp, PgDn | In a multi-edit edit (`Apply selected`): keep or leave out a change, keep all, move, scroll. |
 | Tab | When you were typing a draft, Tab answers the request and keeps your draft. |
-| Ctrl+C | Deny and stop the turn. |
+| Ctrl+C | No, and stop the turn. |
 
-A request that offers no remembering (a channel request, a one-call boundary ask) shows only allow once, deny and a reason.
+A call that cannot be undone, and a request that offers no remembering (a channel request, a one-call boundary ask), offer only `Yes, once` and `No`, with `always asks · can't be remembered` beside them; to let such a call run without asking, add a permission rule with `/permissions`. A command waiting on its terminal for input shows its prompt and a masked answer field: Enter sends the answer, Esc clears it and then declines. A denial is the call's answer: the model is told the call was refused (with your reason) and the turn goes on. The same keys answer a turn that runs on the daemon.
 
-In the Agent the card's keys are: `y` allows once; `a` then Enter allows for the session (after `a` the card says that Enter now allows for the rest of the session and any other key goes back); `n` or Esc denies; Ctrl+C denies and stops the turn. Enter alone is never the broadest answer: it allows once, and for a call that cannot be undone (a delete with no undo record, an irreversible operator action, money spent, a payment step, a message sent as you) it denies. A denial is the call's answer: the model is told the call was refused and the turn goes on. The same keys answer a turn that runs on the daemon.
+A question an agent of this chat left for you (the `query` tool's `ask`) appears as `A question for you`, pinned above the composer without covering the conversation: Up and Down choose an option, `1` to `9` pick one, Enter answers (the last option, `Something else…`, opens a one-line answer), and Esc answers later (it stays in `/questions` and the web UI). These keys reach the card while the composer is empty; typing goes to the composer. The answer goes through the owner inbox and the card shows `Answered: <option>` once.
 
 The same asks appear in the web UI, in `/questions` (the owner inbox), on Telegram, and in the channel conversation the request came from, where that channel's owner can answer.
 
@@ -284,7 +284,7 @@ A choice to remember is not saved when the owner edited the arguments, when the 
 
 No command, setting or operator method adds a rule directly. A rule exists only in these ways:
 
-1. You answer an approval prompt with a remember tier other than session (in the terminal app, `1` to `9` then Enter on the card; the tiers offered are numbered in this order: exact, command-class, path, tool, session, with command-class moved first after three remembered exact answers for that class; only the tiers that apply to the call are offered). A stream-json headless run's `"remember": true` on a `PERMISSION_ANSWER` remembers for the session only, not as a rule.
+1. You answer an approval prompt with a remember tier other than session (in both terminal programs, `a` on the card, then the choice and Enter; the tiers offered are numbered in this order: exact, command-class, path, tool, session, with command-class moved first after three remembered exact answers for that class; only the tiers that apply to the call are offered). A stream-json headless run's `"remember": true` on a `PERMISSION_ANSWER` remembers for the session only, not as a rule.
 2. You answer `/decisions never|always|ask <id>` on a call Jev decided. The rule is built at the first tier the call offers (for `exec`, `exact`; for `write` and `edit`, `path`; otherwise `tool`).
 3. You add a record to the rules file by hand (format below). The file is re-read within two seconds; a malformed record is skipped.
 

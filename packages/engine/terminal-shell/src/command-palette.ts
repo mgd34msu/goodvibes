@@ -73,7 +73,6 @@ const CURATED: ReadonlyArray<readonly [string, CuratedEntry]> = [
   ['session', { title: 'Sessions', group: 'Session', keywords: ['saved', 'hosted', 'history'] }],
   ['clear', { title: 'Clear the conversation', group: 'Session', keywords: ['new', 'reset'] }],
   ['compact', { title: 'Compact context', group: 'Session', keywords: ['summarize', 'tokens'] }],
-  ['fork', { title: 'Fork from here', group: 'Session', keywords: ['branch'] }],
   ['bookmarks', { title: 'Bookmarks', group: 'Session' }],
   ['replay', { title: 'Replay a session', group: 'Session' }],
   ['agents', { title: 'Agents', group: 'Views', keywords: ['hosted', 'acp', 'claude code', 'codex', 'opencode', 'steer', 'stop'] }],

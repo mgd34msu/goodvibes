@@ -13,6 +13,7 @@ import { MY_SKILLS_WORKSPACE_ACTIONS } from './workspace-actions/my-skills.ts';
 import { TODO_WORKSPACE_ACTIONS } from './workspace-actions/todo.ts';
 import { SECRETS_WORKSPACE_ACTIONS } from './workspace-actions/secrets.ts';
 import { MEMORY_WORKSPACE_ACTIONS } from './workspace-actions/memory.ts';
+import { SESSION_WORKSPACE_ACTIONS } from './workspace-actions/session.ts';
 
 export interface WorkspaceActionTarget {
   /** The described command's name. */
@@ -28,6 +29,7 @@ const TARGETS: ReadonlyMap<string, WorkspaceActionTarget> = new Map(Object.entri
   ...TODO_WORKSPACE_ACTIONS,
   ...SECRETS_WORKSPACE_ACTIONS,
   ...MEMORY_WORKSPACE_ACTIONS,
+  ...SESSION_WORKSPACE_ACTIONS,
 }));
 
 /** The action a workspace row's form kind now opens, or undefined while the row still opens its form. */

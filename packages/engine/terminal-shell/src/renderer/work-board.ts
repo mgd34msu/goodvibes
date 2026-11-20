@@ -222,8 +222,7 @@ function drawDetail(canvas: SurfaceCanvas, p: KitInset, detail: PanelDetail): vo
   const t = activeTokens();
   const width = p.r - p.l + 1;
   let y = p.top;
-  canvas.put(p.l, y, clipText(detail.title, width), { fg: t.text, bold: true, bg: p.bg });
-  y++;
+  y = drawTexts(canvas, p.l, y, width, [{ text: detail.title, tone: 'text', bold: true }], p.bottom, p.bg);
   if (detail.meta) y = drawTexts(canvas, p.l, y, width, [{ text: detail.meta, tone: 'faint' }], p.bottom, p.bg);
   y++;
   const tailRows = Math.min(textRows(detail.tail, width), Math.max(0, p.bottom - y + 1 - 2));
@@ -334,19 +333,29 @@ interface ColumnPlan {
   readonly whoW: number;
   /** Where the scheduled meta starts, relative to the title's column. */
   readonly scheduledTitleW: number;
+  /** Where a background service's state word starts, relative to its name's column. */
+  readonly serviceW: number;
 }
 
 function planColumns(lines: readonly BodyLine[], inner: number): ColumnPlan {
   let who = 0;
   let title = 0;
+  let meta = 0;
+  let service = 0;
   for (const line of lines) {
+    if (line.kind === 'service') service = Math.max(service, getDisplayWidth(line.label));
     if (line.kind !== 'entry') continue;
     if (line.layout === 'agent' && showsWho(line.entry.row)) who = Math.max(who, getDisplayWidth(line.entry.row.who!) + line.entry.depth * 2);
-    if (line.layout === 'scheduled') title = Math.max(title, getDisplayWidth(line.entry.row.title));
+    if (line.layout === 'scheduled') {
+      title = Math.max(title, getDisplayWidth(line.entry.row.title));
+      meta = Math.max(meta, getDisplayWidth(line.entry.row.meta.short));
+    }
   }
   // The who column never takes more than a third of the row.
   const whoW = who > 0 ? Math.min(who + 3, Math.floor(inner / 3)) : 0;
-  return { whoW, scheduledTitleW: Math.min(title + 6, Math.floor(inner / 2)) };
+  // Scheduled titles line up with six columns before their words, three when that is what makes the words fit.
+  const scheduledTitleW = Math.min(title + 6, Math.max(title + 3, inner - 5 - meta), Math.floor(inner * 0.6));
+  return { whoW, scheduledTitleW, serviceW: Math.min(service + 3, Math.floor(inner * 0.6)) };
 }
 
 function drawEntry(canvas: SurfaceCanvas, y: number, x0: number, x1: number, line: Extract<BodyLine, { kind: 'entry' }>, plan: ColumnPlan): void {
@@ -444,7 +453,7 @@ function drawListLevel(f: ModalFrame, view: WorkBoardPanelView): void {
   const bottom = f.bottom - bottomRows(view, width);
   // Wide screens put the selected row's detail on the right; 80 columns show rows and hints only.
   const wide = !f.canvas.compact && view.detail !== null;
-  const split = wide ? splitListDetail(f.l, f.r, top, bottom, 0.55, 6) : null;
+  const split = wide ? splitListDetail(f.l, f.r, top, bottom, 0.68, 6) : null;
   const x0 = f.l;
   const x1 = split && !split.stacked ? split.x1 : f.r;
   const listBottom = split && !split.stacked ? bottom : bottom;
@@ -471,8 +480,9 @@ function drawListLevel(f: ModalFrame, view: WorkBoardPanelView): void {
       }
       case 'entry': drawEntry(f.canvas, y, x0, x1, line, plan); break;
       case 'service': {
-        f.canvas.put(x0 + 3, y, cutText(line.label, Math.max(1, plan.scheduledTitleW - 2)), { fg: t.textMuted });
-        f.canvas.put(x0 + 3 + Math.max(plan.scheduledTitleW, getDisplayWidth(line.label) + 3), y, line.state, { fg: t.textFaint });
+        const stateX = x0 + 3 + plan.serviceW;
+        f.canvas.put(x0 + 3, y, cutText(line.label, Math.max(1, plan.serviceW - 2)), { fg: t.textMuted });
+        f.canvas.put(stateX, y, cutText(line.state, Math.max(1, x1 - 1 - stateX + 1)), { fg: t.textFaint });
         break;
       }
     }

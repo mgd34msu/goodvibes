@@ -81,7 +81,7 @@ function describeRuleRow(record: Pick<StoredUserPermissionRule, 'rule' | 'tier' 
   };
 }
 
-function showRememberedRules(ctx: PermissionsCommandContext): void {
+export function showRememberedRules(ctx: PermissionsCommandContext): void {
   const store = ctx.ruleStore;
   if (!store) {
     ctx.print('Remembered permission rules are not available on this surface.');
@@ -123,7 +123,7 @@ function showRememberedRules(ctx: PermissionsCommandContext): void {
   ].join('\n'));
 }
 
-async function revokeRememberedRule(ctx: PermissionsCommandContext, ruleId: string): Promise<void> {
+export async function revokeRememberedRule(ctx: PermissionsCommandContext, ruleId: string): Promise<void> {
   const store = ctx.ruleStore;
   if (!store) {
     ctx.print('Remembered permission rules are not available on this surface.');
@@ -184,7 +184,8 @@ function ownerRuleRecord(args: readonly string[], projectRoot: string | null, no
   return { rule: { ...built, id: ownerRuleId(tier, toolName, now) }, tier, tool: toolName, createdAt: now, project: projectIdentity(projectRoot) };
 }
 
-async function addOwnerRule(ctx: PermissionsCommandContext, args: readonly string[]): Promise<void> {
+/** Adds a rule the owner states: `never <command>`, or `<allow|deny|ask> <command|class|path|tool> <target>`. */
+export async function addOwnerRule(ctx: PermissionsCommandContext, args: readonly string[]): Promise<void> {
   const store = ctx.ruleStore;
   if (!store?.add) {
     ctx.print('Permission rules cannot be added on this surface.');
@@ -220,6 +221,11 @@ export async function runPermissionsCommand(args: readonly string[], ctx: Permis
     await addOwnerRule(ctx, args.slice(1));
     return;
   }
+  showPermissionSettings(ctx);
+}
+
+/** The permission settings in force, where each comes from, and how many rules there are. */
+export function showPermissionSettings(ctx: PermissionsCommandContext): void {
   const reported = ctx.modeInForce?.();
   const provenance = buildPermissionProvenance(ctx.configManager, { evaluatorInForce: ctx.evaluatorInForce?.(), ...(reported ? { modeInForce: reported } : {}) });
   ctx.print(renderPermissionProvenance(provenance));

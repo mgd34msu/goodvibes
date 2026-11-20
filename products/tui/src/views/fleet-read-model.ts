@@ -235,15 +235,15 @@ export function isBlockedOnUserNode(node: ProcessNode): boolean {
  *   - 'conflict', a merge conflict needs a human resolution before the work
  *                  can land.
  * The pick/conflict wording is deliberately DISTINCT from the bare
- * 'blocked on you' so an operator reads the required act, not just the state.
+ * 'waiting for you' so an operator reads the required act, not just the state.
  */
 export function fleetAttentionText(attention: ProcessAttention): string {
   switch (attention.reason) {
     case 'input': return 'needs your input';
     case 'pick': return 'needs your pick';
     case 'conflict': return 'merge conflict waiting on you';
-    case 'approval': return 'blocked on you';
-    default: return 'blocked on you';
+    case 'approval': return 'waiting for your answer';
+    default: return 'waiting for you';
   }
 }
 

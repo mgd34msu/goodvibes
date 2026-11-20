@@ -5,7 +5,7 @@ import type { SlashCommand } from './command-registry.ts';
 import { policyCommand } from './commands/policy.ts';
 import { providerCommand } from './commands/provider.ts';
 import { evalCommand } from './commands/eval.ts';
-import { sessionCommand, resumeCommand } from './commands/session.ts';
+import { sessionCommand, resumeCommand, saveCommand } from './commands/session.ts';
 import { memoryCommand } from './commands/memory.ts';
 import { knowledgeCommand } from './commands/knowledge.ts';
 import { registerShellCoreCommands } from './commands/shell-core.ts';
@@ -14,7 +14,6 @@ import { registerDiscoveryRuntimeCommands } from './commands/discovery-runtime.t
 import { registerPlanningRuntimeCommands } from './commands/planning-runtime.ts';
 import { registerPaymentCardCommands } from './commands/payment-card-intake.ts';
 import { registerScheduleRuntimeCommands } from './commands/schedule-runtime.ts';
-import { registerBranchRuntimeCommands } from './commands/branch-runtime.ts';
 import { registerOperatorRuntimeCommands } from './commands/operator-runtime.ts';
 import { registerPluginRuntimeCommands } from './commands/plugin-runtime.ts';
 import { registerDiffRuntimeCommands } from './commands/diff-runtime.ts';
@@ -25,7 +24,6 @@ import { registerGraphRuntimeCommands } from './commands/graph-runtime.ts';
 import { registerTestRuntimeCommands } from './commands/test-runtime.ts';
 import { registerNotifyRuntimeCommands } from './commands/notify-runtime.ts';
 import { registerReplayRuntimeCommands } from './commands/replay-runtime.ts';
-import { registerShareRuntimeCommands } from './commands/share-runtime.ts';
 import { registerChannelRuntimeCommands } from './commands/channel-runtime.ts';
 import { registerTelegramIntakeCommands } from './commands/telegram-intake-runtime.ts';
 import { registerProductRuntimeCommands } from './commands/product-runtime.ts';
@@ -122,7 +120,6 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Testing', register: registerTestRuntimeCommands },
   { category: 'Notifications', register: registerNotifyRuntimeCommands },
   { category: 'Sessions & Replay', register: registerReplayRuntimeCommands },
-  { category: 'Sharing', register: registerShareRuntimeCommands },
   { category: 'Channels', register: registerChannelRuntimeCommands },
   { category: 'Channels', register: registerTelegramIntakeCommands },
   { category: 'Product', register: registerProductRuntimeCommands },
@@ -171,7 +168,6 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Planning', register: registerPlanningRuntimeCommands },
   { category: 'Payments', register: registerPaymentCardCommands },
   { category: 'Scheduling', register: registerScheduleRuntimeCommands },
-  { category: 'Branches', register: registerBranchRuntimeCommands },
   { category: 'Session Content', register: registerSessionContentCommands },
   { category: 'Checkpoints', register: registerCheckpointRuntimeCommands },
   { category: 'Checkpoints', register: registerRewindRuntimeCommands },
@@ -198,6 +194,7 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Sessions & Replay', register: registerHostedRuntimeCommands },
   { category: 'Sessions & Replay', register: (registry) => registry.register(sessionCommand) },
   { category: 'Sessions & Replay', register: (registry) => registry.register(resumeCommand) },
+  { category: 'Sessions & Replay', register: (registry) => registry.register(saveCommand) },
   { category: 'Memory', register: (registry) => registry.register(memoryCommand) },
   { category: 'Knowledge', register: (registry) => registry.register(knowledgeCommand) },
 ];

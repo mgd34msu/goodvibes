@@ -16,12 +16,16 @@
  */
 import { formatRefusal } from '@goodvibes-jev/engine/errors';
 import type { OwnerAnswerDelivery, OwnerInboxPort, OwnerItem } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { TerminalSlashCommand } from './command-registry.js';
+import type { TerminalCommandRegistry } from './command-registry.js';
+import { commandRefusal } from './command-confirmation.js';
+import { defineCommand } from './command-actions/define.js';
+import { defineList, type ListRow } from './command-actions/lists.js';
+import type { ActionDescription, CommandActionContext, InputDescription } from './command-actions/types.js';
+import { listInput, readAction, textInput } from './described-command-kit.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
 import { JEV_DECISION_CHOICES } from '@goodvibes-jev/engine/platform/platform/permissions';
 
-export interface OwnerInboxCommandContext {
-  readonly print: (text: string) => void;
+export interface OwnerInboxCommandContext extends CommandActionContext {
   readonly renderRequest: () => void;
 }
 
@@ -35,15 +39,13 @@ export interface OwnerInboxCommandPolicy<Context> {
 const SHORT_ID_CHARS = 14;
 const LIST_LIMIT = 50;
 const DECISIONS_LIMIT = 30;
-/** What the owner can do about a call Jev decided (permissions/jev-decisions.ts). */
-const DECISION_CHOICES: ReadonlySet<string> = new Set(Object.values(JEV_DECISION_CHOICES));
 
 /** Display-only: strip terminal control sequences from text an agent or a channel wrote. */
 function text(value: string): string {
   return stripDangerousAnsi(value).replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
 }
 
-function shortId(id: string): string {
+export function shortId(id: string): string {
   return id.length > SHORT_ID_CHARS ? id.slice(0, SHORT_ID_CHARS) : id;
 }
 
@@ -170,94 +172,121 @@ function resolveId(raw: string, items: readonly OwnerItem[]): { id: string } | {
   return { error: `"${raw}" matches ${matches.length} items (${matches.slice(0, 4).map((item) => shortId(item.id)).join(', ')}); type more of the id.` };
 }
 
-export function createOwnerInboxCommands<Context extends OwnerInboxCommandContext>(
+let inboxPolicy: OwnerInboxCommandPolicy<unknown> | undefined;
+function inboxOf(context: unknown): OwnerInboxPort {
+  const inbox = inboxPolicy?.inbox(context) ?? { unavailable: 'No inbox is wired here.' };
+  if ('unavailable' in inbox) throw commandRefusal(inbox.unavailable);
+  return inbox;
+}
+function failed(what: string, error: unknown): never {
+  throw commandRefusal(`Could not ${what}: ${error instanceof Error ? error.message : String(error)}.`, 'Check the daemon with /status, then retry.');
+}
+const TERMINAL_ONLY = { terminalOnly: 'The web UI answers the inbox on its own Inbox page.' } as const;
+
+const OPEN_QUESTIONS = defineList<unknown>({
+  name: 'inbox.open',
+  async read(ctx) {
+    return (await inboxOf(ctx).list({ status: 'open', limit: LIST_LIMIT })).map((item): ListRow => ({
+      value: shortId(item.id), label: text(item.title), state: item.kind,
+      detail: item.options.length > 0 ? `answers: ${item.options.join(', ')}` : 'a written answer',
+    }));
+  },
+  operator: { method: 'inbox.list', input: { status: 'open' }, rows: { from: 'items', value: 'id', label: 'title', state: 'kind' } },
+});
+const ALL_ITEMS = defineList<unknown>({
+  name: 'inbox.all',
+  async read(ctx) {
+    return (await inboxOf(ctx).list({ status: 'all', limit: LIST_LIMIT })).map((item): ListRow => ({ value: shortId(item.id), label: text(item.title), state: item.status }));
+  },
+  operator: { method: 'inbox.list', input: { status: 'all' }, rows: { from: 'items', value: 'id', label: 'title', state: 'status' } },
+});
+const OPEN_DECISIONS = defineList<unknown>({
+  name: 'inbox.decisions',
+  async read(ctx) {
+    return (await inboxOf(ctx).list({ status: 'open', kinds: ['decision'], limit: LIST_LIMIT })).map((item): ListRow => ({ value: shortId(item.id), label: text(item.title), detail: when(item.createdAt) }));
+  },
+  operator: { method: 'inbox.list', input: { status: 'open', kinds: 'decision' }, rows: { from: 'items', value: 'id', label: 'title' } },
+});
+
+async function findItem(inbox: OwnerInboxPort, raw: string, status: 'open' | 'all'): Promise<OwnerItem> {
+  const direct = await inbox.find(raw);
+  if (direct) return direct;
+  const resolved = resolveId(raw, await inbox.list({ status, limit: 500 }));
+  if ('error' in resolved) throw commandRefusal(resolved.error);
+  const item = await inbox.find(resolved.id);
+  if (!item) throw commandRefusal(`${resolved.id} is no longer in the inbox.`);
+  return item;
+}
+
+/** What each choice on a decision Jev made does, said once (the action's label and sentence). */
+const DECISION_ACTIONS: readonly { readonly word: keyof typeof JEV_DECISION_CHOICES; readonly label: string; readonly sentence: string; readonly risk: ActionDescription<never>['risk'] }[] = [
+  { word: 'keep', label: 'Leave a decision as Jev made it', sentence: '{decision} stays as Jev decided it, and nothing changes until you change it.', risk: 'none' },
+  { word: 'undo', label: 'Undo what a decision did', sentence: 'The files the call in {decision} changed are put back as they were before it, until you change it.', risk: 'none' },
+  { word: 'never', label: 'Never allow calls like a decision\'s', sentence: 'Calls like the one in {decision} are refused from now on, until you change it.', risk: 'none' },
+  { word: 'always', label: 'Always allow calls like a decision\'s without asking', sentence: 'Calls like the one in {decision} run without asking from now on, until you change it.', risk: 'loosens-a-protection' },
+  { word: 'ask', label: 'Ask me about calls like a decision\'s', sentence: 'Calls like the one in {decision} are asked of you from now on, until you change it.', risk: 'none' },
+];
+
+/** Register `/questions` and `/decisions` (one description each for both apps) over this app's inbox. */
+export function registerOwnerInboxCommands<Context extends OwnerInboxCommandContext>(
+  registry: Pick<TerminalCommandRegistry<Context>, 'register'>,
   policy: OwnerInboxCommandPolicy<Context>,
-): readonly TerminalSlashCommand<Context>[] {
-  const port = (context: Context): OwnerInboxPort | undefined => {
-    const inbox = policy.inbox(context);
-    if ('unavailable' in inbox) {
-      context.print(`[inbox] ${inbox.unavailable}`);
-      return undefined;
-    }
-    return inbox;
-  };
-  const say = (context: Context, message: string) => {
-    context.print(message);
-    context.renderRequest();
-  };
-  const failed = (context: Context, what: string, error: unknown) => {
-    say(context, `[inbox] Could not ${what}: ${error instanceof Error ? error.message : String(error)}. Check the daemon with /status, then retry.`);
+): void {
+  inboxPolicy = policy as OwnerInboxCommandPolicy<unknown>;
+  const ownerOnly = (context: Context, command: string, what: string): void => {
+    // The answer is the owner's: a model running this command never answers for him.
+    if (!policy.isOwner(context, command)) throw commandRefusal(`Only the owner ${what}. Type /${command} at the terminal.`);
   };
 
-  const questions: TerminalSlashCommand<Context> = {
+  const ITEM: InputDescription = listInput({ id: 'item', label: 'Question', help: 'What waits on you', list: OPEN_QUESTIONS, other: 'the id of an item already answered' });
+  registry.register(defineCommand<Context>({
     name: 'questions',
-    aliases: ['inbox'],
-    description: 'What waits on you: permission asks, questions agents left, claims, purchase windows; answer one',
-    usage: '[all] | show <id> | answer <id> <choice|text> [note]',
-    argsHint: '[all|show|answer]',
-    // Reading the inbox is open to a model; answering is the owner's (the handler checks).
-    effect: 'mixed',
-    readVerbs: ['', 'all', 'list', 'show'],
-    // An answer is free text, delivered as typed.
-    rawRest: (args) => (args[0] === 'answer' ? 2 : undefined),
-    async handler(args, context) {
-      // Read before the first await: a model running this command must not answer for the owner.
-      const owner = policy.isOwner(context, 'questions');
-      const inbox = port(context);
-      if (!inbox) return;
-      const sub = (args[0] ?? '').toLowerCase();
-
-      if (sub === '' || sub === 'all' || sub === 'list') {
-        try {
-          const items = await inbox.list({ status: sub === 'all' ? 'all' : 'open', limit: LIST_LIMIT });
-          if (items.length === 0) {
-            say(context, sub === 'all' ? '[inbox] Nothing has been asked of you yet.' : '[inbox] Nothing is waiting on you.');
-            return;
-          }
-          say(context, [
-            sub === 'all' ? `Owner inbox (${items.length}, newest first):` : `Waiting on you (${items.length}):`,
-            ...items.map((item) => `  ${formatOwnerItemLine(item)}`),
-            '',
-            'Show one: /questions show <id>   Answer: /questions answer <id> <choice|text>',
-          ].join('\n'));
-        } catch (error) {
-          failed(context, 'read the inbox', error);
-        }
-        return;
-      }
-
-      if (sub === 'show') {
-        const raw = args[1];
-        if (!raw) { say(context, 'Usage: /questions show <id>'); return; }
-        try {
-          const item = await inbox.find(raw) ?? await (async () => {
-            const resolved = resolveId(raw, await inbox.list({ status: 'all', limit: 500 }));
-            return 'id' in resolved ? inbox.find(resolved.id) : undefined;
-          })();
-          say(context, item ? formatOwnerItemDetail(item) : `[inbox] No inbox item starts with "${raw}".`);
-        } catch (error) {
-          failed(context, 'read the item', error);
-        }
-        return;
-      }
-
-      if (sub === 'answer') {
-        if (!owner) {
-          say(context, '[inbox] Only the owner answers the inbox. Type /questions answer at the terminal.');
-          return;
-        }
-        const raw = args[1];
-        const rest = args.slice(2);
-        if (!raw || rest.length === 0) { say(context, 'Usage: /questions answer <id> <choice|text> [note]'); return; }
-        try {
-          let item = await inbox.find(raw);
-          if (!item) {
-            const resolved = resolveId(raw, await inbox.list({ status: 'open', limit: 500 }));
-            if ('error' in resolved) { say(context, `[inbox] ${resolved.error}`); return; }
-            item = await inbox.find(resolved.id);
-            if (!item) { say(context, `[inbox] ${resolved.id} is no longer in the inbox.`); return; }
-          }
-          const words = rest.join(' ').trim();
+    title: 'What waits on you',
+    summary: 'Permission asks, questions agents left, claims and purchase windows: see them and answer',
+    group: 'Inbox',
+    report: 'list',
+    actions: [
+      readAction<Context>({
+        id: 'list', label: 'See what waits on you', word: 'list',
+        sentence: 'Lists every open question, ask, claim and purchase window, with its answers.',
+        async rowValue(ctx) { try { const open = await inboxOf(ctx).list({ status: 'open', limit: LIST_LIMIT }); return open.length === 0 ? 'nothing waiting' : `${open.length} waiting`; } catch { return ''; } },
+        async run(_values, ctx) {
+          let items: readonly OwnerItem[];
+          try { items = await inboxOf(ctx).list({ status: 'open', limit: LIST_LIMIT }); } catch (error) { return failed('read the inbox', error); }
+          if (items.length === 0) return 'Nothing is waiting on you.';
+          return [`Waiting on you (${items.length}):`, ...items.map((item) => `  ${formatOwnerItemLine(item)}`), '', 'Show one: /questions show <id>   Answer: /questions answer <id> <choice|text>'].join('\n');
+        },
+      }),
+      readAction<Context>({
+        id: 'all', label: 'See everything ever asked of you', word: 'all',
+        sentence: 'Lists every inbox item, open or answered, newest first, with who answered and where the answer went.',
+        async run(_values, ctx) {
+          let items: readonly OwnerItem[];
+          try { items = await inboxOf(ctx).list({ status: 'all', limit: LIST_LIMIT }); } catch (error) { return failed('read the inbox', error); }
+          if (items.length === 0) return 'Nothing has been asked of you yet.';
+          return [`Owner inbox (${items.length}, newest first):`, ...items.map((item) => `  ${formatOwnerItemLine(item)}`)].join('\n');
+        },
+      }),
+      readAction<Context>({
+        id: 'show', label: 'See one question in full', word: 'show',
+        inputs: [listInput({ id: 'item', label: 'Item', help: 'Everything in the inbox', list: ALL_ITEMS })],
+        sentence: 'Shows {item} in full: who asked, when, the answers it takes, and where an answer went.', example: { item: 'q-41a2' },
+        async run(values, ctx) {
+          try { return formatOwnerItemDetail(await findItem(inboxOf(ctx), values.item!, 'all')); } catch (error) { if (error && typeof error === 'object' && 'refusal' in error) throw error; return failed('read the item', error); }
+        },
+      }),
+      {
+        id: 'answer', label: 'Answer a question', word: 'answer',
+        inputs: [ITEM, textInput({ id: 'answer', label: 'Answer', help: 'One of its answers, then a note if you like; or your written answer', why: 'your own words', kind: 'long-text', typed: { tail: true } })],
+        sentence: '{item} is answered "{answer}" and the answer goes to whoever asked.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone',
+        ownerOnly: { reason: 'the owner\'s answer is the owner\'s', instead: 'Ask the owner to answer it with /questions answer.' },
+        operator: TERMINAL_ONLY, example: { item: 'q-41a2', answer: 'approve' },
+        async run(values, ctx) {
+          ownerOnly(ctx, 'questions', 'answers the inbox');
+          const inbox = inboxOf(ctx);
+          const item = await findItem(inbox, values.item!, 'open');
+          const words = values.answer!.trim();
           // With options, the first word is the choice and the rest, as typed, its note.
           const space = words.search(/\s/);
           // An approval is answered at the revision shown: one that moved meanwhile is refused with how it stands now.
@@ -265,108 +294,91 @@ export function createOwnerInboxCommands<Context extends OwnerInboxCommandContex
           const answer = item.options.length > 0
             ? { option: space < 0 ? words : words.slice(0, space), ...(space < 0 ? {} : { text: words.slice(space).trim() }), ...shown }
             : { text: words, ...shown };
-          const outcome = await inbox.answer(item.id, answer);
-          if (outcome.applied) {
-            say(context, `[inbox] Answered ${shortId(outcome.item.id)}: ${answerText(outcome.item)}${deliveryNotice(outcome.delivery)}`);
-            return;
-          }
-          say(context, `[inbox] ${formatRefusal(outcome.refusal)}`);
-        } catch (error) {
-          failed(context, 'send the answer', error);
-        }
-        return;
-      }
+          let outcome;
+          try { outcome = await inbox.answer(item.id, answer); } catch (error) { return failed('send the answer', error); }
+          if (!outcome.applied) throw commandRefusal(formatRefusal(outcome.refusal));
+          ctx.renderRequest();
+          return `Answered ${shortId(outcome.item.id)}: ${answerText(outcome.item)}${deliveryNotice(outcome.delivery)}`;
+        },
+      },
+    ],
+  }));
 
-      say(context, 'Usage: /questions [all] | show <id> | answer <id> <choice|text> [note]');
-    },
-  };
-
-  const decisions: TerminalSlashCommand<Context> = {
+  const DECISION: InputDescription = listInput({ id: 'decision', label: 'Decision', help: 'Calls Jev decided that you can still change', list: OPEN_DECISIONS });
+  registry.register(defineCommand<Context>({
     name: 'decisions',
-    description: 'What was decided for you: calls Jev decided (undo, never, always, ask, keep) and every answered inbox item',
-    usage: '[list] [<count>] | today | yesterday | <YYYY-MM-DD> | since <YYYY-MM-DD|30m|2h|3d|1w> | <keep|undo|never|always|ask> <id>',
-    argsHint: '[list|keep|undo|never|always|ask]',
-    // Listing reads; a choice on a decision changes files or standing rules and is the owner's (the handler checks).
-    effect: 'mixed',
-    readVerbs: ['', 'list', 'today', 'yesterday', 'since'],
-    async handler(args, context) {
-      // Read before the first await: a model running this command must not choose for the owner.
-      const owner = policy.isOwner(context, 'decisions');
-      const inbox = port(context);
-      if (!inbox) return;
-      const sub = (args[0] ?? '').toLowerCase();
-
-      if (DECISION_CHOICES.has(sub)) {
-        if (!owner) {
-          say(context, '[decisions] Only the owner changes what Jev decided. Type /decisions <choice> <id> at the terminal.');
-          return;
-        }
-        const raw = args[1];
-        if (!raw) { say(context, `Usage: /decisions ${sub} <id>   (/decisions lists the ids)`); return; }
-        try {
-          const open = await inbox.list({ status: 'open', kinds: ['decision'], limit: 500 });
-          const resolved = resolveId(raw, open);
-          if ('error' in resolved) {
-            const closed = await inbox.find(raw);
-            say(context, closed?.kind === 'decision'
-              ? `[decisions] ${shortId(closed.id)} is ${closed.status}${closed.answer ? `: ${answerText(closed)}` : closed.withdrawnReason ? `: ${text(closed.withdrawnReason)}` : ''}. Set a standing rule with /permissions instead.`
-              : `[decisions] No open decision starts with "${raw}". /decisions lists them.`);
-            return;
+    title: 'What was decided for you',
+    summary: 'Calls Jev decided for you, and every answered inbox item: see them, undo one, or set a standing rule',
+    group: 'Inbox',
+    report: 'list',
+    actions: [
+      readAction<Context>({
+        id: 'list', label: 'See what was decided for you', word: 'list',
+        inputs: [
+          textInput({ id: 'when', label: 'When', help: 'today, yesterday, a day (2026-11-19), or since a day or 30m, 2h, 3d, 1w', why: 'a day or a time span', typed: { flag: '--when' }, optional: { default: '', means: 'the latest' } }),
+          { id: 'count', label: 'How many', help: 'How many of the latest to show', kind: 'number', freeTextReason: 'a number', required: { default: '', defaultMeans: String(DECISIONS_LIMIT) }, typed: { flag: '--count' } },
+        ],
+        sentence: 'Lists the calls Jev decided that you can still change, and what was decided, {when}.', example: { when: 'today' },
+        async run(values, ctx) {
+          const window = values.when ? decisionWindow(values.when.split(/\s+/), Date.now()) : undefined;
+          if (typeof window === 'string') throw commandRefusal(window.replace('/decisions since', '--when "since'));
+          if (values.when && window === undefined) throw commandRefusal(`"${values.when}" is not a period: today, yesterday, a day (2026-11-19), or since a day or 30m, 2h, 3d, 1w.`);
+          const count = Number(values.count);
+          const limit = window !== undefined ? 500 : Number.isInteger(count) && count > 0 ? Math.min(count, 500) : DECISIONS_LIMIT;
+          const inbox = inboxOf(ctx);
+          let allOpen: readonly OwnerItem[], allClosed: readonly OwnerItem[];
+          try {
+            [allOpen, allClosed] = await Promise.all([inbox.list({ status: 'open', kinds: ['decision'], limit }), inbox.list({ status: 'closed', limit })]);
+          } catch (error) { return failed('read the decisions', error); }
+          const inWindow = (at: number): boolean => window === undefined || (at >= window.from && at < window.to);
+          const open = allOpen.filter((item) => inWindow(item.createdAt));
+          const closed = allClosed.filter((item) => inWindow(item.closedAt ?? item.createdAt));
+          if (open.length === 0 && closed.length === 0) return window === undefined ? 'Nothing has been decided yet.' : `Nothing was decided ${window.label}.`;
+          const period = window === undefined ? '' : ` ${window.label}`;
+          return [
+            ...(open.length > 0 ? [
+              `Jev decided${period}, and you can still change (${open.length}, newest first):`,
+              ...open.map((item) => `  ${when(item.createdAt)}  ${formatOwnerItemLine(item)}`),
+              '',
+              'Change one: /decisions <keep|undo|never|always|ask> <decision>   (undo puts back the files the call changed; never, always and ask set a standing rule for calls like it)',
+              '',
+            ] : []),
+            ...(closed.length > 0 ? [`Decided${period} (${closed.length}, newest first):`, ...closed.map((item) => `  ${item.closedAt !== undefined ? `${when(item.closedAt)}  ` : ''}${formatOwnerItemLine(item)}`), ''] : []),
+            'Details: /questions show <id>',
+          ].join('\n');
+        },
+      }),
+      ...DECISION_ACTIONS.map((choice): ActionDescription<Context> => ({
+        id: choice.word, label: choice.label, word: choice.word, inputs: [DECISION],
+        sentence: choice.sentence, done: '',
+        touches: 'this-machine', lasts: 'kept', risk: choice.risk,
+        ownerOnly: { reason: 'what Jev decided for the owner is the owner\'s to change', instead: `Ask the owner to choose it with /decisions ${choice.word}.` },
+        operator: TERMINAL_ONLY, example: { decision: 'd-7c31' },
+        async run(values, ctx) {
+          ownerOnly(ctx, 'decisions', 'changes what Jev decided');
+          const inbox = inboxOf(ctx);
+          const raw = values.decision!;
+          let resolvedId: string;
+          try {
+            const resolved = resolveId(raw, await inbox.list({ status: 'open', kinds: ['decision'], limit: 500 }));
+            if ('error' in resolved) {
+              const closed = await inbox.find(raw);
+              throw commandRefusal(closed?.kind === 'decision'
+                ? `${shortId(closed.id)} is ${closed.status}${closed.answer ? `: ${answerText(closed)}` : closed.withdrawnReason ? `: ${text(closed.withdrawnReason)}` : ''}. Set a standing rule with /permissions instead.`
+                : `No open decision starts with "${raw}". /decisions lists them.`);
+            }
+            resolvedId = resolved.id;
+          } catch (error) {
+            if (error && typeof error === 'object' && 'refusal' in error) throw error;
+            return failed('read the decisions', error);
           }
-          const outcome = await inbox.answer(resolved.id, { option: sub });
-          if (outcome.applied) {
-            say(context, `[decisions] ${shortId(outcome.item.id)}: ${outcome.item.answer?.text ? text(outcome.item.answer.text) : `${sub}.`}`);
-            return;
-          }
-          say(context, `[decisions] ${formatRefusal(outcome.refusal)}`);
-        } catch (error) {
-          failed(context, 'apply the choice', error);
-        }
-        return;
-      }
-
-      // A period: today, yesterday, a day, or since a day or a duration; filtered here from the newest 500 of each list.
-      const window = decisionWindow(sub === 'list' ? args.slice(1) : args, Date.now());
-      if (typeof window === 'string') { say(context, window); return; }
-      if (window === undefined && sub !== '' && sub !== 'list' && !/^\d+$/.test(sub)) {
-        say(context, 'Usage: /decisions [list] [<count>] | today | yesterday | <YYYY-MM-DD> | since <YYYY-MM-DD|30m|2h|3d|1w> | <keep|undo|never|always|ask> <id>');
-        return;
-      }
-      const count = Number(sub === 'list' ? args[1] : args[0]);
-      const limit = window !== undefined ? 500 : Number.isInteger(count) && count > 0 ? Math.min(count, 500) : DECISIONS_LIMIT;
-      try {
-        const [allOpen, allClosed] = await Promise.all([
-          inbox.list({ status: 'open', kinds: ['decision'], limit }),
-          inbox.list({ status: 'closed', limit }),
-        ]);
-        const inWindow = (at: number): boolean => window === undefined || (at >= window.from && at < window.to);
-        const open = allOpen.filter((item) => inWindow(item.createdAt));
-        const closed = allClosed.filter((item) => inWindow(item.closedAt ?? item.createdAt));
-        if (open.length === 0 && closed.length === 0) {
-          say(context, window === undefined ? '[inbox] Nothing has been decided yet.' : `[inbox] Nothing was decided ${window.label}.`);
-          return;
-        }
-        const period = window === undefined ? '' : ` ${window.label}`;
-        say(context, [
-          ...(open.length > 0 ? [
-            `Jev decided${period}, and you can still change (${open.length}, newest first):`,
-            ...open.map((item) => `  ${when(item.createdAt)}  ${formatOwnerItemLine(item)}`),
-            '',
-            'Change one: /decisions <keep|undo|never|always|ask> <id>   (undo restores the files the call changed; never, always and ask set a standing rule for calls like it)',
-            '',
-          ] : []),
-          ...(closed.length > 0 ? [
-            `Decided${period} (${closed.length}, newest first):`,
-            ...closed.map((item) => `  ${item.closedAt !== undefined ? `${when(item.closedAt)}  ` : ''}${formatOwnerItemLine(item)}`),
-            '',
-          ] : []),
-          'Details: /questions show <id>',
-        ].join('\n'));
-      } catch (error) {
-        failed(context, 'read the decisions', error);
-      }
-    },
-  };
-
-  return [questions, decisions];
+          let outcome;
+          try { outcome = await inbox.answer(resolvedId, { option: choice.word }); } catch (error) { return failed('apply the choice', error); }
+          if (!outcome.applied) throw commandRefusal(formatRefusal(outcome.refusal));
+          ctx.renderRequest();
+          return `${shortId(outcome.item.id)}: ${outcome.item.answer?.text ? text(outcome.item.answer.text) : `${choice.word}.`}`;
+        },
+      })),
+    ],
+  }));
 }

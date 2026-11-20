@@ -9,7 +9,7 @@ import { AGENT_SETUP_TOPIC_ROWS } from '../agent-workspace-categories.ts';
 /** A topic opens the Agent's own forms for it: the setup rows of that topic, and nothing else. */
 function openRows(topic: SetupTopicId): (ctx: CommandContext) => Promise<string | void> {
   return async (ctx) => {
-    const rows = AGENT_SETUP_TOPIC_ROWS[topic];
+    const rows = (AGENT_SETUP_TOPIC_ROWS as Readonly<Partial<Record<SetupTopicId, readonly string[]>>>)[topic];
     if (!rows || !ctx.openAgentSetupRows) return 'The Agent workspace is not available here.';
     ctx.openAgentSetupRows(rows);
   };

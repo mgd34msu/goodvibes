@@ -674,7 +674,7 @@ These keys are not in the rebindable table.
 | `Esc` | Close the top view (one level), then clear the composer, then interrupt the running turn. Inside Agents it backs out one level and never stops work. |
 | `PageUp`, `PageDown` | Scroll the transcript by a page. |
 | `Up`, `Down` | Scroll the transcript, or recall input history when the composer is focused. |
-| `F2` | Open or close the Agents view. |
+| `F2` | Open or close Your agents. |
 | `?` on an empty composer | Open the help list of every command. |
 | `@` at the start or after a space | Open the file picker; the chosen path is inserted. `!@` opens it to insert a file whose text will be embedded. |
 | `r` or `m` after a turn error | Retry the turn, or open the model picker. Any other key dismisses the choice. |
@@ -691,7 +691,7 @@ The default table of the terminal app:
 | `clear-cancel` | `Ctrl+C` | Clear the composer; on an empty composer cancel generation; pressed twice within one second, exit. The footer shows `Press Ctrl+C again to exit`. |
 | `screen-clear` | `Ctrl+L` | Repaint the screen. |
 | `command-palette` | `Ctrl+P`, `Ctrl+K` | Open the command palette: every command, view and setting. |
-| `open-agents` | `Ctrl+O` | Open the Agents view (the same as `F2`). |
+| `open-agents` | `Ctrl+O` | Open Your agents: what is running, what waits for you, what is scheduled (the same as `F2`). |
 | `history-search` | `Ctrl+R` | Reverse search of input history. |
 | `search` | `Ctrl+F` | Search this conversation's transcript. |
 | `block-copy` | `Ctrl+Y` | Copy the nearest block. |
@@ -759,15 +759,15 @@ Every view opens as a modal over the dimmed conversation; `Esc` closes one level
 | View | How to open | What it holds |
 | --- | --- | --- |
 | Command palette | `Ctrl+P`, `Ctrl+K`, `/palette` | Every command, view and setting, searchable. Old pane names (fleet, tokens, git) are search words. |
-| Agents | `F2`, `Ctrl+O`, `/agents`, `/cockpit` | Everything running and finished: helper agents, review chains, workflows, contracts, tasks, worktrees, hosted sessions. `s` steers the selected agent, `Ctrl+X` stops it (first press asks, second stops), `Enter` opens an agent or background process full screen. |
+| Your agents | `F2`, `Ctrl+O`, `/agents`, `/cockpit` | The work board, the same panel as the Agent's: rows waiting for you first (`Waiting for you`), then one line per running agent (`● Helper agent   Writing docs/usage.md   15s  2 files read`, sub-agents indented under their parent), the agents that finished this session (or `no finished agents this session`), `Scheduled` (schedules and watches with their cadence and last run), and one line `Background services  N healthy ›`. The platform's own heartbeats, pollers and the code index are counted there, never as running; an unhealthy one is listed under that line by itself (`Daemon heartbeat stopped answering · 3 min ago`). Keys: `Enter` opens the selected row (an agent or background process full screen; a contract, workflow or hosted agent full height in the panel; a pick or merge conflict acts; a stalled service restarts where it can), `s` stops it and what it started (asks first; `Ctrl+X` too), `n` starts a new agent (a coding agent found on `PATH`, hosted by the GoodVibes service), `b` opens or closes the background services, `p` pauses or resumes a schedule. Also: `i` interrupts, `D` discards a contract's worktree, `f` follows the newest running agent, `v` shows the archive (`a` archives or restores one, `A` archives everything finished), `/` filters. Empty: `nothing running` and `Ask for something and helper agents show up here.` A fleet that cannot be read: `Couldn't read what is running: <reason>` with `r` to try again. On a screen 90 columns or wider the selected row's detail is on the right: model, time, files read and changed, tokens, and cost only when priced. |
 | Usage | `/usage`, `/cost` | Context bar with the compaction threshold, session tokens and cost, per-turn bars, per-agent cost and the budget alert. |
 | Changes | `/changes`, `/diff`, `/review` | Changed files with +/- counts, a tinted diff, a semantic summary; `]` and `[` move between hunks, `space` stages a hunk, `c` adds a review comment for the model, `m` marks reviewed, `o` opens the file in the editor. |
 | Notifications | `/notifications` | Every notice, newest first; `Enter` goes to its subject. |
-| Sessions | `/sessions`, `/resume` | Saved sessions, with hosted sessions in a Hosted group. |
+| Sessions | `/session`, `/resume` | Saved sessions, with hosted sessions in a Hosted group. |
 | Settings | `/settings`, `/config` | Every setting by category, searchable. |
 | Model picker | `/model`, `/provider` | Providers and models for each route. |
 
-An opened helper agent shows its work as the spine of the transcript; the composer then steers that agent while the main conversation keeps running.
+An opened helper agent shows its work as the spine of the transcript; the composer then steers that agent while the main conversation keeps running. In a contract, workflow or hosted agent opened inside Your agents, `s` opens the line that steers it.
 An opened background process shows live output with timestamps, errors in red and follow mode on; it takes no input; `/` searches its output and `y` copies it.
 `Esc` returns one level (a child agent to its parent, then main) and never stops anything.
 
@@ -851,7 +851,7 @@ The sections below explain the commands grouped by task. Each entry gives the pu
 `/guidance dismiss g1` on an item that is not showing prints `Guidance item g1 is not showing now, so there is nothing to dismiss. /guidance lists the items that are.`
 
 `/panel [<name> | open <name> [--target <id>[:<kind>]] | list]` (alias `/panels`) opens a view by an old pane name (fleet, tokens, git and others). `/panel list` shows where each old name goes. An unknown name prints `Nothing holds "<name>". /panel list shows where the old names go.`
-`/deeplink [review|open <view|goodvibes://open/...> [target]|bundle export <path>|bundle inspect <path>]` (alias `/link`) lists, opens and exports `goodvibes://open/<view>` links. `/deeplink open agents` opens Agents. A link that is not of that form prints `Not opened: <link> is not a goodvibes://open/<view> link.`
+`/deeplink [review|open <view|goodvibes://open/...> [target]|bundle export <path>|bundle inspect <path>]` (alias `/link`) lists, opens and exports `goodvibes://open/<view>` links. `/deeplink open agents` opens Your agents. A link that is not of that form prints `Not opened: <link> is not a goodvibes://open/<view> link.`
 
 `/debug` toggles debug mode and prints `Debug mode: ON` or `Debug mode: OFF`.
 `/state [domain...]` prints what the app's runtime store holds now (session, conversation, agents, tasks, permissions and more), for debugging.
@@ -894,55 +894,37 @@ A missing template prints `Template not found: <name>. Run /template list to see
 
 ### Sessions
 
-`/sessions [resume <id|name>]` opens the session picker or resumes one session.
-`/resume [session-id-or-name]` opens the picker, or resumes the named session. With no saved sessions: `No previous sessions to resume yet. /session save [name] stores the current one explicitly.`
-`/save [name] [--replace] [--switch]` saves the current session to `<project>/.goodvibes/tui/sessions/`. `--replace` overwrites a different session saved under that name; `--switch` continues in the saved copy.
-`/load <name>` loads a saved session. Without a name: `Usage: /load <session-name>`, then `Run /sessions to list available sessions.`
-A session another running terminal has open is refused by `/load`, `/resume`, `/sessions` and the picker asks before resuming it.
+`/session` is described once for both programs and holds every session action. Bare, it opens its list with "See this session" first, then "Resume a saved session", "Save this session under a name", "See your saved sessions" and grouped rows ("Copy, rename or delete a session", "Save or share the conversation", "Branches of this conversation", "Look through this conversation", "Tasks across sessions"); a model or a script running it bare gets this session's details. `/resume` and `/save` are single-action commands built from the same two action definitions `/session` lists: `/resume` alone opens the list of saved sessions to pick from, `/resume <session>` resumes one.
 
-`/session <subcommand>` (alias `/sess`) is the full session front door:
-
-| Subcommand | Effect |
+| Line | Action |
 | --- | --- |
-| `list` | List saved sessions. |
-| `rename <name>` | Rename the current session. |
-| `resume <id\|name> [--force]` | Resume a saved session. |
-| `fork [name]` | Fork the current session into a new one. |
-| `save [name] [--yes]` | Save the current session; `--yes` replaces a different session that already uses the name. |
-| `info [id]` | Show session details. With no subcommand, `/session` shows the current session's info. |
-| `export <id\|.> [markdown\|text] [--out <path>] [--print]` | Write the redacted transcript to a file, or print it. `.` is the current session. |
-| `search <keyword>` | Search session content. |
-| `delete <id> --yes` | Delete a saved session. |
-| `events [kind] [start-row] [--last N]` | Transcript events, newest 16 by default. |
-| `groups [kind] [start-row] [--last N]` | Transcript events grouped, 12 per page. |
-| `hotspots [kind]` | Per-kind event counts and the busiest groups. |
-| `link-task <taskId> [--session <sid>] [--depends-on <sid:taskId>] [--label <label>]` | Register a task in the cross-session task graph. |
-| `handoff <taskId> --to <sid> [--session <sid>] [--reason <reason>]` | Hand a task to another session. |
-| `handoff list`, `handoff accept <handoffId>`, `handoff reject <handoffId>` | Review waiting handoffs. |
-| `graph [--session <sid>] [--format text\|json]` | Show the cross-session task graph. |
-| `cancel <taskId> [--scope task\|subtree\|session] [--session <sid>] [--reason <reason>]` | Cancel tasks. |
+| `current` | See this session: id, name, when it started, messages, model. |
+| `list` | See your saved sessions, newest first. |
+| `resume <session> [--force]` (also `/resume <session>`) | Resume a saved session: its messages, model and agent records continue here. A session another running terminal has open is refused unless `--force`; a session with agents still running here is refused. |
+| `save [<name...>] [--switch] [--replace]` (also `/save`) | Save this session under a name (its title when none) in `<project>/.goodvibes/tui/sessions/`; `--switch` keeps working in the saved copy; `--replace` writes over a different session saved under that name and asks first. |
+| `fork [<name...>]` | Continue in a copy of this session under a new id. |
+| `rename <name...>` | Rename this session. |
+| `info [<session>]` | See a saved session's details. |
+| `search <words...>` | Search saved sessions. |
+| `delete <session>` | Delete a saved session (asks first; never the open one). |
+| `events [<kind>] [<from row>] [--last <n>]`, `groups [...]`, `hotspots [<kind>]` | Look through this conversation's record: entries, entries by turn, counts. |
+| `save-file [markdown\|text\|html\|json] [<file>] [--keep-secrets] [--replace] [--then open\|copy]` | Save this conversation as a file (default a new file named for the time, `~/goodvibes-exports/session-<timestamp>.<ext>` for Markdown, html and JSON, `conversation-<timestamp>.txt` in the working directory for text). API keys, tokens and your home path and login name are hidden unless `--keep-secrets`; plain text is always hidden. An existing file is kept unless `--replace`, which asks first. `--then open` opens a web page in the browser; `--then copy` copies the path. |
+| `save-saved <session\|.> [markdown\|text] [--out <file>] [--print]` | Save a saved session's redacted transcript as a file (never replacing one), or print it here. |
+| `upload [html\|md\|json] [--keep-secrets] [--then open\|copy]` | Upload this conversation as a secret GitHub Gist (unlisted, not private: anyone with the link can read it) and print the link. It sends something outside this machine, so it asks first and only counts when you type it. |
+| `branch [<name...>]`, `branches`, `switch-branch <branch>`, `merge-branch <branch>` | Keep a branch of the conversation as it is now, list them, go on from one, or add the messages a branch gained after it was made (refused when both changed; switching and merging refuse while a turn runs). |
+| `graph [--session <id>] [--format text\|json]` | See the cross-session task graph and the handoffs waiting. |
+| `link-task <task> [--session <id>] [--depends-on <session:task>] [--label <text>]`, `hand-off <task> --to <session> [--reason <text>]`, `accept <handoff>`, `withdraw <handoff>`, `cancel <task> [--scope task\|subtree\|session] [--task <task>] [--reason <text>]` | Change the cross-session task graph; `cancel` asks first. The Agent reads the graph but refuses these. |
+
+The Agent has the same `/session`, `/resume` and `/save`; its `save-file` writes Markdown or text only, its `save-saved` only prints, and it refuses `upload` and the branch actions.
 
 Worked example:
 
 ```text
-/session export . markdown --out notes/session.md
-Exported session user-0008b454 (34 messages, redacted) to notes/session.md
+/session save-saved . text --out notes/session.txt
+Exported session user-0008b454 (34 messages, redacted) to notes/session.txt
 ```
 
-Failure cases: `/session rename` without a name prints `Usage: /session rename <new-name>`; `/session delete <id>` without `--yes` prints `Usage: /session delete <session-id> --yes`; `/session link-task a:b` prints `Error: taskId cannot contain ":"; it conflicts with the composite key format.`; an unknown handoff prints `[session] Unknown handoff: <id>. Nothing was changed. /session handoff list shows the waiting ones.`
-
-`/export [format] [path]` writes the conversation to a Markdown file (`markdown` or `md`, the default) or a text file (`text` or `txt`), named `conversation-<timestamp>.md` (or `.txt`) in the working directory when no path is given.
-The path is resolved against the working directory and must lie inside it; another path is refused with `Error: Export path must be within the current directory.` and nothing is written. The file is redacted (API keys, tokens and similar values are masked) before it is written; if redaction fails nothing is written. Replacing an existing file asks first; `--yes` answers in advance. The Agent's `/export` is the same, and its refusal reads `Error` followed by `message Export path must be within the current directory.`
-
-`/share <html|json|md> [path] [--redact] [--upload] [--no-redact] [--copy] [--open]` exports the session in a shareable format.
-
-- The file is written to `[path]` (resolved against the working directory), or to `~/goodvibes-exports/session-<timestamp>.<html|json|md>` when no path is given.
-- `--redact` removes API keys, tokens, and this account's home path and login name from the export (other users' paths are not matched). A local export without `--redact` is not redacted.
-- `--upload` also uploads the export to GitHub as a secret Gist (unlisted, not private: anyone with the link can read it). The upload is always redacted unless `--no-redact` is given; `--no-redact` is valid only with `--upload` and asks for confirmation first, because copies made from the link cannot be recalled.
-- `--copy` copies the export file's path to the clipboard.
-- `--open` opens an HTML export in the default browser; for `json` and `md` it is ignored and the result line says `(--open ignored: only applies to html)`.
-
-The GitHub credential for `--upload` is found in this order:
+The GitHub credential for `upload` is found in this order:
 
 1. the `github` entry of the named API services (`~/.goodvibes/tui/services.json`, see "Named API services"), when its auth headers contain `Authorization: Bearer <token>` or `Authorization: token <token>`; no other header is taken as the token;
 2. the environment variable `GITHUB_TOKEN`.
@@ -952,7 +934,7 @@ The token needs the `gist` scope. It is sent only to `https://api.github.com/gis
 A successful export prints one line with hints:
 
 ```text
-/share html --upload
+/session upload html
 Exported HTML session to /home/me/goodvibes-exports/session-2026-11-18T17-40-02.html  (redacted before upload)  Share link: https://gist.github.com/<user>/<id>  Upload receipt: /home/me/goodvibes-exports/session-2026-11-18T17-40-02.html.gist-<uuid>.json
 ```
 
@@ -963,25 +945,17 @@ Failure cases:
 
 | Situation | What is printed | Next step |
 | --- | --- | --- |
-| `--redact` with `--no-redact` | `Choose one of --redact and --no-redact. Nothing was exported or uploaded.` | Pick one. |
-| `--no-redact` without `--upload` | `--no-redact applies only to --upload; a local export is unredacted unless --redact is given. Nothing was exported.` | Drop it. |
-| An unknown option | `Unknown option: --x. Nothing was exported or uploaded. Valid options: --redact, --upload, --no-redact, --copy, --open. For a path that starts with "--", write it as ./<path>.` | Fix the option. |
-| Two paths | `Expected at most one output path but got 2: ... Nothing was exported or uploaded.` | Give one path. |
 | Empty conversation | `Nothing to export: conversation is empty.` | |
-| No token | `No GitHub token found for --upload.` followed by how to add a `github` service entry or set `GITHUB_TOKEN` (a PAT with the `gist` scope). The local export is kept. | Add the token, run `/share` again. |
+| No token | `No GitHub token found for --upload.` followed by how to add a `github` service entry or set `GITHUB_TOKEN` (a PAT with the `gist` scope). The local export is kept. | Add the token, run `/session upload` again. |
 | The `github` service entry cannot be read and no `GITHUB_TOKEN` | `Upload not attempted: the github service entry could not be read (<reason>) and GITHUB_TOKEN is not set. Local export saved at <path>.` | Fix `services.json` or set `GITHUB_TOKEN`. |
 | GitHub answered with an error, or a network error | `Upload unconfirmed: GitHub API error <status>: <body>. GitHub may have received it; check before retrying.` (or `Network error: ...`) | Check your Gists before retrying. |
 | The upload threw | `Upload failed: the Gist upload did not complete (<reason>). Local export saved at <path>.` | Retry. |
 
-`/fork [name]` (alias `/branch-save`) saves a named snapshot of the conversation as a branch. `/fork try-redis` prints `Forked conversation as "try-redis" (N messages).`; an existing name is refused: `Branch "try-redis" already exists; it was not replaced.`
-`/branch [name]` (alias `/br`) lists branches, or switches to one. `/branch` with none: `No branches. Use /fork [name] to create one.` An unknown name: `Branch "<name>" not found. Use /fork [name] to create one, or /branch to list.` The branch already in use: `Already on branch "<name>"; nothing changed.`
-`/merge <name>` appends the branch's messages after the fork point. When both changed after the fork it refuses: `Branch "<name>" and the current conversation both changed after the fork, so it was not merged.`
-`/branch` and `/merge` refuse while a turn is running.
 
 `/hosted` works with daemon-hosted sessions, whose conversation loop runs in the daemon so it continues without a terminal. It is described once (terminal app only); bare, it opens its list of actions with "See the hosted session you are in" first (a model or a script running it bare gets that status). The actions and their lines:
 `status`; `new [<first message...>] [--on-leave keep|stop]` (start one and join it; without `--on-leave` it follows `hostedSessions.detachPolicy`); `list [--all]` (`--all` includes ended ones); `attach <session>` (join one; the guided path lists the sessions, and a typed plain number is read against the last `/hosted list` printed); `send <message...>` (send now, into the turn it is running); `send-later <message...>` (runs after the current turn); `stop-tool [<call>]` (stop the tool call that is running, the first one when none is named); `leave` (this terminal leaves; the session keeps running or ends as its setting says); `end <session id>` (asks first; it cannot be undone).
 `end` takes a session id, never a list number, so its question names exactly the session that ends.
-A line typed in the Agents view for the hosted session is sent only to the session that was joined when you started typing it; if another session was joined meanwhile it is not sent (`the message was for session <id>; attach to it again to apply it there`) and the draft stays.
+A line typed in Your agents for the hosted session is sent only to the session that was joined when you started typing it; if another session was joined meanwhile it is not sent (`the message was for session <id>; attach to it again to apply it there`) and the draft stays.
 A session joined here belongs to the daemon it was joined on. After `daemon.connectedHost.url` points elsewhere, `send`, `send-later`, `stop-tool` and `end` of that session are refused naming both daemons, and `/hosted leave` releases it on the daemon that holds it.
 With nothing joined: `No hosted session is joined in this terminal, so nothing was queued.` with `/hosted attach <id> joins one`. Hosted sessions are described under "Hosted sessions" in the daemon part.
 
@@ -1159,7 +1133,7 @@ It prints `Running: <command> (<source>, limit Ns; Esc stops it)` first.
 A run past the limit is killed: `Test run timed out after Ns and was killed. Raise contract.gateTimeoutMs (0 for no limit) or pass a pattern to run fewer tests.` (`contract.gateTimeoutMs` defaults to 900000 ms.)
 A second `/test` while one runs prints `A test run is already going; Esc stops it, then run /test again.`
 
-`/codebase build | status | search <query...> [--limit n]` builds and searches the source-tree code index. `build` schedules the build (`Build scheduled: track progress with /codebase status or Agents (F2, the code-index row).`); `search` prints matching symbols and files.
+`/codebase build | status | search <query...> [--limit n]` builds and searches the source-tree code index. `build` schedules the build (`Build scheduled: track progress with /codebase status, or in Your agents (F2) under Background services (b).`); `search` prints matching symbols and files.
 `/intelligence [review|panel|diagnostics [file]|symbols <file>|outline <file>|definition <file> <line> <column>|references <file> <line> <column>|hover <file> <line> <column>|install <file|language>|repair]` (alias `/intel`) uses language servers: `/intelligence definition src/app.ts 42 10` prints the definition location; `/intelligence install typescript` installs the language server for that language. A missing position prints `Usage: /intelligence definition <file> <line> <column>`.
 
 `/tools [review|panel]` (alias `/t`) lists the model's tools; `/tool verify <name> | verify-all | contract show <name>` checks a tool's contract. An unknown tool prints `[tool verify] Tool '<name>' is not registered.`
@@ -1185,14 +1159,14 @@ The run works in a copy of the suite. Before a task's session starts, its `verif
 
 ### Helper agents, tasks and orchestration
 
-`/agents [--target <id>[:<kind>]] | list | host <agentId> [directory]` (alias `/acp`) opens the Agents view.
+`/agents [--target <id>[:<kind>]] | list | host <agentId> [directory]` (alias `/acp`) opens Your agents.
 `/agents list` lists third-party coding agents found on `PATH` that can be hosted over ACP (Claude Code, Codex, opencode).
-`/agents host <agentId> [directory]` starts one as a row in Agents that can be steered and stopped like any agent. With none installed: `[agents] No third-party ACP agents discovered. Install Claude Code, Codex, or opencode on PATH to host one.`
-`/cockpit` opens Agents. `/communication` (alias `/comms`) shows agent communication routes and recent activity.
+`/agents host <agentId> [directory]` starts one as a row in Your agents that can be steered and stopped like any agent (`n` in the panel does the same with a picker). With none installed: `[agents] No third-party ACP agents discovered. Install Claude Code, Codex, or opencode on PATH to host one.`
+`/cockpit` opens Your agents. `/communication` (alias `/comms`) shows agent communication routes and recent activity.
 `/orchestration [show [contractId] | cancel graph <graphId> | cancel subtree <agentId>]` (alias `/orch`) shows contracts and cancels agent graphs or subtrees. An unknown contract prints `Unknown contract: <id>`.
 `/ops view | task <cancel|pause|resume|retry> <id> [note] | agent cancel <id> [note]` controls tasks and agents and opens the audit view. `/ops task pause t1 waiting on review` prints `[Ops] Task t1: pause done.`
 
-`/tasks [list [status|kind] | show <taskId> | output <taskId> | create <kind> <owner> <title...> | start <taskId> | update <taskId> <title|description|result> <value...> | complete <taskId> [result] | fail <taskId> <error...> | cancel <taskId> [note] | pause <taskId> [note] | resume <taskId> [note] | retry <taskId> [note]]` (alias `/task`) inspects and controls runtime tasks. Bare `/tasks` opens Agents on the task list.
+`/tasks [list [status|kind] | show <taskId> | output <taskId> | create <kind> <owner> <title...> | start <taskId> | update <taskId> <title|description|result> <value...> | complete <taskId> [result] | fail <taskId> <error...> | cancel <taskId> [note] | pause <taskId> [note] | resume <taskId> [note] | retry <taskId> [note]]` (alias `/task`) inspects and controls runtime tasks. Bare `/tasks` opens Your agents.
 
 `/teamwork [review|modes|mode <id>|create-mode <id> <title...>|recipes|recipe <id> [title...]|templates|archetypes|validate|archetype <name>|create-archetype <name> <title...>]` (alias `/teammates`) starts packaged task modes and recipes.
 
@@ -1282,9 +1256,9 @@ A session file names the program, the project and the session id, so a terminal-
 ### When a session is saved
 
 - After every completed turn the whole conversation is written (one temporary file, one rename).
-- `/save [name]`, `/session save [name]`, `/clear` and `/quit` also save it.
+- `/save [name]`, `/clear` and `/quit` also save it.
 - `behavior.saveHistory` (default on) controls whether conversations are kept at all.
-- Saved sessions are kept until they are deleted (`/session delete <id> --yes`); the retention sweep never removes them.
+- Saved sessions are kept until they are deleted (`/session delete <id>`); the retention sweep never removes them.
 
 ### Crash snapshots
 
@@ -1298,7 +1272,7 @@ A crash snapshot is a second copy written only while the conversation holds some
 
 The snapshot is deleted when a later save succeeds.
 On the next start the terminal app offers the newest snapshot that is newer than its saved session, unless another running terminal has that session open.
-Opening a session by any route (`--continue`, `--resume`, `goodvibes sessions resume`, `/session resume`, `/load`, `/sessions`) offers its snapshot on top of the saved copy when the snapshot is newer.
+Opening a session by any route (`--continue`, `--resume`, `goodvibes sessions resume`, `/resume`) offers its snapshot on top of the saved copy when the snapshot is newer.
 Choosing Remove deletes that snapshot.
 A restored snapshot that ends inside a turn keeps that turn's prompt marked cancelled, keeps the tool results it had, keeps a cut-off reply with a line saying it was cut off, and records each tool call whose result never reached disk as interrupted with an unknown effect. The interrupted turn is never run again on its own.
 Crash snapshots nobody resumes are removed after `atRest.retentionMaxAgeDays` days (default 30).
@@ -1307,7 +1281,7 @@ Crash snapshots nobody resumes are removed after `atRest.retentionMaxAgeDays` da
 
 A terminal that has a session open holds that session's lock under `~/.goodvibes/shared/owner-askers/`.
 The operating system releases the lock when the process ends, however it ends.
-`/session resume`, `/load` and `/sessions` refuse a session another running terminal has open, and the session picker asks first.
+`/resume` refuses a session another running terminal has open unless `--force`, and the session picker asks first.
 A load takes the session's lock before it replaces the conversation, so of two terminals loading one session at the same moment one gets it and the other is refused; `/session resume <id> --force` takes the session over instead.
 Saving under another name or moving to a session another running terminal has open (`/session save <name> --switch`, a fork onto that name) is refused the same way and nothing is switched.
 A save of a session that another terminal saved after this one read it is refused (`Session <name> was saved by another terminal since this one read it ... nothing was saved`): run `/session resume <name>` to continue from that save, or `/session save <new name>` to keep this conversation under another name. A rename changes the title on the file as it is, keeping the other terminal's turns.
@@ -1322,7 +1296,7 @@ A headless `run` on a session another terminal has open is refused (see "Headles
 | Open the last session | `goodvibes --resume` |
 | Fork the active session at start | `goodvibes --fork` |
 | Open a session, then fork it | `goodvibes --fork user-0008b454` |
-| Pick from a list inside the app | `/sessions` or `/resume` |
+| Pick from a list inside the app | `/resume` |
 
 When no last-session pointer exists, `--continue` prints `No previous conversation to continue. This is a new one; /session list shows saved ones.` and starts a new conversation.
 A resumed session prints `Resumed session: <id>` with its message count and model.
@@ -1330,7 +1304,7 @@ A forked session prints `Session forked:` with the new id, the fork name, the so
 
 ### Branches
 
-`/fork <name>` saves the conversation as a named branch inside the session; `/branch <name>` switches to it; `/merge <name>` appends a branch's messages after the fork point.
+`/session branch <name>` keeps the conversation as a named branch inside the session; `/session switch-branch <name>` goes on from it; `/session merge-branch <name>` adds the messages a branch gained after it was made.
 A saved branch that this version cannot read is left out of a resume, and the transcript names it.
 
 ## Models and providers
@@ -1674,7 +1648,7 @@ Optional front matter keys: `model`, `provider`, `family` (`implement`, `review`
 
 - The transcript's work tree shows each helper agent as a lane; `Alt+Up` moves onto it and `Enter` opens it full screen.
 - In the opened agent, the composer steers that agent while the main conversation keeps running.
-- `F2` or `Ctrl+O` opens Agents: `s` steers, `Ctrl+X` twice stops, `Enter` opens.
+- `F2` or `Ctrl+O` opens Your agents: `Enter` opens an agent (its composer steers it), `s` stops it (asks first).
 - `/ops agent cancel <agent-id> [note]` stops one from the composer.
 
 ### Worktrees
@@ -1696,7 +1670,7 @@ How to ask for parallel work in worktrees:
 
 How to watch:
 
-- `F2` or `Ctrl+O` opens Agents, with each unit's agent; `Enter` opens one, `s` steers it, `Ctrl+X` twice stops it.
+- `F2` or `Ctrl+O` opens Your agents, with each unit's agent; `Enter` opens one (its composer steers it), `s` stops it (asks first).
 - `/orchestration show [contractId]` and `/workstream status <workstream>` show units and their states; `/graph <workstream>` draws the task graph.
 - `/worktree` lists each worktree with its age, size and why it is kept.
 - In a headless run, the `AGENT_*` and `CONTRACT_*` frames report progress.
@@ -1746,7 +1720,7 @@ What is left behind:
 
 A contract is a tracked piece of delegated work: a goal, units of work, acceptance criteria checked when the work ends, a budget, and an owner who answers its questions.
 The planner arranges a contract's units in groups. A group is a set of units that may run at the same time; a group starts once every group it depends on has passed, its units run side by side (up to `contract.maxParallelUnits` in worktree mode, one at a time in shared mode), and when all of them have passed the group as a whole is checked before the groups that depend on it start. The contract passes when its last group and the whole deliverable pass their checks.
-Contracts show in Agents and in `/orchestration`.
+Contracts show in Your agents and in `/orchestration`.
 A contract that needs the owner raises a question (an escalation) in `/questions`; the work continues after the answer.
 `contract.*` settings control gates, budgets and limits; `contract.gateTimeoutMs` (default 900000) bounds the test gate.
 At start the daemon resumes the contracts that had not ended. One it cannot run is held, not run, and its status (`contracts.status`) carries `held` with the code and reason: `input-unavailable` when its recorded input could not be restored (cancelling it ends it as cancelled), `claim-unavailable` when no run claim could be taken in the project's `.goodvibes/contracts` directory (another process may be running it, so it is not cancelled from here: `CONTRACT_HELD`).

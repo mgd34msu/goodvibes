@@ -2913,20 +2913,10 @@
       "types": "./terminal-shell/dist/renderer/help-groups.d.ts",
       "import": "./terminal-shell/dist/renderer/help-groups.js"
     },
-    "./terminal-shell/ask-card-input": {
-      "bun": "./terminal-shell/src/ask-card-input.ts",
-      "types": "./terminal-shell/dist/ask-card-input.d.ts",
-      "import": "./terminal-shell/dist/ask-card-input.js"
-    },
     "./terminal-shell/question-card": {
       "bun": "./terminal-shell/src/question-card.ts",
       "types": "./terminal-shell/dist/question-card.d.ts",
       "import": "./terminal-shell/dist/question-card.js"
-    },
-    "./terminal-shell/renderer/ask-card": {
-      "bun": "./terminal-shell/src/renderer/ask-card.ts",
-      "types": "./terminal-shell/dist/renderer/ask-card.d.ts",
-      "import": "./terminal-shell/dist/renderer/ask-card.js"
     },
     "./terminal-shell/composer-controller": {
       "bun": "./terminal-shell/src/composer-controller.ts",
@@ -2987,6 +2977,11 @@
       "bun": "./terminal-shell/src/command-actions/data.ts",
       "types": "./terminal-shell/dist/command-actions/data.d.ts",
       "import": "./terminal-shell/dist/command-actions/data.js"
+    },
+    "./terminal-shell/permissions-command": {
+      "bun": "./terminal-shell/src/permissions-command.ts",
+      "types": "./terminal-shell/dist/permissions-command.d.ts",
+      "import": "./terminal-shell/dist/permissions-command.js"
     },
     "./terminal-shell/todo-command": {
       "bun": "./terminal-shell/src/todo-command.ts",
@@ -3547,6 +3542,11 @@
       "bun": "./terminal-shell/src/renderer/model-workspace-facts.ts",
       "types": "./terminal-shell/dist/renderer/model-workspace-facts.d.ts",
       "import": "./terminal-shell/dist/renderer/model-workspace-facts.js"
+    },
+    "./terminal-shell/session-command": {
+      "bun": "./terminal-shell/src/session-command.ts",
+      "types": "./terminal-shell/dist/session-command.d.ts",
+      "import": "./terminal-shell/dist/session-command.js"
     },
     "./terminal-shell/permission-prompt-facts": {
       "bun": "./terminal-shell/src/permission-prompt-facts.ts",

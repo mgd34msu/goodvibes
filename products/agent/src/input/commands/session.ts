@@ -1,123 +1,53 @@
+/**
+ * `/session`, `/resume` and `/save` are one description shared with the other
+ * terminal app (terminal-shell/session-command.ts). The Agent resumes, saves,
+ * copies and exports sessions as Markdown or text; it reads the cross-session
+ * task graph but does not change it, keeps no conversation branches and
+ * uploads nothing.
+ */
+import { existsSync } from 'node:fs';
 import { createSessionGraphHandler } from '@goodvibes-jev/engine/terminal-shell/session-graph-command';
-/**
- * /session command handler, Multi-session Orchestration.
- *
- * Implements read-only session graph inspection plus session continuity commands.
- * Local task graph mutation commands are blocked in Agent; explicit build/fix/review
- * handoff must use `/delegate` so GoodVibes TUI owns execution.
- */
-
-import type { SlashCommand, CommandContext } from '../command-registry.ts';
-
-import { handleSessionWorkflowCommand } from './session-workflow.ts';
-import { requireSessionOrchestration } from './runtime-services.ts';
-
-// ── Argument parsing helpers ──────────────────────────────────────────────────
-
-/**
- * Extract a named flag value from args (e.g. `--to <value>`).
- * Returns undefined if the flag is not present.
- */
-
-// ── Formatting helpers ────────────────────────────────────────────────────────
-
-/** Status badge for display. */
-
-/** Format a ref as a compact one-line string. */
-
-function printSessionGraphMutationBlocked(context: CommandContext): void {
-  context.print(
-    [
-      '[session] Local cross-session task graph mutation is blocked in GoodVibes Agent.',
-      '[session] Use /session graph for read-only inspection.',
-      '[session] Use /delegate <task> for explicit build/fix/review handoff to GoodVibes TUI.',
-    ].join('\n'),
-  );
-}
-
-// ── /session graph ────────────────────────────────────────────────────────────
-
-// ── Top-level command definition ───────────────────────────────────────────────
-
-/** Every `/session` subcommand the Agent handles, carried as the command's `subcommands`; the link-task, handoff and cancel verbs are blocked here, so they carry no argument hint. */
-export const SESSION_SUBCOMMAND_ARG_HINTS: Record<string, string> = {
-  list: '',
-  rename: '<name>',
-  resume: '<id|name>',
-  fork: '[name]',
-  save: '[name] [--replace] [--switch]',
-  info: '[id]',
-  export: '<id|.> [markdown|text]',
-  search: '<query>',
-  delete: '<id>',
-  events: '[kind] [start-row] [--last N]',
-  groups: '[kind] [start-row] [--last N]',
-  hotspots: '[kind]',
-  graph: '[--session <sid>] [--format text|json]',
-  g: '[--session <sid>] [--format text|json]',
-};
-
-/**
- * sessionCommand, The `/session` slash command.
- *
- * Routes to multi-session orchestration subcommand handlers based on args[0].
- */
-export const sessionCommand: SlashCommand = {
-  name: 'session',
-  effect: 'session-lifecycle',
-  aliases: ['sess'],
-  description: 'Session continuity and read-only cross-session graph inspection.',
-  usage: '<subcommand> [args]',
-  argsHint: 'list|resume|save|events|groups|hotspots|graph',
-  subcommands: SESSION_SUBCOMMAND_ARG_HINTS,
-  // A new name is the rest of the line exactly as typed.
-  rawRest: (args) => (args[0] === 'rename' && args.length === 1 ? 1 : undefined),
-  handler: async (args: string[], context: CommandContext): Promise<void> => {
-    const [sub, ...rest] = args;
-
-    switch (sub) {
-      case 'link-task':
-      case 'link':
-        printSessionGraphMutationBlocked(context);
-        break;
-
-      case 'handoff':
-      case 'ho':
-        printSessionGraphMutationBlocked(context);
-        break;
-
-      case 'graph':
-      case 'g':
-        handleGraph(rest, context);
-        break;
-
-      case 'cancel':
-        printSessionGraphMutationBlocked(context);
-        break;
-
-      default: {
-        const handled = await handleSessionWorkflowCommand(args, context);
-        if (!handled) {
-          const usage = [
-            'Usage: /session <subcommand>',
-            '  list | rename <name> | resume <id|name> [--force] | fork [name] | save [name] | info [id] | export <id> [format] | search <query> | delete <id> --yes',
-            '                                , Session continuity, export, resume, and pruning',
-            '  events [kind] [start-row] [--last N] | groups [kind] [start-row] [--last N] | hotspots [kind]',
-            '                                , Transcript structure: event log, grouped view, hotspot summary',
-            '  graph [--session <sid>] [--format text|json]',
-            '                                , Display the cross-session task dependency graph',
-            '  link-task | handoff | cancel',
-            '                                , Blocked in Agent; use /delegate for explicit build/fix/review handoff',
-          ].join('\n');
-          context.print(usage);
-        }
-        break;
-      }
-    }
-  },
-};
+import { createSessionCommands } from '@goodvibes-jev/engine/terminal-shell/session-command';
+import type { CommandContext, SlashCommand } from '../command-registry.ts';
+import { exportSavedSession, resumeSavedSession, sessionWorkflow } from './session-workflow.ts';
+import { requireSessionOrchestration, requireShellPaths } from './runtime-services.ts';
+import { contentCommands } from './session-content.ts';
+import { commandRefusal } from './confirmation.ts';
 
 const handleGraph = createSessionGraphHandler<CommandContext>(
   requireSessionOrchestration,
-  '[session] Task graph is empty. Local task graph mutation is blocked in Agent; use /delegate for explicit build/fix/review handoff.',
+  'Task graph is empty.',
+  (ctx) => ctx.session.runtime.sessionId,
 );
+
+const NO_BRANCHES = 'The Agent keeps one line of conversation and no branches. Save a copy to try another way: /session fork';
+
+const commands = createSessionCommands<CommandContext>({
+  workflow: sessionWorkflow,
+  resume: resumeSavedSession,
+  exportSaved: exportSavedSession,
+  fileExists: (ctx, path) => existsSync(requireShellPaths(ctx).resolveWorkspacePath(path)),
+  async saveFile(ctx, input) {
+    if (input.format !== 'markdown' && input.format !== 'text') throw commandRefusal('The Agent writes a conversation as Markdown or plain text; nothing was written.');
+    if (!input.redact) throw commandRefusal('The Agent always hides keys and paths in a conversation file; nothing was written.');
+    if (input.open || input.copy) throw commandRefusal('The Agent does not open or copy a conversation file; nothing was written.');
+    return contentCommands.exportConversation(ctx, { format: input.format, path: input.path });
+  },
+  async upload() {
+    throw commandRefusal('The Agent does not upload conversations.', 'Save it as a file: /session save-file');
+  },
+  branches: {
+    create() { throw commandRefusal(NO_BRANCHES); },
+    list() { throw commandRefusal(NO_BRANCHES); },
+    switchTo() { throw commandRefusal(NO_BRANCHES); },
+    merge() { throw commandRefusal(NO_BRANCHES); },
+  },
+  graphReadOnly: 'The Agent reads the cross-session task graph but does not change it; hand work over with /delegate <task>.',
+  graph(ctx, input) {
+    handleGraph(input, ctx);
+  },
+});
+
+export const sessionCommand: SlashCommand = commands.session;
+export const resumeCommand: SlashCommand = commands.resume;
+export const saveCommand: SlashCommand = commands.save;

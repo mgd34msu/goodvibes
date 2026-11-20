@@ -10,6 +10,8 @@ import type {
   ChannelToolDescriptor,
 } from '../types.js';
 import { describeActionFailure, type ChannelActionOutcome } from '../action-outcome.js';
+import { hostApprovalPresentation } from '../../permissions/ask-facts-host.js';
+import type { AskPresentation } from '../../permissions/ask-presentation.js';
 import type { BuiltinChannelRuntimeDeps } from './shared.js';
 import { isManagedSurface } from './surfaces.js';
 import { isTruncatedDirectory } from './targets.js';
@@ -76,10 +78,12 @@ export async function notifyBuiltinApprovalViaRouter(
     : approval.status === 'denied' || approval.status === 'cancelled' || approval.status === 'expired'
       ? 'failed'
       : 'running';
+  // The ask's own words (permissions/ask-presentation.ts), the same as every other surface shows.
+  const presentation = hostApprovalPresentation({ configManager: context.deps.configManager }, approval.request, approval.sessionId);
   await router.deliver({
     target: buildDeliveryTarget(surface, { pending: {} }, binding),
-    body: formatApprovalMessage(approval),
-    title: `Approval ${approval.status}: ${approval.request.tool}`,
+    body: formatApprovalMessage(approval, presentation),
+    title: presentation.title,
     jobId: binding.jobId ?? `approval:${approval.id}`,
     runId: binding.runId ?? approval.id,
     status,
@@ -204,15 +208,40 @@ function renderStatus(request: ChannelRenderRequest): string {
   return 'running';
 }
 
-function formatApprovalMessage(approval: SharedApprovalRecord): string {
+/**
+ * The ask as a chat message: what it acts on, what it will do, and how to
+ * answer (a reply; no channel offers "don't ask again": a channel's ask is
+ * answered one call at a time). Once decided: who decided it, and how.
+ */
+export function formatApprovalMessage(approval: SharedApprovalRecord, presentation: AskPresentation): string {
+  const subject = presentation.subject;
   const lines = [
-    `Approval ${approval.status}: ${approval.id}`,
-    `Tool: ${approval.request.tool}`,
-    approval.request.analysis.summary,
-    approval.request.analysis.target ? `Target: ${approval.request.analysis.target}` : '',
-    approval.resolvedBy ? `Resolved by: ${approval.resolvedBy}` : '',
-  ].filter((line) => line.trim().length > 0);
-  return lines.join('\n');
+    ...(subject ? subject.lines.map((line) => (subject.kind === 'command' ? `$ ${line}` : line)) : []),
+    ...(presentation.consequence ? [presentation.consequence.text] : []),
+  ];
+  const by = approval.resolvedBy;
+  const reason = approval.decision?.reason;
+  switch (approval.status) {
+    case 'pending':
+    case 'claimed':
+      lines.push('Reply yes or no.');
+      break;
+    case 'approved':
+      lines.push(approval.decision?.rememberTier !== undefined || approval.decision?.remember === true
+        ? `Approved${by ? ` by ${by}` : ''}, and remembered.`
+        : `Approved once${by ? ` by ${by}` : ''}.`);
+      break;
+    case 'denied':
+      lines.push(`Refused${by ? ` by ${by}` : ''}${reason ? `: ${reason}` : '.'}`);
+      break;
+    case 'expired':
+      lines.push('Nobody answered in time, so it was not done.');
+      break;
+    case 'cancelled':
+      lines.push('No longer asked: the request was withdrawn.');
+      break;
+  }
+  return lines.filter((line) => line.trim().length > 0).join('\n');
 }
 
 function readPendingString(pending: Record<string, unknown>, key: string): string | undefined {

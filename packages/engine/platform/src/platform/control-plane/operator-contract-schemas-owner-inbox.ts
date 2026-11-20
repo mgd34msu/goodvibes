@@ -44,6 +44,44 @@ const OWNER_ANSWER_DELIVERY_SCHEMA = objectSchema({
   reason: STRING_SCHEMA,
 }, ['state', 'to']);
 
+const LABELLED_TEXT_SCHEMA = objectSchema({ label: STRING_SCHEMA, value: STRING_SCHEMA }, ['label', 'value']);
+
+/**
+ * What an ask says (permissions/ask-presentation.ts AskPresentation): the
+ * question, where, what it acts on, the consequence, the choices with their
+ * keys, whether an answer can be remembered, why the person is asked, and the
+ * rest as details. Every surface renders this and words nothing itself.
+ */
+export const ASK_PRESENTATION_SCHEMA = objectSchema({
+  kind: enumSchema(['run-command', 'answer-command-prompt', 'change-files', 'fetch', 'start-agent', 'hand-off-work', 'change-setting',
+    'mcp-tool', 'other-tool', 'purchase', 'question', 'decision', 'claim', 'queued-action', 'report']),
+  mark: enumSchema(['ask', 'cannot-undo', 'question']),
+  question: STRING_SCHEMA,
+  place: objectSchema({ short: STRING_SCHEMA, full: STRING_SCHEMA }, ['short', 'full']),
+  subject: objectSchema({ kind: enumSchema(['command', 'paths', 'urls', 'text', 'money']), lines: arraySchema(STRING_SCHEMA) }, ['kind', 'lines']),
+  body: STRING_SCHEMA,
+  consequence: objectSchema({ text: STRING_SCHEMA, withPlace: STRING_SCHEMA, tone: enumSchema(['plain', 'cannot-undo']) }, ['text', 'withPlace', 'tone']),
+  choices: arraySchema(objectSchema({
+    id: STRING_SCHEMA,
+    label: STRING_SCHEMA,
+    key: STRING_SCHEMA,
+    default: BOOLEAN_SCHEMA,
+    danger: BOOLEAN_SCHEMA,
+    value: STRING_SCHEMA,
+  }, ['id', 'label'])),
+  remember: objectSchema({
+    offered: BOOLEAN_SCHEMA,
+    tiers: arraySchema(objectSchema({ tier: STRING_SCHEMA, label: STRING_SCHEMA, detail: STRING_SCHEMA }, ['tier', 'label', 'detail'])),
+    why: STRING_SCHEMA,
+  }, ['offered']),
+  typeToRefuse: BOOLEAN_SCHEMA,
+  countdown: objectSchema({ verb: STRING_SCHEMA, at: NUMBER_SCHEMA }, ['verb', 'at']),
+  origin: objectSchema({ sessionTitle: STRING_SCHEMA, by: STRING_SCHEMA }, ['by']),
+  why: STRING_SCHEMA,
+  details: arraySchema(LABELLED_TEXT_SCHEMA),
+  title: STRING_SCHEMA,
+}, ['kind', 'mark', 'question', 'choices', 'remember', 'typeToRefuse', 'why', 'details', 'title']);
+
 export const OWNER_ITEM_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   kind: OWNER_ITEM_KIND_SCHEMA,
@@ -65,6 +103,8 @@ export const OWNER_ITEM_SCHEMA = objectSchema({
   // An approval item: the record's revision (answer with it as expectedRevision) and its reading for the caller.
   revision: NUMBER_SCHEMA,
   reading: APPROVAL_READING_SCHEMA,
+  // What the ask says, worded once by the daemon for every surface (ASK_PRESENTATION_SCHEMA).
+  presentation: ASK_PRESENTATION_SCHEMA,
 }, ['id', 'kind', 'status', 'title', 'detail', 'options', 'createdAt']);
 
 export const OWNER_INBOX_LIST_INPUT_SCHEMA = objectSchema({

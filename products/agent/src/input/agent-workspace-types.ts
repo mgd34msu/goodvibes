@@ -131,7 +131,6 @@ export interface AgentWorkspaceAction {
   readonly modelPickerTarget?: ModelPickerTarget;
   readonly modelPickerFlow?: 'providerModel' | 'model';
   readonly settingsTarget?: string;
-  readonly setupCheckpointOperation?: AgentWorkspaceSetupCheckpointOperation;
   readonly visibleWhenSettingKey?: string;
   readonly visibleWhenSettingValue?: string | boolean | number;
   readonly localKind?: AgentWorkspaceLocalEditorKind;

@@ -65,7 +65,7 @@ export interface WorkBoardSelectable {
 /** The state word of a healthy background service, listed while the services are open. */
 const SERVICE_STATE_WORDS: Readonly<Record<string, string>> = {
   thinking: 'working', 'executing-tool': 'working', streaming: 'working', retrying: 'retrying', queued: 'starting',
-  idle: 'waiting for its next check', paused: 'paused', done: 'up to date', 'awaiting-approval': 'waiting',
+  idle: 'between checks', paused: 'paused', done: 'up to date', 'awaiting-approval': 'waiting',
 };
 
 export function boardKey(row: BoardRow): string {

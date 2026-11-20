@@ -1,14 +1,10 @@
-import { createSessionListCommand } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
 import { join } from 'path';
 import 'node:fs';
 import 'node:fs/promises';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 
 import { extractText } from '@goodvibes-jev/engine/platform/platform/export';
-import { requireSessionManager, requireShellPaths } from './runtime-services.ts';
-import { sessionCommand } from './session.ts';
-import { saveCommand } from './session-workflow.ts';
-import { loadSavedSessionIntoLive } from './session-load.ts';
+import { requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import './confirmation.ts';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
@@ -41,41 +37,7 @@ function getCurrentConversationMessages(ctx: CommandContext): ReturnType<typeof 
 }
 
 export function registerSessionContentCommands(registry: CommandRegistry): void {
-  registry.register(contentCommands.exportCommand);
-
   registry.register(contentCommands.titleCommand);
-
-  registry.register(saveCommand);
-
-  registry.register({
-    name: 'load',
-    effect: 'session-lifecycle',
-    description: 'Load a saved session',
-    usage: '<name>',
-    argsHint: '<name>',
-    async handler(args, ctx) {
-      if (!args[0]) {
-        throw commandRefusal('Usage: /load <session-name>\nRun /sessions to list available sessions.');
-      }
-      const sessionManager = requireSessionManager(ctx);
-      try {
-        const loaded = await loadSavedSessionIntoLive(ctx, sessionManager, args[0]);
-        ctx.renderRequest();
-        ctx.print(
-          [
-            'Session loaded',
-            `  id ${args[0]}`,
-            `  messages ${loaded.messageCount}`,
-            ...(loaded.agentRecordCount > 0 ? [`  ignored connected-host records ${loaded.agentRecordCount}`] : []),
-            ...(loaded.restoredAnchorCount > 0 ? [`  rewind points ${loaded.restoredAnchorCount} restored`] : []),
-            ...loaded.notices.map((line) => `  ${line}`),
-          ].join('\n'),
-        );
-      } catch (e) {
-        throw commandRefusal(formatSessionFailure('load session', e));
-      }
-    },
-  });
 
   registry.register({
     name: 'undo',
@@ -154,12 +116,11 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
 
   registry.register(contentCommands.retryCommand);
 
-  registry.register(sessionsCommand);
 }
 
 import { createSessionContentCommands } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
 import { commandRefusal } from './confirmation.ts';
-const contentCommands = createSessionContentCommands<CommandContext, ReturnType<typeof getCurrentConversationMessages>[number]>({
+export const contentCommands = createSessionContentCommands<CommandContext, ReturnType<typeof getCurrentConversationMessages>[number]>({
   paths: requireShellPaths,
   capture: getCurrentConversationMessages,
   markdown(messages) {
@@ -176,20 +137,3 @@ const contentCommands = createSessionContentCommands<CommandContext, ReturnType<
   retryRemovesLastTurn: true,
 });
 
-const sessionsCommand = createSessionListCommand<CommandContext>({
-  manager: requireSessionManager,
-  forward: (args, ctx) => sessionCommand.handler(args, ctx),
-  emptyDetail: 'Open Agent Workspace -> Conversation -> Save current session',
-  actions: 'Enter to load',
-  options: { allowSearch: true },
-  selected: (ctx, sessionManager, _sessions, result) => {
-    if (!result) return;
-    void loadSavedSessionIntoLive(ctx, sessionManager, result.item.id).then((loaded) => {
-      ctx.renderRequest();
-      ctx.print(['Session loaded', `  id ${result.item.id}`, `  messages ${loaded.messageCount}`, ...loaded.notices.map((line) => `  ${line}`)].join('\n'));
-    }, (e: unknown) => {
-      ctx.print(formatSessionFailure('load session', e));
-    });
-  },
-  heading: 'Saved sessions',
-});

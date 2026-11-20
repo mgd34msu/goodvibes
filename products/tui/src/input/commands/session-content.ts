@@ -1,39 +1,15 @@
-import { createSessionListCommand } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
 import { join } from 'path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
 import { TemplateManager, parseTemplateArgs, type TemplateDeleteResult, type TemplateScope } from '@goodvibes-jev/engine/platform/platform/templates';
 import { RefusalError, formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
-import { requireSessionManager, requireSessionMemoryStore, requireShellPaths } from './runtime-services.ts';
+import { requireSessionMemoryStore, requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { sessionCommand } from './session.ts';
-import { saveCommand } from './session-workflow.ts';
-import { describeSessionLoad, loadSessionWithAgents } from './session-load.ts';
 import { undoLastRewind, redoLastRewind } from './rewind-runtime.ts';
 import { dropFileChange, redoLastFileChange, undoLastFileChange } from '@goodvibes-jev/engine/terminal-shell/recovery-commands';
 
 export function registerSessionContentCommands(registry: CommandRegistry): void {
-  registry.register(contentCommands.exportCommand);
-
   registry.register(contentCommands.titleCommand);
-
-  registry.register(saveCommand);
-
-  registry.register({
-    name: 'load',
-    description: 'Load a saved session',
-    usage: '<name>',
-    argsHint: '<name>',
-    async handler(args, ctx) {
-      if (!args[0]) {
-        ctx.print('Usage: /load <session-name>\nRun /sessions to list available sessions.');
-        return;
-      }
-      const result = await loadSessionWithAgents(ctx, requireSessionManager(ctx), args[0]);
-      ctx.renderRequest();
-      ctx.print(result.ok ? describeSessionLoad(args[0], result) : result.message);
-    },
-  });
 
   registry.register({
     name: 'undo',
@@ -100,7 +76,6 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
 
   registry.register(contentCommands.retryCommand);
 
-  registry.register(sessionsCommand);
 
   registry.register({
     name: 'template',
@@ -324,7 +299,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
 }
 
 import { createSessionContentCommands } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
-const contentCommands = createSessionContentCommands<CommandContext, Record<string, unknown>>({
+export const contentCommands = createSessionContentCommands<CommandContext, Record<string, unknown>>({
   paths: requireShellPaths,
   capture: (ctx) => (ctx.session.conversationManager.toJSON() as { messages?: Record<string, unknown>[] }).messages ?? [],
   markdown(messages) {
@@ -352,56 +327,3 @@ const contentCommands = createSessionContentCommands<CommandContext, Record<stri
   retryRemovesLastTurn: false,
 });
 
-const sessionsCommand = createSessionListCommand<CommandContext>({
-  manager: requireSessionManager,
-  forward: (args, ctx) => sessionCommand.handler(args, ctx),
-  emptyDetail: 'Use /save [name] to save',
-  actions: '[Del] delete',
-  options: { allowSearch: true, customActions: new Map([['d', 'delete' as const]]) },
-  selected: (ctx, sessionManager, sessions, result) => {
-    if (!result) return;
-    if (result.action === 'delete') {
-      const sessionInfo = sessions.find((s) => s.name === result.item.id);
-      if (!sessionInfo) return;
-      // The same refusals as /session delete: never the active session, never without asking.
-      if (sessionInfo.name === ctx.session.runtime.sessionId) {
-        ctx.print(`Cannot delete the active session (${sessionInfo.name}). Switch to another session first with /session resume <id>.`);
-        ctx.renderRequest();
-        return;
-      }
-      if (!ctx.confirm) {
-        ctx.print(`Deleting a session asks first. Use /session delete ${sessionInfo.name} --yes`);
-        ctx.renderRequest();
-        return;
-      }
-      const remove = (): void => {
-        try {
-          sessionManager.delete(sessionInfo.name);
-          ctx.print(`Session deleted: ${result.item.id}`);
-        } catch (e) {
-          ctx.print(`Failed to delete session: ${summarizeError(e)}`);
-        }
-        ctx.renderRequest();
-      };
-      void ctx
-        .confirm({
-          title: 'Delete session?',
-          body: `This removes "${sessionInfo.name}" and its ${sessionInfo.messageCount} message${sessionInfo.messageCount === 1 ? '' : 's'} from this project.\nIt cannot be undone.`,
-          confirmLabel: 'Delete',
-          tone: 'danger',
-        })
-        .then((confirmed) => {
-          if (confirmed) remove();
-          else ctx.renderRequest();
-        });
-    } else {
-      // The same load as /load, agent records included.
-      const name = result.item.id;
-      void loadSessionWithAgents(ctx, sessionManager, name).then((loaded) => {
-        ctx.renderRequest();
-        ctx.print(loaded.ok ? describeSessionLoad(name, loaded) : loaded.message);
-      });
-    }
-  },
-  heading: 'Saved sessions:',
-});

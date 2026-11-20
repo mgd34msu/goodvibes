@@ -327,8 +327,7 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
     || root === 'quit'
     || root === 'exit'
     || root === 'save'
-    || root === 'load'
-    || root === 'sessions'
+    || root === 'resume'
     || root === 'title'
     || root === 'undo'
     || root === 'redo'
@@ -338,13 +337,6 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
       confirmation,
       preferredModelTool: agentHarnessModes('commands', 'command', 'run_command'),
       boundary: 'Session and conversation commands operate on the visible harness session lifecycle.',
-    };
-  }
-  if (root === 'export') {
-    return {
-      confirmation,
-      preferredModelTool: `${agentHarnessModes('workspace_actions', 'workspace_action', 'run_workspace_action')} or ${agentHarnessModes('run_command')}`,
-      boundary: 'Conversation export writes a local workspace file and requires an explicit output intent.',
     };
   }
   if (root === 'agents') {

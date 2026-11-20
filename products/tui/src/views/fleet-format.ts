@@ -137,7 +137,7 @@ export function renderFleetDetailLines(
 
   // Only facts that are known: no "model unknown", no "cost unpriced", no internal id.
   const facts: Array<[string, string]> = [];
-  if (blocked || stopping) facts.push([stateLabel, color]);
+  if (blocked || stopping) facts.push([`${stateLabel} `, color]);
   if (node.model) facts.push([` model `, C.label], [node.model, C.info]);
   facts.push([' time ', C.label], [formatElapsed(node.elapsedMs), C.value]);
   const line1 = buildViewLine(width, [[' ', C.dim], ...facts]);

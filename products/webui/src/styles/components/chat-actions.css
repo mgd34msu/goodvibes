@@ -193,10 +193,82 @@
   color: var(--text-2);
 }
 
-/* A reply that ended in an error says why under its partial text. */
-.message-failure {
+/* A reply that failed or was refused (ux A5.1): ✕ and the headline, one dim line with the
+   cause and what changed, the next steps as buttons, and the backup-model tip. */
+.turn-failure {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   margin: 8px 0 0;
+}
+
+.turn-failure__headline {
+  margin: 0;
+  color: var(--text);
+  font-weight: var(--weight-semibold);
+}
+
+.turn-failure__mark {
   color: var(--bad);
+}
+
+.turn-failure__cause,
+.turn-failure__tip {
+  margin: 0;
+  padding-left: calc(1em + 4px);
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+
+.turn-failure__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-left: calc(1em + 4px);
+  margin-top: 4px;
+}
+
+.turn-failure__details {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-left: calc(1em + 4px);
+  font-size: var(--text-sm);
+}
+
+.turn-failure__detail {
+  display: grid;
+  grid-template-columns: minmax(70px, max-content) 1fr;
+  gap: 12px;
+}
+
+.turn-failure__detail dt {
+  color: var(--text-3);
+}
+
+.turn-failure__detail dd {
+  margin: 0;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.turn-failure__link {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.turn-failure > .turn-failure__link {
+  margin-left: calc(1em + 4px);
+  color: var(--text-3);
+  font-size: var(--text-sm);
 }
 
 /* The read-aloud button joins the ghost icon row. */
@@ -449,55 +521,104 @@
   white-space: nowrap;
 }
 
-.message-tool-activity__list {
+/* One line per tool call, as the terminal's bead rows (ux A4.5): glyph, name, key
+   argument, and the result and time right-aligned; on a phone the result moves under
+   the line. A failed call's line is --bad; its raw result is behind its own Details. */
+.tool-lines {
   display: grid;
-  gap: 10px;
+  gap: 6px;
   margin: 6px 0 4px 3px;
   padding: 2px 0 2px 14px;
   list-style: none;
   border-left: 1px solid var(--line-strong);
 }
 
-.message-tool-activity__item {
+.active-tool-calls.tool-lines {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: 0;
+}
+
+.tool-line {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.message-tool-activity__header {
+.tool-line__row {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  gap: 2px 8px;
   min-width: 0;
+  color: var(--text-2);
   font-size: var(--text-sm);
   line-height: var(--leading-ui);
 }
 
-.message-tool-activity__label {
+.tool-line__glyph {
+  flex: none;
+  width: 1em;
+  color: var(--text-3);
+  text-align: center;
+}
+
+.tool-line--ok .tool-line__glyph { color: var(--ok); }
+.tool-line--warn .tool-line__glyph { color: var(--warn); }
+.tool-line--failed .tool-line__glyph,
+.tool-line--failed .tool-line__name,
+.tool-line--failed .tool-line__result { color: var(--bad); }
+
+.tool-line__glyph--spin {
+  animation: tool-line-spin 1.2s linear infinite;
+}
+
+@keyframes tool-line-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-line__glyph--spin { animation: none; }
+}
+
+.tool-line__name {
   flex: none;
   color: var(--text);
   font-weight: var(--weight-medium);
 }
 
-.message-tool-activity__arg {
+.tool-line__arg {
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
-  color: var(--text-3);
+  color: var(--text-2);
   font: var(--weight-regular) var(--text-xs) / var(--leading-meta) var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.message-tool-activity__error-badge {
-  flex: none;
-  color: var(--bad);
+.tool-line__result {
+  margin-left: auto;
+  color: var(--text-3);
   font-size: var(--text-xs);
+  white-space: nowrap;
 }
 
-.message-tool-activity__result-inline,
-.message-tool-activity__result pre {
+.tool-line__result--good { color: var(--ok); }
+.tool-line__result--warn { color: var(--warn); }
+.tool-line__result--bad { color: var(--bad); }
+
+.tool-line__details > summary {
+  width: fit-content;
+  margin-left: calc(1em + 8px);
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.tool-line__details pre {
   max-height: 240px;
-  margin: 0;
+  margin: 4px 0 0;
   padding: 8px 10px;
   overflow: auto;
   color: var(--text-2);
@@ -509,16 +630,12 @@
   word-break: break-word;
 }
 
-.message-tool-activity__result > summary {
-  color: var(--text-3);
-  font: var(--weight-regular) var(--text-xs) / var(--leading-meta) var(--font-mono);
-  white-space: pre-wrap;
-  word-break: break-word;
-  cursor: pointer;
-}
-
-.message-tool-activity__result[open] > summary {
-  margin-bottom: 4px;
+@media (max-width: 599px) {
+  .tool-line__result {
+    flex-basis: 100%;
+    margin-left: calc(1em + 8px);
+    white-space: normal;
+  }
 }
 
 /* ── Compaction handoff (folded) ───────────────────────────── */

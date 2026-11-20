@@ -66,7 +66,7 @@ interface KeybindingOperationRoute {
 type KeybindingEntry = { readonly action: KeyAction; readonly description: string; readonly combos: KeyCombo[] };
 type KeybindingContext = Pick<CommandContext, 'workspace'>;
 type KeybindingExecutionContext = KeybindingContext & Pick<CommandContext,
-  'renderRequest' | 'clearScreen' | 'openWorkspacePicker' | 'openAgentWorkspace'
+  'renderRequest' | 'clearScreen' | 'openWorkspacePicker' | 'openAgentWorkspace' | 'openCommandPalette'
   | 'dismissAgentWorkspace' | 'focusPrompt' | 'openPromptHistorySearch' | 'openConversationSearch'
   | 'pasteFromClipboard' | 'openBlockActions'>;
 

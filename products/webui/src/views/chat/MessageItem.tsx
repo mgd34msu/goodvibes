@@ -8,6 +8,7 @@ import { MarkdownMessage } from '../../components/MarkdownMessage';
 import { SpeakButton } from '../../components/voice/SpeakButton';
 import { MemoryProvenanceChip } from './MemoryProvenanceChip';
 import { ToolActivityGroup } from './ToolActivityGroup';
+import { failureReadingOf, TurnFailureRow } from './TurnFailureRow';
 import { readMemoryProvenanceIds } from '../../lib/memory-provenance';
 import { useWebUiPreferences } from '../../lib/ui-preferences';
 import { asRecord } from '../../lib/object';
@@ -49,6 +50,10 @@ interface MessageItemProps {
   onRegenerateFrom: (messageId: string) => void;
   /** Called when the user submits an edited version of a user message. */
   onEditMessage?: (message: ChatMessage, newText: string) => void;
+  /** This is the newest failed reply: its failure row keeps its next steps. */
+  latestFailure?: boolean;
+  /** "Use another model" on a failed reply: open the model menu, then try the same prompt with the model chosen. */
+  onUseAnotherModel?: (messageId: string) => void;
 }
 
 /** Memoised: a keystroke in the composer or a streamed token re-renders a message only when its own props change. */
@@ -66,17 +71,17 @@ export const MessageItem = memo(function MessageItem({
   onResendMessage,
   onRegenerateFrom,
   onEditMessage,
+  latestFailure = false,
+  onUseAnotherModel,
 }: MessageItemProps) {
   const id = bestId(message) || `${index}`;
   const tone = messageTone(message);
   const state = deliveryState(message);
   const text = messageText(message);
   const { openArtifacts } = useArtifactsPanel();
-  // A reply that ended in an error: the partial it had (possibly none) and why it failed.
+  // A reply that ended in an error or was refused: the partial it had (possibly none) and the failure row.
   const failedReply = tone === 'assistant' && state === 'failed';
-  const failureReason = failedReply
-    ? (typeof message.failureReason === 'string' && message.failureReason.trim()) || 'the daemon recorded no reason'
-    : '';
+  const failure = failedReply ? failureReadingOf(message, id) : null;
   const canRetry = (Boolean(text) && (tone === 'user' || tone === 'assistant')) || failedReply;
   // Never an epoch or "unknown" time: a missing or zero time shows nothing.
   const timestamp = messageTimestamp(message);
@@ -133,7 +138,7 @@ export const MessageItem = memo(function MessageItem({
   const toolActivity = isAssistant && message.toolActivity && message.toolActivity.length > 0 ? message.toolActivity : null;
   // Quiet in the hover row; states that need attention (not sent, pending,
   // stopped, queued) stay visible without hovering.
-  const persistentState = state !== '' && state !== 'sent';
+  const persistentState = state !== '' && state !== 'sent' && !failedReply;
 
   const content = isEditing && tone === 'user' ? (
     <div className="message-edit-area">
@@ -188,10 +193,13 @@ export const MessageItem = memo(function MessageItem({
           ))}
         </div>
       )}
-      {failedReply && (
-        <p className="message-failure" role="note">
-          Reply failed: {failureReason.replace(/[.\s]+$/, '')}. Regenerate to try again.
-        </p>
+      {failure && (
+        <TurnFailureRow
+          reading={failure}
+          latest={latestFailure}
+          onRetry={() => onRegenerateFrom(id)}
+          onOtherModel={() => onUseAnotherModel?.(id)}
+        />
       )}
       {!text && attachments.length === 0 && !failedReply && <p>{JSON.stringify(asRecord(message))}</p>}
     </div>
@@ -200,12 +208,12 @@ export const MessageItem = memo(function MessageItem({
   const footer = (
     <div className={`message-actions${persistentState ? ' message-actions--state' : ''}`}>
       <div className="message-actions-inner">
-        {/* Delivery indicator */}
-        {state && (
+        {/* Delivery indicator (a failed reply says so in its failure row) */}
+        {state && !failedReply && (
           <span
             className={`delivery-indicator ${state}`}
             title={
-              state === 'failed' ? (failedReply ? `Reply failed: ${failureReason}` : 'Not sent')
+              state === 'failed' ? 'Not sent'
                 : state === 'local' ? 'Pending'
                   : state === 'cancelled' ? 'Stopped before completion: this is the partial reply that existed when the turn was stopped'
                     : state === 'queued' ? 'Queued: will run after the current reply finishes'
@@ -213,7 +221,7 @@ export const MessageItem = memo(function MessageItem({
                         : 'Sent'
             }
           >
-            {state === 'failed' ? <><X size={12} aria-hidden="true" /> {failedReply ? 'Reply failed' : 'Not sent'}</>
+            {state === 'failed' ? <><X size={12} aria-hidden="true" /> Not sent</>
               : state === 'cancelled' ? <><X size={12} aria-hidden="true" /> Stopped</>
                 : state === 'queued' ? <><Clock size={12} aria-hidden="true" /> Queued</>
                   : state === 'unanswered' ? <><X size={12} aria-hidden="true" /> Not answered</>

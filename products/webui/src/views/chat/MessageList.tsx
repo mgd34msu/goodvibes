@@ -51,6 +51,8 @@ interface MessageListProps {
   lead?: ReactNode;
   /** Rendered below the last message and the live reply (the asks this chat waits on). */
   trailing?: ReactNode;
+  /** "Use another model" on the newest failed reply. */
+  onUseAnotherModel?: (messageId: string) => void;
 }
 
 /** The streamed reply's text: re-renders on its own, at most once per frame, as the text grows. */
@@ -93,6 +95,7 @@ export function MessageList({
   workingLabel = '',
   lead,
   trailing,
+  onUseAnotherModel,
 }: MessageListProps) {
   const reducedMotion = useReducedMotion();
   // Stop must be reachable for the WHOLE active turn, including the
@@ -106,6 +109,12 @@ export function MessageList({
     (message: ChatMessage, newText: string) => onEditMessage?.(message.id ?? message.messageId ?? '', newText),
     [onEditMessage],
   );
+
+  // Only the newest reply's failure row keeps its next steps: a newer turn takes them away.
+  let lastReply = -1;
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    if (messageTone(nodes[index].message) === 'assistant') { lastReply = index; break; }
+  }
 
   return (
     <div className="chat-thread">
@@ -128,6 +137,8 @@ export function MessageList({
               onResendMessage={onResendMessage}
               onRegenerateFrom={onRegenerateFrom}
               onEditMessage={onEditMessage && messageTone(node.message) === 'user' ? editMessage : undefined}
+              latestFailure={index === lastReply && !isStreaming}
+              onUseAnotherModel={onUseAnotherModel}
             />
           ))}
           {(hasLiveText || isStreaming) && (

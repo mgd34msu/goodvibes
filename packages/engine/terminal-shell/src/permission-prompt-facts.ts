@@ -13,9 +13,9 @@
  * the request object), never one per frame.
  */
 import { homedir } from 'node:os';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   presentApprovalAsk,
+  settingLabelOf,
   type AskFacts,
   type AskPresentation,
   type ModeInForceWords,
@@ -34,14 +34,8 @@ export interface TerminalAskContext {
   readonly sessionTitle?: ((sessionId: string) => string | undefined) | undefined;
 }
 
-let labels: Map<string, string> | null = null;
-
-/** A setting's plain name ("Run commands in a sandbox"); undefined for a key the schema does not hold. */
-export function settingLabel(key: string): string | undefined {
-  labels ??= new Map(CONFIG_SCHEMA.map((setting) => [setting.key as string, setting.label]));
-  const label = labels.get(key);
-  return label !== undefined && label.trim() !== '' ? label : undefined;
-}
+/** A setting's plain name ("Run commands in a sandbox"), from the settings schema. */
+export const settingLabel = settingLabelOf;
 
 /**
  * The exec sandbox a request runs in, from the annotation the terminal app's

@@ -213,7 +213,7 @@ export function registerCodebaseRuntimeCommands(registry: CommandRegistry): void
           return;
         }
         store.scheduleBuild();
-        ctx.print('Build scheduled: track progress with /codebase status or Agents (F2, the code-index row).');
+        ctx.print('Build scheduled: track progress with /codebase status, or in Your agents (F2) under Background services (b).');
         return;
       }
 

@@ -106,6 +106,7 @@ import { dispatchCloudflareRoutes } from './cloudflare-routes.js';
 import { dispatchMcpRoutes } from './mcp-routes.js';
 import { HomeAssistantConversationRoutes } from './homeassistant-routes.js';
 import { HomeGraphRoutes } from './home-graph-routes.js';
+import { startsWork } from '../work-admission.js';
 import { dispatchOpenAICompatibleRoutes } from './openai-compatible-routes.js';
 import { ProjectPlanningRoutes } from './project-planning-routes.js';
 import {
@@ -420,9 +421,13 @@ export class DaemonHttpRouter {
         // here (API precedence) and flow to the normal auth-gated dispatch below.
         const asset = serving.serveBundle ? await serveWebuiBundle(req, serving) : null;
         // Reads still answer while admission is closed; anything that could start or change work waits for the restart.
-        const closed = asset === null && req.method !== 'GET' && req.method !== 'HEAD' ? this.context.workAdmission?.refusal() : null;
+        // A channel's inbound message is the exception: it is taken and saved, and the broker holds it until after the restart
+        // (a provider that is refused may not deliver it again).
+        const closed = asset === null ? this.context.workAdmission?.refusalResponse() ?? null : null;
+        const refused = closed !== null && startsWork(req.method) && this.context.channelPlugins.getByPath(new URL(req.url).pathname) === null
+          ? closed : null;
         // An error leaves as the route wrote it: its code is the fact a client reads, so nothing is attached for a model to read.
-        const response = asset ?? (closed ? Response.json(closed, { status: 503, headers: { 'Retry-After': '5' } }) : await this.requests.route(req).catch((error: unknown) => {
+        const response = asset ?? (refused ?? await this.requests.route(req).catch((error: unknown) => {
           if (error instanceof DecisionModelPolicyChangedError) throw error;
           // Decision models are off (no decision model) and this feature needs one: the owner's setting, not a daemon fault.
           if (error instanceof DecisionModelsDisabledError) {

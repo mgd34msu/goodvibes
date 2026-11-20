@@ -41,6 +41,7 @@ import { validateInvocationInput } from '../control-plane/invoke-input-validatio
 import { readGatewayVerbRefusal } from '../control-plane/routes/gateway-verb-error.js';
 import { AUTHENTICATION_REQUIRED_GUIDANCE, authenticationRequiredResponse, buildErrorResponseBody, jsonErrorResponse } from './http/error-response.js';
 import { EngineErrorCodes, isRefusal, refusalErrorBody } from '@goodvibes-jev/engine/errors';
+import { startsWork, type DaemonWorkAdmission } from './work-admission.js';
 import {
   actorFromPrincipal,
   NO_OWNER_USER,
@@ -145,6 +146,8 @@ export interface DaemonControlPlaneContext {
   readonly requireAuthenticatedSession: (req: Request) => { username: string; roles: readonly string[] } | null;
   /** Answers repeats of a call to a method that takes the shared Idempotency-Key; absent, such a key is not honoured. */
   readonly idempotentReplay?: IdempotentReplayStore | undefined;
+  /** Closed for a self-update's restart: a call that could start or change work is refused, as the HTTP router refuses it. */
+  readonly workAdmission?: DaemonWorkAdmission | undefined;
 }
 
 interface UpgradeCapableServer {
@@ -1161,6 +1164,9 @@ export class DaemonControlPlaneHelper {
         }
       }
     }
+    // The same admission the HTTP router applies: reads answer during a self-update's hold, anything else waits for the restart.
+    const closed = this.context.workAdmission?.refusal();
+    if (closed && startsWork(input.method)) return { status: 503, ok: false, body: closed };
     for (const [key, value] of Object.entries(input.query ?? {})) {
       if (value === undefined || value === null) continue;
       url.searchParams.set(key, String(value));
@@ -1255,6 +1261,10 @@ export class DaemonControlPlaneHelper {
    */
   async invokeGatewayMethodCall(input: GatewayMethodCallInput): Promise<{ status: number; ok: boolean; body: unknown; replayed?: boolean }> {
     const descriptor = this.context.gatewayMethods.get(input.methodId);
+    // During a self-update's hold a method that could start or change work is refused with the HTTP router's code,
+    // before the replay store, so the refusal is never kept as the answer to a key retried after the restart.
+    const closed = descriptor ? this.context.workAdmission?.refusal() : null;
+    if (closed && descriptor && startsWork(descriptor.http?.method, descriptor.effect)) return { status: 503, ok: false, body: closed };
     const store = this.context.idempotentReplay;
     if (input.idempotencyKey === undefined || !store || !takesIdempotencyKey(descriptor)) return this.invokeGatewayMethodCallOnce(input);
     const key = IdempotentReplayStore.readKey(input.idempotencyKey);

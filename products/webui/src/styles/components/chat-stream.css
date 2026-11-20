@@ -66,21 +66,6 @@
   list-style: none;
 }
 
-.active-tool-call {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-2);
-  font-size: var(--text-sm);
-  line-height: var(--leading-ui);
-}
-
-.active-tool-call__name {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
 .active-tool-call__cancel {
   display: inline-flex;
   align-items: center;

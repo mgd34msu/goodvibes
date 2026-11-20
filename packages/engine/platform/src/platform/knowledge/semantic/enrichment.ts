@@ -828,13 +828,11 @@ function readArray(value: unknown): readonly unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-function repairSubjectCandidatesForSource(
-  store: KnowledgeStore, source: KnowledgeSourceRecord,
-  readNode: (id: string) => KnowledgeNodeRecord | null = (id) => store.getNode(id),
-): KnowledgeNodeRecord[] {
+/** The ids of the subjects a source is linked to: its discovery record and its `source_for` edges. */
+function repairSubjectCandidateIds(store: KnowledgeStore, source: KnowledgeSourceRecord): string[] {
   const discovery = readRecord(source.metadata.sourceDiscovery);
   const sourceSpaceId = sourceKnowledgeSpace(source);
-  const ids = uniqueStrings([
+  return uniqueStrings([
     ...readStringArray(discovery.linkedObjectIds),
     ...store.edgesFor('source', source.id)
       .filter((edge) => edge.fromKind === 'source' && edge.fromId === source.id)
@@ -845,6 +843,13 @@ function repairSubjectCandidatesForSource(
       })
       .map((edge) => edge.toId),
   ]);
+}
+
+function repairSubjectCandidatesForSource(
+  store: KnowledgeStore, source: KnowledgeSourceRecord,
+  readNode: (id: string) => KnowledgeNodeRecord | null = (id) => store.getNode(id),
+): KnowledgeNodeRecord[] {
+  const ids = repairSubjectCandidateIds(store, source);
   const nodes: KnowledgeNodeRecord[] = [];
   for (const id of ids) {
     const node = readNode(id);
@@ -861,7 +866,10 @@ function repairSubjectCandidatesForSource(
 async function linkedObjectsForSource(store: KnowledgeStore, source: KnowledgeSourceRecord,
   entityOverlayIds: ReadonlySet<string>, signal?: AbortSignal, shouldStop?: () => boolean) {
   const guard = createSemanticWriteGuard(store, signal, shouldStop);
-  guard.edges('source-edges', [`source:${source.id}`]);
+  // The selection rests on which subjects the source is linked to, not on every
+  // edge it has: the edges this pass writes from the source (a fact's support,
+  // its wiki page) must not read as a change to its subjects.
+  guard.watch('source-subject-links', () => repairSubjectCandidateIds(store, source));
   const nodes = repairSubjectCandidatesForSource(store, source, id =>
     entityOverlayIds.has(id) ? store.getNode(id) : guard.node(id));
   const candidateIds: ReadonlySet<string> = new Set(nodes.map((node) => node.id));

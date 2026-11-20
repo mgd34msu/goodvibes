@@ -145,6 +145,8 @@ export function ChatView({
   const [pendingScrollTarget, setPendingScrollTarget] = useState<{ sessionId: string; messageId: string } | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState('');
   const scrollTargetSessionShownRef = useRef(false);
+  // A failed reply's "Use another model": the reply to try again once a model is chosen in the menu.
+  const retryAfterModelRef = useRef('');
 
   const providers = useQuery({ queryKey: queryKeys.providers, queryFn: () => platformClient.operator.providers.list() });
   const modelCatalog = useQuery({ queryKey: ['models'], queryFn: () => platformClient.operator.models.list() });
@@ -263,8 +265,11 @@ export function ChatView({
       const result = await platformClient.operator.models.current.set(registryKey);
       routeSelectionCurrent(selectedChat, lifetime); return result;
     },
-    onError: () => setSelectedProviderId(currentProviderId),
+    onError: () => { retryAfterModelRef.current = ''; setSelectedProviderId(currentProviderId); },
     onSuccess: async () => {
+      const retry = retryAfterModelRef.current;
+      retryAfterModelRef.current = '';
+      if (retry) regenerateFrom(retry);
       if (activeSessionId) return;
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['models'] }),
@@ -600,6 +605,7 @@ export function ChatView({
   }, []));
 
   function submitDraft() {
+    retryAfterModelRef.current = '';
     sendText(draft, attachedFiles);
   }
 
@@ -704,6 +710,11 @@ export function ChatView({
   const onResendMessage = useStableCallback(resendMessage);
   const onRegenerateFrom = useStableCallback(regenerateFrom);
   const onEditMessage = useStableCallback(editAndResend);
+  // Opens the composer's model menu; choosing a model there tries the failed reply again with it.
+  const onUseAnotherModel = useStableCallback((messageId: string) => {
+    retryAfterModelRef.current = messageId;
+    window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.chat-dock .composer-model-btn')?.click());
+  });
 
   function handleMessagesScroll() {
     const container = scrollRef.current;
@@ -862,6 +873,7 @@ export function ChatView({
         onCancelToolCall={(callId) => void cancelToolCall(callId)}
         workingLabel={workingLabel}
         trailing={activeSessionId ? <InlineAsks sessionId={activeSessionId} /> : undefined}
+        onUseAnotherModel={onUseAnotherModel}
       />
       <div className="chat-dock">
         {activeSessionId && (

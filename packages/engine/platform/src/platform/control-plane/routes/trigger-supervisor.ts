@@ -4,6 +4,7 @@ import { builtinTriggerOperationMethodDescriptors, builtinTriggerSupervisorMetho
 import { triggerOperatorStatus, TriggerOperatorError, type TriggerOperatorSupervisor } from '../../triggers/operator.js';
 import { localTriggerOperations } from '../../triggers/operations.js';
 import { TriggerDefinitionError } from '../../triggers/validation.js';
+import { describeWatchValues, watchDefinitionFromValues, WatchValuesError } from '../../triggers/watch-definition.js';
 import type { TriggerManager } from '../../triggers/manager.js';
 import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
@@ -56,6 +57,20 @@ export function registerTriggerSupervisorGatewayMethods(
       const definition = params['definition'];
       if (!definition || typeof definition !== 'object' || Array.isArray(definition)) throw new GatewayVerbError('definition is required: { id, label, spec, action? }', 'INVALID_ARGUMENT', 400, 'definition');
       return { trigger: await operations.create(definition as Record<string, unknown>) };
+    },
+    'watchers.triggers.preview': async (_invocation, params) => {
+      const values: Record<string, string> = {};
+      for (const [key, value] of Object.entries(params)) {
+        if (typeof value !== 'string') throw new GatewayVerbError(`${key} must be text`, 'INVALID_ARGUMENT', 400, key);
+        values[key] = value;
+      }
+      const grant = values['then'] === 'run' ? (await operations.listGrants()).find((entry) => entry.id === values['grant']) : undefined;
+      try {
+        return { summary: describeWatchValues(values, grant), input: { definition: watchDefinitionFromValues(values, grant) } };
+      } catch (error) {
+        if (error instanceof WatchValuesError) throw new GatewayVerbError([error.message, error.next].filter(Boolean).join(' '), 'TRIGGER_DEFINITION_INVALID', 400);
+        throw error;
+      }
     },
     'watchers.triggers.cancel': async (_invocation, params) => ({ trigger: await operations.cancel(requireString(params, 'id')) }),
     'watchers.triggers.reset': async (_invocation, params) => ({ trigger: await operations.reset(requireString(params, 'id')) }),

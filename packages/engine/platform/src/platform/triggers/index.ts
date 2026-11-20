@@ -25,6 +25,7 @@ export * from './hosts.js';
 export * from './compose.js';
 export * from './trigger-tool.js';
 export * from './operations.js';
+export * from './watch-definition.js';
 
 export * from './operator.js';
 export * from './operator-view.js';

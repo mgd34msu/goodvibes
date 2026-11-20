@@ -113,19 +113,6 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
   // `/services` is one description shared with the other terminal app (terminal-shell/services-command.ts).
   registerServicesCommand<CommandContext>(registry, { requireServiceRegistry, requireShellPaths });
 
-  registry.register({
-    name: 'notifications',
-    effect: 'ui-navigation',
-    description: 'Show every notice and notification in full, newest first',
-    handler(_args, ctx) {
-      if (ctx.openNotifications) {
-        ctx.openNotifications();
-        return;
-      }
-      ctx.print('The notification history needs the interactive shell.');
-    },
-  });
-
   registry.register(secretsCommand);
 
   registry.register(localActions['image']);

@@ -151,7 +151,7 @@ export function buildProviderHealthDomainSummaries(
       : intelligenceIssues > 0
         ? `${intelligenceIssues} readiness surface(s) degraded`
         : `ready (${runningServers} of ${intelligence.languageServers.length} language server(s) running)`,
-    next: intelligenceIssues > 0 ? '/intelligence repair' : '/intelligence review',
+    next: '/intelligence review',
     details: intelligenceStarted
       ? [
         intelligence.diagnosticsStatus !== 'ready' ? `diagnostics=${intelligence.diagnosticsStatus}` : '',
@@ -160,7 +160,7 @@ export function buildProviderHealthDomainSummaries(
       ].filter(Boolean)
       : ['syntax diagnostics and symbols come from the built-in parser'],
     nextSteps: intelligenceIssues > 0
-      ? ['/intelligence diagnostics', '/intelligence repair', '/health check intelligence']
+      ? ['/intelligence diagnostics', '/intelligence review', '/health check intelligence']
       : ['/intelligence review'],
   });
 

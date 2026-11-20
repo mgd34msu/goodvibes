@@ -460,7 +460,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     description:
       'Reserved for choosing an execution strategy (single/cohort/background/remote) '
       + 'on every conversation turn. No turn reads a strategy yet, so turning this on '
-      + 'changes nothing today. /project-plan mode, override, explain and status work '
+      + 'changes nothing today. /work planner, planner-mode, planner-override and planner-explain work '
       + 'without it: they configure the planner /workstream drafting consults.',
     defaultState: 'disabled',
     tier: 5,

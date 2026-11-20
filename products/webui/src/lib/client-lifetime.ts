@@ -130,7 +130,7 @@ export const tokenStore: GoodVibesExpiringTokenStore = {
 // a cookie changed, and when this tab comes back into view.
 if (typeof window !== 'undefined') {
   const reconcile = () => { getClientLifetime(); };
-  const cookieStore = (globalThis as { cookieStore?: EventTarget }).cookieStore;
+  const cookieStore = (globalThis as unknown as { readonly cookieStore?: EventTarget }).cookieStore;
   try { cookieStore?.addEventListener('change', reconcile); } catch { /* Not offered: the focus checks below still run. */ }
   window.addEventListener('focus', reconcile);
   window.addEventListener('pageshow', reconcile);

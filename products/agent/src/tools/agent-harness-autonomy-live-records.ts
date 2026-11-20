@@ -511,7 +511,7 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly 
       const active = approval.status === 'pending' || approval.status === 'claimed';
       const label = `${approval.request.tool}: ${approval.request.analysis.summary}`;
       // Answering an approval put to the owner is his own act: the model is shown where he answers it, never a route to answer it.
-      const ownerAnswers = `only the owner answers approval ${approval.id}: the approval prompt, /approval approve|deny ${approval.id} --yes, or the web UI`;
+      const ownerAnswers = `only the owner answers approval ${approval.id}: the approval prompt, /questions answer, or the web UI`;
       const cancelRoute = `agent_operator_action action:"approvals.cancel" approvalId:"${approval.id}"`;
       return {
         id: approval.id,
@@ -529,14 +529,14 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly 
           approval.resolvedBy ? `resolved by ${approval.resolvedBy}` : '',
           compactUnknown(approval.request.args),
         ].filter(Boolean).join(' | '),
-        inspectRoute: commandRoute('/approval matrix'),
+        inspectRoute: commandRoute('/approval kinds'),
         ...(active ? {
           cancelRoute,
         } : {}),
         nextSteps: active ? [
           `tell the owner: ${ownerAnswers}`,
           cancelRoute,
-        ] : [commandRoute('/approval matrix')],
+        ] : [commandRoute('/approval kinds')],
         sourceIds: [
           approval.callId,
           approval.sessionId,
@@ -550,7 +550,7 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly 
           entry.note,
         ].filter(Boolean).join(' ')),
         controls: [
-          availableControl('inspect', 'Inspect approval matrix', 'read-only', commandRoute('/approval matrix')),
+          availableControl('inspect', 'Inspect approval matrix', 'read-only', commandRoute('/approval kinds')),
           active
             ? unavailableControl('approve', 'Approve approval', `It was put to the owner; ${ownerAnswers}.`)
             : unavailableControl('approve', 'Approve approval', `Approval is ${approval.status}; only pending or claimed approvals can be approved.`),

@@ -448,7 +448,7 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
       },
     },
     {
-      id: 'exempt-tool', label: 'Let a tool go beyond its server\'s limits', word: 'exempt',
+      id: 'exempt-tool', label: 'Let a tool go beyond its server\'s limits', word: 'exempt', button: 'Let it go beyond',
       inputs: [SERVER, TOOL],
       sentence: 'Calls to {tool} on {server} will pass {server}\'s folder and site limits until you change it. A block of {tool}, a held-back server or a server set to refuse every call still refuses it.',
       done: '{tool} on {server} now goes past {server}\'s limits, until you change it.',
@@ -463,7 +463,7 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
       },
     },
     {
-      id: 'unexempt-tool', label: 'Make a tool follow its server\'s limits again', word: 'unexempt',
+      id: 'unexempt-tool', label: 'Make a tool follow its server\'s limits again', word: 'unexempt', button: 'Make it follow',
       inputs: [SERVER, { ...TOOL, help: 'Tools that go past this server\'s limits', choices: { list: MCP_EXEMPT_TOOLS, dependsOn: 'server' } }],
       sentence: 'Calls to {tool} on {server} will be held to {server}\'s folder and site limits again, until you change it.',
       done: '{tool} on {server} follows {server}\'s limits again.',

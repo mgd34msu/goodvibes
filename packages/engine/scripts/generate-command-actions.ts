@@ -40,6 +40,7 @@ function actionData(command: CommandDescription<never>, action: ActionDescriptio
   return {
     id: action.id,
     label: action.label,
+    ...(action.button ? { button: action.button } : {}),
     word: action.word,
     line: [`/${command.name}`, linePattern(action)].filter(Boolean).join(' '),
     sentence: action.sentence,

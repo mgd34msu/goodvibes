@@ -20,6 +20,13 @@ import { HEALTH_WORKSPACE_ACTIONS } from './workspace-actions/health.ts';
 import { PROVIDER_WORKSPACE_ACTIONS } from './workspace-actions/provider.ts';
 import { EFFORT_WORKSPACE_ACTIONS } from './workspace-actions/effort.ts';
 import { BUNDLE_WORKSPACE_ACTIONS } from './workspace-actions/bundle.ts';
+import { AGENTS_WORKSPACE_ACTIONS } from './workspace-actions/agents.ts';
+import { ABOUT_ME_WORKSPACE_ACTIONS } from './workspace-actions/about-me.ts';
+import { AGENT_HOME_WORKSPACE_ACTIONS } from './workspace-actions/agent-home.ts';
+import { KNOWLEDGE_WORKSPACE_ACTIONS } from './workspace-actions/knowledge.ts';
+import { PERSONAS_WORKSPACE_ACTIONS } from './workspace-actions/personas.ts';
+import { ROUTINES_WORKSPACE_ACTIONS } from './workspace-actions/routines.ts';
+import { TASKS_WORKSPACE_ACTIONS } from './workspace-actions/tasks.ts';
 
 export interface WorkspaceActionTarget {
   /** The described command's name. */
@@ -30,6 +37,13 @@ export interface WorkspaceActionTarget {
 
 // Each converted command spreads its own rows here. /mcp's rows name its actions directly (`command` rows), so it adds none.
 const TARGETS: ReadonlyMap<string, WorkspaceActionTarget> = new Map(Object.entries({
+  ...AGENTS_WORKSPACE_ACTIONS,
+  ...ABOUT_ME_WORKSPACE_ACTIONS,
+  ...AGENT_HOME_WORKSPACE_ACTIONS,
+  ...KNOWLEDGE_WORKSPACE_ACTIONS,
+  ...PERSONAS_WORKSPACE_ACTIONS,
+  ...ROUTINES_WORKSPACE_ACTIONS,
+  ...TASKS_WORKSPACE_ACTIONS,
   ...VERBOSITY_WORKSPACE_ACTIONS,
   ...MY_SKILLS_WORKSPACE_ACTIONS,
   ...TODO_WORKSPACE_ACTIONS,

@@ -96,7 +96,7 @@ const LOCAL_AUTH_COMMAND: CommandDescription<CommandContext> = {
       },
     },
     {
-      id: 'add-user', label: 'Let someone sign in', word: 'add',
+      id: 'add-user', label: 'Let someone sign in', word: 'add', button: 'Let them sign in',
       inputs: [
         { id: 'user', label: 'User name', help: 'The name they sign in with', kind: 'text', freeTextReason: 'a name you choose for them', required: true, typed: { position: 1 } },
         PASSWORD,

@@ -275,12 +275,51 @@ export function actionDoneLine(action: ActionShape, values: ActionValues): strin
   return action.done ? fillSentence(action.done, values, lastsWords(action, values)) : '';
 }
 
-/** The confirming button's words: the label up to its object ("Stop blocking a tool" → "Stop blocking"). */
+const LEADING_ADVERB = /^(never|always)$/i;
+/** Words that end the button: an article or determiner starting the object, or a preposition or question word. */
+const OBJECT_START = /^(a|an|the|one|its|this|all|every|to|from|for|beyond|on|it|what|where|whether|how|who|like|about|into|as|of|under|with|before|after|in|at|by|your|my|that|these|those|two|some)$/i;
+/** A particle that belongs to the verb ("Sign in", "Go back", "Switch ... on"). */
+const PARTICLE = /^(in|out|on|off|back|aside|over|up|down|away|again)$/i;
+/** Verbs whose particle is part of them wherever it stands ("Bring in a setup", "Take a step out of a plan"). */
+const PHRASAL = /^(bring|take|put|go|hold|sign|switch|roll|set|throw|carry|give)$/i;
+const DETERMINER = /^(a|an|the|one|its|this|all|every|your|my|that|these|those|some|two)$/i;
+/** An object a button says as a pronoun: "Schedule something to run" is confirmed with "Schedule it". */
+const PRONOUN: Readonly<Record<string, string>> = { something: 'it', anything: 'it', everything: 'it', someone: 'them' };
+
+/**
+ * The confirming button's words, read from the label: its verb (after
+ * "Never"/"Always"), the particle that belongs to the verb, either right after
+ * it ("Sign in", "Go back", "Bring in") or closing the object ("Switch a hook
+ * on" -> "Switch on", "Take a plugin out of ..." -> "Take out"), a verb it
+ * continues ("Stop blocking"), or a pronoun for an unnamed object ("Schedule
+ * something to run" -> "Schedule it"). An action whose words cannot be read
+ * this way names its button in its description (`button`).
+ */
 export function actionButton(action: ActionShape): string {
-  const words = action.label.split(/\s+/);
-  const stop = words.findIndex((word, index) => index > 0 && /^(a|an|the|one|its|this|all|every|to|from|for|beyond|on|it)$/i.test(word));
-  const kept = stop > 0 ? words.slice(0, stop) : words;
-  return kept.join(' ');
+  if (action.button) return action.button;
+  const words = action.label.split(/\s+/).filter(Boolean);
+  const out: string[] = [];
+  let index = 0;
+  while (index < words.length - 1 && LEADING_ADVERB.test(words[index]!)) out.push(words[index++]!);
+  out.push(words[index]!);
+  const rest = words.slice(index + 1);
+  const next = rest[0];
+  if (next === undefined) return out.join(' ');
+  const pronoun = PRONOUN[next.toLowerCase()];
+  if (pronoun) return [...out, rest.length === 2 && PARTICLE.test(rest[1]!) && rest[1]!.toLowerCase() !== 'again' ? rest[1]! : pronoun].join(' ');
+  // A particle right after the verb, unless it starts a place ("Continue in a copy").
+  const verb = out[out.length - 1]!;
+  if (PARTICLE.test(next) && (PHRASAL.test(verb) || !(rest[1] && DETERMINER.test(rest[1])))) return [...out, next].join(' ');
+  if (/ing$/i.test(next) && next.length > 4) return [...out, next].join(' ');
+  // A particle closing an object that starts with a determiner: the label's last word, or followed by "of" or "to".
+  if (DETERMINER.test(next) && PHRASAL.test(verb)) {
+    const closing = rest.findIndex((word, at) => at > 1 && PARTICLE.test(word) && word.toLowerCase() !== 'again' && (at === rest.length - 1 || /^(of|to)$/i.test(rest[at + 1] ?? '')));
+    if (closing > 0) return [...out, rest[closing]!].join(' ');
+  }
+  if (OBJECT_START.test(next)) return out.join(' ');
+  // A bare object noun: keep words up to the next object start ("Install hooks", "Save memory").
+  const stop = rest.findIndex((word) => OBJECT_START.test(word));
+  return [...out, ...(stop < 0 ? rest : rest.slice(0, stop))].join(' ');
 }
 
 /**

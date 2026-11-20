@@ -87,8 +87,8 @@ export async function openLegacyImportOperator(options: LegacyImportOperatorOpti
   };
   const savedEntry = (requestId?: string): LegacyImportEntry => named(readSaved(), requestId);
   const named = (entry: LegacyImportEntry | null, requestId: string | undefined): LegacyImportEntry => {
-    if (!entry) throw new Error(`No saved legacy import for project ${projectId}; run /work-import submit ${projectId}`);
-    if (requestId !== undefined && entry.command.requestId !== requestId) throw new Error(`Request ${requestId} is not the saved import for project ${projectId} (that is ${entry.command.requestId}); run /work-import status ${projectId}`);
+    if (!entry) throw new Error(`No saved legacy import for project ${projectId}; run /work import ${projectId}`);
+    if (requestId !== undefined && entry.command.requestId !== requestId) throw new Error(`Request ${requestId} is not the saved import for project ${projectId} (that is ${entry.command.requestId}); run /work import-status ${projectId}`);
     return entry;
   };
   const prepareSources = async (): Promise<LegacyMigrationPreparation> => {
@@ -130,10 +130,10 @@ export async function openLegacyImportOperator(options: LegacyImportOperatorOpti
     if (prior && !replace) return prior;
     if (replace) {
       const saved = named(prior, replace.requestId);
-      if (!['rejected', 'cancelled'].includes(saved.state)) throw new Error(`Only a rejected or cancelled import can be restarted; this one is ${saved.state}. Run /work-import status ${projectId} for its next step`);
+      if (!['rejected', 'cancelled'].includes(saved.state)) throw new Error(`Only a rejected or cancelled import can be restarted; this one is ${saved.state}. Run /work import-status ${projectId} for its next step`);
     }
     const prepared = await prepareSources();
-    if (prepared.kind === 'blocked') throw new Error(`The host blocked the preparation: ${prepared.code}: ${prepared.reason}. Resolve that on the host, then run /work-import preview ${projectId}`);
+    if (prepared.kind === 'blocked') throw new Error(`The host blocked the preparation: ${prepared.code}: ${prepared.reason}. Resolve that on the host, then run /work import-preview ${projectId}`);
     const command: LegacyImportCommand = { type: 'import_legacy', requestId: randomUUID(), expectedRevision: prepared.manifest.expectedLedgerRevision, manifest: prepared.manifest };
     const reserved = journal().reserve(binding, () => command, replace ? prior!.command.requestId : undefined);
     if (reserved.command.requestId !== command.requestId) return reserved;
@@ -142,14 +142,14 @@ export async function openLegacyImportOperator(options: LegacyImportOperatorOpti
   const resume = async (requestId: string | undefined, state: 'pending' | 'unknown'): Promise<LegacyImportEntry> => {
     requireWrite();
     const entry = savedEntry(requestId);
-    if (entry.state !== state) throw new Error(`The saved import is ${entry.state}, not ${state}; run /work-import status ${projectId} for the next step`);
+    if (entry.state !== state) throw new Error(`The saved import is ${entry.state}, not ${state}; run /work import-status ${projectId} for the next step`);
     return dispatch(entry);
   };
   return {
     get binding() { return { ...binding }; },
     status: () => safe(status),
     prepare: () => safe(async () => {
-      if (status()) throw new Error(`A saved import exists for project ${projectId}; run /work-import status ${projectId} for its next step instead of preparing another`);
+      if (status()) throw new Error(`A saved import exists for project ${projectId}; run /work import-status ${projectId} for its next step instead of preparing another`);
       return prepareSources();
     }),
     submit: () => safe(() => create()),

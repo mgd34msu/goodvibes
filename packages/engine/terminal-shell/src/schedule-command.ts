@@ -324,7 +324,7 @@ export const SCHEDULE_COMMAND: CommandDescription<ScheduleCommandContext> = {
       },
     },
     {
-      id: 'run-now', label: 'Run one now', word: 'run',
+      id: 'run-now', label: 'Run a schedule now', word: 'run',
       inputs: [SCHEDULE],
       sentence: '{schedule} will run once now; its usual times stay as they are.',
       done: 'Started {schedule}.',
@@ -337,9 +337,9 @@ export const SCHEDULE_COMMAND: CommandDescription<ScheduleCommandContext> = {
       },
     },
     {
-      id: 'pause', label: 'Pause one', word: 'pause',
+      id: 'pause', label: 'Pause a schedule', word: 'pause',
       inputs: [{ ...SCHEDULE, help: 'Schedules that run now', choices: { list: RUNNING } }],
-      sentence: '{schedule} will not run {lasts}; it is kept, and Resume one starts it again.',
+      sentence: '{schedule} will not run {lasts}; it is kept, and Resume a schedule starts it again.',
       done: 'Paused {schedule}.',
       touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'resume',
       operator: { method: 'automation.schedules.pause', fields: { scheduleId: 'schedule' } },
@@ -352,7 +352,7 @@ export const SCHEDULE_COMMAND: CommandDescription<ScheduleCommandContext> = {
       },
     },
     {
-      id: 'resume', label: 'Resume one', word: 'resume',
+      id: 'resume', label: 'Resume a schedule', word: 'resume',
       inputs: [{ ...SCHEDULE, help: 'Paused schedules', choices: { list: PAUSED } }],
       sentence: '{schedule} will run again at its next time, {lasts}.',
       done: 'Resumed {schedule}.',
@@ -368,7 +368,7 @@ export const SCHEDULE_COMMAND: CommandDescription<ScheduleCommandContext> = {
     },
     {
       id: 'stop-run', label: 'Stop a run that is going', word: 'stop-run',
-      inputs: [{ id: 'run', label: 'Run', help: 'The run id Run one now printed', kind: 'text', freeTextReason: 'a run id', required: true, typed: { position: 1 } }],
+      inputs: [{ id: 'run', label: 'Run', help: 'The run id Run a schedule now printed', kind: 'text', freeTextReason: 'a run id', required: true, typed: { position: 1 } }],
       sentence: 'Run {run} is stopped; its schedule keeps its usual times.',
       done: 'Stopped run {run}.',
       touches: 'this-machine', lasts: 'not-a-change', risk: 'cannot-be-undone',
@@ -421,7 +421,7 @@ export const SCHEDULE_COMMAND: CommandDescription<ScheduleCommandContext> = {
       },
     },
     {
-      id: 'remove', label: 'Remove one', word: 'remove',
+      id: 'remove', label: 'Remove a schedule', word: 'remove',
       inputs: [SCHEDULE],
       sentence: '{schedule} will stop running and be removed.',
       done: 'Removed {schedule}.',

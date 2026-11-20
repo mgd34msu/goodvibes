@@ -100,9 +100,9 @@ export function buildVibeSummary(context: CommandContext): AgentWorkspaceVibeSum
       truncated: 0,
       projectInitPath: null,
       globalInitPath: null,
-      statusRoute: '/vibe status',
-      initProjectRoute: '/vibe init',
-      initGlobalRoute: '/vibe init --global',
+      statusRoute: '/personas vibe',
+      initProjectRoute: '/personas vibe-create',
+      initGlobalRoute: '/personas vibe-create global',
       next: 'Open a normal Agent workspace before relying on VIBE.md personality files.',
     };
   }
@@ -117,9 +117,9 @@ export function buildVibeSummary(context: CommandContext): AgentWorkspaceVibeSum
       truncated,
       projectInitPath: snapshot.projectInitPath,
       globalInitPath: snapshot.globalInitPath,
-      statusRoute: '/vibe status',
-      initProjectRoute: '/vibe init',
-      initGlobalRoute: '/vibe init --global',
+      statusRoute: '/personas vibe',
+      initProjectRoute: '/personas vibe-create',
+      initGlobalRoute: '/personas vibe-create global',
       next: snapshot.blocked.length > 0
         ? 'Inspect blocked VIBE.md files before relying on custom personality.'
         : snapshot.files.length > 0
@@ -134,10 +134,10 @@ export function buildVibeSummary(context: CommandContext): AgentWorkspaceVibeSum
       truncated: 0,
       projectInitPath: null,
       globalInitPath: null,
-      statusRoute: '/vibe status',
-      initProjectRoute: '/vibe init',
-      initGlobalRoute: '/vibe init --global',
-      next: 'VIBE.md discovery failed; use /vibe status for a focused diagnostic.',
+      statusRoute: '/personas vibe',
+      initProjectRoute: '/personas vibe-create',
+      initGlobalRoute: '/personas vibe-create global',
+      next: 'VIBE.md discovery failed; use /personas vibe for a focused diagnostic.',
     };
   }
 }

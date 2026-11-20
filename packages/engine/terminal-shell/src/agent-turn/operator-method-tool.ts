@@ -86,7 +86,7 @@ const WATCHER_METHOD_IDS = new Set<string>([
 function ownerActRoute(methodId: string): string {
   if (methodId === 'inbox.answer') return 'he answers it with /questions (/questions answer <id> <choice>) or in the web UI.';
   if (methodId === 'approvals.approve' || methodId === 'approvals.deny') {
-    return 'he answers it at the approval prompt, with /approval approve|deny <id> --yes or /questions, or in the web UI.';
+    return 'he answers it at the approval prompt, with /questions answer, or in the web UI.';
   }
   return 'he grants or withdraws access himself, from his own app\'s settings or the web UI.';
 }

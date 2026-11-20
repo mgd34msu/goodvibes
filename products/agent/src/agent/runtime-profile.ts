@@ -474,7 +474,7 @@ function discoveredVibeToTemplate(
   if (!shellPaths) throw new Error('Including VIBE.md in a starter template requires shell path context.');
   const snapshot = discoverVibeFiles(profileTemplateVibeShellPaths(shellPaths));
   if (snapshot.blocked.length > 0) {
-    throw new Error(`Cannot include VIBE.md in a starter template while ${snapshot.blocked.length} VIBE.md file is blocked. Run /vibe status and repair it first.`);
+    throw new Error(`Cannot include VIBE.md in a starter template while ${snapshot.blocked.length} VIBE.md file is blocked. Run /personas vibe and repair it first.`);
   }
   if (snapshot.files.length === 0) return undefined;
   const body = snapshot.files.map((file) => [

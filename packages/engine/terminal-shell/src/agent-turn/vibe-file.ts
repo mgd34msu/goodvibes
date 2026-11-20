@@ -1,6 +1,6 @@
 // VIBE.md is the source of the persona prompt: the files found on disk are read
 // when a prompt is composed, so an edit to the file applies to the next turn, and
-// what `/vibe status` and the prompt receipt report is what the prompt carries.
+// what `/personas vibe` and the prompt receipt report is what the prompt carries.
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { atomicWriteFileSync, type AtomicWriteOptions } from '@goodvibes-jev/engine/platform/platform/config';
@@ -243,9 +243,9 @@ export function formatVibeStatus(snapshot: AgentVibeSnapshot): string {
   lines.push(
     '',
     'Next',
-    '  /vibe init --yes',
-    '  /vibe init --global --yes',
-    '  /vibe import-persona project --review --use --yes',
+    '  /personas vibe-create',
+    '  /personas vibe-create global',
+    '  /personas vibe-import project --review --use',
   );
   return lines.join('\n');
 }

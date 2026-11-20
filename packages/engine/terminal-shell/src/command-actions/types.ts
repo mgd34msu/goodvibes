@@ -80,6 +80,8 @@ export interface ActionDescription<Ctx> {
   readonly id: string;
   /** Named for what you get: "Block a tool". */
   readonly label: string;
+  /** The confirming button's words when the label's verb cannot be read from it (actionButton, typed-line.ts): "Let them run it". */
+  readonly button?: string | undefined;
   /** The only typed spelling: `block`. */
   readonly word: string;
   readonly inputs: readonly InputDescription[];
@@ -147,7 +149,7 @@ export interface CommandReport {
 }
 
 /** An action as data: what the typed line, the sentence and the button are read from (the web UI holds this much). */
-export type ActionShape = Pick<ActionDescription<never>, 'id' | 'label' | 'word' | 'inputs' | 'sentence' | 'done' | 'lasts' | 'risk'>;
+export type ActionShape = Pick<ActionDescription<never>, 'id' | 'label' | 'word' | 'inputs' | 'sentence' | 'done' | 'lasts' | 'risk' | 'button'>;
 /** A command as data. */
 export interface CommandShape { readonly name: string; readonly actions: readonly ActionShape[] }
 

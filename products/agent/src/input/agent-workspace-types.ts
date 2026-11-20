@@ -350,9 +350,9 @@ export interface AgentWorkspaceVibeSummary {
   readonly truncated: number;
   readonly projectInitPath: string | null;
   readonly globalInitPath: string | null;
-  readonly statusRoute: '/vibe status';
-  readonly initProjectRoute: '/vibe init';
-  readonly initGlobalRoute: '/vibe init --global';
+  readonly statusRoute: '/personas vibe';
+  readonly initProjectRoute: '/personas vibe-create';
+  readonly initGlobalRoute: '/personas vibe-create global';
   readonly next: string;
 }
 

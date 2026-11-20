@@ -537,7 +537,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       { id: 'workplan-status', label: 'Update work plan item', detail: 'Set the status of one work plan item by id.', editorKind: 'workplan-status', kind: 'editor', safety: 'safe' },
       { id: 'workplan-delete', label: 'Remove work plan item', detail: 'Remove one work plan item by id after confirmation.', editorKind: 'workplan-delete', kind: 'editor', safety: 'safe' },
       { id: 'workplan-clear-completed', label: 'Clear completed items', detail: 'Remove every completed item from the work plan after confirmation.', editorKind: 'workplan-clear-completed', kind: 'editor', safety: 'safe' },
-      { id: 'work-agents', label: 'Your agents', detail: 'Open Your agents: what is running, what waits for you, what is scheduled, and the background services (also Ctrl+O).', command: '/agents', kind: 'command', safety: 'read-only' },
+      { id: 'work-agents', label: 'Your agents', detail: 'Open Your agents: what is running, what waits for you, what is scheduled, and the background services (also Ctrl+O).', command: '/agents open', kind: 'command', safety: 'read-only' },
     ],
   },
   AGENT_WORKSPACE_HOST_CATEGORY,

@@ -176,7 +176,7 @@ export function createShellRemoteCommandService(options: {
 }
 
 /**
- * The execution-strategy runtime behind `/project-plan mode|explain|override|status|clear`.
+ * The execution-strategy runtime behind `/work planner`, `planner-mode`, `planner-override`, `planner-explain` and `planner-reset`.
  * The planner it configures is the one /workstream drafting consults, so it is
  * always available; its answers say that is where a strategy takes effect.
  */

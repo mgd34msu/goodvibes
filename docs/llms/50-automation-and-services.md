@@ -335,16 +335,19 @@ Agent and workstream outcomes, approvals waiting and budget alerts are announced
 
 ```text
 /notify add https://ntfy.sh/<your-topic>
-/notify list            each URL shown by its host; --show reveals them
+/notify list            each address shown by its site; --show reveals them (asks first, the owner's only)
 /notify remove 1
-/notify clear
-/notify test
+/notify clear           asks first
+/notify test            asks first
+/notify send <message>  asks first
 /notify failed          notifications this app could not deliver
 /notify resend <id|all> [--to-current]
 /notifications          open the notification history view
 ```
 
-- `/notify add` keeps each URL in the secret store (key `GOODVIBES_NOTIFY_WEBHOOK_<id>`, daemon tier) and adds its `goodvibes://secrets/` reference to `notifications.webhookUrls`; the URL is read only when a notification is sent. Each URL carries its own key, so a literal URL written into the list is refused, screens show the host only, and the URL typed after `/notify add` or `/notify remove` is kept as `<redacted>` in the input history. `/notify remove` and `/notify clear` delete the stored URLs too. The setting applies at the next start.
+`/notify` and `/notifications` are one command each in both apps; `/notify` alone lists its actions, and a model or script running it bare gets the list. The address after `/notify add` is asked for on a hidden line in the guided path; `/notify remove` takes the number `/notify list` shows.
+
+- `/notify add` keeps each URL in the secret store (key `GOODVIBES_NOTIFY_WEBHOOK_<id>`, daemon tier) and adds its `goodvibes://secrets/` reference to `notifications.webhookUrls`; the URL is read only when a notification is sent. Each URL carries its own key, so a literal URL written into the list is refused, screens show the host only, and the address typed after `/notify add` is kept as `<redacted>` in the input history. `/notify remove` and `/notify clear` delete the stored URLs too. The setting applies at the next start.
 - Slack and Discord carry notifications only when they have somewhere to post: an incoming-webhook URL (`SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`) or a bot token with `surfaces.slack.defaultChannel` / `surfaces.discord.defaultChannelId`.
 - A notification that fails is retried, then kept in a failed list. The daemon keeps its own list on disk (operator methods `notifications.deadLetters.list` and `notifications.deadLetters.replay`). A resent entry stays in the list (and on disk) until its delivery settled, so a daemon that stops during a resend still lists it; a list that cannot be written is reported as a failure, and a terminal takes over another terminal's list file only after its own file was written.
 - A notification is sent only to the destination it was queued for: a retry waiting while the Slack or Discord webhook or default channel changed ends in the failed list with the reason instead of going to the new place. `/notify resend` (and `notifications.deadLetters.replay`) refuses one whose channel now posts somewhere else, naming the old and new destination (`destination-changed`), and leaves it in the list; `--to-current` (`toCurrent: true`) sends it to where the channel posts now.

@@ -83,7 +83,8 @@ async function main(): Promise<void> {
     logger.info('goodvibes daemon host stopping');
     // A move under way sees `ending` at its next step and stops a host it built after this.
     moveTarget = undefined;
-    await serving()?.stop(false);
+    // The process is ending: its services close too, or their timers keep it running after SIGTERM.
+    await serving()?.stop(true);
   }, exitCode => {
     // Set exitCode rather than calling process.exit so that connection
     // drains can complete before the process terminates naturally. The log is

@@ -49,7 +49,7 @@ export interface AgentGraph {
 
 export function createAgentGraph(options: AgentGraphOptions): AgentGraph {
   const agentMessageBus = new AgentMessageBus(); agentMessageBus.setRuntimeBus(options.runtimeBus);
-  // The process's one loader for this directory, shared with /teamwork: one scan, one freshness rule.
+  // The process's one loader for this directory, shared with /agents: one scan, one freshness rule.
   const archetypeLoader = archetypeLoaderFor(join(options.workingDirectory, '.goodvibes', 'agents'));
   const agentOrchestrator = new AgentOrchestrator({ messageBus: agentMessageBus,
     capturedBunRuntimeExecutable: options.capturedBunRuntimeExecutable ?? resolveProcessCapturedBunRuntimeExecutable() });

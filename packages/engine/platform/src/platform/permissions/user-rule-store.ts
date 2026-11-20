@@ -352,15 +352,39 @@ export class UserPermissionRuleStore {
       const watcher = watch(dirname(this.filePath), { persistent: false }, () => {
         this.#diskDirty = true;
         this.#watchDelivers = true;
+        this.#wakeHeard();
       });
       watcher.on('error', () => {
         try { watcher.close(); } catch { /* already closed */ }
         if (this.#diskWatcher === watcher) this.#diskWatcher = null;
         this.#diskDirty = true;
+        this.#wakeHeard();
       });
       (watcher as FSWatcher & { unref?: () => void }).unref?.();
       this.#diskWatcher = watcher;
     } catch { /* not watchable: every read stats the file */ }
+  }
+
+  #heardWaiters: (() => void)[] = [];
+
+  #wakeHeard(): void {
+    if (this.#heardWaiters.length === 0) return;
+    const waiters = this.#heardWaiters;
+    this.#heardWaiters = [];
+    for (const wake of waiters) wake();
+  }
+
+  /**
+   * Resolves once the next read takes in what is on disk now: at once when
+   * that read stats the file anyway (a change already reported and not yet
+   * taken in, no watch, or a watch that has not delivered yet), else at the
+   * directory watch's next report. For a caller that knows another process
+   * wrote and wants this store to have heard it; nothing polls.
+   */
+  diskChangeHeard(): Promise<void> {
+    this.#watchDisk();
+    if (this.#diskDirty || !this.#diskWatcher || !this.#watchDelivers) return Promise.resolve();
+    return new Promise<void>((resolve) => { this.#heardWaiters.push(resolve); });
   }
 
   /** Monotonic committed-publication identity, including same-value replacements. */

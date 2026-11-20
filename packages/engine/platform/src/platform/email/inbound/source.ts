@@ -107,6 +107,13 @@ export interface InboundMailSource {
    * position was established. IMAP only: Gmail's reader has no listing.
    */
   requestHistory?(): void;
+  /**
+   * Resolves when the reader is quiet: what it could do is done and it waits on
+   * the server or the clock (InboundMailboxWatcher.whenQuiet). IMAP only.
+   */
+  whenQuiet?(): Promise<void>;
+  /** Resolves the next time the reader becomes quiet, or when it stops. IMAP only. */
+  nextQuiet?(): Promise<void>;
 }
 
 /**

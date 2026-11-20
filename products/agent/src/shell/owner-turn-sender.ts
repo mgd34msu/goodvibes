@@ -71,6 +71,13 @@ export interface OwnerTurnSender {
   held(): readonly string[];
   /** Messages that may have been sent (their intake answer never came), oldest first: never sent again on their own. */
   uncertain(): readonly string[];
+  /**
+   * Resolves once nothing this sender started on its own is still running: a
+   * phone or plan message sent through `receiveOwnerInput`, and the sending of
+   * held messages that a taken message cleared the way for. The held retry
+   * timer is not counted; a send it starts is.
+   */
+  settled(): Promise<void>;
   dispose(): void;
 }
 
@@ -84,6 +91,12 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
   /** Inputs whose intake answer never came: kept, shown as "may have been sent", not sent again by this sender. */
   const uncertainInputs = createHeldInputs();
   const UNCERTAIN_SESSION = 'agent-owner';
+  /** Sends this sender started on its own, which no caller holds the promise of; `settled()` waits on them. */
+  const running = new Set<Promise<unknown>>();
+  const track = (work: Promise<unknown>): void => {
+    running.add(work);
+    void work.finally(() => running.delete(work)).catch(() => {});
+  };
   const keepUncertain = (text: string, reason: string): void => {
     const held = uncertainInputs.hold({ sessionId: UNCERTAIN_SESSION, text, attachments: [], flags: {} });
     uncertainInputs.unknown(held.clientMessageId, reason);
@@ -216,7 +229,7 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
   function sendHeldOwnerInput(): void {
     if (disposed || heldOwnerSending || heldOwnerInput.length === 0) return;
     heldOwnerSending = true;
-    void (async () => {
+    track((async () => {
       try {
         while (heldOwnerInput.length > 0 && !deps.isBusy()) {
           const next = heldOwnerInput[0]!;
@@ -239,7 +252,7 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
         heldOwnerSending = false;
         scheduleHeldOwnerInput();
       }
-    })();
+    })());
   }
   const receiveOwnerInput = (text: string, turnOptions: OrchestratorUserInputOptions | undefined): void => {
     const hold = (): void => {
@@ -254,7 +267,7 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
     };
     // Behind a held message, a new one waits its turn so the order is kept.
     if (heldOwnerInput.length > 0) hold();
-    else void sendTurn(text, {}, turnOptions, { notSent: hold, uncertain: () => keepUncertain(text, 'the intake did not answer') });
+    else track(sendTurn(text, {}, turnOptions, { notSent: hold, uncertain: () => keepUncertain(text, 'the intake did not answer') }));
   };
 
   return {
@@ -262,6 +275,10 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
     receiveOwnerInput,
     held: () => heldOwnerInput.map((entry) => entry.text),
     uncertain: () => uncertainInputs.list(UNCERTAIN_SESSION).map((entry) => entry.text),
+    settled: async () => {
+      // A send that settles may start the held queue's; wait until a pass finds nothing running.
+      while (running.size > 0) await Promise.allSettled([...running]);
+    },
     dispose: () => {
       disposed = true;
       if (heldOwnerTimer) clearTimeout(heldOwnerTimer);

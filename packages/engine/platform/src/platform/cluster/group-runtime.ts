@@ -251,6 +251,8 @@ export class ClusterGroupRuntime {
   private networkStarted = false;
   private readonly stateOwner: GroupStateOwner;
   private readonly groupWork = new Set<Promise<void>>();
+  /** Authority-record exchanges started from a datagram or a step; stop() resolves after the last one ends. */
+  private readonly syncWork = new Set<Promise<void>>();
   private membershipTransition = false;
   private replication: ConfigReplicationService | null = null;
   private readonly configChanges: GroupConfigChanges;
@@ -322,7 +324,7 @@ export class ClusterGroupRuntime {
         // The authority record's carriage; everything else out of band is admission.
         if (type.startsWith('AUTH_')) {
           if (this.networkStarted && !this.runtimeStopping && !this.membershipTransition) {
-            void this.sync.handle(raw, type).catch((error: unknown) => options.logger.debug('cluster: an authority record message was not taken', { error: summarizeError(error) }));
+            this.trackSync(this.sync.handle(raw, type), 'cluster: an authority record message was not taken');
           }
           return;
         }
@@ -410,6 +412,7 @@ export class ClusterGroupRuntime {
       // Its owned persistence must drain even when lifecycle had no socket.
       await this.membershipOperations.join();
       await this.drainGroupWork();
+      await this.drainSyncWork();
       await this.drainMaterialWrites();
     }).finally(() => { this.stopping = null; });
     return this.stopping;
@@ -459,6 +462,7 @@ export class ClusterGroupRuntime {
     this.admissions.stop('the daemon shut down before the group answered');
     await this.admissions.join();
     await this.drainGroupWork();
+    await this.drainSyncWork();
     await this.membershipOperations.join();
     await this.drainMaterialWrites();
     await this.periodic.stop();
@@ -604,6 +608,17 @@ export class ClusterGroupRuntime {
     return task;
   }
 
+  /** Keep an authority-record exchange where stop() can wait for it; its failure is only a debug line, as before. */
+  private trackSync(work: Promise<unknown>, failure: string): void {
+    const task = work.then(() => {}, (error: unknown) => this.options.logger.debug(failure, { error: summarizeError(error) }));
+    this.syncWork.add(task);
+    void task.then(() => { this.syncWork.delete(task); });
+  }
+
+  private async drainSyncWork(): Promise<void> {
+    while (this.syncWork.size > 0) await Promise.allSettled([...this.syncWork]);
+  }
+
   private async drainMaterialWrites(): Promise<void> {
     while (this.materialWork.size > 0) await Promise.allSettled([...this.materialWork]);
   }
@@ -743,7 +758,7 @@ export class ClusterGroupRuntime {
         // record. Ask for that now, so this machine is in step with the group
         // (and its own changes go out) within a round trip, not on the next
         // housekeeping pass.
-        if (step.kind === 'absorb') void this.sync.pullAll().catch((error: unknown) => this.options.logger.debug('cluster: the group\'s record could not be asked for after joining', { error: String(error) }));
+        if (step.kind === 'absorb') this.trackSync(this.sync.pullAll(), 'cluster: the group\'s record could not be asked for after joining');
       } finally { this.endMembershipTransition(); }
     }, owner);
   }
@@ -816,7 +831,7 @@ export class ClusterGroupRuntime {
    */
   catchUp(fromNodeId: string | null = null): void {
     if (!this.networkStarted || this.runtimeStopping || !this.material) return;
-    void this.sync.catchUp(fromNodeId).catch((error: unknown) => this.options.logger.debug('cluster: a request for the group\'s record could not be sent', { error: summarizeError(error) }));
+    this.trackSync(this.sync.catchUp(fromNodeId), 'cluster: a request for the group\'s record could not be sent');
   }
 
   /** Send an out-of-band datagram the caller built and signed (the authority carriage). */

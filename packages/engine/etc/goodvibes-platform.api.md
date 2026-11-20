@@ -8076,6 +8076,7 @@ export interface OperatorMethodInputMap {
         undoSnapshotId?: string;
         undoExpiresAfter?: string;
         undone?: boolean;
+        notSaved?: string;
         unavailableReason?: string;
         unavailableCode?: "CONVERSATION_CHANGED" | "TARGET_CHANGED" | "UNDO_POINT_GONE";
     };

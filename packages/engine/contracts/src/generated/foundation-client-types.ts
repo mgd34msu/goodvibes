@@ -519,7 +519,7 @@ export interface OperatorMethodInputMap {
   "rewind.conversation.host.register": { sessionId: string; hostId?: string; label?: string; leaseMs?: number; };
   "rewind.conversation.host.release": { sessionId: string; hostId: string; };
   "rewind.conversation.hosts.list": {  };
-  "rewind.conversation.requests.answer": { hostId: string; requestId: string; messagesToDrop?: number; messagesRemaining?: number; revision?: string; droppedMessages?: number; undoSnapshotId?: string; undoExpiresAfter?: string; undone?: boolean; unavailableReason?: string; unavailableCode?: "CONVERSATION_CHANGED" | "TARGET_CHANGED" | "UNDO_POINT_GONE"; };
+  "rewind.conversation.requests.answer": { hostId: string; requestId: string; messagesToDrop?: number; messagesRemaining?: number; revision?: string; droppedMessages?: number; undoSnapshotId?: string; undoExpiresAfter?: string; undone?: boolean; notSaved?: string; unavailableReason?: string; unavailableCode?: "CONVERSATION_CHANGED" | "TARGET_CHANGED" | "UNDO_POINT_GONE"; };
   "rewind.conversation.requests.take": { hostId: string; waitMs?: number; limit?: number; };
   "rewind.plan": { sessionId: string; turnId?: string; scope: "both" | "conversation" | "files"; };
   "rewind.undo": { sessionId: string; undoSnapshotId: string; };

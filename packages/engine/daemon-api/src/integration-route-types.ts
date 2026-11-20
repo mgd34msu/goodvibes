@@ -152,6 +152,8 @@ export interface MemoryRegistryLike {
   searchSemantic(filter?: MemoryRecordSearchFilterInput): Promise<unknown[]>;
   /** Edit scope/summary/detail/tags. Returns the updated record or null when the id is unknown. */
   update(id: string, patch: MemoryRecordUpdateInput): unknown | null;
+  /** Resolves once the last update, review or delete is on disk; rejects with why when it was not saved. */
+  saved(): Promise<void>;
   /** Relate two records. Returns the link or null when either id is unknown. */
   link(fromId: string, toId: string, relation: string): Promise<unknown | null>;
   /** All links touching a record. */

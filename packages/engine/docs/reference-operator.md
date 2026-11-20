@@ -147746,7 +147746,7 @@ Which sessions have a surface offering their live conversation right now, how ea
 
 #### `rewind.conversation.requests.answer`
 
-Report what this surface found or did. Which fields are expected follows from the REQUEST, which already says whether it was a preview, a rewind or an undo, an answer that restated that could only disagree with it, silently. For a preview: messagesToDrop and messagesRemaining. For a rewind: droppedMessages and the undoSnapshotId that restores them, optionally undoExpiresAfter saying how long this surface keeps it. For an undo: undone:true once the pre-rewind conversation is back. For any kind, a non-empty unavailableReason instead, which is the honest answer when the conversation is gone or this surface cannot serve it, and saying so beats staying silent, because silence becomes a timeout and a timed-out rewind cannot tell whether the messages were dropped; an undo refusal adds unavailableCode UNDO_POINT_GONE, CONVERSATION_CHANGED, or TARGET_CHANGED when the snapshot is of another session. A preview may add revision, the conversation's message count and last message key, which a rewind plan binds. Only the surface a request was put to may answer it.
+Report what this surface found or did. Which fields are expected follows from the REQUEST, which already says whether it was a preview, a rewind or an undo, an answer that restated that could only disagree with it, silently. For a preview: messagesToDrop and messagesRemaining. For a rewind: droppedMessages and the undoSnapshotId that restores them, optionally undoExpiresAfter saying how long this surface keeps it. For an undo: undone:true once the pre-rewind conversation is back and its save was tried, with notSaved saying why when that save failed. For any kind, a non-empty unavailableReason instead, which is the honest answer when the conversation is gone or this surface cannot serve it, and saying so beats staying silent, because silence becomes a timeout and a timed-out rewind cannot tell whether the messages were dropped; an undo refusal adds unavailableCode UNDO_POINT_GONE, CONVERSATION_CHANGED, or TARGET_CHANGED when the snapshot is of another session. A preview may add revision, the conversation's message count and last message key, which a rewind plan binds. Only the surface a request was put to may answer it.
 
 - Title: `Answer a Conversation Rewind Request`
 - Source: `builtin`
@@ -147790,6 +147790,9 @@ Report what this surface found or did. Which fields are expected follows from th
     },
     "undone": {
       "type": "boolean"
+    },
+    "notSaved": {
+      "type": "string"
     },
     "unavailableReason": {
       "type": "string"

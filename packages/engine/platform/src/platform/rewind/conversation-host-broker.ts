@@ -77,7 +77,7 @@ export interface ConversationRewindRequest {
 export type ConversationRewindAnswer =
   | { readonly kind: 'preview'; readonly messagesToDrop: number; readonly messagesRemaining: number; readonly revision?: string | undefined }
   | { readonly kind: 'rewind'; readonly droppedMessages: number; readonly undoSnapshotId: string; readonly undoExpiresAfter?: string | undefined }
-  | { readonly kind: 'undone' }
+  | { readonly kind: 'undone'; readonly notSaved?: string | undefined }
   | { readonly kind: 'unavailable'; readonly reason: string; readonly code?: ConversationUndoRefusalCode | undefined };
 
 /** Why a host-facing call was refused. Each maps to one honest message. */
@@ -455,14 +455,14 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
    * added since the rewind, and says which refusal applies otherwise.
    */
   async undo(sessionId: string, undoSnapshotId: string): Promise<
-    { readonly undone: true; readonly label: string }
+    { readonly undone: true; readonly label: string; readonly notSaved?: string | undefined }
     | { readonly undone: false; readonly label: string; readonly reason: string; readonly code: ConversationUndoRefusalCode | null }
     | null
   > {
     const host = this.findHostForSession(sessionId);
     if (!host) return null;
     const answer = await this.ask(host, sessionId, null, 'undo', undoSnapshotId);
-    if (answer.kind === 'undone') return { undone: true, label: host.label };
+    if (answer.kind === 'undone') return { undone: true, label: host.label, ...(answer.notSaved ? { notSaved: answer.notSaved } : {}) };
     return {
       undone: false,
       label: host.label,

@@ -128,7 +128,8 @@ function readAnswer(
     if (params.undone !== true) {
       throw new GatewayVerbError('An undo answer states undone: true, or gives unavailableReason.', 'INVALID_ARGUMENT', 400, 'undone');
     }
-    return { kind: 'undone' };
+    const notSaved = typeof params.notSaved === 'string' ? params.notSaved.trim() : '';
+    return { kind: 'undone', ...(notSaved ? { notSaved } : {}) };
   }
   const undoExpiresAfter = typeof params.undoExpiresAfter === 'string' ? params.undoExpiresAfter.trim() : '';
   return {

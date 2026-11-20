@@ -214,7 +214,7 @@ export function createSessionPermissionModeGetHandler(controls: SessionRuntimeCo
 
 export function createSessionPermissionModeSetHandler(
   controls: SessionRuntimeControls,
-  ownerApprovals?: Pick<ApprovalBroker, 'raiseApproval'> | undefined,
+  ownerApprovals?: Pick<ApprovalBroker, 'raiseApproval' | 'onApproved'> | undefined,
 ): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
@@ -537,7 +537,7 @@ export function readSessionContextUsage(
 export function registerSessionRuntimeGatewayMethods(
   catalog: GatewayMethodCatalog,
   controls: SessionRuntimeControls,
-  ownerApprovals?: Pick<ApprovalBroker, 'raiseApproval'> | undefined,
+  ownerApprovals?: Pick<ApprovalBroker, 'raiseApproval' | 'onApproved'> | undefined,
 ): void {
   const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('sessions.permissionMode.get', createSessionPermissionModeGetHandler(controls));

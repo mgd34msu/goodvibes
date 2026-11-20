@@ -340,6 +340,7 @@ export function createDaemonIntegrationRouteHandlers(
       const patch = withAuthenticatedReviewer(context, req, parsed);
       try {
         const record = context.memoryRegistry.review(id, patch);
+        if (record) await context.memoryRegistry.saved();
         return record
           ? Response.json({ record })
           : jsonErrorResponse({ error: 'Unknown memory record', code: MEMORY_RECORD_NOT_FOUND_CODE }, { status: 404 });
@@ -348,11 +349,12 @@ export function createDaemonIntegrationRouteHandlers(
       }
     },
     // `{ deleted: false }` for an unknown id is the documented answer (see memory.records.delete).
-    deleteMemoryRecord: (id, req) => {
+    deleteMemoryRecord: async (id, req) => {
       const admin = context.requireAdmin(req);
       if (admin) return admin;
       try {
         const deleted = context.memoryRegistry.delete(id);
+        if (deleted) await context.memoryRegistry.saved();
         return Response.json({ id, deleted });
       } catch (error) {
         return readServiceErrorResponse(error);
@@ -383,6 +385,7 @@ export function createDaemonIntegrationRouteHandlers(
       if (patch instanceof Response) return patch;
       try {
         const record = context.memoryRegistry.update(id, patch);
+        if (record) await context.memoryRegistry.saved();
         return record
           ? Response.json({ record })
           : jsonErrorResponse({ error: 'Unknown memory record', code: MEMORY_RECORD_NOT_FOUND_CODE }, { status: 404 });

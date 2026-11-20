@@ -139,7 +139,13 @@ function createRenameHandler(service: PairingGatewayService): GatewayMethodHandl
     const params = readInvocationParams(invocation);
     const id = requireStringValue(params.id, 'id');
     const name = requireStringValue(params.name, 'name');
-    if (!service.rename(id, name)) {
+    let renamed: boolean;
+    try {
+      renamed = await service.rename(id, name);
+    } catch (error) {
+      rethrowAsVerbError(error);
+    }
+    if (!renamed) {
       throw new GatewayVerbError('Unknown pairing token', 'PAIRING_TOKEN_NOT_FOUND', 404);
     }
     return { id, renamed: true };

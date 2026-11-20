@@ -1788,8 +1788,12 @@ export class PairingTokenManager {
     })), ...elsewhere];
   }
 
-  /** Rename a token's user-visible label. False when the id is unknown. */
-  rename(id: string, name: string): boolean {
+  /**
+   * Rename a token's user-visible label. False when the id is unknown.
+   * Resolves once the name is on the authority record too, so a device paired
+   * on another machine is renamed when this answers; a failed write throws.
+   */
+  async rename(id: string, name: string): Promise<boolean> {
     const renamed = this.mutate(snapshot => {
       const record = snapshot.tokens.find(item => item.id === id);
       if (!record) return { value: false, changed: false };
@@ -1799,8 +1803,7 @@ export class PairingTokenManager {
     const entry = this.authority?.view()?.entry('device-token', id);
     if (entry && !entry.revoked && name.trim()) {
       // A rename does not move authority: work admitted under the device stays current.
-      void this.authority!.write(() => ({ kind: 'update', key: `device-token:${id}`, patch: { name: name.trim() }, narrowsOrWidens: false, value: null }))
-        .catch((error: unknown) => logger.warn('A paired device rename could not be written to the authority record', { error: String(error) }));
+      await this.authority!.write(() => ({ kind: 'update', key: `device-token:${id}`, patch: { name: name.trim() }, narrowsOrWidens: false, value: null }));
       return true;
     }
     return renamed;

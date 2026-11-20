@@ -171,6 +171,8 @@ export class CheckoutOperations {
   private readonly execution = new AsyncResource('GoodVibesPaymentOperations', { requireManualDestroy: true });
   private readonly work = new OwnedScope('checkout operations');
   private readonly active = new Map<string, ActiveOperation>();
+  /** Each launched operation's run, by purchase, until it has settled; `ended()` hands it out. */
+  private readonly running = new Map<string, Promise<void>>();
   private readonly preparingRecovery = new Map<string, PreparingRecovery>();
   private readonly errors: unknown[] = [];
   private closed = false;
@@ -486,11 +488,22 @@ export class CheckoutOperations {
           finally { this.active.delete(writer.purchaseId); writer.release(); }
         }
       });
-      void pending.catch(error => {
+      const ending = pending.catch(error => {
         this.errors.push(error);
         try { logger.error('Purchase operation did not settle its metadata cleanly. Inspect its original payment evidence.'); } catch { /* Preserve owned settlement failure. */ }
-      });
+      }).finally(() => { if (this.running.get(writer.purchaseId) === ending) this.running.delete(writer.purchaseId); });
+      this.running.set(writer.purchaseId, ending);
     });
+  }
+
+  /**
+   * Resolves once the operation this host launched for the purchase has
+   * ended: its final state, its owner notice and its cleanup are written.
+   * Resolves at once when no operation for it is running here. Never rejects;
+   * payments.purchase.status says how it ended.
+   */
+  ended(purchaseId: string): Promise<void> {
+    return this.running.get(purchaseId) ?? Promise.resolve();
   }
   private async releaseProtectedRequest(operation: ActiveOperation): Promise<void> {
     // Request and continuation are the evidence the next boot resumes from.

@@ -65,6 +65,8 @@ export interface ApprovalRaiseService {
   readonly homeNode: string;
   raiseApproval(input: RequestSharedApprovalInput): Promise<RaisedApproval>;
   getApproval(approvalId: string): SharedApprovalRecord | null;
+  /** Put a change in effect inside the approver's answer (ApprovalBroker.onApproved). */
+  onApproved(approvalId: string, effect: () => unknown | Promise<unknown>): () => void;
 }
 
 /**

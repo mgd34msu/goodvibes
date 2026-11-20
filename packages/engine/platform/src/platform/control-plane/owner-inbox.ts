@@ -412,6 +412,13 @@ function decisionHandlerFor(key: string | undefined): OwnerDecisionHandler | und
   return undefined;
 }
 
+/**
+ * Carries out the owner's answer on an item (a claim) before the answer is
+ * recorded: resolves once the effect is saved, or throws to say why it could
+ * not be (the item then stays open and the answer is refused with that reason).
+ */
+export type OwnerAnswerEffect = (item: OwnerItem, answer: OwnerAnswer) => Promise<void>;
+
 /** True when this process made the decision posted under `key`, so the owner's choice on it is applied here. */
 export function isOwnerDecisionHandledHere(key: string | undefined): boolean {
   return decisionHandlerFor(key) !== undefined;
@@ -712,6 +719,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   #presenter: OwnerItemPresenter | null = null;
   /** Rows this inbox already announced itself, by id: the store's feed repeats them and is skipped once. */
   readonly #announced = new Map<string, string>();
+  /** Effects of an answer, by the key prefix their items are posted under (handleAnswers). */
+  readonly #answerEffects = new Map<string, OwnerAnswerEffect>();
 
   constructor(options: OwnerInboxOptions) {
     this.#questions = options.questions;
@@ -964,6 +973,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       const checked = this.#checkAnswer(item, answer);
       if ('refusal' in checked) return { applied: false, item, refusal: checked.refusal };
       if (item.kind === 'decision') return this.#answerDecision(item, checked.answer, by);
+      const effect = this.#answerEffectFor(item.key);
+      if (effect) return this.#answerWithEffect(item, checked.answer, by, effect);
       // The deadline and "still open" are checked in the UPDATE that writes the answer.
       const result = this.#questions.answer(id, checked.answer, by, this.#now());
       if (!result) return { applied: false, refusal: unknownRefusal(id) };
@@ -1157,8 +1168,90 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     };
   }
 
+  /**
+   * Carry out the owner's answer on items posted under `keyPrefix` inside the
+   * answer: `answer` claims the item, awaits `effect`, and records the answer
+   * as applied only after it resolved; when it throws, the item is released,
+   * stays open, and the answer is refused with the reason. An answer another
+   * process wrote to the store (no effect registered there) is applied here
+   * when it is heard. Returns the unregister.
+   */
+  handleAnswers(keyPrefix: string, effect: OwnerAnswerEffect): () => void {
+    this.#answerEffects.set(keyPrefix, effect);
+    // Keeps the store's change feed open, so an answer written by another process is heard.
+    const stopFeed = this.subscribe(() => {});
+    return () => {
+      stopFeed();
+      if (this.#answerEffects.get(keyPrefix) === effect) this.#answerEffects.delete(keyPrefix);
+    };
+  }
+
+  #answerEffectFor(key: string | undefined): OwnerAnswerEffect | undefined {
+    if (key === undefined) return undefined;
+    for (const [prefix, effect] of this.#answerEffects) if (key.startsWith(prefix)) return effect;
+    return undefined;
+  }
+
+  /**
+   * Claim, apply, commit for an item whose answer has an effect here: the
+   * item is claimed in the store (a second answer and a withdrawal are refused
+   * while the claim is held), the effect is awaited, and the claim's own token
+   * records the owner's answer. A failed effect releases the claim.
+   */
+  async #answerWithEffect(item: OwnerItem, answer: OwnerAnswer, by: OwnerAnswerSource, effect: OwnerAnswerEffect): Promise<OwnerAnswerOutcome> {
+    const path = this.#questions.path;
+    const token = `${processTaker(path)}:${randomUUID()}`;
+    const claimed = this.#questions.claimDecision(item.id, token, this.#now(), (held) => isTakerGone(path, held.split(':')[0] ?? held));
+    if (!claimed) return { applied: false, refusal: unknownRefusal(item.id) };
+    if (!claimed.claimed) {
+      const current = this.#project(claimed.entry, this.#now());
+      return { applied: false, item: current, refusal: current.status === 'open' ? decisionInProgressRefusal() : closedRefusal(current) };
+    }
+    this.#emitStored(claimed.entry, this.#project(claimed.entry, this.#now()));
+    try {
+      await effect(item, answer);
+    } catch (error) {
+      this.#questions.releaseDecision(item.id, token, this.#now());
+      const released = this.#questions.get(item.id);
+      return {
+        applied: false,
+        ...(released ? { item: this.#project(released, this.#now()) } : {}),
+        refusal: refusal({
+          code: 'ANSWER_NOT_APPLIED',
+          state: 'still open',
+          reason: error instanceof Error ? error.message : String(error),
+          next: ['Answer it again once the cause is fixed; nothing was changed.'],
+          status: 409,
+        }),
+      };
+    }
+    const now = this.#now();
+    const result = this.#questions.commitDecision(item.id, token, answer, by, now);
+    if (!result) return { applied: false, refusal: unknownRefusal(item.id) };
+    const answered = this.#project(result.entry, now);
+    if (!result.applied) return { applied: false, item: answered, refusal: closedRefusal(answered) };
+    this.#emitStored(result.entry, answered);
+    this.#closed(answered);
+    return { applied: true, item: answered };
+  }
+
+  /** An answer another process recorded on an item whose effect is registered here: applied now, since that process could not. */
+  #applyHeardAnswer(item: OwnerItem): void {
+    if (item.status !== 'answered' || !item.answer) return;
+    const effect = this.#answerEffectFor(item.key);
+    if (!effect) return;
+    // Nobody here is waiting on it: the process that recorded the answer already told the owner it was recorded.
+    void effect(item, item.answer).catch((error: unknown) => {
+      logger.error('[owner-inbox] an answer recorded by another process could not be applied here', {
+        itemId: item.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
   dispose(): void {
     this.#decisionFences.retire('the owner inbox closed');
+    this.#answerEffects.clear();
     this.#unsubscribeApprovals?.();
     this.#listeners.clear();
     this.#stopListening();
@@ -1179,7 +1272,9 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       const own = this.#announced.get(id);
       this.#announced.delete(id);
       if (own === storedEntryVersion(entry)) continue;
-      this.#emit(this.#project(entry, now));
+      const item = this.#project(entry, now);
+      this.#emit(item);
+      this.#applyHeardAnswer(item);
     }
   }
 

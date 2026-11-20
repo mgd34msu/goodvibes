@@ -39,6 +39,8 @@ interface AutomationRunDeliveryContext {
   readonly noteJobOutcome?: ((jobId: string, outcome: Exclude<ScheduleRunOutcome, 'failed'>) => void) | undefined;
   /** Removes a finished one-shot job once its run's delivery is recorded. */
   readonly removeOneShotJob?: ((jobId: string) => void) | undefined;
+  /** Hears each delivery started, as a promise that settles (never rejects) when it is recorded or given up on. */
+  readonly track?: ((delivery: Promise<void>) => void) | undefined;
 }
 
 function saveJobsAsync(context: Pick<AutomationFailureFollowUpContext, 'saveJobs'>, reason: string, jobId: string): void {
@@ -274,22 +276,24 @@ function buildFailureNoticeMessage(job: AutomationJob, run: AutomationRun): stri
  * slept-through overnight job still reaches its human, not only to a separately
  * configured failure route. `onDeliveryGap` is invoked (once, at the caller's
  * discretion) when the job has no reachable target at all, so the gap is logged
- * honestly instead of failing silently.
+ * honestly instead of failing silently. The returned promise settles when the
+ * notice was sent or given up on, and never rejects.
  */
 export function maybeDeliverAutomationFailureNotice(
   deliveryManager: AutomationDeliveryManager | null,
   job: AutomationJob,
   run: AutomationRun,
   onDeliveryGap?: (job: AutomationJob, run: AutomationRun) => void,
-): void {
+): Promise<void> {
   const { primary, fallback } = resolveAutomationFailureNoticeTargets(job);
   if (primary.length === 0 && fallback.length === 0) {
     onDeliveryGap?.(job, run);
-    return;
+    return Promise.resolve();
   }
-  if (!deliveryManager) return;
+  if (!deliveryManager) return Promise.resolve();
   const message = buildFailureNoticeMessage(job, run);
-  void (async () => {
+  // Resolves when the notice was sent or given up on; never rejects, so the run it reports on never fails for it.
+  return (async () => {
     const attempts = primary.length > 0
       ? await deliveryManager.deliverText(job, run, message, primary, { kind: 'failure-notice' })
       : [];
@@ -338,7 +342,7 @@ export function maybeDeliverAutomationRun(
   if (job.delivery.mode === 'none' || !context.deliveryManager) {
     if (!context.unattendedRuns || run.status === 'cancelled') return false;
     context.deliveryInFlight.add(run.id);
-    void context.unattendedRuns.postToInbox(automationRunAnswer(job, run))
+    const posting = context.unattendedRuns.postToInbox(automationRunAnswer(job, run))
       .then(async () => {
         if (run.status === 'completed') context.noteJobOutcome?.(job.id, 'inbox');
         await settleOwed([]);
@@ -347,10 +351,11 @@ export function maybeDeliverAutomationRun(
         logger.warn('AutomationManager: the run answer could not be put in the owner inbox; it stays owed', { runId: run.id, jobId: job.id, error: summarizeError(error) });
       })
       .finally(() => { context.deliveryInFlight.delete(run.id); });
+    context.track?.(posting);
     return true;
   }
   context.deliveryInFlight.add(run.id);
-  void context.deliveryManager.deliverJobRun(job, run)
+  const delivering = context.deliveryManager.deliverJobRun(job, run)
     .then(async (deliveryAttempts) => {
       // Every named target failed (or none could be resolved): the answer goes to the owner inbox instead.
       const undelivered = deliveryAttempts.every((attempt) => attempt.status === 'failed' || attempt.status === 'dead_lettered');
@@ -374,5 +379,6 @@ export function maybeDeliverAutomationRun(
     .finally(() => {
       context.deliveryInFlight.delete(run.id);
     });
+  context.track?.(delivering);
   return true;
 }

@@ -226,6 +226,8 @@ export class SharedSessionBroker {
   private readonly capacityWaiting = new Map<string, string>();
   private capacityDrain: Promise<void> | null = null;
   private capacityDrainAgain = false;
+  /** Drains scheduled (their timer has not fired or their run has not ended); `idle()` waits on them. */
+  private readonly capacityDrainsPending = new Set<Promise<void>>();
   /** Tail of the work queued per route or session key; see `serialized`. */
   private readonly serialChains = new Map<string, Promise<void>>();
   private _gcInterval: ReturnType<typeof setInterval> | null = null;
@@ -384,12 +386,28 @@ export class SharedSessionBroker {
   /** An agent ended: start waiting messages once the manager has released its slot. */
   private scheduleCapacityDrain(): void {
     if (this.capacityWaiting.size === 0) return;
-    const timer = setTimeout(() => {
-      void this.drainCapacityWaiting().catch((error: unknown) => {
-        logger.warn('Messages waiting for a free agent could not be started', { error: summarizeError(error) });
-      });
-    }, 0);
-    (timer as unknown as { unref?: () => void }).unref?.();
+    const pending = new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        void this.drainCapacityWaiting().catch((error: unknown) => {
+          logger.warn('Messages waiting for a free agent could not be started', { error: summarizeError(error) });
+        }).finally(resolve);
+      }, 0);
+      (timer as unknown as { unref?: () => void }).unref?.();
+    });
+    this.capacityDrainsPending.add(pending);
+    void pending.finally(() => this.capacityDrainsPending.delete(pending));
+  }
+
+  /**
+   * Resolves once no start of waiting messages is scheduled or running: every
+   * message that was waiting for a free agent (after a restart, a continuation
+   * runner set, an agent's end) has been started or found still waiting.
+   * Costs nothing when nothing is waiting.
+   */
+  async idle(): Promise<void> {
+    while (this.capacityDrainsPending.size > 0 || this.capacityDrain) {
+      await Promise.allSettled([...this.capacityDrainsPending, ...(this.capacityDrain ? [this.capacityDrain] : [])]);
+    }
   }
 
   private drainCapacityWaiting(): Promise<void> {

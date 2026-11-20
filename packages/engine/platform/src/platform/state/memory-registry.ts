@@ -179,6 +179,11 @@ export class MemoryRegistry {
     return removed;
   }
 
+  /** Resolves once the last update, review or delete is on disk; rejects with why when its commit failed. */
+  saved(): Promise<void> {
+    return this.store.saved();
+  }
+
   /** The store's point-in-time copies, newest first (daily, before a migration, before a restore). */
   listSnapshots(): MemorySnapshotInfo[] {
     return listMemorySnapshots(this.store.dbPath);

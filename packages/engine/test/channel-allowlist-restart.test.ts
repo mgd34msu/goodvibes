@@ -22,15 +22,6 @@ import type { ChannelIngressPolicyInput } from '../platform/src/platform/channel
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
-/** Let the event loop turn until `done` holds; bounded in turns, never in milliseconds. */
-async function until(done: () => boolean, what: string): Promise<void> {
-  for (let turn = 0; turn < 20_000; turn += 1) {
-    if (done()) return;
-    await new Promise<void>((resolve) => { setImmediate(resolve); });
-  }
-  if (!done()) throw new Error(`Gave up waiting for: ${what}`);
-}
-
 /** One daemon's view: the policy manager and the owner inbox over the home's two files. */
 async function daemon(dir: string) {
   const inbox = new OwnerInbox({ questions: new QuestionStore({ path: join(dir, 'owner-inbox.sqlite') }) });
@@ -62,7 +53,7 @@ test('a sender removed from the allowlist is still refused after a restart; a cl
   const strangerClaim = claimOf(first.inbox, 'U-STRANGER');
   expect(strangerClaim).toBeDefined();
   expect((await first.inbox.answer(strangerClaim!.id, { option: 'accept' }, { actor: 'owner', surface: 'tui' })).applied).toBe(true);
-  await until(() => first.policy.getPolicy('telegram').allowlistUserIds.includes('U-STRANGER'), 'the accepted claim to reach the policy');
+  expect(first.policy.getPolicy('telegram').allowlistUserIds).toContain('U-STRANGER');
   await first.policy.upsertPolicy('telegram', { allowlistUserIds: ['U-OWNER'] });
   expect((await first.policy.evaluateIngress(message('telegram', 'U-STRANGER'))).allowed).toBe(false);
 
@@ -79,7 +70,7 @@ test('a sender removed from the allowlist is still refused after a restart; a cl
   const second = await daemon(dir);
   try {
     // The answer given while down is applied: the replay ran.
-    await until(() => second.policy.getPolicy('slack').allowlistUserIds.includes('U-SLACK'), 'the answer given while down to be applied');
+    expect(second.policy.getPolicy('slack').allowlistUserIds).toContain('U-SLACK');
     expect((await second.policy.evaluateIngress(message('slack', 'U-SLACK'))).allowed).toBe(true);
 
     // The removal holds: the earlier acceptance was not applied again.

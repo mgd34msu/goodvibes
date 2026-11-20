@@ -39,15 +39,6 @@ afterEach(async () => {
   surfaceInboundDedup.clear();
 });
 
-/** Let the event loop turn until `done` holds; bounded in turns, never in milliseconds. */
-async function until(done: () => boolean, what: string): Promise<void> {
-  for (let turn = 0; turn < 200_000; turn += 1) {
-    if (done()) return;
-    await new Promise<void>((resolve) => { setImmediate(resolve); });
-  }
-  if (!done()) throw new Error(`Gave up waiting for: ${what}`);
-}
-
 /** Three private chats each send one message, as one batch. */
 const UPDATES = [1, 2, 3].map((id) => ({
   update_id: id,
@@ -57,6 +48,11 @@ const UPDATES = [1, 2, 3].map((id) => ({
 /** The Bot API: answers what the supervisor asks, records every getUpdates offset, and holds a poll with nothing to hand out. */
 async function botApi() {
   const offsets: Array<number | null> = [];
+  const offsetWaiters: Array<{ readonly offset: number; readonly resolve: () => void }> = [];
+  /** Resolves once a getUpdates asking from `offset` has arrived and been recorded. */
+  const offsetArrived = (offset: number): Promise<void> => offsets.includes(offset)
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => { offsetWaiters.push({ offset, resolve }); });
   const held: ServerResponse[] = [];
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     let raw = '';
@@ -71,6 +67,10 @@ async function botApi() {
       if (method === 'sendMessage') return ok({ message_id: 1 });
       if (method === 'getUpdates') {
         offsets.push(body.offset ?? null);
+        for (const waiter of offsetWaiters.filter((entry) => entry.offset === body.offset)) {
+          offsetWaiters.splice(offsetWaiters.indexOf(waiter), 1);
+          waiter.resolve();
+        }
         const pending = UPDATES.filter((update) => update.update_id >= (body.offset ?? 0));
         if (pending.length > 0) return ok(pending);
         held.push(res);
@@ -85,7 +85,7 @@ async function botApi() {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
-  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, offsets };
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, offsets, offsetArrived };
 }
 
 /** One daemon's Telegram receiving pieces over the home's files. */
@@ -138,7 +138,8 @@ test('a stop part-way through a batch resumes at the first update that did not s
   expect((await first.supervisor.start()).mode).toBe('polling');
 
   // Update 1 is processed; update 2 finds no free agent and waits to be tried again. The daemon stops in that wait.
-  await until(() => runtime.refused, 'the refused start of update 2');
+  await first.supervisor.whenPollingIdle((wait) => wait.kind === 'update-wait' && wait.updateId === 2);
+  expect(runtime.refused).toBe(true);
   await first.stop();
   firstRunning = false;
   expect(runtime.starts.filter((task) => task.includes('message 3'))).toEqual([]);
@@ -148,7 +149,8 @@ test('a stop part-way through a batch resumes at the first update that did not s
   const second = await daemon(root, api.url, runtime);
   cleanups.push(() => second.stop());
   expect((await second.supervisor.start()).mode).toBe('polling');
-  await until(() => api.offsets.includes(4), 'the poll after the redelivered updates');
+  await second.supervisor.whenPollingIdle((wait) => wait.kind === 'polling' && wait.offset === 4);
+  await api.offsetArrived(4);
 
   // The restart asked from update 2: update 1 had been confirmed, update 2 had not.
   expect(api.offsets).toEqual([null, 2, 4]);

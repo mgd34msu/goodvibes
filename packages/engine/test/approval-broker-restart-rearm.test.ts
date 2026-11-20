@@ -79,14 +79,19 @@ async function restart(): Promise<ApprovalBroker> {
 
 const record = (broker: ApprovalBroker, callId: string) => broker.listApprovals().find((entry) => entry.callId === callId);
 
-/** Let the event loop turn until `done` holds; bounded in turns, never in milliseconds. A miss says what it saw. */
-async function until(done: () => boolean, what: string, seen: () => unknown): Promise<void> {
-  for (let turn = 0; turn < 20_000; turn += 1) {
-    if (done()) return;
-    await new Promise<void>((resolve) => { setImmediate(resolve); });
-  }
-  if (!done()) throw new Error(`Gave up waiting for ${what}; the record is ${JSON.stringify(seen()) ?? 'missing'}`);
+/**
+ * The first record `broker` holds that matches: at once if it already does, else when the broker
+ * publishes the change, which it does once the record is durable.
+ */
+function held(broker: ApprovalBroker, matches: (entry: SharedApprovalRecord) => boolean): Promise<SharedApprovalRecord> {
+  return new Promise((resolve) => {
+    const now = broker.listApprovals().find(matches);
+    if (now) { resolve(now); return; }
+    const off = broker.subscribe((entry) => { if (matches(entry)) { off(); resolve(entry); } });
+  });
 }
+
+const expired = (callId: string) => (entry: SharedApprovalRecord) => entry.callId === callId && entry.status === 'expired';
 
 test('a deadline that passed while the daemon was down is denied at start-up; an approval already given stays given', async () => {
   const first = new ApprovalBroker({ storePath });
@@ -97,7 +102,7 @@ test('a deadline that passed while the daemon was down is denied at start-up; an
 
   moveClock(WINDOW_MS + 1_000);
   const second = await restart();
-  await until(() => record(second, 'lapsed')?.status === 'expired', 'the lapsed ask to be settled', () => record(second, 'lapsed')?.status);
+  await held(second, expired('lapsed'));
   expect(record(second, 'lapsed')?.decision?.approved).toBe(false);
   expect(record(second, 'given')?.status).toBe('approved');
 });
@@ -112,7 +117,7 @@ test('a deadline still ahead is kept and fires after the restart', async () => {
   // Not expired on sight: it still has time to be answered.
   expect(record(second, 'ahead')?.status).toBe('pending');
 
-  await until(() => record(second, 'ahead')?.status === 'expired', 'the re-armed deadline to fire', () => record(second, 'ahead')?.status);
+  await held(second, expired('ahead'));
   expect(record(second, 'ahead')?.decision?.approved).toBe(false);
 });
 
@@ -122,8 +127,8 @@ test('two approvers at once: one decision stands, the command gets only its type
   // A command stopped on its terminal asks for a passphrase through the broker, as exec does.
   const answerPrompt = buildExecPromptAnswerHandler({ attended: () => true, requestApproval: (input) => broker.requestApproval(input) });
   const command = answerPrompt({ command: 'gpg --sign release.tar', prompt: 'Passphrase:', recentOutput: '' });
-  await until(() => broker.listApprovals().length === 1, 'the prompt to be raised', () => broker.listApprovals());
-  const raised = broker.listApprovals()[0]!;
+  const raised = await held(broker, () => true);
+  expect(broker.listApprovals()).toHaveLength(1);
 
   // A stale revision: another surface claimed it after this approver was shown it.
   expect((await broker.claimApproval(raised.id, { actor: 'operator', actorSurface: 'web', expectedRevision: raised.revision })).applied).toBe(true);

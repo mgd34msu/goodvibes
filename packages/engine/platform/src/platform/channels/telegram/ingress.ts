@@ -97,6 +97,17 @@ export type TelegramIngressMode = 'polling' | 'webhook' | 'inactive';
  */
 export type TelegramIngressKind = 'receiving' | 'blocked' | 'retrying' | 'stopped' | 'inactive';
 
+/**
+ * Where the polling loop waits once it has nothing to do until something
+ * outside it happens: `polling`, its getUpdates request for `offset` is sent and
+ * open; `update-wait`, it waits to try `updateId` again (a refused or failed
+ * start); `poll-retry`, it waits to poll again after a failed poll.
+ */
+export type TelegramPollingIdle =
+  | { readonly kind: 'polling'; readonly offset: number | undefined }
+  | { readonly kind: 'update-wait'; readonly updateId: number; readonly attempt: number }
+  | { readonly kind: 'poll-retry' };
+
 export interface TelegramIngressStatus {
   readonly kind: TelegramIngressKind;
   readonly mode: TelegramIngressMode;
@@ -258,6 +269,9 @@ export class TelegramIngressSupervisor {
   private webhookDeliveryFailure: string | null = null;
   /** Polls that came back, counted so a rebuilt receiver resets its backoff once it works again. */
   private completedPolls = 0;
+  /** Where the polling loop waits now, or null while it is working; see {@link whenPollingIdle}. */
+  private pollingIdle: TelegramPollingIdle | null = null;
+  private readonly pollingIdleWaiters = new Set<{ readonly match: (idle: TelegramPollingIdle) => boolean; readonly resolve: (idle: TelegramPollingIdle) => void; readonly reject: (error: Error) => void }>();
   /** The token the latest start() resolved, compared when a secret changes. */
   private startedToken: string | null = null;
 
@@ -412,8 +426,35 @@ export class TelegramIngressSupervisor {
    * backoff would find no signal to listen on and sleep the full interval,
    * holding shutdown for up to a minute.
    */
+  /**
+   * Resolves with the first wait of the polling loop that `match` accepts: the
+   * wait it is in now, if that matches, else the next one it enters. The loop
+   * reaches a wait once each poll cycle, so a caller learns that a batch was
+   * handled (its next getUpdates is open) or that an update is waiting to be
+   * tried again, without polling. Rejects when the supervisor stops first.
+   * Costs the loop one comparison per wait while nobody is waiting.
+   */
+  whenPollingIdle(match: (idle: TelegramPollingIdle) => boolean = () => true): Promise<TelegramPollingIdle> {
+    const now = this.pollingIdle;
+    if (now && match(now)) return Promise.resolve(now);
+    return new Promise((resolve, reject) => { this.pollingIdleWaiters.add({ match, resolve, reject }); });
+  }
+
+  private enterPollingIdle(idle: TelegramPollingIdle): void {
+    this.pollingIdle = idle;
+    if (this.pollingIdleWaiters.size === 0) return;
+    for (const waiter of [...this.pollingIdleWaiters]) {
+      if (!waiter.match(idle)) continue;
+      this.pollingIdleWaiters.delete(waiter);
+      waiter.resolve(idle);
+    }
+  }
+
   async stop(): Promise<void> {
     const generation = ++this.generation;
+    this.pollingIdle = null;
+    for (const waiter of this.pollingIdleWaiters) waiter.reject(new Error('Telegram ingress stopped before the polling loop reached that wait'));
+    this.pollingIdleWaiters.clear();
     this.cursorMigration = undefined;
     const retiringMigrations = [...this.cursorMigrations];
     const migrationClose = Promise.allSettled(retiringMigrations.map(async owner => { await owner.close(); this.cursorMigrations.delete(owner); }))
@@ -838,11 +879,14 @@ export class TelegramIngressSupervisor {
       try {
         const offset = cursor.capture().observation.offset ?? undefined;
         const startedAtMs = receiveProgress?.beginRequest();
-        const updates = await api.getUpdates({
+        const request = api.getUpdates({
           offset,
           timeoutSeconds: receiveProgress?.timeoutSeconds(POLL_TIMEOUT_SECONDS) ?? POLL_TIMEOUT_SECONDS,
           signal: lifetime,
         });
+        this.enterPollingIdle({ kind: 'polling', offset });
+        let updates: Awaited<typeof request>;
+        try { updates = await request; } finally { this.pollingIdle = null; }
         lifetime.throwIfAborted(); cursor.assertCurrent();
         this.completedPolls += 1;
         backoffMs = BACKOFF_MIN_MS;
@@ -910,7 +954,8 @@ export class TelegramIngressSupervisor {
         const jitter = error instanceof TelegramApiError && error.errorCode === 409
           ? Math.floor(this.conflictJitterFraction() * CONFLICT_JITTER_MS)
           : 0;
-        await this.delay((dictated ?? backoffMs) + jitter);
+        this.enterPollingIdle({ kind: 'poll-retry' });
+        try { await this.delay((dictated ?? backoffMs) + jitter); } finally { this.pollingIdle = null; }
         backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS);
       }
     }
@@ -1169,14 +1214,14 @@ export class TelegramIngressSupervisor {
           // an attempt; the poller waits, and a stop leaves the offset before it so the next process fetches it again.
           if (isAdmissionRefusal(response) && updateId !== null) {
             attempt -= 1;
-            await this.delay(WORK_ADMISSION_RECHECK_MS);
+            await this.updateWait(updateId, attempt, WORK_ADMISSION_RECHECK_MS);
             if (this.stopped) return;
             continue;
           }
           const outcome = ingressOutcome(response);
           if (outcome === 'failed' && updateId !== null && !lastAttempt) {
             const dictated = Number(response.headers.get('retry-after'));
-            await this.delay(Math.min(UPDATE_RETRY_MAX_MS, Number.isFinite(dictated) && dictated > 0 ? dictated * 1_000 : BACKOFF_MIN_MS * 2 ** (attempt - 1)));
+            await this.updateWait(updateId, attempt, Math.min(UPDATE_RETRY_MAX_MS, Number.isFinite(dictated) && dictated > 0 ? dictated * 1_000 : BACKOFF_MIN_MS * 2 ** (attempt - 1)));
           } else if (outcome === 'failed' && updateId !== null) {
             settled = true;
             receiveProgress?.gap(scope);
@@ -1193,7 +1238,7 @@ export class TelegramIngressSupervisor {
         } catch (error) {
           if (error instanceof PaymentReplyHistoryError) throw error;
           if (!lastAttempt && updateId !== null) {
-            await this.delay(BACKOFF_MIN_MS * 2 ** (attempt - 1));
+            await this.updateWait(updateId, attempt, BACKOFF_MIN_MS * 2 ** (attempt - 1));
           } else {
             settled = true;
             receiveProgress?.gap(scope);
@@ -1496,6 +1541,12 @@ export class TelegramIngressSupervisor {
    * run many times against one AbortController, and listeners that only unbind
    * when they fire would pile up on a long-lived signal.
    */
+  /** Wait to try an update again, announced as the loop's wait (see whenPollingIdle). */
+  private async updateWait(updateId: number, attempt: number, ms: number): Promise<void> {
+    this.enterPollingIdle({ kind: 'update-wait', updateId, attempt });
+    try { await this.delay(ms); } finally { this.pollingIdle = null; }
+  }
+
   private delay(ms: number): Promise<void> {
     // stop() may have landed while the caller was awaiting something else;
     // never begin a fresh backoff sleep for a loop that is already finished.

@@ -77,7 +77,7 @@ export interface RewindConversationUndoPort {
 
 /** What the surface hosting a session answered to an undo; null when no surface hosts it. */
 export type RewindHostedUndoAnswer =
-  | { readonly undone: true; readonly label: string }
+  | { readonly undone: true; readonly label: string; readonly notSaved?: string | undefined }
   | { readonly undone: false; readonly label: string; readonly reason: string; readonly code: 'UNDO_POINT_GONE' | 'CONVERSATION_CHANGED' | 'TARGET_CHANGED' | null }
   | null;
 
@@ -120,7 +120,12 @@ export function createRewindUndoHandler(
     const hosted = deps.hosts ? await deps.hosts.undo(sessionId, undoSnapshotId) : null;
     if (hosted && hosted.undone) {
       service.anchorsRestored(undoSnapshotId);
-      return { undone: true, sessionId, undoSnapshotId, refusal: null };
+      return {
+        undone: true, sessionId, undoSnapshotId, refusal: null,
+        ...(hosted.notSaved === undefined ? {} : {
+          notSaved: `${hosted.label} put the conversation back but could not save it (${hosted.notSaved}): a restart there brings back the rewound transcript. Fix that session store's disk or permissions, then undo again.`,
+        }),
+      };
     }
     if (hosted && !hosted.undone) {
       if (hosted.code === 'TARGET_CHANGED') {

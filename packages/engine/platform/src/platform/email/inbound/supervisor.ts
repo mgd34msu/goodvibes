@@ -261,6 +261,8 @@ export class InboundMailSupervisor {
   private readonly now: () => number;
 
   private source: InboundMailSource | null = null;
+  /** Callers waiting for a source to read with (whenQuiet, nextQuiet); resolved when one is held or the supervisor stops. */
+  private sourceWaiters: Array<() => void> = [];
   private abort: AbortController | null = null;
   private loop: Promise<void> | null = null;
   /**
@@ -527,6 +529,7 @@ export class InboundMailSupervisor {
 
     if (!this.wantsRunning) { await source.stop(); this.releaseLease(); return this.settle('inactive', 'stopped'); }
     this.source = source;
+    this.releaseSourceWaiters();
     if (this.historyRequested) { this.historyRequested = false; source.requestHistory?.(); }
     this.loopEnded = false;
     const abort = new AbortController();
@@ -760,8 +763,38 @@ export class InboundMailSupervisor {
    * is told to start only after this resolves, and two nodes both holding a
    * connection to one mailbox both notify.
    */
+  /**
+   * Resolves when this node's reader is quiet: it holds a source and that source
+   * has done what it could and waits on the server or the clock
+   * (InboundMailboxWatcher.whenQuiet). A node with no source yet waits for one.
+   * Resolves at stop. A Gmail source has no such wait and resolves at once.
+   */
+  async whenQuiet(): Promise<void> {
+    const source = await this.heldSource();
+    await source?.whenQuiet?.();
+  }
+
+  /** Resolves the next time the held reader becomes quiet (after a push or a clock step, the step it caused is done), or at stop. */
+  async nextQuiet(): Promise<void> {
+    const source = await this.heldSource();
+    await source?.nextQuiet?.();
+  }
+
+  private async heldSource(): Promise<InboundMailSource | null> {
+    if (this.source === null && this.wantsRunning) await new Promise<void>((resolve) => { this.sourceWaiters.push(resolve); });
+    return this.source;
+  }
+
+  private releaseSourceWaiters(): void {
+    if (this.sourceWaiters.length === 0) return;
+    const waiters = this.sourceWaiters;
+    this.sourceWaiters = [];
+    for (const resolve of waiters) resolve();
+  }
+
   async stop(): Promise<void> {
     this.wantsRunning = false;
+    this.releaseSourceWaiters();
     this.restartRequested = false;
     this.clearReviveTimer();
     const starting = this.starting;

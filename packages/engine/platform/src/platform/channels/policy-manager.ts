@@ -14,11 +14,11 @@ import type {
 import { isRecord } from '../utils/record-coerce.js';
 import { logger } from '../utils/logger.js';
 import { judgmentInputProblem } from '../gate/judgment-input.js';
-import type { OwnerInbox, OwnerItem } from '../control-plane/owner-inbox.js';
+import type { OwnerAnswer, OwnerInbox, OwnerItem } from '../control-plane/owner-inbox.js';
 import { maskDigits } from '../security/batteries/card-talk.js';
 
 /** The part of the owner inbox an owner claim uses. */
-export type ChannelOwnerClaimInbox = Pick<OwnerInbox, 'postNow' | 'listNow' | 'subscribe' | 'withdraw'>;
+export type ChannelOwnerClaimInbox = Pick<OwnerInbox, 'postNow' | 'listNow' | 'handleAnswers' | 'withdraw'>;
 
 /** Owner claims open at once on one surface; a further unknown sender waits without a new question. */
 const MAX_OPEN_CLAIMS_PER_SURFACE = 3;
@@ -390,7 +390,7 @@ export class ChannelPolicyManager {
   private ownerInbox: ChannelOwnerClaimInbox | null = null;
   private ownerInboxUnsubscribe: (() => void) | null = null;
   /** Owner claims answered while this process was not attached, settled once the policies are loaded. */
-  private pendingClaimReplay: (() => void) | null = null;
+  private pendingClaimReplay: (() => Promise<void>) | null = null;
   /** Per surface, moved by every change of its policy record; a decision carries the one it was made under. */
   readonly #revisions = new Map<ChannelSurface, number>();
   /** Where a chat the owner set up for delegated review is recorded; absent, no chat is delegated. */
@@ -412,14 +412,22 @@ export class ChannelPolicyManager {
     this.store = new PersistentStore<ChannelPolicySnapshot>(options.storePath);
   }
 
+  /**
+   * Load the policies, then apply the owner claims answered while this process
+   * was not attached (see attachOwnerInbox). Resolves only when both are done,
+   * so no ingress is evaluated against a policy an accepted claim has not yet
+   * reached; every concurrent caller awaits the same start.
+   */
   async start(): Promise<void> {
-    if (this.loaded) return;
-    this.starting ??= this.load();
+    if (this.loaded && !this.starting && !this.pendingClaimReplay) return;
+    this.starting ??= (async () => {
+      if (!this.loaded) await this.load();
+      const replay = this.pendingClaimReplay;
+      this.pendingClaimReplay = null;
+      await replay?.();
+    })();
     try { await this.starting; }
     finally { this.starting = undefined; }
-    const replay = this.pendingClaimReplay;
-    this.pendingClaimReplay = null;
-    replay?.();
   }
 
   private async load(): Promise<void> {
@@ -501,26 +509,20 @@ export class ChannelPolicyManager {
   attachOwnerInbox(inbox: ChannelOwnerClaimInbox): () => void {
     this.ownerInboxUnsubscribe?.();
     this.ownerInbox = inbox;
-    const settle = (item: OwnerItem): void => {
-      if (item.kind !== 'claim' || !item.key?.startsWith(CLAIM_KEY_PREFIX) || item.status !== 'answered') return;
-      void this.settleOwnerClaim(item).catch((error: unknown) => {
-        logger.error('An accepted channel owner claim could not be saved; the sender is not the owner yet', {
-          claimId: item.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-    };
-    this.ownerInboxUnsubscribe = inbox.subscribe(settle);
+    // The inbox awaits this inside the owner's answer: the answer is recorded as applied only after
+    // the policy file is written, and a failed write refuses the answer with the reason (the claim stays open).
+    this.ownerInboxUnsubscribe = inbox.handleAnswers(CLAIM_KEY_PREFIX, (item, answer) => this.settleOwnerClaim(item, answer));
     // An answer given before this attach (a restart in between) still counts, once. An answer closed
     // no later than the surface policy's last change is already in it, or was overridden by the owner
     // since (a sender accepted and later removed stays removed), so it is not applied again. The
     // policy times are read before any answer is applied, since applying one moves its surface's time.
-    // It is read when the policies are, not at attach, so attaching at start-up opens no log.
-    const replay = (): void => {
+    // It is read when the policies are, not at attach, so attaching at start-up opens no log; start()
+    // awaits it, so start-up is complete before any ingress is evaluated.
+    const replay = async (): Promise<void> => {
       const answered: { readonly item: OwnerItem; readonly surface: string; readonly closedAt: number }[] = [];
       for (const item of inbox.listNow({ kinds: ['claim'], status: 'closed' })) {
         const surface = item.metadata?.['surface'];
-        if (item.status === 'answered' && item.closedAt !== undefined && typeof surface === 'string') {
+        if (item.status === 'answered' && item.answer && item.key?.startsWith(CLAIM_KEY_PREFIX) && item.closedAt !== undefined && typeof surface === 'string') {
           answered.push({ item, surface, closedAt: item.closedAt });
         }
       }
@@ -530,11 +532,20 @@ export class ChannelPolicyManager {
       }
       // Oldest first, so the first accepted sender is the one recorded as owner.
       for (const { item, surface, closedAt } of answered.reverse()) {
-        if (closedAt > (changedAt.get(surface) ?? 0)) settle(item);
+        if (closedAt <= (changedAt.get(surface) ?? 0) || !item.answer) continue;
+        try {
+          await this.settleOwnerClaim(item, item.answer);
+        } catch (error) {
+          // The answer was recorded by a process that could not apply it; no one here waits on it.
+          logger.error('An owner claim answered while the daemon was down could not be saved; the sender is not the owner yet', {
+            claimId: item.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
     };
-    if (this.loaded) replay();
-    else this.pendingClaimReplay = replay;
+    // Run by the next start(): the daemon's own start-up, or the first ingress evaluated after this attach.
+    this.pendingClaimReplay = replay;
     return () => {
       this.ownerInboxUnsubscribe?.();
       this.ownerInboxUnsubscribe = null;
@@ -544,14 +555,14 @@ export class ChannelPolicyManager {
   }
 
   /** The owner answered a claim: accept makes the sender the owner, decline is remembered. */
-  private async settleOwnerClaim(item: OwnerItem): Promise<void> {
-    await this.start();
+  private async settleOwnerClaim(item: OwnerItem, answer: OwnerAnswer): Promise<void> {
+    if (!this.loaded) await this.start();
     const surface = item.metadata?.['surface'];
     const userId = item.metadata?.['userId'];
     const groupPolicyId = item.metadata?.['groupPolicyId'];
     if (typeof surface !== 'string' || typeof userId !== 'string') return;
     const policy = this.getPolicy(surface as ChannelSurface);
-    if (item.answer?.option !== 'accept') {
+    if (answer.option !== 'accept') {
       const declined = Array.isArray(policy.metadata[DECLINED_CLAIMANTS_KEY])
         ? (policy.metadata[DECLINED_CLAIMANTS_KEY] as unknown[]).filter((entry): entry is string => typeof entry === 'string')
         : [];
@@ -572,7 +583,7 @@ export class ChannelPolicyManager {
     if (policy.ownerId) return;
     // The surface has an owner now; the other senders' claims are moot.
     for (const other of this.ownerInbox?.listNow({ kinds: ['claim'], status: 'open' }) ?? []) {
-      if (other.key?.startsWith(`${CLAIM_KEY_PREFIX}${policy.surface}:`)) {
+      if (other.id !== item.id && other.key?.startsWith(`${CLAIM_KEY_PREFIX}${policy.surface}:`)) {
         // A claim closed in the meantime is refused, which leaves nothing to do.
         this.ownerInbox?.withdraw(other.id, `${policy.surface} now has an owner`);
       }

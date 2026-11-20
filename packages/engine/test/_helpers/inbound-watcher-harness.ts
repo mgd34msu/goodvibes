@@ -15,34 +15,6 @@ interface Sleeper {
   readonly wake: () => void;
 }
 
-/** Let pending microtasks and I/O callbacks run. */
-export async function flush(times = 3): Promise<void> {
-  for (let index = 0; index < times; index += 1) {
-    await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
-  }
-}
-
-/**
- * Let the event loop turn until `predicate` holds, bounded in turns, never in
- * milliseconds.
- *
- * The fake IMAP server is a real loopback socket, so "the watcher has received
- * the response" is genuinely asynchronous; each turn lets the sockets deliver.
- * Everything with a duration in it runs on the fake clock instead. A condition
- * that never holds fails by name once the turns run out.
- */
-export async function waitFor(
-  predicate: () => boolean,
-  what: string,
-  turns = 40_000,
-): Promise<void> {
-  for (let turn = 0; turn < turns; turn += 1) {
-    if (predicate()) return;
-    await new Promise<void>((resolve) => { setImmediate(resolve); });
-  }
-  if (!predicate()) throw new Error(`Gave up after ${turns} event-loop turns waiting for: ${what}`);
-}
-
 export class FakeClock implements WatcherClock {
   private time = 1_753_000_000_000;
   private readonly sleepers = new Set<Sleeper>();
@@ -83,7 +55,10 @@ export class FakeClock implements WatcherClock {
     });
   }
 
-  /** Move time forward and wake everything that came due, oldest first. */
+  /**
+   * Move time forward and wake everything that came due, oldest first. What the
+   * woken code does next is the reader's to report (nextQuiet), not a pause here.
+   */
   async advance(ms: number): Promise<void> {
     const target = this.time + ms;
     for (;;) {
@@ -95,28 +70,8 @@ export class FakeClock implements WatcherClock {
       if (due === null) break;
       this.time = Math.max(this.time, due.at);
       due.wake();
-      await flush(2);
     }
     this.time = Math.max(this.time, target);
-    await flush(2);
-  }
-
-  /** Wait, in real time, until at least `count` waits are outstanding. */
-  async waitForSleepers(count = 1, what = 'a scheduled wait'): Promise<void> {
-    await waitFor(() => this.sleepers.size >= count, what);
-  }
-
-  /**
-   * Wait until a wait shorter than `maxMs` is outstanding.
-   *
-   * Distinguishing a short wait from a long one matters: the IDLE re-issue
-   * timer is armed for twenty-seven minutes and is almost always pending, so
-   * "some wait exists" is true before the backoff a test is actually waiting
-   * for has been armed, and advancing past a wait that has not been created
-   * yet leaves the test hanging on a timer that will never come due.
-   */
-  async waitForDue(maxMs: number, what = 'a short scheduled wait'): Promise<void> {
-    await waitFor(() => this.sleepers.size > 0 && this.nextDueIn <= maxMs, what);
   }
 }
 

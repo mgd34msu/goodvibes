@@ -43,19 +43,6 @@ function watch(source: RevisionSource): { moved(): boolean } {
   };
 }
 
-/**
- * A store that watches its directory takes in another process's write when the
- * watch reports it: turn the event loop until the revision has moved, bounded
- * in steps, never in milliseconds.
- */
-async function movesOnceHeard(revision: { moved(): boolean }, what: string): Promise<void> {
-  for (let step = 0; step < 200_000; step += 1) {
-    if (revision.moved()) return;
-    await new Promise<void>((resolve) => { setImmediate(resolve); });
-  }
-  throw new Error(`The revision never moved for: ${what}`);
-}
-
 describe('owners move their revision on every change and not on reads', () => {
   test('permission rules: add, remember, delete, and another process adding a rule', async () => {
     const file = join(tempRoot(), 'rules.json');
@@ -79,7 +66,8 @@ describe('owners move their revision on every change and not on reads', () => {
     await other.awaitReady();
     const elsewhere = ruleFor('git diff');
     await other.add(elsewhere);
-    await movesOnceHeard(revision, 'a rule another store added');
+    await store.diskChangeHeard();
+    expect(revision.moved()).toBe(true);
     expect(store.rememberedRules().map(rule => rule.id)).toContain(elsewhere.rule.id);
     expect(revision.moved()).toBe(false);
 
@@ -106,7 +94,7 @@ describe('owners move their revision on every change and not on reads', () => {
     expect(revision.moved()).toBe(true);
   });
 
-  test('device pairings: mint, rename and revoke move it; a last-seen stamp does not; another process minting does once read', () => {
+  test('device pairings: mint, rename and revoke move it; a last-seen stamp does not; another process minting does once read', async () => {
     const file = join(tempRoot(), 'pairing.json');
     const pairing = new PairingTokenManager(file);
     const revision = watch(pairing.revisionSource);
@@ -126,7 +114,7 @@ describe('owners move their revision on every change and not on reads', () => {
     expect(pairing.list()).toHaveLength(2);
     expect(revision.moved()).toBe(true);
 
-    expect(pairing.rename(minted.id, 'Renamed device')).toBe(true);
+    expect(await pairing.rename(minted.id, 'Renamed device')).toBe(true);
     expect(revision.moved()).toBe(true);
     expect(pairing.revoke(minted.id)).toBe(true);
     expect(revision.moved()).toBe(true);

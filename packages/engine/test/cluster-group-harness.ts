@@ -88,8 +88,7 @@ export async function addGroupNode(world: GroupTestWorld, label: string): Promis
   return node;
 }
 
-/** Stop every runtime in the world and let their last handlers run. */
+/** Stop every runtime in the world; each stop returns once the exchanges it had started have ended. */
 export async function stopGroupWorld(world: GroupTestWorld): Promise<void> {
   for (const node of world.nodes) await node.runtime.stop();
-  for (let index = 0; index < 8; index += 1) await new Promise<void>((resolve) => { setImmediate(resolve); });
 }

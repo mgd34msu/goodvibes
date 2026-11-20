@@ -112,7 +112,7 @@ describe('Slack Socket Mode acknowledgement', () => {
     const socket = FakeSocket.last;
     const deliver = async (id: string): Promise<void> => {
       socket.emit('message', { data: JSON.stringify({ envelope_id: id, type: 'events_api', payload: {} }) });
-      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+      await client.idle();
     };
     await deliver('e1');
     fail = true;

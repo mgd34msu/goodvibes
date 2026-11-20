@@ -23,17 +23,18 @@ import { join } from 'node:path';
 import { PersistentStore } from '../../platform/src/platform/state/persistent-store.js';
 
 export class ControllableStore<T extends Record<string, unknown>> extends PersistentStore<T> {
-  /** Timer-based slowdown for the next write only. Prefer `holdNext()`. */
-  delayNextMs = 0;
   private gate: Promise<void> | null = null;
+  private onHeldStart: (() => void) | null = null;
   /**
-   * Park the next write, after its bytes are captured, until the returned
-   * function is called. Consumed by that write.
+   * Park the next write, after its bytes are captured, until `release` is
+   * called. `started` resolves when that write has begun and is parked.
+   * Consumed by that write.
    */
-  holdNext(): () => void {
+  holdNext(): { readonly release: () => void; readonly started: Promise<void> } {
     let release: () => void = () => {};
     this.gate = new Promise<void>((resolve) => { release = resolve; });
-    return release;
+    const started = new Promise<void>((resolve) => { this.onHeldStart = resolve; });
+    return { release, started };
   }
   /** The next write rejects instead of writing. Consumed by that write. */
   failNext = false;
@@ -51,60 +52,37 @@ export class ControllableStore<T extends Record<string, unknown>> extends Persis
   finished = 0;
 
   /**
-   * The delay is applied AFTER the bytes are formed, not before.
+   * A held write is parked AFTER the bytes are formed, not before.
    *
    * This matters for the callers that hand `persist` a LIVE object rather than
    * a copy, `DaemonBatchManager` passes `this.data`, `KVState` passes its own
    * map. `PersistentStore.persist` serialises what it is given a few
    * microtasks in, so for those callers the write's content is fixed early and
    * only its RENAME is late. That is also what the CI failure was: a slow
-   * fsync, which is slow after the content exists. Sleeping before the capture
+   * fsync, which is slow after the content exists. Holding before the capture
    * would model a write that is slow before it has looked at anything, and a
    * test built on that would let a stale write pick up state written while it
-   * was asleep, which is to say it would pass with the defect still in place.
+   * was held, which is to say it would pass with the defect still in place.
    */
   override async persist(data: T, options?: Parameters<PersistentStore<T>['persist']>[1]): Promise<void> {
     this.started += 1;
     const fail = this.failNext || this.failWriteNumber === this.started;
     this.failNext = false;
-    const delay = this.delayNextMs;
-    this.delayNextMs = 0;
     const gate = this.gate;
     this.gate = null;
+    const heldStart = this.onHeldStart;
+    this.onHeldStart = null;
     // Exactly the projection `persist` itself would write, taken now.
     const captured = JSON.parse(JSON.stringify(data)) as T;
     try {
+      heldStart?.();
       if (gate) await gate;
-      if (delay > 0) await new Promise<void>((resolve) => { setTimeout(resolve, delay); });
       if (fail) throw new Error('store unavailable');
       await super.persist(captured, options);
     } finally {
       this.finished += 1;
     }
   }
-}
-
-/**
- * Give a competing write the chance to run while a held write is parked.
- *
- * With a write queue the competing call waits behind the held write and never
- * reaches the store, so this runs its bounded number of event-loop turns and
- * returns. Without one, the competing write starts and finishes inside those
- * turns, and this returns as soon as it has, so the test then releases the held
- * write AFTER it, which is the order that puts the stale bytes on disk.
- * `heldWrites` is how many writes have started, the held one included.
- */
-export async function settleCompetingWrite(
-  store: { readonly started: number; readonly finished: number },
-  heldWrites: number,
-): Promise<void> {
-  const turn = (): Promise<void> => new Promise<void>((resolve) => { setImmediate(resolve); });
-  const settled = (): boolean => store.started > heldWrites && store.finished >= store.started - 1;
-  for (let i = 0; i < 200 && !settled(); i += 1) await turn();
-  // A competing write that has started but is still mid-fsync must be waited
-  // out: returning early releases the held write first and the stale bytes
-  // land last only by luck. Give up only if none ever started.
-  while (store.started > heldWrites && !settled()) await turn();
 }
 
 export interface ControllableStoreFixture<T extends Record<string, unknown>> {

@@ -22,15 +22,6 @@ import type { SharedSessionContinuationRequest } from '../platform/src/platform/
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-/** Let the event loop turn until `done` holds; bounded in turns, never in milliseconds. */
-async function until(done: () => boolean, what: string): Promise<void> {
-  for (let turn = 0; turn < 50_000; turn += 1) {
-    if (done()) return;
-    await new Promise<void>((resolve) => { setImmediate(resolve); });
-  }
-  if (!done()) throw new Error(`Gave up waiting for: ${what}`);
-}
-
 async function open(root: string) {
   const routeBindings = new RouteBindingManager({ store: new AutomationRouteStore(join(root, 'bindings.json')) });
   const broker = new SharedSessionBroker({
@@ -99,7 +90,7 @@ test('messages waiting for a free agent slot are started once, in arrival order,
   cleanups.push(() => after.broker.stop());
   const started: string[] = [];
   after.broker.setContinuationRunner((request: SharedSessionContinuationRequest) => { started.push(request.input.body); return { agentId: `restarted-agent-${started.length}` }; });
-  await until(() => started.length >= 2, 'both waiting messages to start');
+  await after.broker.idle();
 
   expect(started).toEqual(['chat-1: waits', 'chat-2: waits']);
   expect([state(after.broker, one.session, waitingOne.input!.id), state(after.broker, two.session, waitingTwo.input!.id)]).toEqual(['spawned', 'spawned']);

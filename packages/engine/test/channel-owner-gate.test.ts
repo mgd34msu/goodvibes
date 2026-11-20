@@ -51,13 +51,11 @@ function scratch(): string {
   return dir;
 }
 
-/** Let the event loop turn until `done` holds; bounded in turns, never in milliseconds. */
-async function until(done: () => boolean, what: string): Promise<void> {
-  for (let turn = 0; turn < 20_000; turn += 1) {
-    if (done()) return;
-    await new Promise<void>((resolve) => { setImmediate(resolve); });
-  }
-  if (!done()) throw new Error(`Gave up waiting for: ${what}`);
+/** The first ask the broker publishes as pending: published once its record is durable. Subscribe before raising it. */
+function nextPending(broker: ApprovalBroker): Promise<string> {
+  return new Promise<string>((resolve) => {
+    const off = broker.subscribe((approval) => { if (approval.status === 'pending') { off(); resolve(approval.id); } });
+  });
 }
 
 /** A slack surface whose owner is U-OWNER and which also admits U-FRIEND. */
@@ -83,7 +81,7 @@ test('the first unknown sender is held as a claim; only an accepted claim makes 
     expect(claims).toHaveLength(2);
     const ownerClaim = claims.find((item) => item.metadata?.['userId'] === 'U-OWNER')!;
     expect((await inbox.answer(ownerClaim.id, { option: 'accept' }, { actor: 'owner', surface: 'tui' })).applied).toBe(true);
-    await until(() => policy.getPolicy('telegram').ownerId === 'U-OWNER', 'the accepted claim to make U-OWNER the owner');
+    expect(policy.getPolicy('telegram').ownerId).toBe('U-OWNER');
 
     expect(policy.getPolicy('telegram').allowlistUserIds).toEqual(['U-OWNER']);
     expect((await policy.evaluateIngress({ surface: 'telegram', userId: 'U-OWNER', conversationKind: 'direct', text: 'again' })).allowed).toBe(true);
@@ -111,8 +109,9 @@ describe('a reply in the channel answering a pending permission ask', () => {
       approvalBroker: broker,
       routeBindings: { getBinding: () => ({ surfaceKind: 'slack' }) },
     } as unknown as ConstructorParameters<typeof DaemonSurfaceActionHelper>[0]);
+    const pending = nextPending(broker);
     const decision = broker.requestApproval({ request: askRequest(callId), routeId: 'route-1' });
-    await until(() => broker.listApprovals(10).some((entry) => entry.status === 'pending'), 'the ask to be pending');
+    await pending;
     const reply = (userId: string, text: string) => helper.authorizeSurfaceIngress({ surface: 'slack', userId, conversationKind: 'direct', text });
     return { policy, broker, decision, reply };
   }
@@ -222,11 +221,11 @@ test('a guest on the owner\'s channel answers no purchase window, presses no app
     expect(await window).toEqual({ answer: 'approve', channel: 'telegram' });
 
     // The approve button on a permission ask: the guest's press, and one with no sender, leave it pending; the owner's approves it.
+    const pending = nextPending(broker);
     const ask = broker.requestApproval({ request: { callId: 'call-button', tool: 'run_command', args: { command: 'deploy' }, category: 'execute',
       analysis: { classification: 'execute', riskLevel: 'medium', summary: 'run a command', reasons: [] } }, routeId: 'route-1' });
     void ask.catch(() => undefined);
-    await until(() => broker.listApprovals(10).some((entry) => entry.status === 'pending'), 'the ask to be pending');
-    const approvalId = broker.listApprovals(10).find((entry) => entry.status === 'pending')!.id;
+    const approvalId = await pending;
     const press = (userId?: string) => helper.performInteractiveSurfaceAction(`gv:approval:approve:${approvalId}`, 'slack', new Request('http://127.0.0.1/slack/actions', { method: 'POST' }), userId);
     await press('U-FRIEND');
     await press(undefined);

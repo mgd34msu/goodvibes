@@ -40,15 +40,6 @@ afterEach(async () => {
   ntfyOutboundDedup.reset();
 });
 
-/** Let the event loop turn until `done` holds; bounded in turns, never in milliseconds. */
-async function until(done: () => boolean, what: string): Promise<void> {
-  for (let turn = 0; turn < 200_000; turn += 1) {
-    if (done()) return;
-    await new Promise<void>((resolve) => { setImmediate(resolve); });
-  }
-  if (!done()) throw new Error(`Gave up waiting for: ${what}`);
-}
-
 async function ntfyServer(refused: ReadonlySet<string>) {
   const received: Array<{ topic: string; body: string; accepted: boolean }> = [];
   const server: Server = createServer((req, res) => {
@@ -122,10 +113,10 @@ async function automation(ntfyUrl: string, outcome: AgentRecord['status']) {
 test('a run that fails is announced once on the job\'s own target when the job names no failure route', async () => {
   const ntfy = await ntfyServer(new Set());
   const { manager, run } = await automation(ntfy.url, 'failed');
-  await until(() => ntfy.accepted('job-primary').length >= 1, 'the failure notice');
+  await manager.deliveriesSettled();
   // Further reads settle nothing again and send nothing more.
   manager.listJobs();
-  for (let turn = 0; turn < 500; turn += 1) await new Promise<void>((resolve) => { setImmediate(resolve); });
+  await manager.deliveriesSettled();
 
   expect(manager.getRun(run.id)?.status).toBe('failed');
   const notices = ntfy.accepted('job-primary');
@@ -138,7 +129,7 @@ test('a run that fails is announced once on the job\'s own target when the job n
 test('a result the first target refuses is delivered to the fallback target, once', async () => {
   const ntfy = await ntfyServer(new Set(['job-primary']));
   const { manager, run } = await automation(ntfy.url, 'completed');
-  await until(() => ntfy.accepted('job-fallback').length >= 1, 'the result on the fallback target');
+  await manager.deliveriesSettled();
 
   expect(manager.getRun(run.id)?.status).toBe('completed');
   expect(ntfy.received.filter((entry) => entry.topic === 'job-primary').map((entry) => entry.accepted)).toEqual([false]);

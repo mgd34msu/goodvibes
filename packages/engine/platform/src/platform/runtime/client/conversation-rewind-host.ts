@@ -103,6 +103,8 @@ export interface ConversationRewindHostOptions {
    */
   readonly port: RewindConversationPort & {
     restoreBefore?(undoSnapshotId: string): boolean;
+    /** restoreBefore with the conversation's save awaited; an undo is answered only after it, saying when it failed. */
+    restoreBeforeSaved?(undoSnapshotId: string): Promise<{ readonly restored: boolean; readonly notSaved?: string }>;
     messagesSinceRewind?(undoSnapshotId: string): number | null;
     /** The session a rewind's undo snapshot was taken of; an undo asked for another session is refused. */
     snapshotSession?(undoSnapshotId: string): string | null;
@@ -239,7 +241,7 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
     const unavailable = (reason: string | undefined) => ({
       unavailableReason: reason?.trim() || `this surface could not rewind the conversation for session ${request.sessionId}`,
     });
-    if (request.kind === 'undo') return undoHere(request);
+    if (request.kind === 'undo') return await undoHere(request);
     if (request.kind === 'preview') {
       const preview = await options.port.preview(anchor);
       if (!isCurrent(offer)) return undefined;
@@ -260,7 +262,7 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
   };
 
   /** Restore the pre-rewind conversation, only while nothing newer was added since the rewind. */
-  const undoHere = (request: HostRequest): Record<string, unknown> => {
+  const undoHere = async (request: HostRequest): Promise<Record<string, unknown>> => {
     const id = request.undoSnapshotId ?? '';
     const port = options.port;
     if (!port.restoreBefore || !port.messagesSinceRewind) {
@@ -278,11 +280,13 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
       const what = since > 0 ? `${since} newer message${since === 1 ? '' : 's'}` : 'been edited';
       return { unavailableReason: `the conversation has ${what} since the rewind`, unavailableCode: 'CONVERSATION_CHANGED' };
     }
-    if (!port.restoreBefore(id)) {
+    // The save is awaited where the port offers it, so "undone" is reported once the restore is on disk or said not to be.
+    const restored = port.restoreBeforeSaved ? await port.restoreBeforeSaved(id) : { restored: port.restoreBefore(id) };
+    if (!restored.restored) {
       return { unavailableReason: 'the undo snapshot is gone from this surface', unavailableCode: 'UNDO_POINT_GONE' };
     }
     restoreAnchorsDroppedBy(id, options.surface);
-    return { undone: true };
+    return { undone: true, ...(restored.notSaved === undefined ? {} : { notSaved: restored.notSaved }) };
   };
 
   /** A rewind applied here that the daemon has no record of: put it back when that is certain. */

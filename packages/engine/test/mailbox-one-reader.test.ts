@@ -159,6 +159,8 @@ async function machine(server: FakeMailboxOptions = {}) {
       async start() { await supervisor.start(); void intake.sendHeldNotices(); },
       stop,
       get status() { return supervisor.status; },
+      whenQuiet: () => supervisor.whenQuiet(),
+      nextQuiet: () => supervisor.nextQuiet(),
     };
   };
   const rows = () => inbox.mirror!.listItems({ providers: ['email'], limit: 1_000 });
@@ -177,19 +179,19 @@ async function machine(server: FakeMailboxOptions = {}) {
   };
 }
 
-/**
- * Let the reader run: real socket turns, and the fake clock moved to the next
- * scheduled wait (a reconnect backoff, an IDLE re-issue) whenever nothing else
- * is moving. Bounded in steps, never in milliseconds.
- */
-async function pump(clock: FakeClock, done: () => boolean | Promise<boolean>, what: string): Promise<void> {
-  for (let step = 0; step < 40_000; step += 1) {
-    if (await done()) return;
-    await new Promise<void>((resolve) => { setImmediate(resolve); });
-    // Scheduled waits are moved only after the sockets have had their turns.
-    if (step % 200 === 199 && clock.pending > 0) await clock.advance(Math.max(1, clock.nextDueIn));
-  }
-  if (!await done()) throw new Error(`Gave up waiting for: ${what}`);
+/** A reader that says when the step a push or a clock move caused is done (see InboundMailSupervisor.nextQuiet). */
+interface QuietReader { whenQuiet(): Promise<void>; nextQuiet(): Promise<void> }
+
+/** Do `act` (a push, a dropped connection, a clock move) and return once the reader is quiet again: the step it caused is done. */
+async function after(reader: QuietReader, act: () => unknown): Promise<void> {
+  const quiet = reader.nextQuiet();
+  await act();
+  await quiet;
+}
+
+/** Move the fake clock to the reader's next scheduled wait (a reconnect backoff) and return once the step it caused is done. */
+async function tick(reader: QuietReader, clock: FakeClock): Promise<void> {
+  await after(reader, () => clock.advance(Math.max(1, clock.nextDueIn)));
 }
 
 const idleCount = (mailbox: FakeMailboxServer) => mailbox.commands.filter((line) => /^\S+ IDLE$/.test(line)).length;
@@ -201,22 +203,28 @@ test('every message reaches notices and the inbox exactly once across a reconnec
   const first = m.daemon();
   await first.start();
   // First run: the message already there is kept as history for the inbox and announced to nobody.
-  await pump(m.clock, () => m.shown('already here') === 1 && idleCount(m.mailbox) >= 1, 'the history window and IDLE');
+  await first.whenQuiet();
+  expect(m.shown('already here')).toBe(1);
+  expect(idleCount(m.mailbox)).toBeGreaterThanOrEqual(1);
   expect(m.announced('already here')).toBe(0);
 
   // Arriving while connected.
-  m.mailbox.deliver('live one');
-  await pump(m.clock, () => m.shown('live one') === 1, 'live mail');
+  await after(first, () => m.mailbox.deliver('live one'));
+  expect(m.shown('live one')).toBe(1);
 
   // Arriving while the connection is down: found by the first drain after the reconnect.
-  m.mailbox.dropConnections();
-  m.mailbox.deliverQuietly('while down a');
-  m.mailbox.deliverQuietly('while down b');
-  await pump(m.clock, () => m.shown('while down a') === 1 && m.shown('while down b') === 1, 'mail from while the connection was down');
+  await after(first, () => {
+    m.mailbox.dropConnections();
+    m.mailbox.deliverQuietly('while down a');
+    m.mailbox.deliverQuietly('while down b');
+  });
+  // Quiet in the reconnect backoff; moving the clock past it reconnects and drains.
+  await tick(first, m.clock);
+  expect([m.shown('while down a'), m.shown('while down b')]).toEqual([1, 1]);
 
   // A restart part-way through one batch: the daemon stops while the third
   // notice of five is being sent, and a new daemon takes over the same stores.
-  await pump(m.clock, () => idleCount(m.mailbox) >= 2, 'IDLE after the reconnect');
+  expect(idleCount(m.mailbox)).toBeGreaterThanOrEqual(2);
   const held = m.holdNoticeFor('batch 3');
   for (const n of [1, 2, 3, 4, 5]) m.mailbox.deliverQuietly(`batch ${n}`);
   m.mailbox.push(`* ${m.mailbox.uids.length} EXISTS`);
@@ -226,15 +234,18 @@ test('every message reaches notices and the inbox exactly once across a reconnec
   await stopping;
   const second = m.daemon();
   await second.start();
-  await pump(m.clock, () => [1, 2, 3, 4, 5].every((n) => m.shown(`batch ${n}`) === 1), 'the whole batch after the restart');
+  await second.whenQuiet();
+  expect([1, 2, 3, 4, 5].map((n) => m.shown(`batch ${n}`))).toEqual([1, 1, 1, 1, 1]);
 
   // A UIDVALIDITY change: every stored row named the old generation; the inbox
   // now shows the mailbox under the new one, and nothing old is announced again.
   m.mailbox.setUidValidity(77);
-  m.mailbox.dropConnections();
-  await pump(m.clock, () => m.rows().length > 0 && m.rows().every((row) => row.id.includes(':0000000077:')), 'the new generation');
-  m.mailbox.deliver('after reset');
-  await pump(m.clock, () => m.shown('after reset') === 1, 'mail after the reset');
+  await after(second, () => m.mailbox.dropConnections());
+  await tick(second, m.clock);
+  expect(m.rows().length).toBeGreaterThan(0);
+  expect(m.rows().filter((row) => !row.id.includes(':0000000077:'))).toEqual([]);
+  await after(second, () => m.mailbox.deliver('after reset'));
+  expect(m.shown('after reset')).toBe(1);
 
   const announcedOnce = ['live one', 'while down a', 'while down b', 'batch 1', 'batch 2', 'batch 3', 'batch 4', 'batch 5', 'after reset'];
   for (const subject of announcedOnce) expect({ subject, notices: m.announced(subject) }).toEqual({ subject, notices: 1 });
@@ -250,13 +261,18 @@ test('an unreadable message is stepped over and reported, and the messages after
   const m = await machine({ unreadableUids: [102] });
   const reader = m.daemon();
   await reader.start();
-  await pump(m.clock, () => idleCount(m.mailbox) >= 1, 'IDLE');
+  await reader.whenQuiet();
+  expect(idleCount(m.mailbox)).toBeGreaterThanOrEqual(1);
   m.mailbox.deliverQuietly('before');
   m.mailbox.deliverQuietly('unreadable');
   m.mailbox.deliverQuietly('after');
-  m.mailbox.push('* 3 EXISTS');
-  await pump(m.clock, async () => m.shown('after') === 1 && (await m.cursors.get(ACCOUNT, MAILBOX))?.lastSeenUid === 103,
-    'the message after the unreadable one, and the cursor past it');
+  await after(reader, () => m.mailbox.push('* 3 EXISTS'));
+  // The unreadable message holds the cursor while it is read again after 0.5 and 1 second; the second miss steps over it.
+  expect(m.clock.nextDueIn).toBe(500);
+  await tick(reader, m.clock);
+  expect(m.clock.nextDueIn).toBe(1_000);
+  await tick(reader, m.clock);
+  expect(m.shown('after')).toBe(1);
 
   expect(m.announced('before')).toBe(1);
   expect(m.announced('after')).toBe(1);
@@ -274,21 +290,24 @@ test('with two daemons for the same account only one signs in and reads', async 
   const b = m.daemon();
   await a.start();
   await b.start();
-  await pump(m.clock, () => idleCount(m.mailbox) >= 1, 'the first daemon in IDLE');
+  await a.whenQuiet();
+  expect(idleCount(m.mailbox)).toBeGreaterThanOrEqual(1);
   expect(a.status.running).toBe(true);
   expect(b.status.running).toBe(false);
   const logins = () => m.mailbox.commands.filter((line) => /^\S+ LOGIN /.test(line)).length;
   expect(logins()).toBe(1);
 
-  m.mailbox.deliver('to one reader');
-  await pump(m.clock, () => m.shown('to one reader') === 1, 'mail through the one reader');
+  await after(a, () => m.mailbox.deliver('to one reader'));
+  expect(m.shown('to one reader')).toBe(1);
 
   // The holder stops; the other takes over and reads from where it left off.
   await a.stop();
   await b.start();
-  await pump(m.clock, () => b.status.running && idleCount(m.mailbox) >= 2, 'the second daemon in IDLE');
-  m.mailbox.deliver('after handover');
-  await pump(m.clock, () => m.shown('after handover') === 1, 'mail after the handover');
+  await b.whenQuiet();
+  expect(b.status.running).toBe(true);
+  expect(idleCount(m.mailbox)).toBeGreaterThanOrEqual(2);
+  await after(b, () => m.mailbox.deliver('after handover'));
+  expect(m.shown('after handover')).toBe(1);
 
   expect(logins()).toBe(2);
   expect(m.announced('to one reader')).toBe(1);
@@ -300,28 +319,29 @@ test('a mail that arrives while the notice channel is down is announced once whe
   const m = await machine();
   const first = m.daemon();
   await first.start();
-  await pump(m.clock, () => idleCount(m.mailbox) >= 1, 'IDLE');
+  await first.whenQuiet();
+  expect(idleCount(m.mailbox)).toBeGreaterThanOrEqual(1);
 
   // The notice channel is down: the mail is read and recorded, the cursor passes it, nobody is told yet.
   m.route.down = true;
-  m.mailbox.deliver('during the outage');
-  await pump(m.clock, async () => m.shown('during the outage') === 1 && (await m.cursors.get(ACCOUNT, MAILBOX))?.lastSeenUid === 101,
-    'the cursor past the mail whose notice is held');
+  await after(first, () => m.mailbox.deliver('during the outage'));
+  expect(m.shown('during the outage')).toBe(1);
+  expect((await m.cursors.get(ACCOUNT, MAILBOX))?.lastSeenUid).toBe(101);
   expect(m.announced('during the outage')).toBe(0);
 
   // The daemon restarts while the channel is still down; nothing of the held notice is in memory any more.
   await first.stop();
   const second = m.daemon();
   await second.start();
-  await pump(m.clock, () => idleCount(m.mailbox) >= 2, 'IDLE after the restart');
+  await second.whenQuiet();
+  expect(idleCount(m.mailbox)).toBeGreaterThanOrEqual(2);
   expect(m.announced('during the outage')).toBe(0);
 
   // The channel works again and the next mail's notice gets through: the held one follows it.
   m.route.down = false;
-  m.mailbox.deliver('after the outage');
-  const held = async () => (await m.records.list()).find((record) => record.subject === 'during the outage');
-  await pump(m.clock, async () => m.announced('after the outage') === 1 && m.announced('during the outage') === 1
-    && (await held())?.noticeStatus === 'delivered', 'both notices sent and the held one settled');
+  await after(second, () => m.mailbox.deliver('after the outage'));
+  const held = (await m.records.list()).find((record) => record.subject === 'during the outage');
+  expect(held?.noticeStatus).toBe('delivered');
   expect({ held: m.announced('during the outage'), after: m.announced('after the outage') }).toEqual({ held: 1, after: 1 });
 });
 
@@ -331,13 +351,21 @@ test('a mail whose handling keeps failing is set aside and reported once, one th
   m.failHandling.set('fails once', 1);
   const reader = m.daemon();
   await reader.start();
-  await pump(m.clock, () => idleCount(m.mailbox) >= 1, 'IDLE');
+  await reader.whenQuiet();
+  expect(idleCount(m.mailbox)).toBeGreaterThanOrEqual(1);
   m.mailbox.deliverQuietly('keeps failing');
   m.mailbox.deliverQuietly('fails once');
   m.mailbox.deliverQuietly('after them');
-  m.mailbox.push('* 3 EXISTS');
-  await pump(m.clock, async () => m.shown('after them') === 1 && (await m.cursors.get(ACCOUNT, MAILBOX))?.lastSeenUid === 103,
-    'the mail after the failing one, and the cursor past all three');
+  await after(reader, () => m.mailbox.push('* 3 EXISTS'));
+  expect(m.shown('after them')).toBe(1);
+  // The failing mail holds the cursor while its handling is retried after 0.5, 1 and 2 seconds; the third failure sets it aside.
+  expect(m.clock.nextDueIn).toBe(500);
+  await tick(reader, m.clock);
+  expect(m.clock.nextDueIn).toBe(1_000);
+  await tick(reader, m.clock);
+  expect(m.clock.nextDueIn).toBe(2_000);
+  await tick(reader, m.clock);
+  expect((await m.cursors.get(ACCOUNT, MAILBOX))?.lastSeenUid).toBe(103);
 
   expect({ failing: m.announced('keeps failing'), once: m.announced('fails once'), after: m.announced('after them') })
     .toEqual({ failing: 0, once: 1, after: 1 });

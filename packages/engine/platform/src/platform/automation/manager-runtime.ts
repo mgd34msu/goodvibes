@@ -160,6 +160,8 @@ export class AutomationManager {
   private deliveryManager: AutomationDeliveryManager | null;
   private readonly unattendedRuns: UnattendedRuns | undefined;
   private readonly deliveryInFlight = new Set<string>();
+  /** Run answers and failure notices being sent now; {@link deliveriesSettled} waits for them. */
+  private readonly deliveries = new Set<Promise<void>>();
   // Attached post-construction by the CheckinService (attachCheckinEvaluator);
   // runs the briefing→judgment→delivery loop for kind:'checkin' jobs.
   private checkinEvaluator?: AutomationCheckinEvaluator | undefined;
@@ -374,9 +376,11 @@ export class AutomationManager {
    * The one way a job leaves the manager, whoever removes it (an owner, an
    * agent, a one-shot job finishing): its record, timers and queued wakes go,
    * and a run of it still in flight is cancelled rather than left to finish
-   * against a job that no longer exists.
+   * against a job that no longer exists. Returns the group record's removal
+   * (never rejects; a failure is logged as a create's or update's is), which an
+   * owner's removal awaits before it answers.
    */
-  private removeJobRecord(jobId: string, reason: string): void {
+  private removeJobRecord(jobId: string, reason: string): Promise<void> {
     this.cancelTimer(jobId);
     this.heartbeatWakes.delete(jobId);
     for (const [key, wait] of this.capacityWaits) if (wait.jobId === jobId) this.capacityWaits.delete(key);
@@ -403,8 +407,9 @@ export class AutomationManager {
     this.jobs.delete(jobId);
     removeAutomationJobFromRuntime(this.runtimeDispatch, jobId, `automation.${reason}`);
     // Removed in the group, for good: no machine runs or lists it again.
+    let groupRemoval: Promise<void> = Promise.resolve();
     if (removed && this.sharedWithGroup(removed) && this.group?.shared()) {
-      void this.group.remove(jobId, 'automation-manager', reason).catch((error: unknown) => {
+      groupRemoval = this.group.remove(jobId, 'automation-manager', reason).then(() => undefined, (error: unknown) => {
         logger.warn('AutomationManager: a job removal could not be written to the group\'s record', { jobId, error: summarizeError(error) });
       });
     }
@@ -413,6 +418,7 @@ export class AutomationManager {
         logger.warn('AutomationManager: run persistence failed', { reason: 'job-removed', jobId, error: summarizeError(error) });
       });
     }
+    return groupRemoval;
   }
 
   async start(): Promise<void> {
@@ -722,7 +728,8 @@ export class AutomationManager {
     const selected = this.jobs.get(jobId);
     if (!selected) return false;
     await this.commitJob(selected, null, { signal: options.signal, assertCurrent: current, withPublication: options.withPublication });
-    this.removeJobRecord(jobId, 'job-removed');
+    // Removed from the group's record too before the owner is told it is gone, as a create or update is.
+    await this.removeJobRecord(jobId, 'job-removed');
     return true;
   }
 
@@ -1129,17 +1136,32 @@ export class AutomationManager {
     };
   }
 
+  /**
+   * Resolves once every run answer and failure notice started so far, and any
+   * started while waiting, was sent, recorded or given up on. Never rejects.
+   * A run settles on a read (listJobs, getRun); its delivery goes on after the
+   * read returns, and this is where a caller waits for it.
+   */
+  async deliveriesSettled(): Promise<void> {
+    while (this.deliveries.size > 0) await Promise.all([...this.deliveries]);
+  }
+
+  private trackDelivery(delivery: Promise<void>): void {
+    const settled = delivery.then(() => {}, () => {}).finally(() => { this.deliveries.delete(settled); });
+    this.deliveries.add(settled);
+  }
+
   private maybeDeliverFailureNotice(job: AutomationJob, run: AutomationRun): void {
-    maybeDeliverAutomationFailureNotice(this.deliveryManager, job, run, (gapJob, gapRun) => {
+    this.trackDelivery(maybeDeliverAutomationFailureNotice(this.deliveryManager, job, run, (gapJob, gapRun) => {
       // No target: the notice goes to the owner inbox, so a failed or missed unattended run is never silent.
       if (this.unattendedRuns) {
-        void this.unattendedRuns.postToInbox(automationFailureAnswer(gapJob, gapRun));
+        this.trackDelivery(this.unattendedRuns.postToInbox(automationFailureAnswer(gapJob, gapRun)).then(() => {}));
         return;
       }
       if (this.warnedDeliveryGapJobs.has(gapJob.id)) return;
       this.warnedDeliveryGapJobs.add(gapJob.id);
       logger.warn('AutomationManager: failure notice has no delivery target', { jobId: gapJob.id, jobName: gapJob.name, runId: gapRun.id, status: gapRun.status });
-    });
+    }));
   }
 
   private syncRuntimeSnapshot(): void {
@@ -1205,6 +1227,7 @@ export class AutomationManager {
       unattendedRuns: this.unattendedRuns,
       syncRunToRuntime: (nextRun, source) => this.syncRunToRuntime(nextRun, source),
       saveRuns: () => this.saveRuns(),
+      track: (delivery) => this.trackDelivery(delivery),
       noteJobOutcome: (jobId, outcome) => this.noteJobOutcome(jobId, outcome),
       removeOneShotJob: (jobId) => {
         if (!this.jobs.has(jobId)) return;

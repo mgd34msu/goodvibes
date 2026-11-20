@@ -140,15 +140,14 @@ async function paymentHost(config: ConfigManager, options: { failSubmit?: boolea
     try { const answer = await invoke(id, body, explicit) as { outcome?: string; approved?: boolean }; return answer.outcome ?? (answer.approved ? 'approved' : 'answered'); }
     catch (error) { return String((error as { code?: unknown }).code ?? error); }
   };
-  /** Follow a begun purchase through payments.purchase.status until it has ended; bounded in turns, never in time. */
+  /** A begun purchase once it has ended (its final state, owner notice and cleanup written), as payments.purchase.status reports it. */
   const settled = async (purchaseId: string): Promise<PaymentOperationView> => {
-    for (let turn = 0; turn < 200_000; turn += 1) {
-      const status = await invoke('payments.purchase.status', { purchaseId }) as { operations: readonly PaymentOperationView[] };
-      const row = status.operations.find(operation => operation.purchaseId === purchaseId);
-      if (row !== undefined && !isLivePaymentOperation(row.state)) return row;
-      await new Promise<void>(resolve => { setImmediate(resolve); });
-    }
-    throw new Error(`purchase ${purchaseId} did not end`);
+    await registration.purchaseEnded(purchaseId);
+    const status = await invoke('payments.purchase.status', { purchaseId }) as { operations: readonly PaymentOperationView[] };
+    const row = status.operations.find(operation => operation.purchaseId === purchaseId);
+    expect(row).toBeDefined();
+    expect(isLivePaymentOperation(row!.state)).toBe(false);
+    return row!;
   };
   return { invoke, outcome, settled, notices, approvals, standing, purchases, budget, journal, cardId: card.id, close: () => registration.close() };
 }

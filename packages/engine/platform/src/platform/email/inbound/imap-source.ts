@@ -118,6 +118,14 @@ export class ImapMailSource implements InboundMailSource {
     this.watcher.requestHistory();
   }
 
+  whenQuiet(): Promise<void> {
+    return this.watcher.whenQuiet();
+  }
+
+  nextQuiet(): Promise<void> {
+    return this.watcher.nextQuiet();
+  }
+
   /**
    * What the owner is told about delay, as it stands right now.
    *

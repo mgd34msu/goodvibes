@@ -309,6 +309,8 @@ export class MemoryStore {
   private foreignCommits = 0;
   /** Writes applied to the image whose save failed and has not been followed by a successful one. */
   private unsavedChanges = 0;
+  /** The commit persist() started last; a burst of writes in one turn shares it. */
+  private lastSave: Promise<void> = Promise.resolve();
 
   constructor(dbPath: string | undefined, options: MemoryStoreOptions) {
     this.sqlite = this.openBackend(dbPath);
@@ -1290,10 +1292,24 @@ export class MemoryStore {
    * write it carried is not on disk.
    */
   private persist(): void {
-    void this.startSave().then(() => { this.unsavedChanges = 0; }, (err: unknown) => {
+    const save = this.startSave().then(() => { this.unsavedChanges = 0; }, (err: unknown) => {
       this.unsavedChanges += 1;
       logger.warn('MemoryStore: autosave failed', { error: summarizeError(err), unsavedChanges: this.unsavedChanges });
+      throw new Error(`MemoryStore: the change could not be saved to disk: ${summarizeError(err)}`, { cause: err });
     });
+    // Held for saved(); a caller that answers a person awaits it, so the rejection is not left unheard.
+    save.catch(() => {});
+    this.lastSave = save;
+  }
+
+  /**
+   * Resolves once the commit carrying this turn's synchronous writes (update,
+   * review, delete) is on disk; rejects with why when it failed. A route that
+   * answers "updated" or "deleted" awaits it first. Costs the caller the
+   * commit that was already running, nothing more.
+   */
+  async saved(): Promise<void> {
+    await this.lastSave;
   }
 
   /**

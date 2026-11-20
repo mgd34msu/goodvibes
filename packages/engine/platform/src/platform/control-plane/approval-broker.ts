@@ -481,6 +481,8 @@ export class ApprovalBroker {
   /** Raises being written, by coalesce key: an identical raise waits for the first one's write instead of making its own record. */
   private readonly raising = new Map<string, Promise<void>>();
   readonly #ownerApprovals = new OwnerApprovalAuthority();
+  /** What an approval puts in effect when approved, run inside the answer (onApproved). */
+  readonly #approvedEffects = new Map<string, () => unknown | Promise<unknown>>();
   private readonly listeners = new Set<ApprovalListener>();
   /** Every write runs one at a time, in call order; each transition is checked and written inside one unit. */
   private readonly writes = new StoreWriteQueue();
@@ -772,6 +774,17 @@ export class ApprovalBroker {
     return this.#resolveApproval(approvalId, input);
   }
 
+  /**
+   * Put `effect` in force when this approval is approved, inside the answer:
+   * the approver's resolve returns only after it ran, and a failure comes back
+   * to the approver as the answer's error with the reason, never only a log
+   * line. Denial, expiry or cancellation drop it. Returns the unregister.
+   */
+  onApproved(approvalId: string, effect: () => unknown | Promise<unknown>): () => void {
+    this.#approvedEffects.set(approvalId, effect);
+    return () => { if (this.#approvedEffects.get(approvalId) === effect) this.#approvedEffects.delete(approvalId); };
+  }
+
   async #resolveApproval(approvalId: string, input: ResolveSharedApprovalInput, proof?: OwnerApprovalProof): Promise<TransitionOutcome> {
     const approved = input.approved;
     const disposition = input.disposition;
@@ -836,6 +849,16 @@ export class ApprovalBroker {
     }
     if (outcome.applied && approval && input.rememberTier && input.rememberTier !== 'session') {
       await this.#sweepRemembered(approval, input, approved);
+    }
+    const effect = outcome.applied ? this.#approvedEffects.get(approvalId) : undefined;
+    if (outcome.applied) this.#approvedEffects.delete(approvalId);
+    if (effect && approved) {
+      try {
+        await effect();
+      } catch (error) {
+        throw Object.assign(new Error(`Approved, but the change could not be put in effect: ${error instanceof Error ? error.message : String(error)}. Nothing was changed; ask for it again.`, { cause: error }),
+          { code: 'APPROVED_NOT_APPLIED', status: 500 });
+      }
     }
     return outcome;
   }

@@ -141,8 +141,26 @@ export class InboundMailboxWatcher {
   private readonly readFailures = new MailboxReadFailures();
   /** A consumer that shows the mailbox attached late and wants the history window. */
   private historyRequested = false;
+  /** Waits on the clock outstanding now; above zero, the watcher has nothing to do until the server or the clock moves. */
+  private quietWaits = 0;
+  /** Callers of {@link nextQuiet}, resolved when the watcher next becomes quiet or stops. */
+  private quietWaiters: Array<() => void> = [];
 
   constructor(deps: InboundMailboxWatcherDeps) {
+    // Every wait of the watcher and its IDLE and poll loops is a sleep on this clock
+    // (the IDLE round's re-issue timer runs while its IDLE is open), so a sleep
+    // outstanding means the step before it is done. Counted here, once, for all of them.
+    const clock = deps.clock;
+    const quietClock = {
+      now: () => clock.now(),
+      sleep: async (ms: number, signal?: AbortSignal | undefined): Promise<void> => {
+        const waiting = clock.sleep(ms, signal);
+        this.quietWaits += 1;
+        if (this.quietWaits === 1) this.releaseQuietWaiters();
+        try { await waiting; } finally { this.quietWaits -= 1; }
+      },
+    };
+    deps = { ...deps, clock: quietClock };
     this.deps = deps;
     this.settings = deps.settings;
     this.tracker = new CapabilityStateTracker({
@@ -211,6 +229,7 @@ export class InboundMailboxWatcher {
     const runner = this.runner;
     if (runner !== null) await runner;
     this.mode = 'inactive';
+    this.releaseQuietWaiters();
   }
 
   /**
@@ -879,6 +898,29 @@ export class InboundMailboxWatcher {
       ? this.settings.serverUnavailableBackoffMs
       : undefined;
     await this.sleep(this.connectBackoff.next(ceiling));
+  }
+
+  /**
+   * Resolves when the watcher is quiet: every step it could take has been
+   * taken (a drain finished, its messages delivered or its delivery backed
+   * off) and it waits on the server (an open IDLE) or on the clock (a poll
+   * interval, a backoff, a recheck). Resolves now when it is quiet now, and
+   * when it stops. Costs nothing while nobody asks.
+   */
+  whenQuiet(): Promise<void> {
+    return this.quietWaits > 0 ? Promise.resolve() : this.nextQuiet();
+  }
+
+  /** Resolves the next time the watcher becomes quiet (see {@link whenQuiet}), or when it stops: after a push or a clock step, the step it caused is done. */
+  nextQuiet(): Promise<void> {
+    return new Promise((resolve) => { this.quietWaiters.push(resolve); });
+  }
+
+  private releaseQuietWaiters(): void {
+    if (this.quietWaiters.length === 0) return;
+    const waiters = this.quietWaiters;
+    this.quietWaiters = [];
+    for (const resolve of waiters) resolve();
   }
 
   private async sleep(ms: number): Promise<void> {

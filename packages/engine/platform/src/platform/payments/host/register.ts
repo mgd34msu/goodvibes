@@ -365,6 +365,12 @@ export interface PaymentsRegistration {
    */
   readonly recoverAsLeader: () => Promise<void>;
   readonly unregister: Unregister;
+  /**
+   * Resolves once a begun purchase's checkout operation on this host has
+   * ended (final state, owner notice and cleanup written); at once when none
+   * is running for it. What payments.checkout.begin accepted ends here.
+   */
+  readonly purchaseEnded: (purchaseId: string) => Promise<void>;
   /** Stop admission immediately and drain accepted checkout and recovery work. */
   readonly close: () => Promise<void>;
 }
@@ -562,5 +568,6 @@ export function registerPaymentsMethods(
       logger.error('payments recovery on taking the payments role failed', { error });
     }
   };
-  return { ready, recoverAsLeader, close, unregister: () => { void close(); } };
+  return { ready, recoverAsLeader, close, unregister: () => { void close(); },
+    purchaseEnded: (purchaseId: string) => checkoutServiceHolder.operations.ended(purchaseId) };
 }

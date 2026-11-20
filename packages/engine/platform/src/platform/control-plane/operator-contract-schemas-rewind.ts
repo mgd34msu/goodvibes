@@ -258,6 +258,8 @@ export const REWIND_CONVERSATION_REQUESTS_ANSWER_INPUT_SCHEMA = objectSchema(
     undoExpiresAfter: STRING_SCHEMA,
     /** Undo answers: true once the pre-rewind conversation is back. */
     undone: BOOLEAN_SCHEMA,
+    /** Undo answers, optional: the conversation is back but its save failed, and why. */
+    notSaved: STRING_SCHEMA,
     /** Non-empty: this surface cannot serve the request, and this is why. */
     unavailableReason: STRING_SCHEMA,
     /** Undo refusals: why, when it is one the caller can act on. */

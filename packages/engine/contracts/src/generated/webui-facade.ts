@@ -29590,6 +29590,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "undoSnapshotId": "sample",
       "undoExpiresAfter": "sample",
       "undone": false,
+      "notSaved": "sample",
       "unavailableReason": "sample",
       "unavailableCode": "UNDO_POINT_GONE"
     },

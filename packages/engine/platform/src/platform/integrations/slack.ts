@@ -564,6 +564,8 @@ export class SlackSocketModeClient {
   /** Bumped by `stop()` so a start that was awaiting the API does not open a socket after it. */
   private epoch = 0;
   private readonly WebSocketImpl: typeof WebSocket;
+  /** Envelopes being handled (and acknowledged or withheld) right now. */
+  private readonly handling = new Set<Promise<void>>();
 
   constructor(private readonly options: SlackSocketModeClientOptions) {
     this.WebSocketImpl = options.WebSocketImpl ?? WebSocket;
@@ -628,9 +630,11 @@ export class SlackSocketModeClient {
     });
     socket.addEventListener('message', (event) => {
       if (this.socket !== socket) return;
-      void this.handleMessage(event.data).catch((error: unknown) => {
+      const handling = this.handleMessage(event.data).catch((error: unknown) => {
         logger.warn('[slack] socket message handling failed', { error: summarizeError(error) });
       });
+      this.handling.add(handling);
+      void handling.then(() => { this.handling.delete(handling); });
     });
     return opening;
   }
@@ -657,6 +661,15 @@ export class SlackSocketModeClient {
 
   get isStarted(): boolean {
     return this.started;
+  }
+
+  /**
+   * Resolves when every envelope received so far has been handled and its
+   * acknowledgement sent or withheld, including envelopes that arrive while
+   * waiting. Nothing to wait for resolves at once.
+   */
+  async idle(): Promise<void> {
+    while (this.handling.size > 0) await Promise.allSettled([...this.handling]);
   }
 
   private async handleMessage(data: unknown): Promise<void> {

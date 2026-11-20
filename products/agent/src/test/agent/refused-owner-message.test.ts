@@ -35,11 +35,6 @@ const refusedByHost: NativeConversationIntakeState = { status: 'pending', messag
 const disposers: Array<() => void> = [];
 afterEach(() => { for (const dispose of disposers.splice(0)) dispose(); });
 
-/** Every awaited step of a refusal or a send is a microtask: enough of them for the longest chain. */
-async function settle(): Promise<void> {
-  for (let step = 0; step < 200; step++) await Promise.resolve();
-}
-
 function agent() {
   const dir = mkdtempSync(join(tmpdir(), 'refused-owner-message-'));
   disposers.push(() => rmSync(dir, { recursive: true, force: true }));
@@ -110,7 +105,7 @@ test('a phone message refused while another is taken is held, stays held while r
 
   const typed = app.sender.sendTurn('first typed message', {});
   app.sender.receiveOwnerInput('message from the phone', { origin: { source: 'companion' } });
-  await settle();
+  await app.sender.settled();
 
   // Refused by the route, so held: not submitted, not in the composer, not reported sent.
   expect(app.submitted).toEqual(['first typed message']);
@@ -122,7 +117,7 @@ test('a phone message refused while another is taken is held, stays held while r
   app.answers.push(refusedByHost);
   first.answer(taken(1));
   expect(await typed).toBe(true);
-  await settle();
+  await app.sender.settled();
   expect(app.submitted).toEqual(['first typed message', 'message from the phone']);
   expect(app.sender.held()).toEqual(['message from the phone']);
   expect(sentLines(app.activity)).toEqual([]);
@@ -130,7 +125,7 @@ test('a phone message refused while another is taken is held, stays held while r
   // The next message is taken, and so is the held one behind it: sent once, and said so once.
   app.answers.push(taken(2), taken(3));
   expect(await app.sender.sendTurn('second typed message', {})).toBe(true);
-  await settle();
+  await app.sender.settled();
   expect(app.submitted).toEqual(['first typed message', 'message from the phone', 'second typed message', 'message from the phone']);
   expect(app.sender.held()).toEqual([]);
   expect(sentLines(app.activity)).toEqual(['Sent the companion message "message from the phone", held until the previous message was taken.']);

@@ -11,8 +11,6 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { ApprovalBroker } from './approval-broker.js';
-import { logger } from '../utils/logger.js';
-import { summarizeError } from '../utils/error-display.js';
 
 /** Approval metadata marking an ask only the owner's own credential may answer. */
 export const OWNER_ACT_METADATA_KEY = 'ownerAct';
@@ -34,8 +32,12 @@ export interface OwnerActRequest {
   readonly apply: () => unknown | Promise<unknown>;
 }
 
-/** Put a change to the owner; returns the approval's id at once and applies the change when he approves. */
-export async function putToOwner(broker: Pick<ApprovalBroker, 'raiseApproval'>, request: OwnerActRequest): Promise<{ readonly approvalId: string }> {
+/**
+ * Put a change to the owner; returns the approval's id at once. The change is
+ * applied inside the owner's approve: his answer returns once it is in effect,
+ * or carries the reason it could not be.
+ */
+export async function putToOwner(broker: Pick<ApprovalBroker, 'raiseApproval' | 'onApproved'>, request: OwnerActRequest): Promise<{ readonly approvalId: string }> {
   const raised = await broker.raiseApproval({
     request: {
       callId: `owner-act-${randomUUID()}`,
@@ -54,11 +56,8 @@ export async function putToOwner(broker: Pick<ApprovalBroker, 'raiseApproval'>, 
     metadata: { [OWNER_ACT_METADATA_KEY]: true, requestedBy: request.requestedBy },
     timeoutMs: OWNER_ACT_TIMEOUT_MS,
   });
-  void raised.decision.then(async (decision) => {
-    if (!decision.approved) return;
-    await request.apply();
-  }).catch((error: unknown) => {
-    logger.warn('A change the owner approved could not be applied', { approvalId: raised.approval.id, error: summarizeError(error) });
-  });
+  const forget = broker.onApproved(raised.approval.id, request.apply);
+  // Denied, expired or cancelled: nothing is applied, and the effect is let go.
+  raised.decision.then(forget, forget);
   return { approvalId: raised.approval.id };
 }

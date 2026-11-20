@@ -59,12 +59,6 @@ async function controlledStore(): Promise<{ store: UserPermissionRuleStore; writ
   return { store, writes };
 }
 
-/** Event-loop turns until `done`, bounded in steps. */
-async function until(done: () => boolean, what: string): Promise<void> {
-  for (let step = 0; step < 10_000 && !done(); step += 1) await new Promise<void>((resolve) => { setImmediate(resolve); });
-  if (!done()) throw new Error(`Gave up waiting for: ${what}`);
-}
-
 async function reopened(): Promise<readonly StoredUserPermissionRule[]> {
   const store = new UserPermissionRuleStore(path);
   await store.init();
@@ -97,10 +91,11 @@ describe('a remembered rule is live only once saved', () => {
 
   test('two adds in flight together are both saved, and neither is live before its write commits', async () => {
     const { store, writes } = await controlledStore();
-    const release = writes.holdNext();
+    const { release, started } = writes.holdNext();
     const first = store.add(record('first'));
     const second = store.add(record('second'));
-    await until(() => writes.started === 1, 'the first write to start');
+    await started;
+    expect(writes.started).toBe(1);
     expect(store.rules()).toEqual([]);
     release();
     await Promise.all([first, second]);

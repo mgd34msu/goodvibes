@@ -14,6 +14,8 @@ export interface McpWorkspaceControls {
   refreshTools(): Promise<void>;
   appendFormText(text: string): void;
   backspaceFormText(): void;
+  /** Empty the focused text field, so a saved value that stays masked is replaced by typing a new one. */
+  clearFormText?(): void;
   confirmDelete(): Promise<void>;
   reloadRuntime(): Promise<void>;
   cancelForm(): void;
@@ -99,6 +101,8 @@ export function handleMcpWorkspaceToken(
   } else if (token.logicalName === 'space') {
     if (workspace.mode === 'form') workspace.appendFormText(' ');
     else if (workspace.mode === 'browse') workspace.setQuery(workspace.query + ' ');
+  } else if (workspace.mode === 'form' && token.ctrl && token.logicalName?.toLowerCase() === 'u') {
+    workspace.clearFormText?.();
   } else if (workspace.mode === 'browse' && (token.ctrl || token.meta) && token.logicalName) {
     browseChord(token.logicalName.toLowerCase());
   }

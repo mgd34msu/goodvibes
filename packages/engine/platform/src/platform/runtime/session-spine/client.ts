@@ -167,6 +167,13 @@ export function createSessionsClientSpineTransport(sessionsClient: SpineSessions
 export interface SpineTransport {
   register(input: RegisterSharedSessionInput): Promise<SpineResult>;
   close(sessionId: string): Promise<SpineResult>;
+  /**
+   * The daemon the next call goes to (its origin). A register may go to any
+   * daemon (the identity is replayed to a newly adopted one on purpose); a
+   * close goes only to the daemon that holds the registration. Optional: a
+   * transport that does not say is treated as the daemon that holds everything.
+   */
+  readonly targetId?: (() => string | null) | undefined;
 }
 
 export interface SessionSpineRecord {
@@ -185,6 +192,8 @@ interface QueuedOp {
   readonly registeredAt?: number;
   /** Told once whether the daemon took the op (`ok` or a durable refusal) or it was dropped. */
   readonly onSettled?: ((applied: boolean) => void) | undefined;
+  /** Closes only: the daemon that holds the registration; the close is sent to no other. */
+  readonly targetId?: string | null | undefined;
 }
 
 /**
@@ -280,6 +289,10 @@ export class SessionSpineClient {
   private readonly closedOnDaemon = new Set<string>();
   /** Per session, how many times this surface registered or reopened it. */
   private readonly registerCount = new Map<string, number>();
+  /** Per session, the daemon its registration was last applied on: where its close must go. */
+  private readonly registeredOn = new Map<string, string | null>();
+  /** Closes held for a daemon not selected now, already said once in the log. */
+  private readonly heldCloses = new Set<string>();
   private flushing = false;
   /** The most recently registered/reopened session, the keepalive heartbeat target. */
   private lastSessionId: string | null = null;
@@ -444,14 +457,17 @@ export class SessionSpineClient {
       this.heartbeatTimers.delete(sessionId);
     }
     if (this.lastSessionId === sessionId) this.lastSessionId = [...this.records.keys()].at(-1) ?? null;
+    // The close goes to the daemon that holds the registration, never to one adopted since.
+    const holder = this.registeredOn.get(sessionId) ?? null;
+    this.registeredOn.delete(sessionId);
     // A register for this session still waiting in the queue must reach the
     // daemon before the close does, or its later replay would reopen it.
-    if (!this.transport || this.queue.some((op) => op.sessionId === sessionId)) {
-      this.enqueue({ type: 'close', sessionId });
+    if (!this.transport || this.queue.some((op) => op.sessionId === sessionId) || !this.goesTo(this.transport, holder)) {
+      this.enqueue({ type: 'close', sessionId, targetId: holder });
       void this.flush();
       return;
     }
-    void this.runClose(sessionId);
+    void this.runClose(sessionId, holder);
   }
 
   /**
@@ -607,6 +623,7 @@ export class SessionSpineClient {
       if (result.outcome === 'ok') {
         this.reachability = 'online';
         this.lastRefusal = null;
+        this.registeredOn.set(input.sessionId, transport.targetId?.() ?? null);
         await this.flush();
       } else if (result.outcome === 'offline') {
         this.reachability = 'offline';
@@ -629,29 +646,36 @@ export class SessionSpineClient {
     }
   }
 
-  private async runClose(sessionId: string): Promise<void> {
+  /** Whether `transport` goes to `target` now: a close with no known holder, or a transport that does not say, goes anywhere. */
+  private goesTo(transport: SpineTransport, target: string | null | undefined): boolean {
+    if (target === null || target === undefined) return true;
+    const current = transport.targetId?.() ?? null;
+    return current === null || current === target;
+  }
+
+  private async runClose(sessionId: string, holder: string | null = null): Promise<void> {
     const transport = this.transport;
     if (!transport) {
-      this.enqueue({ type: 'close', sessionId });
+      this.enqueue({ type: 'close', sessionId, targetId: holder });
       return;
     }
     try {
       const result = await transport.close(sessionId);
       if (this.transport !== transport) {
-        if (result.outcome === 'offline') this.enqueue({ type: 'close', sessionId });
+        if (result.outcome === 'offline') this.enqueue({ type: 'close', sessionId, targetId: holder });
         return;
       }
       if (result.outcome === 'ok') {
         this.reachability = 'online';
       } else if (result.outcome === 'offline') {
         this.reachability = 'offline';
-        this.enqueue({ type: 'close', sessionId });
+        this.enqueue({ type: 'close', sessionId, targetId: holder });
       } else {
         this.log.debug('session spine close not applied', { error: result.error });
       }
     } catch (error) {
       if (this.transport === transport) this.reachability = 'offline';
-      this.enqueue({ type: 'close', sessionId });
+      this.enqueue({ type: 'close', sessionId, targetId: holder });
       this.log.debug('session spine close threw, queued for reconnect', { error: errorMessage(error) });
     }
   }
@@ -691,6 +715,8 @@ export class SessionSpineClient {
     const transport = this.transport;
     if (!transport) return;
     this.flushing = true;
+    // Closes owed to a daemon not selected now stay queued for it, ahead of what follows.
+    const held: QueuedOp[] = [];
     try {
       // Ops queued while this flush runs are taken on the next pass.
       while (this.queue.length > 0 || this.foldQueue.length > 0) {
@@ -700,12 +726,22 @@ export class SessionSpineClient {
             const op = pending[index]!;
             let result: SpineResult;
             try {
+              if (op.type === 'close' && !this.goesTo(transport, op.targetId)) {
+                held.push(op);
+                const key = `${op.sessionId}\0${op.targetId}`;
+                if (!this.heldCloses.has(key)) {
+                  this.heldCloses.add(key);
+                  this.log.info('session spine: a close is held for the daemon that holds the registration; it is sent when that daemon is adopted again', { sessionId: op.sessionId, daemon: op.targetId });
+                }
+                continue;
+              }
               if (op.type === 'register') {
                 if (!op.input) {
                   op.onSettled?.(true);
                   continue;
                 }
                 result = await transport.register(op.input);
+                if (result.outcome === 'ok') this.registeredOn.set(op.sessionId, transport.targetId?.() ?? null);
               } else {
                 // A flush that took this fold close before the reopen cannot be reached by dropFoldCloses.
                 if (op.registeredAt !== undefined && op.registeredAt !== (this.registerCount.get(op.sessionId) ?? 0)) {
@@ -746,6 +782,7 @@ export class SessionSpineClient {
         }
       }
     } finally {
+      this.queue.unshift(...held);
       this.flushing = false;
     }
   }

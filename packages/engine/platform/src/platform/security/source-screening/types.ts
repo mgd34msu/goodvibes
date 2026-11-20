@@ -85,6 +85,13 @@ export interface ProtectedSourceOwner {
   projectResearchReference(receipt: ResearchReferenceScreeningReceipt): ResearchReferenceProjection;
   release(source: ProtectedSource | ProtectedResearchReference): Promise<void>;
   close(): Promise<void>;
+  /**
+   * Throws unless the screening authorization that issued `receipt` is still
+   * the one in force (consent kept, credentials and settings unchanged). A
+   * copy cleared under that authorization (a saved preview) is reused only
+   * while this holds; an owner without it lets no such copy be reused.
+   */
+  assertAuthorizationCurrent?(receipt: SourceScreeningReceipt): void;
 }
 export const SOURCE_SCREENING_LIMITS = Object.freeze({ parts: 8, characters: 40_000, spans: 100, proposalBytes: 32_768,
   sources: 128, referenceParameters: 100, referenceRoles: 1_024 });

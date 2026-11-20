@@ -189,10 +189,35 @@ function formatWorkPlan(body: unknown): string {
   return `  historical legacy work plan: total ${total}; pending ${readNumber(counts, 'pending') ?? 0}; active ${readNumber(counts, 'in_progress') ?? 0}; blocked ${readNumber(counts, 'blocked') ?? 0}; done ${readNumber(counts, 'done') ?? 0}`;
 }
 
+/** How many approvals the briefing names one by one. */
+const APPROVAL_LINES = 5;
+
+/**
+ * The count from each approval's reading (what is waiting is its phase, not a
+ * status this tool interprets), then one line per approval that still needs
+ * something: still waiting, or decided while its asker has not confirmed it
+ * received it. Each line says why (the reading's reason), on whom, and the
+ * reading's own next move, so an agent stops polling and does not re-ask.
+ */
 function formatApprovals(body: unknown): string {
   const approvals = readArray(body, 'approvals');
-  const pending = approvals.filter((entry) => readString(entry, 'status') === 'pending').length;
-  return `  approvals: pending ${pending}; total ${approvals.length}; mode ${['allow-all', 'background-restricted', 'custom', 'default', 'plan'].includes(readString(body, 'mode') ?? '') ? readString(body, 'mode') : 'unknown'}; awaiting decision ${Boolean(isRecord(body) && body.awaitingDecision === true)}`;
+  const readingOf = (entry: unknown): Record<string, unknown> | null => {
+    const reading = isRecord(entry) ? entry.reading : undefined;
+    return isRecord(reading) ? reading : null;
+  };
+  const waiting = approvals.filter((entry) => readingOf(entry)?.phase === 'waiting');
+  const unreceived = approvals.filter((entry) => readingOf(entry)?.phase === 'decided' && readString(readRecord(readingOf(entry), 'receipt'), 'state') === 'waiting');
+  const head = `  approvals: waiting ${waiting.length}; decided and not yet received ${unreceived.length}; total ${approvals.length}; mode ${['allow-all', 'background-restricted', 'custom', 'default', 'plan'].includes(readString(body, 'mode') ?? '') ? readString(body, 'mode') : 'unknown'}; awaiting decision ${Boolean(isRecord(body) && body.awaitingDecision === true)}`;
+  const lines = [...waiting, ...unreceived].slice(0, APPROVAL_LINES).map((entry) => {
+    const reading = readingOf(entry)!;
+    const ref = readRecord(reading, 'ref');
+    const next = readArray(reading, 'next').map((move) => readString(move, 'text')).find((text) => text !== null);
+    const deadline = readNumber(readRecord(reading, 'deadline'), 'remainingMs');
+    return `    ${readString(ref, 'id') ?? readString(entry, 'id') ?? '?'}@${readString(ref, 'node') ?? '?'} (revision ${readNumber(reading, 'revision') ?? '?'}): `
+      + `${readString(reading, 'reason') ?? 'unknown'}${deadline !== null ? `, ${Math.round(deadline / 1000)}s left` : ''}`
+      + `; receipt ${readString(readRecord(reading, 'receipt'), 'state') ?? 'unknown'}${next ? `; next: ${next}` : ''}`;
+  });
+  return [head, ...lines].join('\n');
 }
 
 function formatAutomation(body: unknown): string {

@@ -25,8 +25,9 @@ import { OwnedJudgmentWork } from '../runtime/owned-judgment-work.js';
  *   getLastCompactionEvent()              , return most recent compaction event
  */
 
-import type { ProviderMessage, ContentPart, LLMProvider } from '../providers/interface.js';
+import type { ProviderMessage, ContentPart } from '../providers/interface.js';
 import type { ProviderRegistry } from '../providers/registry.js';
+import { callWithFailover, failoverTargetOf, type FailoverTarget } from '../providers/failover.js';
 import { logger } from '../utils/logger.js';
 import type { ConfigManager } from '../config/manager.js';
 import type {
@@ -341,19 +342,10 @@ async function llmExtract(
     }
   }
 
-  let provider: LLMProvider;
-  let providerModelId: string;
+  let first: FailoverTarget | undefined;
   try {
-    provider = registry.getForModel(modelId, providerName);
-    const modelDef = registry.listModels().find((model) => (
-      providerName
-        ? model.provider === providerName && (model.registryKey === modelId || model.id === modelId)
-        : model.registryKey === modelId
-    ));
-    if (!modelDef) {
-      throw new Error(`Model '${modelId}' is not in registry.`);
-    }
-    providerModelId = modelDef.id;
+    first = failoverTargetOf(registry, modelId, providerName);
+    if (!first) throw new Error(`Model '${modelId}' is not in registry.`);
   } catch {
     work.assertCurrent();
     logger.warn(`Compaction: failed to get provider for ${label}`, {
@@ -364,11 +356,13 @@ async function llmExtract(
 
   try {
     work.assertCurrent();
-    const response = await work.wait(() => provider.chat({
-      messages: [{ role: 'user', content: prompt }],
-      model: providerModelId,
-      signal: ctx.signal,
-    }));
+    // The extraction model fails over like a turn: its other sign-ins, then provider.fallbackModels.
+    const response = await callWithFailover({ registry, first, purpose: `Compaction (${label})`, signal: ctx.signal },
+      (target) => work.wait(() => target.provider.chat({
+        messages: [{ role: 'user', content: prompt }],
+        model: target.modelId,
+        signal: ctx.signal,
+      })));
     work.assertCurrent();
     const text = response.content?.trim() ?? '';
     if (!text) {

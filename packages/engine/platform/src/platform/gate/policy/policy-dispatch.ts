@@ -237,6 +237,13 @@ async function handleDiff(_args: string[], context: PolicyCommandContext): Promi
   if (diff.changed.length > 0) {
     context.print('  [~] Changed rules:');
     for (const c of diff.changed) context.print(`      ~ ${c.ruleId}`);
+  }  if (diff.moved.length > 0) {
+    context.print('  [>] Moved rules (rules are read in order, so a move can change which one decides):');
+    for (const m of diff.moved) context.print(`      > ${m.ruleId}: position ${m.from + 1} -> ${m.to + 1}`);
+  }
+  if (diff.duplicateIds.length > 0) {
+    context.print('  [!] Ids used by more than one rule (each copy is compared at its own position):');
+    for (const d of diff.duplicateIds) context.print(`      ! ${d.ruleId}: ${d.count} rules in the ${d.bundle === 'from' ? 'active' : 'candidate'} bundle`);
   }
 }
 

@@ -668,6 +668,11 @@
       "types": "./platform/dist/platform/control-plane/approval-hunk-apply.d.ts",
       "import": "./platform/dist/platform/control-plane/approval-hunk-apply.js"
     },
+    "./platform/platform/control-plane/approval-lifecycle": {
+      "bun": "./platform/src/platform/control-plane/approval-lifecycle.ts",
+      "types": "./platform/dist/platform/control-plane/approval-lifecycle.d.ts",
+      "import": "./platform/dist/platform/control-plane/approval-lifecycle.js"
+    },
     "./platform/platform/control-plane/build-compatibility": {
       "bun": "./platform/src/platform/control-plane/build-compatibility.ts",
       "types": "./platform/dist/platform/control-plane/build-compatibility.d.ts",

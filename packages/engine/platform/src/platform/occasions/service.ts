@@ -45,7 +45,7 @@ import { readOccasionsPolicy, readOccasionsTimezone, type OccasionsConfigAccess 
 import { readOccasionDeclarations, readPlans, type OccasionProfileSource, type OccasionReadResult } from './reader.js';
 import { attributionKey, declaredSubject, needsSubjectReading, readOccasionSubject, type OccasionSubjectReading } from './subject.js';
 import type { OccasionStateStore } from './state-store.js';
-import { decideSweep, effectiveLead, occurrenceWindow, type OccasionsPolicy } from './sweep.js';
+import { decideSweep, effectiveLead, isOccurrenceMirrored, occurrenceWindow, type OccasionsPolicy } from './sweep.js';
 import {
   confirmOccasion,
   confirmPlan,
@@ -297,6 +297,7 @@ export class OccasionsService {
       const reading = await this.read(op, options);
       const { today, policy, declarations, plans } = reading;
       const acknowledgements = await this.deps.state.acknowledgements();
+      const mirroredOccurrences = await this.deps.state.mirroredOccurrences();
       const views: OccasionView[] = declarations.occasions.map((occasion) => {
         const occurrence = nextOccurrence(occasion.date, occasion.recurrence, today);
         const window = occurrence === null ? null : occurrenceWindow(occasion, occurrence, today, plans, policy);
@@ -312,7 +313,7 @@ export class OccasionsService {
           leadDays: effectiveLead(occasion, policy),
           inLeadWindow: window?.inside ?? false,
           answer,
-          mirrored: occasion.mirrored,
+          mirrored: occurrence === null ? occasion.mirrored : isOccurrenceMirrored(occasion, occurrence, mirroredOccurrences),
         };
       });
       // Soonest first, the order every surface lists them in; one with no next date
@@ -676,6 +677,8 @@ export class OccasionsService {
         openItems: openItemsBefore,
         interviews: await this.interviewsInFlight(),
         policy,
+        // Read after the mirror pass above, so an occurrence it just wrote is already quiet.
+        mirroredOccurrences: await this.deps.state.mirroredOccurrences(),
       });
 
       if (decision.hold !== null) {
@@ -906,6 +909,7 @@ export class OccasionsService {
         plans,
         openItems: await this.deps.state.openItems(),
         acknowledgements: await this.deps.state.acknowledgements(),
+        mirroredOccurrences: await this.deps.state.mirroredOccurrences(),
       });
       const interviews = (await this.interviewsInFlight()).map(progressOf);
       op.admitted();

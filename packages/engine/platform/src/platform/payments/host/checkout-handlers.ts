@@ -460,7 +460,27 @@ export class CheckoutServiceHolder {
           } });
       });
     }
+    if (this.deps.isPaymentsLeader()) await this.sendOwedPurchaseReports();
     return sweep;
+  }
+
+  /**
+   * Reports of purchases the owner is owed and never got (the process stopped
+   * between recording the purchase and sending its report): sent now, each
+   * settled once a channel took it. One read of the purchases file; one write
+   * per report sent.
+   */
+  private async sendOwedPurchaseReports(): Promise<void> {
+    let owed: ReadonlyMap<string, string>;
+    try { owed = this.deps.purchases.owedOwnerNotices(); } catch { return; }
+    for (const [purchaseId, message] of owed) {
+      try {
+        const deliveries = await this.deps.checkout.notifier.deliver({ kind: 'notice', message });
+        if (deliveries.some((delivery) => delivery.delivered)) await this.deps.purchases.settleOwnerNotice(purchaseId);
+      } catch {
+        // Still owed: the next start tries again, and payments.purchases.list holds the purchase meanwhile.
+      }
+    }
   }
 
   admit(id: string, input: BeginCheckoutInput, source: DetachedCheckoutSource, requestCurrent: () => void,

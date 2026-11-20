@@ -88,7 +88,8 @@ export function createBlockContentActions(policy: {
     policy.noteTouch(conversationManager, nearest.collapseKey);
     const target = describeBlockForReceipt(nearest);
     try {
-      const filePath = bookmarkManager.saveToFile(nearest.rawContent, nearest.type);
+      // Keyed by the block, as its bookmark is: opening the bookmark opens this exact file.
+      const filePath = bookmarkManager.saveToFile(nearest.rawContent, nearest.type, nearest.collapseKey);
       const homePath = process.env.HOME || process.env.USERPROFILE || '';
       const displayPath = homePath ? filePath.replace(homePath, '~') : filePath;
       conversationManager.log(`[Saved ${target} to: ${displayPath}]`, { fg: activeTokens().success });

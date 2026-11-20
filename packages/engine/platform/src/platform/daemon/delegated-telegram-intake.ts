@@ -369,7 +369,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
       pending.approveRetainedSource();
       pending.sourceExpiresAt.value = pending.grant!.sourceExpiresAt;
       const timer = setTimeout(() => pending.sourceController.abort(), Math.max(1, pending.sourceExpiresAt.value - Date.now())); timer.unref(); pending.timers.add(timer);
-      movePending(pending, 'approved'); const outcome = await pending.run(); assertOwner(); return outcome;
+      movePending(pending, 'approved'); const ran = await pending.run(); assertOwner(); return ran;
       } catch (error) {
         // A failed attempt must not strand the review in 'deciding': that state
         // rejects every retry. Before the broker recorded an answer, return it to

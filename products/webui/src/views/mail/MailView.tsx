@@ -229,7 +229,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
       if (input.uidValidity === undefined) {
         return Promise.reject(new Error('The mail server did not say which mailbox generation this message belongs to, so it cannot be changed safely from here. Change it in another mail client.'));
       }
-      return platformClient.operator.email.inbox.update({ uid: input.uid, uidValidity: input.uidValidity, action: input.action });
+      return platformClient.operator.email.inbox.update({ uid: input.uid, uidValidity: input.uidValidity, action: input.action } as Parameters<typeof platformClient.operator.email.inbox.update>[0]);
     },
     onSuccess: async (result) => {
       if (result.action === 'archive' || result.action === 'delete') {
@@ -515,7 +515,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
                 className="mail-row"
                 title={draft.subject || '(no subject)'}
                 meta={`${draft.to || '(no recipient)'} · ${draft.body.slice(0, 120)}`}
-                onSelect={() => void openDraft(draft, drafts.data?.uidValidity)}
+                onSelect={() => void openDraft(draft, (drafts.data as { readonly uidValidity?: number } | undefined)?.uidValidity)}
                 trailing={<span className="mail-row__date">{formatShort(draft.date)}</span>}
               />
             ))}
@@ -627,14 +627,14 @@ export function MailView({ tabs }: MailViewProps = {}) {
                   size="sm"
                   icon={<MailOpen />}
                   disabled={update.isPending}
-                  onClick={() => update.mutate({ uid: openMessage.uid, uidValidity: openMessage.uidValidity, action: selectedSummary?.unread === false ? 'unseen' : 'seen' })}
+                  onClick={() => update.mutate({ uid: openMessage.uid, uidValidity: (openMessage as { readonly uidValidity?: number }).uidValidity, action: selectedSummary?.unread === false ? 'unseen' : 'seen' })}
                 >
                   {selectedSummary?.unread === false ? 'Mark unread' : 'Mark read'}
                 </Button>
                 <IconButton label="Archive" icon={<Archive />} disabled={update.isPending}
-                  onClick={() => update.mutate({ uid: openMessage.uid, uidValidity: openMessage.uidValidity, action: 'archive' })} />
+                  onClick={() => update.mutate({ uid: openMessage.uid, uidValidity: (openMessage as { readonly uidValidity?: number }).uidValidity, action: 'archive' })} />
                 <IconButton label="Delete (moves to Trash)" icon={<Trash2 />} disabled={update.isPending}
-                  onClick={() => update.mutate({ uid: openMessage.uid, uidValidity: openMessage.uidValidity, action: 'delete' })} />
+                  onClick={() => update.mutate({ uid: openMessage.uid, uidValidity: (openMessage as { readonly uidValidity?: number }).uidValidity, action: 'delete' })} />
               </>
             ) : undefined}
             onClose={() => selectMessage(null)}

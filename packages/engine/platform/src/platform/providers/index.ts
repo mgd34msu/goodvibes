@@ -280,8 +280,8 @@ export { DecisionRouterProvider, prepareDecisionRouterTurn, describeDecisionRout
 export type { DecisionRouterRouteInfo, PreparedDecisionRoute, DecisionRouterProviderOptions } from './decision-router.js';
 export type { DecisionRoutingContext } from './decision-router-context.js';
 
-export { chooseFailover, createTurnFailover, describeFailoverCost, readFallbackOrder } from './failover.js';
-export type { FailoverChoice, FailoverRegistry, FailoverRequest, TurnFailoverModel, TurnFailoverOptions } from './failover.js';
+export { callWithFailover, chooseFailover, createTurnFailover, describeFailoverCost, failoverTargetOf, readFallbackOrder } from './failover.js';
+export type { CallFailoverRegistry, CallWithFailoverOptions, FailoverChoice, FailoverRegistry, FailoverRequest, FailoverTarget, TurnFailoverModel, TurnFailoverOptions } from './failover.js';
 export { OPENAI_SIGN_IN_ROUTE_LABELS } from './openai.js';
 export type { OpenAISignInRoute } from './openai.js';
 export { admitsCandidate, admittedCandidates } from './route-constraint.js';

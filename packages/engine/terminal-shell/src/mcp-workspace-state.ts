@@ -180,6 +180,13 @@ export abstract class McpWorkspaceState<Context, Form extends McpWorkspaceFormBa
       if ('confirm' in this.form && typeof this.form.confirm === 'string') this.form.confirm += text;
     } else if (isTextField(field.id)) this.form[field.id] += text;
   }
+  clearFormText(): void {
+    const field = this.formFields[this.formIndex];
+    if (!field) return;
+    if (field.id === 'confirm') {
+      if ('confirm' in this.form && typeof this.form.confirm === 'string') this.form.confirm = '';
+    } else if (isTextField(field.id)) this.form[field.id] = '';
+  }
   backspaceFormText(): void {
     const field = this.formFields[this.formIndex];
     if (!field) return;

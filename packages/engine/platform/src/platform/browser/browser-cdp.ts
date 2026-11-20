@@ -8,6 +8,21 @@ export function debuggerWebSocket(value: unknown): string | null {
 }
 
 /**
+ * What may be shown of a debugger endpoint: its scheme, host and port. A path,
+ * query or user name can carry a capability (a proxy route, a token), and a
+ * session description or an error message reaches screens, logs and the
+ * model, so they are left out.
+ */
+export function cdpEndpointOrigin(endpoint: string): string {
+  try {
+    const parsed = new URL(endpoint.includes('://') ? endpoint : `http://${endpoint}`);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return '(the given debugger endpoint)';
+  }
+}
+
+/**
  * Endpoints to try for an attach, in order.
  *
  * A browser started with --remote-debugging-port may end up listening on IPv6

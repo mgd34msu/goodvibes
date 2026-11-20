@@ -194,7 +194,10 @@ export function persistConversation(
   saveSource: 'user' | 'auto' = 'auto',
 ): void {
   saveSession(sessionId, data, model, provider, title, options, saveSource);
-  writeLastSessionPointer(sessionId, options);
+  // The session itself is saved; a pointer that was not written is said, not
+  // reported as a failed save (the next save writes it again).
+  try { writeLastSessionPointer(sessionId, options); }
+  catch (error) { logger.warn('The last-session pointer was not written; the session itself was saved', { sessionId, error: summarizeError(error) }); }
 }
 
 /**
@@ -207,11 +210,16 @@ export function persistConversation(
  * which is the safe direction; this makes a torn pointer impossible to produce
  * in the first place.) The pid suffix keeps two processes writing the same
  * pointer from sharing a temp name.
+ *
+ * Throws when the pointer was not written (the error names the pointer's
+ * path), so a caller can say so: `--continue` would otherwise open an older
+ * session with nothing having said why.
  */
 export function writeLastSessionPointer(sessionId: string, options?: SessionPersistenceOptions): void {
   let tempPath: string | undefined;
+  let pointerPath: string | undefined;
   try {
-    const pointerPath = resolveLastSessionPointerPath(options);
+    pointerPath = resolveLastSessionPointerPath(options);
     mkdirSync(dirname(pointerPath), { recursive: true });
     tempPath = `${pointerPath}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
     writeFileSync(
@@ -222,7 +230,7 @@ export function writeLastSessionPointer(sessionId: string, options?: SessionPers
     renameSync(tempPath, pointerPath);
     tempPath = undefined;
   } catch (error) {
-    logger.warn('writeLastSessionPointer failed', { error: summarizeError(error) });
+    throw new Error(`the last-session pointer${pointerPath ? ` ${pointerPath}` : ''} was not written (${summarizeError(error)})`, { cause: error });
   } finally {
     // A failed write must not leave its own litter behind. ENOENT here means
     // the rename actually landed or the file was never created, either way

@@ -1,4 +1,4 @@
-import { cdpEndpointCandidates, cdpWebSocketHandshakeWorks, debuggerWebSocket, firstReachableCdpEndpoint, type ReachableCdpEndpoint } from './browser-cdp.js';
+import { cdpEndpointCandidates, cdpEndpointOrigin, cdpWebSocketHandshakeWorks, debuggerWebSocket, firstReachableCdpEndpoint, type ReachableCdpEndpoint } from './browser-cdp.js';
 export { cdpEndpointCandidates } from './browser-cdp.js';
 export type { ReachableCdpEndpoint } from './browser-cdp.js';
 import { assertProvisionCurrent, ownProvisionLifetime, type BrowserProvisionLifetime } from './browser-failure-reading.js';
@@ -619,10 +619,12 @@ export class BrowserSessionManager {
       // completely different answers and only one of them is the user's doing.
       const handshake = await cdpWebSocketHandshakeWorks(webSocket, owner.signal ?? this.#retiring.signal);
       current();
+      // A connection error quotes the debugger URL it tried, whose path holds the browser's id: origin only.
+      lastMessage = lastMessage.replace(/\b(?:wss?|https?):\/\/[^\s'"]+/g, (url) => cdpEndpointOrigin(url));
       throw new BrowserSessionError(
         handshake
-          ? `The browser at ${endpoint} is running and reachable, but this build cannot complete the debugger handshake: ${lastMessage.split('\n')[0]}`
-          : `Could not connect to the browser at ${endpoint}: ${lastMessage.split('\n')[0]}`,
+          ? `The browser at ${cdpEndpointOrigin(endpoint)} is running and reachable, but this build cannot complete the debugger handshake: ${lastMessage.split('\n')[0]}`
+          : `Could not connect to the browser at ${cdpEndpointOrigin(endpoint)}: ${lastMessage.split('\n')[0]}`,
         handshake
           ? 'Use action:"launch" with a profileName instead. The agent opens its own browser with a saved profile, and a sign-in done there persists across runs.'
           : 'Restart the browser with --remote-debugging-port and try again, or use action:"launch".',
@@ -839,7 +841,8 @@ export class BrowserSessionManager {
       sessionId: session.sessionId,
       origin: session.origin,
       profileDirectory: session.profileDirectory,
-      cdpEndpoint: session.cdpEndpoint,
+      // Origin only: a path, query or user name in the endpoint can carry a capability.
+      cdpEndpoint: session.cdpEndpoint === null ? null : cdpEndpointOrigin(session.cdpEndpoint),
       executablePath: session.executablePath,
       source: session.source,
       headless: session.headless,

@@ -111,6 +111,18 @@ import { ShellPassthrough } from '@goodvibes-jev/engine/terminal-shell/shell-pas
 import { makeComposerEditorOpener, makeFileEditorOpener } from './input/composer-editor.ts';
 import { evaluateSessionMaintenance } from '@/runtime/index.ts';
 import { createCancelGeneration, runOwnedTurnRetry } from './core/turn-cancellation.ts';
+
+/** What a retry of a turn that already ran tools sends: the turn continues from the results instead of repeating them. */
+const CONTINUE_AFTER_TOOLS = 'The previous attempt stopped with an error after running tools. Their results are above; continue from them without repeating what they already did.';
+
+/** Whether the turn that started at `from` (its message count before the prompt) ran any tool. */
+function turnRanTools(conversation: { getMessageCount(): number; getMessageAt(index: number): Readonly<{ role: string; toolCalls?: readonly unknown[] | undefined }> | undefined }, from: number): boolean {
+  for (let index = from; index < conversation.getMessageCount(); index++) {
+    const message = conversation.getMessageAt(index);
+    if (message?.role === 'tool' || (message?.role === 'assistant' && (message.toolCalls?.length ?? 0) > 0)) return true;
+  }
+  return false;
+}
 import { wireInteractionSeams, createMemoryProvenanceUi } from './runtime/interaction-seams.ts';
 import { createPowerChipSource } from './core/power-chip-source.ts';
 import { createModeWordsSource, getSharedModeFlash } from '@goodvibes-jev/engine/terminal-shell/session-permission-mode';
@@ -1388,16 +1400,36 @@ async function main(prepared: PreparedShellCliRuntime) {
       render();
       return false;
     }
-    // Roll back to pre-submission count, then re-submit.
-    orchestrator.clearFailedTurnInput(failed.turnId);
-    if (!failed.superseded) conversation.removeMessagesAfter(failed.rollbackCount);
+    // A turn that already ran tools is not replayed from its prompt: its tool
+    // results stay, so their effects are not repeated, and the turn continues
+    // from them (the rule the in-turn failover applies before any tool ran).
+    const ranTools = !failed.superseded && turnRanTools(conversation, failed.rollbackCount);
+    const sessionId = runtime.sessionId;
+    // The failed turn stays held (its transcript and this retry) until the
+    // replacement is submitted: a memory refresh that fails, a session switch or
+    // a newer turn while it prepares leaves it as it was, to try again.
     void runOwnedTurnRetry({
       prepare: () => refreshMemoryRecallSnapshot(ctx.services),
-      submit: () => orchestrator.handleUserInput(text, rContent, rOpts),
-      abort: () => orchestrator.abort(),
-      isCurrent: () => true,
-    }).catch((e: unknown) => {
+      isCurrent: () => runtime.sessionId === sessionId && orchestrator.failedTurnInput()?.turnId === failed.turnId,
+      submit: () => {
+        orchestrator.clearFailedTurnInput(failed.turnId);
+        if (ranTools) {
+          conversation.removeMessagesAfter(failed.rollbackCount, { preserveCompletedTools: true });
+          systemMessageRouter.high('[Retry] The failed turn had already run tools, so it continues from their results instead of starting over.', 'info');
+          return orchestrator.handleUserInput(CONTINUE_AFTER_TOOLS, undefined, rOpts);
+        }
+        if (!failed.superseded) conversation.removeMessagesAfter(failed.rollbackCount);
+        return orchestrator.handleUserInput(text, rContent, rOpts);
+      },
+    }).then((submitted) => {
+      if (!submitted) { systemMessageRouter.high('[Retry] Not sent: the session or the failed turn changed while it was being prepared. Alt+R sends it again.', 'warning'); render(); }
+    }, (e: unknown) => {
       logger.debug('retryTurn', { error: summarizeError(e) });
+      // Before submission nothing was taken away; the retry is still offered.
+      if (orchestrator.failedTurnInput()?.turnId === failed.turnId) {
+        systemMessageRouter.high(`[Retry] Not sent: ${summarizeError(e)}. The failed turn is kept; Alt+R tries again.`, 'warning');
+        render();
+      }
     });
     return true;
   };
@@ -1418,7 +1450,10 @@ async function main(prepared: PreparedShellCliRuntime) {
   });
   unsubs.push(...streamResult.unsubs);
   // Offer Alt+R when a user-visible error surfaces and the turn can be sent again.
-  wireRetryOfferOnError(streamResult.onErrorSurfaced, actionOffers, () => orchestrator.failedTurnInput() !== null, render);
+  wireRetryOfferOnError(streamResult.onErrorSurfaced, actionOffers, () => orchestrator.failedTurnInput() !== null, render, () => {
+    const failed = orchestrator.failedTurnInput();
+    return failed !== null && !failed.superseded && turnRanTools(conversation, failed.rollbackCount);
+  });
   // Companion messages and an activated plan take the composer's turn path as sent
   // (no composer grammar), carrying their origin. Bound once that path's state exists.
   unsubs.push(bindOwnerInput(orchestrator, (text, inputOptions) => {

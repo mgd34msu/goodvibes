@@ -36,6 +36,7 @@ import {
 } from '../workspace/index.js';
 import { normalizeWorkspaceRoot, pathCovers } from '../workspace/registration/resolution.js';
 import { logger } from '../utils/logger.js';
+import { fileIdentity } from '../security/read-source.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { PermissionCategory } from '../permissions/index.js';
 import type { PermissionRequestHandler } from '../permissions/index.js';
@@ -315,6 +316,8 @@ export interface WorkspaceTrustQuestion {
 export class WorkspaceTrustManager {
   private level: WorkspaceTrustLevel | null = null; // null = undecided (new place)
   private loaded = false;
+  /** The register file's identity (security/read-source.ts fileIdentity) when it was last read. */
+  private registerIdentity: string | null = null;
   private revision = 0;
   private decisionRevision = 0;
   private pendingDecisions = 0;
@@ -352,6 +355,7 @@ export class WorkspaceTrustManager {
   async load(): Promise<void> {
     if (this.loaded) return;
     const revision = this.revision;
+    const identity = fileIdentity(this.registerPath);
     let fault: string | null = null;
     const persisted = await this.store.trustDecision(this.workspaceRoot).catch((error: unknown) => {
       fault = `the workspace register ${this.registerPath} could not be read (${summarizeError(error)})`;
@@ -365,8 +369,12 @@ export class WorkspaceTrustManager {
       this.loadFault = fault;
       logger.warn('workspace trust: the saved trust decision could not be read; autonomous actions stay restricted until it is replaced', { file: this.registerPath, fault });
     }
+    this.registerIdentity = identity;
     if (persisted) {
       this.level = persisted.level;
+    } else if (fault === null && this.level !== null && !this.legacyIgnored) {
+      // The decision was removed from the register by another process: undecided again.
+      this.level = null;
     } else if (fault === null && existsSync(this.legacyFile)) {
       this.legacyIgnored = true;
       logger.info('workspace trust: a trust decision stored inside the workspace is not honored; the owner is asked once more', { file: this.legacyFile });
@@ -407,6 +415,11 @@ export class WorkspaceTrustManager {
   async prepareAutonomousConstraint(category: PermissionCategory, signal?: AbortSignal): Promise<() => void> {
     if (this.pendingDecisions > 0) throw new Error('Workspace trust decision is pending');
     const decisionRevision = this.decisionRevision;
+    // Another process may have changed this workspace's decision (a downgrade in
+    // another app): one stat of the register, and it is read again when it moved.
+    if (this.loaded && this.registerIdentity !== null && fileIdentity(this.registerPath) !== this.registerIdentity) {
+      this.loaded = false;
+    }
     await awaitPermission(() => this.load(), signal);
     if (this.decisionRevision !== decisionRevision) throw new Error('Workspace trust changed during autonomous preparation');
     // Dispatch reads the decision in effect now, not the one seen at preparation:
@@ -464,6 +477,8 @@ export class WorkspaceTrustManager {
     try {
       await this.store.setTrust(this.workspaceRoot, level);
       this.loadFault = null;
+      // This process's own write: the decision in memory is the one on disk.
+      this.registerIdentity = fileIdentity(this.registerPath);
       return { saved: true };
     } catch (error) {
       return { saved: false, fault: `the workspace register ${this.registerPath} could not be written (${summarizeError(error)})` };

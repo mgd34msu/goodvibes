@@ -27,14 +27,18 @@
  * approved, denied, cancelled, expired, on `control.approval_update`, with the
  * whole record in the frame. This view consumes that stream, so an ask raised
  * on a phone appears here the moment the daemon records it and a decision made
- * elsewhere clears it just as fast. The 15-second re-read this panel used to
- * live on is retained UNDERNEATH as the fallback: the stream can be refused (no
- * daemon, a 401, a proxy that will not hold a connection) and it can drop, and
- * a permission ask is not something to be blind about. Without a stream the
- * panel polls exactly as it always did, and each poll tick also retries the
- * stream, that retry is the entire reconnect story. `liveUpdates` on the
- * snapshot says which of the two modes is in force, because "as of now" and "as
- * of up to fifteen seconds ago" are different claims.
+ * elsewhere clears it just as fast. While the stream is open nothing re-reads
+ * the list: it is read once when the stream opens or reopens (frames are not
+ * replayed, so that read is what reconciles a gap), and every frame and row is
+ * applied only when its `revision` is higher than the one already held for
+ * that approval (keyed by its node and id), so a late or repeated frame never
+ * brings a settled ask back. The 15-second re-read is the fallback only: the
+ * stream can be refused (no daemon, a 401, a proxy that will not hold a
+ * connection) and it can drop, and a permission ask is not something to be
+ * blind about. Without a stream the panel polls, and each poll tick also
+ * retries the stream, that retry is the entire reconnect story. `liveUpdates`
+ * on the snapshot says which of the two modes is in force, because "as of now"
+ * and "as of up to fifteen seconds ago" are different claims.
  *
  * ── Honest degrade ─────────────────────────────────────────────────────────
  *
@@ -104,14 +108,8 @@ export interface ApprovalsViewOptions {
    * hands asks to it, and those exist nowhere else.
    */
   readonly localBroker: { listApprovals(limit?: number): readonly SharedApprovalRecord[] };
-  /** Cadence for {@link ApprovalsView.start} while there is no push stream. Default 15s. */
+  /** Cadence for {@link ApprovalsView.start} while there is no push stream. Default 15s. Nothing re-reads while the stream is open. */
   readonly refreshIntervalMs?: number | undefined;
-  /**
-   * Cadence while the push stream IS open. Default 2 minutes: the stream
-   * carries every transition, so this is a reconciliation against the daemon's
-   * list rather than the way transitions arrive.
-   */
-  readonly liveRefreshIntervalMs?: number | undefined;
   /**
    * Open the `control.approval_update` stream. Supplied by the composition
    * (which owns host resolution and the token); omitted, the view simply polls,
@@ -128,7 +126,6 @@ export interface ApprovalsViewOptions {
 }
 
 const DEFAULT_REFRESH_INTERVAL_MS = 15_000;
-const DEFAULT_LIVE_REFRESH_INTERVAL_MS = 120_000;
 
 /**
  * The statuses that keep an ask on the panel.
@@ -151,13 +148,25 @@ export function applyApprovalUpdate(
   rows: readonly SharedApprovalRecord[],
   record: SharedApprovalRecord,
 ): readonly SharedApprovalRecord[] {
-  const withoutIt = rows.filter((row) => row.id !== record.id);
+  const key = approvalRefKey(record);
+  const index = rows.findIndex((row) => approvalRefKey(row) === key);
+  // A record older than the one held is a late frame or a list read that crossed a push: it changes nothing.
+  if (index >= 0 && revisionOf(rows[index]!) >= revisionOf(record) && revisionOf(record) > 0) return rows;
+  const withoutIt = rows.filter((row) => approvalRefKey(row) !== key);
   if (!WAITING_STATUSES.has(record.status)) return withoutIt;
-  const index = rows.findIndex((row) => row.id === record.id);
   if (index < 0) return [...rows, record];
   const next = [...rows];
   next[index] = record;
   return next;
+}
+
+/** Where an approval lives and its id there: rows are keyed by both, so two nodes' ids never collide. */
+function approvalRefKey(record: SharedApprovalRecord): string {
+  return `${record.id}@${typeof record.homeNode === 'string' ? record.homeNode : ''}`;
+}
+
+function revisionOf(record: SharedApprovalRecord): number {
+  return typeof record.revision === 'number' ? record.revision : 0;
 }
 
 function isApprovalRecord(value: unknown): value is SharedApprovalRecord {
@@ -237,7 +246,16 @@ export function describeApprovalsUnavailable(snapshot: ApprovalsPanelSnapshot): 
 
 export function createApprovalsView(options: ApprovalsViewOptions): ApprovalsView {
   const pollIntervalMs = options.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;
-  const liveIntervalMs = options.liveRefreshIntervalMs ?? DEFAULT_LIVE_REFRESH_INTERVAL_MS;
+  /** The newest revision seen per approval, waiting or not: a frame at or below it is stale even after its row left. */
+  const seen = new Map<string, number>();
+  const fresh = (record: SharedApprovalRecord): boolean => {
+    const revision = revisionOf(record);
+    if (revision === 0) return true;
+    const key = approvalRefKey(record);
+    if ((seen.get(key) ?? 0) >= revision) return false;
+    seen.set(key, revision);
+    return true;
+  };
   let timer: ReturnType<typeof setInterval> | null = null;
   let inFlight: Promise<ApprovalsPanelSnapshot> | null = null;
   let started = false;
@@ -307,7 +325,17 @@ export function createApprovalsView(options: ApprovalsViewOptions): ApprovalsVie
     pushedDuringRead = pushed;
     inFlight = readHost()
       .then(({ rows, reason }) => {
-        let merged = rows;
+        // A listed row older than a frame already applied (a decision pushed while the list was out) gives way
+        // to what that frame left: the newer waiting row, or nothing when it was settled.
+        let merged: readonly SharedApprovalRecord[] = rows.flatMap((row) => {
+          const key = approvalRefKey(row);
+          if (revisionOf(row) === 0 || revisionOf(row) >= (seen.get(key) ?? 0)) {
+            fresh(row);
+            return [row];
+          }
+          const current = hostRows.find((held) => approvalRefKey(held) === key);
+          return current ? [current] : [];
+        });
         for (const record of pushed.values()) merged = applyApprovalUpdate(merged, record);
         hostRows = merged;
         hostReason = reason;
@@ -326,7 +354,10 @@ export function createApprovalsView(options: ApprovalsViewOptions): ApprovalsVie
   const armTimer = (): void => {
     if (!started) return;
     if (timer !== null) clearInterval(timer);
-    timer = setInterval(() => { void tick(); }, liveUpdates ? liveIntervalMs : pollIntervalMs);
+    timer = null;
+    // While the stream is open it carries every transition; nothing re-reads on a timer.
+    if (liveUpdates) return;
+    timer = setInterval(() => { void tick(); }, pollIntervalMs);
     timer.unref?.();
   };
 
@@ -350,7 +381,7 @@ export function createApprovalsView(options: ApprovalsViewOptions): ApprovalsVie
     opening = options.subscribe({
       onUpdate: (notice) => {
         const record = notice.approval as unknown;
-        if (!isApprovalRecord(record)) return;
+        if (!isApprovalRecord(record) || !fresh(record)) return;
         // The frame carries the daemon's whole record, so the panel advances
         // without a follow-up read: an ask appears the moment it is raised and
         // leaves the moment anyone decides it, on any surface.
@@ -388,6 +419,8 @@ export function createApprovalsView(options: ApprovalsViewOptions): ApprovalsVie
         if (opened === null || liveUpdates) return;
         liveUpdates = true;
         armTimer();
+        // Frames are not replayed: the list is read once now, which reconciles anything missed while closed.
+        void refresh();
       })
       .catch(() => {
         // `subscribe` is documented to report failure as null rather than throw;

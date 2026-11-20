@@ -1311,7 +1311,12 @@ export class ProviderRegistry {
       provider: separator > 0 ? registryKey.slice(0, separator) : registryKey,
       displayName: separator > 0 ? registryKey.slice(separator + 1) : registryKey,
     };
-    return chooseFailover({ registry: this, current, visited, fallbackOrder: readFallbackOrder(this.configManager.get('provider.fallbackModels')) });
+    return chooseFailover({ registry: this, current, visited, fallbackOrder: this.fallbackOrder() });
+  }
+
+  /** The person's fallback order (`provider.fallbackModels`), read now. */
+  fallbackOrder(): readonly string[] {
+    return readFallbackOrder(this.configManager.get('provider.fallbackModels'));
   }
 
   /** Model tier readings (routing.model-tier), for the route planner. */

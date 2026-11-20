@@ -862,6 +862,23 @@ export type EmailSendResult = OperatorMethodOutput<'email.send'>;
 /** Drafts append to the account's Drafts folder and need no `confirm`: nothing leaves the account. */
 export type EmailDraftCreateInput = OperatorMethodInput<'email.draft.create'>;
 export type EmailDraftCreateResult = OperatorMethodOutput<'email.draft.create'>;
+/** `email.draft.update`: replace the saved draft named by `uid` in the Drafts generation `uidValidity`. */
+export interface EmailDraftUpdateInput {
+  readonly uid: number;
+  readonly uidValidity: number;
+  readonly to: string;
+  readonly subject: string;
+  readonly body: string;
+  readonly inReplyTo?: string;
+  readonly references?: string;
+}
+export interface EmailDraftUpdateResult {
+  readonly draftId: string;
+  readonly uid?: number;
+  readonly uidValidity?: number;
+  readonly mailbox: string;
+  readonly replaced: number;
+}
 
 // ─── Sessions and companion chat ─────────────────────────────────────────────
 
@@ -1359,8 +1376,9 @@ export const client = {
         create: (input: EmailDraftCreateInput) =>
           invokeOperator('email.draft.create', input),
         // Replaces the saved draft (uid + uidValidity from email.drafts.list): the folder keeps one copy. ws-only.
-        update: (input: OperatorMethodInput<'email.draft.update'>) =>
-          invokeGatewayMethod('email.draft.update', input),
+        // Typed here until the generated contract carries the method; sent through the generic invoke route.
+        update: (input: EmailDraftUpdateInput) =>
+          invokeGatewayMethod('email.draft.update' as never, input as never) as Promise<EmailDraftUpdateResult>,
       },
     },
     // Occasions and plans (occasions.*, docs/occasions.md).

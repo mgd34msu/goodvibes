@@ -23,9 +23,15 @@
  * {@link createTurnFailover}, in the terminal app, `run`, the Agent, hosted
  * sessions, worker agents and the companion chat alike. The move lasts for the
  * rest of that turn; the next turn starts on the selected model again.
+ *
+ * A model call outside a turn (context compaction, the helper and tool
+ * models, the check-in note, native work intake, knowledge, image
+ * understanding, the verification writer) runs the same rule through
+ * {@link callWithFailover}: the move lasts for that one call.
  */
 import { ProviderError } from '../types/errors.js';
 import { summarizeError } from '../utils/error-display.js';
+import { logger } from '../utils/logger.js';
 import type { LLMProvider } from './interface.js';
 import type { ModelDefinition } from './registry-types.js';
 
@@ -195,5 +201,94 @@ export function createTurnFailover(options: TurnFailoverOptions): (error: unknow
       );
       return true;
     }
+  };
+}
+
+/** What a single call outside a turn is sent to: the model, its provider's own id for it, and the provider. */
+export interface FailoverTarget {
+  readonly model: TurnFailoverModel;
+  /** The id the provider's `chat` takes. */
+  readonly modelId: string;
+  readonly provider: LLMProvider;
+}
+
+/** What the registry must answer to move a single call. */
+export interface CallFailoverRegistry extends FailoverRegistry {
+  getForModel(modelId: string, provider?: string): LLMProvider;
+  /** The person's fallback order (`provider.fallbackModels`), read at the failure. */
+  fallbackOrder(): readonly string[];
+}
+
+export interface CallWithFailoverOptions {
+  readonly registry: CallFailoverRegistry;
+  /** The model the call is asked of first. */
+  readonly first: FailoverTarget;
+  /** What the call is, for the lines that say where it moved ("context compaction"). */
+  readonly purpose: string;
+  /** Where a move or a stop is told; the log when absent (background work has no conversation). */
+  readonly notify?: ((line: string, level: 'warning' | 'error') => void) | undefined;
+  /** A cancelled call is never moved to another model. */
+  readonly signal?: AbortSignal | undefined;
+}
+
+/** The target for a model the failover chose, as the registry knows it. */
+function targetFor(registry: CallFailoverRegistry, choice: Extract<FailoverChoice, { kind: 'switch' }>): FailoverTarget {
+  const listed = registry.listModels().find((model) => model.registryKey === choice.registryKey);
+  return {
+    model: { registryKey: choice.registryKey, provider: choice.provider, displayName: choice.displayName },
+    modelId: listed?.id ?? choice.registryKey.slice(choice.registryKey.indexOf(':') + 1),
+    provider: registry.getForModel(choice.registryKey, choice.provider),
+  };
+}
+
+/**
+ * One model call outside a turn, under the turn's rule: the model's own
+ * sign-ins first (inside the provider's request), then the person's fallback
+ * order (`provider.fallbackModels`), each entry at most once; with no order,
+ * or every entry tried, the call fails with the last model's error. The first
+ * call is the only request when it succeeds; a failure that is not the
+ * provider's (a cancelled call, a refused input) is never moved.
+ */
+export async function callWithFailover<T>(
+  options: CallWithFailoverOptions,
+  call: (target: FailoverTarget) => Promise<T>,
+): Promise<T> {
+  let target = options.first;
+  const failOver = createTurnFailover({
+    registry: options.registry,
+    fallbackOrder: () => options.registry.fallbackOrder(),
+    current: () => target.model,
+    switchTo: (choice) => { target = targetFor(options.registry, choice); },
+    notify: options.notify ?? ((line, level) => {
+      const message = `${options.purpose}: ${line}`;
+      if (level === 'error') logger.warn(message);
+      else logger.info(message);
+    }),
+  });
+  for (;;) {
+    try {
+      return await call(target);
+    } catch (error) {
+      if (options.signal?.aborted || !failOver(error)) throw error;
+    }
+  }
+}
+
+/**
+ * The target for a model the registry lists, by registry key or by provider
+ * and id; undefined when it does not list it (the caller then has nothing to
+ * fail over from and asks as it did).
+ */
+export function failoverTargetOf(registry: CallFailoverRegistry, modelId: string, providerName?: string): FailoverTarget | undefined {
+  const listed = registry.listModels().find((model) => (
+    providerName
+      ? model.provider === providerName && (model.registryKey === modelId || model.id === modelId)
+      : model.registryKey === modelId
+  ));
+  if (!listed) return undefined;
+  return {
+    model: { registryKey: listed.registryKey, provider: listed.provider, displayName: listed.displayName },
+    modelId: listed.id,
+    provider: registry.getForModel(listed.registryKey, listed.provider),
   };
 }

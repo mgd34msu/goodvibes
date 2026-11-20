@@ -70,6 +70,7 @@ import {
   type OccasionSubject,
   type RaiseBoundary,
 } from './types.js';
+import { occasionMirrorKey } from './sweep.js';
 
 const UNRESTRICTED_OPERATION = () => {};
 
@@ -852,6 +853,11 @@ export class OccasionStateStore {
   // Calendar mirror
   // -------------------------------------------------------------------------
 
+  /** Every occurrence written to the calendar, as `<occasionId>@<occurrence>` (occasionMirrorKey): one read of the state. */
+  async mirroredOccurrences(): Promise<ReadonlySet<string>> {
+    return new Set((await this.state()).mirrors.map((entry) => occasionMirrorKey(entry.occasionId, entry.occurrence)));
+  }
+
   /** The mirror already written for this occurrence, if there is one. */
   async mirrorFor(occasionId: string, occurrence: IsoDate): Promise<OccasionMirrorRecord | undefined> {
     return (await this.state()).mirrors.find(
@@ -1019,3 +1025,4 @@ export class OccasionStateStore {
     await this.writes.drain();
   }
 }
+

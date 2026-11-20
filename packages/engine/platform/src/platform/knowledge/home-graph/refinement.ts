@@ -3,6 +3,7 @@ import type { KnowledgeSemanticService } from '../semantic/index.js';
 import type { KnowledgeStore } from '../store.js';
 import { knowledgeRefinementTaskLifecycle, type KnowledgeRefinementTaskRecord } from '../types.js';
 import { resolveReadableHomeGraphSpace } from './space-selection.js';
+import { guardKnowledgeRefinementTaskInput } from '../store-refinement.js';
 import {
   runHomeGraphIssueTriage,
   type HomeGraphTriageOptions,
@@ -134,7 +135,12 @@ export async function cancelHomeGraphRefinementTask(input: HomeGraphSpaceInput &
   const move = knowledgeRefinementTaskLifecycle.check(task.state, 'cancelled');
   // A closed or suppressed task is already decided; the store would keep it unchanged, so say so.
   if (!move.ok) return { ok: false, spaceId, error: `${move.reason}. Nothing was changed.`, task };
-  const cancelled = await input.store.upsertRefinementTask({
+  // The cancel applies only to the task as read: a reset or delete that removed it, or a run that moved it,
+  // before the write wins, and the cancel writes nothing (checked with no await before the write).
+  const changed = (): void => {
+    if (input.store.getRefinementTask(task.id) !== task) throw new RefinementTaskChangedError(task.id);
+  };
+  const cancelled = await input.store.upsertRefinementTask(guardKnowledgeRefinementTaskInput({
     id: task.id,
     spaceId: task.spaceId,
     subjectKind: task.subjectKind,
@@ -150,6 +156,20 @@ export async function cancelHomeGraphRefinementTask(input: HomeGraphSpaceInput &
     attemptCount: task.attemptCount,
     appendTrace: [{ at: Date.now(), state: 'cancelled', message: 'Home Graph refinement task was cancelled by request.' }],
     metadata: task.metadata,
+  }, changed)).catch((error: unknown) => {
+    if (error instanceof RefinementTaskChangedError) return null;
+    throw error;
   });
+  if (cancelled === null) {
+    const now = input.store.getRefinementTask(task.id);
+    return now === null
+      ? { ok: false, spaceId, error: 'The refinement task was removed (its space was reset or its subject deleted) while it was being cancelled. Nothing was changed.' }
+      : { ok: false, spaceId, error: `The refinement task changed to ${now.state} while it was being cancelled. Nothing was changed; read it again.`, task: now };
+  }
   return { ok: true, spaceId, task: cancelled };
+}
+
+/** The task a cancel read is no longer the stored one. */
+class RefinementTaskChangedError extends Error {
+  constructor(taskId: string) { super(`Refinement task ${taskId} changed before the cancel was written`); this.name = 'RefinementTaskChangedError'; }
 }

@@ -71,7 +71,7 @@ export interface AskPresentation {
     | { readonly offered: false; readonly why: string };
   /** The card takes a typed reason to refuse ("or type why not"). */
   readonly typeToRefuse: boolean;
-  /** A purchase veto window: "goes ahead" at `at`. */
+  /** A purchase window's deadline: a veto window "goes ahead" at `at`; an approval window "waits for you" until it. */
   readonly countdown?: { readonly verb: string; readonly at: number } | undefined;
   /** "the agent in "Tidy the seed notes"": who asked, from which chat. */
   readonly origin?: { readonly sessionTitle?: string | undefined; readonly by: string } | undefined;
@@ -474,7 +474,10 @@ export function presentInboxAsk(item: OwnerItem, facts: AskFacts, request?: Perm
       const windowKind = purchase?.kind ?? (item.options.includes('go') ? 'veto' : item.options.includes('approve') ? 'approval' : undefined);
       const question = purchase?.item && purchase.price ? `Buy ${purchase.item} for ${purchase.price}?`
         : windowKind === 'veto' ? 'Let this purchase go ahead?' : windowKind === 'approval' ? 'Approve this purchase?' : 'A purchase update';
-      const budget = purchase?.withinBudget === true ? 'Inside your daily budget.' : purchase?.withinBudget === false ? 'Over your daily budget.' : undefined;
+      // A veto window opens only for a purchase inside the budget (payments/merchant-recourse.ts windowForPurchase:
+      // anything above it gets an approval window), so a veto window is inside it by construction.
+      const withinBudget = purchase?.withinBudget ?? (windowKind === 'veto' ? true : undefined);
+      const budget = withinBudget === true ? 'Inside your daily budget.' : withinBudget === false ? 'Over your daily budget.' : undefined;
       const deadline = purchase?.deadlineMs ?? item.expiresAt;
       const choices: AskChoice[] = windowKind === 'veto'
         ? [{ id: 'acknowledge', label: 'Let it go ahead', key: 'y', value: 'go' }, { id: 'object', label: 'Stop it', key: 'n', default: true, value: 'stop' }]
@@ -487,7 +490,8 @@ export function presentInboxAsk(item: OwnerItem, facts: AskFacts, request?: Perm
         body: firstLine(item.detail),
         ...(budget ? { consequence: { text: budget, withPlace: budget, tone: 'plain' as const } } : {}),
         choices, remember: noRemember, typeToRefuse: false,
-        ...(windowKind === 'veto' && deadline !== undefined ? { countdown: { verb: 'goes ahead', at: deadline } } : {}),
+        // A veto window goes ahead by itself at its deadline; an approval window only waits (silence refuses it).
+        ...(deadline !== undefined && windowKind !== undefined ? { countdown: { verb: windowKind === 'veto' ? 'goes ahead' : 'waits for you', at: deadline } } : {}),
         why: windowKind === 'veto' ? 'A purchase inside your limits goes ahead unless you stop it before the time runs out.'
           : 'A purchase over what you allow without asking needs your yes.',
         details: [{ label: 'Notice', value: item.detail }, ...(deadline !== undefined ? [{ label: windowKind === 'veto' ? 'Goes ahead at' : 'Waits until', value: new Date(deadline).toISOString() }] : [])],

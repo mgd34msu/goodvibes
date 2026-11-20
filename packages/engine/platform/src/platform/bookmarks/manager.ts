@@ -36,15 +36,14 @@ export function bookmarkFileSlug(label: string): string {
     .slice(0, 40) || 'block';
 }
 
-/** Whether a saved file name is the one saveToFile writes for this label. */
-export function isSavedFileForLabel(fileName: string, label: string): boolean {
-  // A second save of the same label in one second carries a counter suffix.
-  return /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-/.test(fileName)
-    && new RegExp(`^${bookmarkFileSlug(label)}(-\\d+)?\\.txt$`).test(fileName.slice(20));
-}
-
 export class BookmarkManager {
   private bookmarks = new Map<string, BookmarkEntry>();
+  /**
+   * The file each block was saved to, by the block's key: the name saveToFile
+   * returned, which is the saved block's identity. A label is not one (two
+   * blocks can share it, and its slug is cut and lossy).
+   */
+  private readonly savedFiles = new Map<string, string>();
   private saveDir: string;
 
   constructor(baseDir: string) {
@@ -94,7 +93,7 @@ export class BookmarkManager {
    * saveToFile - Write block content to a file in the bookmarks directory.
    * Returns the file path on success, or throws on failure.
    */
-  public saveToFile(content: string, label: string): string {
+  public saveToFile(content: string, label: string, key?: string): string {
     mkdirSync(this.saveDir, { recursive: true });
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const base = `${timestamp}-${bookmarkFileSlug(label)}`;
@@ -108,8 +107,14 @@ export class BookmarkManager {
         throw err;
       }
       logger.debug('BookmarkManager: saved block content', { filePath });
+      if (key !== undefined) this.savedFiles.set(key, filePath.slice(join(this.saveDir, '').length));
       return filePath;
     }
+  }
+
+  /** The file name the block with `key` was last saved to in this session, or undefined when it was not saved. */
+  public savedFileFor(key: string): string | undefined {
+    return this.savedFiles.get(key);
   }
 
   /**

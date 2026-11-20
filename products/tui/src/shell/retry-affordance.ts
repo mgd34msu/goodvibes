@@ -21,7 +21,8 @@ export const FIX_SESSION_CHORD_LABEL = 'Alt+J';
 
 export interface ShellActionOffers {
   /** A failed turn can be sent again; `exhausted` when automatic failover already tried every provider. */
-  retry: { readonly exhausted: boolean } | null;
+  /** `continues`: the failed turn already ran tools, so the chord continues it from their results instead of sending it again. */
+  retry: { readonly exhausted: boolean; readonly continues?: boolean | undefined } | null;
   /** The newest started fix session the owner has not opened yet. */
   fixSessionId: string | null;
 }
@@ -34,7 +35,7 @@ export function createShellActionOffers(): ShellActionOffers {
 export function actionHint(offers: ShellActionOffers): string | null {
   const parts: string[] = [];
   if (offers.retry) {
-    parts.push(`${RETRY_CHORD_LABEL} retry${offers.retry.exhausted ? ' same provider' : ''} · /model switch model`);
+    parts.push(`${RETRY_CHORD_LABEL} ${offers.retry.continues ? 'continue' : 'retry'}${offers.retry.exhausted ? ' same provider' : ''} · /model switch model`);
   }
   if (offers.fixSessionId) parts.push(`${FIX_SESSION_CHORD_LABEL} open fix session`);
   return parts.length > 0 ? `[Next] ${parts.join(' · ')}` : null;
@@ -46,16 +47,17 @@ export function wireRetryOfferOnError(
   offers: ShellActionOffers,
   hasRetryCtx: () => boolean,
   render: () => void,
+  continues: () => boolean = () => false,
 ): void {
   onErrorSurfaced((exhausted) => {
     if (!hasRetryCtx()) return;
-    offers.retry = { exhausted };
+    offers.retry = { exhausted, continues: continues() };
     render();
   });
 }
 
 export interface ShellActionChordDeps {
-  /** Send the failed turn again (rolls the transcript back to before it). */
+  /** Send the failed turn again (rolls the transcript back to before it), or continue it when it already ran tools. */
   readonly retry: () => void;
   /** Open (resume) the session with this id. */
   readonly openSession: (sessionId: string) => void;

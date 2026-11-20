@@ -27,8 +27,9 @@ import { OwnedJudgmentWork } from '../runtime/owned-judgment-work.js';
  * empty brief.
  */
 
-import type { ProviderMessage, LLMProvider } from '../providers/interface.js';
+import type { ProviderMessage } from '../providers/interface.js';
 import type { ProviderRegistry } from '../providers/registry.js';
+import { callWithFailover, failoverTargetOf, type FailoverTarget } from '../providers/failover.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { CompactionContext, CompactionResult, CompactionEvent } from './compaction-types.js';
@@ -143,19 +144,15 @@ function resolveProvider(
   registry: ProviderRegistry,
   modelId: string,
   providerName: string | undefined,
-): { provider: LLMProvider; providerModelId: string; contextWindow: number | null } | null {
+): { target: FailoverTarget; contextWindow: number | null } | null {
   try {
-    const provider = registry.getForModel(modelId, providerName);
-    const modelDef = registry.listModels().find((model) => (
-      providerName
-        ? model.provider === providerName && (model.registryKey === modelId || model.id === modelId)
-        : model.registryKey === modelId
-    ));
-    if (!modelDef) return null;
+    const target = failoverTargetOf(registry, modelId, providerName);
+    const modelDef = registry.listModels().find((model) => model.registryKey === target?.model.registryKey);
+    if (!target || !modelDef) return null;
     // An unreadable window only means the transcript is not capped.
     let contextWindow: number | null = null;
     try { contextWindow = registry.getKnownContextWindowForModel(modelDef); } catch { contextWindow = null; }
-    return { provider, providerModelId: modelDef.id, contextWindow };
+    return { target, contextWindow };
   } catch (err) {
     logger.warn('Distiller: failed to resolve provider', { modelId, err: summarizeError(err) });
     return null;
@@ -213,11 +210,13 @@ export async function distillConversation(
     work.assertCurrent();
     if (helped !== null) brief = helped.trim();
     else {
-      const response = await work.wait(() => resolved.provider.chat({
-        messages: [{ role: 'user', content: prompt }],
-        model: resolved.providerModelId,
-        signal: ctx.signal,
-      }));
+      // The extraction model fails over like a turn: its other sign-ins, then provider.fallbackModels.
+      const response = await callWithFailover({ registry, first: resolved.target, purpose: 'Distiller compaction', signal: ctx.signal },
+        (target) => work.wait(() => target.provider.chat({
+          messages: [{ role: 'user', content: prompt }],
+          model: target.modelId,
+          signal: ctx.signal,
+        })));
       work.assertCurrent();
       brief = response.content?.trim() ?? '';
     }

@@ -834,7 +834,8 @@ export async function takeSnapshot(
     sessionId,
     pageId,
     url: page.url(),
-    title: await work.wait(() => pageRead(() => page.title().catch(() => ''))),
+    // The title is page-written text like any other: a page can copy what was typed into it.
+    title: scrub(await work.wait(() => pageRead(() => page.title().catch(() => '')))),
     snapshotId,
     elements: Object.freeze(elements),
     truncated: !options.controls && raw.length >= limit,

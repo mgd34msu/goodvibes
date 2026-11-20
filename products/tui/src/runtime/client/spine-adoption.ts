@@ -84,7 +84,8 @@ export function createSpineAdoptionSync(
         close: (sessionId) => httpTransport.operator.sessions.close(sessionId),
       };
       return {
-        sessionTransport: createSessionsClientSpineTransport(sessionsClient),
+        // Pinned to this daemon: a close owed to it is sent only through a transport for it.
+        sessionTransport: { ...createSessionsClientSpineTransport(sessionsClient), targetId: () => parseDaemonOrigin(baseUrl)?.baseUrl ?? baseUrl },
         inboundInputs: {
           listInputs: (sessionId, opts) => httpTransport.operator.sessions.inputsPage(sessionId, opts),
           // A renewal sends the claim's token (its epoch), so a held input stays this surface's while it waits.

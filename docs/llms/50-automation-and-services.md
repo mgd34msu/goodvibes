@@ -135,10 +135,11 @@ The model can list and create schedules with the `schedule` tool (its inputs are
 - An occurrence that comes due while an earlier run of the same job is still running is skipped.
 - A one-time job whose time passed while the daemon was down for longer than `automation.catchUpWindowMinutes` is recorded as missed and disabled.
 - After a failure, the job waits `automation.failureCooldownMs` before it may run again.
-- A cancelled run stays cancelled and is not retried.
+- A cancelled run stays cancelled and is not retried. Cancelling a check-in that is still deciding stops it before its judgment and its delivery.
+- A run still starting when the daemon stops starts no agent and saves no record afterwards; the next start reconciles what was recorded.
 - At most `automation.maxConcurrentRuns` runs execute at once; `automation.runHistoryLimit` runs per job are kept.
 - `automation.enabled` `false` stops the whole subsystem.
-- In a group of machines (`cluster`), a routine made on any machine is listed on every machine and runs once in the group, on the machine holding the `automation` role; disabling or removing it on any machine applies on all of them, and when the role moves the new holder carries on from the last occurrence started. See "What a cluster does and does not do" under "Clusters" in "The daemon, the web UI and networking". The scheduled check-in is the exception: it follows the `checkin` role.
+- In a group of machines (`cluster`), a routine made on any machine is listed on every machine and runs once in the group, on the machine holding the `automation` role; disabling or removing it on any machine applies on all of them, and when the role moves the new holder carries on from the last occurrence started. A run still starting on the machine that lost the role starts no agent and saves nothing more. See "What a cluster does and does not do" under "Clusters" in "The daemon, the web UI and networking". The scheduled check-in is the exception: it follows the `checkin` role.
 
 ### Where a routine's result goes, and what a routine can use
 
@@ -272,7 +273,7 @@ Example: fire when a health endpoint stops answering `ok` three checks in a row.
 
 - Only an `on-exit` trigger finishes when it fires (state `fired`, final). A `condition` or `stream` trigger records each firing (`firedCount`, a `fired` entry in its runs) and keeps watching. A cancelled trigger is finished. Cancelling a running `on-exit` trigger stops its process and records the run's termination as `cancel-requested` (not observed) until the supervisor sees the process end, then as what it saw (`signalled` or `exited`, reason `cancelled`); a process started before a daemon restart is not ours to stop, so its cancel records no termination and says the process was not stopped. `reset` applies only to `idle`, `backoff`, `circuit-open` and `failed` triggers; resetting another is refused with what to do instead.
 - A failing check backs off along `watchers.triggers.backoffLadderMs`; after `watchers.triggers.breakerStrikes` failures in a row the breaker opens (`circuit-open`) until reset.
-- An action that fails to deliver is kept owed and delivered again when due. A stream keeps at most eight undelivered batches; a dropped one is recorded in the trigger's runs.
+- An action that fails to deliver is kept owed and delivered again when due, once at a time: an action slower than the supervision tick is not started a second time, and a batch leaves the owed list only when the attempt that delivered it ends. A stream keeps at most eight undelivered batches; a dropped one is recorded in the trigger's runs.
 - A save that fails sets `lastError` to `not saved: <cause> (<path>)` and is retried on the next tick; the trigger keeps running.
 - `/triggers` answers `/triggers <verb> was not done: <reason>` when the daemon refuses.
 
@@ -317,6 +318,7 @@ curl -s -X POST http://127.0.0.1:3421/api/control-plane/methods/watchers.create/
 The answer is the watcher record: `id`, `label`, `kind`, `state`, `source`, `lastCheckpoint`, `lastError`. Remove it with `watchers.delete` and `{"body":{"watcherId":"<id>"}}`.
 
 - After a restart, a watcher owned by a component reads `awaiting its owner since <time>` until that component registers it again; start or run is refused with `WATCHER_AWAITING_OWNER`.
+- Updating, stopping or deleting a watcher while it runs stops that run (its request is aborted) and its outcome is not written: the record shows the new definition's runs only.
 - The daemon itself runs one watcher, `daemon-heartbeat`, while `watchers.enabled` is on.
 - When the watcher store cannot be saved, a change still applies and its answer carries `persisted: false`.
 - Settings: `watchers.enabled`, `watchers.pollIntervalMs`, `watchers.heartbeatIntervalMs`, `watchers.recoveryWindowMinutes`, and `watchers.ciPollIntervalMs` for CI watches (never below 15 seconds).
@@ -697,6 +699,8 @@ An approval prompt for a turn the owner started from a channel is shown in that 
 #### Run control
 
 Every chat surface lets the owner ask about, cancel or retry a run, agent or session the daemon knows, by its id, for work started from the same conversation (anything else is refused: `This conversation did not start <id>, so it cannot act on it. Send the command from the conversation that did.`). With a decision model in use, any message that names a known id and asks for one of the three is read as the command (`cancel run-123`, "stop run-123"). With no decision model in use, only the exact form is recognised: `/status <id>`, `/cancel <id>` or `/retry <id>`, with the leading slash and nothing else on the line; any other wording is an ordinary message.
+
+Only the channel's owner controls runs: a guest (anyone else the channel admits) who sends one of these, or presses a run's Cancel or Retry button on Slack or Discord, is refused (`Not done: cancel <id> was refused. Status, cancel and retry act on the owner's runs and agents, so only the owner of this channel may send them.`). The typed command and the button are the same control: a button cancels a run or an agent, as `/cancel` does.
 
 ### Other `/channel` subcommands (terminal app)
 

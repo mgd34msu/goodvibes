@@ -112,6 +112,8 @@ export interface SweepContext {
   readonly openItems: readonly OpenItem[];
   readonly interviews: readonly Interview[];
   readonly policy: OccasionsPolicy;
+  /** Occurrences the calendar mirror wrote (OccasionStateStore.mirroredOccurrences). */
+  readonly mirroredOccurrences: ReadonlySet<string>;
 }
 
 /** Why a sweep raised nothing, when it raised nothing. */
@@ -245,7 +247,7 @@ export function decideSweep(context: SweepContext): SweepDecision {
     // and nothing is pushed at them about this occurrence again.
     if (answer?.answer === 'acknowledged') continue;
     if (answer?.answer === 'later' && (answer.returnOn ?? occurrence) > today) continue;
-    if (occasion.mirrored && policy.suppressMirroredNudges) continue;
+    if (policy.suppressMirroredNudges && isOccurrenceMirrored(occasion, occurrence, context.mirroredOccurrences)) continue;
 
     // The two-raise ceiling, and the only gate on a nudge. Not "is its due date
     // here", a due date that cannot move past the occurrence is due forever on
@@ -359,3 +361,17 @@ function addDaysClamped(today: IsoDate, days: number, cap?: IsoDate): IsoDate {
  * function is how two callers end up disagreeing about what "later" means.
  */
 export { laterReturnDate };
+
+/** The key one mirrored occurrence is known by. */
+export function occasionMirrorKey(occasionId: string, occurrence: string): string {
+  return `${occasionId}@${occurrence}`;
+}
+
+/**
+ * Whether an occurrence is on a calendar: the owner's own "mirrored" mark on
+ * the occasion's line, or the record of the calendar mirror having written
+ * that occurrence. Sweep, pending and the list read this one view.
+ */
+export function isOccurrenceMirrored(occasion: { readonly id: string; readonly mirrored: boolean }, occurrence: string, mirrored: ReadonlySet<string>): boolean {
+  return occasion.mirrored || mirrored.has(occasionMirrorKey(occasion.id, occurrence));
+}

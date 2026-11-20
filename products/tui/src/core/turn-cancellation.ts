@@ -59,24 +59,23 @@ export function createCancelToolCall(
 
 
 /**
- * Relay recovery cancellation through both memory preparation and native platform
- * admission. The latter can be pending before isThinking/TURN_SUBMITTED, so a
- * boolean pre-entry check alone cannot cancel it. The turn hold releases this
- * signal without abort on submission; the platform then owns ordinary turn abort.
+ * A retry in two steps: `prepare` (memory refresh), then `submit`, which is the
+ * replacement turn's own admission and run. A cancellation or a newer action
+ * while it prepares (`signal`, `isCurrent`) stops it before anything is
+ * submitted; nothing is aborted, since no turn of this retry runs yet and the
+ * running turn, if any, is someone else's. Once submitted, the turn is the
+ * platform's and its own cancellation applies. `prepare` failing rejects
+ * before `submit`, so what the retry would replace is still there.
  */
 export async function runOwnedTurnRetry(options: {
   readonly prepare: () => Promise<unknown>;
   readonly submit: () => Promise<void>;
-  readonly abort: () => void;
   readonly isCurrent: () => boolean;
   readonly signal?: AbortSignal | undefined;
-}): Promise<void> {
-  if (!options.isCurrent() || options.signal?.aborted) return;
-  const abort = () => { options.abort(); };
-  options.signal?.addEventListener('abort', abort, { once: true });
-  try {
-    await options.prepare();
-    if (!options.isCurrent() || options.signal?.aborted) return;
-    await options.submit();
-  } finally { options.signal?.removeEventListener('abort', abort); }
+}): Promise<boolean> {
+  if (!options.isCurrent() || options.signal?.aborted) return false;
+  await options.prepare();
+  if (!options.isCurrent() || options.signal?.aborted) return false;
+  await options.submit();
+  return true;
 }

@@ -34,6 +34,7 @@ import { composeUnattendedRunTools } from './unattended-run-tools.js';
 export { startDeviceHousekeeping } from './device-posture-composition.js';
 import { createClusterServices, startClusterServices } from './cluster-group-composition.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
+import { resolveNodeIdentity } from '@goodvibes-jev/engine/platform/platform/cluster';
 import { observeNativeStartupPhase } from './startup-observation.js';
 import type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.js';
 export type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.js';
@@ -176,6 +177,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     // The one owner inbox: this broker's asks plus questions, claims, purchase
     // windows and queued actions, kept in the home's one store that the terminal
     // apps open too. The store opens on first use, not at start-up.
+    // This daemon's approvals are stamped with its cluster node, the id the group knows it by (read on the first raise).
+    approvalBroker.useHomeNode(() => resolveNodeIdentity({ stateDirectory: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'cluster') }).nodeId);
     const ownerInbox = createOwnerInbox({
       approvals: approvalBroker,
       questionsPath: ownerInboxStorePath(shellPaths),

@@ -22,6 +22,7 @@ export class EmailConfigurationError extends Error {
  * bun/node transport lives in the sibling `email/node` entry.
  */
 
+import type { Secret } from '../security/secret.js';
 import { readEmailInboxBatch, type EmailInboxBatchInput, type EmailInboxBatchRead } from './email-inbox-batch.js';
 import { assertDeliveryCurrent, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
 import { listEmailInbox } from './email-inbox-list.js';
@@ -315,7 +316,7 @@ export interface EmailServiceDeps {
   readonly getInboxConfig?: ((key: string) => unknown) | undefined;
   /** SecretsManager-compatible interface for resolving secret refs. */
   readonly secretsManager: {
-    readonly get: (key: string) => Promise<string | null>;
+    readonly get: (key: string) => Promise<Secret | null>;
   };
   /** The real connections. Required: this module never opens one itself. */
   readonly transport: EmailTransportPort;

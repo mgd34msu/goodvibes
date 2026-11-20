@@ -1,5 +1,6 @@
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
-import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type ProtectedSource, type ProtectedResearchReference, type SourceScreeningHold } from '@goodvibes-jev/engine/platform/platform/security';
+import { createHash } from 'node:crypto';
+import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type ProtectedSource, type ProtectedResearchReference, type SourceScreeningHold, type SourceScreeningReceipt } from '@goodvibes-jev/engine/platform/platform/security';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 import type { ToolInputProjectionProblem, ToolInputProjector, ToolInputProjectionRequest, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { prepareAgentResearchReportInput, omittedReferencePattern } from './research-report-input.js';
@@ -27,11 +28,25 @@ const SOURCE_TEXT_FIELDS = ['title', 'name', 'publisher', 'credibility', 'note',
 /** A cleared preview is kept this long for the save of the same arguments, so preview-then-save screens once. */
 const PREVIEW_REUSE_MS = 10 * 60_000;
 const PREVIEW_REUSE_LIMIT = 8;
-const clearedPreviews = new WeakMap<ProtectedSourceOwner, Map<string, { readonly args: Record<string, unknown>; readonly expiresAt: number }>>();
-/** The arguments a preview and its save share: everything but `preview`. */
+/**
+ * A cleared preview: the cleared arguments and the receipts of the screening
+ * that cleared them. It is reused only while the authorization that issued
+ * those receipts is still the one in force (ProtectedSourceOwner.assertAuthorizationCurrent);
+ * withdrawn consent or changed credentials make the save screen again.
+ */
+interface ClearedPreview { readonly args: Record<string, unknown>; readonly expiresAt: number; readonly receipts: readonly SourceScreeningReceipt[] }
+const clearedPreviews = new WeakMap<ProtectedSourceOwner, Map<string, ClearedPreview>>();
+/** The arguments a preview and its save share (everything but `preview`), kept as a digest, never as the report text. */
 function previewKey(raw: Record<string, unknown>): string {
   const { preview: _preview, ...rest } = raw;
-  return JSON.stringify(rest);
+  return createHash('sha256').update(JSON.stringify(rest)).digest('hex');
+}
+
+/** True while every receipt's authorization is the one in force; an owner that cannot say is never trusted. */
+function previewAuthorizationHolds(owner: ProtectedSourceOwner, preview: ClearedPreview): boolean {
+  if (!owner.assertAuthorizationCurrent || preview.receipts.length === 0) return false;
+  try { for (const receipt of preview.receipts) owner.assertAuthorizationCurrent(receipt); return true; }
+  catch { return false; }
 }
 
 const owners = new WeakMap<ToolRegistry, ProtectedSourceOwner>();
@@ -225,8 +240,8 @@ export async function prepareProtectedResearchReport(
     const now = Date.now();
     for (const [entryKey, entry] of reuse) if (entry.expiresAt <= now) reuse.delete(entryKey);
     const cleared = reuse.get(key);
-    if (cleared) {
-      reuse.delete(key);
+    if (cleared) reuse.delete(key);
+    if (cleared && previewAuthorizationHolds(owner, cleared)) {
       checkOperation();
       return finish(snapshotJudgmentInput({ ...cleared.args, ...(raw.preview === undefined ? {} : { preview: raw.preview }) }, 'research report') as Record<string, unknown>);
     }
@@ -290,10 +305,12 @@ export async function prepareProtectedResearchReport(
         const result = await owner.screen(handle, operation);
         if (result.status !== 'settled') screeningStop(result.reason, 'The report text');
         parts[index] = [...owner.project(result.receipt)];
+        textReceipts.push(result.receipt);
       }),
       projected: () => order.flatMap(index => parts[index]!),
     };
   };
+  const textReceipts: SourceScreeningReceipt[] = [];
   try {
     checkOperation();
     const screening = textScreening(strings);
@@ -361,11 +378,11 @@ export async function prepareProtectedResearchReport(
     });
     const args = snapshotJudgmentInput({ ...prepared, sources: finalSources }, 'research report') as Record<string, unknown>;
     if (raw.preview === true) {
-      const kept = clearedPreviews.get(owner) ?? new Map<string, { readonly args: Record<string, unknown>; readonly expiresAt: number }>();
+      const kept = clearedPreviews.get(owner) ?? new Map<string, ClearedPreview>();
       clearedPreviews.set(owner, kept);
       while (kept.size >= PREVIEW_REUSE_LIMIT) kept.delete(kept.keys().next().value as string);
       const { preview: _preview, ...cleared } = args;
-      kept.set(key, { args: cleared, expiresAt: Date.now() + PREVIEW_REUSE_MS });
+      kept.set(key, { args: cleared, expiresAt: Date.now() + PREVIEW_REUSE_MS, receipts: [...textReceipts] });
     }
     return finish(args);
   } catch (error) {

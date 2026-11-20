@@ -285,7 +285,7 @@ export function buildMcpWorkspaceFormFields(form: McpWorkspaceFormBase): readonl
       id: 'args',
       label: 'Arguments',
       value: form.args,
-      help: 'Command arguments. Quotes are supported for values with spaces.',
+      help: 'Command arguments. Quotes are supported for values with spaces. The value after a secret-looking flag (--token, --api-key) stays masked while you type; Ctrl+U empties the field to replace it.',
       editable: true,
     },
     {
@@ -306,7 +306,7 @@ export function buildMcpWorkspaceFormFields(form: McpWorkspaceFormBase): readonl
       id: 'env',
       label: 'Environment',
       value: form.env,
-      help: 'Comma-separated KEY=VALUE entries. Prefer env var references or secure secrets for sensitive values.',
+      help: 'Comma-separated KEY=VALUE entries. Each value stays masked, also while you type it; Ctrl+U empties the field to replace it. Prefer env var references or secure secrets for sensitive values.',
       editable: true,
     },
     {

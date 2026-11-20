@@ -215,6 +215,10 @@ export function createSessionSpineRestTransport(options: SessionSpineRestTranspo
   const registerTimeoutMs = options.registerTimeoutMs ?? DEFAULT_REGISTER_TIMEOUT_MS;
   const closeTimeoutMs = options.closeTimeoutMs ?? DEFAULT_CLOSE_TIMEOUT_MS;
   return {
+    // The daemon each op goes to (resolved per op): a close is sent only to the daemon holding the registration.
+    targetId: () => {
+      try { return new URL(options.resolveConnection().baseUrl).origin; } catch { return null; }
+    },
     async register(input: RegisterSharedSessionInput): Promise<SpineResult> {
       const connection = options.resolveConnection();
       const result = await postSessionSpineRegister(connection, input, { timeoutMs: registerTimeoutMs });

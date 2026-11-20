@@ -20,6 +20,7 @@ import { captureCredentialPage, captureNativeSnapshotControls, restoreControlSna
 import { containsIssuerCredential } from '../utils/redaction.js';
 import { assertCaptureAllowed, assertPageTextAllowed, fillSecretsIntoPage, type SecretFillKind } from './browser-secret-fill.js';
 import type {
+  BrowserPageInfo,
   BrowserProvisionReport,
   BrowserSnapshot,
   CardFieldGuard,
@@ -149,6 +150,11 @@ export class BrowserEngine {
    */
   private scrub(sessionId: string, pageId: string, text: string): string {
     return this.cardGuard === null ? text : this.cardGuard.redact(sessionId, pageId, text);
+  }
+
+  /** A session's tabs as they leave the engine: each title is page-written text and goes through the guard. */
+  private async guardedPageList(sessionId: string): Promise<readonly BrowserPageInfo[]> {
+    return (await this.sessions.pageList(sessionId)).map((page) => ({ ...page, title: this.scrub(sessionId, page.pageId, page.title) }));
   }
 
   /**
@@ -379,7 +385,7 @@ export class BrowserEngine {
 
   async attach(options: BrowserAttachOptions): Promise<Record<string, unknown>> {
     const session = await this.sessions.attach(options);
-    const pages = await this.sessions.pageList(session.sessionId);
+    const pages = await this.guardedPageList(session.sessionId);
     return {
       session,
       pages,
@@ -577,7 +583,7 @@ export class BrowserEngine {
       // restore filled history or merchant state. A URL/load result does not
       // establish that this page has forgotten its material; keep protection
       // until the actual page or owned browser is closed.
-      const title = await page.title().catch(() => ''); current();
+      const title = this.scrub(sessionId, pageId, await page.title().catch(() => '')); current();
       return {
         sessionId,
         pageId,
@@ -1284,7 +1290,7 @@ export class BrowserEngine {
         pageId,
         `${text}${frameTexts.join('')}`.replace(/\n{3,}/g, '\n\n').trim(),
       );
-      const title = await page.title().catch(() => ''); current();
+      const title = this.scrub(sessionId, pageId, await page.title().catch(() => '')); current();
       // The ledger is told what the model is given (the returned slice), each
       // part under its own author: the page's text, then each frame's block.
       const given = normalized.slice(0, limit);
@@ -1386,7 +1392,7 @@ export class BrowserEngine {
 
   async tabs(target: BrowserTarget): Promise<Record<string, unknown>> {
     const sessionId = this.resolveSessionId(target);
-    const pages = await this.sessions.pageList(sessionId);
+    const pages = await this.guardedPageList(sessionId);
     // Tabs the person closed natively are gone from the list; what this engine
     // held for them goes with them.
     for (const pageId of this.snapshots.retainPages(sessionId, new Set(pages.map((page) => page.pageId)))) {
@@ -1419,7 +1425,7 @@ export class BrowserEngine {
         await this.requireReadableAddress(sessionId, pageId, page.url());
       }
       current();
-      const pages = await this.sessions.pageList(sessionId); current();
+      const pages = await this.guardedPageList(sessionId); current();
       return { sessionId, pageId, url: page.url(), pages };
     });
   }
@@ -1436,7 +1442,7 @@ export class BrowserEngine {
     this.snapshots.clear(sessionId, args.pageId);
     this.cardGuard?.disarm(sessionId, args.pageId);
     this.localReach.delete(`${sessionId}:${args.pageId}`);
-    return { sessionId, closedPageId: args.pageId, pages: await this.sessions.pageList(sessionId) };
+    return { sessionId, closedPageId: args.pageId, pages: await this.guardedPageList(sessionId) };
   }
 
   async goBack(target: BrowserTarget, args: { readonly timeoutMs?: number | undefined } = {}): Promise<Record<string, unknown>> {

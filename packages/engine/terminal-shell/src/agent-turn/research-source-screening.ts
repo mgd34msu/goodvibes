@@ -307,6 +307,12 @@ export function createAgentResearchSourceOwner(config: ConfigOwner, secrets: Cre
       if (!acquisition) return changed();
       return acquisition.owner.project(receipt);
     },
+    assertAuthorizationCurrent(receipt) {
+      // The acquisition that issued it, still the active one and still current: consent, settings and credentials unchanged.
+      const acquisition = receipts.get(receipt);
+      if (!acquisition || acquisition !== active || closing) changed();
+      acquisition.assertCurrent();
+    },
     projectResearchReference(receipt) {
       const acquisition = receipts.get(receipt);
       if (!acquisition) return changed();

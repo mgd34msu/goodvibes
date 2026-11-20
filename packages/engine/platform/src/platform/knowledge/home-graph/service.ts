@@ -614,7 +614,11 @@ export class HomeGraphService {
   }
 
   async cancelRefinementTask(input: HomeGraphSpaceInput & { readonly taskId: string }) {
-    return this.ownForegroundOperation(async () => {
+    return this.ownForegroundOperation(async (writes) => {
+      await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
+      // A cancel writes its space: a reset refuses it while running, and a reset that starts later waits for it.
+      writes.begin(resolveReadableHomeGraphSpace(this.store, input).spaceId);
       return cancelHomeGraphRefinementTask({ ...input, store: this.store });
     });
   }

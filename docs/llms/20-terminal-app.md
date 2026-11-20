@@ -1294,6 +1294,9 @@ Crash snapshots nobody resumes are removed after `atRest.retentionMaxAgeDays` da
 A terminal that has a session open holds that session's lock under `~/.goodvibes/shared/owner-askers/`.
 The operating system releases the lock when the process ends, however it ends.
 `/session resume`, `/load` and `/sessions` refuse a session another running terminal has open, and the session picker asks first.
+A load takes the session's lock before it replaces the conversation, so of two terminals loading one session at the same moment one gets it and the other is refused; `/session resume <id> --force` takes the session over instead.
+Saving under another name or moving to a session another running terminal has open (`/session save <name> --switch`, a fork onto that name) is refused the same way and nothing is switched.
+A save of a session that another terminal saved after this one read it is refused (`Session <name> was saved by another terminal since this one read it ... nothing was saved`): run `/session resume <name>` to continue from that save, or `/session save <new name>` to keep this conversation under another name. A rename changes the title on the file as it is, keeping the other terminal's turns.
 A headless `run` on a session another terminal has open is refused (see "Headless runs").
 
 ### Starting on a session
@@ -1728,6 +1731,9 @@ The planner arranges a contract's units in groups. A group is a set of units tha
 Contracts show in Agents and in `/orchestration`.
 A contract that needs the owner raises a question (an escalation) in `/questions`; the work continues after the answer.
 `contract.*` settings control gates, budgets and limits; `contract.gateTimeoutMs` (default 900000) bounds the test gate.
+At start the daemon resumes the contracts that had not ended. One it cannot run is held, not run, and its status (`contracts.status`) carries `held` with the code and reason: `input-unavailable` when its recorded input could not be restored (cancelling it ends it as cancelled), `claim-unavailable` when no run claim could be taken in the project's `.goodvibes/contracts` directory (another process may be running it, so it is not cancelled from here: `CONTRACT_HELD`).
+A kill of a workstream unit while its gates run stops the gates and commits nothing; the phase reads cancelled.
+A reply that a failure question does not accept is refused before anything is taken, so a shared-tree contract does not take the tree for it.
 
 <!-- generated: settings:contract -->
 

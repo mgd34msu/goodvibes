@@ -265,7 +265,11 @@ function askRow(ask: WorkBoardAsk, now: number): BoardRow {
     ? p.kind === 'purchase' ? `From "${p.origin.sessionTitle}"` : `Asked by ${p.origin.by} in "${p.origin.sessionTitle}"`
     : p.origin ? `Asked by ${p.origin.by}` : undefined;
   const minutes = p.countdown ? Math.max(0, Math.ceil((p.countdown.at - now) / 60_000)) : undefined;
-  const countdown = p.countdown && minutes !== undefined ? `${p.countdown.verb} in ${minutes} min unless you say no` : undefined;
+  const until = p.countdown ? new Date(p.countdown.at) : undefined;
+  const countdown = p.countdown && minutes !== undefined && until
+    ? p.countdown.verb === 'goes ahead' ? `goes ahead in ${minutes} min unless you say no`
+      : `${p.countdown.verb} until ${until.getHours()}:${String(until.getMinutes()).padStart(2, '0')}`
+    : undefined;
   const parts = [from, p.kind === 'purchase' ? undefined : agoWords(ask.askedAt, now), p.consequence ? clause(p.consequence.text) : undefined, countdown]
     .filter((part): part is string => part !== undefined && part !== '');
   return {

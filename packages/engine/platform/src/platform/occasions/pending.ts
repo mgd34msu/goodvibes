@@ -29,7 +29,7 @@
 import { prepareNudge, composeConflictMessage, subjectFor } from './nudge.js';
 import { nudgeItemId } from './cadence.js';
 import { daysBetween, nextOccurrence, type IsoDate } from './dates.js';
-import { occurrenceWindow, type OccasionsPolicy } from './sweep.js';
+import { isOccurrenceMirrored, occurrenceWindow, type OccasionsPolicy } from './sweep.js';
 import type {
   NudgeSubject,
   Occasion,
@@ -70,6 +70,8 @@ export interface PendingInput {
   readonly plans: readonly Plan[];
   readonly openItems: readonly OpenItem[];
   readonly acknowledgements: readonly OccasionAcknowledgement[];
+  /** Occurrences the calendar mirror wrote (OccasionStateStore.mirroredOccurrences). */
+  readonly mirroredOccurrences: ReadonlySet<string>;
 }
 
 type PreparedPending = Omit<PendingResult, 'nudge'> & { readonly nudge: Omit<OccasionNudge, 'id' | 'raisedAt'> | null };
@@ -122,7 +124,7 @@ export function preparePending(input: PendingInput): PreparedPending {
       if (!occurrenceWindow(occasion, occurrence, input.today, input.plans, input.policy).inside) continue;
       const answer = ackByKey.get(`${occasion.id}@${occurrence}`)?.answer;
       if (answer === 'yes' || answer === 'no') continue;
-      if (answer !== 'acknowledged' && occasion.mirrored && input.policy.suppressMirroredNudges) continue;
+      if (answer !== 'acknowledged' && input.policy.suppressMirroredNudges && isOccurrenceMirrored(occasion, occurrence, input.mirroredOccurrences)) continue;
       place(occasion, occurrence, answer === 'acknowledged');
     }
   }

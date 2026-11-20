@@ -16,7 +16,7 @@ export const STEP_ORDER: readonly OnboardingWizardStepId[] = [
 export const DEFAULT_CAPABILITIES: readonly OnboardingStep1CapabilityItem[] = [
   {
     id: 'local-tui-only',
-    label: 'Local TUI Only (No Servers)',
+    label: 'Only this terminal (no servers)',
     selected: true,
     // Honest wording (One-Platform daemon-by-default): this avoids browser/LAN/
     // webhook/external-app exposure, but the loopback-only GoodVibes daemon
@@ -25,7 +25,7 @@ export const DEFAULT_CAPABILITIES: readonly OnboardingStep1CapabilityItem[] = [
   },
   {
     id: 'browser-access',
-    label: 'Open GoodVibes in a Browser',
+    label: 'Open GoodVibes in a browser',
     selected: false,
     detail: 'Run the background service and web UI. GoodVibes will use the local network by default; you can restrict or customize it next.',
   },
@@ -49,7 +49,7 @@ export const DEFAULT_CAPABILITIES: readonly OnboardingStep1CapabilityItem[] = [
   },
   {
     id: 'cloudflare-batch',
-    label: 'Use Cloudflare for batch or remote daemon work',
+    label: 'Use Cloudflare for batch or remote work',
     selected: false,
     detail: 'Optionally configure Cloudflare Workers and Queues for explicit or eligible background batch jobs. Immediate local daemon behavior stays the default unless enabled.',
   },

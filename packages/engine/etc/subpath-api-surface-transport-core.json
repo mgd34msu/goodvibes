@@ -71,6 +71,15 @@
       "text": "export type RuntimeEventFeeds<TDomain extends string, TEvent extends EventLike = EventLike> = { readonly domains: readonly TDomain[]; domain(domain: TDomain): RuntimeEventFeed<TEvent>; } & { readonly [K in TDomain]: RuntimeEventFeed<TEvent>; };"
     },
     {
+      "name": "StreamGapError",
+      "kind": "class",
+      "publicMembers": [
+        "constructor",
+        "dropped"
+      ],
+      "text": "export declare class StreamGapError extends GoodVibesError { readonly dropped: number; constructor(dropped: number); }"
+    },
+    {
       "name": "StreamTextAssembler",
       "kind": "interface",
       "required": [
@@ -195,6 +204,11 @@
       "text": "export declare function isAbortError(error: unknown): boolean;"
     },
     {
+      "name": "readStreamGapDropped",
+      "kind": "function",
+      "text": "export declare function readStreamGapDropped(error: unknown): number | undefined;"
+    },
+    {
       "name": "sendWebSocketMessage",
       "kind": "function",
       "text": "export declare function sendWebSocketMessage(socket: { send(data: string): unknown; readonly bufferedAmount?: number; getBufferedAmount?(): number; readonly readyState?: number; }, message: string | Iterable<string>, signal?: AbortSignal): Promise<void>; ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Iterable = interface Iterable<T, TReturn = any, TNext = any> { [Symbol.iterator](): Iterator<T, TReturn, TNext>; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
@@ -238,6 +252,15 @@
   ],
   "./errors": [
     {
+      "name": "StreamGapError",
+      "kind": "class",
+      "publicMembers": [
+        "constructor",
+        "dropped"
+      ],
+      "text": "export declare class StreamGapError extends GoodVibesError { readonly dropped: number; constructor(dropped: number); }"
+    },
+    {
       "name": "describeUnknownTransportError",
       "kind": "function",
       "text": "export declare function describeUnknownTransportError(error: unknown): string;"
@@ -246,6 +269,11 @@
       "name": "isAbortError",
       "kind": "function",
       "text": "export declare function isAbortError(error: unknown): boolean;"
+    },
+    {
+      "name": "readStreamGapDropped",
+      "kind": "function",
+      "text": "export declare function readStreamGapDropped(error: unknown): number | undefined;"
     },
     {
       "name": "transportErrorFromUnknown",
@@ -962,6 +990,48 @@
       "name": "verifyRelayRegistration",
       "kind": "function",
       "text": "export declare function verifyRelayRegistration(rid: RendezvousId, nonce: string, proof: RelayProveFrame): Promise<boolean>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    }
+  ],
+  "./turn-settlement": [
+    {
+      "name": "TURN_SETTLING_EVENTS",
+      "kind": "const",
+      "text": "TURN_SETTLING_EVENTS: readonly [\"TURN_COMPLETED\", \"TURN_ERROR\", \"TURN_CANCEL\", \"PREFLIGHT_FAIL\"]"
+    },
+    {
+      "name": "TurnSettlement",
+      "kind": "type",
+      "text": "export type TurnSettlement = { readonly kind: 'answered'; readonly turnId: string; readonly response: string; readonly stopReason: string; } | { readonly kind: 'empty'; readonly turnId: string; } | { readonly kind: 'refused'; readonly turnId: string; readonly reason: string; readonly stopReason: 'preflight_failed' | 'context_overflow'; } | { readonly kind: 'failed'; readonly turnId: string; readonly error: string; readonly stopReason: string; } | { readonly kind: 'cancelled'; readonly turnId: string; readonly reason: string; readonly stopReason: string; };"
+    },
+    {
+      "name": "TurnSettlingEvent",
+      "kind": "type",
+      "text": "export type TurnSettlingEvent = (typeof TURN_SETTLING_EVENTS)[number];"
+    },
+    {
+      "name": "exitCodeOfSettlement",
+      "kind": "function",
+      "text": "export declare function exitCodeOfSettlement(s: TurnSettlement): 0 | 1 | 130;"
+    },
+    {
+      "name": "isTurnSettlingEvent",
+      "kind": "function",
+      "text": "export declare function isTurnSettlingEvent(type: unknown): type is TurnSettlingEvent;"
+    },
+    {
+      "name": "readTurnSettlement",
+      "kind": "function",
+      "text": "export declare function readTurnSettlement(frame: { readonly type: string; readonly payload: unknown; }): TurnSettlement | null;"
+    },
+    {
+      "name": "settlesRunningTurn",
+      "kind": "function",
+      "text": "export declare function settlesRunningTurn(s: TurnSettlement): boolean;"
+    },
+    {
+      "name": "stopReasonOfSettlement",
+      "kind": "function",
+      "text": "export declare function stopReasonOfSettlement(s: TurnSettlement): string;"
     }
   ],
   "./uuid": [

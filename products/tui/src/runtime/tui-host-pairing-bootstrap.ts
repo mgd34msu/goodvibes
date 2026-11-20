@@ -2,6 +2,7 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, type St
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
 import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
+import { isTrustedAncestorDirectory } from '@goodvibes-jev/engine/terminal-shell/host-pairing-store';
 
 /** The daemon's operator token on this machine, read with every ancestor checked: the bootstrap of
  * explicit /host pair, and the credential native work presents to a daemon on this machine when
@@ -18,8 +19,8 @@ export function readTuiLegacyPairingBootstrap(home: string): string | null {
     const daemonHome = resolve(resolveGoodVibesDaemonHome(home));
     for (let path = daemonHome; ; path = dirname(path)) {
       const stat = lstatSync(path);
-      if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.uid !== uid && stat.uid !== 0)
-        || ((stat.mode & 0o022) !== 0 && (stat.mode & 0o1000) === 0)) return null;
+      // The one rule for directories above a credential (host-pairing-store.ts).
+      if (!isTrustedAncestorDirectory(stat, uid)) return null;
       if (dirname(path) === path) break;
     }
     // The daemon home, and every directory from it up to the login home when it

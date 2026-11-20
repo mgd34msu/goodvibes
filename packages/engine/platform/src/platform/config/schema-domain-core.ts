@@ -754,7 +754,7 @@ export const coreTailConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'tools.hooksFile',
-    label: 'Hooks file',
+    label: 'File that defines hooks',
     type: 'string',
     description: 'Hook configuration file name, relative to the project working directory (so the default is <project>/hooks.json, not a file under .goodvibes)',
   },

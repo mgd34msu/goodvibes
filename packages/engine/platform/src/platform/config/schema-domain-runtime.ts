@@ -541,7 +541,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'service.serviceName',
-    label: 'Service name',
+    label: "Name of the daemon's service",
     type: 'string',
     description: 'Name of the daemon\'s service unit, used by the installer, the daemon\'s and the terminal apps\' service commands and onboarding alike. Empty (the default) uses goodvibes (goodvibes.service under systemd) on Linux and Windows, and sh.goodvibes.daemon (the launchd label) on macOS.',
   },

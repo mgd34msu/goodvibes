@@ -50,8 +50,10 @@ export class TriggerChildProcesses {
     let stopped: Promise<void>;
     try { stopped = original.stop(); } catch { stopped = Promise.reject(new Error('Trigger child termination could not be confirmed')); }
     this.stops.set(id, stopped);
+    // A stopped child stays until its exit is read (release): the cancel's
+    // record says how it ended, not that it was asked to.
     void stopped.then(() => {
-      this.children.delete(id); this.stops.delete(id);
+      this.stops.delete(id);
     // The child stays in `children` and the failed stop is forgotten, so a retried join() asks it to stop again.
     }, () => { this.stops.delete(id); logger.warn('Trigger child termination could not be confirmed'); });
   }

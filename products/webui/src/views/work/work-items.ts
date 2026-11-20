@@ -297,8 +297,10 @@ export function readWork(sources: WorkSources, now: number): WorkReading {
     ...(sources.sessions ?? []).map((record) => boardSession(record, hostedById.get(record.id), sources.chatTitles?.get(record.id))),
     ...(sources.hosted ?? []).filter((session) => !unionIds.has(session.id)).map((session) => boardSession(undefined, session, undefined)),
   ];
+  // A runtime task an agent runs is that agent's row already (the task's id and owner are the agent's).
+  const agentIds = new Set(fleet.flatMap((node) => [node.id, ...(node.sessionRef?.agentId ? [node.sessionRef.agentId] : [])]));
   const tasks = [
-    ...(sources.tasks ?? []).map(boardTask),
+    ...(sources.tasks ?? []).filter((task) => !agentIds.has(task.id) && !(task.owner && agentIds.has(task.owner))).map(boardTask),
     ...(sources.contracts ?? []).filter((contract) => !nodeIds.has(`contract:${contract.id}`)).map(contractTask),
   ];
   const board = readWorkBoard({ nodes, asks: sources.asks.map(boardAsk), sessions, tasks }, now);

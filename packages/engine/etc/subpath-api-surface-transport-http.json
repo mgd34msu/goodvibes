@@ -81,9 +81,10 @@
         "paths",
         "requestJson",
         "resolveContractRequest",
+        "streamFetch",
         "use"
       ],
-      "text": "export interface HttpJsonTransport { readonly baseUrl: string; readonly authToken?: string | null | undefined; readonly fetchImpl: FetchLike; readonly paths: TransportPaths; buildUrl(path: string): string; getAuthToken(): Promise<string | null>; requestJson<T>(pathOrUrl: string, options?: HttpJsonRequestOptions): Promise<T>; resolveContractRequest(method: string, path: string, input?: Record<string, unknown>): ResolvedContractRequest; use(middleware: TransportMiddleware): void; } ;; via FetchLike = export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+      "text": "export interface HttpJsonTransport { readonly baseUrl: string; readonly authToken?: string | null | undefined; readonly fetchImpl: FetchLike; readonly paths: TransportPaths; buildUrl(path: string): string; getAuthToken(): Promise<string | null>; requestJson<T>(pathOrUrl: string, options?: HttpJsonRequestOptions): Promise<T>; resolveContractRequest(method: string, path: string, input?: Record<string, unknown>): ResolvedContractRequest; readonly streamFetch: FetchLike; use(middleware: TransportMiddleware): void; } ;; via FetchLike = export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
     },
     {
       "name": "HttpJsonTransportOptions",
@@ -151,7 +152,7 @@
     {
       "name": "RawServerSentEventHandlers",
       "kind": "interface",
-      "text": "export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; readonly final?: boolean | undefined; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
+      "text": "export interface ServerSentEventHandlers extends StreamSubscriber<ServerSentEvent> { readonly onReady?: ((payload: unknown) => void) | undefined; readonly onReconnect?: ((input: { readonly attempt: number; readonly delayMs: number; readonly error: unknown; }) => void) | undefined; readonly onEventId?: ((id: string) => void) | undefined; }"
     },
     {
       "name": "RawServerSentEventOptions",
@@ -208,9 +209,23 @@
       "text": "SSE_HEARTBEAT_INTERVAL_MS = 15000"
     },
     {
+      "name": "STREAM_CONTROL_FRAMES",
+      "kind": "const",
+      "text": "STREAM_CONTROL_FRAMES: ReadonlySet<string> ;; via ReadonlySet = interface ReadonlySet<T> { forEach(callbackfn: (value: T, value2: T, set: ReadonlySet<T>) => void, thisArg?: any): void; has(value: T): boolean; readonly size: number; }"
+    },
+    {
+      "name": "ServerSentEvent",
+      "kind": "interface",
+      "required": [
+        "name",
+        "payload"
+      ],
+      "text": "export interface ServerSentEvent { readonly name: string; readonly payload: unknown; }"
+    },
+    {
       "name": "ServerSentEventHandlers",
       "kind": "interface",
-      "text": "export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; readonly final?: boolean | undefined; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
+      "text": "export interface ServerSentEventHandlers extends StreamSubscriber<ServerSentEvent> { readonly onReady?: ((payload: unknown) => void) | undefined; readonly onReconnect?: ((input: { readonly attempt: number; readonly delayMs: number; readonly error: unknown; }) => void) | undefined; readonly onEventId?: ((id: string) => void) | undefined; }"
     },
     {
       "name": "ServerSentEventOptions",
@@ -226,9 +241,32 @@
       "text": "export interface ServerSentEventStreamHandle { (): void; readonly lastEventId: string | null; }"
     },
     {
+      "name": "StreamEnd",
+      "kind": "type",
+      "text": "export type StreamEnd = { readonly kind: 'closed'; } | { readonly kind: 'source-ended'; readonly complete: true; } | { readonly kind: 'source-ended'; readonly complete: false; readonly dropped: number; } | { readonly kind: 'failed'; readonly refusal: Refusal; }; ;; via Refusal = export interface Refusal { readonly code: string; readonly state: string; readonly reason: string; readonly next: readonly string[]; readonly retryable: boolean; readonly retryAfterMs?: number | undefined; readonly status?: number | undefined; readonly changes?: readonly TargetChange[] | undefined; }"
+    },
+    {
+      "name": "StreamGap",
+      "kind": "interface",
+      "required": [
+        "dropped"
+      ],
+      "text": "export interface StreamGap { readonly dropped: number; readonly afterId?: string; }"
+    },
+    {
       "name": "StreamReconnectPolicy",
       "kind": "interface",
       "text": "export interface StreamReconnectPolicy extends BackoffPolicy { readonly enabled?: boolean | undefined; }"
+    },
+    {
+      "name": "StreamSubscriber",
+      "kind": "interface",
+      "required": [
+        "onEnd",
+        "onEvent",
+        "onGap"
+      ],
+      "text": "export interface StreamSubscriber<E> { onEvent(event: E): void; onGap(gap: StreamGap): void; onEnd(end: StreamEnd): void; }"
     },
     {
       "name": "TransportContext",
@@ -684,7 +722,7 @@
       "required": [
         "handlers"
       ],
-      "text": "export interface ContractStreamOptions extends ContractInvokeOptions { readonly handlers: ServerSentEventHandlers; } ;; via ServerSentEventHandlers = export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; readonly final?: boolean | undefined; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
+      "text": "export interface ContractStreamOptions extends ContractInvokeOptions { readonly handlers: ServerSentEventHandlers; } ;; via ServerSentEventHandlers = export interface ServerSentEventHandlers extends StreamSubscriber<ServerSentEvent> { readonly onReady?: ((payload: unknown) => void) | undefined; readonly onReconnect?: ((input: { readonly attempt: number; readonly delayMs: number; readonly error: unknown; }) => void) | undefined; readonly onEventId?: ((id: string) => void) | undefined; }"
     },
     {
       "name": "invokeContractRoute",
@@ -741,7 +779,7 @@
     {
       "name": "HttpTransport",
       "kind": "type",
-      "text": "export type HttpTransport = HttpJsonTransport; ;; via HttpJsonTransport = export interface HttpJsonTransport { readonly baseUrl: string; readonly authToken?: string | null | undefined; readonly fetchImpl: FetchLike; readonly paths: TransportPaths; buildUrl(path: string): string; getAuthToken(): Promise<string | null>; requestJson<T>(pathOrUrl: string, options?: HttpJsonRequestOptions): Promise<T>; resolveContractRequest(method: string, path: string, input?: Record<string, unknown>): ResolvedContractRequest; use(middleware: TransportMiddleware): void; }"
+      "text": "export type HttpTransport = HttpJsonTransport; ;; via HttpJsonTransport = export interface HttpJsonTransport { readonly baseUrl: string; readonly authToken?: string | null | undefined; readonly fetchImpl: FetchLike; readonly paths: TransportPaths; buildUrl(path: string): string; getAuthToken(): Promise<string | null>; requestJson<T>(pathOrUrl: string, options?: HttpJsonRequestOptions): Promise<T>; resolveContractRequest(method: string, path: string, input?: Record<string, unknown>): ResolvedContractRequest; readonly streamFetch: FetchLike; use(middleware: TransportMiddleware): void; }"
     },
     {
       "name": "HttpTransportOptions",
@@ -958,9 +996,10 @@
         "paths",
         "requestJson",
         "resolveContractRequest",
+        "streamFetch",
         "use"
       ],
-      "text": "export interface HttpJsonTransport { readonly baseUrl: string; readonly authToken?: string | null | undefined; readonly fetchImpl: FetchLike; readonly paths: TransportPaths; buildUrl(path: string): string; getAuthToken(): Promise<string | null>; requestJson<T>(pathOrUrl: string, options?: HttpJsonRequestOptions): Promise<T>; resolveContractRequest(method: string, path: string, input?: Record<string, unknown>): ResolvedContractRequest; use(middleware: TransportMiddleware): void; } ;; via FetchLike = export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; }; ;; TransportPaths = export interface TransportPaths { readonly baseUrl: string; readonly statusUrl: string; readonly controlPlaneUrl: string; readonly controlPlaneAuthUrl: string; readonly controlPlaneEventsUrl: string; readonly controlPlaneMethodsUrl: string; readonly sessionsUrl: string; readonly tasksUrl: string; readonly approvalsUrl: string; readonly providersUrl: string; readonly accountsUrl: string; readonly localAuthUrl: string; readonly telemetryUrl: string; readonly telemetryEventsUrl: string; readonly telemetryErrorsUrl: string; readonly telemetryTracesUrl: string; readonly telemetryMetricsUrl: string; readonly telemetryStreamUrl: string; readonly telemetryOtlpTracesUrl: string; readonly telemetryOtlpLogsUrl: string; readonly telemetryOtlpMetricsUrl: string; readonly remoteUrl: string; readonly remoteContractUrl: string; readonly peerRequestsUrl: string; readonly peerListUrl: string; readonly remoteWorkUrl: string; readonly controlUrl: string; }"
+      "text": "export interface HttpJsonTransport { readonly baseUrl: string; readonly authToken?: string | null | undefined; readonly fetchImpl: FetchLike; readonly paths: TransportPaths; buildUrl(path: string): string; getAuthToken(): Promise<string | null>; requestJson<T>(pathOrUrl: string, options?: HttpJsonRequestOptions): Promise<T>; resolveContractRequest(method: string, path: string, input?: Record<string, unknown>): ResolvedContractRequest; readonly streamFetch: FetchLike; use(middleware: TransportMiddleware): void; } ;; via FetchLike = export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; }; ;; TransportPaths = export interface TransportPaths { readonly baseUrl: string; readonly statusUrl: string; readonly controlPlaneUrl: string; readonly controlPlaneAuthUrl: string; readonly controlPlaneEventsUrl: string; readonly controlPlaneMethodsUrl: string; readonly sessionsUrl: string; readonly tasksUrl: string; readonly approvalsUrl: string; readonly providersUrl: string; readonly accountsUrl: string; readonly localAuthUrl: string; readonly telemetryUrl: string; readonly telemetryEventsUrl: string; readonly telemetryErrorsUrl: string; readonly telemetryTracesUrl: string; readonly telemetryMetricsUrl: string; readonly telemetryStreamUrl: string; readonly telemetryOtlpTracesUrl: string; readonly telemetryOtlpLogsUrl: string; readonly telemetryOtlpMetricsUrl: string; readonly remoteUrl: string; readonly remoteContractUrl: string; readonly peerRequestsUrl: string; readonly peerListUrl: string; readonly remoteWorkUrl: string; readonly controlUrl: string; }"
     },
     {
       "name": "HttpJsonTransportOptions",
@@ -1266,7 +1305,7 @@
     {
       "name": "ServerSentEventHandlers",
       "kind": "interface",
-      "text": "export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; readonly final?: boolean | undefined; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
+      "text": "export interface ServerSentEventHandlers extends StreamSubscriber<ServerSentEvent> { readonly onReady?: ((payload: unknown) => void) | undefined; readonly onReconnect?: ((input: { readonly attempt: number; readonly delayMs: number; readonly error: unknown; }) => void) | undefined; readonly onEventId?: ((id: string) => void) | undefined; } ;; via ServerSentEvent = export interface ServerSentEvent { readonly name: string; readonly payload: unknown; }"
     },
     {
       "name": "ServerSentEventOptions",
@@ -1294,9 +1333,23 @@
       "text": "SSE_HEARTBEAT_INTERVAL_MS = 15000"
     },
     {
+      "name": "STREAM_CONTROL_FRAMES",
+      "kind": "const",
+      "text": "STREAM_CONTROL_FRAMES: ReadonlySet<string> ;; via ReadonlySet = interface ReadonlySet<T> { forEach(callbackfn: (value: T, value2: T, set: ReadonlySet<T>) => void, thisArg?: any): void; has(value: T): boolean; readonly size: number; }"
+    },
+    {
+      "name": "ServerSentEvent",
+      "kind": "interface",
+      "required": [
+        "name",
+        "payload"
+      ],
+      "text": "export interface ServerSentEvent { readonly name: string; readonly payload: unknown; }"
+    },
+    {
       "name": "ServerSentEventHandlers",
       "kind": "interface",
-      "text": "export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; readonly final?: boolean | undefined; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
+      "text": "export interface ServerSentEventHandlers extends StreamSubscriber<ServerSentEvent> { readonly onReady?: ((payload: unknown) => void) | undefined; readonly onReconnect?: ((input: { readonly attempt: number; readonly delayMs: number; readonly error: unknown; }) => void) | undefined; readonly onEventId?: ((id: string) => void) | undefined; }"
     },
     {
       "name": "ServerSentEventOptions",
@@ -1310,6 +1363,29 @@
         "lastEventId"
       ],
       "text": "export interface ServerSentEventStreamHandle { (): void; readonly lastEventId: string | null; }"
+    },
+    {
+      "name": "StreamEnd",
+      "kind": "type",
+      "text": "export type StreamEnd = { readonly kind: 'closed'; } | { readonly kind: 'source-ended'; readonly complete: true; } | { readonly kind: 'source-ended'; readonly complete: false; readonly dropped: number; } | { readonly kind: 'failed'; readonly refusal: Refusal; }; ;; via Refusal = export interface Refusal { readonly code: string; readonly state: string; readonly reason: string; readonly next: readonly string[]; readonly retryable: boolean; readonly retryAfterMs?: number | undefined; readonly status?: number | undefined; readonly changes?: readonly TargetChange[] | undefined; }"
+    },
+    {
+      "name": "StreamGap",
+      "kind": "interface",
+      "required": [
+        "dropped"
+      ],
+      "text": "export interface StreamGap { readonly dropped: number; readonly afterId?: string; }"
+    },
+    {
+      "name": "StreamSubscriber",
+      "kind": "interface",
+      "required": [
+        "onEnd",
+        "onEvent",
+        "onGap"
+      ],
+      "text": "export interface StreamSubscriber<E> { onEvent(event: E): void; onGap(gap: StreamGap): void; onEnd(end: StreamEnd): void; }"
     },
     {
       "name": "isAbortError",

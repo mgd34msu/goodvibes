@@ -19,6 +19,60 @@ import { openTerminalApp } from './pty.ts';
 const journey = new Journey('j15-guided-commands');
 const s = await stage('j15');
 
+/**
+ * The screen as it stands, replayed from everything written: the renderer
+ * writes only the cells that changed, so a phrase redrawn over similar text
+ * is never in the stream whole. Cursor moves, clears and text are applied;
+ * colours and other sequences are skipped. 120x40, as pty.ts opens it.
+ */
+function screenNow(raw: string, cols = 120, rows = 40): string {
+  const grid = Array.from({ length: rows }, () => Array<string>(cols).fill(' '));
+  let x = 0;
+  let y = 0;
+  for (let i = 0; i < raw.length;) {
+    const ch = raw[i]!;
+    if (ch === '\x1b') {
+      const csi = /^\x1b\[([0-?]*)[ -/]*([@-~])/.exec(raw.slice(i, i + 32));
+      if (csi) {
+        const args = csi[1]!.split(';').map((n) => Number.parseInt(n, 10));
+        const n = Number.isNaN(args[0]!) ? 1 : args[0]!;
+        if (csi[2] === 'H' || csi[2] === 'f') { y = (Number.isNaN(args[0]!) ? 1 : args[0]!) - 1; x = (Number.isNaN(args[1] ?? Number.NaN) ? 1 : args[1]!) - 1; }
+        else if (csi[2] === 'C') x += n;
+        else if (csi[2] === 'D') x -= n;
+        else if (csi[2] === 'A') y -= n;
+        else if (csi[2] === 'B') y += n;
+        else if (csi[2] === 'G') x = n - 1;
+        else if (csi[2] === 'J' && args[0] === 2) for (const row of grid) row.fill(' ');
+        else if (csi[2] === 'K') grid[y]?.fill(' ', x);
+        i += csi[0].length;
+        continue;
+      }
+      const osc = /^\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/.exec(raw.slice(i, i + 512));
+      i += osc ? osc[0].length : 2;
+      continue;
+    }
+    const cp = raw.codePointAt(i)!;
+    const text = String.fromCodePoint(cp);
+    i += text.length;
+    if (ch === '\r') { x = 0; continue; }
+    if (ch === '\n') { y += 1; continue; }
+    if (cp < 0x20 || cp === 0x7f) continue;
+    if (y >= 0 && y < rows && x >= 0 && x < cols) grid[y]![x] = text;
+    x += 1;
+  }
+  return grid.map((row) => row.join('').trimEnd()).join('\n');
+}
+
+/** Wait until the replayed screen matches. */
+async function waitForScreen(raw: () => string, pattern: RegExp, timeoutMs: number): Promise<RegExpMatchArray | null> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const found = screenNow(raw()).match(pattern);
+    if (found || Date.now() > deadline) return found;
+    await Bun.sleep(100);
+  }
+}
+
 /** A stdio MCP stand-in with one tool. */
 const STANDIN = `
 const send = (m) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\\n');
@@ -48,9 +102,9 @@ try {
       app.press('\x1b[B'); // Down to "Add a server…"
       app.press('\r');
       await app.type(`bun ${standin}`);
-      const form = await app.waitFor(/Add a server · step 1 of 2[\s\S]*suggested from the command[\s\S]*This will run:[\s\S]*\/mcp add weather/, 15_000, mark);
+      const form = await waitForScreen(app.raw, /Add a server · step 1 of 2[\s\S]*weather\s+suggested from the command[\s\S]*This will run: \/mcp add weather -- bun /, 15_000);
       journey.check(`${program}: the add form suggests the name and shows the line it will run`, 'Down, Enter, type the command',
-        short(form?.[0] ?? app.screen().slice(-400), 240), form !== null);
+        short(form?.[0] ?? screenNow(app.raw()).slice(-600), 240), form !== null);
 
       mark = app.raw().length;
       app.press('\r'); // step 2

@@ -116,13 +116,13 @@ export function deriveStep1Capabilities(snapshot: OnboardingSnapshotState): read
   return [
     {
       id: 'local-tui-only',
-      label: 'Local TUI Only (No Servers)',
+      label: 'Only this terminal (no servers)',
       selected: !hasAnyServerEnabled(snapshot),
       detail: describeLocalTuiOnly(snapshot),
     },
     {
       id: 'browser-access',
-      label: 'Open GoodVibes in a Browser',
+      label: 'Open GoodVibes in a browser',
       selected: hasBrowserAccess(snapshot),
       detail: describeBrowserAccess(snapshot),
     },
@@ -146,7 +146,7 @@ export function deriveStep1Capabilities(snapshot: OnboardingSnapshotState): read
     },
     {
       id: 'cloudflare-batch',
-      label: 'Use Cloudflare for batch or remote daemon work',
+      label: 'Use Cloudflare for batch or remote work',
       selected: hasCloudflareBatch(snapshot),
       detail: describeCloudflareBatch(snapshot),
     },

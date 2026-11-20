@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync, type Stats } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, type Stats } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { BoundedJsonFile, type BoundedJsonFileIO, type BoundedJsonFileTransaction } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 export const HOST_PAIRING_MAX_RECORDS = 32;
@@ -14,6 +14,42 @@ export interface HostPairingSecret {
   readonly name: string;
   readonly createdAt: number;
 }
+
+let overflowUid: number | null | undefined;
+/** The kernel's overflow uid (`/proc/sys/kernel/overflowuid`), read once; null where there is none to read. */
+function kernelOverflowUid(): number | null {
+  if (overflowUid !== undefined) return overflowUid;
+  try {
+    const value = Number(readFileSync('/proc/sys/kernel/overflowuid', 'utf8').trim());
+    overflowUid = Number.isInteger(value) && value > 0 ? value : null;
+  } catch {
+    overflowUid = null;
+  }
+  return overflowUid;
+}
+
+/**
+ * Whether a directory above a home may hold that home's credential store: a
+ * real directory (no symlink) owned by this user, by root, or by the kernel's
+ * overflow uid, and not writable by group or others unless the sticky bit is set.
+ *
+ * The overflow uid is how a directory owned by a user unmapped in this user
+ * namespace looks (real root's `/`, `/tmp` and `/home` in a rootless container
+ * or under `unshare -r`). No process in this namespace can act as that owner:
+ * nobody here can chmod, rename or replace it, exactly as for root outside a
+ * namespace. What stays refused: a directory owned by any other user, a
+ * symlink, and a directory writable by group or others without the sticky bit
+ * (anyone could swap the entry under it). The store's own directories and
+ * files are checked apart, and must be owned by this user with no group or
+ * other access.
+ */
+export function isTrustedAncestorDirectory(stat: Stats, uid: number | undefined = typeof process.geteuid === 'function' ? process.geteuid() : undefined): boolean {
+  if (!stat.isDirectory() || stat.isSymbolicLink()) return false;
+  const owner = stat.uid === uid || stat.uid === 0 || (kernelOverflowUid() !== null && stat.uid === kernelOverflowUid());
+  if (!owner) return false;
+  return (stat.mode & 0o022) === 0 || (stat.mode & 0o1000) !== 0;
+}
+
 /** Why the store refused, so a caller can say what to fix instead of one constant sentence. */
 export type HostPairingUnavailableCause =
   | 'invalid-origin'
@@ -242,17 +278,12 @@ export function createHostPairingStore<const Reason extends string>(policy: {
     const home = resolve(homeDirectory);
     for (let ancestor = dirname(home); ; ancestor = dirname(ancestor)) {
       const stat = lstatSync(ancestor);
-      if (
-        !stat.isDirectory() ||
-        stat.isSymbolicLink() ||
-        (!owned(stat) && stat.uid !== 0) ||
-        ((stat.mode & 0o022) !== 0 && (stat.mode & 0o1000) === 0)
-      )
+      if (!isTrustedAncestorDirectory(stat))
         refuse(new HostPairingRefusal(
           'ancestor-unsafe',
-          `${ancestor}, above the home directory, is ${stat.isSymbolicLink() ? 'a symlink' : `owned by uid ${stat.uid} with mode ${mode(stat)}`}; use the home's real path, or make that directory owned by you or root and not writable by others.`,
+          `${ancestor}, above the home directory, is ${stat.isSymbolicLink() ? 'a symlink' : `owned by uid ${stat.uid} with mode ${mode(stat)}`}; use the home's real path, or make that directory owned by you or root and not writable by group or others (unless it is sticky, as /tmp is).`,
           ancestor,
-          'a real directory owned by you or root, not writable by others',
+          'a real directory owned by you, root or the namespace overflow user, not writable by group or others unless sticky',
         ));
       if (dirname(ancestor) === ancestor) break;
     }

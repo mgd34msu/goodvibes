@@ -193,10 +193,19 @@ try {
   const zeroStatus = await api(s.daemon, owner, 'GET', '/api/payments/purchase/status?purchaseId=rt-zero');
   const zeroWindow = ((zeroStatus.body as { windows?: Array<{ windowId?: string; id?: string }> }).windows ?? [])[0];
   const declined = zeroWindow ? await api(s.daemon, owner, 'POST', '/api/payments/purchase/deny', { purchaseId: 'rt-zero', windowId: zeroWindow.windowId ?? zeroWindow.id, confirm: true }, { 'x-goodvibes-explicit-user-request': 'true' }) : undefined;
+  // The owner's "no" is on the purchase's record before it is reported accepted: the daemon is killed the moment the answer came back.
+  await s.restartDaemon({ crash: true });
+  owner = operatorToken(s.home);
   const budgetAfter = await api(s.daemon, owner, 'GET', '/api/payments/budget');
   journey.check('answering the offer sets the daily limit; the owner declines the waiting purchase', 'inbox.answer { text: 20 } on the limit offer; payments.purchase.deny on its window; GET /api/payments/budget',
     `offer ${offerAnswer?.status} ${short(offerAnswer?.text ?? 'no offer', 160)}; deny ${declined?.status} ${short(declined?.text ?? 'no window', 160)}; budget ${short(budgetAfter.text, 200)}`,
     offerAnswer?.status === 200 && (budgetAfter.body as { item?: { limit?: number } }).item?.limit === 2000 && declined !== undefined && declined.status < 300 && submissions.length === 0);
+  await Bun.sleep(3_000);
+  const afterDeny = await api(s.daemon, owner, 'GET', '/api/payments/purchase/status?purchaseId=rt-zero');
+  journey.check('a purchase the owner declined is not resumed after a crash right after the answer', 'payments.purchase.deny; SIGKILL the daemon at once; start it again; payments.purchase.status rt-zero',
+    `status ${short(afterDeny.text, 500)}; merchant submissions ${submissions.length}`,
+    afterDeny.status === 200 && ((afterDeny.body as { windows?: unknown[] }).windows ?? []).length === 0 && submissions.length === 0
+      && !/"state":"(accepted|running)"/.test(afterDeny.text));
   // The per-purchase ceiling and the overage allowance are set in settings. The owner names the merchant as a
   // retailer he trusts: an in-budget purchase there is told to him (a veto window, here the shortest, one minute)
   // and goes ahead unless he objects.

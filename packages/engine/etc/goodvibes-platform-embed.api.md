@@ -60,18 +60,18 @@ export type AnyRuntimeEvent = SessionEvent | TurnEvent | ProviderEvent | ToolEve
 // @public (undocumented)
 export class ApprovalBroker {
     constructor(options: {
-        readonly store?: PersistentStore<SharedApprovalStoreSnapshot> | undefined;
-        readonly storePath?: string | undefined;
+        readonly storePath: string;
+        readonly nodeId?: string | (() => string) | undefined;
     });
     // (undocumented)
-    cancelApproval(approvalId: string, actor: string, actorSurface?: string, note?: string, outcome?: ApprovalActionOutcome): Promise<SharedApprovalRecord | null>;
-    // Warning: (ae-forgotten-export) The symbol "ApprovalActionOutcome" needs to be exported by the entry point embed.d.ts
-    //
-    // (undocumented)
-    claimApproval(approvalId: string, actor: string, actorSurface?: string, note?: string, outcome?: ApprovalActionOutcome): Promise<SharedApprovalRecord | null>;
+    cancelApproval(approvalId: string, input: ApprovalActionInput): Promise<TransitionOutcome>;
+    // Warning: (ae-forgotten-export) The symbol "ApprovalActionInput" needs to be exported by the entry point embed.d.ts
+    // Warning: (ae-forgotten-export) The symbol "TransitionOutcome" needs to be exported by the entry point embed.d.ts
+    claimApproval(approvalId: string, input: ApprovalActionInput): Promise<TransitionOutcome>;
     get eventPublisher(): Pick<ApprovalPublisher, 'publishEvent'> | null;
     // (undocumented)
     getApproval(approvalId: string): SharedApprovalRecord | null;
+    get homeNode(): string;
     // Warning: (ae-forgotten-export) The symbol "SharedApprovalRecord" needs to be exported by the entry point embed.d.ts
     //
     // (undocumented)
@@ -89,13 +89,17 @@ export class ApprovalBroker {
         readonly actorSurface?: string | undefined;
         readonly note?: string | undefined;
         readonly metadata?: Record<string, unknown> | undefined;
-    }): Promise<SharedApprovalRecord | null>;
-    releaseApproval(approvalId: string, actor: string, actorSurface?: string, note?: string, outcome?: ApprovalActionOutcome, holdId?: string): Promise<SharedApprovalRecord | null>;
+    }): Promise<TransitionOutcome>;
+    // (undocumented)
+    get relay(): ApprovalRelayPort | null;
+    releaseApproval(approvalId: string, input: Omit<ApprovalActionInput, 'expectedRevision'> & {
+        readonly holdId?: string | undefined;
+    }): Promise<TransitionOutcome>;
     requestApproval(input: RequestSharedApprovalInput): Promise<PermissionPromptDecision>;
     // Warning: (ae-forgotten-export) The symbol "ResolveSharedApprovalInput" needs to be exported by the entry point embed.d.ts
     //
     // (undocumented)
-    resolveApproval(approvalId: string, input: ResolveSharedApprovalInput): Promise<SharedApprovalRecord | null>;
+    resolveApproval(approvalId: string, input: ResolveSharedApprovalInput): Promise<TransitionOutcome>;
     // Warning: (ae-forgotten-export) The symbol "ApprovalPublisher" needs to be exported by the entry point embed.d.ts
     //
     // (undocumented)
@@ -106,6 +110,9 @@ export class ApprovalBroker {
     //
     // (undocumented)
     subscribe(listener: ApprovalListener): () => void;
+    useHomeNode(nodeId: string | (() => string)): void;
+    // Warning: (ae-forgotten-export) The symbol "ApprovalRelayPort" needs to be exported by the entry point embed.d.ts
+    useRelay(relay: ApprovalRelayPort | null): void;
 }
 
 // @public
@@ -366,7 +373,7 @@ export class SharedSessionBroker {
         readonly timestamp: number;
         readonly source: string;
         readonly metadata?: Readonly<Record<string, unknown>> | undefined;
-    }): Promise<SharedSessionMessage | null>;
+    }): Promise<Durable<SharedSessionMessage> | null>;
     // (undocumented)
     appendSystemMessage(sessionId: string, body: string, metadata?: Record<string, unknown>): Promise<SharedSessionMessage | null>;
     attachRuntimeBus(bus: RuntimeEventBus, sessionResolver: (agentId: string) => string | null): () => void;
@@ -401,11 +408,17 @@ export class SharedSessionBroker {
     findPreferredSession(options?: FindSharedSessionOptions): Promise<SharedSessionRecord | null>;
     findSessionForAgent(agentId: string): string | null;
     // (undocumented)
-    followUpMessage(input: SubmitSharedSessionMessageInput): Promise<SharedSessionSubmission>;
+    followUpMessage(input: SubmitSharedSessionMessageInput): Promise<Durable<SharedSessionSubmission>>;
     // Warning: (ae-forgotten-export) The symbol "SharedSessionInputRecord" needs to be exported by the entry point embed.d.ts
     //
     // (undocumented)
     getInputs(sessionId: string, limit?: number): SharedSessionInputRecord[];
+    // Warning: (ae-forgotten-export) The symbol "Page" needs to be exported by the entry point embed.d.ts
+    getInputsPage(sessionId: string, options?: {
+        readonly state?: SharedSessionInputRecord['state'] | undefined;
+        readonly since?: number | undefined;
+        readonly limit?: number | undefined;
+    }): Page<SharedSessionInputRecord>;
     getInputsSince(sessionId: string, options?: {
         readonly state?: SharedSessionInputRecord['state'] | undefined;
         readonly since?: number | undefined;
@@ -418,15 +431,27 @@ export class SharedSessionBroker {
     // (undocumented)
     getSession(sessionId: string): SharedSessionRecord | null;
     holdForCapacity(sessionId: string, inputId: string, arrivalIntent?: string): Promise<'held' | 'already' | null>;
+    listOwedChannelReplies(only?: {
+        readonly sessionId: string;
+        readonly agentId: string;
+    }): Array<{
+        readonly sessionId: string;
+        readonly agentId: string;
+        readonly routeId: string;
+        readonly task: string;
+        readonly body: string;
+    }>;
     // Warning: (ae-forgotten-export) The symbol "ListSharedSessionsOptions" needs to be exported by the entry point embed.d.ts
     //
     // (undocumented)
     listSessions(limit?: number, options?: ListSharedSessionsOptions): SharedSessionRecord[];
+    markChannelReplyOwed(sessionId: string, agentId: string): Promise<void>;
     markInputDelivered(sessionId: string, inputId: string, options?: {
         readonly consumed?: boolean | undefined;
         readonly agentId?: string | undefined;
         readonly claim?: boolean | undefined;
         readonly surfaceInstance?: string | undefined;
+        readonly claimEpoch?: number | null | undefined;
         readonly beforeApply?: (() => void) | undefined;
     }): Promise<SharedSessionInputRecord | null>;
     // (undocumented)
@@ -445,6 +470,7 @@ export class SharedSessionBroker {
     setChannelExecutionMode(sessionId: string, mode: GatePresetName): Promise<void>;
     // Warning: (ae-forgotten-export) The symbol "ChannelIntake" needs to be exported by the entry point embed.d.ts
     setChannelIntake(intake: ChannelIntake | null): void;
+    setChannelReplyOwedProbe(probe: ((agentId: string) => boolean) | null): void;
     // Warning: (ae-forgotten-export) The symbol "SharedSessionContinuationRunner" needs to be exported by the entry point embed.d.ts
     //
     // (undocumented)
@@ -462,55 +488,44 @@ export class SharedSessionBroker {
     setSurfaceNoticeSender(sender: ((routeId: string, text: string) => void) | null): void;
     // Warning: (ae-forgotten-export) The symbol "SharedSessionSurfaceReplyBinder" needs to be exported by the entry point embed.d.ts
     setSurfaceReplyBinder(binder: SharedSessionSurfaceReplyBinder | null): void;
-    settleChannelReply(sessionId: string, agentId: string): Promise<void>;
+    settleChannelReply(sessionId: string, agentId: string, routeId?: string): Promise<void>;
     settleNativeTurnInput(sessionId: string, inputId: string, permit: NativeConversationTurnPermit, state: 'completed' | 'cancelled' | 'failed'): Promise<SharedSessionInputRecord>;
     // (undocumented)
     start(): Promise<void>;
+    startWaitingMessages(): void;
     // Warning: (ae-forgotten-export) The symbol "SteerSharedSessionMessageInput" needs to be exported by the entry point embed.d.ts
     //
     // (undocumented)
-    steerMessage(input: SteerSharedSessionMessageInput): Promise<SharedSessionSubmission>;
+    steerMessage(input: SteerSharedSessionMessageInput): Promise<Durable<SharedSessionSubmission>>;
     stop(): Promise<void>;
     readonly storePath: string | null;
     // Warning: (ae-forgotten-export) The symbol "DelegatedSessionInputBinding" needs to be exported by the entry point embed.d.ts
     // Warning: (ae-forgotten-export) The symbol "DelegatedSessionSubmission" needs to be exported by the entry point embed.d.ts
     submitDelegatedMessage(input: SubmitSharedSessionMessageInput, onQueued: (input: SharedSessionInputRecord) => DelegatedSessionInputBinding): Promise<DelegatedSessionSubmission>;
-    // (undocumented)
-    submitMessage(input: SubmitSharedSessionMessageInput): Promise<SharedSessionSubmission>;
+    // Warning: (ae-forgotten-export) The symbol "Durable" needs to be exported by the entry point embed.d.ts
+    submitMessage(input: SubmitSharedSessionMessageInput): Promise<Durable<SharedSessionSubmission>>;
     subscribe(listener: () => void): () => void;
     trimRetained(level: 'floor' | 'flush'): void;
     // Warning: (ae-forgotten-export) The symbol "SetAsideSessionEntry" needs to be exported by the entry point embed.d.ts
     unreadableEntries(): readonly SetAsideSessionEntry[];
 }
 
-// @public (undocumented)
-export interface SharedSessionSubmission {
-    // (undocumented)
-    readonly activeAgentId?: string | undefined;
-    // (undocumented)
-    readonly created: boolean;
-    readonly duplicate?: true | undefined;
-    // (undocumented)
-    readonly input: SharedSessionInputRecord;
-    // Warning: (ae-forgotten-export) The symbol "SharedSessionInputIntent" needs to be exported by the entry point embed.d.ts
-    //
-    // (undocumented)
-    readonly intent: SharedSessionInputIntent;
-    // (undocumented)
-    readonly mode: 'spawn' | 'continued-live' | 'queued-follow-up' | 'queued-for-surface' | 'rejected';
-    // Warning: (ae-forgotten-export) The symbol "AutomationRouteBinding" needs to be exported by the entry point embed.d.ts
-    //
-    // (undocumented)
-    readonly routeBinding?: AutomationRouteBinding | undefined;
-    // (undocumented)
-    readonly session: SharedSessionRecord;
-    // (undocumented)
-    readonly state: SharedSessionInputRecord['state'];
-    // (undocumented)
+// Warning: (ae-forgotten-export) The symbol "SharedSessionSubmissionBase" needs to be exported by the entry point embed.d.ts
+//
+// @public
+export type SharedSessionSubmission = (SharedSessionSubmissionBase & {
+    readonly mode: 'spawn';
+    readonly task: string;
+}) | (SharedSessionSubmissionBase & {
+    readonly mode: 'continued-live' | 'queued-follow-up' | 'queued-for-surface' | 'rejected';
+    readonly task?: undefined;
+});
+
+// @public
+export type SharedSessionSubmissionReceipt = SharedSessionSubmissionBase & {
+    readonly mode: SharedSessionSubmission['mode'];
     readonly task?: string | undefined;
-    // (undocumented)
-    readonly userMessage: SharedSessionMessage;
-}
+};
 
 // @public (undocumented)
 export interface SubmitSharedSessionMessageInput {
@@ -545,13 +560,12 @@ export interface SubmitSharedSessionMessageInput {
 
 // Warnings were encountered during analysis:
 //
-// platform/src/platform/control-plane/approval-broker.ts:339:7 - (ae-forgotten-export) The symbol "PersistentStore" needs to be exported by the entry point embed.d.ts
-// platform/src/platform/control-plane/approval-broker.ts:339:7 - (ae-forgotten-export) The symbol "SharedApprovalStoreSnapshot" needs to be exported by the entry point embed.d.ts
-// platform/src/platform/control-plane/approval-broker.ts:509:66 - (ae-forgotten-export) The symbol "OwnerApprovalGuard" needs to be exported by the entry point embed.d.ts
-// platform/src/platform/control-plane/session-broker.ts:225:5 - (ae-forgotten-export) The symbol "SharedSessionStoreSnapshot" needs to be exported by the entry point embed.d.ts
-// platform/src/platform/control-plane/session-broker.ts:227:5 - (ae-forgotten-export) The symbol "RouteBindingManager" needs to be exported by the entry point embed.d.ts
-// platform/src/platform/control-plane/session-broker.ts:228:5 - (ae-forgotten-export) The symbol "SharedSessionAgentStatusProvider" needs to be exported by the entry point embed.d.ts
-// platform/src/platform/control-plane/session-broker.ts:229:5 - (ae-forgotten-export) The symbol "SharedSessionMessageSender" needs to be exported by the entry point embed.d.ts
-// platform/src/platform/control-plane/session-broker.ts:234:5 - (ae-forgotten-export) The symbol "ConversationGateConfigReader" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/approval-broker.ts:641:66 - (ae-forgotten-export) The symbol "OwnerApprovalGuard" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/session-broker.ts:245:5 - (ae-forgotten-export) The symbol "PersistentStore" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/session-broker.ts:245:5 - (ae-forgotten-export) The symbol "SharedSessionStoreSnapshot" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/session-broker.ts:247:5 - (ae-forgotten-export) The symbol "RouteBindingManager" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/session-broker.ts:248:5 - (ae-forgotten-export) The symbol "SharedSessionAgentStatusProvider" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/session-broker.ts:249:5 - (ae-forgotten-export) The symbol "SharedSessionMessageSender" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/session-broker.ts:254:5 - (ae-forgotten-export) The symbol "ConversationGateConfigReader" needs to be exported by the entry point embed.d.ts
 
 ```

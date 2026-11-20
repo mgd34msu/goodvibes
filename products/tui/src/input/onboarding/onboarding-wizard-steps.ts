@@ -51,6 +51,8 @@ const FEATURE_TOPIC_STEP: Partial<Record<OnboardingWizardTopic, OnboardingWizard
 const KEY_FIELD_PREFIXES = ['providers.api-key.', 'providers.api-key-inventory'];
 const isKeyField = (id: string): boolean => KEY_FIELD_PREFIXES.some((prefix) => id.startsWith(prefix));
 const ACCOUNT_ADMIN_FIELDS = ['accounts.admin-username', 'accounts.admin-password', 'accounts.admin-password-confirm', 'accounts.auth', 'accounts.bootstrap', 'accounts.user-store'];
+/** The sign-in account rows a reach topic adds when it opens the computer to the network. */
+const REACH_ADMIN_FIELDS = ['accounts.admin-username', 'accounts.admin-password', 'accounts.admin-password-confirm', 'accounts.auth'];
 
 function pick(step: OnboardingWizardStepDefinition, keep: (id: string) => boolean): OnboardingWizardFieldDefinition[] {
   return step.fields.filter((field) => keep(field.id));
@@ -63,12 +65,12 @@ function topicFields(controller: OnboardingWizardControllerLike, topic: Onboardi
   const capabilityOn = capabilityId ? controller.isCapabilitySelected(capabilityId as OnboardingStep1CapabilityId) : false;
   // A reach topic that opens the machine to the network asks for the account that signs in.
   const adminRows = (): OnboardingWizardFieldDefinition[] => controller.requiresAuthBootstrap()
-    ? pick(buildAccessStep(controller), (id) => ACCOUNT_ADMIN_FIELDS.includes(id))
+    ? pick(buildAccessStep(controller), (id) => REACH_ADMIN_FIELDS.includes(id))
     : [];
   switch (topic) {
     case 'model': {
       const step = buildDefaultModelStep(controller);
-      return { id: step.id, description: step.description, fields: [...step.fields] };
+      return { id: step.id, description: 'The model new conversations use, and how hard it thinks.', fields: [...step.fields] };
     }
     case 'sign-in': {
       const providers = buildProviderAccessStep(controller);
@@ -118,7 +120,7 @@ function topicFields(controller: OnboardingWizardControllerLike, topic: Onboardi
     }
     case 'how-it-works': {
       const step = buildExperienceStep(controller);
-      return { id: step.id, description: step.description, fields: [...step.fields] };
+      return { id: step.id, description: 'How much GoodVibes tells you while it works, how much guidance it gives, and who decides when it should ask.', fields: [...step.fields] };
     }
     default: {
       const stepId = FEATURE_TOPIC_STEP[topic];
@@ -235,7 +237,7 @@ export function buildCapabilitiesStep(controller: OnboardingWizardControllerLike
         kind: 'action',
         id: 'capabilities.clear',
         action: 'clear-capabilities',
-        label: 'Use Local TUI Only (No Servers)',
+        label: 'Turn off everything but this terminal',
         hint: 'Clear all server-backed capabilities: no browser access, LAN reachability, webhooks/events, or external app surfaces. The loopback-only background daemon still runs by default.',
         defaultValue: 'Action',
       },
@@ -359,7 +361,7 @@ export function buildDefaultModelStep(controller: OnboardingWizardControllerLike
     const primarySelectionField: OnboardingWizardModelPickerFieldDefinition = {
       kind: 'modelPicker',
       id: 'default-model.primary-model',
-      label: 'Default provider + model',
+      label: 'Model for new conversations',
       hint: "Open the nested model picker for the shell's main routing target.",
       target: 'main',
       defaultSelection: {
@@ -593,7 +595,7 @@ export function buildExperienceStep(controller: OnboardingWizardControllerLike):
         {
           kind: 'radio',
           id: 'experience.hitl',
-          label: 'Human-in-the-Loop (HITL) mode',
+          label: 'How much GoodVibes tells you',
           hint: 'Choose how much operational activity should be surfaced.',
           options: HITL_MODE_OPTIONS,
           defaultValue: controller.runtimeSnapshot?.runtimeDefaults.behavior.hitlMode ?? 'balanced',
@@ -601,7 +603,7 @@ export function buildExperienceStep(controller: OnboardingWizardControllerLike):
         {
           kind: 'radio',
           id: 'experience.guidance',
-          label: 'Guidance verbosity',
+          label: 'How much guidance it gives',
           hint: 'Choose how much explanation the shell should provide.',
           options: GUIDANCE_MODE_OPTIONS,
           defaultValue: controller.runtimeSnapshot?.runtimeDefaults.behavior.guidanceMode ?? 'minimal',
@@ -609,7 +611,7 @@ export function buildExperienceStep(controller: OnboardingWizardControllerLike):
         {
           kind: 'radio',
           id: 'experience.permissions',
-          label: 'Execution mode',
+          label: 'Who decides when it should ask',
           hint: 'Choose owner-reviewed safety, Jev-reviewed safety, or unrestricted YOLO execution.',
           options: PERMISSION_MODE_OPTIONS,
           defaultValue: normalizePermissionMode(controller.runtimeSnapshot?.runtimeDefaults.permissionsMode),

@@ -65,7 +65,7 @@ confidential registration only if you specifically want one.
    goodvibes-daemon config set calendar.google.clientId <CLIENT_ID>
    ```
 
-   Inside the terminal app, `/config set calendar.google.clientId <CLIENT_ID>` does
+   Inside the terminal app, `/settings set calendar.google.clientId <CLIENT_ID>` does
    the same.
 
    If you registered a Web-app (confidential) client instead, also store its secret
@@ -97,7 +97,7 @@ always gets both.
    goodvibes-daemon config set calendar.microsoft.clientId <CLIENT_ID>
    ```
 
-   Inside the terminal app, `/config set calendar.microsoft.clientId <CLIENT_ID>`
+   Inside the terminal app, `/settings set calendar.microsoft.clientId <CLIENT_ID>`
    does the same.
 
    A confidential registration additionally needs its secret stored and referenced in

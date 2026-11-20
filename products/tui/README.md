@@ -130,7 +130,7 @@ Settings are layered. Later layers win:
 3. project overrides: `.goodvibes/tui/settings.json`
 4. CLI and runtime overrides
 
-Edit them live with `/settings` or the fullscreen `/config` workspace rather than by hand. A few of the most-reached-for keys:
+Edit them live with `/settings` rather than by hand. A few of the most-reached-for keys:
 
 | Key | Default | What it does |
 | --- | --- | --- |

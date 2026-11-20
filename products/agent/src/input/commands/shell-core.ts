@@ -6,6 +6,7 @@ import { startFreshConversation } from './fresh-conversation.ts';
 import '@goodvibes-jev/engine/platform/platform/utils';
 import '@goodvibes-jev/engine/platform/platform/utils';
 import { createCompactCommand, refuseWhileTurnRuns } from '@goodvibes-jev/engine/terminal-shell/everyday-commands';
+import { NOTHING_TO_COMPACT_YET, NothingToCompactError } from '@goodvibes-jev/engine/platform/platform/core';
 import { createHelpCommand } from '@goodvibes-jev/engine/terminal-shell/help-command';
 import { shortcutGroups } from '../../renderer/shortcut-groups.ts';
 import { registerModelCommands } from '@goodvibes-jev/engine/terminal-shell/model-command';
@@ -46,12 +47,10 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
 /** `/compact` is a single-action command shared with the other terminal app (terminal-shell/everyday-commands.ts). */
 const compactCommand = createCompactCommand<CommandContext>(async (_values, ctx) => {
   refuseWhileTurnRuns(ctx, '/compact');
+  if (ctx.session.conversationManager.getMessagesForLLM().length === 0) throw new NothingToCompactError(NOTHING_TO_COMPACT_YET);
   ctx.print('Compacting conversation...');
   const receipt = await compactConversation(ctx);
-  ctx.print(
-    receipt
-      ? `Conversation compacted (${receipt.messagesBefore} to ${receipt.messagesAfter} messages).`
-      : 'Nothing was compacted: the conversation is already short enough or compaction was declined.',
-  );
+  if (!receipt) throw new NothingToCompactError(NOTHING_TO_COMPACT_YET);
+  ctx.print(`Conversation compacted (${receipt.messagesBefore} to ${receipt.messagesAfter} messages).`);
   ctx.renderRequest();
 });

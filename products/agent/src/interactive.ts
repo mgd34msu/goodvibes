@@ -43,7 +43,7 @@ import { HEADER_GAP_ROWS, withHeaderGap } from './renderer/header-line.ts';
 import { TranscriptScroll, mainBackToBottom, transcriptEscape } from './shell/transcript-scroll.ts';
 import { buildConversationViewport, centerViewportContent } from './renderer/conversation-layout.ts';
 import { applyConversationOverlays, buildConversationLayers } from './renderer/conversation-overlays.ts';
-import { WorkBoardModal } from '@goodvibes-jev/engine/terminal-shell/work-board-input';
+import { WorkBoardModal, waitingAskOf } from '@goodvibes-jev/engine/terminal-shell/work-board-input';
 import { createVerbSpawnGateway, FleetSpawn } from '@goodvibes-jev/engine/terminal-shell/fleet-spawn';
 import { confirmThrough } from './input/confirm-dialog.ts';
 import { AgentCalendarRegistry } from './agent/calendar-registry.ts';
@@ -787,6 +787,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     const modal = open ?? new WorkBoardModal({
       sources: {
         nodes: () => ctx.services.fleetUnion.nodes(),
+        // The ask on screen, with its card's own words.
+        asks: () => waitingAskOf(pendingPermission),
         sessionStartedAt,
         // What the old "Coming up" showed from the calendar: today's events, one line under Scheduled.
         eventsToday: () => AgentCalendarRegistry.fromShellPaths(ctx.services.shellPaths).upcoming(0).length,

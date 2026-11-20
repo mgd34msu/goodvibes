@@ -210,6 +210,8 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   openView?: (name: string, target?: ViewTarget) => boolean;
   /** The Agents modal; `target` selects a process, `hosted` opens the attached hosted session. */
   openAgents?: (options?: { readonly target?: ViewTarget; readonly hosted?: boolean }) => void;
+  /** The ask waiting on screen, as Your agents lists it (its card's own words). */
+  waitingAsks?: () => readonly import('@goodvibes-jev/engine/contracts').WorkBoardAsk[];
   /**
    * Open an agent or a background process full screen (terminal-shell session-focus).
    * False when it is not known here (the caller keeps its own fallback).

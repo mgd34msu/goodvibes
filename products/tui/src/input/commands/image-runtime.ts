@@ -33,6 +33,7 @@ export function registerImageRuntimeCommands(
   options: { readonly openFile?: (path: string) => Promise<boolean> } = {},
 ): void {
   registry.register(createMediaCommand<CommandContext>({
+    product: 'goodvibes',
     registry: (ctx) => ctx.platform.mediaProviders,
     artifactStore: (ctx) => ctx.platform.artifactStore,
     paths: requireShellPaths,

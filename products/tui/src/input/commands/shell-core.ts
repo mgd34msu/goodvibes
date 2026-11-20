@@ -9,6 +9,7 @@ import {
 } from '../../renderer/compaction-preview.ts';
 import { ensureProviderKeyThenSelect } from '../provider-key-intake.ts';
 import { createCompactCommand } from '@goodvibes-jev/engine/terminal-shell/everyday-commands';
+import { NOTHING_TO_COMPACT_YET, NothingToCompactError } from '@goodvibes-jev/engine/platform/platform/core';
 import { createHelpCommand } from '@goodvibes-jev/engine/terminal-shell/help-command';
 import { shortcutGroups } from '../../renderer/shortcut-groups.ts';
 import { registerModelCommands } from '@goodvibes-jev/engine/terminal-shell/model-command';
@@ -56,6 +57,7 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
 /** `/compact` is a single-action command shared with the other terminal app (terminal-shell/everyday-commands.ts). */
 const compactCommand = createCompactCommand<CommandContext>(async (_values, ctx) => {
   const messages = ctx.session.conversationManager.getMessagesForLLM();
+  if (messages.length === 0) throw new NothingToCompactError(NOTHING_TO_COMPACT_YET);
   // contextWindow IS reachable from CommandContext, the same
   // call compactConversation() (runtime-services.ts) already makes to scale
   // its own behaviour by window size. Previously hardcoded to 0 here, which

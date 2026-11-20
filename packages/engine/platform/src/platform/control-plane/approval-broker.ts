@@ -149,11 +149,18 @@ function sortApprovals(records: Iterable<SharedApprovalRecord>): SharedApprovalR
 }
 
 /**
- * Maximum number of terminal (resolved) approval records retained in memory and
- * on disk. Pending and claimed approvals are never counted or evicted: they
- * have a live waiter and must survive until resolved.
+ * Settled approvals nobody decided (withdrawn, expired, or settled by a
+ * remembered rule) kept in memory and on disk; the oldest past this leave.
+ * An approval a person approved or denied is never dropped: it is what the
+ * owner allowed or refused, when and for what. Open approvals are never
+ * counted or evicted: they have a live waiter.
  */
 const MAX_APPROVAL_RECORDS = 500;
+
+/** Approved or denied by a person (not by a remembered rule): kept for good. */
+function decidedByPerson(record: SharedApprovalRecord): boolean {
+  return (record.status === 'approved' || record.status === 'denied') && record.cause !== 'remembered-rule';
+}
 const WITHHELD_ANSWER = WITHHELD_PROMPT_ANSWER;
 const TERMINAL_APPROVAL_STATUSES = new Set<SharedApprovalStatus>(['approved', 'denied', 'cancelled', 'expired']);
 /** The home node of a broker outside a daemon, whose records never leave its process. */
@@ -1083,14 +1090,14 @@ export class ApprovalBroker {
   }
 
   /**
-   * Drop the oldest terminal approvals once they exceed MAX_APPROVAL_RECORDS,
-   * bounding both the in-memory Map and the persisted snapshot. Open approvals
-   * are never evicted.
+   * Drop the oldest settled approvals nobody decided once they exceed
+   * MAX_APPROVAL_RECORDS, bounding the in-memory Map and the log. Open
+   * approvals and approvals a person decided are never evicted.
    */
   private pruneTerminalApprovals(): void {
     const terminal: SharedApprovalRecord[] = [];
     for (const record of this.approvals.values()) {
-      if (TERMINAL_APPROVAL_STATUSES.has(record.status)) terminal.push(record);
+      if (TERMINAL_APPROVAL_STATUSES.has(record.status) && !decidedByPerson(record)) terminal.push(record);
     }
     if (terminal.length <= MAX_APPROVAL_RECORDS) return;
     terminal.sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));

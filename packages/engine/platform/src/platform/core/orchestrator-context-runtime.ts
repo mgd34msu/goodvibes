@@ -14,7 +14,7 @@ import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitOpsContextWarning, emitCompactionReceipt } from '../runtime/emitters/index.js';
 import type { HookEvent, HookResult } from '../hooks/types.js';
 import type { CompactionReceipt, CompactionStrategyChoice } from './compaction-types.js';
-import { CompactionQualityError } from './compaction-types.js';
+import { CompactionQualityError, NothingToCompactError } from './compaction-types.js';
 import { summarizeError } from '../utils/error-display.js';
 import { lifecycleStrategyFor, lifecycleTriggerFor, routeConversationCompaction } from './compaction-lifecycle-route.js';
 import type { CompactionLifecycleOwner } from './compaction-lifecycle-route.js';
@@ -356,6 +356,12 @@ export async function checkContextWindowPreflight(
       }
     } catch (compactErr) {
       deps.signal?.throwIfAborted();
+      // Nothing to gain by compacting is not a failure: the request goes as it is, quietly.
+      if (compactErr instanceof NothingToCompactError && fits) {
+        logger.info('Pre-flight compaction had nothing to gain; request sent as it is', { reason: compactErr.message });
+        failedPreflightCompaction.set(deps.conversation, deps.conversation.workRevision);
+        return 'ok';
+      }
       const msg = compactErr instanceof Error ? compactErr.message : String(compactErr);
       logger.error('Orchestrator: pre-flight compact failed', { error: msg });
       emitCompactionFailureReceipt(deps, turnId, compactErr, 'auto', 'structured');
@@ -704,6 +710,8 @@ export async function handlePostTurnContextMaintenance(
         }).catch((err: unknown) => {
           deps.signal?.throwIfAborted();
           deps.setIsCompacting(false);
+          // Nothing to gain by compacting is not a failure: an automatic compaction says nothing.
+          if (err instanceof NothingToCompactError) { logger.info('Auto-compaction had nothing to gain', { reason: err.message }); deps.requestRender(); return; }
           const msg = summarizeError(err);
           logger.error('Orchestrator: auto-compact failed', { error: msg });
           emitCompactionFailureReceipt(deps, turnId, err, 'auto', 'structured');
@@ -741,6 +749,8 @@ export async function handlePostTurnContextMaintenance(
         deps.requestRender();
         deps.signal.throwIfAborted();
       }
+      // Nothing to gain by compacting is not a failure: an automatic compaction says nothing.
+      if (compactErr instanceof NothingToCompactError) { logger.info('Auto-compaction had nothing to gain', { reason: compactErr.message }); deps.requestRender(); return; }
       logger.error('Auto-compact failed', { error: String(compactErr) });
       emitCompactionFailureReceipt(deps, turnId, compactErr, 'auto', 'structured');
       deps.conversation.addNotice(`[Compact] Auto-compaction failed: ${String(compactErr)}`, { level: 'error' });

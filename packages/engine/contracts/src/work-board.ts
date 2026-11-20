@@ -259,7 +259,7 @@ function clause(text: string): string {
   return trimmed.charAt(0).toLowerCase() + trimmed.slice(1);
 }
 
-function askRow(ask: WorkBoardAsk, now: number): BoardRow {
+function askRow(ask: WorkBoardAsk, now: number, who?: string | undefined): BoardRow {
   const p = ask.presentation;
   const from = p.origin?.sessionTitle !== undefined
     ? p.kind === 'purchase' ? `From "${p.origin.sessionTitle}"` : `Asked by ${p.origin.by} in "${p.origin.sessionTitle}"`
@@ -276,6 +276,7 @@ function askRow(ask: WorkBoardAsk, now: number): BoardRow {
     ref: { type: 'ask', id: ask.id },
     group: 'waiting',
     title: p.title,
+    ...(who !== undefined ? { who } : {}),
     meta: { short: [p.kind === 'purchase' ? undefined : agoWords(ask.askedAt, now), countdown].filter(Boolean).join(' · '), full: parts.join(' · ') },
     tone: 'needs-you',
     actions: ['answer', 'open'],
@@ -288,7 +289,7 @@ function waitingNodeRow(node: WorkBoardNode, now: number): BoardRow {
   return {
     ref: { type: refType(node.kind), id: node.id },
     group: 'waiting',
-    title: node.needsAttention?.detail ?? `${node.label} is waiting for you`,
+    title: node.needsAttention?.detail ?? 'Waiting for your reply in its own conversation',
     ...(AGENT_KINDS.has(node.kind) ? { who: node.label } : {}),
     meta: { short: since !== undefined ? agoWords(since, now) : '', full: [AGENT_KINDS.has(node.kind) ? node.label : undefined, since !== undefined ? agoWords(since, now) : undefined].filter(Boolean).join(' · ') },
     tone: 'needs-you',
@@ -377,7 +378,10 @@ function headlineOf(waiting: number, running: number): string {
 export function readWorkBoard(sources: WorkBoardSources, now: number): WorkBoard {
   const asks = sources.asks ?? [];
   const since = sources.sessionStartedAt;
-  const waiting: BoardRow[] = asks.map((ask) => askRow(ask, now));
+  // An ask from an agent names it: "Helper agent · Run bun test?".
+  const whoOf = (agentId: string | undefined): string | undefined => agentId === undefined ? undefined
+    : sources.nodes.find((node) => node.id === agentId || node.sessionRef?.agentId === agentId)?.label;
+  const waiting: BoardRow[] = asks.map((ask) => askRow(ask, now, whoOf(ask.agentId)));
   const askAgents = new Set(asks.flatMap((ask) => (ask.agentId !== undefined ? [ask.agentId] : [])));
   const askSessions = new Set(asks.flatMap((ask) => (ask.sessionId !== undefined ? [ask.sessionId] : [])));
   const running: BoardRow[] = [];

@@ -5,14 +5,51 @@ import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } 
 import { snapshotJudgmentInput, captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
 import { CardMaterialRefusedError, screenOutboundForCardMaterial } from './payments-channel-guard.js';
-import {
-  collectAgentMedia,
-  formatAgentMediaGenerationResult,
-  generateAgentMedia,
-} from './media-generation.js';
+import { collectMedia, generateMedia, type MediaGenerationRun, type MediaOrigin } from '../media-generation.js';
+import type { MediaProviderTask } from '@goodvibes-jev/engine/platform/platform/media';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import { toolErrorText } from './tool-error-text.js';
 import { readFlag, readString } from './tool-args.js';
+
+/** The model's media tool runs in the Agent. */
+const TOOL_ORIGIN: MediaOrigin = { product: 'goodvibes-agent', source: 'agent-media-generation' };
+
+/** The `agent_media_generate` call that collects a pending job. */
+function mediaCollectToolCall(task: MediaProviderTask): string {
+  const resume = task.resume && Object.keys(task.resume).length > 0 ? { resume: task.resume } : {};
+  return `agent_media_generate ${JSON.stringify({ providerId: task.providerId, taskId: task.taskId, ...resume })}`;
+}
+
+/**
+ * The result as text. A pending job names the step that collects it on the
+ * surface printing it: the tool call by default, the slash command for `/media`.
+ */
+function formatAgentMediaGenerationResult(
+  result: MediaGenerationRun,
+  collectStep: (task: MediaProviderTask) => string = mediaCollectToolCall,
+): string {
+  if (result.pending) {
+    return [
+      'Agent media still generating',
+      `  provider ${result.pending.providerId}`,
+      `  task ${result.pending.taskId}`,
+      '  the provider accepted (and charged for) the job; it had not finished when the wait ended',
+      `  collect it later with ${collectStep(result.pending)}`,
+    ].join('\n');
+  }
+  return [
+    'Agent media generated',
+    `  provider ${result.providerId}`,
+    `  artifacts ${result.artifacts.length}`,
+    ...result.artifacts.map((artifact, index) => [
+      `  ${index + 1}. ${artifact.artifactId}`,
+      `     type ${artifact.mimeType}`,
+      `     size ${artifact.sizeBytes} bytes`,
+      ...(artifact.filename ? [`     filename ${artifact.filename}`] : []),
+      ...(artifact.sourceUri ? [`     source ${artifact.sourceUri}`] : []),
+    ].join('\n')),
+  ].join('\n');
+}
 
 export interface AgentMediaGenerateToolArgs {
   readonly prompt?: unknown | undefined;
@@ -127,8 +164,8 @@ export function createAgentMediaGenerateTool(
             if (!assertCurrentToolEffect(rawArgs, executionOptions, 'send') || !assertCurrentToolEffect(rawArgs, executionOptions, 'write')) throw new ToolInputProjectionError('held');
           };
           assertCurrent();
-          const result = await collectAgentMedia(mediaProviderRegistry, artifactStore,
-            { providerId, taskId, ...(Object.keys(resume).length > 0 ? { resume } : {}) },
+          const result = await collectMedia(mediaProviderRegistry, artifactStore,
+            { providerId, taskId, ...(Object.keys(resume).length > 0 ? { resume } : {}) }, TOOL_ORIGIN,
             typeof args.waitSeconds === 'number' ? { waitSeconds: args.waitSeconds } : {},
             { signal: executionOptions?.signal, assertCurrent });
           return output(formatAgentMediaGenerationResult(result));
@@ -153,12 +190,12 @@ export function createAgentMediaGenerateTool(
         assertCurrent(); if (!outward.allowed) return failure([outward.reason ?? 'Media prompt content was refused.', outward.fix].filter(Boolean).join(' '));
         const card = await screenOutboundForCardMaterial({ surface: 'media-provider', message: prompt }, { signal: executionOptions?.signal, assertCurrent });
         assertCurrent(); if (card) throw new CardMaterialRefusedError(card);
-        const result = await generateAgentMedia(mediaProviderRegistry, artifactStore, {
+        const result = await generateMedia(mediaProviderRegistry, artifactStore, {
           prompt,
           ...(readString(args.providerId) ? { providerId: readString(args.providerId) } : {}),
           ...(readString(args.modelId) ? { modelId: readString(args.modelId) } : {}),
           ...(readString(args.outputMimeType) ? { outputMimeType: readString(args.outputMimeType) } : {}),
-        }, { signal: executionOptions?.signal, assertCurrent });
+        }, TOOL_ORIGIN, { signal: executionOptions?.signal, assertCurrent });
         return output(formatAgentMediaGenerationResult(result));
       } catch (error) {
         return failure(toolErrorText(error, executionOptions?.signal));

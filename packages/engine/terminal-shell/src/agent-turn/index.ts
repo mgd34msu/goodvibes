@@ -97,7 +97,7 @@ export * from './provider-model.js';
 export * from './payments-channel-guard.js';
 export * from './schedule-delivery-targets.js';
 export * from './channel-delivery.js';
-export * from './media-generation.js';
+export * from '../media-generation.js';
 export * from './notify-tool.js';
 export * from './media-generate-tool.js';
 export * from './review-packet-share-tool.js';

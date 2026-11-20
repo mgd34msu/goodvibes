@@ -27,6 +27,7 @@ export const localActions = createLocalCommandActions<CommandContext>(requirePro
 });
 
 const mediaCommand = createMediaCommand<CommandContext>({
+  product: 'goodvibes-agent',
   registry: (ctx) => ctx.platform.mediaProviderRegistry,
   artifactStore: (ctx) => ctx.platform.artifactStore,
   paths: requireShellPaths,

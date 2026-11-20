@@ -26,10 +26,10 @@ import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ProcessNode, SteerResult } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import type { WorkBoardSession } from '@goodvibes-jev/engine/contracts';
+import type { WorkBoardAsk, WorkBoardSession } from '@goodvibes-jev/engine/contracts';
 import type { SurfaceModal, SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { renderWorkBoardPanel, type PanelDetail, type PanelText, type WorkBoardPanelView } from '@goodvibes-jev/engine/terminal-shell/work-board';
-import { WorkBoardList } from '@goodvibes-jev/engine/terminal-shell/work-board-input';
+import { boardAskDetail, WorkBoardList } from '@goodvibes-jev/engine/terminal-shell/work-board-input';
 import type { KitHint, SurfaceLayer } from '../renderer/surface-kit.ts';
 import { fleetNodeAttention, isRunningProcessState, isTerminalProcessState, type FleetReadModel, type FleetSnapshot } from '../views/fleet-read-model.ts';
 import type { FleetActs } from '../views/fleet-acts.ts';
@@ -84,6 +84,8 @@ export interface AgentsModalDeps {
   readonly openSessionView?: (target: { readonly kind: 'agent' | 'process'; readonly id: string }) => boolean;
   /** When this run of the program began: finished work from before it is not listed. */
   readonly sessionStartedAt?: number;
+  /** The asks waiting for the person here, with their words (the card on screen). */
+  readonly asks?: () => readonly WorkBoardAsk[];
 }
 
 const HOSTED_ID = 'hosted-session';
@@ -128,6 +130,7 @@ export class AgentsModal implements SurfaceModal {
       nodes: () => this.fleet().rows.map((row) => row.node),
       sessions: () => this.hostedSessions(),
       archived: () => this.archivedFleet().rows.map((row) => row.node),
+      asks: () => deps.asks?.() ?? [],
       sessionStartedAt: deps.sessionStartedAt,
     });
     // What 'n' (new agent) finds or fails on is said here, not behind the panel.
@@ -303,6 +306,8 @@ export class AgentsModal implements SurfaceModal {
       this.say(`${row.title}: it can't be restarted from here.`, 'faint');
       return;
     }
+    // An ask's card is the one on screen under the panel: closing the panel puts it in front.
+    if (row.ref.type === 'ask') { host.close(this, 'done'); return; }
     const node = this.selectedNode();
     if (!node) return;
     if (this.deps.acts?.handleTreeKey('enter', node)) return;
@@ -630,6 +635,8 @@ export class AgentsModal implements SurfaceModal {
       if (!state?.record) return null;
       return { title: row.title, meta: 'a conversation running in the GoodVibes service', blocks: [{ kind: 'text', lines: hostedHeaderTexts(state) }], tail: hostedRowTexts(state.rows.slice(-40)) };
     }
+    const ask = this.list.ask(row);
+    if (ask) return boardAskDetail(row, ask);
     const node = this.selectedNode();
     if (!node) return { title: row.title, meta: row.meta.full, blocks: [], tail: [] };
     const stopping = this.stopTracker.isStopping(node.id);

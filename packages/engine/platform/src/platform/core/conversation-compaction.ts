@@ -197,6 +197,13 @@ export async function compactConversation(
     work.assertCurrent();
     const { result } = produced;
 
+    // A summary no shorter than the conversation gains nothing: said plainly, the
+    // conversation kept, and no quality score is spent on it.
+    if (result.tokensAfterEstimate >= result.tokensBeforeEstimate) {
+      logger.info('Compaction would not shorten the conversation; kept as it is', { trigger, tokensBefore: result.tokensBeforeEstimate, tokensAfter: result.tokensAfterEstimate });
+      throw new NothingToCompactError(ALREADY_AS_SHORT_AS_IT_GETS);
+    }
+
     // Quality guard: score the compaction before committing it, once. A
     // low-quality result (e.g. no compression, or a destroyed handoff) is
     // rejected, the full conversation is kept and the failure is surfaced
@@ -233,12 +240,6 @@ export async function compactConversation(
     // even when a broken/empty extraction technically "shrank" tokens, so a
     // no-net-reduction result is treated as a failure and the conversation is
     // kept rather than swapping in a summary that did not help.
-    const noReduction = result.tokensAfterEstimate >= result.tokensBeforeEstimate;
-    // A summary no shorter than the conversation gains nothing: said plainly, the conversation kept.
-    if (noReduction) {
-      logger.info('Compaction would not shorten the conversation; kept as it is', { trigger, tokensBefore: result.tokensBeforeEstimate, tokensAfter: result.tokensAfterEstimate });
-      throw new NothingToCompactError(ALREADY_AS_SHORT_AS_IT_GETS);
-    }
     if (quality?.isLowQuality) {
       const detail = `Compaction quality ${quality.score.toFixed(2)} (${quality.grade}) below threshold ${LOW_QUALITY_THRESHOLD}; conversation retained. ${quality.description}`;
       logger.warn('Compaction rejected by quality guard, conversation kept', { detail, trigger });

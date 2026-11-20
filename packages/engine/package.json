@@ -4093,10 +4093,10 @@
       "types": "./terminal-shell/dist/agent-turn/local-state-admission.d.ts",
       "import": "./terminal-shell/dist/agent-turn/local-state-admission.js"
     },
-    "./terminal-shell/agent-turn/media-generation": {
-      "bun": "./terminal-shell/src/agent-turn/media-generation.ts",
-      "types": "./terminal-shell/dist/agent-turn/media-generation.d.ts",
-      "import": "./terminal-shell/dist/agent-turn/media-generation.js"
+    "./terminal-shell/media-generation": {
+      "bun": "./terminal-shell/src/media-generation.ts",
+      "types": "./terminal-shell/dist/media-generation.d.ts",
+      "import": "./terminal-shell/dist/media-generation.js"
     },
     "./terminal-shell/agent-turn/memory-input-guard": {
       "bun": "./terminal-shell/src/agent-turn/memory-input-guard.ts",

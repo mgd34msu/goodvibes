@@ -72,6 +72,7 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
       openSessionView: (target) => commandContext.openSessionView?.(target) ?? false,
       // Finished work listed is this run's: the service's older finished rows stay in its own history.
       sessionStartedAt: Math.floor(performance.timeOrigin),
+      asks: () => commandContext.waitingAsks?.() ?? [],
     });
     if (opts.target) modal.reveal(opts.target);
     if (opts.hosted) modal.showHosted();

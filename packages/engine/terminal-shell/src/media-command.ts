@@ -20,7 +20,7 @@ import { defineCommand, type DescribedCommand } from './command-actions/define.j
 import { defineList, type ListRow } from './command-actions/lists.js';
 import type { CommandActionContext, InputDescription } from './command-actions/types.js';
 import { choiceInput, doAction, readAction, textInput } from './described-command-kit.js';
-import { collectAgentMedia, generateAgentMedia, type AgentMediaGenerationResult } from './agent-turn/media-generation.js';
+import { collectMedia, generateMedia, type MediaGenerationRun } from './media-generation.js';
 
 type MediaStore = Pick<ArtifactStore, 'create'> & Partial<Pick<ArtifactStore, 'readContent'>>;
 
@@ -30,6 +30,8 @@ interface MediaListContext {
 }
 
 export interface MediaCommandPolicy<Ctx> {
+  /** The running program, stamped on what it makes: `goodvibes` or `goodvibes-agent`. */
+  readonly product: string;
   readonly registry: (ctx: Ctx) => MediaProviderRegistry | undefined;
   readonly artifactStore: (ctx: Ctx) => MediaStore | undefined;
   readonly paths: (ctx: Ctx) => Pick<ShellPathService, 'workingDirectory' | 'resolveWorkspacePath'>;
@@ -90,7 +92,7 @@ export function createMediaCommand<Ctx extends CommandActionContext>(policy: Med
   };
 
   /** Each artifact saved as a file next to its stored copy; the first one opened where there is a viewer. */
-  const save = async (ctx: Ctx, store: MediaStore, result: AgentMediaGenerationResult, prompt: string, out: string): Promise<string> => {
+  const save = async (ctx: Ctx, store: MediaStore, result: MediaGenerationRun, prompt: string, out: string): Promise<string> => {
     if (result.pending) {
       return [
         `${result.pending.providerId} accepted the job (task ${result.pending.taskId}) and is still making it; it is paid for and keeps running.`,
@@ -181,14 +183,14 @@ export function createMediaCommand<Ctx extends CommandActionContext>(policy: Med
         async run(values, ctx) {
           const { registry, store } = needs(ctx);
           const prompt = values.prompt!.trim();
-          let result: AgentMediaGenerationResult;
+          let result: MediaGenerationRun;
           try {
-            result = await generateAgentMedia(registry, store, {
+            result = await generateMedia(registry, store, {
               prompt,
               outputMimeType: MIME_BY_KIND[values.kind || 'image'],
               ...(values.provider ? { providerId: values.provider } : {}),
               ...(values.model ? { modelId: values.model } : {}),
-            });
+            }, { product: policy.product, source: 'media-command' });
           } catch (error) {
             return failed('Making it', error);
           }
@@ -213,9 +215,9 @@ export function createMediaCommand<Ctx extends CommandActionContext>(policy: Med
             if (at <= 0) throw commandRefusal(`"${pair}" is not key=value; give the resume values exactly as the pending result printed them.`);
             resume[pair.slice(0, at)] = pair.slice(at + 1);
           }
-          let result: AgentMediaGenerationResult;
+          let result: MediaGenerationRun;
           try {
-            result = await collectAgentMedia(registry, store, { providerId: values.provider!, taskId: values.task!, ...(Object.keys(resume).length > 0 ? { resume } : {}) });
+            result = await collectMedia(registry, store, { providerId: values.provider!, taskId: values.task!, ...(Object.keys(resume).length > 0 ? { resume } : {}) }, { product: policy.product, source: 'media-command' });
           } catch (error) {
             return failed(`Collecting ${values.provider} job ${values.task}`, error);
           }

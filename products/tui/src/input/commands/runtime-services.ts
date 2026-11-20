@@ -52,7 +52,7 @@ export const {
 } = createCommandServiceAccessors<CommandContext>();
 export const { requireEcosystemCatalogPaths } = createCommandPathAccessors('tui');
 import type { CommandContext } from '../command-registry.ts';
-import { compactSmallWindow, getLastCompactionEvent, recordSmallWindowCompaction, SMALL_WINDOW_KEEP_RECENT, SMALL_WINDOW_THRESHOLD } from '@goodvibes-jev/engine/platform/platform/core';
+import { compactSmallWindow, getLastCompactionEvent, NOTHING_TO_COMPACT_YET, NothingToCompactError, recordSmallWindowCompaction, SMALL_WINDOW_KEEP_RECENT, SMALL_WINDOW_THRESHOLD } from '@goodvibes-jev/engine/platform/platform/core';
 import type { CompactionContext, CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
 import { recordCompactionQualityScore } from '../../renderer/compaction-quality.ts';
 import type { CompactionQualityScore } from '../../renderer/compaction-quality.ts';
@@ -209,12 +209,8 @@ export async function compactConversation(context: CommandContext): Promise<Comp
     if (qualityScore) recordCompactionQualityScore(eventAfter.timestamp, qualityScore);
     return { kind: 'summarised', event: eventAfter, qualityScore };
   }
-  return {
-    kind: 'unchanged',
-    reason: receipt === undefined
-      ? 'the conversation has no messages'
-      : 'no compaction was recorded, so the conversation is as it was',
-  };
+  if (receipt === undefined) throw new NothingToCompactError(NOTHING_TO_COMPACT_YET);
+  return { kind: 'unchanged', reason: 'no compaction was recorded, so the conversation is as it was' };
 }
 
 export function requireKnowledgeApi(context: CommandContext): KnowledgeApi {

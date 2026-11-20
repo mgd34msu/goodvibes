@@ -25,6 +25,8 @@ import {
 } from '@goodvibes-jev/engine/contracts';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { askPresentationFor } from './permission-prompt-facts.js';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { ConfirmOptions } from './confirm-dialog-types.js';
 import { isTextBackspace } from './delete-key-policy.js';
@@ -121,7 +123,7 @@ export class WorkBoardList {
   filtering = false;
   /** The archive view: archived nodes instead of the live board. */
   archive = false;
-  private cache: { board: WorkBoard | null; error: string | null; nodes: readonly WorkBoardNode[] } | null = null;
+  private cache: { board: WorkBoard | null; error: string | null; nodes: readonly WorkBoardNode[]; asks: readonly WorkBoardAsk[] } | null = null;
   private archiveCache: { rows: BoardRow[]; nodes: readonly WorkBoardNode[] } | null = null;
   /** Read once per open: the calendar is a file read, not a fact the fleet ticks. */
   private eventsTodayCache: number | null = null;
@@ -149,22 +151,23 @@ export class WorkBoardList {
     return this.archiveCache;
   }
 
-  private read(): { board: WorkBoard | null; error: string | null; nodes: readonly WorkBoardNode[] } {
+  private read(): { board: WorkBoard | null; error: string | null; nodes: readonly WorkBoardNode[]; asks: readonly WorkBoardAsk[] } {
     if (this.cache) return this.cache;
     const now = this.sources.now?.() ?? Date.now();
     try {
       const nodes = this.sources.nodes();
+      const asks = this.sources.asks?.() ?? [];
       const input: WorkBoardSources = {
         nodes,
-        asks: this.sources.asks?.(),
+        asks,
         sessions: this.sources.sessions?.(),
         tasks: this.sources.tasks?.(),
         sessionStartedAt: this.sources.sessionStartedAt,
       };
-      this.cache = { board: readWorkBoard(input, now), error: null, nodes };
+      this.cache = { board: readWorkBoard(input, now), error: null, nodes, asks };
     } catch (error) {
       const sentence = summarizeError(error).replace(/\.?\s*$/, '.');
-      this.cache = { board: null, error: sentence, nodes: [] };
+      this.cache = { board: null, error: sentence, nodes: [], asks: [] };
     }
     return this.cache;
   }
@@ -175,6 +178,11 @@ export class WorkBoardList {
 
   error(): string | null {
     return this.read().error;
+  }
+
+  /** The ask behind a waiting row, when the row is an ask. */
+  ask(row: BoardRow): WorkBoardAsk | undefined {
+    return row.ref.type === 'ask' ? this.read().asks.find((ask) => ask.id === row.ref.id) : undefined;
   }
 
   /** The node behind a row, when the row is a fleet node. */
@@ -345,6 +353,44 @@ export class WorkBoardList {
   }
 }
 
+/** When each ask was first seen, by its call id (the card's request object is replaced as it is typed in). */
+const askSeenAt = new Map<string, number>();
+
+/**
+ * The ask on screen as a waiting row: its words are the card's own
+ * (ask-presentation, the same object the card draws), with the agent that
+ * asked when a background agent did. Nothing is computed that the card did not.
+ */
+export function waitingAskOf(request: PermissionPromptRequest | null | undefined): WorkBoardAsk[] {
+  if (!request) return [];
+  let at = askSeenAt.get(request.callId);
+  if (at === undefined) {
+    if (askSeenAt.size > 64) askSeenAt.clear();
+    at = Date.now();
+    askSeenAt.set(request.callId, at);
+  }
+  const agentId = request.attribution?.kind === 'background-agent' ? request.attribution.agentId : undefined;
+  return [{ id: request.callId, askedAt: at, ...(agentId !== undefined ? { agentId } : {}), presentation: askPresentationFor(request) }];
+}
+
+/** An ask's own words as the detail shows them: its question, what it acts on, and the consequence. */
+interface AskWords {
+  readonly question?: string | undefined;
+  readonly subject?: { readonly lines: readonly string[] } | undefined;
+  readonly consequence?: { readonly text: string; readonly tone: string } | undefined;
+}
+
+/** The detail of a waiting ask: the question, what it acts on, and what follows. */
+export function boardAskDetail(row: BoardRow, ask: WorkBoardAsk): PanelDetail {
+  const words = ask.presentation as WorkBoardAsk['presentation'] & AskWords;
+  const lines: PanelText[] = [];
+  if (words.question) lines.push({ text: words.question, tone: 'text', bold: true });
+  for (const line of words.subject?.lines ?? []) lines.push({ text: line, tone: 'brand' });
+  if (words.consequence) lines.push({ text: words.consequence.text, tone: words.consequence.tone === 'cannot-undo' ? 'error' : 'muted' });
+  lines.push({ text: 'Enter opens the question to answer it.', tone: 'faint' });
+  return { title: row.who ? `${row.who} asks` : row.title, meta: row.meta.full, blocks: [{ kind: 'text', lines }], tail: [] };
+}
+
 /**
  * The selected row's detail on a wide screen, from the facts its node holds:
  * the model, the time, files read and changed, tokens, the cost only when it
@@ -481,6 +527,8 @@ export class WorkBoardModal implements SurfaceModal {
     }
     if (selected.section === 'calendar') { host.close(this, 'done'); this.deps.openEventsToday?.(); return; }
     if (selected.section === 'waiting' && this.deps.openAsk?.(row)) { host.close(this, 'done'); return; }
+    // An ask's card is the one on screen under the panel: closing the panel puts it in front.
+    if (row.ref.type === 'ask') { host.close(this, 'done'); return; }
     const node = this.list.node(row);
     const target = node?.kind === 'agent' ? { kind: 'agent' as const, id: node.id }
       : node?.kind === 'background-process' ? { kind: 'process' as const, id: node.id } : null;
@@ -526,8 +574,10 @@ export class WorkBoardModal implements SurfaceModal {
     const selected = this.list.selected();
     // The detail inset is drawn only on a wide screen; on 80 columns it is not built at all.
     const node = selected && screenWidth >= 90 ? this.list.node(selected.row) : undefined;
+    const ask = selected && screenWidth >= 90 ? this.list.ask(selected.row) : undefined;
     const detail = selected && screenWidth >= 90
-      ? this.deps.detail ? this.deps.detail(selected.row, node) : boardNodeDetail(selected.row, node as Partial<ProcessNode> | undefined)
+      ? ask ? boardAskDetail(selected.row, ask)
+        : this.deps.detail ? this.deps.detail(selected.row, node) : boardNodeDetail(selected.row, node as Partial<ProcessNode> | undefined)
       : null;
     return {
       level: 'list',

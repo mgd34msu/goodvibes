@@ -60,6 +60,7 @@ import { voiceCaptureRowVisible } from './core/voice-capture-status.ts';
 import { resolveWebSurfaceUrl } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
 import { worktreeStatusLines } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { emitAgentAwaitingMessage, emitAgentAwaitingTool } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
+import { waitingAskOf } from '@goodvibes-jev/engine/terminal-shell/work-board-input';
 import { resolveActiveModelDisplay } from './core/active-model-identity.ts';
 import { computePromptContentWidth } from './renderer/prompt-content-width.ts';
 import { buildConversationViewport, centerViewportContent } from './renderer/conversation-layout.ts';
@@ -273,6 +274,8 @@ async function main(prepared: PreparedShellCliRuntime) {
   // what is on offer (shell/retry-affordance.ts).
   const actionOffers = createShellActionOffers();
   const offeredFixSessions = new Set<string>();
+  // Your agents lists the ask on screen with its card's words (terminal-shell work-board-input.ts).
+  commandContext.waitingAsks = () => waitingAskOf(pendingPermission);
   commandContext.armFixSessionAttach = (fixSessionId) => {
     if (offeredFixSessions.has(fixSessionId)) return; // a repeated run result offers it once
     offeredFixSessions.add(fixSessionId);

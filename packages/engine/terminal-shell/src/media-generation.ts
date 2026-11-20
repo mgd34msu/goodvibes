@@ -1,3 +1,9 @@
+/**
+ * Media generation shared by both terminal programs: find a provider that
+ * makes the output asked for, run the job (or collect one a provider was still
+ * making), and keep what it made in the artifact store, each artifact stamped
+ * with the running program and the path that asked (`MediaOrigin`).
+ */
 import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type {
   MediaArtifact,
@@ -13,7 +19,15 @@ import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 import { assertDeliveryCurrent, type DeliveryLifetime } from '@goodvibes-jev/engine/platform/platform/utils';
 
-export interface AgentMediaGenerationInput {
+/** Who asked for the media: the running program and the path inside it, kept with every artifact. */
+export interface MediaOrigin {
+  /** The running program: `goodvibes` (the terminal app) or `goodvibes-agent`. */
+  readonly product: string;
+  /** The path that asked: `agent-media-generation` (the model's tool), `media-command` (`/media`). */
+  readonly source: string;
+}
+
+export interface MediaGenerationInput {
   readonly prompt: string;
   readonly providerId?: string | undefined;
   readonly modelId?: string | undefined;
@@ -21,7 +35,7 @@ export interface AgentMediaGenerationInput {
   readonly options?: Record<string, unknown> | undefined;
 }
 
-export interface AgentGeneratedMediaArtifact {
+export interface GeneratedMediaArtifact {
   readonly artifactId: string;
   readonly mimeType: string;
   readonly filename?: string | undefined;
@@ -29,9 +43,9 @@ export interface AgentGeneratedMediaArtifact {
   readonly sourceUri?: string | undefined;
 }
 
-export interface AgentMediaGenerationResult {
+export interface MediaGenerationRun {
   readonly providerId: string;
-  readonly artifacts: readonly AgentGeneratedMediaArtifact[];
+  readonly artifacts: readonly GeneratedMediaArtifact[];
   readonly metadata: Record<string, unknown>;
   /** The job was accepted and is still running: collect it with this task. */
   readonly pending?: MediaProviderTask | undefined;
@@ -48,7 +62,7 @@ function ensurePrompt(prompt: string): string {
   return trimmed;
 }
 
-async function findGenerationProvider(registry: MediaProviderRegistry, input: AgentMediaGenerationInput): Promise<MediaProvider> {
+async function findGenerationProvider(registry: MediaProviderRegistry, input: MediaGenerationInput): Promise<MediaProvider> {
   const providerId = readText(input.providerId);
   const output = mediaOutputKindOf(readText(input.outputMimeType));
   const provider = await registry.resolveProvider('generate', providerId, { output });
@@ -82,21 +96,22 @@ async function findGenerationProvider(registry: MediaProviderRegistry, input: Ag
 
 function filenameForArtifact(artifact: MediaArtifact, index: number): string {
   if (readText(artifact.filename)) return artifact.filename as string;
-  if (artifact.mimeType.includes('video')) return `agent-generated-${index + 1}.mp4`;
-  if (artifact.mimeType.includes('image')) return `agent-generated-${index + 1}.png`;
-  return `agent-generated-${index + 1}`;
+  if (artifact.mimeType.includes('video')) return `generated-${index + 1}.mp4`;
+  if (artifact.mimeType.includes('image')) return `generated-${index + 1}.png`;
+  return `generated-${index + 1}`;
 }
 
 function artifactCreateInput(
   providerId: string,
   artifact: MediaArtifact,
   index: number,
+  origin: MediaOrigin,
 ): ArtifactCreateInput {
   const filename = filenameForArtifact(artifact, index);
   const metadata = {
     ...artifact.metadata,
-    product: 'goodvibes-agent',
-    source: 'agent-media-generation',
+    product: origin.product,
+    source: origin.source,
     providerId,
   };
   const common = {
@@ -125,7 +140,7 @@ function artifactCreateInput(
 }
 
 /** An output the provider already streamed into the artifact store. */
-function storedArtifact(artifact: MediaArtifact): AgentGeneratedMediaArtifact | undefined {
+function storedArtifact(artifact: MediaArtifact): GeneratedMediaArtifact | undefined {
   const artifactId = readText(artifact.artifactId);
   if (!artifactId || typeof artifact.sizeBytes !== 'number') return undefined;
   return {
@@ -137,7 +152,7 @@ function storedArtifact(artifact: MediaArtifact): AgentGeneratedMediaArtifact | 
   };
 }
 
-function toGeneratedArtifact(descriptor: ArtifactDescriptor): AgentGeneratedMediaArtifact {
+function toGeneratedArtifact(descriptor: ArtifactDescriptor): GeneratedMediaArtifact {
   return {
     artifactId: descriptor.id,
     mimeType: descriptor.mimeType,
@@ -147,40 +162,42 @@ function toGeneratedArtifact(descriptor: ArtifactDescriptor): AgentGeneratedMedi
   };
 }
 
-function buildProviderRequest(input: AgentMediaGenerationInput): MediaGenerationRequest {
+function buildProviderRequest(input: MediaGenerationInput, origin: MediaOrigin): MediaGenerationRequest {
   return {
     prompt: ensurePrompt(input.prompt),
     ...(readText(input.outputMimeType) ? { outputMimeType: readText(input.outputMimeType) } : {}),
     ...(readText(input.modelId) ? { modelId: readText(input.modelId) } : {}),
     ...(input.options ? { options: input.options } : {}),
     metadata: {
-      product: 'goodvibes-agent',
-      source: 'agent-media-generation',
+      product: origin.product,
+      source: origin.source,
     },
   };
 }
 
-export async function generateAgentMedia(
+export async function generateMedia(
   registry: MediaProviderRegistry,
   artifactStore: Pick<ArtifactStore, 'create'>,
-  input: AgentMediaGenerationInput,
+  input: MediaGenerationInput,
+  origin: MediaOrigin,
   lifetime: DeliveryLifetime = {},
-): Promise<AgentMediaGenerationResult> {
+): Promise<MediaGenerationRun> {
   assertDeliveryCurrent(lifetime);
   const provider = await findGenerationProvider(registry, input);
   const generate = provider.generate;
   if (!generate) throw new Error(`Media generation provider is unavailable or not configured for generation: ${provider.id}.`);
-  return runAndStore(registry, provider, artifactStore, lifetime, (ownership) => generate.call(provider, buildProviderRequest(input), ownership));
+  return runAndStore(registry, provider, artifactStore, origin, lifetime, (ownership) => generate.call(provider, buildProviderRequest(input, origin), ownership));
 }
 
 /** Finishes a job an earlier generation answered as pending, and stores its outputs. */
-export async function collectAgentMedia(
+export async function collectMedia(
   registry: MediaProviderRegistry,
   artifactStore: Pick<ArtifactStore, 'create'>,
   task: MediaProviderTask,
+  origin: MediaOrigin,
   options: MediaCollectOptions = {},
   lifetime: DeliveryLifetime = {},
-): Promise<AgentMediaGenerationResult> {
+): Promise<MediaGenerationRun> {
   assertDeliveryCurrent(lifetime);
   const provider = registry.get(task.providerId);
   const collect = provider?.collect;
@@ -193,16 +210,17 @@ export async function collectAgentMedia(
       status: 404,
     }));
   }
-  return runAndStore(registry, provider, artifactStore, lifetime, (ownership) => collect.call(provider, task, options, ownership));
+  return runAndStore(registry, provider, artifactStore, origin, lifetime, (ownership) => collect.call(provider, task, options, ownership));
 }
 
 async function runAndStore(
   registry: MediaProviderRegistry,
   provider: MediaProvider,
   artifactStore: Pick<ArtifactStore, 'create'>,
+  origin: MediaOrigin,
   lifetime: DeliveryLifetime,
   run: (ownership: DeliveryLifetime) => Promise<MediaGenerationResult>,
-): Promise<AgentMediaGenerationResult> {
+): Promise<MediaGenerationRun> {
   const incarnation = registry.getIncarnation();
   const assertCurrent = () => {
     assertDeliveryCurrent(lifetime);
@@ -216,13 +234,13 @@ async function runAndStore(
   if (generated.pending) {
     return { providerId: generated.providerId, artifacts: [], metadata: generated.metadata, pending: generated.pending };
   }
-  const artifacts: AgentGeneratedMediaArtifact[] = [];
+  const artifacts: GeneratedMediaArtifact[] = [];
   try {
     for (const [index, artifact] of generated.artifacts.entries()) {
       assertCurrent();
       const stored = storedArtifact(artifact);
       if (stored) { artifacts.push(stored); continue; }
-      const descriptor = await artifactStore.create(artifactCreateInput(generated.providerId, artifact, index), ownership);
+      const descriptor = await artifactStore.create(artifactCreateInput(generated.providerId, artifact, index, origin), ownership);
       artifacts.push(toGeneratedArtifact(descriptor));
       assertCurrent();
     }
@@ -242,47 +260,4 @@ async function runAndStore(
     artifacts,
     metadata: generated.metadata,
   };
-}
-
-/** The `agent_media_generate` call that collects a pending job. */
-export function mediaCollectToolCall(task: MediaProviderTask): string {
-  const resume = task.resume && Object.keys(task.resume).length > 0 ? { resume: task.resume } : {};
-  return `agent_media_generate ${JSON.stringify({ providerId: task.providerId, taskId: task.taskId, ...resume })}`;
-}
-
-/** The `/media` command that collects a pending job. */
-export function mediaCollectCommand(task: MediaProviderTask): string {
-  const resume = Object.entries(task.resume ?? {}).map(([key, value]) => ` ${key}=${value}`).join('');
-  return `/media collect ${task.providerId} ${task.taskId}${resume}`;
-}
-
-/**
- * The result as text. A pending job names the step that collects it on the
- * surface printing it: the tool call by default, the slash command for `/media`.
- */
-export function formatAgentMediaGenerationResult(
-  result: AgentMediaGenerationResult,
-  collectStep: (task: MediaProviderTask) => string = mediaCollectToolCall,
-): string {
-  if (result.pending) {
-    return [
-      'Agent media still generating',
-      `  provider ${result.pending.providerId}`,
-      `  task ${result.pending.taskId}`,
-      '  the provider accepted (and charged for) the job; it had not finished when the wait ended',
-      `  collect it later with ${collectStep(result.pending)}`,
-    ].join('\n');
-  }
-  return [
-    'Agent media generated',
-    `  provider ${result.providerId}`,
-    `  artifacts ${result.artifacts.length}`,
-    ...result.artifacts.map((artifact, index) => [
-      `  ${index + 1}. ${artifact.artifactId}`,
-      `     type ${artifact.mimeType}`,
-      `     size ${artifact.sizeBytes} bytes`,
-      ...(artifact.filename ? [`     filename ${artifact.filename}`] : []),
-      ...(artifact.sourceUri ? [`     source ${artifact.sourceUri}`] : []),
-    ].join('\n')),
-  ].join('\n');
 }

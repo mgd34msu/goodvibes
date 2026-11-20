@@ -10,11 +10,13 @@ import {
   atomicWriteFileSync,
   describePendingProjectService,
   pendingProjectServiceLines,
+  projectServiceRef,
   type ServiceRegistry,
 } from '@goodvibes-jev/engine/platform/platform/config';
+import { compareTarget } from '@goodvibes-jev/engine/platform/platform/utils/target-ref';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { commandRefusal } from './command-confirmation.js';
+import { commandRefusal, describeTargetChanges } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
@@ -36,6 +38,8 @@ function host(): ServicesCommandServices<ServicesCommandContext> {
   if (!installed) throw commandRefusal('Services are not available in this session.');
   return installed;
 }
+
+type PendingProjectService = ReturnType<ServiceRegistry['pendingProjectServices']>[number];
 
 const SERVICE_AUTH_TYPES = new Set(['bearer', 'basic', 'api-key', 'oauth']);
 const TERMINAL_ONLY = 'Services are read from the services files of the terminal app on this machine.';
@@ -195,24 +199,42 @@ export const SERVICES_COMMAND: CommandDescription<ServicesCommandContext> = {
     {
       id: 'trust', label: 'Use a service this project defines', word: 'trust',
       inputs: [listInput({ id: 'service', label: 'Service', help: 'Services from this project\'s services file that wait for you', list: PENDING })],
-      sentence: '{service} from this project\'s services file is used as it is now, sending the stored key it names to the address it names, {lasts}; if the project changes that entry it waits for you again.', done: '',
-      touches: 'credential', lasts: 'kept', risk: 'loosens-a-protection',
+      sentence: '{service} from this project\'s services file is used, sending the stored key it names to the address it names, {lasts}; this loosens a protection, so you are asked with exactly what it sends and where, and only that entry is approved.', done: '',
+      // It asks its own question, with the entry's facts, and approves exactly that entry (by digest).
+      touches: 'credential', lasts: 'kept', risk: 'none',
       ownerOnly: { reason: 'whoever wrote the repository chose which of your stored keys it sends and where', instead: 'Ask the owner to run /services trust <service>.' },
       operator: { terminalOnly: TERMINAL_ONLY },
       example: { service: 'acme-api' },
       async run(values, ctx) {
         const registry = host().requireServiceRegistry(ctx);
         const name = values.service!;
-        const pending = registry.pendingProjectServices().find((service) => service.name === name);
-        if (!pending) throw commandRefusal(`No service from this project's services file named ${name} waits for you; nothing was confirmed.`, pendingProjectServiceLines(registry.pendingProjectServices()).join('\n') || '/services list shows your services.');
+        const read = () => registry.pendingProjectServices().find((service) => service.name === name);
+        const shownFirst = read();
+        if (!shownFirst) throw commandRefusal(`No service from this project's services file named ${name} waits for you; nothing was confirmed.`, pendingProjectServiceLines(registry.pendingProjectServices()).join('\n') || '/services list shows your services.');
+        const detail = (pending: PendingProjectService) => `${describePendingProjectService(pending)}.\nA project's services file is part of the checkout, so whoever wrote the repository chose which of your stored keys ${name} sends and to which host. Once confirmed, ${name} is used as shown here; if the repository changes its keys, header or host it waits for confirmation again. This loosens a protection.`;
+        const confirm = ctx.confirm;
+        if (!confirm || ctx.invokedByModel === true) {
+          throw commandRefusal(`${name} was not confirmed: it is confirmed only where you can be asked with what it sends.\n${detail(shownFirst)}`, 'Type /services trust in the terminal app.', 'CONFIRMATION_REQUIRED');
+        }
+        const ask = (body: string) => confirm({ title: `Use the service ${name} from this project's services file?`, body, confirmLabel: 'Use it', cancelLabel: 'Back', tone: 'danger' });
+        if (!(await ask(detail(shownFirst)))) throw commandRefusal('Not confirmed: nothing was changed.', undefined, 'CANCELLED');
+        // What was shown is what is approved: a change since then is shown and asked about again (once).
+        let shown = shownFirst;
+        const now = read();
+        const changes = compareTarget(projectServiceRef(shown), now ? projectServiceRef(now) : null);
+        if (changes.length > 0) {
+          if (!now) throw commandRefusal(`${describeTargetChanges(changes)}\nNothing was confirmed.`, undefined, 'TARGET_CHANGED');
+          if (!(await ask(`${describeTargetChanges(changes)}\n\n${detail(now)}`))) throw commandRefusal('Not confirmed: nothing was changed.', undefined, 'CANCELLED');
+          shown = now;
+        }
         let result;
         try {
-          // The entry as it is now is the one confirmed; a later change waits again.
-          result = registry.confirmProjectService(name, pending.digest);
+          result = registry.confirmProjectService(name, shown.digest);
         } catch (error) {
           throw commandRefusal(`Nothing was confirmed: the confirmation could not be saved (${summarizeError(error)}).`);
         }
-        if (!result.ok) throw commandRefusal(`Nothing was confirmed: ${result.reason}.`);
+        // A second change after the second question is refused by the digest check: nothing unshown is approved.
+        if (!result.ok) throw commandRefusal(`Nothing was confirmed: ${result.reason}.`, `/services trust ${name} asks again.`, 'TARGET_CHANGED');
         return `${name} from this project is used from now on: ${describePendingProjectService(result.service)}.`;
       },
     },

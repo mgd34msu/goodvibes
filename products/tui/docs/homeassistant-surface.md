@@ -23,7 +23,7 @@ If auto-start is set to `No`, the setup values are saved but the surface stays i
 
 Home Assistant values are also editable after onboarding:
 
-- `/settings` or `/settings open surfaces.homeassistant.instanceUrl` opens the fullscreen configuration workspace with the Home Assistant settings available under `Surfaces`.
+- `/settings open surfaces.homeassistant.instanceUrl` opens the fullscreen configuration workspace with the Home Assistant settings available under `Surfaces`.
 - Edit `surfaces.homeassistant.instanceUrl` inline from the `Surfaces` category to update the instance URL.
 - Edit `surfaces.homeassistant.accessToken` from the same workspace to store raw token input in the GoodVibes user secret store and write a `goodvibes://secrets/goodvibes/...` reference to config.
 - Edit `surfaces.homeassistant.webhookSecret` from the same workspace to use the same secret-backed persistence path.

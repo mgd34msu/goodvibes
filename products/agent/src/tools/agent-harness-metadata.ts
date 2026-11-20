@@ -35,19 +35,12 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
       boundary: '/triggers list reads the actual surface supervisor and its triggers without promoting ownership.',
     };
   }
-  if (root === 'work-import') {
-    return {
-      requiresConfirmation: false,
-      confirmation: 'Read operations use existing host read permissions. Explicit submission and recovery use current import authority and a fresh host-owned Jev decision; caller confirmation flags grant no authority.',
-      preferredModelTool: `${agentHarnessModes('run_command')} commandName:"work-import"`,
-      boundary: '/work-import preview|status|submit <project-id>; reconsider|recover|cancel|restart <project-id> <request-id>. Submission captures complete persisted legacy sources and saves the exact command before dispatch. Reconsideration asks Jev again; recovery retains the original request and reconciles host receipts. Only a selected definitive rejection or undispatched cancellation permits restart. Imports preserve historical claims without granting execution or verification. Host, principal, workspace and live capability checks remain mandatory.',
-    };
-  }
   if (root === 'work') {
     return {
-      confirmation,
+      requiresConfirmation: false,
+      confirmation: 'Reads use the selected host\'s existing read permissions. Submissions, intake steps and imports use current authority and, for an import, a fresh host-owned Jev decision; caller confirmation flags grant no authority.',
       preferredModelTool: `${agentHarnessModes('run_command')} commandName:"work"`,
-      boundary: '/work [daemon-project-id] opens the native read-only work ledger in the visible Agent workspace. Project discovery, snapshots, history, and live updates use the selected authenticated host and its existing read permissions. Explicit project selection is view-local; this command does not create or mutate work, change credentials, grant trust, or broaden scopes. Host, credential, workspace changes and access revocation invalidate the view.',
+      boundary: '/work open [project] opens the native read-only work ledger in the visible Agent workspace; start|status|cancel|resume <work> act on one attempt; submit-file and the submission actions submit owner source; the intake actions recover captured input; import-preview|import-status|import <project> and import-reconsider|import-recover|import-cancel|import-restart <project> [request] import old planning records (submission captures complete persisted sources and saves the exact command before dispatch; recovery keeps the original request; imports grant no execution or verification). Host, principal, workspace and live capability checks remain mandatory.',
     };
   }
   if (root === 'agent' || root === 'agent-workspace' || root === 'workspace') {

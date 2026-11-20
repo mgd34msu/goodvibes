@@ -218,7 +218,7 @@ These slash commands are the fastest way to get oriented once the TUI is running
 | Command | What it opens |
 | --- | --- |
 | `/model` | The fullscreen provider/model workspace for main chat, helper, tool LLM, and TTS LLM routing |
-| `/settings` or `/settings` | The fullscreen configuration workspace for inspecting and editing runtime settings |
+| `/settings` | The fullscreen configuration workspace for inspecting and editing runtime settings |
 | `/knowledge status` | The knowledge runtime's current posture |
 | `/plugin browse` and `/marketplace` | The plugin ecosystem and the curated marketplace |
 | `/remote` | Remote peers and node-host runners, if you use them |

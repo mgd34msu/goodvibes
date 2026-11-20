@@ -90,7 +90,10 @@ function uidOf(raw: string | undefined): number {
 /** Register `/mail` with how this app reads and sends mail. */
 export function registerMailCommand<Ctx extends CommandActionContext>(registry: Pick<TerminalCommandRegistry<Ctx>, 'register'>, host: MailHost<Ctx>): void {
   hostOf = host as unknown as MailHost<unknown>;
-  registry.register(defineCommand<Ctx>({
+  registry.register({
+    // --yes answers the question only right after the action word: the same word inside a message is text.
+    leadingFlagsOnly: true,
+    ...defineCommand<Ctx>({
     name: 'mail',
     title: 'Mail',
     summary: 'Read your inbox, write a draft and send mail, from the mailbox set up under surfaces.email',
@@ -175,5 +178,5 @@ export function registerMailCommand<Ctx extends CommandActionContext>(registry: 
         },
       },
     ],
-  }));
+  }) });
 }

@@ -433,7 +433,7 @@ GoodVibes schedule preview for Agent routine
     cli /routines promote "weekly-review" --every "7d" --name "Agent routine: Weekly-Review" --yes
 ```
 
-Inside the Agent, `/routines start <id>` prints the routine's steps into the main conversation.
+Inside the Agent, `/routines start <routine>` sends the routine's steps as your next message in the main conversation.
 
 #### `goodvibes-agent memory` (alias `memories`)
 
@@ -492,7 +492,7 @@ Agent Knowledge is the Agent's own knowledge store on the connected host, under 
 
 Options that would target another space (`--space`, `--knowledge-space`, `--knowledge-space-id`, `--include-all-spaces`) are refused.
 Without a token: `Agent Knowledge error auth_required (authorization required)`, the route tried and the repair step; exit `1`.
-Inside the Agent, `/knowledge` adds `queue`, `review-issue <issue-id> <action>`, `packet <task>`, `explain <task>` and `consolidate light|deep`.
+Inside the Agent, `/knowledge` is the terminal app's command on Agent Knowledge (a question naming another knowledge space is refused), plus `ingest-file <file>`, `ingest-artifact <artifact>`, `import-browser-history [--browsers <list>] [--sources history|bookmark] [--limit <n>] [--since-days <n>]` (the owner's only), `ingest-connector <connector> [--input ...|--path ...|--content ...]`, `map [words]`, `connectors`, `connector <connector>` and `connector-doctor <connector>`; bare, it opens the workspace's Knowledge section from `open`.
 
 #### `goodvibes-agent delegate` (alias `build`)
 
@@ -503,8 +503,8 @@ goodvibes-agent delegate "fix the failing tests in this repo"
 goodvibes-agent delegate --review "implement the settings screen and review it"
 ```
 
-Inside the Agent: `/delegate [--review] [--reason <why>] [--success <evidence>] [--workspace <hint>] [--priority <priority>] [--] <task>` and `/delegate status [session-id]`.
-Each hand-off is recorded in the Agent home; `/delegate status` lists them (`No delegations recorded yet. Hand work off with /delegate <task>.`), and `/delegate status <session-id>` shows the session's input state and latest answer.
+Inside the Agent: `/agents hand-off [--review] [--reason <why>] [--success <evidence>] [--workspace <hint>] [--priority <priority>] <the work...>` and `/agents handed-off [<session>]`.
+Each hand-off is recorded in the Agent home; `/agents handed-off` lists them (`No work handed off yet. Hand some on: /agents hand-off <the work>.`), and `/agents handed-off <session>` shows the session's input state and latest answer.
 A hand-off whose task could not be delivered removes the empty session it created.
 
 #### `goodvibes-agent owner-profile` (aliases `owner-profiles`, `about-me`)
@@ -523,7 +523,7 @@ The owner profile is one Markdown file the daemon keeps: name, contact, location
 | `owner-profile status` | Load state, path, counts and fields that did not parse; never values. |
 
 A prose line is named by its section and exact text, never by position.
-Inside the Agent the same is `/owner-profile` (alias `/about-me`); the terminal app's equivalent is `/profile`.
+Inside the Agent the same is `/about-me`, the same command as the terminal app's.
 
 #### `goodvibes-agent ci`, `principals`, `channel-profiles`
 
@@ -607,7 +607,7 @@ With no workspace at the default place: `No OpenClaw workspace found at the defa
 ## The Agent workspace
 
 The Agent workspace is a full-screen view of categories, each a list of actions: forms, pickers, read-only reports and confirmed changes.
-It opens with `/agent [category]` (aliases `/home`, `/operator`) or `Ctrl+G`. `/setup` opens one topic's rows of it at a time (below).
+It opens with `/agent [section]` or `Ctrl+G`. `/setup` opens one topic's rows of it at a time (below).
 `Ctrl+]` and `Ctrl+[` move between categories; `/` searches actions by name, category, command or detail; `Ctrl+X` or `Esc` closes it.
 Typing a letter on Home closes the workspace and puts the letter in the composer.
 
@@ -643,11 +643,11 @@ The workspace has these 26 categories, in this order, in eight groups; there are
 | FINISH | `finish` | Finish | 1 | Apply & close: writes the onboarding completion marker, so later launches start in the conversation. |
 
 Until setup is applied, the workspace opened for setup (`goodvibes-agent setup`) shows only the ONBOARDING group, and reveals its categories as setup reaches them; `/agent` shows all 26. A start whose model is not ready opens first run, not the workspace (see the install part of this file).
-`/agent <category>` opens a category by its id or label.
+`/agent <section>` opens a section (category) by its id; the guided form lists them by label.
 
-`/notes` (alias `/scratchpad`) opens Notes. `/agent-profile` (aliases `/runtime-profile`, `/agent-profiles`) manages profiles from inside the Agent with the same verbs as `goodvibes-agent profiles` (`list`, `show`, `default`, `use`, `templates`, `guide`, `template show|export|import|from-discovered`, `create`, `create-from-discovered`, `delete`).
-`/agents` and `Ctrl+O` open Your agents, the same panel as the terminal app's (see "Views" there): waiting rows first, one line per running agent, the agents finished this session, `Scheduled`, and `Background services  N healthy ›` (`b` opens it; an unhealthy service is listed by itself). `Enter` opens an agent full screen, where the composer steers it (a background process opens in the process monitor when it cannot open full screen), `s` stops it (asks first), `n` hosts a coding agent found on `PATH` on the connected host. It reads this process's agents and the connected host's. Notices that used to collect in the Activity view's recent list are in the notices (`Ctrl+N`, `/notifications`), as in the terminal app.
-`/brief` (alias `/briefing`) prints an operator briefing with next actions: native work totals, approvals, automation, schedules and capacity.
+`/notes` (alias `/scratchpad`) opens Notes. `/agent-home` manages separate Agent homes from inside the Agent (`goodvibes-agent profiles` from the shell): `list` (the report), `show <home>`, `next`, `use <home>`, `use-base`, `create <name> [--starter <starter>]`, `create-learned <name>`, `delete <home>` (asks first), and the starters `starters`, `starter <starter>`, `guide`, `export-starter <starter> <file> [--include-vibe] [--overwrite]`, `import-starter <file> [--replace]` and `starter-learned <id>`.
+`/agents open` and `Ctrl+O` open Your agents, the same panel as the terminal app's (see "Views" there): waiting rows first, one line per running agent, the agents finished this session, `Scheduled`, and `Background services  N healthy ›` (`b` opens it; an unhealthy service is listed by itself). `Enter` opens an agent full screen, where the composer steers it (a background process opens in the process monitor when it cannot open full screen), `s` stops it (asks first), `n` hosts a coding agent found on `PATH` on the connected host. It reads this process's agents and the connected host's. Notices that used to collect in the Activity view's recent list are in the notices (`Ctrl+N`, `/notifications`), as in the terminal app.
+`/brief` (one action) prints a briefing with next actions: the model in use, what is ready, the work plan and schedules.
 The Start category's "Import GoodVibes settings" reads the terminal app's settings once, shows the plan (counts per family, every permission and provider change, sign-ins by name), and on `yes` writes it; previous values are saved to `~/.goodvibes/agent/settings-import-undo.json`.
 
 ## The Agent's slash commands
@@ -658,22 +658,21 @@ The commands listed in the table under "Commands that exist in both but behave d
 
 ### Work
 
-`/work [daemon-project-id] | start|status|cancel|resume <work-id> | submit-file <JSON-path> | submission-status | submission-retry | submission-discard | intake-status | intake-retry | intake-resume | intake-cancel` works with native work on the connected host.
-Bare `/work` (optionally naming a project) shows native work, intent, attention, evidence and history, read only.
-`/work submit-file <JSON-path>` submits original owner source from a file; `submission-status`, `submission-retry` and `submission-discard` follow up on it.
-`/work intake-status|intake-retry|intake-resume|intake-cancel` inspect or move forward a captured conversation input (the same as the `run --intake-*` flags). A message whose intake did not answer (it may have been recorded) is not counted as sent and is not sent again on its own: the Agent says `Your message may have been sent`, keeps the text in the composer (a message from the phone or a plan is kept aside instead of being retried every few seconds), and `/work intake-status` tells whether it arrived before it is sent again.
-`/work start|status|cancel|resume <work-id>` acts on one native attempt.
+`/work` is the terminal app's command (see "Native work and work requests" there) on the connected host; `open [<project>]` opens the Work section, which shows native work, intent, attention, evidence and history, read only.
+`/work submit-file <JSON-file>` submits original owner source from a file; `submission`, `submission-retry` and `submission-discard` follow up on it.
+`/work intake`, `intake-retry`, `intake-resume` and `intake-cancel` inspect or move forward a captured conversation input (the same as the `run --intake-*` flags). A message whose intake did not answer (it may have been recorded) is not counted as sent and is not sent again on its own: the Agent says `Your message may have been sent`, keeps the text in the composer (a message from the phone or a plan is kept aside instead of being retried every few seconds), and `/work intake` tells whether it arrived before it is sent again.
+`/work start|status|cancel|resume <work>` acts on one native attempt. `request`, the planner and past plans are the terminal app's and are refused here.
 
 `/todo` is the project's to-do list, the same command and the same list as in the terminal app (the model's `agent_work_plan` tool keeps the same list); it records items and their state and runs nothing.
 Its actions are `list`, `markdown`, `export`, `add <title> [--owner ...] [--notes ...] [--source ...]`, `edit <item> <title>`, `mark <item> <state>`, `next <item>`, `remove <item>` and `clear-done` (the last two ask first); `open` (the panel) is the terminal app's only and is refused here.
 Changes are the owner's own: a model running a `/todo` change is refused. Items are not native work: submit native work with `/work submit-file <JSON-path>`.
 
-`/work-import preview|status|submit <project-id> | reconsider|recover|cancel|restart <project-id> [request-id]` imports legacy planning records into the native work ledger, with safe retry of a lost request.
+`/work import-preview <project>`, `import <project>`, `import-status <project>`, `import-reconsider`, `import-recover`, `import-cancel` and `import-restart <project> [request]` import old planning records into the native work ledger, with safe retry of a lost request.
 
 ### Personas, skills, routines, memory and personality
 
-`/personas`, `/my-skills` and `/routines` take the same verbs as the matching `goodvibes-agent` commands above, plus `/routines start <id>`, `/my-skills import-standard` and `/my-skills export-standard`; `/my-skills` names the bundle verbs `bundle-create`, `bundle-show` and so on, and its options are named (`create --name ... --description ... <steps>`). `/memory` is the same command as the terminal app's `/memory`.
-`/vibe status` lists the VIBE.md candidates and which loaded; `/vibe init` creates one (asks first); `/vibe show` prints the applied text; `/vibe import-persona` imports it as a persona.
+`/personas` (`list`, `active`, `show`, `search`, `create`, `update`, `use`, `stop-using`, `review`, `stale`, `delete`, `discover`, `import`, and the VIBE.md actions), `/my-skills` and `/routines` (`list [--only enabled|attention]`, `show`, `search`, `create`, `update`, `enable`, `disable`, `start`, `review`, `stale`, `delete`, `discover`, `import`, `promote`, `receipts`, `receipt`, `reconcile`) take the actions of the matching `goodvibes-agent` commands above, plus `/routines start <routine>`, `/my-skills import-standard` and `/my-skills export-standard`; `/my-skills` names the bundle verbs `bundle-create`, `bundle-show` and so on, and its options are named (`create --name ... --description ... <steps>`). `/memory` is the same command as the terminal app's `/memory`.
+`/personas vibe` lists the VIBE.md candidates and which loaded; `/personas vibe-create` writes a starter (asks first before replacing one); `/personas vibe-show` prints the text; `/personas vibe-import` makes it a persona.
 
 ### Personal operations
 
@@ -706,7 +705,7 @@ Changes are the owner's own: a model running a `/todo` change is refused. Items 
 
 `/calendar add --title "Dentist" --start 2026-12-03T15:00` adds a local event.
 
-`/owner-profile` reads and corrects the owner profile (see `goodvibes-agent owner-profile`).
+`/about-me` reads and corrects the owner profile, the same command as the terminal app's (see `goodvibes-agent owner-profile`).
 `/payments address` writes the address to the connected host's settings; the actions of `/payments` are the same as the terminal app's.
 
 ### Channels and delivery
@@ -739,9 +738,8 @@ Agent channel delivery sent
 
 ### Automation and host actions
 
-`/automation job <run|pause|resume> <job-id> --yes | run <cancel|retry> <run-id> --yes` (alias `/auto`) runs one confirmed automation action on the connected host.
-`/schedule` takes the same actions and lines as in the terminal app, and keeps each schedule on the connected host: `/schedule add --at 2026-12-01T09:00 Renew the passport` makes one; `/schedule change <schedule> --cron "0 8 * * 1"` changes one (it also takes `--every`, `--at`, `--tz`, `--stagger`, `--name`, new words for what it does, or `--task` with `--success-criteria`; the change is bound to the schedule as the host has it when it is read); `/schedule pause`, `resume`, `run` and `remove` act on one.
-`/routines promote <routine-id> --cron <expr> --yes` promotes a routine; `/routines receipts`, `/routines receipt <id>` and `/routines reconcile` read promotion receipts.
+`/schedule` takes the same actions and lines as in the terminal app, and keeps each schedule on the connected host: `/schedule add --at 2026-12-01T09:00 Renew the passport` makes one; `/schedule change <schedule> --cron "0 8 * * 1"` changes one (it also takes `--every`, `--at`, `--tz`, `--stagger`, `--name`, new words for what it does, or `--task` with `--success-criteria`; the change is bound to the schedule as the host has it when it is read); `/schedule pause`, `resume`, `run` and `remove` act on one; `stop-run <run>` (asks first) and `retry-run <run>` act on one of its runs.
+`/routines promote <routine> --how cron --when "0 9 * * 1-5"` promotes a routine; `/routines receipts`, `/routines receipt <receipt>` and `/routines reconcile` read promotion receipts.
 
 ### Media and devices
 
@@ -750,7 +748,7 @@ Agent channel delivery sent
 
 ### Support
 
-`/bundle` (Agent only) is described: `export [<file>] [--replace]` ("Save a support bundle": settings and setup with every secret taken out; an existing file is kept unless `--replace`, which asks first), `inspect <file>` (what it holds and which settings loading it would change) and `import <file> [--include-security]` ("Load settings from a support bundle"; a model cannot run it, and loading security settings loosens a protection and asks first).
+`/bundle` (Agent only) is described: `preview` ("See what a support bundle would hold", the report a bare `/bundle` runs where no list can be shown: it builds one in a temporary place, shows it and keeps nothing), `export [<file>] [--replace]` ("Save a support bundle": settings and setup with every secret taken out; an existing file is kept unless `--replace`, which asks first), `inspect <file>` (what it holds and which settings loading it would change) and `import <file> [--include-security]` ("Load settings from a support bundle"; a model cannot run it, and loading security settings loosens a protection and asks first).
 `/health compat [--json]` is `goodvibes-agent compat`.
 
 ## The model's tools in the Agent

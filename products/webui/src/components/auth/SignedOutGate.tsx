@@ -352,8 +352,8 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
                   )}
                   {relayStored && (
                     <div className="banner" role="status">
-                      Relay saved. This device uses it by itself when it can&rsquo;t reach your
-                      computer directly.
+                      Relay ready. This page uses it by itself when it can&rsquo;t reach your
+                      computer directly, until you reload it.
                     </div>
                   )}
                   {relayPasteError != null && (

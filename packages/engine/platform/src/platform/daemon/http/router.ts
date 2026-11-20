@@ -101,7 +101,7 @@ import { assertDaemonRouteManifest } from './route-manifest.js';
 import { IdempotentReplayStore, replayKeyedRequest, takesIdempotencyKey } from '../../control-plane/idempotent-replay.js';
 import { deriveRequestWithBody } from '../derived-request.js';
 import { configuredBrowserOrigins, refuseCookieWriteFromOtherOrigin } from './browser-origin.js';
-import { handleBrowserSession } from './browser-session.js';
+import { handleBrowserNodeSession, handleBrowserSession } from './browser-session.js';
 import { isSurfaceIngressEnabled } from '../surface-policy.js';
 import { dispatchCloudflareRoutes } from './cloudflare-routes.js';
 import { dispatchMcpRoutes } from './mcp-routes.js';
@@ -532,6 +532,14 @@ export class DaemonHttpRouter {
       });
     }
 
+    // The web UI's phone node: its peer token goes into an HttpOnly cookie of its own, scoped to the peer routes.
+    if ((url.pathname === '/api/browser-session/node' || url.pathname === '/api/browser-session/node/end') && req.method === 'POST') {
+      return handleBrowserNodeSession(req, {
+        requireRemotePeer: (request) => this.context.requireRemotePeer(request),
+        allowedBrowserOrigins: () => configuredBrowserOrigins(this.context.configManager),
+        trustProxy: Boolean(this.context.configManager.get('controlPlane.trustProxy')),
+      });
+    }
     // The peer endpoints, matched by the method and path the published peer contract states.
     const peerRoute = matchPeerRoute(req.method, url.pathname);
     if (peerRoute?.id === 'pair.request') {

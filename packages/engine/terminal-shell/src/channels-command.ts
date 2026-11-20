@@ -467,7 +467,10 @@ export function registerChannelsCommand<Ctx extends CommandActionContext>(regist
       async run(_values, ctx) { await h.telegramCursor(ctx); return undefined; },
     }),
   ];
-  registry.register(defineCommand<Ctx>({
+  registry.register({
+    // --yes answers the question only right after the action word: the same word inside a message is text.
+    leadingFlagsOnly: true,
+    ...defineCommand<Ctx>({
     name: 'channels',
     title: 'Channels',
     summary: 'Your channels (Slack, Telegram, ntfy, ...): their state and setup, who may reach the assistant, and what each one\'s sessions get',
@@ -482,5 +485,5 @@ export function registerChannelsCommand<Ctx extends CommandActionContext>(regist
       { label: 'Routes and delivery…', actions: ['overview', 'routes', 'delivery', 'open'] },
     ],
     actions,
-  }));
+  }) });
 }

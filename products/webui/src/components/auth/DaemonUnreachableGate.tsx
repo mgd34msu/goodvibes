@@ -1,10 +1,10 @@
 /**
  * DaemonUnreachableGate, the honest "can't reach the daemon" state.
  *
- * When auth.current fails with a NETWORK error (the daemon is down or unreachable) and a
- * token is still stored, the app must NOT fall through to the sign-in front door: that
+ * When auth.current fails with a NETWORK error (the daemon is down or unreachable) and the
+ * page still holds a sign-in, the app must NOT fall through to the sign-in front door: that
  * wrongly implies the operator is signed out and invites them to re-paste a token that
- * was never the problem. Instead we keep the stored token untouched and show this plain
+ * was never the problem. Instead we keep the sign-in untouched and show this plain
  * unreachable state. The auth query keeps re-probing while unreachable (App wires a
  * conditional refetchInterval), so the shell reveals itself automatically the moment the
  * daemon answers again, no user action required. A manual "Retry now" is offered for
@@ -59,8 +59,8 @@ export function DaemonUnreachableGate({ detail, retrying, onRetry, serverFault }
             <li>The daemon may have stopped, restarted, or is still booting.</li>
             <li>Check that the daemon process is running and bound to the expected port.</li>
             <li>
-              Nothing here signs you out: your stored token is kept and reused
-              automatically once the daemon responds.
+              Nothing here signs you out: this browser keeps your sign-in and uses it
+              again automatically once the daemon responds.
             </li>
           </ul>
         </Disclosure>

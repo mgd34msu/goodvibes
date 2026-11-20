@@ -127,7 +127,7 @@ export function formatRoutineScheduleReceipts(snapshot: RoutineScheduleReceiptSn
       'Agent routine schedule receipts',
       `  store ${snapshot.path}`,
       '  No routine schedule promotions have been recorded yet.',
-      '  Create one with /routines promote <routine-id> --cron <expr> --yes.',
+      '  Create one with /routines promote <routine> --how cron --when <pattern>.',
     ].join('\n');
   }
   return [
@@ -190,7 +190,7 @@ export function formatRoutineScheduleCorrelation(result: RoutineScheduleCorrelat
       `  route: ${result.kind} ${result.route}`,
       `  live schedules: ${result.scheduleCount}`,
       '  No local routine promotion receipts exist yet.',
-      '  Create one with /routines promote <routine-id> --cron <expr> --yes.',
+      '  Create one with /routines promote <routine> --how cron --when <pattern>.',
     ].join('\n');
   }
   const matched = result.correlations.filter((entry) => entry.liveStatus === 'matched').length;

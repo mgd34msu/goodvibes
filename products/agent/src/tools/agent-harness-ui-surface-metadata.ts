@@ -446,7 +446,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     label: 'Profile Picker',
     kind: 'picker',
     summary: 'Agent profile picker for local isolated profile selection.',
-    command: '/agent-profile',
+    command: '/agent-home',
     preferredModelRoute: 'Use workspace profile actions or profile slash-command mirrors for concrete model operation.',
     available: (context) => typeof context.openProfilePicker === 'function',
     open: (context) => openSimpleContextSurface(context, 'profile-picker', 'openProfilePicker'),

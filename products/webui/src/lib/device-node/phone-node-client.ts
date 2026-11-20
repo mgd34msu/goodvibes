@@ -13,7 +13,11 @@
  * platform action and an honest activity log of everything it did, so the
  * person holding the phone can see what happened on it.
  *
- * The peer token is persisted so a reload does not re-pair, and it is validated
+ * The peer token is never written to browser storage. On the direct route the
+ * daemon binds it to an HttpOnly cookie of its own (`goodvibes_node`, sent only to
+ * the peer routes; POST /api/browser-session/node), and only the node's id and
+ * label are kept so a reload does not re-pair. On the relay route it is held in
+ * memory for the life of the page, and a reload pairs again. It is validated
  * by USE, not by presence: a token the daemon rejects (revoked, rotated, or
  * from a daemon that has forgotten this node) is discarded on the spot and the
  * node returns to unpaired rather than retrying forever against a credential
@@ -41,14 +45,15 @@ import {
   type CapabilityRunResult,
 } from './capability-bindings';
 
-/** Where the peer token is kept between reloads. */
-export const PHONE_NODE_TOKEN_KEY = 'goodvibes.webui.phoneNode';
+/** Where the node's id and label are kept between reloads (never its token). */
+export const PHONE_NODE_IDENTITY_KEY = 'goodvibes.webui.phoneNode';
 
 export type PhoneNodeStatus = 'unpaired' | 'pairing' | 'awaiting-approval' | 'connected' | 'error';
 
 export interface PhoneNodeIdentity {
   readonly nodeId: string;
-  readonly token: string;
+  /** The peer token, only while held in memory (relay route); absent when the HttpOnly node cookie carries it. */
+  readonly token?: string | undefined;
   readonly label: string;
 }
 
@@ -115,28 +120,28 @@ export function browserPhoneNodeStorage(): PhoneNodeStorage {
   return {
     read(): PhoneNodeIdentity | null {
       try {
-        const raw = window.localStorage.getItem(PHONE_NODE_TOKEN_KEY);
+        const raw = window.localStorage.getItem(PHONE_NODE_IDENTITY_KEY);
         if (!raw) return null;
         const parsed = JSON.parse(raw) as Partial<PhoneNodeIdentity>;
         // Validated by shape, not by presence, a half-written entry is
         // discarded rather than used to build a request that cannot succeed.
         if (typeof parsed.nodeId !== 'string' || !parsed.nodeId) return null;
-        if (typeof parsed.token !== 'string' || !parsed.token) return null;
-        return { nodeId: parsed.nodeId, token: parsed.token, label: typeof parsed.label === 'string' ? parsed.label : 'Phone' };
+        return { nodeId: parsed.nodeId, label: typeof parsed.label === 'string' ? parsed.label : 'Phone' };
       } catch {
         return null;
       }
     },
     write(identity: PhoneNodeIdentity): void {
       try {
-        window.localStorage.setItem(PHONE_NODE_TOKEN_KEY, JSON.stringify(identity));
+        // The id and label only: the token stays in the HttpOnly cookie (or in memory).
+        window.localStorage.setItem(PHONE_NODE_IDENTITY_KEY, JSON.stringify({ nodeId: identity.nodeId, label: identity.label }));
       } catch {
         // A browser refusing storage means re-pairing after a reload, not a crash.
       }
     },
     clear(): void {
       try {
-        window.localStorage.removeItem(PHONE_NODE_TOKEN_KEY);
+        window.localStorage.removeItem(PHONE_NODE_IDENTITY_KEY);
         window.localStorage.removeItem(PHONE_NODE_EXECUTED_KEY);
       } catch {
         // Nothing to do; the identity is dropped in memory regardless.
@@ -182,6 +187,11 @@ export interface PhoneNodeClientOptions {
    * non-standard extras (`preconnect`).
    */
   readonly fetchImpl?: ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) | undefined;
+  /**
+   * True when a token the pairing returns is to be held in memory for this page (the
+   * relay route) instead of bound to the daemon's HttpOnly node cookie. Absent: bound.
+   */
+  readonly holdTokenInMemory?: (() => boolean) | undefined;
   readonly bindings?: BrowserBindings | undefined;
   /** Runs one capability; `fence` ends when the node stops or unpairs, and the camera and screen paths race it. */
   readonly runCapability?: ((capabilityId: string, input: Record<string, unknown>, fence: Fence) => Promise<CapabilityRunResult>) | undefined;
@@ -299,6 +309,8 @@ export class PhoneNodeClient {
     try { response = await this.fetchImpl(this.url(path), {
       signal: lifetime.signal,
       method: 'POST',
+      // A paired node on the direct route is carried by its HttpOnly cookie.
+      credentials: 'include',
       headers: {
         'content-type': 'application/json',
         ...(token ? { authorization: `Bearer ${token}` } : {}),
@@ -424,8 +436,20 @@ export class PhoneNodeClient {
         this.failPairing('The daemon approved pairing but returned no device token.');
         return;
       }
-      this.identity = { nodeId, token, label: this.options.label };
-      this.options.storage.write(this.identity);
+      if (this.options.holdTokenInMemory?.() === true) {
+        // Relay route: held for the life of this page only; a reload pairs again.
+        this.identity = { nodeId, token, label: this.options.label };
+      } else {
+        // Direct route: the daemon keeps the token in an HttpOnly cookie no page script can read.
+        const bound = await this.post('/api/browser-session/node', { token });
+        if (!this.isCurrent(lifetime)) return;
+        if (bound.status !== 200) {
+          this.failPairing(`The daemon approved pairing but this browser could not keep the device credential (HTTP ${bound.status}). Ask to pair again.`);
+          return;
+        }
+        this.identity = { nodeId, label: this.options.label };
+        this.options.storage.write(this.identity);
+      }
       this.pendingChallenge = '';
       this.setState({
         status: 'connected',
@@ -438,8 +462,17 @@ export class PhoneNodeClient {
     }
   }
 
+  /** Clears the HttpOnly node cookie a direct-route pairing set; best effort, the daemon may be unreachable. */
+  private releaseCredential(): void {
+    if (!this.identity || this.identity.token !== undefined) return;
+    try {
+      void this.fetchImpl(this.url('/api/browser-session/node/end'), { method: 'POST', credentials: 'include' }).catch(() => undefined);
+    } catch { /* Nothing more to do: the cookie is refused by use once the pairing is revoked. */ }
+  }
+
   /** Forget this device's pairing locally. */
   unpair(): void {
+    this.releaseCredential();
     this.stop();
     this.#runs.issue();
     this.identity = null;
@@ -454,6 +487,7 @@ export class PhoneNodeClient {
    * revoked or rotated it, and no amount of retrying will make it work again.
    */
   private handleAuthFailure(): void {
+    this.releaseCredential();
     this.stop();
     this.#runs.issue();
     this.identity = null;

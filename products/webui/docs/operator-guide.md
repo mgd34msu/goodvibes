@@ -497,6 +497,13 @@ capability the browser cannot actually provide on this origin is not
 announced at all, so the desktop side explains why it is unavailable instead
 of offering a control that would fail.
 
+The node's peer token is never kept in browser storage. Paired directly, the
+daemon holds it in an HttpOnly cookie of its own (`goodvibes_node`, sent only to
+the peer routes under `/api/remote`, never usable as a sign-in), and the page
+keeps only the node's id and name, so a reload stays paired. Paired over the
+relay, the token is held in the page's memory and a reload asks to pair again.
+Unpairing clears the cookie.
+
 The capabilities a phone can announce:
 
 | Capability | What it serves |

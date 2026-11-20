@@ -14,6 +14,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { GOODVIBES_BASE_URL } from '../../lib/goodvibes';
+import { getActiveRoute } from '../../lib/relay-connection';
 import {
   PhoneNodeClient,
   browserPhoneNodeStorage,
@@ -65,6 +66,8 @@ export function PhoneNodeView() {
       baseUrl: GOODVIBES_BASE_URL,
       label,
       storage: browserPhoneNodeStorage(),
+      // Over the relay the node's token is held for this page only; directly, the daemon keeps it in an HttpOnly cookie.
+      holdTokenInMemory: () => getActiveRoute() === 'relay',
       onState: (next) => setState(next),
     });
     clientRef.current = client;

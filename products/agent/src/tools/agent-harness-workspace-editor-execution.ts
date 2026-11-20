@@ -46,7 +46,7 @@ export function describeWorkspaceEditorModelExecution(editorKind: AgentWorkspace
       note: 'run_workspace_action creates a local skill, routine, or persona from the submitted learned-behavior fields.' };
   }
   if (editorKind === 'profile') {
-    return { route: 'slash-command-dispatch', command: '/agent-profile create <name> [--template <template>] --yes', dispatcher: 'run_command', confirmation: 'required',
+    return { route: 'slash-command-dispatch', command: '/agent-home create <name> [--starter <starter>]', dispatcher: 'run_command', confirmation: 'required',
       note: 'run_workspace_action builds the matching profile creation slash command from the submitted fields.' };
   }
   if (HARNESS_LANE_EDITOR_KINDS.has(editorKind)) {

@@ -107,7 +107,7 @@ export async function runWorkspaceEditorAction(
     // created would differ from the one the person reviewed.
     const flagLike = [['name', name], ...(useTemplate ? [['template', template]] : [])].find(([, value]) => value!.trim().startsWith('--'));
     if (flagLike) return error(`Profile ${flagLike[0]} "${flagLike[1]}" starts with "--" and would be read as a command flag. Choose a ${flagLike[0]} that does not start with "--".`);
-    const command = ['/agent-profile', 'create', JSON.stringify(name), ...(useTemplate ? ['--template', JSON.stringify(template)] : []), '--yes'].join(' ');
+    const command = ['/agent-home', 'create', JSON.stringify(name), ...(useTemplate ? ['--starter', JSON.stringify(template)] : [])].join(' ');
     return runTranslatedWorkspaceCommand(deps, args, command, options);
   }
 

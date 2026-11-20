@@ -20,9 +20,10 @@
  */
 import type { RequestPrincipal } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import {
-  buildIdentityMarkerCookie, buildOperatorSessionCookie, mintIdentityMarker, NON_EXPIRING_BROWSER_CREDENTIAL_MS,
-  type CredentialRefusal,
+  buildExpiredRemoteNodeCookie, buildIdentityMarkerCookie, buildOperatorSessionCookie, buildRemoteNodeCookie, mintIdentityMarker,
+  NON_EXPIRING_BROWSER_CREDENTIAL_MS, type CredentialRefusal,
 } from '../../security/http-auth.js';
+import type { DistributedPeerAuth } from '../../runtime/remote/index.js';
 import { browserOriginAllowed, originNotAllowedResponse } from './browser-origin.js';
 import { jsonErrorResponse } from './error-response.js';
 import { parseDaemonJsonText } from './router-request-body.js';
@@ -115,4 +116,45 @@ function withoutCookies(response: Response): Response {
   headers.delete('Set-Cookie');
   headers.set('Cache-Control', 'no-store');
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+export interface BrowserNodeSessionDeps {
+  /** The remote peer a request's credential authenticates as (the peer routes' own check), or its refusal. */
+  readonly requireRemotePeer: (req: Request) => Promise<DistributedPeerAuth | Response>;
+  readonly allowedBrowserOrigins: () => readonly string[];
+  readonly trustProxy: boolean;
+}
+
+/**
+ * `POST /api/browser-session/node`: the web UI acting as a device node (the phone page)
+ * binds the peer token its pairing returned to its own HttpOnly, SameSite=Strict cookie,
+ * `goodvibes_node`, scoped to `/api/remote`. It is kept apart from the sign-in cookie on
+ * purpose: the node is a different principal (a remote peer with its own scopes, its own
+ * revocation and rotation), and the peer routes read only this cookie or a bearer, while
+ * operator routes never read it, so neither credential can act with the other's rights.
+ * `POST /api/browser-session/node/end` clears it. Both are held to the page's origin.
+ */
+export async function handleBrowserNodeSession(req: Request, deps: BrowserNodeSessionDeps): Promise<Response> {
+  const origin = req.headers.get('origin');
+  if (origin === null || !browserOriginAllowed(req, origin, deps.allowedBrowserOrigins())) {
+    return originNotAllowedResponse(origin, 'bind a device node to this browser');
+  }
+  if (new URL(req.url).pathname.endsWith('/end')) {
+    const response = Response.json({ cleared: true }, { headers: { 'Cache-Control': 'no-store' } });
+    response.headers.append('Set-Cookie', buildExpiredRemoteNodeCookie(req, deps.trustProxy));
+    return response;
+  }
+  const text = await readTextBodyWithinLimit(req, MAX_BODY_BYTES);
+  if (text instanceof Response) return text;
+  const body = parseDaemonJsonText(text);
+  if (body instanceof Response) return body;
+  const token = typeof body.token === 'string' ? body.token.trim() : '';
+  if (!token) {
+    return jsonErrorResponse({ error: 'No peer token', code: 'SIGN_IN_EMPTY', state: 'the body named no peer token', next: ['Send { "token": "<peer token from pair/verify>" }'] }, { status: 400 });
+  }
+  const auth = await deps.requireRemotePeer(new Request(req.url, { method: 'POST', headers: { authorization: `Bearer ${token}` } }));
+  if (auth instanceof Response) return auth;
+  const response = Response.json({ bound: true, nodeId: auth.peer.id }, { headers: { 'Cache-Control': 'no-store' } });
+  response.headers.append('Set-Cookie', buildRemoteNodeCookie(token, { req, expiresAt: Date.now() + NON_EXPIRING_BROWSER_CREDENTIAL_MS, trustProxy: deps.trustProxy }));
+  return response;
 }

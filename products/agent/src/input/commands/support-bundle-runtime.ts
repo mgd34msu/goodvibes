@@ -4,7 +4,9 @@
  * work is the `goodvibes-agent bundle` command's (cli/bundle-command.ts); this
  * description is how a person reaches it from the composer.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 import { choiceInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
@@ -47,7 +49,23 @@ const BUNDLE_COMMAND = defineCommand<CommandContext>({
   title: 'Support bundle',
   summary: 'Save this Agent\'s settings and setup to a redacted file, check one, or load settings back from one',
   group: 'Setup',
+  report: 'preview',
   actions: [
+    readAction<CommandContext>({
+      id: 'preview', label: 'See what a support bundle would hold', word: 'preview',
+      sentence: 'Builds a support bundle in a temporary place, shows what it holds (secrets taken out), and deletes it; nothing is kept.',
+      operator: { terminalOnly: TERMINAL_ONLY },
+      async run(_values, ctx) {
+        const scratch = mkdtempSync(join(tmpdir(), 'goodvibes-bundle-'));
+        try {
+          const path = join(scratch, DEFAULT_BUNDLE_FILENAME);
+          succeeded(await runBundle(ctx, ['export', path]));
+          return [succeeded(await runBundle(ctx, ['inspect', path])), '', `Nothing was kept. /bundle export [<file>] saves one.`].join('\n');
+        } finally {
+          rmSync(scratch, { recursive: true, force: true });
+        }
+      },
+    }),
     {
       id: 'save', label: 'Save a support bundle', word: 'export',
       inputs: [

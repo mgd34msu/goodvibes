@@ -182,10 +182,10 @@ export class DaemonStandingAuthorizations {
       this.entries = readDocument(this.filePath, {
         label: 'payments/standing',
         validate: readFile,
-        recovery: 'The standing purchase authorisations start empty: scheduled purchases are refused until the owner adds them again with /payments standing add.',
+        recovery: 'The standing purchase authorisations start empty: scheduled purchases are refused until the owner adds them again with /payments repeat.',
       }) ?? Object.freeze([]);
     } catch {
-      throw new StandingAuthorizationError('The standing purchase authorisations could not be read. Nothing was changed; restart the daemon, then check /payments standing.', 'unavailable');
+      throw new StandingAuthorizationError('The standing purchase authorisations could not be read. Nothing was changed; restart the daemon, then check /payments repeats.', 'unavailable');
     }
     return this.entries;
   }
@@ -237,7 +237,7 @@ export class DaemonStandingAuthorizations {
     const expiresAtMs = readExpiry(input.expires, nowMs);
     const kept = this.load().filter(entry => entry.expiresAtMs === null || entry.expiresAtMs > nowMs);
     if (kept.length >= MAX_STANDING_AUTHORIZATIONS) {
-      throw new StandingAuthorizationError(`${String(MAX_STANDING_AUTHORIZATIONS)} standing authorisations are already kept. Remove one with /payments standing remove <id>, then add this one. Nothing was added.`, 'full');
+      throw new StandingAuthorizationError(`${String(MAX_STANDING_AUTHORIZATIONS)} standing authorisations are already kept. Remove one with /payments stop-repeat, then add this one. Nothing was added.`, 'full');
     }
     const entry: StandingAuthorization = Object.freeze({
       id: `standing-${randomBytes(4).toString('hex')}`, item, merchants: Object.freeze(merchants), currency: String(currency),
@@ -274,7 +274,7 @@ export class DaemonStandingAuthorizations {
     const listHint = 'payments.standing.list shows the standing authorisations the owner created.';
     if (!entry) return { ok: false, reason: `There is no standing authorisation ${request.id}. ${listHint}` };
     if (entry.expiresAtMs !== null && entry.expiresAtMs <= nowMs) {
-      return { ok: false, reason: `Standing authorisation ${entry.id} expired on ${new Date(entry.expiresAtMs).toISOString().slice(0, 10)}. Ask the owner to add a new one with /payments standing add.` };
+      return { ok: false, reason: `Standing authorisation ${entry.id} expired on ${new Date(entry.expiresAtMs).toISOString().slice(0, 10)}. Ask the owner to add a new one with /payments repeat.` };
     }
     if (entry.currency !== String(request.currency)) {
       return { ok: false, reason: `Standing authorisation ${entry.id} was written in ${entry.currency}, and purchases are now made in ${String(request.currency)}. Ask the owner to add it again in ${String(request.currency)}.` };

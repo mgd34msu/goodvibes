@@ -176,7 +176,7 @@ const REFUSAL_MESSAGES: Readonly<Record<RefusalCode | ExecutionRefusalCode | Ope
   'no-card': 'No usable payment card is configured, or payments.cvvHandling is set to prompt on a host with no way to ask for the code. Check the card in payment settings, or set payments.cvvHandling to stored.',
   'no-shipping-address': 'The stored address is incomplete, unavailable or changed. Check payment address settings.',
   'no-billing-address': 'No complete billing address is stored. Set it in payment address settings, then start the purchase again.',
-  'not-owner-request': 'The checkout had neither a direct request from its owner nor a live standing authorisation of his (/payments standing).',
+  'not-owner-request': 'The checkout had neither a direct request from its owner nor a live standing authorisation of his (/payments repeats).',
   'derived-from-untrusted-content': 'The purchase instruction repeats untrusted content, or its original source evidence is incomplete. Make a fresh request in your own words.',
   'link-validation-failed': 'The checkout address did not pass the authorized merchant checks.',
   'currency-mismatch': 'The checkout currency does not match the payment budget.',

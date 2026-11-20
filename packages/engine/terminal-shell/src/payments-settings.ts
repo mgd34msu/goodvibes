@@ -17,7 +17,7 @@ export interface PaymentsSettingEntry {
 }
 /**
  * The one payments row that is not a schema setting: where the cards are. Cards
- * live in the daemon's card store, added and removed with `/payments card` (or
+ * live in the daemon's card store, added and removed with `/payments` (or
  * the web UI); Settings shows the way there and accepts no card material.
  */
 export const PAYMENTS_CARDS_ROW_KEY = 'payments.cardsOnFile' as ConfigKey;
@@ -27,12 +27,12 @@ export function buildPaymentsCardsRow(): PaymentsSettingEntry {
       key: PAYMENTS_CARDS_ROW_KEY,
       type: 'string',
       default: '',
-      description: 'Cards purchases can use. Enter closes Settings, lists the cards on the daemon with their count, and starts /payments card to add one (Esc stops it); /payments card remove <id> deletes one. Settings never takes a card number.',
+      description: 'Cards purchases can use. Enter closes Settings, lists the cards on the daemon, and starts "Add a card" (Esc stops it); /payments remove-card deletes one. Settings never takes a card number.',
     },
     currentValue: 'Enter: list cards and add one',
     isDefault: true,
     locked: true,
-    lockReason: 'Cards are managed with /payments card or the web UI.',
+    lockReason: 'Cards are managed with /payments or the web UI.',
   };
 }
 
@@ -45,13 +45,13 @@ export interface PaymentsCardsRowContext {
 /**
  * Enter on the cards row, after Settings has closed: list the cards the daemon
  * holds (with their count, from `payments.cards.list`), then start the masked
- * card entry, exactly as `/payments status` and `/payments card` do.
+ * card entry, exactly as `/payments cards` and `/payments add-card` do.
  */
 export async function openPaymentsCardsFromSettings(context: PaymentsCardsRowContext): Promise<void> {
   if (!context.executeCommand) {
-    context.print('Run /payments status to list your cards and /payments card to add one.');
+    context.print('Run /payments cards to list your cards and /payments add-card to add one.');
     return;
   }
-  await context.executeCommand('payments', ['status']);
-  await context.executeCommand('payments', ['card']);
+  await context.executeCommand('payments', ['cards']);
+  await context.executeCommand('payments', ['add-card']);
 }

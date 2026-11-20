@@ -385,7 +385,7 @@ export function createAgentOperatorMethodTool(
       if (operatorMethodIsOwnerOnly(method.id)) {
         return {
           success: false,
-          error: `operator method '${method.id}' is the owner's own act (answering a purchase window, typing a card security code, recording what the merchant history shows, or approving a purchase in advance). Nothing was sent. Ask the owner: /payments pending answers windows and codes, /payments approve <merchant> <item> <maximum> approves a purchase in advance, and the web UI Purchases panel does both. payments.purchase.status and payments.purchases.list can be read here to tell him where it stands; payments.checkout.begin and payments.purchase.cancel can be called here. Standing authorisations for scheduled purchases are his to add with /payments standing add; payments.standing.list can be read here, and a scheduled begin names one as standingId.`,
+          error: `operator method '${method.id}' is the owner's own act (answering a purchase window, typing a card security code, recording what the merchant history shows, or approving a purchase in advance). Nothing was sent. Ask the owner: /payments pending answers windows and codes, /payments approve <shop> --most <amount> <item> approves a purchase in advance, and the web UI Purchases panel does both. payments.purchase.status and payments.purchases.list can be read here to tell him where it stands; payments.checkout.begin and payments.purchase.cancel can be called here. Standing authorisations for scheduled purchases are his to add with /payments repeat; payments.standing.list can be read here, and a scheduled begin names one as standingId.`,
         };
       }
       if (PROFILE_TOOL_ONLY_METHOD_IDS.has(method.id)) {

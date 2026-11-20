@@ -70,7 +70,7 @@ export function credentialValueRefusal(key: string, value: unknown): { readonly 
   const facts = configKeyFacts(key);
   if (facts.cardMaterial) {
     return { code: 'CONFIG_CARD_MATERIAL', reason: `${key} is card material, which is kept only in the daemon's card store, never in a settings file.`,
-      next: 'Enter the card with /payments card in a terminal app, or under Payments in the web UI.' };
+      next: 'Enter the card with /payments add-card in a terminal app, or under Payments in the web UI.' };
   }
   if (facts.secret && typeof value === 'string' && value.trim() !== '' && !isSecretReferenceValue(value)) {
     return { code: 'CONFIG_SECRET_LITERAL', reason: `${key} holds a credential, and a settings file keeps only a reference to it.`,

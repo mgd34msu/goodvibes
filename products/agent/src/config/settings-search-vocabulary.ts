@@ -37,8 +37,8 @@ export const SETTING_DOMAIN_VOCABULARY: Readonly<Record<string, SettingDomainVoc
       'price', 'cost', 'charge', 'refund', 'cvv', 'expiry', 'approval window', 'veto window',
     ],
     relatedCommand: {
-      command: '/payments card',
-      why: 'The card number, expiry and verification code are never settings, they are typed at a local terminal through a masked prompt. /payments address billing|shipping enters the two addresses; /payments status shows what is set.',
+      command: '/payments add-card',
+      why: 'The card number, expiry and verification code are never settings, they are typed at a local terminal through a masked prompt. /payments address enters the two addresses; /payments cards shows what is set.',
     },
   },
   occasions: {

@@ -68,7 +68,7 @@ export interface CommandUiActions extends TerminalCommandUiActions<import('./mod
    * Ask the composer for one line of MASKED entry (see input/concealed-input.ts).
    * The typed characters are never echoed, never added to input history, and
    * never printed to the transcript; the plaintext reaches `onSubmit` exactly
-   * once. Used by `/payments card` for card number, expiry, CVV and cardholder
+   * once. Used by `/payments add-card` for card number, expiry, CVV and cardholder
    * name.
    *
    * Optional because a command context can be built without a live composer

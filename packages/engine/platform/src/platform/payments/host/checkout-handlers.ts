@@ -641,7 +641,7 @@ function approvalRefusalMessage(mismatch: string, amount: Money | undefined): st
       + 'so ask the owner to approve exactly this merchant, item and amount with /payments approve (payments.checkout.approve), then begin again.';
   }
   return 'payments.confirmEveryPurchase is on and this purchase has no owner approval on file. Ask the owner to '
-    + 'approve it with /payments approve <merchant> <item> <amount> (payments.checkout.approve; the amount is this begin call\'s requestedMax), '
+    + 'approve it with /payments approve <shop> --most <amount> <item> (payments.checkout.approve; the amount is this begin call\'s requestedMax), '
     + 'then begin within five minutes.';
 }
 

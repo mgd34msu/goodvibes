@@ -182,7 +182,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Authorise a Purchase in Advance',
     description:
-      'The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Requires confirm: true and the explicit-user-request context; /payments standing add sends both. The owner\'s own act: an agent cannot add one.',
+      'The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Requires confirm: true and the explicit-user-request context; /payments repeat sends both. The owner\'s own act: an agent cannot add one.',
     category: 'payments',
     effects: ['purchase.approve'],
     dangerous: true,
@@ -195,7 +195,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     repeat: 'safe',
     title: 'Withdraw a Standing Authorisation',
     description:
-      'Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Requires confirm: true and the explicit-user-request context; /payments standing remove sends both. The owner\'s own act.',
+      'Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Requires confirm: true and the explicit-user-request context; /payments repeats remove sends both. The owner\'s own act.',
     category: 'payments',
     effects: ['purchase.approve'],
     dangerous: true,

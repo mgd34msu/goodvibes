@@ -78,7 +78,7 @@ export async function harnessSettingsCatalog(
  *
  * Some of what a domain needs cannot be a setting: the card number behind
  * `payments.*` is typed at a local terminal through a masked prompt and stored
- * write-only. A page of payment settings that never mentions `/payments card`
+ * write-only. A page of payment settings that never mentions `/payments add-card`
  * leaves a reader concluding the platform cannot take a card at all, which is
  * how the live failure ended.
  */

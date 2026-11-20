@@ -434,7 +434,7 @@ export class SettingsModal extends TerminalSettingsModalState<
 
     const choice = SETTINGS_CHOICE_ACTIONS[setting.key];
     if (choice) { this.pendingSettingsPickerAction = choice; return; }
-    // The cards row lists the daemon's cards and starts /payments card.
+    // The cards row lists the daemon's cards and starts /payments add-card.
     if (setting.key === PAYMENTS_CARDS_ROW_KEY) { this.pendingSettingsPickerAction = 'payments-cards'; return; }
 
     // Delegate provider/model picker settings to the model picker UI
@@ -805,7 +805,7 @@ export class SettingsModal extends TerminalSettingsModalState<
       }
     }
 
-    // Cards are not settings: one locked row points to /payments card, where
+    // Cards are not settings: one locked row points to /payments add-card, where
     // they are added and removed. Settings takes no card material.
     const paymentsEntries = this.groups.get('payments');
     if (paymentsEntries && !paymentsEntries.some((existing) => existing.setting.key === PAYMENTS_CARDS_ROW_KEY)) {

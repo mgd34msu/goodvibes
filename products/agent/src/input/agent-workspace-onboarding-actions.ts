@@ -63,7 +63,7 @@ export function completeOnboardingAction(params: CompleteOnboardingParams): Comp
     // onboarding stays open, and the result says what is missing.
     const route = computeOnboardingStateFromSnapshot(runtimeSnapshot, shellPaths);
     if (route === null || !route.readyToChat) {
-      writeOnboardingCheckMarker(shellPaths, marker);
+      // No marker is written: either one reads as "setup done" at the next start (completion.ts).
       const routeSteps = route?.steps.filter((step) => (step.id === 'provider-access' || step.id === 'local-model-readiness') && step.status !== 'ready') ?? [];
       const missing = route === null
         ? 'The setup check could not be read, so it is not known whether a model route works.'

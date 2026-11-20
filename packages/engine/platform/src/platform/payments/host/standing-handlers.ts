@@ -138,7 +138,7 @@ export function standingDeleteHandler(deps: PaymentsHandlerDeps): TypedHandler<u
     const store = deps.checkout.standing;
     if (!store) throw unavailable();
     const id = asRecord(body)['id'];
-    if (typeof id !== 'string' || id.trim().length === 0) throw invalid('id', 'is required: the id /payments standing lists.');
+    if (typeof id !== 'string' || id.trim().length === 0) throw invalid('id', 'is required: the id /payments repeats lists.');
     const removed = overStore(() => store.remove(id.trim()));
     return { id: id.trim(), deleted: removed };
   };

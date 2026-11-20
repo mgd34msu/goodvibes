@@ -36,6 +36,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { ContainmentUnavailableError, runContained } from '../sandbox/contained-spawn.js';
+import { hostSandboxAvailability } from '../../tools/exec/sandbox.js';
 import type { EvalRawResult, EvalResult, EvalSuiteResult } from './types.js';
 
 /** One task's on-disk definition (task.json). */
@@ -246,7 +247,11 @@ export const defaultShellVerifier: TaskVerifier = async (ctx) => {
       },
     });
     const output = `${result.stdout}${result.stderr}`.trim();
-    const host = result.applied.backend === 'host' ? 'verification ran on the host: no boundary is available here, so the task directory was not read-only' : '';
+    // The one boundary the product has is bubblewrap on Linux (tools/exec/sandbox.ts); macOS, native
+    // Windows and a Linux without bubblewrap or user namespaces have none, and only there does this run on the host.
+    const host = result.applied.backend === 'host'
+      ? `verification was NOT isolated: it ran on the host with the task directory writable, because no sandbox boundary exists here (${hostSandboxAvailability().reason})`
+      : '';
     if (result.exitCode === 0) return { passed: true, output: [output, host].filter(Boolean).join('\n') };
     const fault = result.exitCode === null ? `verification script was stopped after ${timeoutMs} ms` : '';
     return { passed: false, output: [output, fault, host].filter(Boolean).join('\n') };

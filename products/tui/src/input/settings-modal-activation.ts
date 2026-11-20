@@ -77,7 +77,7 @@ export function activateSelected(ctx: ActivateSelectedContext): void {
 
   const choice = SETTINGS_CHOICE_ACTIONS[setting.key];
   if (choice) { ctx.setPendingSettingsPickerAction(choice); return; }
-  // The cards row lists the daemon's cards and starts /payments card.
+  // The cards row lists the daemon's cards and starts /payments add-card.
   if (setting.key === PAYMENTS_CARDS_ROW_KEY) { ctx.setPendingSettingsPickerAction('payments-cards'); return; }
 
   // Delegate provider/model picker settings to the model picker UI

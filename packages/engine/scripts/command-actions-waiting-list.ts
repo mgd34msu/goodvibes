@@ -60,7 +60,6 @@ export const COMMAND_ACTIONS_WAITING_LIST: readonly string[] = [
   'fork',
   'git',
   'google',
-  'graph',
   'guidance',
   'handoff',
   'health',
@@ -182,8 +181,5 @@ export const COMMAND_ACTIONS_WAITING_LIST: readonly string[] = [
   'welcome',
   'work',
   'work-import',
-  'work-plan',
-  'workplan',
-  'workstream',
   'worktree',
 ];

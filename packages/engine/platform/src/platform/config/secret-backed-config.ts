@@ -12,7 +12,7 @@ import type { SecretScope, SecretStorageMedium } from './secrets.js';
  * (secret-bearing-config-keys.ts), which masking, redaction and the settings
  * admission read, so a key that is masked is always routed and the reverse.
  * Card material is not a setting at all: the settings admission refuses it and
- * cards are kept in the daemon's card store (`/payments card`).
+ * cards are kept in the daemon's card store (`/payments add-card`).
  */
 export const SECRET_CONFIG_KEYS: ReadonlySet<ConfigKey> = new Set(SECRET_BEARING_CONFIG_PATHS as readonly ConfigKey[]);
 export interface SecretBackedConfigUpdate {
@@ -93,7 +93,7 @@ export function buildSecretBackedConfigUpdate(configKey: ConfigKey, rawValue: st
  * nothing. For the mailbox password that is the whole feature failing silently,
  * the daemon is the process that polls IMAP and answers over Telegram, and it
  * does so with every surface closed. A payment card entered through
- * /payments card is the same shape of failure at purchase time.
+ * /payments add-card is the same shape of failure at purchase time.
  */
 export function defaultSecretBackedScope(configKey: ConfigKey): SecretScope {
     return isDaemonOwnedConfigKey(configKey) ? 'daemon' : 'user';

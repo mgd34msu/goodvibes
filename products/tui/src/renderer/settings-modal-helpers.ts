@@ -98,7 +98,7 @@ export const CATEGORY_INFO: Record<SettingsCategory, string> = {
   learning:
     'Idle-time memory consolidation: merging duplicate standing memory records and decaying/archiving stale ones. Off by default; nothing runs until enabled.',
   payments:
-    'Payment card on file for daemon-initiated purchases: card number, expiry, CVV, cardholder name, billing and shipping address, and whether the CVV is stored or requested at purchase time. Card fields are entered through /payments card (concealed input) and are secret-tier; never rendered in plaintext.',
+    'Payment card on file for daemon-initiated purchases: card number, expiry, CVV, cardholder name, billing and shipping address, and whether the CVV is stored or requested at purchase time. Card fields are entered through /payments add-card (each field hidden) and are secret-tier; never rendered in plaintext.',
   email:
     "The daemon's own mailbox connection; IMAP and SMTP hosts, ports and security, the mailbox and drafts folders, and the username. Password fields hold secret-store references, never values; /google connects a Gmail-backed setup in one action.",
   calendar:

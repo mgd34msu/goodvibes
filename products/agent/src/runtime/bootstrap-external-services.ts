@@ -39,6 +39,7 @@ import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import type { RuntimeServices } from './services.ts';
 import type { UiRuntimeServices } from './ui-services.ts';
 import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
+import { firstShowingOfSettingsNotice } from '@goodvibes-jev/engine/terminal-shell/cli-config-overrides';
 
 /**
  * This is a PROBE address, so it goes through the same wildcard→loopback
@@ -109,6 +110,8 @@ export function wireAgentExternalServices(options: {
   // then acknowledge): delivery at the daemon is once-only, so every captured receipt renders here, buffered ones from before
   // this sink attaches flush immediately.
   services.daemonReceiptFeed.attach((receipt) => {
+    // A settings notice this Agent already showed for the same file and key (one formatter writes both) is said once.
+    if (!firstShowingOfSettingsNotice(receipt.text)) return;
     systemMessageRouter.high(`[Connected host] ${receipt.text}`);
     requestRender();
   });

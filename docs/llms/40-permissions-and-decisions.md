@@ -533,7 +533,7 @@ Prerequisite: a TypeSafe API key for the hosted endpoint.
 1. Put the key in the environment variable `TYPESAFE_API_KEY` for the process (or the daemon service), or store it in the secret store and point the settings at it:
 
    ```text
-   /secrets set TYPESAFE_API_KEY <your-api-key> --user
+   /secrets set TYPESAFE_API_KEY <your-api-key> --scope user
    /config set judgment.keySource secret
    /config set judgment.keyName TYPESAFE_API_KEY
    ```
@@ -611,7 +611,7 @@ Prerequisite: a server speaking the protocol above, for example Kev-9B listening
 - `judgment.keySource none` comes first: while a credential is configured, `judgment.endpoint` changes only together with it (see below).
 - `Decision Model Only` makes an outage stop work instead of falling back: a call that needs the model fails with the model's error (`System One could not be reached`, `System One answered HTTP <status>`), and the gate does not ask you instead. With `Hybrid` an outage would fall back silently after one notice.
 - `permissions.mode jev-decides` is set explicitly: the unchosen default would behave as `ask-me` on a model the shipped calibration did not measure.
-- With an authenticated server: `/secrets set KEV_API_KEY <your-api-key> --user`, `/config set judgment.keySource secret`, `/config set judgment.keyName KEV_API_KEY`.
+- With an authenticated server: `/secrets set KEV_API_KEY <your-api-key> --scope user`, `/config set judgment.keySource secret`, `/config set judgment.keyName KEV_API_KEY`.
 - Check with `goodvibes status`. While the model answers, the `Decision model:` block reads `A decision model is in use (judgment.policy Decision Model Only).` After it has failed, the block and the one notice in the conversation read `The decision model <model> is unavailable (<what failed>); work that needs it stops (judgment.policy is Decision Model Only; Hybrid would continue without it). Next: <step>`. Under `Hybrid` the same line ends `continuing without it. Next: <step>`. Then ask for a change in the conversation: with the server stopped, the call fails with the error above.
 - What stops and what does not: facts (reads and recoverable edits inside the project, matching rules, owner-only asks) never ask the model and keep working; only judgment calls and other work that needs the model fail.
 
@@ -852,17 +852,21 @@ GoodVibes secrets
 ### Slash commands
 
 ```text
+/secrets                           the list of actions, "See your secrets" first
 /secrets list
 /secrets providers
-/secrets set <KEY> <value> [--user|--project] [--secure|--plaintext]
-/secrets set <KEY>                 type the value masked (terminal app)
-/secrets link <KEY> <secret-ref> [--user|--project] [--secure|--plaintext]
+/secrets storage                   how secrets are kept and where each store is
+/secrets set <KEY> <value> [--scope project|user] [--storage secure|plaintext]
+/secrets set <KEY>                 type the value on a hidden line
+/secrets link <KEY> <secret-ref> [--scope project|user] [--storage secure|plaintext]
 /secrets get <KEY>                 confirms it is stored; never prints it
 /secrets test <secret-ref>
-/secrets trust <KEY>               confirm a key in this project's store (asks once)
-/secrets delete <KEY> [--user|--project] [--secure|--plaintext]   (asks once)
-/secret <NAME>                     terminal app: type a value masked; kept as an environment variable for this session only
+/secrets trust <KEY>               use a key in this project's store (asks once; never from a model)
+/secrets delete <KEY> [--scope project|user] [--storage secure|plaintext]   (asks once)
+/secrets use <NAME>                type a value on a hidden line; kept as an environment variable for this session only
 ```
+
+`project` and `secure` are the defaults; `--storage plaintext` loosens a protection, so it asks first and a model cannot choose it.
 
 A value with spaces goes inside quotes. A value that starts with `--` goes after a bare `--`.
 

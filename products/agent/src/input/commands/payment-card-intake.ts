@@ -1,4 +1,6 @@
-import { createCardEntryPrompter, createPaymentCardHost, createPaymentCardCommands, renderCardList, describeCard, describeCardFailure, CARD_ENTRY_FIELDS, CardHostError, type CardField } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
+import { createCardEntryPrompter, createPaymentCardHost, renderCardList, describeCard, describeCardFailure, CARD_ENTRY_FIELDS, CardHostError, type CardField } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
+import { createPaymentWindowCommand } from '@goodvibes-jev/engine/terminal-shell/payment-window-command';
+import { registerPaymentsCommand } from '@goodvibes-jev/engine/terminal-shell/payments-command';
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
 import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
 import { bindCredential, daemonTarget } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
@@ -30,7 +32,7 @@ import { bindCredential, daemonTarget } from '@goodvibes-jev/engine/platform/pla
  * The DAEMON is the point, not a detail: it completes an unattended purchase,
  * with every surface closed and this program not running at all, and it can
  * spend only from a card in its own store (the ids `payments.cards.list`
- * returns). `/payments status` lists those cards.
+ * returns). `/payments cards` lists those cards.
  *
  * ── Addresses: real schema keys, entered in the clear, same command ──────
  *
@@ -61,13 +63,13 @@ import { bindCredential, daemonTarget } from '@goodvibes-jev/engine/platform/pla
  * This command always runs in the agent's own composer, which the allowlist
  * accepts, so the gate changes nothing about today's behavior. What it buys is
  * that the refusal already exists the moment a shared command registry ever
- * grows a path that reaches `/payments card` from somewhere else: the check is
+ * grows a path that reaches "Add a card" from somewhere else: the check is
  * real and platform-driven, not an implicit "this is a terminal so it's fine".
  */
 
-import type { CommandContext } from '../command-registry.ts';
-import { approvePurchaseInAdvance, manageStandingAuthorizations, openPendingPaymentWindows } from './payments-pending.ts';
+import { isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 import { ownerOperatorConnectionPolicy } from './operator-connection-policy.ts';
+import { commandRefusal } from './confirmation.ts';
 import { agentDaemonConfigClient, agentDaemonConfigClientInstalled, routeDaemonOwnedConfigWrite } from '../../config/daemon-config-routing.ts';
 import type { ConfigKey } from '../../config/index.ts';
 import '@goodvibes-jev/engine/platform/platform/payments';
@@ -111,7 +113,7 @@ function addressFields(kind: PaymentsAddressKind): readonly AddressField[] {
 /**
  * Address values the connected host accepted from this process. A host on
  * another machine keeps its own file, so this process's config cannot read them
- * back; remembering what the host acknowledged keeps /payments status honest.
+ * back; remembering what the host acknowledged keeps /payments cards honest.
  */
 const hostAcknowledgedAddressValues = new WeakMap<object, Map<string, string>>();
 
@@ -164,139 +166,40 @@ async function renderStatus(ctx: CommandContext): Promise<string[]> {
       lines.push(`  ${field.label.padEnd(20)} ${value.length > 0 ? value : '(not set)'}`);
     }
   }
-  lines.push('Run /payments pending to review and answer purchase approval/veto windows on the selected paired host.');
-  lines.push('Run /payments address billing or /payments address shipping to enter an address (chained prompts, shown as typed).');
-  lines.push(
-    'Budgets, windows, CVV handling and the rest of the payment capability are ordinary config values: set them via /config payments or the Settings > Payments category.',
-  );
+  lines.push('/payments pending shows the purchases waiting for your answer; /payments address sets an address; budgets, windows and security-code handling are in Settings > Payments.');
   return lines;
 }
 
 /**
- * Start the card-entry flow, gated on the platform's own entry-surface allowlist
- * rather than an assumption baked into this command. `surface` defaults to this
- * command's real, fixed identity, exposed as a parameter only so tests can
- * drive the refusal path without this program actually being reachable from a
- * remote channel.
+ * Write the address fields given. The daemon completes the purchase and reads
+ * its own settings, so with a connected host each field is written there, the
+ * same route the settings modal uses; otherwise to this machine's settings.
+ * Every field is tried; the line names any that were not saved.
  */
-
-/**
- * Chain a plain (unmasked) prompt for each address field.
- *
- * Uses the composer's ordinary submit path via `awaitPlainLine` below rather
- * than the concealed one, see this file's header for why an address is
- * entered in the clear.
- */
-function promptAddressFields(
-  ctx: CommandContext,
-  kind: PaymentsAddressKind,
-  fields: readonly AddressField[],
-  index: number,
-  failed: readonly string[] = [],
-): void {
-  if (index >= fields.length) {
-    const title = kind === 'billing' ? 'Billing' : 'Shipping';
-    if (failed.length > 0) {
-      ctx.print(`\n[payments] ${title} address only partly saved: ${failed.join(', ')} ${failed.length === 1 ? 'was' : 'were'} NOT saved. Re-run /payments address ${kind} to retry; /payments status shows what is set.`);
-    } else {
-      ctx.print(`\n[payments] ${title} address saved to the daemon-owned config tier${agentDaemonConfigClientInstalled() ? ' (on the connected host)' : ''}.`);
-    }
-    ctx.renderRequest();
-    return;
-  }
-  const field = fields[index]!;
-  const current = readConfigString(ctx, field.key);
-  const currentNote = current.length > 0 ? ` [currently ${current}]` : '';
-  ctx.print(`[payments] Enter ${field.label} (e.g. ${field.placeholder})${currentNote}, Enter to save, Esc to stop.`);
-  awaitPlainLine(ctx, field, {
-    onSubmit: (value) => {
-      const trimmed = value.trim();
-      if (trimmed.length === 0) {
-        ctx.print(`[payments] ${field.label} left as-is.`);
-        promptAddressFields(ctx, kind, fields, index + 1, failed);
-        return;
-      }
-      const saved = () => {
-        ctx.print(`[payments] ${field.label} set to ${trimmed}.`);
-        promptAddressFields(ctx, kind, fields, index + 1, failed);
-      };
-      const refused = (error: unknown) => {
-        ctx.print(`[payments] Failed to set ${field.label}: ${error instanceof Error ? error.message : String(error)}`);
-        promptAddressFields(ctx, kind, fields, index + 1, [...failed, field.label]);
-      };
-      const writeLocally = () => {
-        try {
-          ctx.platform.configManager.setDynamic(field.key, trimmed);
-        } catch (error: unknown) {
-          refused(error);
-          return;
-        }
-        saved();
-      };
-      // The daemon completes the purchase and reads its own settings, so with a
-      // connected host the address is written there, the same route the settings
-      // modal uses. The next prompt waits for the host's answer.
-      if (!agentDaemonConfigClientInstalled()) {
-        writeLocally();
-        return;
-      }
-      routeDaemonOwnedConfigWrite(field.key, trimmed).then((routed) => {
-        if (routed !== 'daemon') {
-          writeLocally();
-          return;
-        }
+async function setAddress(ctx: CommandContext, kind: PaymentsAddressKind, fields: Readonly<Record<string, string>>): Promise<string> {
+  const failed: string[] = [];
+  let onHost = false;
+  for (const [suffix, value] of Object.entries(fields)) {
+    const field = addressFields(kind).find((entry) => entry.key === paymentsAddressConfigKey(kind, suffix));
+    if (!field) continue;
+    try {
+      if (agentDaemonConfigClientInstalled() && await routeDaemonOwnedConfigWrite(field.key, value) === 'daemon') {
         const store = hostAcknowledgedAddressValues.get(ctx.platform.configManager) ?? new Map<string, string>();
-        store.set(field.key, trimmed);
+        store.set(field.key, value);
         hostAcknowledgedAddressValues.set(ctx.platform.configManager, store);
-        saved();
-      }, refused);
-    },
-    onCancel: () => {
-      ctx.print(`[payments] Stopped. Re-run /payments address ${kind} to finish the remaining fields.`);
-    },
-  });
-}
-
-/**
- * One line of ORDINARY composer entry, chained like the concealed flow.
- *
- * Goes through `beginPlainInput`, a genuinely separate composer slot from the
- * masked one, rather than a `conceal: false` flag on ConcealedInputRequest.
- * That flag is the obvious design and is rejected on purpose: a boolean
- * controlling whether a card number is echoed is one wrong default, one
- * refactor or one copied call site away from a PAN on screen, and whoever makes
- * that change will not have read this file first. The masked request type
- * therefore carries no masking flag at all, it is masked by its type. See
- * input/plain-line-input.ts.
- *
- * What this means in practice: address fields ARE echoed while being typed,
- * which is correct, they are ordinary config values, the same as typing them
- * through `/config`. Neither kind of guided answer is added to input history:
- * both are consumed by the composer's line-prompt route before the normal
- * submit path runs, so "62704" does not become a chat-recall entry.
- */
-function awaitPlainLine(
-  ctx: CommandContext,
-  field: AddressField,
-  handlers: { onSubmit: (value: string) => void; onCancel: () => void },
-): void {
-  if (!ctx.beginPlainInput) {
-    // Name the real config KEY, not the human label, the label is not
-    // something /config accepts, and a hint that does not work is worse than
-    // no hint.
-    ctx.print(`[payments] Guided entry is unavailable on this surface. Set it directly with /config, key ${field.key}.`);
-    return;
+        onHost = true;
+      } else {
+        ctx.platform.configManager.setDynamic(field.key, value);
+      }
+    } catch {
+      failed.push(field.label);
+    }
   }
-  ctx.beginPlainInput({ label: field.label, onSubmit: handlers.onSubmit, onCancel: handlers.onCancel });
-}
-
-/** Entry point for `/payments [card|address|status]`, exported so tests can drive it without the registry. */
-
-/** Start the guided address flow for one of the two addresses. */
-export function startAddressEntryFlow(ctx: CommandContext, kind: PaymentsAddressKind): void {
-  const fields = addressFields(kind);
-  ctx.print(`Entering ${fields.length} ${kind} address field(s), Esc to stop at any point. Blank keeps the current value.`);
-  promptAddressFields(ctx, kind, fields, 0);
+  ctx.renderRequest();
+  if (failed.length > 0) {
+    throw commandRefusal(`${failed.join(', ')} ${failed.length === 1 ? 'was' : 'were'} not saved; the other fields were.`, '/payments cards shows what is set; choose "Set your billing or shipping address" again for the rest.');
+  }
+  return onHost ? 'Kept in the connected host\'s settings.' : 'Kept in this machine\'s settings.';
 }
 
 /** Card fields in prompt order, exported for tests that drive the chain field-by-field. */
@@ -347,17 +250,20 @@ function promptCardFields(ctx: CommandContext, fields: readonly CardField[], ind
   promptCardChain(ctx, fields, index);
 }
 
-export const { startCardEntryFlow, runPaymentsCommand, registerPaymentCardCommands } = createPaymentCardCommands<CommandContext>({
-  surface: CARD_ENTRY_SURFACE,
-  announcement: `Entering ${CARD_ENTRY_FIELDS.length} card field(s), masked; Esc to stop at any point. The card is sent to the selected daemon after the last one.`,
-  promptFields: promptCardFields,
-  status: renderStatus,
-  pending: openPendingPaymentWindows,
-  approve: approvePurchaseInAdvance,
-  standing: manageStandingAuthorizations,
-  remove: (ctx, id) => cardHost.remove(ctx, id),
-  address: startAddressEntryFlow,
-  description: 'Payment card/address setup, pending purchase approval/veto windows, purchases approved in advance and standing authorisations for scheduled purchases',
-  usage: '/payments [card [remove <id>]|address <billing|shipping>|status|pending|approve <merchant> <item> <maximum>|standing [list|add <shops> <item> <per-purchase> <per-period> <days> [<last day>]|remove <id>]]',
-  argsHint: '[card|address|status|pending|approve|standing]',
+const openPendingPaymentWindows = createPaymentWindowCommand<CommandContext>({
+  ...ownerOperatorConnectionPolicy, isOwner: (context) => isDirectOwnerCommandContext(context, 'payments'),
 });
+
+/** Register `/payments` with this app's host. */
+export function registerPaymentCardCommands(registry: CommandRegistry): void {
+  registerPaymentsCommand<CommandContext>(registry, {
+    cardEntrySurface: CARD_ENTRY_SURFACE,
+    policy: { ...ownerOperatorConnectionPolicy, isOwner: (context) => isDirectOwnerCommandContext(context, 'payments') },
+    status: renderStatus,
+    promptCardFields,
+    listCards: (ctx) => cardHost.list(ctx),
+    removeCard: (ctx, id) => cardHost.remove(ctx, id),
+    setAddress,
+    pending: openPendingPaymentWindows,
+  });
+}

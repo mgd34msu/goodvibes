@@ -8,7 +8,7 @@
  * callback runs.
  *
  * Ported from the TUI's src/input/concealed-input.ts deliberately unchanged in
- * shape and naming. `/payments card` exists on both surfaces and must behave
+ * shape and naming. `/payments add-card` exists on both surfaces and must behave
  * identically on both; a second, subtly different masking implementation here
  * is exactly how the two surfaces would drift into one of them echoing a card
  * number. Where the two apps genuinely differ is only in how the host wires

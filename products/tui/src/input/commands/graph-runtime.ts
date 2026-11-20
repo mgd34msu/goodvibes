@@ -32,7 +32,10 @@ const FLEET_WORKSTREAMS = defineList<CommandContext>({
     const rpc = getOperatorRpc(ctx);
     if (!rpc.available) return [];
     const page = await rpc.platformClient.operator.invoke('fleet.list', { kinds: ['contract'] });
-    return page.items.map((node): ListRow => ({ value: node.id, label: node.label ?? node.task ?? node.id, ...(node.state ? { state: String(node.state) } : {}) }));
+    return page.items.map((node): ListRow => {
+      const state = (node as { readonly state?: unknown }).state;
+      return { value: node.id, label: node.label ?? node.task ?? node.id, ...(typeof state === 'string' ? { state } : {}) };
+    });
   },
   operator: { method: 'fleet.list', input: {}, rows: { from: 'items', value: 'id', label: 'label', state: 'state' } },
 });
@@ -51,8 +54,9 @@ export function registerGraphRuntimeCommands(registry: CommandRegistry): void {
         example: { workstream: 'c-4f9c21' },
         operator: { method: 'fleet.graph.get', fields: { workstreamId: 'workstream' } },
         async run(values, ctx) {
+          const rpc = rpcOf(ctx);
           try {
-            const snapshot = await rpcOf(ctx).platformClient.operator.invoke('fleet.graph.get', { workstreamId: values.workstream! });
+            const snapshot = await rpc.platformClient.operator.invoke('fleet.graph.get', { workstreamId: values.workstream! });
             return renderWorkstreamGraphLines(snapshot, renderWidth()).join('\n');
           } catch (error) {
             throw commandRefusal(describeOperatorRpcError(error));

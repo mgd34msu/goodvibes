@@ -372,7 +372,7 @@ export function buildSettingGroups(
   injectExecEnvScrubSyntheticEntry(groups, configManager);
 
   // Payments: the CONFIG_SCHEMA loop above already filled 'payments' with the
-  // real settings. Cards are not settings: one locked row points to /payments card.
+  // real settings. Cards are not settings: one locked row points to /payments add-card.
   const paymentsEntries = groups.get('payments');
   if (paymentsEntries && !paymentsEntries.some((e) => e.setting.key === PAYMENTS_CARDS_ROW_KEY)) {
     paymentsEntries.push(buildPaymentsCardsRow());

@@ -86,6 +86,9 @@ export async function handleHomeAssistantSurfaceWebhook(
     title: readString(body.title) ?? 'Home Assistant',
     metadata: {
       directoryKind: conversationKind === 'direct' ? 'user' : conversationKind,
+      // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
+      ...(readString(body.userId ?? body.user_id) ? { userId: readString(body.userId ?? body.user_id) } : {}),
+      conversationKind,
       source: 'homeassistant',
       messageId,
       conversationId,
@@ -147,6 +150,7 @@ export async function handleHomeAssistantSurfaceWebhook(
     ...(readString(body.userId ?? body.user_id) ? { userId: readString(body.userId ?? body.user_id)! } : {}),
     ...(readString(body.displayName ?? body.userName ?? body.user_name) ? { displayName: readString(body.displayName ?? body.userName ?? body.user_name)! } : {}),
     title: readString(body.title) ?? 'Home Assistant',
+    conversationKind,
     ...(routing?.providerId ? { providerId: routing.providerId } : {}),
     ...(routing?.modelId ? { modelId: routing.modelId } : {}),
     context: {

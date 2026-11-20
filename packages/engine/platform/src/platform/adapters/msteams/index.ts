@@ -192,6 +192,9 @@ export async function handleMSTeamsSurfaceWebhook(req: Request, context: Surface
       title: readString(conversation?.name) ?? readString(channel?.id) ?? conversationId,
       // The fields a reply needs; the activity itself (message text included) is not kept on the binding.
       metadata: {
+        // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
+        ...(readString(from?.id) ? { userId: readString(from?.id) } : {}),
+        conversationKind,
         conversationId,
         serviceUrl,
         conversationType,

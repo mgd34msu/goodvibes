@@ -86,6 +86,8 @@ export async function handleBlueBubblesSurfaceWebhook(req: Request, context: Sur
         ...(messageId ? { messageId } : {}),
         ...(chatGuid ? { chatGuid } : {}),
         ...(senderId ? { senderId } : {}),
+        // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
+        conversationKind,
       },
     },
     text,

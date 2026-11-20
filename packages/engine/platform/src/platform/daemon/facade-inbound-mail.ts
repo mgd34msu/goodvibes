@@ -100,6 +100,7 @@ import type { RouteBindingManager } from '../channels/index.js';
 import type { SecretsManager } from '../config/secrets.js';
 import type { ShellPathService } from '../runtime/shell-paths.js';
 import type { StructuredNotice } from '../email/inbound-notice.js';
+import { renderNoticeAsPlainText } from '../email/inbound-notice-channels.js';
 import type { SurfaceNoticeDelivery } from './types.js';
 
 /** The folder a mailbox is read from when its settings name none. */
@@ -140,6 +141,12 @@ export interface InboundMailCompositionOptions {
    * so the default notice route is one of the owner's own one-to-one conversations.
    */
   readonly channelOwner: (surface: string) => string | undefined;
+  /**
+   * The owner inbox: a mail notice no conversation can carry (the owner never
+   * messaged from a chat app, or the route refuses it) is kept there, where
+   * every terminal and the web UI list it. Absent: only recorded and reported.
+   */
+  readonly ownerInbox?: Pick<import('../control-plane/owner-inbox.js').OwnerInbox, 'post'> | undefined;
   /**
    * How this machine's Google credential is turned into Gmail-reading I/O.
    *
@@ -548,6 +555,12 @@ export function composeInboundMail(
         notice,
         announces,
       ),
+      ...(options.ownerInbox ? { toInbox: async (notice: StructuredNotice, announces: string) => {
+        const text = renderNoticeAsPlainText(notice);
+        // Keyed by the message's notice identity, so a pass repeated after a restart posts one item.
+        await options.ownerInbox!.post({ kind: 'report', title: text.split('\n')[0]!.slice(0, 200) || 'Mail arrived', detail: text, options: ['read'], key: announces, askedBy: 'inbound mail' }, 'inbound-mail');
+        return true;
+      } } : {}),
     },
     noticeMode: () => readNoticeMode(configManager),
     now: () => new Date(),

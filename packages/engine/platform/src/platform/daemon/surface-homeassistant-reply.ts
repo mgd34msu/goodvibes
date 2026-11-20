@@ -68,6 +68,8 @@ export interface HomeAssistantSurfaceChatInput {
   readonly threadId?: string | undefined;
   readonly userId?: string | undefined;
   readonly displayName?: string | undefined;
+  /** One-to-one with its user (`direct`), a shared room or device (`channel`), or a thread; the owner's notice routes are read from it. */
+  readonly conversationKind?: 'direct' | 'channel' | 'group' | 'thread' | 'service' | undefined;
   readonly title: string;
   readonly providerId?: string | undefined;
   readonly modelId?: string | undefined;
@@ -144,6 +146,7 @@ export async function postHomeAssistantSurfaceChatMessage(
         ...(input.threadId ? { threadId: input.threadId } : {}),
         ...(input.userId ? { userId: input.userId } : {}),
         ...(input.displayName ? { displayName: input.displayName } : {}),
+        ...(input.conversationKind ? { conversationKind: input.conversationKind } : {}),
         title: input.title,
         ...(input.providerId ? { providerId: input.providerId } : {}),
         ...(input.modelId ? { modelId: input.modelId } : {}),

@@ -119,6 +119,8 @@ async function dispatchDiscordInteraction(
       title: interaction.commandName ?? 'discord',
       metadata: {
         userId: interaction.userId,
+        // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
+        conversationKind: discordInteractionDirect(interaction) ? 'direct' : 'channel',
         commandName: interaction.commandName,
         applicationId: interaction.applicationId,
         // The interaction token edits this one command's response for 15 minutes.
@@ -303,6 +305,9 @@ export async function handleDiscordGatewayDispatchPayload(
       title: 'Discord message',
       metadata: {
         userId,
+        // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
+        // A bot is never in a group DM, so a gateway message without a guild is a direct message.
+        conversationKind: guildId ? 'channel' : 'direct',
         messageId,
         gatewayEvent: dispatch.t,
       },
@@ -323,4 +328,15 @@ export async function handleDiscordGatewayDispatchPayload(
   });
   if (outcome.kind === 'no-text') return new Response(null, { status: 204 });
   return surfaceOutcomeResponse(outcome, 'caller');
+}
+
+/**
+ * Whether an interaction came from the one-to-one DM with the bot: no guild, and
+ * not a group DM (channel type 3, or the private-channel context 2 of a user-installed app).
+ */
+function discordInteractionDirect(interaction: { readonly guildId?: string | undefined; readonly raw: Record<string, unknown> }): boolean {
+  if (interaction.guildId) return false;
+  const channel = interaction.raw.channel;
+  const channelType = channel && typeof channel === 'object' ? (channel as Record<string, unknown>).type : undefined;
+  return channelType !== 3 && interaction.raw.context !== 2;
 }

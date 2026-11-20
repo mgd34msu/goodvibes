@@ -50,7 +50,9 @@ export async function handleIMessageSurfaceWebhook(req: Request, context: Surfac
       channelId: chatId,
       threadId,
       title: chatId,
-      metadata: {},
+      // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
+      // This adapter treats every chat as the person it is keyed by (as its ingress does).
+      metadata: { userId: chatId, conversationKind: threadId ? 'thread' : 'direct' },
     },
     text: message,
     logLabel: 'handleIMessageSurfaceWebhook',

@@ -42,6 +42,8 @@ export interface HomeAssistantChatInput {
   readonly channelId: string;
   readonly threadId?: string | undefined;
   readonly userId?: string | undefined;
+  /** One-to-one with its user (`direct`), a shared room or device (`channel`), or a thread; the owner's notice routes are read from it. */
+  readonly conversationKind?: 'direct' | 'channel' | 'group' | 'thread' | 'service' | undefined;
   readonly displayName?: string | undefined;
   readonly title: string;
   readonly providerId?: string | undefined;
@@ -213,6 +215,9 @@ async function resolveHomeAssistantChatSessionNow(
     metadata: {
       source: 'homeassistant',
       directoryKind: input.threadId ? 'thread' : 'user',
+      // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation).
+      ...(input.userId ? { userId: input.userId } : {}),
+      conversationKind: input.threadId ? 'thread' : input.conversationKind ?? 'direct',
       messageId: input.messageId,
       conversationId: input.conversationId,
       remoteSessionTtlMs: input.remoteSessionTtlMs,

@@ -97,6 +97,11 @@ export async function handleMatrixSurfaceWebhook(req: Request, context: SurfaceA
       metadata: {
         ...(eventId ? { eventId } : {}),
         ...(msgtype ? { msgtype } : {}),
+        // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
+        // A room event does not say whether the room is a direct chat (that is the account's m.direct data);
+        // the bridge that delivers it does, as is_direct / isDirect. Without it the room counts as shared.
+        ...(sender ? { userId: sender } : {}),
+        conversationKind: threadId ? 'thread' : (payload.is_direct === true || payload.isDirect === true) ? 'direct' : 'channel',
         ...(replyToMessageId ? { replyToMessageId } : {}),
       },
     },

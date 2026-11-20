@@ -98,6 +98,10 @@ export async function handleGoogleChatSurfaceWebhook(req: Request, context: Surf
       metadata: {
         eventType,
         userName: readString(user?.name),
+        // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
+        // Google marks a one-to-one space with the app as DM (space.type, or spaceType DIRECT_MESSAGE with singleUserBotDm).
+        ...(readString(user?.name) ? { userId: readString(user?.name) } : {}),
+        conversationKind: threadName ? 'thread' : googleChatDirect(space) ? 'direct' : 'channel',
       },
     },
     text,
@@ -142,4 +146,10 @@ export async function handleGoogleChatSurfaceWebhook(req: Request, context: Surf
     // A redelivered event: no text, so Google posts nothing a second time.
     case 'duplicate': return surfaceOutcomeResponse(outcome, 'caller');
   }
+}
+
+/** Whether a Google Chat space is the one-to-one conversation between one person and the app. */
+function googleChatDirect(space: Record<string, unknown> | undefined): boolean {
+  if (!space) return false;
+  return space.type === 'DM' || space.singleUserBotDm === true || (space.spaceType === 'DIRECT_MESSAGE' && space.singleUserBotDm !== false);
 }

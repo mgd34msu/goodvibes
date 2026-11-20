@@ -25,13 +25,13 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     ],
   },
   {
-    // The forms `/setup` opens, a topic at a time (AGENT_SETUP_TOPIC_ROWS). Not
+    // The rows `/setup` shows, a topic at a time (AGENT_SETUP_TOPIC_ROWS). Not
     // listed in the workspace: `/setup` is where they are found.
     id: 'setup',
     group: 'SETUP',
     label: 'Setup',
-    summary: 'The form for one /setup topic.',
-    detail: 'Each row saves state, opens the shared model picker, or opens a confirmed in-modal form. Esc goes back to the conversation.',
+    summary: 'The rows of one /setup topic.',
+    detail: 'Each row changes a setting, opens the shared model picker, or opens the guided form of the command that does it. Esc goes back to the conversation.',
     actions: [
       { id: 'use-local-model', label: 'Use a local model (no sign-in)', detail: 'Opens the model picker, which recommends models that fit this computer. No account or subscription needed.', kind: 'model-picker', modelPickerFlow: 'model', modelPickerTarget: 'main', safety: 'safe' },
       { id: 'setup-provider-model', label: 'Choose main model', detail: 'Open the shared provider/model picker for normal assistant turns.', kind: 'model-picker', modelPickerFlow: 'providerModel', modelPickerTarget: 'main', safety: 'safe' },
@@ -114,7 +114,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       settingAction({ id: 'permissions-edit', label: 'File edits', detail: 'deny refuses file edits; prompt leaves each edit to the execution mode (ask-me runs an undoable edit inside the workspace without asking); allow also runs edits without asking when no decision model works.', key: 'permissions.tools.edit' }),
       settingAction({ id: 'permissions-exec', label: 'Shell commands', detail: 'deny refuses shell commands; prompt leaves each command to the execution mode; allow also runs commands without asking when no decision model works.', key: 'permissions.tools.exec' }),
       settingAction({ id: 'permissions-fetch', label: 'Network fetches', detail: 'deny refuses network fetches; prompt leaves each fetch to the execution mode; allow also runs fetches without asking when no decision model works.', key: 'permissions.tools.fetch' }),
-      // MCP servers + secrets (forms that open inside the modal)
+      // MCP servers and secrets (each opens its command's guided form)
       actRow('onboarding-mcp-server', 'mcp add-server'),
       actRow('onboarding-secret-link', 'secrets link-secret'),
       actRow('onboarding-secret-test', 'secrets test-reference'),
@@ -161,15 +161,15 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       actRow('personal-ops-google-status', 'google status'),
       actRow('personal-ops-google-reauthorize', 'google reauthorize'),
       actRow('personal-ops-google-forget', 'google forget'),
-      actRow('personal-ops-google-app-password', 'google setup', { path: 'app-password' }),
-      actRow('personal-ops-google-oauth', 'google setup', { path: 'oauth' }),
+      actRow('personal-ops-google-app-password', 'google setup', { path: 'app-password' }, 'Connect Google with an app password'),
+      actRow('personal-ops-google-oauth', 'google setup', { path: 'oauth' }, 'Connect Google with a new OAuth client'),
       actRow('personal-ops-google-adopt', 'google adopt'),
       actRow('personal-ops-google-client-file', 'google client-file'),
       actRow('personal-ops-google-client-manual', 'google client'),
       actRow('personal-ops-calendar', 'calendar subscribe'),
       actRow('personal-ops-calendar-add', 'calendar add'),
-      actRow('personal-ops-calendar-google', 'calendar use-app', { provider: 'google' }),
-      actRow('personal-ops-calendar-outlook', 'calendar use-app', { provider: 'outlook' }),
+      actRow('personal-ops-calendar-google', 'calendar use-app', { provider: 'google' }, 'Use your own Google Calendar app'),
+      actRow('personal-ops-calendar-outlook', 'calendar use-app', { provider: 'outlook' }, 'Use your own Outlook calendar app'),
       { id: 'personal-ops-notes', label: 'Scratchpad notes', detail: 'Open Agent-local notes for source triage, decisions, and handoff context.', targetCategoryId: 'notes', kind: 'workspace', safety: 'safe' },
       actRow('personal-ops-note-create', 'notes create'),
       actRow('personal-ops-reminder', 'schedule add'),
@@ -395,8 +395,8 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       actRow('learned-behavior-routine', 'routines create'),
       actRow('learned-behavior-persona', 'personas create'),
       actRow('memory-edit', 'memory edit'),
-      actRow('memory-review', 'memory review', { state: 'reviewed' }),
-      actRow('memory-stale', 'memory review', { state: 'stale' }),
+      actRow('memory-review', 'memory review', { state: 'reviewed' }, 'Mark a record reviewed'),
+      actRow('memory-stale', 'memory review', { state: 'stale' }, 'Mark a record out of date'),
       actRow('memory-delete', 'memory forget'),
       actRow('memory-promote', 'memory move'),
       actRow('memory-link', 'memory link'),
@@ -578,7 +578,7 @@ function freezeDeclaration<T>(value: T, visited = new Set<object>()): T {
 }
 
 /**
- * Where each former Start row lives now: the `/setup` topic whose form shows it
+ * Where each former Start row lives now: the `/setup` topic that shows it
  * (terminal-shell/setup-command.ts). Every row of the `setup` category is in
  * exactly one topic.
  */

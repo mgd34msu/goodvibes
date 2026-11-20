@@ -269,6 +269,13 @@ export interface InboundMailNoticeRoute {
    * into text is the code that knows the destination.
    */
   send(notice: StructuredNotice, binding: NoticeRouteBinding | null, announces: string): Promise<SurfaceNoticeDelivery>;
+  /**
+   * Where a notice goes when no conversation can carry it (no owner route, or
+   * a structural refusal): the owner inbox, which every terminal and the web UI
+   * list. Resolves whether it was kept there. Absent: the refusal is only
+   * recorded and reported (status verb, health entry, log).
+   */
+  toInbox?: ((notice: StructuredNotice, announces: string) => Promise<boolean>) | undefined;
 }
 
 /**
@@ -1034,6 +1041,13 @@ export function createInboundMailIntake(deps: InboundMailIntakeDeps): InboundMai
       deps.noticeHealth?.refused({ ...refusal, at: receivedAt.iso });
       note(deps.observer, message, 'notice-refused',
         `${refusal.reason}: ${refusal.detail} ${refusal.fix}`, receivedAt.iso);
+      // No conversation carries it: the owner inbox does, so the owner sees the message anyway.
+      const unrouted = plan.notice;
+      if (unrouted && deps.notices.toInbox) {
+        void deps.notices.toInbox(unrouted, mailNoticeAnnounces(key)).catch((error: unknown) => {
+          note(deps.observer, message, 'notice-refused', `the owner inbox did not keep the notice either: ${summarizeError(error)}`, receivedAt.iso);
+        });
+      }
     } else if (status === 'delivered' && plan.kind === 'send') {
       deps.noticeHealth?.announced(receivedAt.iso);
     }
@@ -1107,6 +1121,8 @@ type NoticePlan =
     readonly kind: 'settled';
     readonly status: InboundNoticeStatus;
     readonly refusal?: { readonly reason: string; readonly detail: string; readonly fix: string };
+    /** The notice no route could carry, for the owner inbox. */
+    readonly notice?: StructuredNotice | undefined;
   };
 
 /** Turn a route resolution into either a notice to send or a refusal to record. */
@@ -1118,29 +1134,27 @@ async function planFor(
   receivedAt: ReturnType<typeof receiptTimestamp>,
   bodiesWithheld: boolean,
 ): Promise<NoticePlan> {
+  const outcome = noticeOutcome(match, bodiesWithheld);
+  const notice = await renderInboundMailNotice({
+    senderDisplay: message.senderDisplay,
+    subject: message.subject,
+    deliveredTo,
+    outcome,
+    links: [],
+    receivedAt,
+  });
   if (route.kind === 'unavailable') {
     // Recorded under the delivery layer's own vocabulary, `no-route-binding`
     // is what "there is no route" is called everywhere else, while the
     // condition reported to the owner keeps the finer reason the resolver
-    // knew. One fact, two audiences, neither of them given a guess.
+    // knew. One fact, two audiences, neither of them given a guess. The notice
+    // itself goes to the owner inbox, so the owner still sees the message.
     return {
       kind: 'settled',
       status: 'no-route-binding',
       refusal: { reason: route.reason, detail: route.detail, fix: route.fix },
+      notice,
     };
   }
-  const outcome = noticeOutcome(match, bodiesWithheld);
-  return {
-    kind: 'send',
-    outcome,
-    binding: route.binding,
-    notice: await renderInboundMailNotice({
-      senderDisplay: message.senderDisplay,
-      subject: message.subject,
-      deliveredTo,
-      outcome,
-      links: [],
-      receivedAt,
-    }),
-  };
+  return { kind: 'send', outcome, binding: route.binding, notice };
 }

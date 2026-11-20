@@ -129,7 +129,8 @@ function actionCommand(action: AgentWorkspaceAction): string {
   if (action.kind === 'model-picker') return action.modelPickerFlow === 'model' ? 'model picker' : 'provider/model picker';
   if (action.kind === 'settings-modal') return action.settingsTarget ? `settings ${action.settingsTarget}` : 'settings';
   if (action.kind === 'onboarding-complete') return 'apply and close';
-  return action.command ?? '(guidance)';
+  // A guidance row runs nothing; what to do is in its detail.
+  return action.command ?? '';
 }
 
 function isOnboardingCategory(category: AgentWorkspaceCategory): boolean {

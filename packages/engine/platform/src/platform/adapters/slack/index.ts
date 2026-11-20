@@ -104,6 +104,9 @@ export async function handleSlackSurfacePayload(
         command: event.command,
         userId: event.userId,
         userName: event.userName,
+        // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
+        // Slack names a direct message's channel `directmessage` on a slash command.
+        conversationKind: event.channelName === 'directmessage' ? 'direct' : 'channel',
         // The one-shot reply URL belongs to this command alone. It is not kept on
         // the channel's shared binding, and any copy an earlier release stored
         // there is cleared, so later messages never reply to an expired URL.
@@ -260,6 +263,9 @@ export async function handleSlackSurfacePayload(
         title: `Slack ${event.eventType}`,
         metadata: {
           userId: event.userId,
+          // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
+          // An event in a direct message carries channel_type `im`.
+          conversationKind: event.threadTs ? 'thread' : slackChannelType(event.raw) === 'im' ? 'direct' : 'channel',
           eventType: event.eventType,
           eventTs: event.eventTs,
           // Clears a one-shot reply URL an earlier release stored on this binding.
@@ -357,4 +363,11 @@ function slackSecretRefOptions(context: SurfaceAdapterContext): SecretRefResolut
       : undefined,
     homeDirectory: context.secretsManager?.getGlobalHome?.() ?? undefined,
   };
+}
+
+/** The `channel_type` of an Events API callback's event (`im` for a direct message), when it names one. */
+function slackChannelType(body: Record<string, unknown>): string | undefined {
+  const event = body.event;
+  const type = event && typeof event === 'object' ? (event as Record<string, unknown>).channel_type : undefined;
+  return typeof type === 'string' ? type : undefined;
 }

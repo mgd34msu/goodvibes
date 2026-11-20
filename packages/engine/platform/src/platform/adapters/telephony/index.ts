@@ -153,7 +153,8 @@ export async function handleTelephonySurfaceWebhook(req: Request, context: Surfa
       externalId: from,
       channelId: from,
       title: from,
-      metadata: { messageId, to },
+      // A text conversation is one-to-one with the number it came from. Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
+      metadata: { messageId, to, from, conversationKind: 'direct' },
     },
     text,
     logLabel: 'handleTelephonySurfaceWebhook',

@@ -50,6 +50,8 @@ export class AgentWorkspace {
   /** Scroll offset into the selected area's context, and the area it belongs to. */
   public workContextScroll = 0;
   public workContextScrollFor: string | null = null;
+  /** How many pane rows one PgUp/PgDn moves: as many as the pane shows (set when it is drawn). */
+  public contextPageRows = 5;
   public resultScrollFor: AgentWorkspaceActionResult | null = null;
   private context: CommandContext | null = null;
   /** Each command's short report, read once per opening when one of its rows is first selected. */

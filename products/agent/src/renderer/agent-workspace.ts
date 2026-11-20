@@ -359,6 +359,8 @@ export function renderAgentWorkspace(workspace: AgentWorkspace, width: number, h
   if (category.id !== 'work' && contextRows.length <= metrics.contextRows) workspace.workContextScroll = 0;
   else {
     const count = Math.max(1, metrics.contextRows - 2);
+    // PgUp/PgDn move the pane by what it shows, so a short pane skips nothing.
+    workspace.contextPageRows = count;
     workspace.workContextScroll = Math.min(workspace.workContextScroll, Math.max(0, contextRows.length - count));
     // A pane longer than its room scrolls; the first and last rows say which way there is more.
     const visible = contextRows.slice(workspace.workContextScroll, workspace.workContextScroll + count);

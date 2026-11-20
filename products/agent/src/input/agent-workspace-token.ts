@@ -35,7 +35,7 @@ export function handleAgentWorkspaceToken(
     // A long action result scrolls rather than being cut off. These keys reach
     // the workspace already, they were consumed and did nothing, so binding
     // them here takes nothing away from the transcript scroll behind the modal.
-    if ((!workspace.lastActionResult || token.ctrl === true) && (token.logicalName === 'pageup' || token.logicalName === 'pagedown')) workspace.workContextScroll = Math.max(0, workspace.workContextScroll + (token.logicalName === 'pageup' ? -RESULT_SCROLL_STEP : RESULT_SCROLL_STEP));
+    if ((!workspace.lastActionResult || token.ctrl === true) && (token.logicalName === 'pageup' || token.logicalName === 'pagedown')) workspace.workContextScroll = Math.max(0, workspace.workContextScroll + (token.logicalName === 'pageup' ? -workspace.contextPageRows : workspace.contextPageRows));
     else if (token.logicalName === 'pageup') workspace.scrollActionResult(-RESULT_SCROLL_STEP);
     else if (token.logicalName === 'pagedown') workspace.scrollActionResult(RESULT_SCROLL_STEP);
     else if (token.ctrl === true && token.logicalName === 'r') workspace.refreshRuntimeSnapshot();

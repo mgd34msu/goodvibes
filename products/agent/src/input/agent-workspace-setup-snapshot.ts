@@ -1,9 +1,8 @@
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from './command-registry.ts';
-import { readSetupWizardCheckpoint } from '../agent/setup-wizard-checkpoint.ts';
 import { listSetupSmokeEvidence } from '../agent/setup-smoke-evidence.ts';
 import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
-import { DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE, buildAgentSetupWizard, emptyAgentSetupSmokeHistory, emptyAgentSetupWizardCheckpoint, type AgentSetupWizard, type AgentSetupWizardBlockedCheckFrequency, type AgentSetupWizardCheckpoint, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../agent/setup-wizard.ts';
+import { DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE, buildAgentSetupWizard, emptyAgentSetupSmokeHistory, type AgentSetupWizard, type AgentSetupWizardBlockedCheckFrequency, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../agent/setup-wizard.ts';
 import type { AgentWorkspaceSetupChecklistItem } from './agent-workspace-setup.ts';
 import { readArtifactMetadataString, readArtifactMetadataStringList } from './agent-workspace-artifact-metadata.ts';
 
@@ -82,50 +81,6 @@ export function buildSetupSmokeHistory(context: CommandContext): AgentSetupWizar
   };
 }
 
-export function buildSetupWizardCheckpoint(context: CommandContext): AgentSetupWizardCheckpoint {
-  const shellPaths = context.workspace?.shellPaths;
-  if (!shellPaths || typeof shellPaths.resolveUserPath !== 'function') {
-    return {
-      ...emptyAgentSetupWizardCheckpoint('Agent shell paths are unavailable; setup wizard checkpoint storage cannot be inspected.'),
-      status: 'unavailable',
-    };
-  }
-  const snapshot = readSetupWizardCheckpoint(shellPaths);
-  const routes = {
-    markCurrentRoute: DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE,
-    clearRoute: DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE,
-    inspectRoute: DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE,
-  };
-  if (!snapshot.exists) {
-    return {
-      ...emptyAgentSetupWizardCheckpoint(),
-      ...routes,
-      path: snapshot.path,
-    };
-  }
-  if (!snapshot.checkpoint) {
-    return {
-      ...emptyAgentSetupWizardCheckpoint(snapshot.parseError ?? 'Saved setup wizard checkpoint could not be read.'),
-      ...routes,
-      status: 'unavailable',
-      path: snapshot.path,
-      ...(snapshot.parseError ? { parseError: snapshot.parseError } : {}),
-    };
-  }
-  return {
-    status: 'available',
-    currentStepId: snapshot.checkpoint.currentStepId,
-    currentStepLabel: snapshot.checkpoint.currentStepLabel,
-    savedAt: snapshot.checkpoint.savedAt,
-    source: snapshot.checkpoint.source,
-    resumed: false,
-    summary: `Saved setup checkpoint for ${snapshot.checkpoint.currentStepLabel}.`,
-    path: snapshot.path,
-    ...(snapshot.checkpoint.note ? { note: snapshot.checkpoint.note } : {}),
-    ...routes,
-  };
-}
-
 function setupChecklistUserRoute(item: AgentWorkspaceSetupChecklistItem): string {
   return item.breadcrumb ?? 'Start';
 }
@@ -169,7 +124,6 @@ const SETUP_WIZARD_SNAPSHOT_BLOCKER_ALIASES: Readonly<Record<string, readonly st
 export function buildWorkspaceSetupWizard(
   checklist: readonly AgentWorkspaceSetupChecklistItem[],
   smokeHistory: AgentSetupWizardSmokeHistory,
-  checkpoint: AgentSetupWizardCheckpoint,
   setupMarkerExists: boolean,
 ): AgentSetupWizard {
   const items: AgentSetupWizardSourceItem[] = checklist.map((item) => ({
@@ -184,7 +138,6 @@ export function buildWorkspaceSetupWizard(
   return buildAgentSetupWizard({
     items,
     smokeHistory,
-    checkpoint,
     closeoutCriticalStepIds: ['runtime', 'connected-host-auth', 'provider-model'],
     // Only the setup smoke saves evidence; the runtime and auth steps are decided by their live checks.
     receiptRequiredStepIds: ['install-smoke'],

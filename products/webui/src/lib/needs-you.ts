@@ -6,12 +6,12 @@
  * never a second derivation: an idle watcher, a heartbeat or a schedule between
  * runs is not counted as running, and an ask is counted once.
  *
- * The shell does not read the hosted-session list, so a daemon-hosted session
- * answering right now is counted on the Work page and not here.
+ * The shell reads the hosted-session list with Work's own key and request, so a
+ * daemon-hosted session answering right now is counted here as on the page.
  */
 import { readWork, type WorkSources } from '../views/work/work-items';
 
-export type ShellCountSources = Pick<WorkSources, 'asks' | 'nodes' | 'attemptGroups' | 'tasks'>;
+export type ShellCountSources = Pick<WorkSources, 'asks' | 'nodes' | 'attemptGroups' | 'tasks' | 'hosted'>;
 
 export interface ShellCounts {
   /** Rows under "Waiting for you". */

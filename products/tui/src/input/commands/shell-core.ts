@@ -1,7 +1,6 @@
 import { createShellCoreActions } from '@goodvibes-jev/engine/terminal-shell/shell-core-actions';
 import { createBasicShellCommands, createShellNavigationCommands } from '@goodvibes-jev/engine/terminal-shell/basic-shell-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { executeCommitAll } from './quit-shared.ts';
 import { startFreshConversation } from './fresh-conversation.ts';
 import { CompactBusyError, compactConversation, requireKeybindingsManager, requireProviderApi, requireSessionMemoryStore } from './runtime-services.ts';
 import {
@@ -14,20 +13,13 @@ import { ensureProviderKeyThenSelect } from '../provider-key-intake.ts';
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import { createCompactCommand } from '@goodvibes-jev/engine/terminal-shell/everyday-commands';
 import { helpForCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { registerModelCommands } from '@goodvibes-jev/engine/terminal-shell/model-command';
 
 const coreActions = createShellCoreActions<CommandContext>(
-  { requireProviderApi, requireKeybindingsManager, startFreshConversation },
+  { requireKeybindingsManager, startFreshConversation },
   {
     hidden: false,
-    modelHint: '[model-id] | fallback',
-    choiceMarker: '\\u25c9',
-    offeredIndent: '',
     shortcutOverlay: true,
-    unsupportedEffortAdvice: true,
-    beforeSelection: ensureProviderKeyThenSelect,
-    modelSelected: (model, provider) => 'Switched to model: ' + model + ' (' + provider + ')',
-    effortMessage: (level, changed) => (changed ? 'Reasoning effort set to: ' : 'Reasoning effort: ') + level,
-    error: (detail) => 'Error: ' + detail,
     freshConversation: (ctx, savedAs) =>
       ctx.showToast?.({
         title: 'Fresh conversation',
@@ -44,7 +36,8 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
     shortcutsFallback: 'Press ? for every command and keyboard shortcut.',
   });
 
-  registry.register(coreActions.model);
+  // `/model` and `/effort` are one description each, shared with the other terminal app; a missing key is asked for before a switch lands.
+  registerModelCommands<CommandContext>(registry, { requireProviderApi, beforeSelection: ensureProviderKeyThenSelect });
 
   registry.register(navigation.shortcuts);
 
@@ -123,18 +116,6 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
 
   registry.register(navigation.quit);
 
-  registry.register({
-    name: 'commit-all',
-    aliases: [],
-    description: 'Show what committing the whole working tree would include; --yes commits it',
-    usage: '[--yes]: bare shows the repository root and file counts; --yes commits (a hand-staged set is committed as it is)',
-    argsHint: '[--yes]',
-    async handler(args, ctx) {
-      await executeCommitAll(ctx, args);
-    },
-  });
-
-  registry.register(coreActions.effort);
 }
 
 /** `/compact` is a single-action command shared with the other terminal app (terminal-shell/everyday-commands.ts). */

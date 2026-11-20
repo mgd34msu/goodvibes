@@ -1,16 +1,6 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ProviderRegistry, ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
-import {
-  describeEffortForModel,
-  describeServingEffort,
-  effortPresentationForModel,
-  requestedEffortLevel,
-  resolveEffortForModelSurface,
-  resolveRequestedEffortForServingModel,
-  servingEffortForLevel,
-  toEffortModel,
-} from '@goodvibes-jev/engine/platform/platform/providers/reasoning-effort-surface';
-import { summarizeError, logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { OpenSelection } from './selection-modal.js';
 import type { TerminalSlashCommand } from './command-registry.js';
 import { commandRefusal } from './command-confirmation.js';
@@ -34,213 +24,18 @@ interface KeybindingsView {
   getAll(): { action: string; combos: KeyCombo[]; description: string }[];
   formatCombo(combo: KeyCombo): string;
 }
-/**
- * "Choose a backup model": the models a failed turn moves to, in order
- * (`provider.fallbackModels`). Bare, it lists the selectable models to pick one
- * to add; with model ids it sets the order; `clear` empties it.
- */
-async function chooseBackupModel(args: readonly string[], ctx: ShellCoreContext, providerApi: ProviderApi): Promise<void> {
-  const current = ctx.platform.configManager.get('provider.fallbackModels');
-  const order = Array.isArray(current) ? current.filter((entry): entry is string => typeof entry === 'string') : [];
-  const say = (list: readonly string[]) => ctx.print(list.length === 0
-    ? 'No backup model: a failed turn stops and says why. /model fallback chooses one.'
-    : `Backup models, in order: ${list.join(', ')}. A turn the main model fails moves to them, until you change it.`);
-  if (args[0]?.toLowerCase() === 'clear') {
-    ctx.platform.configManager.set('provider.fallbackModels', []);
-    say([]);
-    return;
-  }
-  const models = await providerApi.listModels({ selectableOnly: true });
-  if (args.length > 0) {
-    const unknown = args.filter((id) => !models.some((model) => model.registryKey === id || model.modelId === id));
-    if (unknown.length > 0) throw commandRefusal(`No selectable model named ${unknown.join(', ')}; the backup models were not changed.`, '/model fallback lists the models to choose from.');
-    const keys = args.map((id) => models.find((model) => model.registryKey === id || model.modelId === id)!.registryKey);
-    ctx.platform.configManager.set('provider.fallbackModels', [...new Set(keys)]);
-    say([...new Set(keys)]);
-    return;
-  }
-  if (!ctx.openSelection) { say(order); return; }
-  const items = models.filter((model) => !model.current && !order.includes(model.registryKey))
-    .map((model) => ({ id: model.registryKey, label: model.displayName, detail: `${model.registryKey} (${model.providerId})` }));
-  ctx.openSelection(`Choose a backup model${order.length > 0 ? `  (now: ${order.join(', ')})` : ''}`, items, { allowSearch: true, primaryVerbLabel: 'Add' }, (result) => {
-    if (!result) return;
-    const next = [...order, result.item.id];
-    ctx.platform.configManager.set('provider.fallbackModels', next);
-    say(next);
-    ctx.renderRequest();
-  });
-}
-
 export function createShellCoreActions<Context extends ShellCoreContext>(
   services: {
-    readonly requireProviderApi: (context: Context) => ProviderApi;
     readonly requireKeybindingsManager: (context: Context) => KeybindingsView;
     readonly startFreshConversation: (context: Context) => { readonly savedAs: string | null };
   },
   policy: {
     readonly hidden: boolean;
-    readonly modelHint: string;
-    readonly choiceMarker: string;
-    readonly offeredIndent: string;
     readonly shortcutOverlay: boolean;
-    readonly unsupportedEffortAdvice: boolean;
-    readonly beforeSelection: (context: Context, provider: string, complete: () => void) => void;
-    readonly modelSelected: (model: string, provider: string) => string;
-    readonly effortMessage: (level: string, changed: boolean) => string;
-    readonly error: (detail: string) => string;
     readonly freshConversation: (context: Context, savedAs: string) => void;
   },
 ) {
   return {
-    model: {
-      name: 'model',
-      effect: 'mixed',
-      aliases: ['m'],
-      description: 'Select or display the current LLM model; /model fallback chooses a backup model a failed turn moves to',
-      usage: '[model-id] | fallback [model-id...|clear]',
-      argsHint: policy.modelHint,
-      async handler(args: string[], ctx: Context) {
-        const providerApi = services.requireProviderApi(ctx);
-        if (args[0]?.toLowerCase() === 'fallback') {
-          await chooseBackupModel(args.slice(1), ctx, providerApi);
-          return;
-        }
-        if (args.length === 0) {
-          if (ctx.openModelPicker) {
-            ctx.openModelPicker();
-          } else {
-            const models = await providerApi.listModels({ selectableOnly: true });
-            const lines = [
-              'Available models:',
-              ...models.map(
-                (model) => `  ${model.current ? '▶' : ' '} ${model.registryKey.padEnd(36)} ${model.displayName} (${model.providerId})`,
-              ),
-            ];
-            ctx.print(lines.join('\n'));
-          }
-        } else {
-          const modelId = args[0];
-          if (modelId === undefined) return;
-          try {
-            const selected = await providerApi.selectModel(modelId);
-            // Capture the key for an unconfigured provider inline before the
-            // selection is announced, so the switch lands ready to chat.
-            policy.beforeSelection(ctx, selected.providerId, () => {
-              ctx.session.runtime.model = selected.registryKey;
-              ctx.session.runtime.provider = selected.providerId;
-              ctx.platform.configManager.set('provider.model', selected.registryKey);
-              ctx.print(policy.modelSelected(selected.displayName, selected.providerId));
-              // The REQUESTED level may not exist on the model just selected.
-              // Re-resolve it here, exactly as the picker's commit path does, so
-              // `/model x` and picking x from the picker cannot disagree about
-              // what is actually being sent.
-              //
-              // The resolution reads config (the requested preference) and writes
-              // only the session's effective level. Writing the snapped value back
-              // over the preference is what used to make the downgrade permanent.
-              const switchedTo = toEffortModel(ctx.provider.providerRegistry.getCurrentModel());
-              const serving = resolveRequestedEffortForServingModel(ctx.platform.configManager, switchedTo);
-              ctx.session.runtime.reasoningEffort = serving.effective ?? '';
-              if (serving.requested !== '') {
-                ctx.print(policy.effortMessage(describeServingEffort(serving, switchedTo), false));
-              }
-              void providerApi.recordModelUsage(selected.registryKey).catch((err) => {
-                logger.debug('model usage record failed', { err });
-              });
-            });
-          } catch (e) {
-            ctx.print(policy.error(summarizeError(e)));
-          }
-        }
-      },
-    } satisfies TerminalSlashCommand<Context>,
-    effort: {
-      name: 'effort',
-      effect: 'mixed',
-      firstScreen: !policy.hidden,
-      aliases: ['e'],
-      description: 'Show or set reasoning effort level',
-      usage: '[level]',
-      // No fixed list here. The accepted levels belong to the serving model, so
-      // the old '[instant|low|medium|high]' hint was wrong for every model that
-      // offers 'none', 'minimal', 'xhigh' or 'max', and for every model that
-      // rejects 'instant'. Running `/effort` with no argument prints the real
-      // ones for the model currently in use.
-      argsHint: '[level]',
-      async handler(args: string[], ctx: Context) {
-        // The ModelDefinition (not the provider-api record) is what carries the
-        // structured ReasoningEffortSpec the honest wording is generated from.
-        const definition = ctx.provider.providerRegistry.getCurrentModel();
-        const model = toEffortModel(definition);
-        const presentation = effortPresentationForModel(model);
-
-        if (!presentation.configurable) {
-          ctx.print(presentation.headline);
-          if (presentation.caveat) ctx.print(presentation.caveat);
-          return;
-        }
-
-        // The user's REQUESTED level, not the session's effective one: this
-        // command is where the preference is read back and re-chosen, so it must
-        // show what was asked for even while a capped model is serving.
-        const current = requestedEffortLevel(ctx.platform.configManager);
-        // What the list should open on, though, is the level in EFFECT, the
-        // requested level snapped to this model. The requested level may not be
-        // in the list at all when the model caps lower, and preselecting a
-        // missing id lands the cursor on the lowest level instead of on what is
-        // actually running.
-        const inEffect = servingEffortForLevel(current, model).effective ?? current;
-
-        const applyLevel = (level: string): void => {
-          // An explicit user choice, the one kind of write that is allowed to
-          // change the stored preference.
-          ctx.platform.configManager.set('provider.reasoningEffort', level);
-          const serving = servingEffortForLevel(level, model);
-          ctx.session.runtime.reasoningEffort = serving.effective ?? '';
-          ctx.print(policy.effortMessage(describeServingEffort(serving, model), true));
-        };
-
-        if (args.length === 0) {
-          if (ctx.openSelection) {
-            const items = presentation.choices.map((choice) => ({
-              id: choice.level,
-              label: choice.level,
-              detail: choice.level === inEffect ? `${policy.choiceMarker} ${choice.description}` : choice.description,
-            }));
-            const options = { preSelectId: inEffect, allowSearch: false };
-            ctx.openSelection('Reasoning Effort', items, options, (result) => {
-              if (!result) return;
-              applyLevel(result.item.id);
-              ctx.renderRequest();
-            });
-            return;
-          }
-          ctx.print(describeEffortForModel(model, current || undefined).join('\n'));
-          return;
-        }
-
-        const requested = args[0];
-        if (requested === undefined) return;
-        if (!presentation.choices.some((choice) => choice.level === requested)) {
-          const offered = presentation.choices.map((choice) => choice.level).join(', ');
-          // Name the model: "invalid" alone reads as a typo when the real reason
-          // is that this particular model does not offer the level.
-          const lines = [
-            `${definition.displayName} does not offer reasoning effort '${requested}'.`,
-            `${policy.offeredIndent}Levels it offers: ${offered}`,
-          ];
-          if (policy.unsupportedEffortAdvice) {
-            const resolved = resolveEffortForModelSurface(requested, model);
-            if (resolved.note) lines.push(resolved.note);
-            if (presentation.caveat) lines.push(presentation.caveat);
-          }
-          ctx.print(lines.join('\n'));
-          return;
-        }
-
-        applyLevel(requested);
-      },
-    } satisfies TerminalSlashCommand<Context>,
     // `/clear`: a single-action command (command-actions/): the line is the command name alone.
     clear: defineCommand<Context & CommandActionContext>({
       name: 'clear', title: 'Start a fresh conversation', summary: 'Start a fresh conversation; the current one is saved as its own session', group: 'Conversation',

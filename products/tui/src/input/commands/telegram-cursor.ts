@@ -3,5 +3,5 @@ import { isDirectOwnerCommandContext, type CommandContext } from '../command-reg
 import { ownerOperatorConnectionPolicy } from './operator-connection-policy.ts';
 
 export const openTelegramCursorRecovery = createTelegramCursorCommand<CommandContext>({
-  ...ownerOperatorConnectionPolicy, isOwner: context => isDirectOwnerCommandContext(context, 'channel'),
+  ...ownerOperatorConnectionPolicy, isOwner: context => isDirectOwnerCommandContext(context, 'channels'),
 });

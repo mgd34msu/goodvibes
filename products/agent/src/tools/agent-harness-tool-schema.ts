@@ -6,7 +6,7 @@ export const AGENT_HARNESS_MODES = [
   'shortcuts', 'keybindings', 'keybinding', 'run_keybinding', 'set_keybinding', 'reset_keybinding',
   'commands', 'command', 'run_command', 'channels', 'channel', 'channel_setup_guide', 'channel_triage', 'channel_deliveries', 'notifications', 'notification_target',
   'provider_accounts', 'provider_account', 'mcp_servers', 'mcp_server',
-  'setup_posture', 'setup_item', 'setup_repair', 'setup_checkpoint', 'mark_setup_checkpoint', 'clear_setup_checkpoint', 'provision_connected_host_token', 'run_setup_smoke',
+  'setup_posture', 'setup_item', 'setup_repair', 'provision_connected_host_token', 'run_setup_smoke',
   'project_context', 'project_context_file', 'prompt_context',
   'agent_orchestration', 'agent_orchestration_agent',
   'model_routing', 'model_route', 'local_model_cookbook', 'run_local_model_smoke',

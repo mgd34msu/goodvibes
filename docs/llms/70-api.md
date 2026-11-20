@@ -260,7 +260,7 @@ Each method's access is in the Access column of "Operator API methods" in the re
 | tasks | scope | admin |
 | telemetry | scope | (none) |
 | voice | scope | admin |
-| watchers | scope, except admin: `watchers.triggers.grant.list`, `watchers.triggers.history`, `watchers.triggers.list`, `watchers.triggers.status` | admin |
+| watchers | scope, except admin: `watchers.triggers.grant.list`, `watchers.triggers.history`, `watchers.triggers.list`, `watchers.triggers.preview`, `watchers.triggers.status` | admin |
 | web-search | scope | admin |
 | work-ledger | admin | admin |
 | workspaces | scope | scope |

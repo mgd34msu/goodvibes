@@ -2,10 +2,10 @@ import { handleNativeIntakeCommand, handleNativeSubmissionCommand } from '@goodv
 import '../../runtime/native-conversation-intake.ts';
 import { nativeWorkExecutionLines } from '@goodvibes-jev/engine/terminal-shell/native';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { AGENT_WORKSPACE_CATEGORY_IDS } from '../agent-workspace-types.ts';
+import { AGENT_WORKSPACE_CATEGORIES } from '../agent-workspace-categories.ts';
+import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { choiceInput, doAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 import { commandRefusal } from './confirmation.ts';
-
-const AGENT_WORKSPACE_ARGS_HINT = `${AGENT_WORKSPACE_CATEGORY_IDS.join('|')}|connected-host`;
 
 export function registerAgentWorkspaceRuntimeCommands(registry: CommandRegistry): void {
   function openAgentWorkspace(ctx: CommandContext, categoryId: string | undefined): void {
@@ -70,17 +70,27 @@ export function registerAgentWorkspaceRuntimeCommands(registry: CommandRegistry)
       openAgentWorkspace(ctx, 'work');
     },
   });
-  registry.register({
+  // `/agent`, described once (command-actions/): one action, the workspace at a section.
+  registry.register(defineCommand<CommandContext>({
     name: 'agent',
-    effect: 'ui-navigation',
-    aliases: ['home', 'operator'],
-    description: 'Open the GoodVibes Agent operator workspace',
-    usage: '[category]',
-    argsHint: AGENT_WORKSPACE_ARGS_HINT,
-    handler(args, ctx) {
-      openAgentWorkspace(ctx, args[0]);
-    },
-  });
+    title: 'Agent workspace',
+    summary: 'Open the Agent workspace, at a section when one is named',
+    group: 'Agent',
+    actions: [doAction<CommandContext>({
+      id: 'open', label: 'Open the Agent workspace', word: '', touches: 'reads',
+      inputs: [choiceInput({
+        id: 'section', label: 'Section', help: 'Where it opens',
+        choices: AGENT_WORKSPACE_CATEGORIES.map((category) => ({ value: category.id, label: category.label })),
+        typed: { position: 1 }, optional: { default: '', means: 'where you left it' },
+      })],
+      sentence: 'Opens the Agent workspace, at the section named.',
+      operator: { terminalOnly: 'It is the Agent\'s own screen.' }, example: { section: 'memory' },
+      async run(values, ctx) {
+        if (!ctx.openAgentWorkspace) throw commandRefusal('The Agent workspace needs the interactive shell.');
+        ctx.openAgentWorkspace(values.section || undefined);
+      },
+    })],
+  }));
   registry.register({
     name: 'notes',
     effect: 'ui-navigation',

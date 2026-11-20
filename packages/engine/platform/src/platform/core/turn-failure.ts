@@ -30,8 +30,27 @@ export interface TurnFailureReading {
   readonly headline: string;
   /** "OpenAI returned an error (500) three times." */
   readonly cause: string;
-  /** "Nothing was changed." | "2 files were changed before it stopped." ('' when not known) */
-  readonly changed: { readonly text: string; readonly files: readonly string[] };
+  /**
+   * What the turn changed before it stopped, as facts and as the sentence
+   * every surface shows. `known` false: nobody recorded it, and `text` is ''
+   * (never "Nothing was changed." without the fact). `text` is "Nothing was
+   * changed." only when known and nothing was: no file written, no command
+   * run, nothing sent, no tool of unknown effect.
+   */
+  readonly changed: {
+    readonly text: string;
+    readonly known: boolean;
+    /** Files written by tools that name them. */
+    readonly files: readonly string[];
+    /** Commands run (a command may change files it does not name). */
+    readonly commands: number;
+    /** Calls that sent something to another service (a message, an MCP call). */
+    readonly messages: number;
+    /** Successful calls to tools that declare no effects. */
+    readonly unknown: number;
+  };
+  /** The requests made to the provider that failed last, and when each was sent (epoch ms); absent when not counted. */
+  readonly attempts?: { readonly count: number; readonly times: readonly number[] } | undefined;
   readonly next: readonly { readonly action: TurnFailureAction; readonly label: string }[];
   /** A second way to the same end, said after the keys: "or run /setup". */
   readonly also?: string | undefined;
@@ -60,12 +79,10 @@ export interface TurnFailureInput {
   readonly provider?: string | undefined;
   readonly model?: string | undefined;
   /**
-   * Files the turn's successful tool calls changed before it stopped; an empty
-   * list says nothing was changed; undefined says it is not known.
+   * What the turn's successful tool calls changed before it stopped, from the
+   * turn's own record; undefined says nobody recorded it (no sentence then).
    */
-  readonly changedFiles?: readonly string[] | undefined;
-  /** A tool that may change things without naming the files (a command) ran before it stopped. */
-  readonly changedUnknown?: boolean | undefined;
+  readonly changes?: TurnChanges | undefined;
   /** Whether provider.fallbackModels names any model. */
   readonly fallbackOrderSet?: boolean | undefined;
   /** Why the fallback order did not move the turn, when it was consulted. */
@@ -74,6 +91,14 @@ export interface TurnFailureInput {
   readonly refusal?: TurnRefusalReason | undefined;
   /** The command that starts the GoodVibes service, for `daemon-unreachable`. */
   readonly startCommand?: string | undefined;
+}
+
+/** What a turn's successful tool calls changed, as its runner recorded them (TURN_ERROR carries the same fields). */
+export interface TurnChanges {
+  readonly files: readonly string[];
+  readonly commands: number;
+  readonly messages: number;
+  readonly unknown: number;
 }
 
 const HEADLINE_NO_ANSWER = 'The model didn\'t answer.';
@@ -101,16 +126,25 @@ function sentence(text: string): string {
   return /[.!?…]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
+const NOTHING: TurnChanges = { files: [], commands: 0, messages: 0, unknown: 0 };
+
+function count(n: number, one: string, many: string): string {
+  return n === 1 ? `1 ${one}` : `${n} ${many}`;
+}
+
 function changedReading(input: TurnFailureInput): TurnFailureReading['changed'] {
-  if (input.refusal !== undefined) return { text: 'Nothing was changed.', files: [] };
-  const files = input.changedFiles;
-  if (input.changedUnknown) {
-    const named = files && files.length > 0 ? ` ${files.length === 1 ? '1 file was' : `${files.length} files were`} changed, and` : '';
-    return { text: sentence(`Before it stopped,${named} tools ran that may have changed other things`), files: files ?? [] };
-  }
-  if (files === undefined) return { text: '', files: [] };
-  if (files.length === 0) return { text: 'Nothing was changed.', files: [] };
-  return { text: `${files.length === 1 ? '1 file was' : `${files.length} files were`} changed before it stopped.`, files };
+  // A refused turn ran nothing.
+  const changes = input.refusal !== undefined ? NOTHING : input.changes;
+  if (!changes) return { text: '', known: false, ...NOTHING };
+  const facts = { known: true, files: [...changes.files], commands: changes.commands, messages: changes.messages, unknown: changes.unknown };
+  const parts: string[] = [];
+  if (changes.files.length > 0) parts.push(`${count(changes.files.length, 'file was', 'files were')} changed`);
+  if (changes.commands > 0) parts.push(`${count(changes.commands, 'command', 'commands')} ran`);
+  if (changes.messages > 0) parts.push(`${count(changes.messages, 'message was', 'messages were')} sent`);
+  if (changes.unknown > 0) parts.push(`${count(changes.unknown, 'tool', 'tools')} of unknown effect ran`);
+  if (parts.length === 0) return { text: 'Nothing was changed.', ...facts };
+  const list = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]!}`;
+  return { text: sentence(`${list.charAt(0).toUpperCase()}${list.slice(1)} before it stopped`), ...facts };
 }
 
 function causeOf(input: TurnFailureInput, provider: string): string {
@@ -181,13 +215,14 @@ export function readTurnFailure(input: TurnFailureInput): TurnFailureReading {
   add('Attempts', input.attempts);
   if (input.attemptTimes && input.attemptTimes.length > 0) add('Times', input.attemptTimes.map(clock).join(', '));
   add('Fallback', input.fallbackNote);
-  if (input.changedFiles && input.changedFiles.length > 0) add('Changed', input.changedFiles.join(', '));
+  if (input.changes && input.changes.files.length > 0) add('Changed', input.changes.files.join(', '));
   add('Message', input.error?.trim());
   return {
     turnId: input.turnId,
     headline,
     cause: causeOf(input, provider),
     changed: changedReading(input),
+    ...(input.attempts !== undefined && input.attempts > 0 ? { attempts: { count: input.attempts, times: [...(input.attemptTimes ?? [])] } } : {}),
     next,
     ...(also ? { also } : {}),
     ...(providerFailed && input.fallbackOrderSet === false ? { tip: { text: TIP_TEXT, command: TIP_COMMAND } } : {}),

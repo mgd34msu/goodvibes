@@ -775,6 +775,23 @@ The settings dialog opens from the account menu, or with `?settings=<section>` i
 
 Every setting the daemon knows appears in exactly one section; a namespace no section lists appears under Advanced.
 
+### Slash command actions in the web UI
+
+The web UI draws the actions of the slash commands the daemon runs from the same descriptions the terminal apps use (`packages/engine/contracts/artifacts/command-actions.json`), so a button, its blanks, its sentence and its done line say what the terminal says. The command palette (Ctrl+K or ⌘K) lists each such action that changes something by its label (`Schedule something to run`, `Block a tool`, `Allow a repeat purchase`); choosing one opens its sheet. A sheet shows the action's blanks as pick-lists, switches and fields (a blank that belongs to a choice shows only while that choice is made; a step of four or more usual settings is folded under `More settings`), the sentence of what will happen above the button, and `From a terminal:` with the typed line that does the same (a secret is left out of it). Its button is red only for what cannot be undone. Pressing it sends the request as the owner's own (`x-goodvibes-explicit-user-request: true`), which purchase allowances and letting triggers run a command require. An action only a terminal app can do (one that belongs to that terminal's session) is shown greyed with the reason.
+
+Two sheets have the daemon read what was typed before anything is kept: "Schedule something to run" and "Change a schedule" call `automation.schedules.preview` (a time described in words, such as `every weekday at 9am`, is read once, by the decision model when one is set, else only the fixed forms: an ISO time, a cron pattern, `every 30m`, `in 2h`), and "Watch for something" calls `watchers.triggers.preview`. `Check` shows the reading (`Read as: 0 9 * * 1-5 [Europe/Vienna]. Next run: 2026-11-23 09:00 Europe/Vienna.`); the button then keeps exactly that, and changing a blank asks for `Check` again. A refusal ("Not kept: ...") is shown in the sheet, which stays open.
+
+Four screens are drawn from one command each; the palette opens them in a side panel (`Schedules`, `MCP servers and tools`, `Repeat purchases`, `Triggers`):
+
+| Screen | Rows | Actions on a row | At the top |
+| --- | --- | --- | --- |
+| Schedules | Each schedule: name, when it runs in words, its next run, `(paused)`, a failed last run. | Run, Pause or Resume, Change (the schedule editor: blanks left empty keep what it has, shown as `Now: ...`), and Remove one in More. | Schedule something to run. |
+| MCP servers and tools | Each server: connected or not, tools held back, trust level, role, the config file that keeps it; `Tools (n)` opens its tools, each with its rule (`follows github's limits`, `blocked, kept`, a rule for one terminal's session, changed only there). | Accept a server's changed tools (when held back); More: set its trust level or role, remove it. A tool: Block or Stop blocking; More: let it go beyond its server's limits, or make it follow them again. | Add a server, Reconnect every server from its config. |
+| Repeat purchases | Each allowance in the daemon's words (shops, item, limits, what is left this period, its last day). | Stop. | Allow a repeat purchase. |
+| Triggers | Who supervises them, then each trigger: what it watches, its state, how often it fired, its last error; `Runs` shows its newest runs. Under it, the commands triggers may run. | Start a trigger that gave up (when its breaker is open); More: Stop. | Watch for something; Let triggers run a command. |
+
+Each screen ends with the command's actions only a terminal app can do, greyed, each with its reason.
+
 ## Credentials and pairing
 
 ### The three kinds of credential

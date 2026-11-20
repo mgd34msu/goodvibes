@@ -2988,6 +2988,11 @@
       "types": "./terminal-shell/dist/ci-command.d.ts",
       "import": "./terminal-shell/dist/ci-command.js"
     },
+    "./terminal-shell/channels-command": {
+      "bun": "./terminal-shell/src/channels-command.ts",
+      "types": "./terminal-shell/dist/channels-command.d.ts",
+      "import": "./terminal-shell/dist/channels-command.js"
+    },
     "./terminal-shell/agents-command": {
       "bun": "./terminal-shell/src/agents-command.ts",
       "types": "./terminal-shell/dist/agents-command.d.ts",
@@ -3027,6 +3032,11 @@
       "bun": "./terminal-shell/src/everyday-commands.ts",
       "types": "./terminal-shell/dist/everyday-commands.d.ts",
       "import": "./terminal-shell/dist/everyday-commands.js"
+    },
+    "./terminal-shell/health-command": {
+      "bun": "./terminal-shell/src/health-command.ts",
+      "types": "./terminal-shell/dist/health-command.d.ts",
+      "import": "./terminal-shell/dist/health-command.js"
     },
     "./terminal-shell/workstream-command": {
       "bun": "./terminal-shell/src/workstream-command.ts",

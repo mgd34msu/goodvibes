@@ -59,7 +59,7 @@ import { describeResearchSource, researchQueueSummary } from './agent-harness-re
 import { describeHarnessSecurityFinding, describeHarnessSupportBundle, securityPostureSummary, supportBundleCatalogStatus, supportBundleSummary } from './agent-harness-security-posture.ts';
 import { describeHarnessSession, sessionSummary } from './agent-harness-session-metadata.ts';
 import { describeHarnessServiceEndpoint, servicePostureCatalogStatus, servicePostureSummary } from './agent-harness-service-posture.ts';
-import { clearSetupCheckpoint, describeHarnessSetupItem, markSetupCheckpoint, provisionConnectedHostOperatorToken, runSetupInstallSmoke, setupCheckpointSummary, setupPostureSummary, setupRepairSummary } from './agent-harness-setup-posture.ts';
+import { describeHarnessSetupItem, provisionConnectedHostOperatorToken, runSetupInstallSmoke, setupPostureSummary, setupRepairSummary } from './agent-harness-setup-posture.ts';
 import { AGENT_HARNESS_MODES, AGENT_HARNESS_PARAMETER_PROPERTIES } from './agent-harness-tool-schema.ts';
 import { runCommand } from './agent-harness-command-runner.ts';
 import { runWorkspaceAction } from './agent-harness-workspace-action-runner.ts';
@@ -507,17 +507,6 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           return error(resolved.usage);
         }
         if (dispatchMode === 'setup_repair') return output(await setupRepairSummary(deps.commandContext, args, catalogOptions));
-        if (dispatchMode === 'setup_checkpoint') return output(await setupCheckpointSummary(deps.commandContext, catalogOptions));
-        if (dispatchMode === 'mark_setup_checkpoint') {
-          const confirmationError = requireConfirmedAction(rawArgs, options, 'Setup wizard checkpoint save');
-          if (confirmationError) return error(confirmationError);
-          return effectOutput(await markSetupCheckpoint(deps.commandContext, rawArgs, options));
-        }
-        if (dispatchMode === 'clear_setup_checkpoint') {
-          const confirmationError = requireConfirmedAction(rawArgs, options, 'Setup wizard checkpoint clear');
-          if (confirmationError) return error(confirmationError);
-          return effectOutput(clearSetupCheckpoint(deps.commandContext, rawArgs, options));
-        }
         if (dispatchMode === 'project_context') return output(await projectContextSummary(deps.commandContext, args, catalogOptions));
         if (dispatchMode === 'project_context_file') {
           const resolved = await describeProjectContextFile(deps.commandContext, args, catalogOptions);

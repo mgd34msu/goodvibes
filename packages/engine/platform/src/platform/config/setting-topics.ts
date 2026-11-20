@@ -163,12 +163,12 @@ export const SETTING_TOPICS: readonly SettingTopic[] = [
   {
     id: 'permissions',
     label: 'Permissions',
-    description: 'Approval rules, the sandbox and tool policy.',
+    description: 'How often GoodVibes asks before it acts, and what it may do without asking.',
     sections: [
       {
         id: 'permissions',
         label: 'Permissions',
-        description: 'Approval rules, MCP tool rules, the sandbox and tool policy.',
+        description: 'The permission mode, your standing rules, and the sandbox.',
         namespaces: ['permissions', 'sandbox', 'policy', 'security', 'danger', 'tools', 'conversationGate', 'fetch'],
       },
     ],

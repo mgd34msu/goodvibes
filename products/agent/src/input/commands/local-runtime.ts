@@ -94,7 +94,6 @@ export const localActions = createLocalCommandActions<CommandContext>(requirePro
   imageHint: '<path> [prompt]',
   supportedFormats: '\nSupported .png, .jpg, .jpeg, .webp, .gif',
   maximumImageSize: 'Maximum 20MB',
-  partialRefresh: 'Some refreshes failed, see messages above.',
   error: (detail) => 'Error\n  message ' + detail,
   imageFailure: (kind, detail) => kind + ' ' + detail,
   invalidBlockType: (type, valid) => 'Unknown type ' + type + '\nValid types ' + valid.join(', '),
@@ -187,7 +186,6 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
     },
   });
 
-
   registry.register(secretsCommand);
 
   registry.register(localActions['image']);
@@ -270,8 +268,6 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
       }
     },
   });
-
-  registry.register(localActions['refresh-models']);
 
   registry.register(localActions['pin']);
 

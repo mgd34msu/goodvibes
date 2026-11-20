@@ -13,7 +13,7 @@ import { buildAgentWorkspaceVoiceMediaReadiness } from './agent-workspace-voice-
 import { buildProcessSupervisionSummary, buildProjectContextSummary, buildPromptContextReceiptTimeline, buildResearchBrowserRunnerContract, buildResearchVisualReportContract, buildVibeSummary } from './agent-workspace-context-snapshot.ts';
 import { summarizeMemoryItem, summarizeRoutineItem, summarizeRuntimeProfile, summarizeStarterTemplate } from './agent-workspace-local-library-snapshot.ts';
 import { buildReviewPacketDefaults, buildReviewPacketTimeline, buildReviewPacketWizard, readDocumentDrafts, reviewerReadinessBadge } from './agent-workspace-review-packet-snapshot.ts';
-import { buildSetupSmokeHistory, buildSetupWizardCheckpoint, buildWorkspaceSetupWizard, setupCompletionMarkerExists } from './agent-workspace-setup-snapshot.ts';
+import { buildSetupSmokeHistory, buildWorkspaceSetupWizard, setupCompletionMarkerExists } from './agent-workspace-setup-snapshot.ts';
 import { readConfigNumber, readConfigString } from './agent-workspace-snapshot-config.ts';
 import {
   buildAgentWorkspaceArtifactListSnapshot,
@@ -412,7 +412,6 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
   const setupWizard = buildWorkspaceSetupWizard(
     setupChecklist,
     setupSmokeHistory,
-    buildSetupWizardCheckpoint(context),
     // Setup status comes from the checks this Agent runs itself; artifact
     // metadata and host read models are not setup evidence.
     setupCompletionMarkerExists(context),

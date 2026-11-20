@@ -9,20 +9,17 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { deriveStep1Capabilities, deriveStep1CapabilityFlags } from '../runtime/onboarding/index.ts';
 import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
-import { clearSetupWizardCheckpoint, saveSetupWizardCheckpoint, setupWizardCheckpointPath } from '../agent/setup-wizard-checkpoint.ts';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { SETUP_TOPICS } from '@goodvibes-jev/engine/terminal-shell/setup-command';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
-import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
 import type { SetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts';
-import { DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE } from '../agent/setup-wizard.ts';
+import { DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE } from '../agent/setup-wizard.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { captureCatalogSnapshot } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
 import { type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import type { AgentHarnessSetupArgs, SetupResolution } from './agent-harness-setup-posture-types.ts';
 import { buildSetupPlan, SETUP_PLAN_ROW_IDS } from './agent-harness-setup-plan.ts';
-import { buildSetupWizard, describeInstallSmokeCheck, ignoredSetupSmokeEvidenceFields, installSmokeNextAction, SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS, installSmokeRunResult, installSmokeRunSummary, latestSetupSmokeEvidence, saveSetupSmokeArtifact, setupCompletionMarkerExists, setupSmokeEvidenceArtifacts, setupSmokeEvidenceHistory, setupWizardCheckpoint } from './agent-harness-setup-smoke.ts';
+import { buildSetupWizard, describeInstallSmokeCheck, ignoredSetupSmokeEvidenceFields, installSmokeNextAction, SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS, installSmokeRunResult, installSmokeRunSummary, latestSetupSmokeEvidence, saveSetupSmokeArtifact, setupCompletionMarkerExists, setupSmokeEvidenceArtifacts, setupSmokeEvidenceHistory } from './agent-harness-setup-smoke.ts';
 import { confirmedRepairCandidates, describeCandidate, describeHandoffCard, describeItem, describePlanItem, describeRepairCard, describeRepairDecision, describeServiceLifecycleDecision, nextSetupHandoffSummaries, planSummary, primarySetupRepairDecision, setupRepairTarget } from './agent-harness-setup-describe.ts';
 import { setupHandoffsForItem } from './agent-harness-setup-handoffs.ts';
 import { homeRelativePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/home-path';
@@ -62,7 +59,9 @@ export async function setupPostureCatalogStatus(context: CommandContext, options
   const setupSmokeHistory = setupSmokeEvidenceHistory(smoke);
   const setupWizard = buildSetupWizard(plan, context, smoke);
   return caller.publish({
-    modes: ['setup_posture', 'setup_item', 'setup_repair', 'setup_checkpoint', 'mark_setup_checkpoint', 'clear_setup_checkpoint', 'provision_connected_host_token', 'run_setup_smoke'],
+    modes: ['setup_posture', 'setup_item', 'setup_repair', 'provision_connected_host_token', 'run_setup_smoke'],
+    // What the person sets up, one topic at a time: each is a /setup action (run_command "/setup <word>").
+    setupTopics: Object.values(SETUP_TOPICS).map((topic) => ({ label: topic.label, line: `/setup ${topic.word}` })),
     capabilities: capabilities.length,
     planItems: plan.length,
     blockedPlanItems: plan.filter((item) => item.status === 'blocked').length,
@@ -211,125 +210,6 @@ export async function setupPostureSummary(context: CommandContext, rawArgs: Agen
       : {}),
     policy: 'Read-only setup/onboarding posture. Apply, import, auth, profile, channel, and setting mutations remain confirmation-gated through visible workspace, settings, slash-command, or first-class tool flows.',
   });
-}
-
-/** The saved checkpoint, read from its file: no host probe, no plan. setup action:"status" shows where the wizard stands now. */
-export async function setupCheckpointSummary(context: CommandContext, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  const caller = captureSetupCaller(context, {}, options);
-  const checkpoint = setupWizardCheckpoint(context);
-  return caller.publish({
-    mode: 'setup_checkpoint',
-    checkpoint,
-    currentStep: checkpoint.currentStepId ? { id: checkpoint.currentStepId, label: checkpoint.currentStepLabel } : null,
-    routes: {
-      inspectSetup: DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE,
-      markCurrent: DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE,
-      clear: DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE,
-    },
-    policy: 'Read-only checkpoint inspection. Saving or clearing the setup wizard checkpoint requires a confirmed route with explicit user request.',
-  });
-}
-
-export async function markSetupCheckpoint(context: CommandContext, args: Record<string, unknown>, options?: Parameters<Tool['execute']>[1]): Promise<EffectResult> {
-  const assertCurrent = captureHarnessLocalEffect(context, args, options, paths => [setupWizardCheckpointPath(paths)]);
-  const platform = context.platform, config = platform.configManager, incarnation = config.getConfigurationIncarnation();
-  const { smoke, plan } = await observeSetup(context, { signal: options?.signal, assertCurrent });
-  assertCurrent();
-  const setupWizard = buildSetupWizard(plan, context, smoke);
-  const requestedStepId = readString(args.setupItemId);
-  const step = requestedStepId
-    ? setupWizard.steps.find((candidate) => candidate.id === requestedStepId)
-    : setupWizard.currentStepId
-      ? setupWizard.steps.find((candidate) => candidate.id === setupWizard.currentStepId)
-      : null;
-  if (!step) {
-    return {
-      status: 'no_checkpoint_written',
-      done: false,
-      mode: 'mark_setup_checkpoint',
-      reason: requestedStepId
-        ? `Unknown setup wizard step ${requestedStepId}.`
-        : 'Setup wizard has no current step to checkpoint.',
-      setupWizard: {
-        status: setupWizard.status,
-        currentStepId: setupWizard.currentStepId,
-        currentStepLabel: setupWizard.currentStepLabel,
-      },
-      routes: {
-        inspectSetup: DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE,
-      },
-    };
-  }
-  if (step.sourceStatus === 'ready') {
-    return {
-      status: 'no_checkpoint_written',
-      done: false,
-      mode: 'mark_setup_checkpoint',
-      reason: `Setup wizard step ${step.label} is already ready.`,
-      step,
-      routes: {
-        inspectSetup: DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE,
-        clear: DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE,
-      },
-    };
-  }
-  const shellPaths = requireShellPaths(context);
-  assertCurrent();
-  if (context.platform !== platform || platform.configManager !== config || config.getConfigurationIncarnation() !== incarnation) throw new ToolInputProjectionError('held');
-  const checkpoint = saveSetupWizardCheckpoint(shellPaths, {
-    currentStepId: step.id,
-    currentStepLabel: step.label,
-    source: 'harness',
-    note: 'Recorded model-admitted setup wizard checkpoint.',
-  });
-  const updatedWizard = buildSetupWizard(plan, context, smoke);
-  return {
-    status: 'checkpoint_saved',
-    done: true,
-    mode: 'mark_setup_checkpoint',
-    explicitUserRequest: previewHarnessText(readString(args.explicitUserRequest), 160),
-    step,
-    checkpoint,
-    setupWizard: {
-      status: updatedWizard.status,
-      progressLabel: updatedWizard.progressLabel,
-      currentStepId: updatedWizard.currentStepId,
-      currentStepLabel: updatedWizard.currentStepLabel,
-      checkpoint: updatedWizard._diagnostic.checkpoint,
-    },
-    routes: {
-      inspectCheckpoint: DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE,
-      inspectSetup: DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE,
-      clear: DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE,
-    },
-    policy: {
-      effect: 'confirmed-setup-checkpoint-save',
-      boundary: 'Only the current setup wizard step id, label, source, timestamp, and generic note were saved in Agent-owned setup state.',
-    },
-  };
-}
-
-export function clearSetupCheckpoint(context: CommandContext, args: Record<string, unknown>, options?: Parameters<Tool['execute']>[1]): EffectResult {
-  const assertCurrent = captureHarnessLocalEffect(context, args, options, paths => [setupWizardCheckpointPath(paths)]);
-  const shellPaths = requireShellPaths(context);
-  assertCurrent();
-  const checkpoint = clearSetupWizardCheckpoint(shellPaths);
-  return {
-    status: 'checkpoint_cleared',
-    done: true,
-    mode: 'clear_setup_checkpoint',
-    explicitUserRequest: previewHarnessText(readString(args.explicitUserRequest), 160),
-    checkpoint,
-    routes: {
-      inspectCheckpoint: DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE,
-      inspectSetup: DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE,
-      markCurrent: DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE,
-    },
-    policy: {
-      effect: 'confirmed-setup-checkpoint-clear',
-      boundary: 'Removed only the Agent-owned setup wizard checkpoint file.',
-    },
-  };
 }
 
 export function provisionConnectedHostOperatorToken(context: CommandContext, args: AgentHarnessSetupArgs): EffectResult {

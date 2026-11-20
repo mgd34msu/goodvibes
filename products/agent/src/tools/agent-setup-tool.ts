@@ -156,20 +156,6 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
           includeParameters: args.includeParameters,
         }));
       }
-      if (action === 'checkpoint') return run('agent_harness', { mode: 'setup_checkpoint' });
-      if (action === 'save_checkpoint') {
-        return run('agent_harness', {
-          mode: 'mark_setup_checkpoint',
-          ...compactArgs({ setupItemId: itemLookup(args) || undefined }),
-          ...confirmedArgs(args),
-        });
-      }
-      if (action === 'clear_checkpoint') {
-        return run('agent_harness', {
-          mode: 'clear_setup_checkpoint',
-          ...confirmedArgs(args),
-        });
-      }
       if (action === 'token') {
         return run('agent_harness', {
           mode: 'provision_connected_host_token',

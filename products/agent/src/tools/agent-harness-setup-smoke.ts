@@ -6,11 +6,9 @@ import type { SetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts'
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
-import { clearSetupWizardCheckpoint, readSetupWizardCheckpoint, saveSetupWizardCheckpoint } from '../agent/setup-wizard-checkpoint.ts';
 import { listSetupSmokeEvidence, recordSetupSmokeEvidence, type SetupSmokeEvidenceList } from '../agent/setup-smoke-evidence.ts';
-import { DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE, buildAgentSetupWizard, emptyAgentSetupSmokeHistory, emptyAgentSetupWizardCheckpoint, type AgentSetupWizard, type AgentSetupWizardCheckpoint, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../agent/setup-wizard.ts';
+import { DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE, buildAgentSetupWizard, emptyAgentSetupSmokeHistory, type AgentSetupWizard, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../agent/setup-wizard.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-import { homeRelativePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/home-path';
 import { readFieldMap, readString, safeIso, setupSmokeArtifactStore } from './agent-harness-setup-posture-utils.ts';
 import { setupHandoffsForItem } from './agent-harness-setup-handoffs.ts';
 import type { SetupConnectedHostAuthPosture, SetupInstallSmokeCheck, SetupInstallSmokePlan, SetupInstallSmokeRunSummary, SetupPlanItem, SetupServiceProbe, SetupSmokeEvidenceField } from './agent-harness-setup-posture-types.ts';
@@ -582,89 +580,11 @@ export function setupWizardSmokeHistory(listed: SetupSmokeEvidenceList): AgentSe
   };
 }
 
-export function setupWizardCheckpoint(context: CommandContext): AgentSetupWizardCheckpoint {
-  const routes = {
-    markCurrentRoute: DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE,
-    clearRoute: DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE,
-    inspectRoute: DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE,
-  };
-  try {
-    const shellPaths = requireShellPaths(context);
-    const snapshot = readSetupWizardCheckpoint(shellPaths);
-    if (!snapshot.exists) {
-      return {
-        ...emptyAgentSetupWizardCheckpoint(),
-        ...routes,
-        path: homeRelativePath(snapshot.path, shellPaths.homeDirectory),
-      };
-    }
-    if (!snapshot.checkpoint) {
-      return {
-        ...emptyAgentSetupWizardCheckpoint(snapshot.parseError ?? 'Saved setup wizard checkpoint could not be read.'),
-        ...routes,
-        status: 'unavailable',
-        path: homeRelativePath(snapshot.path, shellPaths.homeDirectory),
-        ...(snapshot.parseError ? { parseError: snapshot.parseError } : {}),
-      };
-    }
-    return {
-      status: 'available',
-      currentStepId: snapshot.checkpoint.currentStepId,
-      currentStepLabel: snapshot.checkpoint.currentStepLabel,
-      savedAt: snapshot.checkpoint.savedAt,
-      source: snapshot.checkpoint.source,
-      resumed: false,
-      summary: `Saved setup checkpoint for ${snapshot.checkpoint.currentStepLabel}.`,
-      path: homeRelativePath(snapshot.path, shellPaths.homeDirectory),
-      ...(snapshot.checkpoint.note ? { note: snapshot.checkpoint.note } : {}),
-      ...routes,
-    };
-  } catch (error) {
-    return {
-      ...emptyAgentSetupWizardCheckpoint(previewHarnessText(error instanceof Error ? error.message : String(error), 160)),
-      ...routes,
-      status: 'unavailable',
-    };
-  }
-}
-
-export function setupCompletionMarkerExists(context: CommandContext): boolean {
-  try {
-    return isOnboardingComplete(requireShellPaths(context));
-  } catch {
-    return false;
-  }
-}
-
-export const SETUP_WIZARD_PLAN_BLOCKER_ALIASES: Readonly<Record<string, readonly string[]>> = {
-  'agent-binary': ['install-smoke', 'connected-host-readiness'],
-  'connected-host-status': ['connected-host-readiness'],
-  'connected-host-auth': ['connected-host-auth'],
-  'provider-model': ['provider-access'],
-  'setup-posture': ['install-smoke'],
-  'first-assistant-turn': ['install-smoke'],
-};
-
-export function setupPlanItemToWizardSource(item: SetupPlanItem): AgentSetupWizardSourceItem {
-  const primaryHandoff = setupHandoffsForItem(item)[0];
-  return {
-    id: item.id,
-    label: item.label,
-    status: item.status,
-    detail: item.nextAction || item.reason,
-    userRoute: primaryHandoff?.userRoute ?? item.userRoute,
-    modelRoute: primaryHandoff?.modelRoute ?? item.modelRoute,
-    actionId: primaryHandoff?.id ?? item.id,
-  };
-}
-
-
 export function buildSetupWizard(plan: readonly SetupPlanItem[], context: CommandContext, smoke: SetupSmokeEvidenceList): AgentSetupWizard {
   const markerItem = plan.find((item) => item.id === 'finish-onboarding');
   return buildAgentSetupWizard({
     items: plan.map(setupPlanItemToWizardSource),
     smokeHistory: setupWizardSmokeHistory(smoke),
-    checkpoint: setupWizardCheckpoint(context),
     closeoutCriticalStepIds: plan.filter((item) => item.blocksAutonomy).map((item) => item.id),
     // Only the setup smoke saves evidence; the host readiness and auth steps are decided by their live checks.
     receiptRequiredStepIds: ['install-smoke'],

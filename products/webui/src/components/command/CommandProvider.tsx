@@ -31,6 +31,7 @@ import { CommandPalette } from './CommandPalette';
 import { ShortcutCheatsheet } from './ShortcutCheatsheet';
 import { ActionSheet } from './ActionSheet';
 import { COMMAND_ACTIONS } from '../../lib/generated/command-actions';
+import { COMMAND_SCREENS, CommandScreenDrawer } from './screens/CommandScreens';
 
 export type { ViewId };
 
@@ -57,6 +58,8 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
   /** The slash-command action whose sheet is open from the palette. */
   const [sheet, setSheet] = useState<{ readonly command: string; readonly action: string } | null>(null);
+  /** The screen drawn from a command's description (schedules, MCP servers ...) open in a panel. */
+  const [screen, setScreen] = useState<string | null>(null);
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
   const closePalette = useCallback(() => setPaletteOpen(false), []);
@@ -170,6 +173,16 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
         });
       }
     }
+    // Each screen drawn from a command's description (its rows carry the command's actions) opens in a panel.
+    for (const entry of COMMAND_SCREENS) {
+      defs.push({
+        id: `screen.${entry.id}`,
+        title: entry.title,
+        group: 'settings',
+        keywords: [`/${entry.command}`, ...entry.keywords],
+        run: () => setScreen(entry.id),
+      });
+    }
     // Every other settings section is one command in the palette's Settings group
     // ("Models and providers" is nav.providers above).
     for (const section of SETTINGS_SECTIONS) {
@@ -210,6 +223,7 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
       {children}
       <CommandPalette open={paletteOpen} onClose={closePalette} />
       <ShortcutCheatsheet open={cheatsheetOpen} onClose={closeCheatsheet} />
+      <CommandScreenDrawer screen={screen} onClose={() => setScreen(null)} />
       {sheet ? <ActionSheet key={`${sheet.command}.${sheet.action}`} open command={sheet.command} action={sheet.action} onClose={() => setSheet(null)} /> : null}
     </>
   );

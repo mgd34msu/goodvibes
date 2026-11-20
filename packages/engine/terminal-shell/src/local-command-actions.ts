@@ -1,7 +1,6 @@
 import { existsSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { ContentPart, ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
-import { formatModelDiscoveryReport } from '@goodvibes-jev/engine/platform/platform/providers';
 import { resolveAndValidatePath, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { TerminalSlashCommand } from './command-registry.js';
 import type { TerminalConversationManager } from './terminal-conversation.js';
@@ -47,7 +46,6 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
     readonly imageHint: string;
     readonly supportedFormats: string;
     readonly maximumImageSize: string;
-    readonly partialRefresh: string;
     readonly error: (detail: string) => string;
     readonly imageFailure: (kind: string, detail: string) => string;
     readonly invalidBlockType: (type: string, valid: readonly string[]) => string;
@@ -155,69 +153,6 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
         ];
         if (!ctx.submitTurn) throw commandRefusal('The image was not sent: this surface cannot send a message.');
         ctx.submitTurn(promptText, content);
-      },
-    } satisfies TerminalSlashCommand<Context>,
-    'refresh-models': {
-      name: 'refresh-models',
-      effect: 'external-network',
-      firstScreen: !policy.hidden,
-      description: 'Refresh model catalog, benchmarks, and token limits',
-      async handler(_args: string[], ctx: Context) {
-        const providerApi = requireProviderApi(ctx);
-        let catalogOk = false;
-        let benchmarksOk = false;
-        let limitsOk = false;
-        ctx.print('Refreshing model catalog...');
-        try {
-          const catalog = await providerApi.refreshCatalog();
-          catalogOk = true;
-          ctx.print(`Model catalog refreshed: ${catalog.modelCount} models from ${catalog.providerCount} providers`);
-        } catch (e) {
-          ctx.print(policy.imageFailure('Catalog refresh failed', summarizeError(e)));
-        }
-        ctx.print('Refreshing benchmarks...');
-        try {
-          const benchmarkCount = await providerApi.refreshBenchmarks();
-          benchmarksOk = true;
-          ctx.print(`Benchmarks refreshed${benchmarkCount > 0 ? `: ${benchmarkCount} model records available.` : '.'}`);
-        } catch (e) {
-          ctx.print(policy.imageFailure('Benchmarks refresh failed', summarizeError(e)));
-        }
-        ctx.print('Refreshing token limits...');
-        try {
-          const count = await providerApi.refreshModelLimits();
-          limitsOk = true;
-          ctx.print(`Token limits refreshed: ${count} models updated.`);
-        } catch (e) {
-          ctx.print(policy.imageFailure('Token limits refresh failed', summarizeError(e)));
-        }
-        let discoveryOk = false;
-        ctx.print('Refreshing live provider model lists...');
-        try {
-          // Explicit user refresh → force past each provider's TTL cache and
-          // report the delta ("3 new, 1 retired") or the honest fallback reason.
-          const reports = await providerApi.refreshLiveModelDiscovery(undefined, { force: true });
-          discoveryOk = reports.every((report) => !report.error);
-          if (reports.length === 0) {
-            ctx.print('No providers perform live model discovery.');
-          } else {
-            for (const report of reports) {
-              if (report.source === 'live' || report.error || report.unclassifiedModels?.length)
-                ctx.print(`  ${formatModelDiscoveryReport(report.providerId, report)}`);
-            }
-            const absent = reports.filter((report) => report.skippedReason === 'local-endpoint-unavailable');
-            if (absent.length > 0)
-              ctx.print(`Local servers not running: ${absent.map((report) => report.providerId).join(', ')} (skipped).`);
-            const unchanged = reports.filter(
-              (report) => report.source !== 'live' && !report.error && !report.skippedReason && !report.unclassifiedModels?.length,
-            ).length;
-            if (unchanged > 0) ctx.print(`${unchanged} providers kept their last listed models or the pinned catalog (no live refresh).`);
-          }
-        } catch (e) {
-          ctx.print(policy.imageFailure('Live model discovery failed', summarizeError(e)));
-        }
-        // Each step above printed what it did; a step that failed makes the refresh a refusal.
-        if (!catalogOk || !benchmarksOk || !limitsOk || !discoveryOk) throw commandRefusal(policy.partialRefresh);
       },
     } satisfies TerminalSlashCommand<Context>,
     // `/pin`: pin and unpin models in the favourites the model picker shows first (command-actions/).

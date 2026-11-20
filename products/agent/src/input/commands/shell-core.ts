@@ -9,6 +9,7 @@ import '@goodvibes-jev/engine/platform/platform/utils';
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import { createCompactCommand, refuseWhileTurnRuns } from '@goodvibes-jev/engine/terminal-shell/everyday-commands';
 import { helpForCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { registerModelCommands } from '@goodvibes-jev/engine/terminal-shell/model-command';
 
 function commandCategory(commandName: string): string {
   if (
@@ -124,18 +125,10 @@ function registeredCommandListText(registry: CommandRegistry): string {
 }
 
 const coreActions = createShellCoreActions<CommandContext>(
-  { requireProviderApi, requireKeybindingsManager, startFreshConversation },
+  { requireKeybindingsManager, startFreshConversation },
   {
     hidden: true,
-    modelHint: '[name] | fallback',
-    choiceMarker: '◉',
-    offeredIndent: '  ',
     shortcutOverlay: false,
-    unsupportedEffortAdvice: false,
-    beforeSelection: (_ctx, _provider, complete) => complete(),
-    modelSelected: (model, provider) => 'Switched model\n  model ' + model + '\n  provider ' + provider,
-    effortMessage: (level, changed) => (changed ? 'Reasoning effort set' : 'Reasoning effort') + '\n  level ' + level,
-    error: (detail) => 'Error\n  message ' + detail,
     freshConversation: (ctx, savedAs) =>
       ctx.print('Fresh conversation. The previous one is saved as ' + savedAs + ': /session resume ' + savedAs + ' returns to it.'),
   },
@@ -148,7 +141,8 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
     shortcutsFallback: 'Press ? for every command and keyboard shortcut.',
   });
 
-  registry.register(coreActions.model);
+  // `/model` and `/effort` are one description each, shared with the other terminal app.
+  registerModelCommands<CommandContext>(registry, { requireProviderApi, beforeSelection: (_ctx, _provider, complete) => complete() });
 
   registry.register(navigation.shortcuts);
 
@@ -185,8 +179,6 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
   registry.register(compactCommand);
 
   registry.register(navigation.quit);
-
-  registry.register(coreActions.effort);
 }
 
 /** `/compact` is a single-action command shared with the other terminal app (terminal-shell/everyday-commands.ts). */

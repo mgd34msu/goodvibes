@@ -147,7 +147,7 @@ export function setupCommandDescription<Ctx>(options: SetupCommandOptions<Ctx>):
     'chat-apps', 'who-signs-in', 'how-it-works',
     { label: 'Features and switches…', actions: FEATURE_GROUP },
     'history', 'import-settings',
-    { label: 'Pair the Agent with a GoodVibes host…', actions: ['pair', 'unpair'] },
+    'pair', 'unpair',
     'first-run',
   ];
   return {

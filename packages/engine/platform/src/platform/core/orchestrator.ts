@@ -61,7 +61,7 @@ import type { RuntimeEventBus, TurnEvent, TurnInputOrigin } from '../runtime/eve
 import { readTurnFailure, turnFailureText, type TurnRefusalReason } from './turn-failure.js';
 import { resolveDefaultModelReadiness } from '../providers/keyless-default.js';
 import { readFallbackOrder } from '../providers/failover.js';
-import { declaredValues } from '../gate/classify.js';
+import { TurnAttemptRecord, TurnChangeRecord } from './turn-changes.js';
 import { HelperModel } from '../config/helper-model.js';
 import {
   emitPreflightFail,
@@ -137,10 +137,8 @@ interface TurnFailureFacts {
   readonly turnId: string;
   provider?: string | undefined;
   model?: string | undefined;
-  attempts: number;
-  attemptTimes: number[];
-  readonly changedFiles: Set<string>;
-  changedUnknown: boolean;
+  readonly attempts: TurnAttemptRecord;
+  readonly changes: TurnChangeRecord;
   fallbackNote?: string | undefined;
   readonly stop: () => void;
 }
@@ -1568,8 +1566,8 @@ export class Orchestrator {
     return {
       ...(provider ? { provider, providerName: providerRegistry.providerDisplayName(provider) } : {}),
       ...(model ? { model } : {}),
-      ...(providerFailed && record && record.attempts > 0 ? { attempts: record.attempts, attemptTimes: [...record.attemptTimes] } : {}),
-      ...(record ? { changedFiles: [...record.changedFiles], ...(record.changedUnknown ? { changedUnknown: true } : {}) } : {}),
+      ...(providerFailed && record && record.attempts.count > 0 ? { attempts: record.attempts.count, attemptTimes: [...record.attempts.times] } : {}),
+      ...(record ? { changes: record.changes.changes } : {}),
       ...(record?.fallbackNote ? { fallbackNote: record.fallbackNote } : {}),
       fallbackOrderSet,
     };
@@ -1585,52 +1583,26 @@ export class Orchestrator {
     this.turnFailureFacts?.stop();
     const bus = this.runtimeBus;
     const stops: (() => void)[] = [];
-    const record: TurnFailureFacts = { turnId, attempts: 0, attemptTimes: [], changedFiles: new Set(), changedUnknown: false,
+    const record: TurnFailureFacts = { turnId, attempts: new TurnAttemptRecord(), changes: new TurnChangeRecord(),
       stop: () => { for (const stop of stops.splice(0)) stop(); } };
     if (bus) {
       stops.push(bus.on<Extract<TurnEvent, { type: 'LLM_REQUEST_STARTED' }>>('LLM_REQUEST_STARTED', (envelope) => {
         const payload = envelope.payload;
         if (payload.turnId !== turnId) return;
-        if (payload.provider !== record.provider || payload.model !== record.model) {
-          record.attempts = 0;
-          record.attemptTimes = [];
-        }
         record.provider = payload.provider;
         record.model = payload.model;
-        record.attempts += 1;
-        record.attemptTimes.push(envelope.ts);
+        record.attempts.sent(`${payload.provider}:${payload.model}`, envelope.ts);
       }));
       stops.push(bus.on<Extract<TurnEvent, { type: 'LLM_RESPONSE_RECEIVED' }>>('LLM_RESPONSE_RECEIVED', (envelope) => {
-        if (envelope.payload.turnId !== turnId) return;
-        record.attempts = 0;
-        record.attemptTimes = [];
+        if (envelope.payload.turnId === turnId) record.attempts.answered();
       }));
     }
     this.turnFailureFacts = record;
   }
 
-  /**
-   * Record what a batch of the running turn's tool calls changed: the declared
-   * paths of each successful call to a tool that writes files; a successful
-   * call whose effects are not declared, or a command, may have changed
-   * something the row cannot name.
-   */
+  /** Record what a batch of the running turn's tool calls changed (core/turn-changes.ts). */
   private recordTurnChanges(calls: readonly ToolCall[], results: readonly ToolResult[]): void {
-    const record = this.turnFailureFacts;
-    if (!record) return;
-    for (const result of results) {
-      if (!result.success) continue;
-      const call = calls.find((candidate) => candidate.id === result.callId);
-      if (!call) continue;
-      const definition = this.toolRegistry.definitionOf(call.name);
-      const effects = definition?.sideEffects;
-      if (effects === undefined) { record.changedUnknown = true; continue; }
-      if (effects.includes('write_fs')) {
-        const paths = declaredValues(call.arguments, definition?.subjects?.paths);
-        if (paths && paths.length > 0) for (const path of paths) record.changedFiles.add(path);
-        else record.changedUnknown = true;
-      } else if (effects.includes('exec')) record.changedUnknown = true;
-    }
+    this.turnFailureFacts?.changes.note(calls, results, (name) => this.toolRegistry.definitionOf(name));
   }
 
   /** Finally handler: tool-call reconciliation, submission key finalization, notifications, replay queue. */

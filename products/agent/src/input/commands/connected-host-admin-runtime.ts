@@ -1,51 +1,16 @@
 /**
- * The connected host's principal registry and per-channel profile admin
- * families: /principals, /channel-profiles. `/ci` is one description shared with
- * the terminal app (terminal-shell/ci-command.ts), its methods called on the
- * connected host.
- *
- * These are thin bridges onto the exact same CLI handlers the terminal
- * commands use (src/cli/ci-command.ts, principals-command.ts,
- * channel-profiles-command.ts): the TUI handler re-parses the invocation
- * through the real CLI parser and hands the result to the CLI handler, so
- * subcommand grammar, --yes confirmation gates, per-job CI conclusion
- * rendering, and connected-host failure classification can never drift
- * between the two surfaces. Output prints into the transcript verbatim.
+ * `/ci` and `/principals` on the connected host: each is one description
+ * shared with the terminal app (terminal-shell/ci-command.ts,
+ * principals-command.ts), its methods called on the connected host. Channel
+ * profiles are actions of `/channels` (terminal-shell/channels-command.ts).
  */
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { parseGoodVibesCli } from '../../cli/parser.ts';
-import type { CliCommandOutput } from '../../cli/types.ts';
-import type { CliCommandRuntime } from '../../cli/management.ts';
 import { registerCiCommand } from '@goodvibes-jev/engine/terminal-shell/ci-command';
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import { formatOperatorGatewayFailure, invokeOperatorGatewayMethod } from '../../agent/operator-gateway-call.ts';
 import { resolveAgentConnectedHostConnection } from '../../agent/routine-schedule-promotion.ts';
 import { registerPrincipalsCommand } from '@goodvibes-jev/engine/terminal-shell/principals-command';
-import { handleChannelProfilesCommand } from '../../cli/channel-profiles-command.ts';
 import { requireShellPaths } from './runtime-services.ts';
-import { printCliCommandResult, refuseCliParseErrors } from './cli-command-output.ts';
-
-function buildCliRuntime(ctx: CommandContext, command: string, args: readonly string[]): CliCommandRuntime {
-  const shellPaths = requireShellPaths(ctx);
-  return {
-    cli: parseGoodVibesCli([command, ...args]),
-    configManager: ctx.platform.configManager,
-    workingDirectory: shellPaths.workingDirectory,
-    homeDirectory: shellPaths.homeDirectory,
-  };
-}
-
-async function runBridgedCliCommand(
-  ctx: CommandContext,
-  command: string,
-  args: readonly string[],
-  handler: (runtime: CliCommandRuntime) => Promise<CliCommandOutput>,
-): Promise<void> {
-  const runtime = buildCliRuntime(ctx, command, args);
-  refuseCliParseErrors(runtime.cli.errors);
-  const result = await handler(runtime);
-  printCliCommandResult((text) => ctx.print(text), result);
-}
 
 /** The connected host's routes for the CI methods (the same as `goodvibes-agent ci`). */
 const CI_ROUTES = {
@@ -79,17 +44,5 @@ export function registerConnectedHostAdminCommands(registry: CommandRegistry): v
     const result = await invokeOperatorGatewayMethod(connection, method, PRINCIPALS_ROUTES[method], input);
     if (!result.ok) throw commandRefusal(formatOperatorGatewayFailure(result));
     return result.data;
-  });
-  registry.register({
-    name: 'channel-profiles',
-    effect: 'connected-host-state',
-    aliases: ['channel-profile'],
-    description: 'Manage per-channel session profile bindings (model, provider, permission mode) on the connected host',
-    firstScreen: false,
-    usage: 'list | get <surface-kind> [--channel-id <id>] | set <surface-kind> [--model <model>] [--provider <provider>] [--permission-mode <mode>] --yes | delete <surface-kind> --yes',
-    argsHint: 'list | get slack',
-    async handler(args, ctx) {
-      await runBridgedCliCommand(ctx, 'channel-profiles', args, handleChannelProfilesCommand);
-    },
   });
 }

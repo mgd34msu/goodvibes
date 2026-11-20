@@ -1,116 +1,28 @@
+/**
+ * `/channels` is one description shared with the terminal app
+ * (terminal-shell/channels-command.ts). Here the daemon's channel methods go to
+ * the connected host, and this app gives what it keeps itself: the setup
+ * readiness of the channels it can send to, the setup guide, the inbox, sends
+ * and their receipts.
+ */
+import { registerChannelsCommand, type ChannelReadinessFilter, type ChannelSendValues } from '@goodvibes-jev/engine/terminal-shell/channels-command';
 import { openTelegramCursorRecovery } from './telegram-cursor.ts';
-import type { CommandRegistry } from '../command-registry.ts';
-import type { CommandContext } from '../command-registry.ts';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { AgentWorkspaceChannelSetupGuide, AgentWorkspaceChannelStatus } from '../agent-workspace-channels.ts';
 import { buildAgentWorkspaceChannelTriage, formatAgentWorkspaceChannelTriage } from '../agent-workspace-channel-triage.ts';
 import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from '../agent-workspace-channels.ts';
-import { formatConnectedHostRouteFailure, readConnectedHostMethod } from '../connected-host-routes.ts';
-import { buildAgentChannelDeliveryPreview, deliverAgentChannelMessage, formatAgentChannelDeliveryPreview, formatAgentChannelDeliveryResult } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery';
+import { invokeConnectedHostMethod } from '../connected-host-routes.ts';
+import { buildAgentChannelDeliveryPreview, deliverAgentChannelMessage, formatAgentChannelDeliveryResult } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery';
 import { formatAgentChannelDeliveryReceiptLine, readAgentChannelDeliveryReceipts, recordAgentChannelDeliveryReceipt } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery-receipts';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
-import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
-import { secretArg } from '@goodvibes-jev/engine/terminal-shell/command-registry';
-import type { Secret } from '@goodvibes-jev/engine/platform/platform/security';
-
-type ChannelFilter = 'all' | 'ready' | 'attention';
-type JsonRecord = Record<string, unknown>;
-
-interface ChannelSendArgs {
-  readonly message: string;
-  readonly title?: string;
-  readonly channel?: string;
-  readonly route?: string;
-  /** Read with `secretArg` (a declared secret flag): an incoming webhook URL carries its token. */
-  readonly webhook?: Secret;
-  readonly link?: string;
-  readonly yes: boolean;
-  readonly errors: readonly string[];
-}
-
-function isRecord(value: unknown): value is JsonRecord {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readString(record: JsonRecord, key: string, fallback = ''): string {
-  const value = record[key];
-  return typeof value === 'string' ? value : fallback;
-}
-
-function readBoolean(record: JsonRecord, key: string, fallback = false): boolean {
-  const value = record[key];
-  return typeof value === 'boolean' ? value : fallback;
-}
+import { commandRefusal } from './confirmation.ts';
+import { Secret } from '@goodvibes-jev/engine/platform/platform/security';
 
 function readLimitValue(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(1, Math.min(100, Math.trunc(parsed)));
-}
-
-function readRecordArray(record: JsonRecord, key: string): readonly JsonRecord[] {
-  const value = record[key];
-  return Array.isArray(value) ? value.filter(isRecord) : [];
-}
-
-function readFlagValue(args: readonly string[], index: number, flag: string, errors: string[]): string | null {
-  const value = args[index + 1];
-  // Message and title are free text, so a value such as "--- status ---" is
-  // the text itself, not a missing value followed by another flag.
-  const freeText = flag === '--message' || flag === '--title';
-  if (!value || (!freeText && value.startsWith('--'))) {
-    errors.push(`${flag} requires a value.`);
-    return null;
-  }
-  return value;
-}
-
-/**
- * `args` are the arguments after `send`; `offset` is where they start in the
- * command's own arguments, so the webhook URL is read at the position the
- * input history masked (`secretArgs.flags`).
- */
-function parseChannelSendArgs(args: readonly string[], offset: number): ChannelSendArgs {
-  const parsed = stripYesFlag([...args]);
-  const errors: string[] = [];
-  const messageParts: string[] = [];
-  let title: string | undefined;
-  let channel: string | undefined;
-  let route: string | undefined;
-  let webhook: Secret | undefined;
-  let link: string | undefined;
-
-  for (let index = 0; index < parsed.rest.length; index += 1) {
-    const arg = parsed.rest[index];
-    if (arg === '--title' || arg === '--message' || arg === '--channel' || arg === '--route' || arg === '--webhook' || arg === '--link') {
-      const value = readFlagValue(parsed.rest, index, arg, errors);
-      index += 1;
-      if (!value) continue;
-      if (arg === '--title') title = value;
-      else if (arg === '--message') messageParts.push(value);
-      else if (arg === '--channel') channel = value;
-      else if (arg === '--route') route = value;
-      else if (arg === '--webhook') webhook = secretArg(offset + args.lastIndexOf('--webhook') + 1);
-      else link = value;
-    } else if (arg?.startsWith('--')) {
-      errors.push(`Unknown channel send flag ${arg}`);
-    } else if (arg) {
-      messageParts.push(arg);
-    }
-  }
-
-  const message = messageParts.join(' ').trim();
-  if (!message) errors.push('Channel send message is required.');
-  return {
-    message,
-    ...(title ? { title } : {}),
-    ...(channel ? { channel } : {}),
-    ...(route ? { route } : {}),
-    ...(webhook ? { webhook } : {}),
-    ...(link ? { link } : {}),
-    yes: parsed.yes,
-    errors,
-  };
 }
 
 function formatChannelDeliveryReceipts(context: CommandContext, limitArg?: string): string {
@@ -159,18 +71,17 @@ function formatChannelLine(channel: AgentWorkspaceChannelStatus): string {
 
 function filterChannels(
   channels: readonly AgentWorkspaceChannelStatus[],
-  filter: ChannelFilter,
+  filter: ChannelReadinessFilter,
 ): readonly AgentWorkspaceChannelStatus[] {
   if (filter === 'ready') return channels.filter((channel) => channel.ready);
   if (filter === 'attention') return channels.filter((channel) => (channel.enabled || channel.setupState === 'unknown') && channel.setupState !== 'ready');
   return channels;
 }
 
-function printChannelSummary(
-  print: (message: string) => void,
+function formatChannelSummary(
   channels: readonly AgentWorkspaceChannelStatus[],
-  filter: ChannelFilter,
-): void {
+  filter: ChannelReadinessFilter,
+): string {
   const ready = channels.filter((channel) => channel.ready);
   const enabled = channels.filter((channel) => channel.enabled);
   const needsTarget = channels.filter((channel) => channel.setupState === 'needs-target');
@@ -188,20 +99,17 @@ function printChannelSummary(
     `  needs target: ${needsTarget.length}`,
     `  needs config: ${needsConfig.length}`,
     '  policy: read-only inspection; sends require explicit user action and Agent policy',
-    '  details: /channels show <id>',
+    '  details: /channels configured <channel>',
     '',
     ...(filtered.length > 0
       ? filtered.map(formatChannelLine)
       : [`  No ${filter === 'ready' ? 'ready' : 'attention'} channels matched.`]),
   ];
-  print(lines.join('\n'));
+  return lines.join('\n');
 }
 
-function printChannelDetail(
-  print: (message: string) => void,
-  channel: AgentWorkspaceChannelStatus,
-): void {
-  print([
+function formatChannelDetail(channel: AgentWorkspaceChannelStatus): string {
+  return [
     `Channel: ${channel.label} (${channel.id})`,
     `  state: ${channel.setupState}`,
     `  enabled: ${channel.enabled ? 'yes' : 'no'}`,
@@ -214,7 +122,7 @@ function printChannelDetail(
     `  configured target keys: ${channel.configuredDefaultTargetKeys.join(', ') || 'none'}`,
     `  next: ${channel.nextStep}`,
     '  policy: this command never prints secret values and never sends messages',
-  ].join('\n'));
+  ].join('\n');
 }
 
 function formatGuideStepStatus(status: string): string {
@@ -248,271 +156,51 @@ function formatChannelSetupGuide(guide: AgentWorkspaceChannelSetupGuide): string
   return lines.join('\n');
 }
 
-function formatChannelAccounts(body: unknown): string {
-  const root = isRecord(body) ? body : {};
-  const accounts = readRecordArray(root, 'accounts');
-  const lines = [
-    'Channel Accounts',
-    `  accounts ${accounts.length}`,
-    '  policy read-only account posture; secret values are never shown',
-    '',
-  ];
-  if (accounts.length === 0) return [...lines, '  No channel accounts reported by connected host.'].join('\n');
-  for (const account of accounts.slice(0, 20)) {
-    const surface = readString(account, 'surface', 'unknown');
-    const accountId = readString(account, 'accountId', '');
-    const authState = readString(account, 'authState', readString(account, 'state', 'unknown'));
-    const configured = readBoolean(account, 'configured') ? 'configured' : 'not-configured';
-    const linked = readBoolean(account, 'linked') ? 'linked' : 'not-linked';
-    const secretFields = readRecordArray(account, 'secrets')
-      .map((secret) => readString(secret, 'field', 'secret'))
-      .join(', ') || 'none';
-    lines.push(`  ${surface}${accountId ? `/${accountId}` : ''}: ${configured}; ${linked}; auth=${authState}; secret refs=${secretFields === 'none' ? 'none' : secretFields.split(', ').map((field) => `${field}:config`).join(',')}`);
-  }
-  if (accounts.length > 20) lines.push(`  ${accounts.length - 20} more account(s) omitted.`);
-  return lines.join('\n');
-}
 
-function formatChannelPolicies(body: unknown): string {
-  const root = isRecord(body) ? body : {};
-  const policies = readRecordArray(root, 'policies');
-  const lines = [
-    'Channel Policies',
-    `  policies ${policies.length}`,
-    '  policy read-only policy posture; use exact confirmed commands for changes',
-    '',
-  ];
-  if (policies.length === 0) return [...lines, '  No channel policies reported by connected host.'].join('\n');
-  for (const policy of policies.slice(0, 20)) {
-    const surface = readString(policy, 'surface', 'unknown');
-    const direct = readBoolean(policy, 'allowDirectMessages') ? 'direct=yes' : 'direct=no';
-    const users = Array.isArray(policy.allowlistUserIds) ? policy.allowlistUserIds.length : 0;
-    const groups = Array.isArray(policy.allowlistGroupIds) ? policy.allowlistGroupIds.length : 0;
-    const groupPolicies = readRecordArray(policy, 'groupPolicies').length;
-    lines.push(`  ${surface}: ${direct}; allowlist users=${users}; groups=${groups}; group policies=${groupPolicies}`);
+async function sendChannelMessage(ctx: CommandContext, values: ChannelSendValues): Promise<string> {
+  const router = ctx.platform.channelDeliveryRouter;
+  if (!router) throw commandRefusal('Channel delivery is not available in this Agent runtime.');
+  const input = { ...values, ...(values.webhook ? { webhook: Secret.of(values.webhook, '/channels send webhook') } : {}) };
+  try {
+    buildAgentChannelDeliveryPreview(input);
+  } catch (error) {
+    throw commandRefusal(error instanceof Error ? error.message : String(error));
   }
-  if (policies.length > 20) lines.push(`  ${policies.length - 20} more policy record(s) omitted.`);
-  return lines.join('\n');
-}
-
-function formatChannelStatus(body: unknown): string {
-  const root = isRecord(body) ? body : {};
-  const channels = readRecordArray(root, 'channels');
-  const lines = [
-    'Connected Channel Status',
-    `  channels ${channels.length}`,
-    '  policy read-only connected-host status',
-    '',
-  ];
-  if (channels.length === 0) return [...lines, '  No connected channel status reported.'].join('\n');
-  for (const channel of channels.slice(0, 20)) {
-    const surface = readString(channel, 'surface', 'unknown');
-    const state = readString(channel, 'state', readString(channel, 'status', 'unknown'));
-    const enabled = readBoolean(channel, 'enabled') ? 'enabled' : 'disabled';
-    const ready = readBoolean(channel, 'ready') ? 'ready' : 'not-ready';
-    lines.push(`  ${surface}: ${enabled}; ${ready}; state=${state}`);
-  }
-  if (channels.length > 20) lines.push(`  ${channels.length - 20} more channel(s) omitted.`);
-  return lines.join('\n');
-}
-
-function formatChannelDoctor(surface: string, body: unknown): string {
-  const root = isRecord(body) ? body : {};
-  const checks = readRecordArray(root, 'checks');
-  const repairActions = readRecordArray(root, 'repairActions');
-  const lines = [
-    `Channel Doctor: ${readString(root, 'surface', surface)}`,
-    `  checks ${checks.length}`,
-    `  repair actions ${repairActions.length}`,
-    '  policy read-only doctor report; repair actions are not run here',
-    '',
-  ];
-  if (checks.length === 0) lines.push('  No doctor checks reported.');
-  for (const check of checks.slice(0, 20)) {
-    lines.push(`  ${readString(check, 'id', 'check')}: ${readString(check, 'status', 'unknown')}`);
-  }
-  if (repairActions.length > 0) {
-    lines.push('', '  Available repair action ids:');
-    for (const action of repairActions.slice(0, 12)) lines.push(`  - ${readString(action, 'id', 'action')}`);
-  }
-  return lines.join('\n');
-}
-
-function formatChannelSetup(surface: string, body: unknown): string {
-  const root = isRecord(body) ? body : {};
-  const fields = readRecordArray(root, 'fields');
-  const secretTargets = readRecordArray(root, 'secretTargets');
-  const lines = [
-    `Channel Setup Schema: ${readString(root, 'surface', surface)}`,
-    `  version ${typeof root.version === 'number' ? root.version : 'unknown'}`,
-    `  fields ${fields.length}`,
-    `  secret targets ${secretTargets.length}`,
-    '  policy read-only setup form; no credentials or values are printed',
-    '',
-  ];
-  if (fields.length > 0) {
-    lines.push('  Fields');
-    for (const field of fields.slice(0, 20)) lines.push(`  - ${readString(field, 'id', 'field')}`);
-  }
-  if (secretTargets.length > 0) {
-    lines.push('', '  Secret targets');
-    for (const target of secretTargets.slice(0, 12)) {
-      const required = readBoolean(target, 'required') ? 'required' : 'optional';
-      lines.push(`  - ${readString(target, 'id', 'secret')} (${required})`);
+  try {
+    const result = await deliverAgentChannelMessage(router, input);
+    const lines = [formatAgentChannelDeliveryResult(result)];
+    if (ctx.workspace?.shellPaths) {
+      try {
+        const receipt = recordAgentChannelDeliveryReceipt(ctx.workspace.shellPaths, { source: 'command', deliveryInput: input, result });
+        lines.push(`  receipt ${receipt.id}`);
+        if (receipt.storeNote) lines.push(`  ${receipt.storeNote}`);
+      } catch (receiptError) {
+        lines.push(`  receipt unavailable ${receiptError instanceof Error ? receiptError.message : String(receiptError)}`);
+      }
     }
+    return lines.join('\n');
+  } catch (error) {
+    if (readRefusal(error)) throw error;
+    throw commandRefusal(`Send failed: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
   }
-  return lines.join('\n');
 }
 
-async function printReadOnlyChannelRead(
-  context: CommandContext,
-  title: string,
-  methodId: string,
-  input: Record<string, unknown>,
-  format: (body: unknown) => string,
-): Promise<void> {
-  const result = await readConnectedHostMethod(context, methodId, input);
-  if (!result.ok) {
-    throw commandRefusal(formatConnectedHostRouteFailure(title, result, 'read-only; no channel send/action route was called'), undefined, 'COMMAND_FAILED');
-  }
-  context.print(format(result.body));
+function findChannel(ctx: CommandContext, id: string): AgentWorkspaceChannelStatus {
+  const wanted = id.trim().toLowerCase();
+  const channel = buildAgentWorkspaceChannels(ctx).find((entry) => entry.id.toLowerCase() === wanted || entry.label.toLowerCase() === wanted);
+  if (!channel) throw commandRefusal(`No channel is called ${id}.`, '/channels readiness lists the channels');
+  return channel;
 }
 
 export function registerChannelsRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'channels',
-    effect: 'external-network',
-    aliases: ['channel'],
-    description: 'Inspect Agent channel readiness or send an explicitly confirmed delivery message',
-    firstScreen: false,
-    usage: '[list|readiness|ready|attention|triage [limit]|guide [id]|show <id>|deliveries [limit]|send --channel <id> --message <text> --yes|accounts|policies|status|doctor <id>|setup <id>|telegram-cursor]',
-    // `send --webhook <url>`: the URL carries the webhook's token, so the input history keeps `<redacted>`.
-    secretArgs: { flags: ['--webhook'] },
-    argsHint: 'list|readiness|ready|attention|triage|guide|show|deliveries|send|accounts|policies|status|doctor|setup|telegram-cursor',
-    async handler(args, ctx) {
-      if (args[0]?.trim().toLowerCase() === 'telegram-cursor') { await openTelegramCursorRecovery(ctx); return; }
-      const channels = buildAgentWorkspaceChannels(ctx);
-      const subcommand = (args[0] ?? 'readiness').trim().toLowerCase();
-
-      if (subcommand === 'list' || subcommand === 'readiness') {
-        printChannelSummary(ctx.print, channels, 'all');
-        return;
-      }
-
-      if (subcommand === 'ready') {
-        printChannelSummary(ctx.print, channels, 'ready');
-        return;
-      }
-
-      if (subcommand === 'attention' || subcommand === 'issues') {
-        printChannelSummary(ctx.print, channels, 'attention');
-        return;
-      }
-
-      if (subcommand === 'guide' || subcommand === 'setup-guide') {
-        const channelId = args[1]?.trim();
-        ctx.print(formatChannelSetupGuide(buildAgentWorkspaceChannelSetupGuide(channels, channelId ? { channelId } : {})));
-        return;
-      }
-
-      if (subcommand === 'triage' || subcommand === 'inbox') {
-        ctx.print(formatAgentWorkspaceChannelTriage(await buildAgentWorkspaceChannelTriage(ctx, { limit: args[1] })));
-        return;
-      }
-
-      if (subcommand === 'show') {
-        const channelId = args[1]?.trim().toLowerCase();
-        if (!channelId) {
-          throw commandRefusal('Usage: /channels show <id>');
-        }
-        const channel = channels.find((entry) => entry.id.toLowerCase() === channelId || entry.label.toLowerCase() === channelId);
-        if (!channel) {
-          throw commandRefusal(`Unknown channel ${channelId}\nUse /channels list to see available channel ids.`);
-        }
-        printChannelDetail(ctx.print, channel);
-        return;
-      }
-
-      if (subcommand === 'deliveries' || subcommand === 'receipts') {
-        ctx.print(formatChannelDeliveryReceipts(ctx, args[1]));
-        return;
-      }
-
-      if (subcommand === 'send') {
-        const router = ctx.platform.channelDeliveryRouter;
-        if (!router) {
-          ctx.print('Channel delivery is not available in this Agent runtime.');
-          return;
-        }
-        const parsed = parseChannelSendArgs(args.slice(1), 1);
-        if (parsed.errors.length > 0) {
-          ctx.print(`[channels] ${parsed.errors.join('\n[channels] ')}`);
-          return;
-        }
-        let preview: ReturnType<typeof buildAgentChannelDeliveryPreview>;
-        try {
-          preview = buildAgentChannelDeliveryPreview(parsed);
-        } catch (error) {
-          throw commandRefusal(`[channels] ${error instanceof Error ? error.message : String(error)}`);
-        }
-        if (!parsed.yes) {
-          ctx.print(formatAgentChannelDeliveryPreview(preview, router.listStrategies().length));
-          requireYesFlag(ctx, 'send a channel delivery message', '/channels send --channel "<surface[:route][ | label]>" --message <text> --yes');
-          return;
-        }
-        try {
-          const result = await deliverAgentChannelMessage(router, parsed);
-          const lines = [formatAgentChannelDeliveryResult(result)];
-          if (ctx.workspace?.shellPaths) {
-            try {
-              const receipt = recordAgentChannelDeliveryReceipt(ctx.workspace.shellPaths, {
-                source: 'command',
-                deliveryInput: parsed,
-                result,
-              });
-              lines.push(`  receipt ${receipt.id}`);
-              if (receipt.storeNote) lines.push(`  ${receipt.storeNote}`);
-            } catch (receiptError) {
-              lines.push(`  receipt unavailable ${receiptError instanceof Error ? receiptError.message : String(receiptError)}`);
-            }
-          }
-          ctx.print(lines.join('\n'));
-        } catch (error) {
-          if (readRefusal(error)) throw error;
-          throw commandRefusal(`[channels] Send failed ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
-        }
-        return;
-      }
-
-      if (subcommand === 'accounts') {
-        await printReadOnlyChannelRead(ctx, 'Channel accounts', 'channels.accounts.list', {}, formatChannelAccounts);
-        return;
-      }
-
-      if (subcommand === 'policies') {
-        await printReadOnlyChannelRead(ctx, 'Channel policies', 'channels.policies.list', {}, formatChannelPolicies);
-        return;
-      }
-
-      if (subcommand === 'status') {
-        await printReadOnlyChannelRead(ctx, 'Channel status', 'channels.status', {}, formatChannelStatus);
-        return;
-      }
-
-      if (subcommand === 'doctor' || subcommand === 'setup') {
-        const channelId = args[1]?.trim().toLowerCase();
-        if (!channelId) {
-          throw commandRefusal(`Usage: /channels ${subcommand} <id>`);
-        }
-        if (subcommand === 'doctor') {
-          await printReadOnlyChannelRead(ctx, 'Channel doctor', 'channels.doctor.get', { surface: channelId }, (body) => formatChannelDoctor(channelId, body));
-          return;
-        }
-        await printReadOnlyChannelRead(ctx, 'Channel setup', 'channels.setup.get', { surface: channelId }, (body) => formatChannelSetup(channelId, body));
-        return;
-      }
-
-      throw commandRefusal('Usage: /channels [list|readiness|ready|attention|triage [limit]|guide [id]|show <id>|deliveries [limit]|send --channel <id> --message <text> --yes|accounts|policies|status|doctor <id>|setup <id>|telegram-cursor]');
-    },
+  registerChannelsCommand<CommandContext>(registry, {
+    invoke: (ctx, method, input) => invokeConnectedHostMethod(ctx, method, input),
+    telegramCursor: (ctx) => openTelegramCursorRecovery(ctx),
+    readiness: (ctx, filter: ChannelReadinessFilter) => formatChannelSummary(buildAgentWorkspaceChannels(ctx), filter),
+    configured: (ctx, id) => formatChannelDetail(findChannel(ctx, id)),
+    guide: (ctx, id) => formatChannelSetupGuide(buildAgentWorkspaceChannelSetupGuide(buildAgentWorkspaceChannels(ctx), id ? { channelId: id } : {})),
+    triage: async (ctx, limit) => formatAgentWorkspaceChannelTriage(await buildAgentWorkspaceChannelTriage(ctx, { limit })),
+    receipts: (ctx, limit) => formatChannelDeliveryReceipts(ctx, limit),
+    send: sendChannelMessage,
   });
 }

@@ -298,3 +298,40 @@
 .gv-action-sheet__sentence { margin: 4px 0 0; font-weight: 500; }
 .gv-action-sheet__line { margin: 0; color: var(--text-3); font-size: 0.875em; }
 .gv-action-buttons { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.gv-action-sheet__group { display: flex; flex-direction: column; gap: 12px; }
+.gv-action-sheet__step { margin: 0; font-weight: 600; }
+.gv-action-sheet__more { border-top: 1px solid var(--line); padding-top: 10px; }
+.gv-action-sheet__more > summary { cursor: pointer; font-weight: 600; margin-bottom: 10px; }
+.gv-action-sheet__hint-inline { color: var(--text-3); font-weight: 400; }
+.gv-action-sheet__preview { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); }
+.gv-action-sheet__problem { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--warn-soft); }
+.gv-action-sheet__line code { overflow-wrap: anywhere; }
+.gv-action-sheet__secret { -webkit-text-security: disc; }
+
+/* Screens drawn from one slash command (components/command/screens/): rows carry the command's actions. */
+.gv-command-screen { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.gv-command-screen__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.gv-command-screen__titles { min-width: 0; flex: 1 1 240px; }
+.gv-command-screen__title { margin: 0 0 2px; font-size: 16px; font-weight: 600; }
+.gv-command-screen__summary { margin: 0; color: var(--text-2); }
+.gv-command-screen__actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.gv-command-screen__state { margin: 0; color: var(--text-2); display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.gv-command-screen__state p { margin: 0; }
+.gv-command-screen__group { list-style: none; }
+.gv-command-screen__group > .gv-rows { margin: 0; }
+.gv-command-screen__nested { padding: 0 0 8px 28px; }
+.gv-command-screen__hint { color: var(--text-3); font-size: 0.875em; }
+.gv-command-screen__subhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.gv-command-screen__subhead h4 { margin: 0; font-size: 14px; font-weight: 600; }
+.gv-command-screen__runs { margin: 0; padding-left: 16px; color: var(--text-2); font-size: 0.875em; display: flex; flex-direction: column; gap: 4px; }
+.gv-command-screen__run-at { color: var(--text-3); }
+.gv-command-screen__terminal { color: var(--text-3); font-size: 0.875em; border-top: 1px solid var(--line); padding-top: 8px; }
+.gv-command-screen__terminal summary { cursor: pointer; }
+.gv-command-screen__terminal ul { margin: 6px 0 0; padding-left: 16px; display: flex; flex-direction: column; gap: 4px; }
+.gv-command-screen__terminal-label { color: var(--text-2); }
+.gv-command-screen-drawer { padding: 4px 16px 16px; overflow-y: auto; }
+@media (max-width: 600px) {
+  .gv-command-screen .gv-row { flex-wrap: wrap; }
+  .gv-command-screen .gv-row__trailing { width: 100%; justify-content: flex-start; padding-left: 28px; }
+  .gv-command-screen__nested { padding-left: 12px; }
+}

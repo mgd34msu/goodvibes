@@ -79,6 +79,8 @@ A schedule is named by its id, its name or the start of its id (one that names m
 | `--light-context` | Run with a small context. |
 | `--tz <zone>`, `--stagger <duration>` | For a pattern or a description: its time zone, and a spread of the start (such as `5m`). |
 
+In the web UI the same actions are the Schedules screen and its sheets (see "Slash command actions in the web UI" in the daemon part). There a time described in words is read by the daemon (`automation.schedules.preview`, in the browser's time zone when `--tz` is blank) and shown as `Read as: ...` with the next run before the button keeps it; nothing is kept by the reading.
+
 Successful `add` output (the id is generated):
 
 ```text
@@ -192,6 +194,8 @@ Stored triggers start being supervised at once. Triggers are saved in `triggers.
 "Watch for something" asks what to watch: a command finishing (the command after `--`; an `on-exit` trigger), a line a command prints (`--match`; a `stream` trigger), a web address changing (`--url`, looked at `--every`, default 5m; a `condition` with an `http` probe and a `change` rule), a file changing (`--file`, likewise with a `file` probe), or something else written out (`--definition`, the `{ "spec": ..., "action": ... }` JSON below, for any probe, rule or action). Its id is made from the name. Then it asks what happens: the agent looks at it (`--say` adds your instructions; `--deliver` names the channel its answer goes to, else the owner inbox), or a command you let triggers run (`--run`).
 
 The model creates, lists, cancels and resets triggers with the `trigger` tool. Only the owner lets triggers run a command: `/triggers allow-command` from a model is refused before anything is asked.
+
+The web UI's Triggers screen has the same actions; its "Watch for something" sheet asks the same blanks, and the daemon reads them into the definition (`watchers.triggers.preview`, the same reading as the terminal apps') and shows what it will watch before `Watch` makes it.
 
 ### Definition JSON
 
@@ -1104,6 +1108,8 @@ Allowed: "dog food" from shop.example, pets.example. Stop it any time: Stop a re
 /payments repeats
 /payments stop-repeat standing-1a2b3c4d
 ```
+
+In the web UI the Repeat purchases screen lists the same allowances, each with Stop, under `Allow a repeat purchase…`, a sheet with the same six blanks and sentence; both are sent as the owner's own request.
 
 The example lets a scheduled run buy "dog food" from either shop, at most 60.00 a purchase and 120.00 every 30 days, until 30 June 2027. A routine's purchase names the authorisation as `standingId` when it calls `payments.checkout.begin`. Every budget, ceiling and purchase window still applies to each purchase under it. A refusal names the field and ends with `Nothing was added.`, for example `maxPerPeriod must be one amount in USD, at least the per-purchase maximum.`
 

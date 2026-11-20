@@ -16,7 +16,7 @@
  * text is written here.
  */
 import { useMemo, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   actionButton,
   actionDoneLine,
@@ -262,6 +262,7 @@ export interface ActionSheetProps {
 export function ActionSheet({ open, onClose, command, action: actionId, prefill = {}, current = {}, onDone }: ActionSheetProps) {
   const found = findCommandAction(command, actionId);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [values, setValues] = useState<Record<string, string>>(() => (found ? initialValues(found.action, prefill) : {}));
   const [preview, setPreview] = useState<Preview | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -294,6 +295,9 @@ export function ActionSheet({ open, onClose, command, action: actionId, prefill 
         description: `From a terminal: ${renderTypedLine(asCommandShape(found.command), found.action.id, withoutSecrets(shape, sent))}`,
         tone: 'success',
       });
+      // What it changed shows in every screen and live list at once.
+      void queryClient.invalidateQueries({ queryKey: ['command-screen'] });
+      void queryClient.invalidateQueries({ queryKey: ['command-actions'] });
       onDone?.();
       onClose();
     },

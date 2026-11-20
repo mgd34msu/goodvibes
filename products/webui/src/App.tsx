@@ -28,6 +28,7 @@ import { useWakeHost } from './lib/voice/useWake';
 import { DaemonReceipts } from './components/status/DaemonReceipts';
 import { forgetUnendedSignIn, getCurrentAuth, hasStoredTokenSync, retryDaemonSignOut, signOut, client as platformClient } from './lib/goodvibes';
 import { queryKeys } from './lib/queries';
+import { hostedSessionsFromListResult } from './lib/hosted-sessions';
 import { ChatView } from './views/ChatView';
 import { WorkView } from './views/work/WorkView';
 import { LibraryView } from './views/library/LibraryView';
@@ -168,14 +169,25 @@ export default function App() {
     enabled: auth.isSuccess,
     retry: 0,
   });
+  // Daemon-hosted sessions: the same key, request and cadence Work's list reads (Work shows finished
+  // ones too), so a hosted turn answering now is counted here as it is on the page, with no second request.
+  const hostedList = useQuery({
+    queryKey: queryKeys.hostedSessions(true),
+    queryFn: () => platformClient.operator.sessions.hosted.list({ includeTerminated: true }),
+    enabled: auth.isSuccess,
+    refetchInterval: liveUpdates.status === 'live' ? 60_000 : 15_000,
+    retry: false,
+  });
+  const hostedRecords = useMemo(() => hostedSessionsFromListResult(hostedList.data), [hostedList.data]);
   const workCounts = useMemo(
     () => shellCounts({
       asks: openAskList,
+      hosted: hostedRecords,
       nodes: fleetSnapshot.data?.nodes ?? [],
       attemptGroups: attemptGroupList.isError ? [] : attemptGroupList.data?.groups ?? [],
       tasks: taskList.data?.tasks ?? [],
     }),
-    [openAskList, fleetSnapshot.data, attemptGroupList.data, attemptGroupList.isError, taskList.data],
+    [openAskList, hostedRecords, fleetSnapshot.data, attemptGroupList.data, attemptGroupList.isError, taskList.data],
   );
   const fleetAttentionCount = workCounts.waiting;
   const runningWork = workCounts.running;

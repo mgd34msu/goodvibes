@@ -20,7 +20,9 @@ export {
   type OperatorRpcUnavailable,
 } from '../../runtime/client/operator-endpoint.ts';
 
-import { resolveOperatorRpc } from '../../runtime/client/operator-endpoint.ts';
+import { describeOperatorRpcError, resolveOperatorRpc } from '../../runtime/client/operator-endpoint.ts';
+import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import type { OperatorRpc } from '../../runtime/client/operator-endpoint.ts';
 import type { CommandContext } from '../command-registry.ts';
 import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
@@ -38,4 +40,19 @@ export function getOperatorRpc(context: CommandContext): OperatorRpc {
     // disabled-daemon context with no shell paths still returns the honest reason.
     homeDirectory: () => requireShellPaths(context).homeDirectory,
   });
+}
+
+/**
+ * Call one operator method on this workspace's daemon for a described
+ * command: its typed output, or a refusal saying why the daemon could not be
+ * asked or what it answered.
+ */
+export async function invokeOperatorMethod<M extends OperatorMethodId>(context: CommandContext, method: M, input: OperatorMethodInput<M>): Promise<OperatorMethodOutput<M>> {
+  const rpc = getOperatorRpc(context);
+  if (!rpc.available) throw commandRefusal(rpc.reason);
+  try {
+    return await rpc.platformClient.operator.invoke(method, input);
+  } catch (error) {
+    throw commandRefusal(describeOperatorRpcError(error));
+  }
 }

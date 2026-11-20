@@ -6,7 +6,9 @@
  * principal and a failure names which credential source was used.
  */
 import { homedir } from 'node:os';
-import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostInvokeOptions, type ConnectedHostSelection, type ConnectedHostSource, type ConnectedHostUnavailable, type HostFailureKind } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
+import { createConnectedHost, formatHostFailure, isHostFailure, resolveConnectedHost, type ConnectedHostInvokeOptions, type ConnectedHostSelection, type ConnectedHostSource, type ConnectedHostUnavailable, type HostFailureKind } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
+import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import type { CommandContext } from './command-registry.ts';
 
 export interface ConnectedHostConnection {
@@ -128,4 +130,19 @@ export function formatConnectedHostRouteFailure(
     `  error: ${failure.message}`,
     `  policy: ${policy}`,
   ].join('\n');
+}
+
+/**
+ * Call one operator method on the connected host for a described command:
+ * its typed output, or a refusal saying what failed, why and what to do next.
+ * A line the owner typed carries the explicit-request mark; one a model ran
+ * does not.
+ */
+export async function invokeConnectedHostMethod<M extends OperatorMethodId>(context: CommandContext, method: M, input: OperatorMethodInput<M>): Promise<OperatorMethodOutput<M>> {
+  try {
+    return await createConnectedHost(selectionFor(context)).invoke(method, input, { explicitUserRequest: context.invokedByModel !== true });
+  } catch (error) {
+    if (isHostFailure(error)) throw commandRefusal(formatHostFailure(error));
+    throw commandRefusal(`The call to the connected host was not sent: ${error instanceof Error ? error.message : String(error)}`, 'Check the connected-host settings with /settings, then try again');
+  }
 }

@@ -61,7 +61,7 @@ Every method except three needs a credential. The three public methods are `cont
 A credential is sent in one of two ways:
 
 - `Authorization: Bearer <token>`, for any token;
-- the cookie `goodvibes_session=<token>`, which `POST /login` sets (`HttpOnly`, `SameSite=Lax`, `Secure` over HTTPS).
+- the cookie `goodvibes_session=<token>`, which `POST /login` and the web UI's `POST /api/browser-session` set (`HttpOnly`, `SameSite=Strict`, `Secure` over HTTPS), with the readable marker `goodvibes_identity` beside it (a generation and who is signed in, no credential). A request on the cookie is held to the page's origin: a state-changing one must carry the daemon's own `Origin` (or one in `controlPlane.cors.allowedOrigins`), and a read, the event stream included, is refused `403` `ORIGIN_NOT_ALLOWED` when it names another origin.
 
 When both are present, the bearer header is used.
 
@@ -147,7 +147,8 @@ curl -sS -i -X POST -H 'content-type: application/json' http://127.0.0.1:3421/lo
 
 ```text
 HTTP/1.1 200 OK
-set-cookie: goodvibes_session=<token>; Path=/; HttpOnly; SameSite=Lax; Expires=Thu, 19 Nov 2026 05:14:45 GMT; Max-Age=43199
+set-cookie: goodvibes_session=<token>; Path=/; HttpOnly; SameSite=Strict; Expires=Thu, 19 Nov 2026 05:14:45 GMT; Max-Age=43199
+set-cookie: goodvibes_identity=<generation>.<username, base64url>; Path=/; SameSite=Strict; Expires=Thu, 19 Nov 2026 05:14:45 GMT; Max-Age=43199
 ```
 
 ```json

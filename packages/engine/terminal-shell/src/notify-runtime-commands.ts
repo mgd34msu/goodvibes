@@ -266,7 +266,7 @@ export function registerNotifyCommands<Context extends NotifyContext & CommandAc
         ],
         sentence: 'The failed notification {which} is sent again.', example: { which: 'all' },
         touches: 'another-machine', risk: 'sends-out',
-        operator: { method: 'notifications.deadLetters.replay', fields: { ids: 'which:lines' } },
+        operator: { terminalOnly: 'a failed notification is named by the short id the terminal lists, or all' },
         async run(values, context) {
           const { sources, entries } = deadLetters(context);
           const which = values.which!;

@@ -54,8 +54,9 @@ GET /api/control-plane/auth
 Session cookie:
 - name: `goodvibes_session`
 - `HttpOnly`
-- `SameSite=Lax`
+- `SameSite=Strict`, and a request on the cookie is held to the page's `Origin` (the daemon's own or one in `controlPlane.cors.allowedOrigins`)
 - path: `/`
+- beside it the readable marker `goodvibes_identity` (a generation and who is signed in, no credential), cleared with it by `POST /logout`
 
 ## OAuth (daemon-side)
 

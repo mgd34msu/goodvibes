@@ -103,6 +103,8 @@ export function composeDelegatedTelegramIntake(runtime: ResolvedDaemonFacadeRunt
     beforeReviewOwnerWrite: () => runtime.runtimeServices.nativeDataWriter?.declare('delegated-review-owner-v2'),
     selectionPath: runtime.runtimeServices.shellPaths.resolveProjectPath('goodvibes', 'channels', 'telegram-delegated-selection.json'),
     receiptPath: runtime.runtimeServices.shellPaths.resolveProjectPath('goodvibes', 'channels', 'telegram-delegated-review.json'),
+    // The owner is told in his inbox when a message waits for him to confirm the chat again after a restart.
+    notices: runtime.runtimeServices.ownerInbox,
   });
   registerDelegatedTelegramCommands(runtime.gatewayMethods, host); return host;
 }

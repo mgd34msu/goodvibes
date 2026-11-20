@@ -22,7 +22,22 @@ import { summarizeError } from '../utils/native-error-summary.js';
 const sourceReader = (read: () => string) => () => ({ text: read(), unsupportedSources: [] });
 const routeKey = (chatId: string, threadId?: string) => JSON.stringify([chatId, threadId ?? null]);
 const routeFacts = (route: AutomationRouteBinding) => Object.freeze([route.id, route.surfaceKind, route.surfaceId, route.channelId, route.threadId, route.externalId, route.createdAt, route.kind, route.sessionPolicy, route.threadPolicy]);
-interface Selection { readonly chatId: string; readonly threadId?: string; }
+/**
+ * A chat the owner set up for delegated review, saved so it holds across restarts. `retentionMs` is the
+ * owner's own choice of how long a third party's message may wait in memory for review; the owner's grant
+ * (his live paired authority) is not saved, since it rests on his credential: after a restart he confirms the chat again.
+ */
+interface Selection { readonly chatId: string; readonly threadId?: string; readonly retentionMs?: number; }
+/** A message that arrived after a restart, kept in memory only, until the owner confirms the chat again or its time runs out. */
+interface Waiting { readonly input: DelegatedTelegramIngress; readonly until: number; }
+/** Most messages one selected chat keeps waiting for the owner to confirm it again. */
+const MAX_WAITING_PER_CHAT = 50;
+/** The owner inbox the intake tells that a message waits for the chat to be confirmed again. */
+export interface DelegatedWaitingNotices {
+  postNow(input: { readonly kind: 'report'; readonly title: string; readonly detail?: string; readonly key?: string; readonly expiresAt?: number;
+    readonly askedBy?: string; readonly metadata?: Readonly<Record<string, string | number | boolean>> }, postedBy?: string): { readonly item: { readonly id: string } };
+  withdraw(id: string, reason: string): unknown;
+}
 interface SelectionStore extends Record<string, unknown> { readonly selected: readonly Selection[]; }
 interface Configuration {
   readonly id: string; readonly choice: DelegatedTelegramConfiguration; readonly owner: NativeExecutionAuthority;
@@ -97,6 +112,8 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
   private readonly selected = new Map<string, Selection>();
   private readonly ingresses = new Map<string, IngressEntry>();
   private readonly pending = new Map<string, Pending>();
+  /** Per selected chat, messages that arrived with no live configuration (after a restart), and the notice telling the owner. */
+  private readonly waiting = new Map<string, { entries: Waiting[]; noticeId?: string }>();
   private readonly selectionStore: PersistentStore<SelectionStore>;
   private readonly selectionWrites = new StoreWriteQueue();
   private readonly receiver: DelegatedInboundReviewReceiver;
@@ -109,6 +126,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     readonly broker: SharedSessionBroker; readonly approvals: ApprovalBroker; readonly routes: Pick<RouteBindingManager, 'getBinding' | 'getBindingIncarnation'>;
     readonly accounts: TelegramSourceAccountReader; readonly workspaceRoot: string;
     readonly selectionPath: string; readonly receiptPath: string; readonly beforeReviewOwnerWrite?: () => void;
+    readonly notices?: DelegatedWaitingNotices | undefined;
   }) {
     this.selectionStore = new PersistentStore(deps.selectionPath);
     this.receiver = new DelegatedInboundReviewReceiver(deps.receiptPath, deps.beforeReviewOwnerWrite);
@@ -191,6 +209,14 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     const config: Configuration = { id: `telegram-config-${randomUUID()}`, choice: Object.freeze({ ...choice }), owner, expected, account,
       revision: randomUUID(), controller, timer, expiresAt: Date.now() + choice.configurationLifetimeMs };
     this.configurations.set(key, config); this.assertConfiguration(config);
+    // The owner's retention choice is saved with the chat, so after a restart a third party's message waits for him.
+    const saved = this.selected.get(key);
+    if (saved && saved.retentionMs !== choice.pendingRetentionMs) {
+      this.selected.set(key, { ...saved, retentionMs: choice.pendingRetentionMs });
+      const selection = { selected: [...this.selected.values()] };
+      await this.selectionWrites.run(() => this.selectionStore.persist(selection, { durable: true }));
+    }
+    this.replayWaiting(key, handle);
     return { outcome: 'configured', configurationId: config.id, accountIdentity: account, expiresAt: config.expiresAt, pendingRetentionMs: choice.pendingRetentionMs,
       processing: 'requires-per-message-approval', restart: 'selected-route-held-without-original-or-grant' };
   }
@@ -226,6 +252,60 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     }, () => { if (this.ingresses.get(key) === entry) this.ingresses.delete(key); });
     return entry.result;
   }
+  /**
+   * A message in a selected chat with no live configuration (the owner's grant ends with the process): it is
+   * kept in memory for the retention the owner chose for this chat, and the owner is told it waits for him to
+   * confirm the chat again. A chat whose retention was never chosen holds the message without keeping it.
+   */
+  private waitForConfirmation(input: DelegatedTelegramIngress): DelegatedTelegramAcceptance {
+    const key = routeKey(input.chatId, input.threadId);
+    const retentionMs = this.selected.get(key)?.retentionMs;
+    if (retentionMs === undefined) return delegatedHold('no-configuration');
+    const now = Date.now();
+    const slot = this.waiting.get(key) ?? { entries: [] };
+    slot.entries = slot.entries.filter(entry => entry.until > now);
+    if (slot.entries.length >= MAX_WAITING_PER_CHAT) return delegatedHold('tracking-full');
+    const until = now + retentionMs;
+    slot.entries.push({ input, until });
+    this.waiting.set(key, slot);
+    const chat = input.threadId ? `${input.chatId} (thread ${input.threadId})` : input.chatId;
+    try {
+      const posted = this.deps.notices?.postNow({
+        kind: 'report', key: `delegated-telegram-waiting:${key}`.slice(0, 200), askedBy: 'delegated Telegram intake', expiresAt: until,
+        title: `A message in delegated Telegram chat ${chat} waits for your review`,
+        detail: `Messages from other people in this chat wait in memory, unread, for your review (${slot.entries.length} now; the newest until ${new Date(until).toISOString()}). `
+          + 'The daemon restarted since you set the chat up, so confirm it again with inbound.telegram.configure for this chat: each waiting message is then put to you for review. '
+          + 'A restart before that drops them; inbound.telegram.release returns the chat to normal handling.',
+        metadata: { surface: 'telegram', chatId: input.chatId, waiting: slot.entries.length },
+      }, 'delegated Telegram intake');
+      if (posted) slot.noticeId = posted.item.id;
+    } catch (error) {
+      logger.warn('Delegated Telegram: the owner could not be told a message waits', { error: summarizeError(error) });
+    }
+    return delegatedHold('no-configuration', { message: 'Held in memory for the owner\'s review until he confirms this chat again.', nextStep: 'Call inbound.telegram.configure for this chat; the waiting messages are then put to the owner for review.' });
+  }
+
+  /** The owner confirmed the chat: the messages that waited are put to him for review, and the notice is withdrawn. */
+  private replayWaiting(key: string, handle: TelegramSourceAccountHandle): void {
+    const slot = this.waiting.get(key);
+    if (!slot) return;
+    this.waiting.delete(key);
+    if (slot.noticeId) { try { this.deps.notices?.withdraw(slot.noticeId, 'the chat was confirmed again; the waiting messages are put to you for review'); } catch { /* the notice is informational */ } }
+    const now = Date.now();
+    for (const entry of slot.entries) {
+      if (entry.until <= now) continue;
+      void this.accept({ ...entry.input, account: handle }).catch(error => logger.warn('Delegated Telegram: a waiting message could not be put to review', { error: summarizeError(error) }));
+    }
+  }
+
+  /** Drop what waits for a chat that left delegated review, with its notice. */
+  private dropWaiting(key: string, reason: string): void {
+    const slot = this.waiting.get(key);
+    if (!slot) return;
+    this.waiting.delete(key);
+    if (slot.noticeId) { try { this.deps.notices?.withdraw(slot.noticeId, reason); } catch { /* informational */ } }
+  }
+
   /** Forget redelivery guards and pending reviews whose source deadline has passed. */
   private prune(): void {
     const now = Date.now();
@@ -241,7 +321,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
   private async acceptOnce(input: DelegatedTelegramIngress, account: TelegramSourceAccountSnapshot, generation: number): Promise<DelegatedTelegramAcceptance> {
     if (this.closed || generation !== this.lifecycleGeneration) return delegatedHold('lifecycle-changed');
     const config = this.configurations.get(routeKey(input.chatId, input.threadId));
-    if (!config) return delegatedHold('no-configuration');
+    if (!config) return this.waitForConfirmation(input);
     try { this.assertConfiguration(config); if (config.account.id !== account.id || config.account.revision !== account.revision) throw new Error('Account scope changed'); } catch { return delegatedHold('configuration-not-current'); }
     const sourceController = new AbortController(); const sourceExpiresAt = { value: Date.now() + config.choice.pendingRetentionMs };
     const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -473,11 +553,12 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     const live = this.configurations.get(key);
     if (live) { live.controller.abort(); clearTimeout(live.timer); }
     this.configurations.delete(key); this.selectionAttempts.delete(key); this.selected.delete(key);
+    this.dropWaiting(key, 'the chat was returned to normal handling');
     const selection = { selected: [...this.selected.values()] };
     await this.selectionWrites.run(() => this.selectionStore.persist(selection, { durable: true })); assertCurrent();
     return { outcome: 'released', route: 'normal-handling-resumes' };
   }
   /** A new daemon lifecycle restores commands, never previous source/grant lifetimes. */
   startLifecycle(): void { this.closed = false; this.watchAccount(); this.receiver.reopen(); }
-  close(): void { this.ingresses.clear(); this.pending.clear(); this.selectionAttempts.clear(); this.accountUnsubscribe?.(); this.accountUnsubscribe = undefined; this.lifecycleGeneration++; this.closed = true; for (const config of this.configurations.values()) { config.controller.abort(); clearTimeout(config.timer); } this.receiver.close(); }
+  close(): void { for (const key of [...this.waiting.keys()]) this.dropWaiting(key, 'the daemon stopped; messages waiting in memory were dropped'); this.ingresses.clear(); this.pending.clear(); this.selectionAttempts.clear(); this.accountUnsubscribe?.(); this.accountUnsubscribe = undefined; this.lifecycleGeneration++; this.closed = true; for (const config of this.configurations.values()) { config.controller.abort(); clearTimeout(config.timer); } this.receiver.close(); }
 }

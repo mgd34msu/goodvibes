@@ -606,7 +606,7 @@ With no workspace at the default place: `No OpenClaw workspace found at the defa
 
 ## The Agent workspace
 
-The Agent workspace is a full-screen view of categories, each a list of rows grouped by what a person does. It has no forms of its own: a row that does something names a slash command's action (shown in its Command column, such as `/memory add`), and `Enter` closes the workspace and opens that action's guided form, the same one the slash command opens (a row may fill some blanks in, such as the account of `/calendar use-app google`); a row's name and its About line are the action's own label and sentence. A setting row cycles a yes/no or a choice in place and opens the settings screen at that setting for a typed value or a `permissions.*` change; an area whose rows are all settings shows Setting, Default and Current columns, and a setting among action rows shows `now <value>`. The other rows open a picker, another category, or say what to ask in the conversation.
+The Agent workspace is a full-screen view of categories, each a list of rows grouped by what a person does. It has no forms of its own: a row that does something names a slash command's action (shown in its Command column, such as `/memory add`), and `Enter` closes the workspace and opens that action's guided form, the same one the slash command opens (a row may fill some blanks in, such as the account of `/calendar use-app google`); a row's name is the action's own label. The pane beside the rows says in one sentence what the area is for, then what the selected row will do (the action's sentence, or a setting's own description with its value and default as `/settings get` shows them) and, where the row's command has a report, that report's first lines, read by running it exactly as the command does (once per opening, when a row of that command is first selected; `Ctrl+R` reads again). Work & Approvals also shows the work view `/work open` shows. Nothing else is shown there. A setting row cycles a yes/no or a choice in place and opens the settings screen at that setting for a typed value or a `permissions.*` change; an area whose rows are all settings shows Setting, Default and Current columns, and a setting among action rows shows `now <value>`. The other rows open a picker, another category, or say what to ask in the conversation.
 It opens with `/agent [section]` or `Ctrl+G`. `/setup` opens one topic's rows of it at a time (below).
 `Ctrl+]` and `Ctrl+[` move between categories; `/` searches actions by name, category, command or detail; `Ctrl+X` or `Esc` closes it.
 Typing a letter on Home closes the workspace and puts the letter in the composer.
@@ -622,24 +622,24 @@ The workspace has these 26 categories, in this order, in eight groups; there are
 | ONBOARDING | `tools-permissions` | Tools & Permissions | 13 | The permission mode and tool settings. |
 | ONBOARDING | `onboarding-display` | Interface | 9 | Display settings. |
 | ONBOARDING | `onboarding-channels` | Messaging | 74 | Chat channels (Slack, Discord, Telegram and others): enable each and fill in its credentials. Its description ends with the channels' readiness. |
-| ONBOARDING | `onboarding-voice-media` | Voice & Media | 23 | Voice, TTS, image input, media generation and telephony. |
-| ONBOARDING | `onboarding-context` | Local Context | 17 | Personas, starter memories, skills, routines, and importing context files; VIBE.md and project context; the applied prompt. |
-| DAY-TO-DAY | `personal-ops` | Personal Ops | 26 | The daily operations hub: inbox, calendar, reminders, briefing, Google connection. |
+| ONBOARDING | `onboarding-voice-media` | Voice & Media | 21 | Voice, TTS, image input, media generation and telephony. |
+| ONBOARDING | `onboarding-context` | Local Context | 14 | Personas, starter memories, skills, routines, notes and knowledge, and importing their files; VIBE.md. |
+| DAY-TO-DAY | `personal-ops` | Personal Ops | 25 | The daily operations hub: inbox, calendar, reminders, briefing, Google connection. |
 | DAY-TO-DAY | `research` | Research | 21 | `/research` (a question or a page into the conversation, research runs, sources, sourced reports), what goes into Agent Knowledge. |
-| DAY-TO-DAY | `documents` | Documents & Files | 42 | `/documents` (drafts, review comments and suggestions, review packets), `/artifacts`, `/compare` (blind model comparison), uploads, exports, media. |
+| DAY-TO-DAY | `documents` | Documents & Files | 41 | `/documents` (drafts, review comments and suggestions, review packets), `/artifacts`, `/compare` (blind model comparison), uploads, exports, media. |
 | DAY-TO-DAY | `conversation` | Conversation | 16 | Context review, compaction, prompt helpers, transcript navigation, session continuity, title, export, undo, redo, retry. |
 | CAPABILITIES | `tools` | Tools & MCP | 10 | Task tools and MCP servers; changes need typed confirmation. |
 | CAPABILITIES | `knowledge` | Knowledge | 16 | Agent Knowledge status, ask, search and ingest. |
 | LOCAL BEHAVIOR | `profiles` | Profiles | 10 | Named Agent profiles and starter templates. |
 | LOCAL BEHAVIOR | `owner-profile` | Your Profile | 9 | The owner profile kept by the daemon. |
-| LOCAL BEHAVIOR | `memory` | Memory | 25 | Memory records, the prompt plan and the learning curator. |
+| LOCAL BEHAVIOR | `memory` | Memory | 23 | Memory records, the prompt plan and the learning curator. |
 | LOCAL BEHAVIOR | `notes` | Notes | 12 | Scratchpad notes (not memory, not Agent Knowledge): `/notes`. |
 | LOCAL BEHAVIOR | `personas` | Personas | 9 | Personas and VIBE.md. |
 | LOCAL BEHAVIOR | `skills` | Skills | 20 | Agent skills and bundles with their requirements. |
-| LOCAL BEHAVIOR | `routines` | Routines | 14 | Routines and their promotion to schedules. |
-| OPERATIONS | `work` | Work & Approvals | 16 | Active operator state, pending approvals, background processes, the work plan. |
+| LOCAL BEHAVIOR | `routines` | Routines | 13 | Routines and their promotion to schedules. |
+| OPERATIONS | `work` | Work & Approvals | 15 | Active operator state, pending approvals, background processes, the work plan. |
 | OPERATIONS | `host` | Connected Host | 17 | Read-only views of the connected host: health, remote routes, host tasks and their output, sessions and the session graph, channels, schedules, knowledge, media, MCP, provider detail, routes and repair, provider auth, support bundles. |
-| OPERATIONS | `automation` | Automation | 22 | Confirmed reminders, routine promotion, and run, pause and resume of schedules and automation jobs on the connected host. |
+| OPERATIONS | `automation` | Automation | 20 | Confirmed reminders, routine promotion, and run, pause and resume of schedules and automation jobs on the connected host. |
 | FINISH | `finish` | Finish | 1 | Apply & close: writes the onboarding completion marker, so later launches start in the conversation. |
 
 Until setup is applied, the workspace opened for setup (`goodvibes-agent setup`) shows only the ONBOARDING group, and reveals its categories as setup reaches them; `/agent` shows all 26. A start whose model is not ready opens first run, not the workspace (see the install part of this file).

@@ -241,6 +241,8 @@ export function registerOwnerInboxCommands<Context extends OwnerInboxCommandCont
   const ITEM: InputDescription = listInput({ id: 'item', label: 'Question', help: 'What waits on you', list: OPEN_QUESTIONS, other: 'the id of an item already answered' });
   registry.register(defineCommand<Context>({
     name: 'questions',
+    // --yes confirms only right after the action word: the same word in the text is text.
+    leadingFlagsOnly: true,
     title: 'What waits on you',
     summary: 'Permission asks, questions agents left, claims and purchase windows: see them and answer',
     group: 'Inbox',

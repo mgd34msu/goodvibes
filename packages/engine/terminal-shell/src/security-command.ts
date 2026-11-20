@@ -517,6 +517,8 @@ function securityActions<Ctx extends CommandActionContext>(policy: SecurityComma
 export function createSecurityCommand<Ctx extends CommandActionContext>(policy: SecurityCommandPolicy<Ctx>): DescribedCommand<Ctx> {
   return defineCommand<Ctx>({
     name: 'security',
+    // --yes confirms only right after the action word: the same word in the text is text.
+    leadingFlagsOnly: true,
     title: 'Security',
     summary: 'See what protects this machine: tokens, trust, policies and the sandbox, and change them',
     group: 'Security',

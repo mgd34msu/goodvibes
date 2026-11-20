@@ -30,7 +30,8 @@ import { subscriptionRegistryForWrite } from './calendar-subscription-runtime.ts
 import { requireSecretsManager, requireShellPaths } from './runtime-services.ts';
 import { routeConfigWrite } from '../../config/daemon-config-routing.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { CREDENTIAL_VERB, READ_VERB, ownerOnlyVerb, withCommandVerbs, type CommandVerbs } from './command-verbs.ts';
+import { defineCommand, defineList, type ActionDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { choiceInput, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 import { renderGoogleSetupReport } from '@goodvibes-jev/engine/platform/platform/google';
 import { renderGoogleSetupRunbook } from '@goodvibes-jev/engine/platform/platform/google';
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
@@ -52,30 +53,6 @@ import { getOutwardApprovalStore, listRefusedOutwardActions, takeRefusedOutwardA
 import { commandRefusal } from './confirmation.ts';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
 
-const USAGE = [
-  'Usage: /google <subcommand>',
-  '',
-  '  connect                         Connect Gmail and Calendar. Works out the shortest route by itself',
-  '                                  and asks you for at most one thing: approving a consent link.',
-  '  status                          What is connected, proven by reading mail and calendar.',
-  '  reauthorize                     Fresh consent covering mail and calendar together. Use this when',
-  '                                  something reports a missing scope or a dead credential.',
-  '  forget [--yes]                  Remove stored Google credentials. Says what would go and waits.',
-  '  adopt [--yes]                   Take up Google credentials from files on this machine (~/.gmail-mcp).',
-  '  client-file <path>              Store an OAuth client JSON you already have, then ask for consent.',
-  '  client <client-id> <client-secret>',
-  '                                  Store an OAuth client id and secret you copied from the console,',
-  '                                  then ask for consent. No Cloud project or gcloud step is run.',
-  '  account <address>               Set the Gmail address to connect as.',
-  '  calendar-address <url>          Store the private iCal address and subscribe to it for read-only calendar access.',
-  '  setup [--path app-password|oauth|existing-client]',
-  '                                  Run one specific path. /google connect picks for you.',
-  '  runbook                         Print the written step-by-step instructions.',
-  '  approve [<n>] [--yes|--drop]    Show the sends that were refused; --yes sends the one shown (or number n)',
-  '                                  exactly as shown. Type it yourself; it is ignored when the model runs it.',
-  '',
-  'The same routes are cards in the Agent workspace, under Personal Ops.',
-].join('\n');
 
 /** Live progress. A setup run is never a silent grind. */
 function progressPort(ctx: CommandContext): GoogleProgressPort {
@@ -91,20 +68,6 @@ function progressPort(ctx: CommandContext): GoogleProgressPort {
     },
     note: (message: string) => { ctx.print(`      ${message}`); },
   };
-}
-
-/** The setup path named by `--path`, `app-password` when the flag is absent, null when its value is not a path. */
-function parsePath(args: readonly string[]): GoogleSetupPath | null {
-  const index = args.indexOf('--path');
-  if (index < 0) return 'app-password';
-  const value = args[index + 1];
-  if (value === 'oauth' || value === 'existing-client' || value === 'app-password') return value;
-  return null;
-}
-
-/** True when the owner typed an explicit yes on this invocation. */
-function saidYes(args: readonly string[]): boolean {
-  return args.includes('--yes') || args.includes('-y');
 }
 
 /**
@@ -123,21 +86,14 @@ function consentAnnouncer(ctx: CommandContext): (url: string) => void {
   };
 }
 
-async function runSetup(args: readonly string[], ctx: CommandContext): Promise<void> {
-  const path = parsePath(args);
-  if (path === null) {
-    throw commandRefusal('Unknown setup path. Use /google setup --path app-password|oauth|existing-client. Nothing was run.');
-  }
+async function runSetup(path: GoogleSetupPath, ctx: CommandContext): Promise<void> {
   const report = await runGoogleSetup(path, ctx, progressPort(ctx));
   ctx.print(renderGoogleSetupReport(report));
 }
 
-async function setAccount(args: readonly string[], ctx: CommandContext): Promise<void> {
-  const address = (args[0] ?? '').trim();
-  if (address.length === 0 || !address.includes('@')) {
-    ctx.print('Give the Gmail address to connect as: /google account <your-address@gmail.com>');
-    return;
-  }
+async function setAccount(raw: string, ctx: CommandContext): Promise<void> {
+  const address = raw.trim();
+  if (address.length === 0 || !address.includes('@')) throw commandRefusal(`"${address}" is not an email address; nothing was set.`, 'Line: /google account <your-address@gmail.com>');
   const homeDir = requireShellPaths(ctx).homeDirectory;
   try {
     await routeConfigWrite(ctx.platform.configManager, GOOGLE_CONFIG_KEYS.emailUsername, address, { homeDir });
@@ -158,12 +114,9 @@ async function setAccount(args: readonly string[], ctx: CommandContext): Promise
  * fetched before anything is replaced, so an address that does not work
  * leaves the current feed and its stored address as they were.
  */
-async function setCalendarAddress(args: readonly string[], ctx: CommandContext, fetcher?: FeedFetcher): Promise<void> {
-  const url = (args[0] ?? '').trim();
-  if (!url.startsWith('https://')) {
-    ctx.print('Give the private iCal address: /google calendar-address <https://calendar.google.com/calendar/ical/.../basic.ics>');
-    return;
-  }
+async function setCalendarAddress(raw: string, ctx: CommandContext, fetcher?: FeedFetcher): Promise<void> {
+  const url = raw.trim();
+  if (!url.startsWith('https://')) throw commandRefusal('The private calendar address starts with https://; nothing was stored.', 'Copy it from Google Calendar: Settings, your calendar, "Secret address in iCal format".');
   // Touch the secrets manager through the same accessor the ports use, so an
   // unavailable secret store fails here rather than half-way through a write.
   requireSecretsManager(ctx);
@@ -196,7 +149,6 @@ async function setCalendarAddress(args: readonly string[], ctx: CommandContext, 
           : `The new calendar address could not be subscribed (${subscribed.stage}) and the previous '${GOOGLE_CALENDAR_SUBSCRIPTION_NAME}' feed could not be put back (${restored.ok ? 'unknown' : restored.stage}); its address is still in the secret store. Run /google calendar-address again.`,
       `  ${subscribed.detail}`,
     ].join('\n'));
-    return;
   }
   // The setup status reads this key to say a calendar address is present.
   await googleSecretPort(ctx).set(GOOGLE_SECRET_KEYS.calendarIcsUrl, url);
@@ -215,69 +167,65 @@ function describePending(entry: PendingOutwardAction): string[] {
 }
 
 /**
- * `/google approve`, the gesture that clears an outward-effect refusal. It
- * shows the refused actions, then sends (or creates) the one the owner names,
- * exactly as shown. The bytes approved are the bytes sent: nothing waits on
- * the model to repeat its call word for word.
- *
- * Owner-only (GOOGLE_VERBS): `agent_harness mode:"run_command"` can run any
- * registered command, so without that the remedy would be reachable by
- * exactly the route it exists to defend against: content steers the model,
- * the model runs the command, the approval appears.
- */
-/**
- * The waiting sends the last `/google approve` listing showed, by id with
- * their description. `/google approve --yes` without a number approves the
- * one that listing showed, never a different send that is alone now.
+ * The waiting sends the last "See sends waiting for your approval" showed, by
+ * id with their description. Approving without naming one approves the one
+ * that listing showed alone, never a different send that is alone now.
  */
 let lastListedSends: ReadonlyMap<number, string> | null = null;
 
-async function approveRefusedOutwardAction(rest: readonly string[], ctx: CommandContext): Promise<void> {
+function listWaitingSends(): string {
   const waiting = listRefusedOutwardActions();
   if (waiting.length === 0) {
-    ctx.print('Nothing is waiting for approval. A refused send stays here for five minutes.');
-    return;
+    lastListedSends = new Map();
+    return 'Nothing is waiting for approval. A refused send stays here for five minutes.';
   }
-  const numbers = rest.filter((arg) => /^\d+$/.test(arg)).map(Number);
-  let chosen = numbers.length > 0 ? waiting.find((entry) => entry.id === numbers[0]) : waiting.length === 1 ? waiting[0] : undefined;
-  // Without a number, the send approved is the one the last listing showed alone.
-  if (numbers.length === 0 && chosen && saidYes(rest) && !rest.includes('--drop')) {
+  lastListedSends = new Map(waiting.map((entry) => [entry.id, entry.description] as const));
+  return [
+    'Refused by the content check, waiting for your approval:',
+    ...waiting.flatMap(describePending),
+    '',
+    waiting.length === 1 ? 'Send it exactly as shown: /google approve   (or drop it: /google drop 1)' : 'Send one exactly as shown: /google approve <n>   (or drop one: /google drop <n>)',
+  ].join('\n');
+}
+
+/**
+ * Approving a refused send reads it, shows it, asks, and sends exactly what
+ * was shown: the bytes approved are the bytes sent, nothing waits on the model
+ * to repeat its call word for word. Without a number it is bound to the last
+ * listing. Owner-only (in the description): a model running the command is
+ * exactly the route this exists to defend against.
+ */
+async function approveRefusedOutwardAction(which: string, ctx: CommandContext): Promise<string> {
+  const waiting = listRefusedOutwardActions();
+  if (waiting.length === 0) throw commandRefusal('Nothing is waiting for approval; nothing was sent.', 'A refused send stays here for five minutes.');
+  let chosen: PendingOutwardAction | undefined;
+  if (which) {
+    chosen = waiting.find((entry) => String(entry.id) === which.trim());
+    if (!chosen) throw commandRefusal(`No waiting send is ${which}; nothing was sent.`, '/google waiting lists them.');
+  } else {
+    // Bound to the last listing when one showed a single send; with none shown, the one waiting send is shown in the question below.
     const shown = lastListedSends && lastListedSends.size === 1 ? [...lastListedSends][0]! : null;
-    if (shown === null) {
-      chosen = undefined; // Nothing was shown yet: show it, and the owner approves what he saw.
-    } else if (shown[0] !== chosen.id) {
-      throw commandRefusal(`Nothing was sent: the waiting send changed since it was shown (was ${shown[0]}: ${shown[1]}; now ${chosen.id}: ${chosen.description}).`,
-        'Run /google approve to see what is waiting, then approve it by its number.', 'TARGET_CHANGED');
+    if (shown === null && waiting.length !== 1) throw commandRefusal(`Nothing was sent: ${waiting.length} sends are waiting.`, 'See them: /google waiting, then /google approve <n>.');
+    chosen = shown === null ? waiting[0] : waiting.find((entry) => entry.id === shown[0]);
+    if (!chosen || (shown !== null && waiting.length !== 1)) {
+      throw commandRefusal(`Nothing was sent: the waiting sends changed since they were shown (was ${shown?.[0]}: ${shown?.[1]}).`, 'Run /google waiting to see what is waiting, then approve it by its number.', 'TARGET_CHANGED');
     }
   }
-  if (rest.includes('--drop')) {
-    const dropped = chosen && takeRefusedOutwardAction(chosen.id);
-    ctx.print(dropped ? `Dropped ${dropped.id}: ${dropped.description}. Nothing was sent.` : 'Name the one to drop: /google approve <n> --drop');
-    return;
-  }
-  if (!chosen || !saidYes(rest)) {
-    lastListedSends = new Map(waiting.map((entry) => [entry.id, entry.description] as const));
-    ctx.print([
-      'Refused by the content check, waiting for your approval:',
-      ...waiting.flatMap(describePending),
-      '',
-      waiting.length === 1
-        ? 'Send it exactly as shown with: /google approve --yes   (or drop it: /google approve 1 --drop)'
-        : 'Send one exactly as shown with: /google approve <n> --yes   (or drop one: /google approve <n> --drop)',
-    ].join('\n'));
-    return;
-  }
+  if (!ctx.confirm) throw commandRefusal('A refused send is approved only where you can see it and be asked; nothing was sent.');
+  const go = await ctx.confirm({
+    title: 'Send this exactly as shown?',
+    body: [...describePending(chosen), '', 'It goes outside this machine and cannot be called back.'].join('\n'),
+    confirmLabel: 'Send', cancelLabel: 'Back', tone: 'danger',
+  });
+  if (!go) throw commandRefusal('Not sent; it is still waiting.', undefined, 'CANCELLED');
   const approved = takeRefusedOutwardAction(chosen.id);
-  if (!approved) {
-    throw commandRefusal('Nothing was sent: that approval expired.', 'Ask for the send again.', 'COMMAND_FAILED');
-  }
+  if (!approved) throw commandRefusal('Nothing was sent: that approval expired.', 'Ask for the send again.', 'COMMAND_FAILED');
   if (!approved.perform) {
     // No way to perform it from here: grant a one-use approval for the exact
     // content instead, which the next identical call spends.
     const approval = getOutwardApprovalStore().grant({ action: approved.action, surface: 'owner-direct', content: approved.content });
     if (approval === null) throw commandRefusal(`Could not record the approval for ${approved.description}; nothing was approved.`, 'Ask for the send again.', 'COMMAND_FAILED');
-    ctx.print(`Approved: ${approved.description}. It is tied to that exact content, good once, and expires in five minutes.`);
-    return;
+    return `Approved: ${approved.description}. It is tied to that exact content, good once, and expires in five minutes.`;
   }
   const outcome = await approved.perform();
   // The model asked for this; it learns how it ended on its next request.
@@ -285,129 +233,185 @@ async function approveRefusedOutwardAction(rest: readonly string[], ctx: Command
     `The owner approved "${approved.description}" with /google approve. ${outcome.ok ? 'Done' : 'It failed'}: ${outcome.text} Do not send it again.`,
     { once: true, append: true });
   if (!outcome.ok) throw commandRefusal(`Approved, but it did not go through: ${outcome.text}`, undefined, 'COMMAND_FAILED');
-  ctx.print(`Approved and done: ${outcome.text}`);
+  return `Approved and done: ${outcome.text}`;
 }
 
-/** `fetcher` replaces the real HTTP feed fetch, for tests. */
-export async function runGoogleCommand(args: readonly string[], ctx: CommandContext, fetcher?: FeedFetcher): Promise<void> {
-  const sub = (args[0] ?? 'status').trim().toLowerCase();
-  const rest = args.slice(1);
+const WAITING_SENDS = defineList<CommandContext>({
+  name: 'google.waiting-sends',
+  async read() {
+    return listRefusedOutwardActions().map((entry): ListRow => ({ value: String(entry.id), label: entry.description }));
+  },
+  operator: { terminalOnly: 'Refused sends are held by the Agent that refused them.' },
+});
 
+/** Every Google action's failure, said as a refusal (a refusal passes through). */
+async function guarded<T>(work: () => Promise<T>): Promise<T> {
   try {
-    if (sub === 'status') {
-      ctx.print(await describeGoogleConnection(ctx));
-      return;
-    }
-    if (sub === 'connect') {
-      const outcome = await connectGoogle(ctx, progressPort(ctx), consentAnnouncer(ctx));
-      ctx.print(outcome.text);
-      return;
-    }
-    if (sub === 'reauthorize' || sub === 'reauth') {
-      const outcome = await reauthorizeGoogle(ctx, progressPort(ctx), consentAnnouncer(ctx));
-      ctx.print(outcome.text);
-      return;
-    }
-    if (sub === 'forget') {
-      // Every stored Google credential is in scope, and none of it goes
-      // without the owner's yes on this exact invocation.
-      const yes = saidYes(rest);
-      const receipt = await forgetGoogleCredentials(
-        ctx,
-        ['refresh-token', 'client-secret', 'app-password', 'calendar-address'],
-        yes,
-      );
-      ctx.print(receipt);
-      return;
-    }
-    if (sub === 'adopt') {
-      const outcome = await adoptGoogleCredentials(
-        ctx,
-        { setup: '/google connect', status: '/google status' },
-        { confirmReplace: saidYes(rest) },
-      );
-      ctx.print(outcome.text);
-      return;
-    }
-    if (sub === 'setup') return await runSetup(rest, ctx);
-    if (sub === 'account') return await setAccount(rest, ctx);
-    if (sub === 'calendar-address') return await setCalendarAddress(rest, ctx, fetcher);
-    if (sub === 'runbook') {
-      ctx.print(renderGoogleSetupRunbook());
-      return;
-    }
-    if (sub === 'approve') return await approveRefusedOutwardAction(rest, ctx);
-    if (sub === 'client-file') {
-      const path = (rest[0] ?? '').trim();
-      if (path.length === 0) {
-        ctx.print('Give the path to the downloaded client JSON: /google client-file <path>');
-        return;
-      }
-      const outcome = await connectGoogleClient(ctx, { kind: 'client-json-file', path }, progressPort(ctx), consentAnnouncer(ctx));
-      ctx.print(outcome.text);
-      return;
-    }
-    if (sub === 'client') {
-      const clientId = (rest[0] ?? '').trim();
-      const clientSecret = (rest[1] ?? '').trim();
-      if (clientId.length === 0 || clientSecret.length === 0) {
-        ctx.print('Give both values: /google client <client-id> <client-secret>');
-        return;
-      }
-      const outcome = await connectGoogleClient(ctx, { kind: 'manual-entry', clientId, clientSecret }, progressPort(ctx), consentAnnouncer(ctx));
-      ctx.print(outcome.text);
-      return;
-    }
-    ctx.print(USAGE);
+    return await work();
   } catch (error) {
     if (readRefusal(error)) throw error;
     throw commandRefusal(`Google setup could not run: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
+/** Google settings are daemon-owned: wait for the connected host's answer and say which it refused (they are put back here). */
+async function settled(ctx: CommandContext, text: string | void): Promise<string | void> {
+  const refused = await ctx.platform.configManager.settleDaemonWrites();
+  if (refused.length === 0) return text;
+  return [text, `The connected host refused ${refused.map((entry) => entry.key).join(', ')}; ${refused.length === 1 ? 'it was' : 'they were'} not changed: ${summarizeError(refused[0]!.error)}`].filter(Boolean).join('\n');
+}
+
+const CREDENTIAL = 'it stores, adopts, replaces or removes a Google credential';
+const AGENT_ONLY = { terminalOnly: 'The Google account is connected from the Agent.' } as const;
+
 /**
- * What each /google verb does. Anything that stores, adopts, replaces or
- * removes a Google credential, changes the account mail is sent as, or clears
- * an outward-effect refusal is the owner's to type.
+ * `/google`, described once (command-actions/): connect Gmail and Google
+ * Calendar, see what is connected, store or remove the credentials, and
+ * approve a send the content check refused. Nothing prints a credential.
  */
-const GOOGLE_VERBS: CommandVerbs = {
-  defaultVerb: 'status',
-  verbs: {
-    status: READ_VERB,
-    runbook: READ_VERB,
-    connect: CREDENTIAL_VERB,
-    reauthorize: CREDENTIAL_VERB,
-    reauth: CREDENTIAL_VERB,
-    setup: CREDENTIAL_VERB,
-    forget: ownerOnlyVerb('credential', 'removes every stored Google credential'),
-    adopt: ownerOnlyVerb('credential', 'takes up credential files from the home directory'),
-    account: ownerOnlyVerb('credential', 'changes the address mail is sent and signed in as'),
-    'calendar-address': ownerOnlyVerb('credential', 'stores a private calendar address (a credential) and replaces the current feed'),
-    client: ownerOnlyVerb('credential', 'stores a client secret'),
-    'client-file': ownerOnlyVerb('credential', 'stores the client secret from a file'),
-    approve: ownerOnlyVerb('credential', 'clears a refused outward action, which grants authority'),
-  },
-  otherwise: READ_VERB,
-};
+export function createGoogleCommand(fetcher?: FeedFetcher) {
+  const actions: ActionDescription<CommandContext>[] = [
+    readAction<CommandContext>({
+      id: 'status', label: 'See what is connected', word: 'status', operator: AGENT_ONLY,
+      sentence: 'Shows what is connected for mail and calendar, proven by reading them.',
+      run: (_values, ctx) => guarded(() => describeGoogleConnection(ctx)),
+    }),
+    {
+      id: 'connect', label: 'Connect Gmail and Calendar', word: 'connect', inputs: [],
+      sentence: 'Works out the shortest route and connects mail and calendar, asking you at most to approve one consent link; the credential is kept until you change it.',
+      done: '', touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'forget', operator: AGENT_ONLY, example: {},
+      run: (_values, ctx) => guarded(async () => settled(ctx, (await connectGoogle(ctx, progressPort(ctx), consentAnnouncer(ctx))).text)),
+    },
+    {
+      id: 'reauthorize', label: 'Ask Google for consent again', word: 'reauthorize', inputs: [],
+      sentence: 'Asks for a fresh consent covering mail and calendar together, kept until you change it; use it when a scope is missing or the credential is dead.',
+      done: '', touches: 'credential', lasts: 'kept', risk: 'none', operator: AGENT_ONLY, example: {},
+      run: (_values, ctx) => guarded(async () => settled(ctx, (await reauthorizeGoogle(ctx, progressPort(ctx), consentAnnouncer(ctx))).text)),
+    },
+    {
+      id: 'forget', label: 'Remove the stored Google credentials', word: 'forget', inputs: [],
+      sentence: 'Shows which stored Google credentials (refresh token, client secret, app password, private calendar address) would go, asks, and removes exactly those; this cannot be undone, and a value stored since is kept.',
+      done: '', touches: 'credential', lasts: 'kept', risk: 'none',
+      ownerOnly: { reason: CREDENTIAL, instead: 'Ask the owner to run /google forget.' }, operator: AGENT_ONLY, example: {},
+      run: (_values, ctx) => guarded(async () => {
+        // Read, show, ask, apply: the yes removes only the values the question named.
+        const items = ['refresh-token', 'client-secret', 'app-password', 'calendar-address'] as const;
+        const question = await forgetGoogleCredentials(ctx, items, false);
+        const body = question.split('\n').filter((line) => !line.startsWith('Confirm with:')).join('\n');
+        if (!ctx.confirm) throw commandRefusal('Google credentials are removed only where you can see them and be asked; nothing was removed.');
+        if (!(await ctx.confirm({ title: 'Remove these Google credentials?', body: `${body}\n\nThis cannot be undone.`, confirmLabel: 'Remove', cancelLabel: 'Back', tone: 'danger' }))) {
+          throw commandRefusal('Not removed; nothing was changed.', undefined, 'CANCELLED');
+        }
+        return settled(ctx, await forgetGoogleCredentials(ctx, items, true));
+      }),
+    },
+    {
+      id: 'adopt', label: 'Take up Google credentials found on this machine', word: 'adopt',
+      inputs: [choiceInput({
+        id: 'replace', label: 'If some are stored', help: 'Credentials already stored for Google', typed: { flag: '--replace', switchOn: 'yes' },
+        choices: [{ value: 'no', label: 'Keep them and stop' }, { value: 'yes', label: 'Replace them', risk: 'cannot-be-undone' }],
+        optional: { default: 'no', means: 'keep them and stop' },
+      })],
+      sentence: 'Google credentials in files on this machine (~/.gmail-mcp) are taken up and stored until you change it.',
+      done: '', touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'forget',
+      ownerOnly: { reason: 'it takes up credential files from the home directory', instead: 'Ask the owner to run /google adopt.' }, operator: AGENT_ONLY, example: { replace: 'yes' },
+      run: (values, ctx) => guarded(async () => settled(ctx, (await adoptGoogleCredentials(ctx, { setup: '/google connect', status: '/google status' }, { confirmReplace: values.replace === 'yes' })).text)),
+    },
+    {
+      id: 'setup', label: 'Connect by one chosen route', word: 'setup',
+      inputs: [choiceInput({
+        id: 'path', label: 'Route', help: 'Which way to connect; "Connect Gmail and Calendar" picks for you', typed: { flag: '--path' },
+        choices: [
+          { value: 'app-password', label: 'An app password', help: 'Mail only, no Cloud project' },
+          { value: 'oauth', label: 'A new OAuth client', help: 'Creates one in a Cloud project' },
+          { value: 'existing-client', label: 'An OAuth client you have' },
+        ],
+        optional: { default: 'app-password', means: 'an app password' },
+      })],
+      sentence: 'Runs the chosen route step by step, saying each step as it goes; what it stores is kept until you change it.',
+      done: '', touches: 'credential', lasts: 'kept', risk: 'none', operator: AGENT_ONLY, example: { path: 'oauth' },
+      run: (values, ctx) => guarded(async () => { await runSetup((values.path || 'app-password') as GoogleSetupPath, ctx); return settled(ctx, undefined); }),
+    },
+    readAction<CommandContext>({
+      id: 'runbook', label: 'See the written setup steps', word: 'runbook', operator: AGENT_ONLY,
+      sentence: 'Prints the step-by-step instructions for connecting Google by hand.',
+      run: async () => renderGoogleSetupRunbook(),
+    }),
+    {
+      id: 'client-file', label: 'Use an OAuth client file you have', word: 'client-file',
+      inputs: [textInput({ id: 'path', label: 'Client file', help: 'The client JSON downloaded from the Google console', why: 'a file path', kind: 'path', typed: { position: 1 } })],
+      sentence: 'The client in {path} is stored and a consent link is asked for; it is kept until you change it.',
+      done: '', touches: 'credential', lasts: 'kept', risk: 'none',
+      ownerOnly: { reason: 'it stores the client secret from a file', instead: 'Ask the owner to run /google client-file.' }, operator: AGENT_ONLY, example: { path: 'client_secret.json' },
+      run: (values, ctx) => guarded(async () => settled(ctx, (await connectGoogleClient(ctx, { kind: 'client-json-file', path: values.path!.trim() }, progressPort(ctx), consentAnnouncer(ctx))).text)),
+    },
+    {
+      id: 'client', label: 'Use an OAuth client id and secret', word: 'client',
+      inputs: [
+        textInput({ id: 'clientId', label: 'Client id', help: 'Copied from the Google console', why: 'an id Google gave you', typed: { position: 1 } }),
+        { id: 'clientSecret', label: 'Client secret', help: 'Copied from the Google console; hidden as you type', kind: 'secret', required: true, typed: { position: 2 } },
+      ],
+      sentence: 'Client {clientId} and its secret are stored and a consent link is asked for; no Cloud project step is run, and it is kept until you change it.',
+      done: '', touches: 'credential', lasts: 'kept', risk: 'none',
+      ownerOnly: { reason: 'it stores a client secret', instead: 'Ask the owner to run /google client.' }, operator: AGENT_ONLY, example: { clientId: '1234.apps.googleusercontent.com' },
+      run: (values, ctx) => guarded(async () => settled(ctx, (await connectGoogleClient(ctx, { kind: 'manual-entry', clientId: values.clientId!.trim(), clientSecret: values.clientSecret!.trim() }, progressPort(ctx), consentAnnouncer(ctx))).text)),
+    },
+    {
+      id: 'account', label: 'Set the Gmail address', word: 'account',
+      inputs: [textInput({ id: 'address', label: 'Address', help: 'The Gmail address to connect and send as', why: 'your own address', typed: { position: 1 } })],
+      sentence: 'Mail is signed in and sent as {address} until you change it.',
+      done: '', touches: 'this-machine', lasts: 'kept', risk: 'none',
+      ownerOnly: { reason: 'it changes the address mail is sent and signed in as', instead: 'Ask the owner to run /google account.' }, operator: AGENT_ONLY, example: { address: 'you@gmail.com' },
+      run: (values, ctx) => guarded(async () => { await setAccount(values.address!, ctx); return settled(ctx, undefined); }),
+    },
+    {
+      id: 'calendar-address', label: 'Read the calendar by its private address', word: 'calendar-address',
+      inputs: [{ id: 'url', label: 'Private address', help: 'The calendar\'s "Secret address in iCal format"; hidden as you type', kind: 'secret', required: true, typed: { position: 1 } }],
+      sentence: 'The private address is stored in the secret store and subscribed as the Google calendar feed, replacing the current one, until you change it.',
+      done: '', touches: 'credential', lasts: 'kept', risk: 'none',
+      ownerOnly: { reason: 'it stores a private calendar address (a credential) and replaces the current feed', instead: 'Ask the owner to run /google calendar-address.' }, operator: AGENT_ONLY, example: {},
+      run: (values, ctx) => guarded(async () => { await setCalendarAddress(values.url!, ctx, fetcher); return settled(ctx, undefined); }),
+    },
+    readAction<CommandContext>({
+      id: 'waiting', label: 'See sends waiting for your approval', word: 'waiting', operator: AGENT_ONLY,
+      sentence: 'Shows each send the content check refused, exactly as it would go out.',
+      run: async () => listWaitingSends(),
+    }),
+    {
+      id: 'approve', label: 'Send a refused send as shown', word: 'approve',
+      inputs: [listInput({ id: 'send', label: 'Send', help: 'The sends waiting for approval', list: WAITING_SENDS, other: 'a number /google waiting showed', optional: { default: '', means: 'the one the last list showed' } })],
+      sentence: 'The refused send is shown once more and, when you say so, goes out exactly as shown.',
+      done: '', touches: 'another-machine', lasts: 'not-a-change', risk: 'none',
+      ownerOnly: { reason: 'it clears a refused outward action, which grants authority', instead: 'Ask the owner to approve it with /google approve.' }, operator: AGENT_ONLY, example: { send: '1' },
+      run: (values, ctx) => approveRefusedOutwardAction(values.send ?? '', ctx),
+    },
+    {
+      id: 'drop', label: 'Drop a refused send', word: 'drop',
+      inputs: [listInput({ id: 'send', label: 'Send', help: 'The sends waiting for approval', list: WAITING_SENDS, other: 'a number /google waiting showed' })],
+      sentence: 'Waiting send {send} is dropped and never goes out.',
+      done: '', touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', operator: AGENT_ONLY, example: { send: '1' },
+      async run(values) {
+        const dropped = takeRefusedOutwardAction(Number(values.send));
+        if (!dropped) throw commandRefusal(`No waiting send is ${values.send}; nothing was dropped.`, '/google waiting lists them.');
+        return `Dropped ${dropped.id}: ${dropped.description}. Nothing was sent.`;
+      },
+    },
+  ];
+  return defineCommand<CommandContext>({
+    name: 'google',
+    title: 'Google',
+    summary: 'Connect Gmail and Google Calendar with one consent link, and approve a send the content check refused',
+    group: 'Personal',
+    report: 'status',
+    firstScreenRows: [
+      'status', 'connect', 'waiting', 'approve',
+      { label: 'Other ways to connect…', actions: ['setup', 'client-file', 'client', 'account', 'calendar-address', 'adopt', 'runbook'] },
+      { label: 'Fix or remove the connection…', actions: ['reauthorize', 'forget', 'drop'] },
+    ],
+    actions,
+  });
+}
 
 export function registerGoogleRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(withCommandVerbs({
-    name: 'google',
-    effect: 'external-network',
-    aliases: ['gmail'],
-    description: 'Connect Gmail and Google Calendar: one command, one consent link, proven by use',
-    usage: 'connect | status | reauthorize | forget [--yes] | adopt [--yes] | setup [--path app-password|oauth|existing-client] | client-file <path> | client <id> <secret> | account <address> | calendar-address <url> | runbook | approve [<n>] [--yes|--drop]',
-    argsHint: 'connect|status|reauthorize|forget|adopt|setup|client-file|client|account|calendar-address|runbook|approve',
-    // The client secret and the private calendar address are credentials typed on the line.
-    secretArgs: { subcommands: { client: [2], 'calendar-address': [1] } },
-    handler: async (args, ctx) => {
-      await runGoogleCommand(args, ctx);
-      // Google settings are daemon-owned: the connected host is their one writer.
-      // Wait for its answer and say which ones it refused (they are put back here).
-      const refused = await ctx.platform.configManager.settleDaemonWrites();
-      if (refused.length > 0) {
-        ctx.print(`The connected host refused ${refused.map((entry) => entry.key).join(', ')}; ${refused.length === 1 ? 'it was' : 'they were'} not changed: ${summarizeError(refused[0]!.error)}`);
-      }
-    },
-  }, GOOGLE_VERBS));
+  registry.register(createGoogleCommand());
 }

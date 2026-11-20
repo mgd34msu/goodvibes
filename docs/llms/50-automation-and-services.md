@@ -551,21 +551,23 @@ On a CalDAV calendar each occurrence of a recurring event has its own id (the re
 
 ## Google (Gmail and Google Calendar)
 
-The Agent's `/google` (alias `/gmail`) connects one Google account for both mail and calendar. Saying "connect my Google account" to the Agent runs the same flow.
+The Agent's `/google` connects one Google account for both mail and calendar. Saying "connect my Google account" to the Agent runs the same flow.
 
 ```text
 /google connect                 work out the shortest route and connect
 /google status                  what is connected, proven by reading mail and calendar
 /google reauthorize             fresh consent covering mail and calendar
-/google forget [--yes]          remove stored Google credentials (says what would go, then waits for --yes; the yes removes only the values that question named, and keeps one stored or replaced since)
-/google adopt [--yes]           take up Google credentials from files on this machine (~/.gmail-mcp)
+/google forget                  remove stored Google credentials: shows what would go and asks; the yes removes only the values the question named, and keeps one stored or replaced since
+/google adopt [--replace]       take up Google credentials from files on this machine (~/.gmail-mcp); --replace replaces stored ones
 /google client-file <path>      store an OAuth client JSON you already have, then ask for consent
 /google client <client-id> <client-secret>
 /google account <address>       the Gmail address to connect as
 /google calendar-address <url>  store the private iCal address (read-only calendar)
 /google setup [--path app-password|oauth|existing-client]
 /google runbook                 print the step-by-step instructions
-/google approve [<n>] [--yes|--drop]   show sends that were refused; --yes sends the one shown exactly as shown (without a number, only the one the last listing showed; a different send is refused, list again)
+/google waiting                 the sends the content check refused, exactly as they would go out
+/google approve [<n>]           shows the send and asks, then sends it exactly as shown (without a number: the one the last /google waiting showed alone, refused if the waiting sends changed since; with none shown, the one waiting send)
+/google drop <n>                drop a refused send
 ```
 
 The same routes are cards in the Agent workspace under Personal Ops. The terminal app has no `/google`; it uses the mail and calendar the daemon already has.
@@ -618,7 +620,7 @@ Scopes requested: `gmail.readonly`, `gmail.send`, `calendar.events`. Stored: the
 | IMAP `AUTHENTICATIONFAILED` | The app password is wrong or revoked. Delete the `goodvibes-agent` entry at the app passwords page and re-run. |
 | Worked, then broke about a week later | The OAuth app is in Testing. Publish it, then `/google reauthorize`. |
 | A missing scope or dead credential is reported | `/google reauthorize`. |
-| A send was refused | `/google approve` lists refused sends; `/google approve <n> --yes` sends one exactly as shown, typed by the owner. |
+| A send was refused | `/google waiting` lists refused sends; `/google approve <n>` shows one, asks and sends it exactly as shown, typed by the owner. |
 
 Re-running any step is safe: each step checks what already exists and skips it.
 

@@ -116,6 +116,8 @@ function change(fields: Pick<AboutMeAction, 'id' | 'label' | 'word' | 'inputs' |
 
 export const ABOUT_ME_COMMAND: CommandDescription<CommandActionContext> = {
   name: 'about-me',
+  // --yes confirms only right after the action word: the same word in the text is text.
+  leadingFlagsOnly: true,
   title: 'About you',
   summary: 'What the platform knows about you: read it, see where a fact came from, correct it, or forget it',
   group: 'You',

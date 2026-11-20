@@ -1,7 +1,7 @@
 import type { ModelPickerTarget } from '../model-picker.ts';
 import type { OnboardingStep1CapabilityItem } from '../../runtime/onboarding/index.ts';
 import { DEFAULT_CAPABILITIES, NETWORK_HOST_FIELD_IDS } from './onboarding-wizard-constants.ts';
-import { areSelectionsEqual, clamp, cloneSelection, getExternalSurfaceSetupFieldSpec, isMalformedGoodVibesSecretReferenceValue, isValidHostValue, normalizeText } from './onboarding-wizard-helpers.ts';
+import { areSelectionsEqual, clamp, cloneSelection, getExternalSurfaceSetupFieldSpec, isMalformedGoodVibesSecretReferenceValue, isValidHostValue, normalizeText, VERBATIM_FIELD_IDS } from './onboarding-wizard-helpers.ts';
 import type { OnboardingWizardControllerLike } from './onboarding-wizard-types.ts';
 import type { OnboardingWizardFieldDefinition, OnboardingWizardModelSelection, OnboardingWizardStepDefinition } from './onboarding-wizard-types.ts';
 
@@ -74,7 +74,9 @@ export function getFieldValidationError(
   ): string | null {
     if (field.kind !== 'text' && field.kind !== 'masked') return null;
 
-    const value = normalizeText(controller.getFieldValue(field) as string);
+    const raw = controller.getFieldValue(field) as string;
+    // A password is checked as typed; other fields as trimmed.
+    const value = VERBATIM_FIELD_IDS.has(field.id) ? raw ?? '' : normalizeText(raw);
     const required = field.required === true;
     if (required && value.length === 0) {
       return `${step.shortLabel}: ${field.label} is required.`;

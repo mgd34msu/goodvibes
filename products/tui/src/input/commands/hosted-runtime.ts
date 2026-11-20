@@ -282,6 +282,8 @@ const SESSION_PICK = {
 
 const HOSTED_COMMAND: CommandDescription<CommandContext> = {
   name: 'hosted',
+  // --yes confirms only right after the action word: the same word in the text is text.
+  leadingFlagsOnly: true,
   title: 'Hosted sessions',
   summary: 'Conversations that run in the daemon, so they go on when this window closes',
   group: 'Sessions',

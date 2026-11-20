@@ -335,6 +335,8 @@ function serverList(servers: readonly McpSecurityServer[]): string {
 
 export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
   name: 'mcp',
+  // --yes confirms only right after the action word: the same word in the text is text.
+  leadingFlagsOnly: true,
   title: 'MCP servers and tools',
   summary: 'Connect tools from other programs',
   group: 'Tools',

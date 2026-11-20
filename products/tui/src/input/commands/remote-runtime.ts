@@ -211,6 +211,8 @@ function exportAction(fields: Pick<ActionDescription<CommandContext>, 'id' | 'la
 
 const REMOTE_COMMAND = defineCommand<CommandContext>({
   name: 'remote',
+  // --yes confirms only right after the action word: the same word in the text is text.
+  leadingFlagsOnly: true,
   title: 'Remote runners',
   summary: 'Run work on self-hosted runners and review what they hand back',
   group: 'Work',

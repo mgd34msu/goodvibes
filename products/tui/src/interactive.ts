@@ -1208,7 +1208,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       headerRows: shellHeaderLines.length,
       footerRows: shellFooterLines.length,
       permission: pendingPermission
-        ? PermissionPromptUI.renderPromptModal(width, height, pendingPermission, pendingPermission, approvalBroker, input.prompt.length === 0, askContext())
+        ? PermissionPromptUI.renderPromptModal(width, height, pendingPermission, pendingPermission, approvalBroker, input.prompt.length === 0, askContext(), localCards.size())
         : null,
     }), ownerQuestionCard, { width, height, footerRows: shellFooterLines.length, hidden: pendingPermission !== null || Boolean(viewFrame) || onboardingOwnsScreen });
     input.surfacePointer.layers = layers;

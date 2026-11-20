@@ -32,7 +32,7 @@ import { useEffect, useState, useSyncExternalStore, type SyntheticEvent } from '
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { GOODVIBES_BASE_URL, login, setExplicitAuthToken } from '../../lib/goodvibes';
 import { formatError, isAuthExpiredError } from '../../lib/errors';
-import { decodeRelayPairingCode, storeRelayPairing, type RelayPairingPayload } from '../../lib/relay-pairing';
+import { decodeRelayPairingCode, getStoredRelayPairing, storeRelayPairing, type RelayPairingPayload } from '../../lib/relay-pairing';
 import { RelayPairingOffer } from './RelayPairingOffer';
 import {
   describeScannedPairing,
@@ -72,6 +72,10 @@ let typedToken = '';
 // Whether "Other ways to sign in" is open. Kept beside the typed code for the same
 // reason: a refused code remounts this gate, and its message must not be folded away.
 let otherWaysOpenNow = false;
+// The relay section's state: holding a relay replaces the identity boundary (a pairing is
+// a change of identity), which remounts this gate, and its confirmation must still show.
+let relayPasteOpenNow = false;
+let relayReadyNow = false;
 // A scanned pairing for another daemon address, held in memory only (never in
 // component state, never rendered) until the person opens that daemon or scans again.
 let scannedElsewhere: { readonly origin: string; readonly token: string | null } | null = null;
@@ -103,10 +107,14 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
   const [showPassword, setShowPassword] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [showRelayPaste, setShowRelayPaste] = useState(false);
+  const [showRelayPaste, setShowRelayPasteState] = useState(() => relayPasteOpenNow);
+  const setShowRelayPaste = (next: boolean | ((current: boolean) => boolean)) => {
+    setShowRelayPasteState((current) => { relayPasteOpenNow = typeof next === 'function' ? next(current) : next; return relayPasteOpenNow; });
+  };
   const [relayCode, setRelayCode] = useState('');
   const [relayPasteError, setRelayPasteError] = useState<unknown>(null);
-  const [relayStored, setRelayStored] = useState(false);
+  const [relayStored, setRelayStoredState] = useState(() => relayReadyNow);
+  const setRelayStored = (ready: boolean) => { relayReadyNow = ready; setRelayStoredState(ready); };
   const [relayOffer, setRelayOffer] = useState<RelayPairingPayload | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
@@ -350,7 +358,7 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
                   {relayOffer !== null && (
                     <RelayPairingOffer pairing={relayOffer} onConfirm={confirmRelayOffer} onDismiss={() => setRelayOffer(null)} />
                   )}
-                  {relayStored && (
+                  {relayStored && getStoredRelayPairing() !== null && (
                     <div className="banner" role="status">
                       Relay ready. This page uses it by itself when it can&rsquo;t reach your
                       computer directly, until you reload it.

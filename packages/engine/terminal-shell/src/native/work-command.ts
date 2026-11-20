@@ -120,6 +120,8 @@ function hostChange(fields: Pick<WorkAction, 'id' | 'label' | 'word' | 'inputs' 
 
 export const WORK_COMMAND: CommandDescription<CommandActionContext> = {
   name: 'work',
+  // --yes confirms only right after the action word: the same word in the text is text.
+  leadingFlagsOnly: true,
   title: 'Native work',
   summary: 'Work on the host: open it, start, cancel or resume it, submit it from a file, recover input, import old records, and ask for work',
   group: 'Agents and work',

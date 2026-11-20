@@ -6,7 +6,7 @@ import {
   getExternalSurfaceAutoStartFieldId,
   isExternalSurfaceSelectedByDefault,
 } from './onboarding-wizard-external-surfaces.ts';
-import { getExternalSurfaceSpecByFieldId, normalizeText, uniqueNonEmpty } from './onboarding-wizard-helpers.ts';
+import { getExternalSurfaceSpecByFieldId, normalizeText, uniqueNonEmpty, VERBATIM_FIELD_IDS } from './onboarding-wizard-helpers.ts';
 import type { OnboardingWizardControllerLike } from './onboarding-wizard-types.ts';
 
 export function getSharedIpDefault(
@@ -231,7 +231,7 @@ export function getBooleanFieldValue(controller: OnboardingWizardControllerLike,
 
 export function getStringFieldValue(controller: OnboardingWizardControllerLike, fieldId: string, fallback: string): string {
     const value = controller.textState.get(fieldId) ?? controller.radioState.get(fieldId);
-    return normalizeText(value ?? fallback);
+    return VERBATIM_FIELD_IDS.has(fieldId) ? value ?? fallback : normalizeText(value ?? fallback);
   }
 
 export function parseIntegerFieldValue(controller: OnboardingWizardControllerLike, fieldId: string, fallback: number): number | null {

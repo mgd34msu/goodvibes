@@ -37,9 +37,9 @@ export function DaemonUnreachableGate({ detail, retrying, onRetry, serverFault }
         <h1>{serverFault ? 'The daemon could not answer' : <>Can&rsquo;t reach the daemon</>}</h1>
         <p className="signed-out-lede">
           {serverFault
-            ? 'The GoodVibes daemon answered with a server fault, so it could not say who is signed in. Your token is still saved. This is not a sign-in problem. The shell asks again and picks up where it left off as soon as the daemon answers.'
-            : <>The operator shell can&rsquo;t reach the GoodVibes daemon right now. Your token is
-          still saved. This is a connection problem, not a sign-in problem. The shell will
+            ? 'The GoodVibes daemon answered with a server fault, so it could not say who is signed in. Your sign-in is still kept. This is not a sign-in problem. The shell asks again and picks up where it left off as soon as the daemon answers.'
+            : <>The operator shell can&rsquo;t reach the GoodVibes daemon right now. Your sign-in is
+          still kept. This is a connection problem, not a sign-in problem. The shell will
           reconnect and pick up where it left off as soon as the daemon is back.</>}
         </p>
 

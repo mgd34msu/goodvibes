@@ -306,6 +306,8 @@ function promotionOf(values: ActionValues): ParsedRoutineSchedulePromotionArgs {
 export function registerRoutinesRuntimeCommands(registry: CommandRegistry): void {
   registry.register(defineCommand<CommandContext>({
     name: 'routines',
+    // --yes confirms only right after the action word: the same word in the text is text.
+    leadingFlagsOnly: true,
     title: 'Routines',
     summary: 'Repeatable steps the Agent runs when you ask, or on a schedule on the connected host',
     group: 'Agent',

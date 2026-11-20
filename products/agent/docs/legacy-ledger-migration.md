@@ -1,6 +1,6 @@
 # Native legacy import and recovery
 
-Agent and TUI share the same explicit `/work-import` command and durable journal.
+Agent and TUI share the same explicit `/work import` command and durable journal.
 The selected authenticated daemon and its existing KnowledgeStore remain the only
 work authority. Import migrates historical data; it neither launches a work
 attempt nor verifies an old completion. Legacy records remain available for historical
@@ -8,20 +8,20 @@ inspection and explicit migration; importing does not require a live planning in
 
 ## Command workflow
 
-- `/work-import preview <project-id>` reads complete persisted source preparation.
-- `/work-import submit <project-id>` prepares and durably saves one immutable
+- `/work import-preview <project-id>` reads complete persisted source preparation.
+- `/work import <project-id>` prepares and durably saves one immutable
   command before sending it to the native host's recorded Jev admission owner.
   Repeating submit returns existing state and does not dispatch again.
-- `/work-import status <project-id>` reads the protected local journal. It never
+- `/work import-status <project-id>` reads the protected local journal. It never
   contacts an import mutation or resumes work.
-- `/work-import reconsider <project-id> [request-id]` explicitly asks for a fresh
+- `/work import-reconsider <project-id> [request-id]` explicitly asks for a fresh
   host reading of a pending unchanged command. Prior decisions remain provenance.
-- `/work-import recover <project-id> [request-id]` retransmits an unknown command
+- `/work import-recover <project-id> [request-id]` retransmits an unknown command
   unchanged. The host checks exact durable receipts before source freshness or
   Jev; accepted replay neither reimports records nor starts work.
-- `/work-import cancel <project-id> [request-id]` cancels only a known pending
+- `/work import-cancel <project-id> [request-id]` cancels only a known pending
   command. A dispatched unknown request stays unknown; this is not host rollback.
-- `/work-import restart <project-id> [request-id]` captures a new command only
+- `/work import-restart <project-id> [request-id]` captures a new command only
   after the saved request is definitively rejected or locally cancelled.
   The prior command is archived. Unresolved or accepted requests cannot be replaced.
 

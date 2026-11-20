@@ -196,6 +196,8 @@ async function readList(kind: string, limit: number, ctx: CommandActionContext):
 
 export const KNOWLEDGE_COMMAND: CommandDescription<CommandActionContext> = {
   name: 'knowledge',
+  // --yes confirms only right after the action word: the same word in the text is text.
+  leadingFlagsOnly: true,
   title: 'Knowledge',
   summary: 'Your structured knowledge: ask it, search it, add pages and files, review what it flags, and keep it tidy',
   group: 'Knowledge',

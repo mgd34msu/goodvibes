@@ -181,6 +181,8 @@ export type StartWorkstream<Ctx> = (request: string, ctx: Ctx) => Promise<string
 function workstreamDescription<Ctx extends WorkstreamCommandContext>(start: StartWorkstream<Ctx>): CommandDescription<Ctx> {
   return {
     name: 'workstream',
+    // --yes confirms only right after the action word: the same word in the text is text.
+    leadingFlagsOnly: true,
     title: 'Workstreams',
     summary: 'Plan, start, follow and steer work that runs in steps',
     group: 'Work',

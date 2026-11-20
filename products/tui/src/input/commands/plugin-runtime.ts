@@ -32,6 +32,8 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
   const shared = pluginActions<CommandContext>((ctx) => ctx.extensions.pluginManager, 'plugin');
   registry.register(defineCommand<CommandContext>({
     name: 'plugin',
+    // --yes confirms only right after the action word: the same word in the text is text.
+    leadingFlagsOnly: true,
     title: 'Plugins',
     summary: 'Switch plugins on and off, set what each one may do, and publish your own',
     group: 'Extensions',

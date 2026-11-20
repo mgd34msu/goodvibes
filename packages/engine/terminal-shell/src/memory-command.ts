@@ -266,6 +266,8 @@ export function formatMemoryRestore(result: MemoryRestoreResult): string {
 function describeMemory<Ctx extends MemoryCommandContext>(policy: MemoryCommandPolicy<Ctx>): CommandDescription<Ctx> {
   return {
     name: 'memory',
+    // --yes confirms only right after the action word: the same word in the text is text.
+    leadingFlagsOnly: true,
     title: 'Memory',
     summary: 'What the project remembers: decisions, constraints, incidents and patterns, with where each came from',
     group: 'Knowledge',

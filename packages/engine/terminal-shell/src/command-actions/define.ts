@@ -105,6 +105,7 @@ export function defineCommand<Ctx extends CommandActionContext>(description: Com
     name: description.name,
     ...fields,
     ...(description.firstScreen === false ? { firstScreen: false } : {}),
+    ...(description.leadingFlagsOnly === true ? { leadingFlagsOnly: true } : {}),
     described: description,
     async handler(args: string[], ctx: Ctx): Promise<void> {
       const parsed = parseTypedLine(description, args);

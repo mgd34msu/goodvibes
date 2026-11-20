@@ -287,6 +287,8 @@ function requirements(values: ActionValues, registry: AgentSkillRegistry, id?: s
 
 const MY_SKILLS = defineCommand<CommandContext>({
   name: 'my-skills',
+  // --yes confirms only right after the action word: the same word in the text is text.
+  leadingFlagsOnly: true,
   title: 'My skills',
   summary: 'Keep the Agent\'s own skills: step-by-step procedures it follows when a task matches',
   group: 'Extensions',

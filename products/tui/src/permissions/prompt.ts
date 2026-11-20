@@ -59,13 +59,16 @@ export class PermissionPromptUI {
     broker: Parameters<typeof PermissionPromptUI.queueCount>[1],
     composerEmpty: boolean,
     context: TerminalAskContext,
+    /** Local asks waiting for this card's slot (an ask the broker has not seen yet is counted here). */
+    localWaiting = 0,
   ): SurfaceLayer {
     const state: PermissionCardState = {
       hunkState: pending.hunkState,
       detailsExpanded: pending.detailsExpanded,
       replyMode: pending.replyMode,
       replyBuffer: pending.replyBuffer,
-      queueCount: this.queueCount(pending, broker),
+      // The same ask can be both a broker record and a local card: the larger count, never the sum.
+      queueCount: Math.max(this.queueCount(pending, broker), localWaiting),
       choice: pending.choice,
       submenuOpen: pending.submenuOpen,
       submenuIndex: pending.submenuIndex,

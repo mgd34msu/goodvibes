@@ -16,17 +16,17 @@ Saved readiness, questions, answers and approval metadata describe historical ar
 
 ## Native input and recovery
 
-`/project-plan` and its alias `/planning` open native work and recovery. `/project-plan panel` does the same. `/project-plan <goal>` submits the original owner-authored terminal source through native conversation intake, just like ordinary terminal input. A generic/model/nested command call cannot fabricate that original source.
+`/work open` opens native work and recovery. `/work request <goal>` submits the original owner-authored terminal source through native conversation intake, just like ordinary terminal input. A generic/model/nested command call cannot fabricate that original source.
 
 Command syntax and its first whitespace separator are removed; the remaining text is retained exactly, including additional leading spaces, trailing whitespace, line breaks and Unicode. A CRLF delimiter is one separator. Folded paste/image markers and file/context references remain unsupported source references instead of being expanded into replacement authority.
 
-There is no legacy planning or ordinary-turn fallback when native intake, the paired host, the verified principal or durable journal is unavailable. Uncertain submissions retain the original IDs and source. Use `/work intake-status`, `/work intake-retry`, `/work intake-resume` and `/work intake-cancel` to inspect or recover them. Historical inspection does not replace that source or silently retry it. See [terminal workstream intake](../README.md#terminal-workstream-intake) for the shared recovery boundary.
+There is no legacy planning or ordinary-turn fallback when native intake, the paired host, the verified principal or durable journal is unavailable. Uncertain submissions retain the original IDs and source. Use `/work intake`, `/work intake-retry`, `/work intake-resume` and `/work intake-cancel` to inspect or recover them. Historical inspection does not replace that source or silently retry it. See [terminal workstream intake](../README.md#terminal-workstream-intake) for the shared recovery boundary.
 
 Plain conversation, including planning-related language, uses native intake. It does not open an interview or become an answer to a saved question. A new complete request must come from new original terminal input; opening saved history never manufactures one from saved goal/scope/task fields.
 
 ## Historical planning modal
 
-Open the historical view with `/project-plan history`. The workspace-derived project id scopes its saved records to the matching knowledge space.
+Open the historical view with `/work history`. The workspace-derived project id scopes its saved records to the matching knowledge space.
 
 The modal displays persisted planning content, including:
 
@@ -50,14 +50,13 @@ Closing, reopening, refreshing or repeatedly pressing former action keys cannot 
 
 | Command | Does |
 | --- | --- |
-| `/project-plan` or `/project-plan panel` | Open native work and recovery |
-| `/project-plan history` | Inspect saved historical planning records without evaluating or starting an interview |
-| `/project-plan <goal>` | Submit the exact original terminal request through native conversation intake |
-| `/project-plan list` and `/project-plan show <id>` | Show the project work plan, which is the active plan: its open items reach the model once per request turn, and a contract unit that passes marks its agents' items done |
-| `/project-plan dismiss` | Changes nothing: the active plan is the project work plan. It names `/todo clear-done`, `/todo mark <item> cancelled` and `/todo remove <item>` |
-| `/project-plan mode\|explain\|override\|status\|clear` | Route to the existing adaptive runtime controls |
+| `/work open` | Open native work and recovery |
+| `/work history` | Inspect saved historical planning records without evaluating or starting an interview |
+| `/work request <goal>` | Submit the exact original terminal request through native conversation intake |
+| `/work plans` and `/work plan <id>` | Show saved plans, read only; the live plan is the project work plan (`/todo`) |
+| `/work planner`, `planner-explain`, `planner-mode <strategy>`, `planner-override <strategy>`, `planner-reset` | The adaptive planner's state and controls |
 
-`/project-plan approve` and `/project-plan answer` are retired. They change nothing, say so, and point at the work plan and `/workstream`; `/project-plan -- approve ...` submits the words as a goal instead.
+Saved planning records are read only; nothing answers or approves them.
 
 `/project-plan` is unrelated to `/plan`, which toggles the session's existing read-only permission plan mode. `/plan` never touches project-planning state; `Shift+Tab` cycles that same permission mode. These retained compatibility controls do not claim that other legacy permission/runtime consumers have already completed their autonomous migration.
 

@@ -313,6 +313,8 @@ export function pluginActions<Ctx extends CommandActionContext>(manager: PluginM
 export function registerPluginTrustCommand<Ctx extends CommandActionContext>(registry: Pick<TerminalCommandRegistry<Ctx>, 'register'>, manager: PluginManagerOf<Ctx>): void {
   registry.register(defineCommand<Ctx>({
     name: 'plugin-trust',
+    // --yes confirms only right after the action word: the same word in the text is text.
+    leadingFlagsOnly: true,
     title: 'Plugins and their trust',
     summary: 'Switch plugins on and off, and set what each one may do',
     group: 'Extensions',

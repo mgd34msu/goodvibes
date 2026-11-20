@@ -94,10 +94,35 @@ export function singleAction<A extends { readonly word: string }>(description: {
   return only && only.word === '' ? only : undefined;
 }
 
+/**
+ * The typed words with the confirming `--yes` taken off. Words after `--` are
+ * text and are never touched. A command whose last blank is free text
+ * (`leadingFlagsOnly`) takes `--yes` only before its action word and among the
+ * flags right after it, so the same word inside the text stays text; any other
+ * command takes it wherever it stands before `--`.
+ */
+function withoutYes(args: readonly string[], leadingOnly: boolean, actionWordFirst: boolean): string[] {
+  const cut = args.indexOf('--');
+  const head = cut < 0 ? args : args.slice(0, cut);
+  const after = cut < 0 ? [] : args.slice(cut);
+  if (!leadingOnly) return [...head.filter((word) => word !== '--yes'), ...after];
+  const kept: string[] = [];
+  let seenAction = !actionWordFirst;
+  let inFlags = true;
+  for (const word of head) {
+    if (word === '--yes' && (!seenAction || inFlags)) continue;
+    if (!seenAction) { seenAction = true; kept.push(word); continue; }
+    if (!word.startsWith('--')) inFlags = false;
+    kept.push(word);
+  }
+  return [...kept, ...after];
+}
+
 /** Read a typed line (the words after the command name) against the description. */
 export function parseTypedLine<Ctx>(description: CommandDescription<Ctx>, args: readonly string[]): ParsedLine {
   const single = singleAction(description);
-  const words = single ? ['', ...args.filter((word) => word !== '--yes')] : args.filter((word) => word !== '--yes');
+  const leadingOnly = description.leadingFlagsOnly === true;
+  const words = single ? ['', ...withoutYes(args, leadingOnly, false)] : withoutYes(args, leadingOnly, true);
   if (words.length === 0) return { bare: true };
   const action = single ?? findAction(description, words[0]!);
   if (!action) return { unknownWord: words[0]! };
@@ -126,6 +151,8 @@ export function parseTypedLine<Ctx>(description: CommandDescription<Ctx>, args: 
       tailWords.push(...words.slice(index + 1));
       break;
     }
+    // A --yes that was not a leading flag is a word of the text (the leading one was taken off above).
+    if (leadingOnly && word === '--yes') { bare.push(word); continue; }
     if (word.startsWith('--') && word.length > 2) {
       const equals = word.indexOf('=');
       const flag = equals > 0 ? word.slice(0, equals) : word;
@@ -203,7 +230,8 @@ export function renderTypedLine(description: CommandShape, actionId: string, giv
   const tailValue = tail && isShown(tail, values) ? values[tail.id] : undefined;
   if (tail && tailValue) {
     if (tail.kind === 'list') parts.push('--', ...tailValue.split('\n').map(quoteSlashCommandArg));
-    else parts.push(tailValue);
+    // Text holding a word that reads as an option (--yes, --to) goes after --, so it is read back as the same text.
+    else parts.push(...(tailValue.split(/\s+/).some((word) => word.startsWith('--')) ? ['--'] : []), tailValue);
   }
   return parts.join(' ');
 }

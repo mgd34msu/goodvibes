@@ -240,6 +240,8 @@ function healthActions<Ctx extends CommandActionContext>(policy: HealthCommandPo
 export function createHealthCommand<Ctx extends CommandActionContext>(policy: HealthCommandPolicy<Ctx>): DescribedCommand<Ctx> {
   return defineCommand<Ctx>({
     name: 'health',
+    // --yes confirms only right after the action word: the same word in the text is text.
+    leadingFlagsOnly: true,
     title: 'Health',
     summary: 'See whether everything is working, check one area, or find the cause of a problem',
     group: 'Health',

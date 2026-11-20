@@ -31,6 +31,8 @@ const PUBLISHED = defineList<CommandContext>({
 export function registerSkillsRuntimeCommands(registry: CommandRegistry): void {
   registry.register(defineCommand<CommandContext>({
     name: 'skills',
+    // --yes confirms only right after the action word: the same word in the text is text.
+    leadingFlagsOnly: true,
     title: 'Skills',
     summary: 'See the skill packs the model can use, and publish your own',
     group: 'Extensions',

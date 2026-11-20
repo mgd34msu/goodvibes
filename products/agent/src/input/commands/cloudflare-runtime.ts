@@ -2,7 +2,6 @@ import { createCloudflareCommand } from '@goodvibes-jev/engine/terminal-shell/cl
 import { createCloudflareRouteClient, type CloudflareDaemonEndpoint } from '@goodvibes-jev/engine/terminal-shell/cloudflare-control-plane';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { resolveConnectedHostConnection } from '../connected-host-routes.ts';
-import { ownerOnlyVerb, OUTWARD_VERB, READ_VERB, withCommandVerbs } from './command-verbs.ts';
 
 /** The connected host's Cloudflare routes, with the credential every connected-host feature presents. */
 function connectedHostEndpoint(ctx: CommandContext): CloudflareDaemonEndpoint {
@@ -18,29 +17,14 @@ function connectedHostEndpoint(ctx: CommandContext): CloudflareDaemonEndpoint {
 }
 
 /**
- * /cloudflare in the Agent, over the connected host's Cloudflare routes. The
- * Agent has no setup wizard for it; `setup` says which commands set it up.
- * Creating a token, provisioning and disabling spend the owner's Cloudflare
- * account and handle its credentials, so the model may only read.
+ * /cloudflare in the Agent, over the connected host's Cloudflare routes: the
+ * one description shared with the terminal app. The Agent has no guided
+ * setup, so "Set Cloudflare up step by step" says which actions do it.
+ * Creating a token, deploying and turning it off are the owner's to type.
  */
 export function registerCloudflareRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(withCommandVerbs(createCloudflareCommand<CommandContext>({
+  registry.register(createCloudflareCommand<CommandContext>({
     client: (ctx) => createCloudflareRouteClient({ resolveEndpoint: () => connectedHostEndpoint(ctx) }),
     readSetting: (ctx, key) => ctx.platform.configManager.get(key),
-  }), {
-    defaultVerb: 'status',
-    verbs: {
-      status: READ_VERB,
-      show: READ_VERB,
-      setup: READ_VERB,
-      requirements: READ_VERB,
-      validate: OUTWARD_VERB,
-      discover: OUTWARD_VERB,
-      verify: OUTWARD_VERB,
-      'create-token': ownerOnlyVerb('credential', 'creates and stores a Cloudflare API token on the owner\'s account'),
-      provision: ownerOnlyVerb('outward', 'deploys Cloudflare resources on the owner\'s account and stores their credentials'),
-      disable: ownerOnlyVerb('outward', 'turns the Cloudflare integration off and can revoke its token'),
-    },
-    otherwise: READ_VERB,
   }));
 }

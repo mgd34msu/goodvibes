@@ -116,6 +116,8 @@ const KEY = textInput({ id: 'key', label: 'Setting', help: 'A setting key, as /s
 export function registerManagedRuntimeCommands(registry: CommandRegistry): void {
   registry.register(defineCommand<CommandContext>({
     name: 'managed',
+    // --yes confirms only right after the action word: the same word in the text is text.
+    leadingFlagsOnly: true,
     title: 'Managed settings',
     summary: 'Apply settings bundles your organisation manages, lock settings, and roll an apply back',
     group: 'Settings',

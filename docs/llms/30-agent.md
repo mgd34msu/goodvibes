@@ -678,21 +678,23 @@ Changes are the owner's own: a model running a `/todo` change is refused. Items 
 
 `/mail` is the terminal app's command with the Agent's mail service behind it (see "Mail" in the automation guide): `status`, `list [n]` (the unread messages), `read <message>`, `draft <to> --subject <subject> <message>`, `send <to> --subject <subject> <message>` (asks first), and the mailbox settings `settings`, `set <setting> <value>` and `password` (asked for masked). For example `/mail send ada@example.com --subject "Lunch on Friday" Are you free at noon?` answers `Email sent to ada@example.com with subject "Lunch on Friday".`
 
-`/google` (alias `/gmail`) connects Gmail and Google Calendar:
+`/google` connects Gmail and Google Calendar (bare in the terminal it opens its list; from a model it runs `status`):
 
 | Form | Effect |
 | --- | --- |
 | `connect` | Picks the shortest route and asks for at most one thing, approving a consent link. |
 | `status` | What is connected, proven by reading mail and calendar. |
 | `reauthorize` | Fresh consent covering mail and calendar together. |
-| `forget [--yes]` | Remove stored Google credentials; without `--yes` it says what would go. |
-| `adopt [--yes]` | Take up Google credentials from files on this machine (`~/.gmail-mcp`). |
+| `forget` | Shows which stored Google credentials would go, asks, then removes exactly those. |
+| `adopt [--replace]` | Take up Google credentials from files on this machine (`~/.gmail-mcp`); `--replace` replaces stored ones. |
 | `client-file <path>`, `client <client-id> <client-secret>` | Store an OAuth client, then ask for consent. |
 | `account <address>` | Set the Gmail address. |
 | `calendar-address <url>` | Store the private iCal address and subscribe to it for read-only calendar access. |
 | `setup [--path app-password|oauth|existing-client]` | Run one specific path. |
 | `runbook` | Print the written instructions. |
-| `approve [<n>] [--yes|--drop]` | Show sends that were refused; `--yes` sends the one shown, exactly as shown, good once and for five minutes; `--drop` drops it. It is ignored when the model runs it. |
+| `waiting` | The sends the content check refused, exactly as they would go out. |
+| `approve [<n>]` | Shows a refused send, asks, and sends it exactly as shown, good once and for five minutes; without a number, the one the last `waiting` showed. Only the owner typing it counts. |
+| `drop <n>` | Drops a refused send. |
 
 `/calendar` is the terminal app's command; here it works on the Agent's own events, its feeds and its accounts:
 

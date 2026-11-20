@@ -160,6 +160,8 @@ function start(fields: Pick<AgentsAction, 'id' | 'label' | 'word' | 'inputs' | '
 
 export const AGENTS_COMMAND: CommandDescription<CommandActionContext> = {
   name: 'agents',
+  // --yes confirms only right after the action word: the same word in the text is text.
+  leadingFlagsOnly: true,
   title: 'Your agents',
   summary: 'What your agents are doing: open the live view, start agents, host a coding agent, hand work on, and stop work',
   group: 'Agents and work',
@@ -211,7 +213,7 @@ export const AGENTS_COMMAND: CommandDescription<CommandActionContext> = {
     }),
     start({
       id: 'recipe', label: 'Run a recipe of agents', word: 'recipe',
-      inputs: [choiceInput({ id: 'recipe', label: 'Recipe', help: 'Agents that run one after another, each handed the last one\'s report', choices: TEAM_RECIPES.map(({ steps: _steps, ...choice }) => choice), typed: { position: 1 } }), TITLE],
+      inputs: [choiceInput({ id: 'recipe', label: 'Recipe', help: 'Agents that run one after another, each handed the last one\'s report', choices: TEAM_RECIPES.map((recipe): FixedChoice => ({ value: recipe.value, label: recipe.label, help: recipe.help })), typed: { position: 1 } }), TITLE],
       sentence: 'The {recipe} recipe runs on "{title}": each step starts when the one before it finished, and a step that fails stops the rest.', example: { recipe: 'research-implement-review', title: 'add retries to the uploader' },
       async run(values, ctx) { return able(hostOf().team).runRecipe(ctx, values.recipe!, values.title!); },
     }),

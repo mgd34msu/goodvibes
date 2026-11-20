@@ -29,8 +29,11 @@ export interface ConfirmationArgs {
 export function stripYesFlag(args: readonly string[]): ConfirmationArgs {
   const rest: string[] = [];
   let yes = false;
+  let text = false;
   for (const token of args) {
-    if (token === '--yes') {
+    // Words after `--` are text: a --yes there is a word of it.
+    if (token === '--') text = true;
+    if (token === '--yes' && !text) {
       yes = true;
       continue;
     }
@@ -52,7 +55,7 @@ export function stripLeadingYesFlag(args: readonly string[], skip = 1): Confirma
   let index = 0;
   for (; index < args.length; index += 1) {
     const token = args[index]!;
-    if (index >= skip && !token.startsWith('--')) break;
+    if (index >= skip && (!token.startsWith('--') || token === '--')) break;
     if (token === '--yes') {
       yes = true;
       continue;

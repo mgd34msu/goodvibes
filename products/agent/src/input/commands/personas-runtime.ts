@@ -163,6 +163,8 @@ function change(fields: Pick<PersonaAction, 'id' | 'label' | 'word' | 'inputs' |
 export function registerPersonasRuntimeCommands(registry: CommandRegistry): void {
   registry.register(defineCommand<CommandContext>({
     name: 'personas',
+    // --yes confirms only right after the action word: the same word in the text is text.
+    leadingFlagsOnly: true,
     title: 'Personas',
     summary: 'How the Agent talks and behaves: your personas, the one in use, and VIBE.md personality files',
     group: 'Agent',

@@ -114,9 +114,9 @@ export function registerNotifyCommands<Context extends NotifyContext & CommandAc
     })],
   }));
   registry.register({
+    ...defineCommand<Context>({
     // --yes answers the question only right after the action word: the same word inside a message is text.
     leadingFlagsOnly: true,
-    ...defineCommand<Context>({
     name: 'notify',
     title: 'Webhook notifications',
     summary: 'The webhook addresses (ntfy.sh format) notifications go to: add, remove, test, send, and resend the ones that failed',

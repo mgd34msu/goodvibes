@@ -52,7 +52,7 @@ export function createUndoCommands<Ctx extends CommandActionContext>(policy: {
 /** `/retry [changed message]`: send the last message again, as it was or changed. */
 export function createRetryCommand<Ctx extends CommandActionContext>(run: Run<Ctx>): DescribedCommand<Ctx> {
   return defineCommand<Ctx>({
-    name: 'retry', title: 'Ask again', summary: 'Send your last message again, as it was or changed', group: 'Conversation',
+    name: 'retry', leadingFlagsOnly: true, title: 'Ask again', summary: 'Send your last message again, as it was or changed', group: 'Conversation',
     actions: [doAction<Ctx>({
       id: 'retry', label: 'Send the last message again', word: '',
       inputs: [textInput({ id: 'message', label: 'Changed message', help: 'What to send instead', why: 'your own words', kind: 'long-text', typed: { tail: true }, optional: { default: '', means: 'the last message as it was' } })],
@@ -65,7 +65,7 @@ export function createRetryCommand<Ctx extends CommandActionContext>(run: Run<Ct
 /** `/title [text]`: show the conversation's title, or give it one. */
 export function createTitleCommand<Ctx extends CommandActionContext>(run: Run<Ctx>): DescribedCommand<Ctx> {
   return defineCommand<Ctx>({
-    name: 'title', title: 'Conversation title', summary: 'See or change the conversation\'s title', group: 'Conversation',
+    name: 'title', leadingFlagsOnly: true, title: 'Conversation title', summary: 'See or change the conversation\'s title', group: 'Conversation',
     actions: [{
       id: 'title', label: 'Name this conversation', word: '',
       inputs: [textInput({ id: 'text', label: 'Title', help: 'Its new title', why: 'your own words', typed: { tail: true }, optional: { default: '', means: 'show the title it has' } })],

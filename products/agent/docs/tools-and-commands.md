@@ -36,7 +36,7 @@ High-signal TUI routes:
 | `/channels`, `/notify`, `/devices` | Pair companions, inspect channel readiness, review delivery receipts, and send confirmed messages. |
 | `/media`, `/voice`, `/tts` | Inspect media/voice readiness, generate media, and run spoken turns. |
 | `/mcp`, `/secrets`, `/settings` | Inspect or update Agent-local configuration. |
-| `/delegate` | Hand explicit build/fix/review work to GoodVibes TUI with a confirmed handoff brief. Each hand-off is recorded in the Agent home; `/delegate status` lists them and `/delegate status <session-id>` shows the session's input state and latest answer. A hand-off whose task could not be delivered removes the empty session it created. |
+| `/agents hand-off` | Hand explicit build/fix/review work to the terminal app with a handoff brief. Each hand-off is recorded in the Agent home; `/agents handed-off` lists them and `/agents handed-off <session>` shows the session's input state and latest answer. A hand-off whose task could not be delivered removes the empty session it created. |
 
 An agent or a background process can take over the whole terminal. `Enter` on an agent's lane in the work tree (or on its row in the Activity modal) opens the agent: its work is the spine, its own children branch off it, the header reads `main › researcher` in the agent's color, and the composer steers the agent while main keeps running. `Enter` on a `▶` bead (or a row in the process monitor) opens the process: live output with timestamps, errors in red, follow mode on. The process view takes no input, because the Agent cannot write to a background process's stdin; `/` searches its output and `y` copies it. While more than one session exists, a row of session chips under the header lists them, and `Tab` / `Shift+Tab` switch between them when the composer is empty.
 
@@ -368,17 +368,12 @@ Agent rejects route-selection flags that would target another knowledge space, i
 
 ## Approvals, automation, and schedules
 
-Read views are safe by default. Mutations require exact target ids and confirmation:
+Read views are safe by default. An approval is answered with `/questions answer`; `/approval kinds` says what each kind asks about. A schedule and its runs are changed with `/schedule` (a change that cannot be undone asks first):
 
 ```text
-/approval approve <approval-id> [--note <text>] [--remember|--no-remember] --yes
-/approval deny <approval-id> [--note <text>] [--remember|--no-remember] --yes
-/approval cancel <approval-id> [--note <text>] [--remember|--no-remember] --yes
-/automation job run <job-id> --yes
-/automation job pause <job-id> --yes
-/automation job resume <job-id> --yes
-/automation run cancel <run-id> --yes
-/automation run retry <run-id> --yes
+/questions answer <approval> <choice> [note]
+/schedule stop-run <run>
+/schedule retry-run <run>
 /schedule run <schedule>
 /schedule pause <schedule>
 /schedule resume <schedule>

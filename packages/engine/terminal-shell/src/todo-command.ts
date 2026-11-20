@@ -62,6 +62,8 @@ function change<Ctx>(fields: Omit<ActionDescription<Ctx>, 'touches' | 'lasts' | 
 function todoDescription<Ctx extends TodoCommandContext>(openPanel: (ctx: Ctx) => void): CommandDescription<Ctx> {
   return {
     name: 'todo',
+    // --yes confirms only right after the action word: the same word in the text is text.
+    leadingFlagsOnly: true,
     title: 'To-do list',
     summary: 'Keep this project\'s to-do list',
     group: 'Work',

@@ -255,6 +255,8 @@ function shortPrompt(prompt: string): string {
 
 export const SCHEDULE_COMMAND: CommandDescription<ScheduleCommandContext> = {
   name: 'schedule',
+  // --yes confirms only right after the action word: the same word in the text is text.
+  leadingFlagsOnly: true,
   title: 'Schedules',
   summary: 'Run something at set times, with or without the app open',
   group: 'Automation',

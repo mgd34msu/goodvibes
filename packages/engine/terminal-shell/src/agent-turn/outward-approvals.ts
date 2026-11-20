@@ -57,7 +57,7 @@ export function resetOutwardApprovalStoreForTests(): void {
 
 /** The gesture, in the owner's words. Named once so the refusal cannot drift from it. */
 export const OUTWARD_APPROVAL_GESTURE =
-  'type /google approve at the prompt yourself to see the refused message and send it. '
+  'type /google approve at the prompt yourself: it shows the refused message and sends it when you say so. '
   + 'It is a keystroke rather than a phrase on purpose: anything you could be talked into typing, '
   + 'content that was just read could talk the agent into producing.';
 

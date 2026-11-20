@@ -128,6 +128,12 @@ export interface CommandDescription<Ctx> {
   readonly group: string;
   /** The action id a bare command runs where no list can be shown (a model, a script); first row of the list. */
   readonly report?: string | undefined;
+  /**
+   * The last blank of an action is text a person wrote (a message, a note):
+   * `--yes` confirms only right after the action word, and the same word inside
+   * the text is text. Words after `--` are text for every command.
+   */
+  readonly leadingFlagsOnly?: boolean | undefined;
   /** False: listed only once something is typed. Every action stays reachable from the guided path. */
   readonly firstScreen?: boolean | undefined;
   /**

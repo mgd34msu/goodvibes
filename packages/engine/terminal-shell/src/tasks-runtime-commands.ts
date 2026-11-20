@@ -155,6 +155,8 @@ function change(fields: Pick<TaskAction, 'id' | 'label' | 'word' | 'inputs' | 's
 
 export const TASKS_COMMAND: CommandDescription<CommandActionContext> = {
   name: 'tasks',
+  // --yes confirms only right after the action word: the same word in the text is text.
+  leadingFlagsOnly: true,
   title: 'Tasks',
   summary: 'The work running here and on the daemon: see it, start it, finish it, pause or cancel it',
   group: 'Agents and work',

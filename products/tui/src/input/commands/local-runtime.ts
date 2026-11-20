@@ -1,12 +1,11 @@
 import { createSecretsCommand } from '@goodvibes-jev/engine/terminal-shell/secrets-command';
 import { createLocalCommandActions } from '@goodvibes-jev/engine/terminal-shell/local-command-actions';
-import { handleBookmarks } from '@goodvibes-jev/engine/terminal-shell/bookmark-command';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
 
-import { openCommandView, requireBookmarkManager, requireProviderApi } from './runtime-services.ts';
+import { openCommandView, requireProviderApi } from './runtime-services.ts';
 
-const localActions = createLocalCommandActions<CommandContext>(requireProviderApi, {
+export const localActions = createLocalCommandActions<CommandContext>(requireProviderApi, {
   hidden: false,
   unpinByModelId: false,
   imageHint: '<path> [prompt text]',
@@ -88,33 +87,7 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
     },
   });
 
-  registry.register({
-    name: 'expand',
-    description: 'Expand blocks by type',
-    usage: '[all|thinking|tool|code]',
-    argsHint: '[all|thinking|tool|code]',
-    handler(args, ctx) {
-      localActions.toggleBlocks(args[0] || 'all', false, ctx);
-    },
-  });
-  registry.register({
-    name: 'collapse',
-    description: 'Collapse blocks by type',
-    usage: '[all|thinking|tool|code]',
-    argsHint: '[all|thinking|tool|code]',
-    handler(args, ctx) {
-      localActions.toggleBlocks(args[0] || 'all', true, ctx);
-    },
-  });
 
-  registry.register({
-    name: 'bookmarks',
-    aliases: ['bm'],
-    description: 'List bookmarked blocks',
-    handler(_args, ctx) {
-      handleBookmarks(ctx, () => requireBookmarkManager(ctx));
-    },
-  });
 
   registry.register(secretsCommand);
 

@@ -368,7 +368,7 @@ export class DaemonSurfaceActionHelper {
     for (const proposal of store.listAcceptedUnstarted()) {
       try {
         // Held again (admission closed meanwhile): it stays accepted and unstarted for the next start.
-        if (await startAgreedWork(this.conversationGateDeps(), proposal) === 'held') continue;
+        if (await startAgreedWork(this.conversationGateDeps(), proposal, proposal.agreedNote) === 'held') continue;
         store.markStarted(proposal.id);
         resumed += 1;
       } catch (error) {

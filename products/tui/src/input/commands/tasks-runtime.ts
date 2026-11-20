@@ -28,19 +28,15 @@ import { requireOperatorClient, requireOpsApi, requireShellPaths } from './runti
 import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
 
 import { createTasksRuntimeCommands } from '@goodvibes-jev/engine/terminal-shell/tasks-runtime-commands';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 export const { registerTasksRuntimeCommands } = createTasksRuntimeCommands<CommandContext>({
-  description: 'Inspect and control runtime tasks',
-  usage:
-    '[list [status|kind] | show <taskId> | output <taskId> | create <kind> <owner> <title...> | start <taskId> | update <taskId> <title|description|result> <value...> | complete <taskId> [result] | fail <taskId> <error...> | cancel <taskId> [note] | pause <taskId> [note] | resume <taskId> [note] | retry <taskId> [note]]',
   listTitle: 'Runtime Tasks',
   local: (ctx) => requireOperatorClient(ctx).tasks,
   verbs: (ctx) =>
     createDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }),
   mutations: requireOpsApi,
-  beforeRead(args, ctx) {
-    if (args.length !== 0) return false;
-    if (!ctx.openView?.('tasks')) ctx.print('The Agents view is not available in this session; /tasks list prints them.');
-    return true;
+  open(ctx) {
+    if (!ctx.openView?.('tasks')) throw commandRefusal('The Agents view is not available in this session.', '/tasks list prints them.');
   },
   row: ({ task }) => `  ${task.id}  ${task.status.padEnd(9)} ${task.kind.padEnd(11)} ${task.owner}  ${task.title}`,
   detail(ctx, entry) {
@@ -76,6 +72,4 @@ export const { registerTasksRuntimeCommands } = createTasksRuntimeCommands<Comma
       })(),
     );
   },
-  unknown: (id) => `Unknown task: ${id}`,
-  unknownSubcommand: (subcommand) => `Unknown tasks subcommand: ${subcommand}`,
 });

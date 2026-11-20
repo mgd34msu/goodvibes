@@ -14,6 +14,9 @@ import { summarizeError, logger } from '@goodvibes-jev/engine/platform/platform/
 import type { OpenSelection } from './selection-modal.js';
 import type { TerminalSlashCommand } from './command-registry.js';
 import { commandRefusal } from './command-confirmation.js';
+import { defineCommand } from './command-actions/define.js';
+import { doAction } from './described-command-kit.js';
+import type { CommandActionContext } from './command-actions/types.js';
 import type { KeyCombo } from './keybindings.js';
 interface ShellCoreContext {
   readonly session: { readonly runtime: { model: string; provider: string; reasoningEffort: string; sessionId: string } };
@@ -238,29 +241,26 @@ export function createShellCoreActions<Context extends ShellCoreContext>(
         applyLevel(requested);
       },
     } satisfies TerminalSlashCommand<Context>,
-    clear: {
-      name: 'clear',
-      effect: 'session-lifecycle',
-      aliases: ['cls'],
-      description: 'Start a fresh conversation (the current one is saved as its own session)',
-      handler(_args: string[], ctx: Context) {
-        if (ctx.isGenerating?.()) {
-          ctx.print('A turn is still running. Stop it with Esc or let it finish, then /clear.');
-          return;
-        }
-        let result: { readonly savedAs: string | null };
-        try {
-          result = services.startFreshConversation(ctx);
-        } catch (e) {
-          ctx.print(`Could not save the current conversation, so nothing was cleared: ${summarizeError(e)}`);
-          return;
-        }
-        if (result.savedAs) {
-          policy.freshConversation(ctx, result.savedAs);
-        }
-        ctx.renderRequest();
-      },
-    } satisfies TerminalSlashCommand<Context>,
+    // `/clear`: a single-action command (command-actions/): the line is the command name alone.
+    clear: defineCommand<Context & CommandActionContext>({
+      name: 'clear', title: 'Start a fresh conversation', summary: 'Start a fresh conversation; the current one is saved as its own session', group: 'Conversation',
+      actions: [doAction<Context & CommandActionContext>({
+        id: 'clear', label: 'Start a fresh conversation', word: '', touches: 'this-machine',
+        sentence: 'The current conversation is saved as its own session and a fresh one starts; /resume brings the saved one back.',
+        operator: { terminalOnly: 'It is the terminal app\'s open conversation.' },
+        async run(_values, ctx) {
+          if (ctx.isGenerating?.()) throw commandRefusal('A turn is still running, so nothing was cleared.', 'Stop it with Esc or let it finish, then /clear.');
+          let result: { readonly savedAs: string | null };
+          try {
+            result = services.startFreshConversation(ctx);
+          } catch (e) {
+            throw commandRefusal(`Could not save the current conversation, so nothing was cleared: ${summarizeError(e)}`);
+          }
+          if (result.savedAs) policy.freshConversation(ctx, result.savedAs);
+          ctx.renderRequest?.();
+        },
+      })],
+    }),
     keybindings: {
       name: 'keybindings',
       effect: 'read-only',

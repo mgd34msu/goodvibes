@@ -99,6 +99,11 @@ export interface WorkProposalRecord {
    * started (the daemon stopped in between); it is started then.
    */
   readonly started?: boolean | undefined;
+  /**
+   * The direction the owner added to his "yes" (an accepted proposal only),
+   * saved with the answer so work started later (after a restart) still carries it.
+   */
+  readonly agreedNote?: string | undefined;
 }
 
 /** The owner's conversation that answers a guest's proposal. */
@@ -190,6 +195,7 @@ export function validateWorkProposal(value: unknown): WorkProposalRecord | null 
     // delivery was never confirmed, loads as unseen and stays unanswerable.
     delivered: value.delivered === true,
     ...(value.started === true ? { started: true } : {}),
+    ...(status === 'accepted' && optionalString(value.agreedNote) ? { agreedNote: optionalString(value.agreedNote) } : {}),
     ...(optionalString(value.surfaceId) ? { surfaceId: optionalString(value.surfaceId) } : {}),
     ...(optionalString(value.routeId) ? { routeId: optionalString(value.routeId) } : {}),
     ...(optionalString(value.externalId) ? { externalId: optionalString(value.externalId) } : {}),
@@ -492,12 +498,13 @@ export class WorkProposalStore {
    * answered a second time), or its message was never confirmed delivered (the
    * owner has not seen it, so there is nothing for them to have answered).
    */
-  async resolve(id: string, outcome: 'accepted' | 'declined'): Promise<WorkProposalRecord | null> {
+  async resolve(id: string, outcome: 'accepted' | 'declined', note?: string): Promise<WorkProposalRecord | null> {
     if (!this.sweepEnabled) return null;
     this.reap();
     const record = this.proposals.get(id);
     if (!record || !record.delivered || !workProposalLifecycle.can(record.status, outcome)) return null;
-    const resolved: WorkProposalRecord = { ...record, status: outcome };
+    // The owner's added direction is saved in the same write as his "yes".
+    const resolved: WorkProposalRecord = { ...record, status: outcome, ...(outcome === 'accepted' && note?.trim() ? { agreedNote: note.trim() } : {}) };
     // Taken at once, so a racing second answer finds it answered; acted on only
     // once saved: an answer whose save failed is given back and throws, so the
     // owner is never told work started that a restart would forget.

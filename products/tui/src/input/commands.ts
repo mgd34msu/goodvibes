@@ -63,7 +63,6 @@ import { registerAcpRuntimeCommands } from './commands/acp-runtime.ts';
 import { registerProviderAccountsRuntimeCommands } from './commands/provider-accounts-runtime.ts';
 import { registerLocalAuthRuntimeCommands } from './commands/local-auth-runtime.ts';
 import { registerIntelligenceRuntimeCommands } from './commands/intelligence-runtime.ts';
-import { registerConversationRuntimeCommands } from './commands/conversation-runtime.ts';
 import { registerQrcodeRuntimeCommands } from './commands/qrcode-runtime.ts';
 import { registerDevicesRuntimeCommands } from './commands/devices-runtime.ts';
 import { registerRelayRuntimeCommands } from './commands/relay-runtime.ts';
@@ -153,7 +152,6 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Provider Accounts', register: registerProviderAccountsRuntimeCommands },
   { category: 'Local Auth', register: registerLocalAuthRuntimeCommands },
   { category: 'Intelligence', register: registerIntelligenceRuntimeCommands },
-  { category: 'Conversation', register: registerConversationRuntimeCommands },
   { category: 'QR Codes', register: registerQrcodeRuntimeCommands },
   { category: 'Security', register: registerDevicesRuntimeCommands },
   { category: 'Security', register: registerHostPairingCommands },

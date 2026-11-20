@@ -10,7 +10,6 @@ import {
   buildPinUsageText,
   buildPinSuccessText,
 } from '../../renderer/compaction-preview.ts';
-import { buildCompactionHistoryText } from '../../renderer/compaction-history-modal.ts';
 import { ensureProviderKeyThenSelect } from '../provider-key-intake.ts';
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import { helpForCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
@@ -138,8 +137,7 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
     },
   });
 
-  // /reset is the same fresh start as /clear, so it is one of its names rather than a second implementation.
-  registry.register({ ...coreActions.clear, aliases: [...coreActions.clear.aliases, 'reset'] });
+  registry.register(coreActions.clear);
 
   registry.register({
     name: 'compact',
@@ -173,7 +171,7 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
         // quality-score grade line when one was computed.
         ctx.print(buildCompactionAfterNotice({ event: result.event, pinnedMemoryCount, qualityScore: result.qualityScore }));
       } else if (result.kind === 'dropped') {
-        ctx.print(`[Context] Dropped the ${result.dropped} oldest message(s) without a summary and kept the last ${result.kept}: this model's context window is too small to summarise them. Their tool results are gone; re-read any file you still need. /compact-history lists it.`);
+        ctx.print(`[Context] Dropped the ${result.dropped} oldest message(s) without a summary and kept the last ${result.kept}: this model's context window is too small to summarise them. Their tool results are gone; re-read any file you still need. /session compactions lists it.`);
       } else {
         ctx.print(`[Context] Nothing was compacted: ${result.reason}.`);
       }
@@ -181,15 +179,6 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
     },
   });
 
-  registry.register({
-    name: 'compact-history',
-    aliases: ['compaction-history'],
-    description: 'Show compaction history for this session',
-    handler(_args, ctx) {
-      ctx.print(buildCompactionHistoryText());
-      ctx.renderRequest();
-    },
-  });
 
   registry.register({
     name: 'keep',

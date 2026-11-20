@@ -10,8 +10,12 @@ import { createSessionCommands } from '@goodvibes-jev/engine/terminal-shell/sess
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
 import { exportSavedSession, resumeSavedSession, sessionWorkflow } from './session-workflow.ts';
-import { requireSessionOrchestration, requireShellPaths } from './runtime-services.ts';
+import { requireBookmarkManager, requireSessionOrchestration, requireShellPaths } from './runtime-services.ts';
 import { contentCommands } from './session-content.ts';
+import { handleBookmarks } from '@goodvibes-jev/engine/terminal-shell/bookmark-command';
+import { conversationReading } from './conversation-runtime.ts';
+import { localActions } from './local-runtime.ts';
+import { buildCompactionHistoryText } from '../../renderer/compaction-history-modal.ts';
 import { shareConversation } from './share-runtime.ts';
 
 const handleGraph = createSessionGraphHandler<CommandContext>(
@@ -72,6 +76,24 @@ const commands = createSessionCommands<CommandContext>({
       ctx.print(`Added the new messages of branch "${name}" to this conversation.`);
       ctx.renderRequest();
     },
+  },
+  look: {
+    async find(ctx, words, kind) {
+      if (!words.trim() && ctx.openTranscriptSearch) { ctx.openTranscriptSearch(); return; }
+      await conversationReading.find(ctx, words, kind);
+    },
+    async jump(ctx, direction, kind) {
+      if (kind !== 'error') { await conversationReading.jump(ctx, direction, kind); return; }
+      const conversation = ctx.session.conversationManager;
+      const line = direction === 'next' ? conversation.nextErrorLine(ctx.getScrollTop?.() ?? 0) : conversation.prevErrorLine(ctx.getScrollTop?.() ?? 0);
+      if (line < 0) throw commandRefusal('No error messages in this conversation.');
+      ctx.scrollToLine?.(line);
+    },
+    composer: (ctx) => conversationReading.composer(ctx),
+    restored: (ctx) => conversationReading.restored(ctx),
+    blocks: (ctx, type, fold) => localActions.toggleBlocks(type, fold, ctx),
+    bookmarks: (ctx) => handleBookmarks(ctx, () => requireBookmarkManager(ctx)),
+    compactions: (ctx) => { ctx.print(buildCompactionHistoryText()); ctx.renderRequest(); },
   },
   graphReadOnly: undefined,
   graph(ctx, input) {

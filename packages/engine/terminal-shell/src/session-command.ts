@@ -57,6 +57,19 @@ export interface SessionCommandPolicy<Ctx> {
     switchTo(ctx: Ctx, name: string): void;
     merge(ctx: Ctx, name: string): void;
   };
+  /** Looking through the open conversation. */
+  readonly look: {
+    /** Words found in the record; with no words, the app's in-place search when it has one. */
+    find(ctx: Ctx, words: string, kind: string): Promise<void>;
+    /** Scroll to the next or previous entry of a kind, or of an error (`error`). */
+    jump(ctx: Ctx, direction: 'next' | 'prev', kind: string): Promise<void>;
+    composer(ctx: Ctx): void;
+    restored(ctx: Ctx): Promise<void>;
+    blocks(ctx: Ctx, type: string, fold: boolean): void;
+    bookmarks(ctx: Ctx): void;
+    /** What compaction removed so far; undefined when this app keeps no such record. */
+    compactions: ((ctx: Ctx) => void) | undefined;
+  };
   /** Why this app may only read the cross-session task graph, or undefined when it may change it. */
   readonly graphReadOnly: string | undefined;
   readonly graph: (ctx: Ctx, input: { readonly session: string; readonly format: string }) => void;
@@ -126,6 +139,18 @@ const KINDS: readonly FixedChoice[] = [
 const KIND: InputDescription = {
   id: 'kind', label: 'Kind', help: 'Only one kind of entry', kind: 'choice', choices: KINDS,
   required: { default: 'all', defaultMeans: 'everything' }, typed: { position: 1 },
+};
+const JUMP_KINDS: readonly FixedChoice[] = [{ value: 'error', label: 'Errors' }, ...KINDS.map((choice) => choice.value === 'all' ? { value: 'all', label: 'Any entry' } : choice)];
+const JUMP_KIND: InputDescription = {
+  id: 'kind', label: 'To', help: 'Which kind of entry', kind: 'choice', choices: JUMP_KINDS,
+  required: { default: 'all', defaultMeans: 'any entry' }, typed: { position: 1 },
+};
+const BLOCK_TYPES: readonly FixedChoice[] = [
+  { value: 'all', label: 'Every block' }, { value: 'thinking', label: 'Thinking' }, { value: 'tool', label: 'Tool calls' }, { value: 'code', label: 'Code' },
+];
+const BLOCK_TYPE: InputDescription = {
+  id: 'type', label: 'Blocks', help: 'Which blocks', kind: 'choice', choices: BLOCK_TYPES,
+  required: { default: 'all', defaultMeans: 'every block' }, typed: { position: 1 },
 };
 const START: InputDescription = {
   id: 'start', label: 'From row', help: 'The first row to show', kind: 'number', freeTextReason: 'a row number from 1',
@@ -277,6 +302,76 @@ function sessionActions<Ctx extends SessionCommandContext>(policy: SessionComman
       touches: 'reads', lasts: 'not-a-change', risk: 'none',
       operator: { terminalOnly: 'It is the terminal app\'s open conversation.' }, example: { kind: 'tool_call' },
       async run(values, ctx) { await policy.workflow.review(ctx, 'hotspots', { kind: values.kind ?? '', start: '', last: '' }); },
+    },
+    {
+      id: 'find', label: 'Find words in this conversation', word: 'find',
+      inputs: [
+        { id: 'words', label: 'Words', help: 'What to look for', kind: 'text', freeTextReason: 'your own words', required: { default: '', defaultMeans: 'search in place, as Ctrl+F does' }, typed: { tail: true } },
+        { ...KIND, typed: { flag: '--kind' } },
+      ],
+      sentence: 'Lists the entries of this conversation that hold the words given; with none, searches in place.', done: '',
+      touches: 'reads', lasts: 'not-a-change', risk: 'none',
+      operator: { terminalOnly: 'It is the terminal app\'s open conversation.' }, example: { words: 'approval', kind: 'approval_request' },
+      async run(values, ctx) { await policy.look.find(ctx, values.words ?? '', values.kind ?? 'all'); },
+    },
+    {
+      id: 'next', label: 'Jump to the next entry', word: 'next', inputs: [JUMP_KIND],
+      sentence: 'Scrolls to the next entry of the kind chosen, after where you are.', done: '',
+      touches: 'reads', lasts: 'not-a-change', risk: 'none',
+      operator: { terminalOnly: 'It moves the terminal app\'s own view.' }, example: { kind: 'error' },
+      async run(values, ctx) { await policy.look.jump(ctx, 'next', values.kind ?? 'all'); },
+    },
+    {
+      id: 'prev', label: 'Jump to the previous entry', word: 'prev', inputs: [JUMP_KIND],
+      sentence: 'Scrolls to the previous entry of the kind chosen, before where you are.', done: '',
+      touches: 'reads', lasts: 'not-a-change', risk: 'none',
+      operator: { terminalOnly: 'It moves the terminal app\'s own view.' }, example: { kind: 'tool_result' },
+      async run(values, ctx) { await policy.look.jump(ctx, 'prev', values.kind ?? 'all'); },
+    },
+    {
+      id: 'expand', label: 'Open folded blocks', word: 'expand', inputs: [BLOCK_TYPE],
+      sentence: 'Opens the folded blocks of the kind chosen in this conversation.', done: '',
+      touches: 'reads', lasts: 'not-a-change', risk: 'none',
+      operator: { terminalOnly: 'It changes the terminal app\'s own view.' }, example: { type: 'tool' },
+      async run(values, ctx) { policy.look.blocks(ctx, values.type || 'all', false); },
+    },
+    {
+      id: 'collapse', label: 'Fold blocks', word: 'collapse', inputs: [BLOCK_TYPE],
+      sentence: 'Folds the blocks of the kind chosen in this conversation to one line each.', done: '',
+      touches: 'reads', lasts: 'not-a-change', risk: 'none',
+      operator: { terminalOnly: 'It changes the terminal app\'s own view.' }, example: { type: 'thinking' },
+      async run(values, ctx) { policy.look.blocks(ctx, values.type || 'all', true); },
+    },
+    {
+      id: 'bookmarks', label: 'See bookmarked blocks', word: 'bookmarks', inputs: [],
+      sentence: 'Lists the blocks you bookmarked (Ctrl+B) and jumps to one.', done: '',
+      touches: 'reads', lasts: 'not-a-change', risk: 'none',
+      operator: { terminalOnly: 'Bookmarks belong to the terminal app\'s open conversation.' }, example: {},
+      async run(_values, ctx) { policy.look.bookmarks(ctx); },
+    },
+    {
+      id: 'composer', label: 'See what the composer waits on', word: 'composer', inputs: [],
+      sentence: 'Shows the composer\'s mode, what it waits on, the turn\'s state and how full the context is.', done: '',
+      touches: 'reads', lasts: 'not-a-change', risk: 'none',
+      operator: { terminalOnly: 'It is the terminal app\'s composer.' }, example: {},
+      async run(_values, ctx) { policy.look.composer(ctx); },
+    },
+    {
+      id: 'restored', label: 'See what a resume brought back', word: 'restored', inputs: [],
+      sentence: 'Lists the entries a resume restored: approvals, tasks, remote state and notices.', done: '',
+      touches: 'reads', lasts: 'not-a-change', risk: 'none',
+      operator: { terminalOnly: 'It is the terminal app\'s open conversation.' }, example: {},
+      async run(_values, ctx) { await policy.look.restored(ctx); },
+    },
+    {
+      id: 'compactions', label: 'See what compaction removed', word: 'compactions', inputs: [],
+      sentence: 'Lists each compaction of this session: when, how much it removed and what it kept.', done: '',
+      touches: 'reads', lasts: 'not-a-change', risk: 'none',
+      operator: { terminalOnly: 'It is the terminal app\'s open conversation.' }, example: {},
+      async run(_values, ctx) {
+        if (!policy.look.compactions) throw commandRefusal('This app keeps no record of compactions.', '/compact says what it removed when it runs.');
+        policy.look.compactions(ctx);
+      },
     },
     {
       id: 'save-file', label: 'Save this conversation as a file', word: 'save-file',
@@ -514,7 +609,7 @@ export function createSessionCommands<Ctx extends SessionCommandContext>(policy:
       { label: 'Copy, rename or delete a session', actions: ['fork', 'rename', 'info', 'search', 'delete'] },
       { label: 'Save or share the conversation', actions: ['save-file', 'save-saved', 'upload'] },
       { label: 'Branches of this conversation', actions: ['branch', 'branches', 'switch-branch', 'merge-branch'] },
-      { label: 'Look through this conversation', actions: ['events', 'groups', 'hotspots'] },
+      { label: 'Look through this conversation', actions: ['find', 'next', 'prev', 'events', 'groups', 'hotspots', 'expand', 'collapse', 'bookmarks', 'composer', 'restored', 'compactions'] },
       { label: 'Tasks across sessions', actions: ['graph', 'link-task', 'hand-off', 'accept', 'withdraw', 'cancel'] },
     ],
     actions,

@@ -1,72 +1,69 @@
+/**
+ * `/context`, described once (command-actions/): what fills the context, and
+ * the context window size of the current model. Both terminal apps register
+ * this one description; how tokens are estimated is each app's policy.
+ * Jumping between errors is `/session next error` and `/session prev error`.
+ */
 import type { TerminalConversationManager } from './terminal-conversation.js';
-import type { TerminalSlashCommand } from './command-registry.js';
+import { defineCommand, type DescribedCommand } from './command-actions/define.js';
+import { readAction, textInput } from './described-command-kit.js';
+import type { CommandActionContext } from './command-actions/types.js';
+
 type ContextMessages = ReturnType<TerminalConversationManager['getMessagesForLLM']>;
-interface ContextInspectionContext {
-  readonly session: {
-    readonly conversationManager: Pick<TerminalConversationManager, 'getMessagesForLLM' | 'nextErrorLine' | 'prevErrorLine'>;
-  };
+interface ContextInspectionContext extends CommandActionContext {
+  readonly session: { readonly conversationManager: Pick<TerminalConversationManager, 'getMessagesForLLM'> };
   readonly openContextInspector?: (() => void) | undefined;
-  readonly getScrollTop?: (() => number) | undefined;
-  readonly scrollToLine?: ((line: number) => void) | undefined;
-  print(message: string): void;
 }
+
 export function createContextInspectionCommand<Context extends ContextInspectionContext>(policy: {
-  readonly description: string;
-  readonly hidden?: boolean | undefined;
+  /** Shows, sets (a size) or clears ('clear') the window; '' shows it. */
   readonly window: (args: string[], context: Context) => void;
   readonly estimate: (message: ContextMessages[number]) => number;
   readonly total: (messages: ContextMessages, estimates: number[]) => number;
-}): TerminalSlashCommand<Context> {
-  return {
+}): DescribedCommand<Context> {
+  return defineCommand<Context>({
     name: 'context',
-    effect: 'mixed',
-    aliases: ['ctx'],
-    description: policy.description,
-    firstScreen: !policy.hidden,
-    usage: '[window [<size>|clear]]',
-    argsHint: '[window <size|clear>]',
-    handler(args, context) {
-      if (args[0]?.toLowerCase() === 'window') {
-        policy.window(args.slice(1), context);
-        return;
-      }
-      if (context.openContextInspector) {
-        context.openContextInspector();
-        return;
-      }
-      const messages = context.session.conversationManager.getMessagesForLLM();
-      if (!messages.length) {
-        context.print('[context] No messages in conversation.');
-        return;
-      }
-      const measured = messages.map((message) => ({ message, tokens: policy.estimate(message) }));
-      const total = policy.total(
-        messages,
-        measured.map((entry) => entry.tokens),
-      );
-      const lines = ['Context breakdown:'];
-      for (const { message, tokens } of measured) lines.push(`  ${message.role.padEnd(12)} ~${tokens.toLocaleString()} tokens`);
-      lines.push(`  ${'Total'.padEnd(12)} ~${total.toLocaleString()} tokens (${messages.length} messages)`);
-      context.print(lines.join('\n'));
-    },
-  };
-}
-export function createErrorNavigationCommands<Context extends ContextInspectionContext>(hidden?: boolean) {
-  const command = (direction: 'next' | 'prev'): TerminalSlashCommand<Context> => ({
-    name: direction + '-error',
-    effect: 'ui-navigation',
-    aliases: [direction === 'next' ? 'ne' : 'pe'],
-    firstScreen: !hidden,
-    description: 'Jump to the ' + (direction === 'next' ? 'next' : 'previous') + ' error message in the conversation',
-    handler(_args, context) {
-      const conversation = context.session.conversationManager;
-      const line =
-        direction === 'next'
-          ? conversation.nextErrorLine(context.getScrollTop?.() ?? 0)
-          : conversation.prevErrorLine(context.getScrollTop?.() ?? 0);
-      if (line < 0) context.print('[No error messages found in conversation]');
-      else context.scrollToLine?.(line);
-    },
+    title: 'Context',
+    summary: 'What fills the model\'s context, and how large its window is',
+    group: 'Conversation',
+    report: 'see',
+    actions: [
+      readAction<Context>({
+        id: 'see', label: 'See what fills the context', word: 'show',
+        sentence: 'Shows how many tokens each message of this conversation takes, and the total.',
+        operator: { terminalOnly: 'It is the terminal app\'s open conversation.' },
+        async run(_values, context) {
+          if (context.openContextInspector) { context.openContextInspector(); return; }
+          const messages = context.session.conversationManager.getMessagesForLLM();
+          if (!messages.length) return 'The conversation has no messages yet.';
+          const measured = messages.map((message) => ({ message, tokens: policy.estimate(message) }));
+          const total = policy.total(messages, measured.map((entry) => entry.tokens));
+          return ['What fills the context:', ...measured.map(({ message, tokens }) => `  ${message.role.padEnd(12)} ~${tokens.toLocaleString()} tokens`), `  ${'Total'.padEnd(12)} ~${total.toLocaleString()} tokens (${messages.length} messages)`].join('\n');
+        },
+      }),
+      readAction<Context>({
+        id: 'see-window', label: 'See the context window size', word: 'window',
+        sentence: 'Shows the current model\'s context window: what it says, any size you set and any limit learned from the provider.',
+        operator: { terminalOnly: 'It is the terminal app\'s model.' },
+        async run(_values, context) { policy.window([], context); },
+      }),
+      {
+        id: 'set-window', label: 'Set the context window size', word: 'set-window',
+        inputs: [textInput({ id: 'size', label: 'Size', help: 'Tokens, such as 120000, 200k or 1m', why: 'a token count', kind: 'number', typed: { position: 1 } })],
+        sentence: 'The current model\'s context window will be taken as {size} tokens until you change it.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'clear-window',
+        operator: { terminalOnly: 'It is the terminal app\'s model.' }, example: { size: '200k' },
+        async run(values, context) {
+          policy.window([values.size!], context);
+        },
+      },
+      {
+        id: 'clear-window', label: 'Go back to the automatic window size', word: 'clear-window', inputs: [],
+        sentence: 'The size you set and any limit learned for the current model are cleared, and its own window size applies until you change it.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'set-window',
+        operator: { terminalOnly: 'It is the terminal app\'s model.' }, example: {},
+        async run(_values, context) { policy.window(['clear'], context); },
+      },
+    ],
   });
-  return { nextError: command('next'), prevError: command('prev') };
 }

@@ -155,7 +155,7 @@ async function resolveOwnedProposalReply(input: ChannelIngressPolicyInput, deps:
     ...(answer === 'steer' ? { note: text } : {}) };
 
   // Saved before it is acted on or acknowledged (a failed save throws, and the proposal stays open).
-  const resolved = await store.resolve(target.id, reply.decision === 'affirmative' ? 'accepted' : 'declined');
+  const resolved = await store.resolve(target.id, reply.decision === 'affirmative' ? 'accepted' : 'declined', reply.note);
   if (!resolved) {
     // Reaped between listPending and resolve, or answered by a racing reply.
     // A racing "yes" lost to the winning one: that proposal is under way, not expired.

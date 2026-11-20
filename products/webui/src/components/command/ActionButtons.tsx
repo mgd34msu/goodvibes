@@ -15,10 +15,14 @@ export interface ActionButtonsProps {
   readonly actions: readonly string[];
   /** What the row knows (its server, its tool), by blank id. */
   readonly prefill?: Readonly<Record<string, string>>;
+  /** What the thing holds now, by blank id (an editor's current values), shown in blanks left empty. */
+  readonly current?: Readonly<Record<string, string>>;
   readonly onDone?: () => void;
+  /** Words for a button other than the action's label ("Change…" on a row that already names the schedule). */
+  readonly labels?: Readonly<Record<string, string>>;
 }
 
-export function ActionButtons({ command, actions, prefill = {}, onDone }: ActionButtonsProps) {
+export function ActionButtons({ command, actions, prefill = {}, current, onDone, labels = {} }: ActionButtonsProps) {
   const [open, setOpen] = useState<string | null>(null);
   return (
     <span className="gv-action-buttons">
@@ -30,17 +34,18 @@ export function ActionButtons({ command, actions, prefill = {}, onDone }: Action
           <Button
             key={id}
             size="sm"
-            variant={found.action.risk === 'none' ? 'secondary' : 'quiet-danger'}
+            // Red only for what cannot be undone; other risks say their words in the title and the sheet.
+            variant={found.action.risk === 'cannot-be-undone' ? 'quiet-danger' : 'secondary'}
             disabled={terminalOnly !== undefined}
             title={terminalOnly ?? (found.action.riskWords ? `${found.action.label} (${riskWords(found.action.risk)})` : found.action.label)}
             onClick={() => setOpen(id)}
           >
-            {found.action.inputs.some((input) => prefill[input.id] === undefined) ? `${found.action.label}…` : found.action.label}
+            {labels[id] ?? (found.action.inputs.some((input) => input.required === true && prefill[input.id] === undefined) ? `${found.action.label}…` : found.action.label)}
           </Button>
         );
       })}
       {open ? (
-        <ActionSheet key={open} open command={command} action={open} prefill={prefill} onClose={() => setOpen(null)} {...(onDone ? { onDone } : {})} />
+        <ActionSheet key={open} open command={command} action={open} prefill={prefill} {...(current ? { current } : {})} onClose={() => setOpen(null)} {...(onDone ? { onDone } : {})} />
       ) : null}
     </span>
   );

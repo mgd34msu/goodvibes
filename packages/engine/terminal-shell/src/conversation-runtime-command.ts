@@ -4,7 +4,6 @@ import type { ComposerStateInput, ComposerState } from './composer-state.js';
 import type { TranscriptEventKind } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ConversationManager, TranscriptReadingOptions } from '@goodvibes-jev/engine/platform/platform/core';
 import type { TranscriptCommandContext } from './transcript-reading.js';
-import type { TerminalSlashCommand } from './command-registry.js';
 import type { UiSessionSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 import { commandRefusal } from './command-confirmation.js';
 type RuntimeTranscriptConversation = Pick<ConversationManager, 'getMessageSnapshot' | 'getTranscriptEventIndex' | 'getMessageCount'> & {
@@ -16,62 +15,16 @@ export interface ConversationRuntimeContext extends TranscriptCommandContext<Run
   readonly getScrollTop?: (() => number) | undefined;
   readonly scrollToLine?: ((line: number) => void) | undefined;
 }
-/** Registry and product visibility stay at the edge; transcript observation is shared. */
-export function createConversationRuntimeCommand<Context extends ConversationRuntimeContext>(
+/**
+ * Reading the open conversation for `/session`'s "Look through this
+ * conversation" actions: find words, jump to the next or previous entry of a
+ * kind, what the composer waits on, and what a resume brought back.
+ */
+export function createConversationReading<Context extends ConversationRuntimeContext>(
   readSession: (context: Context) => UiSessionSnapshot,
   deriveComposerState: (input: ComposerStateInput) => ComposerState,
-  hidden = false,
-): TerminalSlashCommand<Context> {
+) {
 
-
-async function buildTranscriptLines(
-  ctx: Context,
-  kind: TranscriptEventKind | 'all',
-  mode: 'events' | 'groups' | 'hotspots',
-  source: ReturnType<typeof captureTranscriptSource<RuntimeTranscriptConversation>>,
-): Promise<string[]> {
-  const index = await readTranscriptIndex(ctx, source);
-  if (!index) return [TRANSCRIPT_UNAVAILABLE];
-  const events = kind === 'all' ? index.events : index.events.filter((event) => event.kind === kind);
-  const groups = kind === 'all' ? index.groups : index.groups.filter((group) => group.kind === kind);
-
-  if (mode === 'groups') {
-    return [
-      `Conversation Groups${kind === 'all' ? '' : `: ${kind}`}`,
-      `  groups: ${groups.length}`,
-      ...groups.slice(0, 12).map((group) => (
-        `  ${group.kind.padEnd(20)} ${String(group.events.length).padStart(2)} event(s)  msgs=${group.messageIndexes[0]}-${group.messageIndexes[group.messageIndexes.length - 1]}  ${group.title}`
-      )),
-      ...(groups.length > 12 ? [`  ... ${groups.length - 12} more group(s)`] : []),
-    ];
-  }
-
-  if (mode === 'hotspots') {
-    const kindCounts = new Map<TranscriptEventKind, number>();
-    for (const event of index.events) {
-      kindCounts.set(event.kind, (kindCounts.get(event.kind) ?? 0) + 1);
-    }
-    const busiestGroups = [...index.groups]
-      .sort((a, b) => b.events.length - a.events.length || a.messageIndexes[0]! - b.messageIndexes[0]!)
-      .slice(0, 8);
-    return [
-      'Conversation Hotspots',
-      ...[...kindCounts.entries()]
-        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-        .map(([eventKind, count]) => `  ${eventKind.padEnd(20)} ${count}`),
-      '',
-      'Busiest groups',
-      ...busiestGroups.map((group) => `  ${group.kind.padEnd(20)} ${String(group.events.length).padStart(2)}  ${group.title}`),
-    ];
-  }
-
-  return [
-    `Conversation Events${kind === 'all' ? '' : `: ${kind}`}`,
-    `  events: ${events.length}`,
-    ...events.slice(0, 16).map((event) => `  #${String(event.messageIndex).padStart(3)}  ${event.kind.padEnd(20)} ${event.title} - ${event.detail}`),
-    ...(events.length > 16 ? [`  ... ${events.length - 16} more event(s)`] : []),
-  ];
-}
 
 function buildComposerReview(ctx: Context): string[] {
   const session = readSession(ctx);
@@ -127,99 +80,43 @@ async function buildConversationRestoreReview(ctx: Context, source: ReturnType<t
     `  restore-relevant events: ${events.length}`,
     ...events.slice(0, 16).map((event) => `  #${String(event.messageIndex).padStart(3)}  ${event.kind.padEnd(20)} ${event.title} - ${event.detail}`),
     ...(events.length > 16 ? [`  ... ${events.length - 16} more restore event(s)`] : []),
-    '  next: /conversation hotspots',
+    '  next: /session hotspots',
     '  next: /session list',
   ];
 }
 
+  /** Run one reading against a captured transcript source; a reading cut short by a newer one says nothing. */
+  async function withSource(ctx: Context, read: (source: ReturnType<typeof captureTranscriptSource<RuntimeTranscriptConversation>>) => Promise<string[]>): Promise<void> {
+    const source = captureTranscriptSource(ctx);
+    try {
+      const lines = await read(source);
+      source.assertPublishable();
+      ctx.print(lines.join('\n'));
+    } catch (error) {
+      try { source.assertPublishable(); } catch { return; }
+      if (!transcriptReadingCanceled(error)) throw commandRefusal(TRANSCRIPT_UNAVAILABLE);
+    }
+  }
+  function kindOf(word: string): TranscriptEventKind | 'all' {
+    const kind = readTranscriptKind(word || undefined);
+    if (kind === undefined) throw commandRefusal(describeUnknownTranscriptKind(word));
+    return kind;
+  }
   return {
-    name: 'conversation',
-    effect: 'session-lifecycle',
-    firstScreen: !hidden,
-    aliases: ['transcript', 'composer'],
-    description: 'Review conversation structure, transcript hotspots, and composer posture',
-    usage: '[review|events [kind]|groups [kind]|hotspots|composer|find <query> [kind]|next [kind]|prev [kind]|restore]',
-    async handler(args: string[], ctx: Context) {
+    find: (ctx: Context, query: string, kind: string) => withSource(ctx, (source) => buildConversationSearch(ctx, query, kindOf(kind), source)),
+    restored: (ctx: Context) => withSource(ctx, (source) => buildConversationRestoreReview(ctx, source)),
+    composer: (ctx: Context) => { ctx.print(buildComposerReview(ctx).join('\n')); },
+    async jump(ctx: Context, direction: 'next' | 'prev', word: string): Promise<void> {
+      const kind = kindOf(word);
       const source = captureTranscriptSource(ctx);
-      try {
-        const sub = (args[0] ?? 'review').toLowerCase();
-        if (sub === 'composer') {
-          ctx.print(buildComposerReview(ctx).join('\n'));
-          return;
-        }
-        if (sub === 'find' || sub === 'search') {
-          const trailing = args.length > 2 ? args[args.length - 1] : undefined;
-          // A trailing word that names no kind is part of the query, not a filter.
-          const parsedTrailingKind = readTranscriptKind(trailing);
-          const hasExplicitKind = Boolean(trailing) && parsedTrailingKind !== undefined && parsedTrailingKind !== 'all';
-          const kind = hasExplicitKind ? parsedTrailingKind : 'all';
-          const queryParts = args.slice(1, hasExplicitKind ? -1 : undefined);
-          const query = queryParts.join(' ').trim();
-          const lines = await buildConversationSearch(ctx, query, kind, source); source.assertPublishable(); ctx.print(lines.join('\n'));
-          return;
-        }
-        if (sub === 'restore') {
-          const lines = await buildConversationRestoreReview(ctx, source); source.assertPublishable(); ctx.print(lines.join('\n'));
-          return;
-        }
-        if (sub === 'next' || sub === 'prev') {
-          const kind = readTranscriptKind(args[1]);
-          if (kind === undefined) {
-            ctx.print(describeUnknownTranscriptKind(args[1] ?? ''));
-            return;
-          }
-          const currentLine = ctx.getScrollTop?.() ?? 0;
-          const targetLine = sub === 'next'
-            ? await source.conversation.nextTranscriptEventLine(currentLine, kind, { assertCurrent: source.assertCurrent, lifetime: source.lifetime })
-            : await source.conversation.prevTranscriptEventLine(currentLine, kind, { assertCurrent: source.assertCurrent, lifetime: source.lifetime });
-          source.assertPublishable();
-          if (targetLine < 0) {
-            ctx.print(`No ${kind === 'all' ? 'transcript' : kind} events found.`);
-            return;
-          }
-          ctx.scrollToLine?.(targetLine);
-          ctx.print(`Jumped to ${kind === 'all' ? 'next transcript event' : `${kind} event`} at line ${targetLine + 1}.`);
-          return;
-        }
-        if (sub === 'events' || sub === 'groups' || sub === 'hotspots') {
-          const kind = readTranscriptKind(args[1]);
-          if (kind === undefined) {
-            ctx.print(describeUnknownTranscriptKind(args[1] ?? ''));
-            return;
-          }
-          const lines = await buildTranscriptLines(ctx, kind, sub, source); source.assertPublishable(); ctx.print(lines.join('\n'));
-          return;
-        }
-        if (sub !== 'review' && sub !== 'status') {
-          throw commandRefusal('Usage: /conversation [review|events [kind]|groups [kind]|hotspots|composer|find <query> [kind]|next [kind]|prev [kind]|restore]');
-        }
-
-        const index = await readTranscriptIndex(ctx, source);
-        source.assertPublishable();
-        if (!index) { ctx.print(TRANSCRIPT_UNAVAILABLE); return; }
-        const session = readSession(ctx);
-        const byKind = new Map<TranscriptEventKind, number>();
-        for (const event of index.events) {
-          byKind.set(event.kind, (byKind.get(event.kind) ?? 0) + 1);
-        }
-        ctx.print([
-          'Conversation Review',
-          `  messages: ${session.messageCount || ctx.session.conversationManager.getMessageCount()}`,
-          `  events: ${index.events.length}`,
-          `  groups: ${index.groups.length}`,
-          `  turn state: ${session.turnState}`,
-          `  context tokens: ${session.estimatedContextTokens}`,
-          `  families: ${[...byKind.entries()].sort((a, b) => b[1] - a[1]).map(([kind, count]) => `${kind}=${count}`).join(', ') || 'none'}`,
-          '  next: /conversation hotspots',
-          '  next: /conversation composer',
-          '  next: /conversation find approval approval_request',
-          '  next: /conversation next tool_result',
-          '  next: /conversation restore',
-        ].join('\n'));
-      } catch (error) {
-        try { source.assertPublishable(); } catch { return; }
-        if (!transcriptReadingCanceled(error)) ctx.print(TRANSCRIPT_UNAVAILABLE);
-      }
+      const currentLine = ctx.getScrollTop?.() ?? 0;
+      const targetLine = direction === 'next'
+        ? await source.conversation.nextTranscriptEventLine(currentLine, kind, { assertCurrent: source.assertCurrent, lifetime: source.lifetime })
+        : await source.conversation.prevTranscriptEventLine(currentLine, kind, { assertCurrent: source.assertCurrent, lifetime: source.lifetime });
+      source.assertPublishable();
+      if (targetLine < 0) throw commandRefusal(`No ${kind === 'all' ? '' : `${kind} `}entries ${direction === 'next' ? 'after' : 'before'} this point.`);
+      ctx.scrollToLine?.(targetLine);
+      ctx.print(`Jumped to ${kind === 'all' ? 'the next entry' : `a ${kind} entry`} at line ${targetLine + 1}.`);
     },
   };
 }

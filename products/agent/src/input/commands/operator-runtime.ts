@@ -1,6 +1,5 @@
 import {
   createContextInspectionCommand,
-  createErrorNavigationCommands,
 } from '@goodvibes-jev/engine/terminal-shell/context-inspection-command';
 import { registerInteractionModeCommand } from '@goodvibes-jev/engine/terminal-shell/interaction-mode-command';
 import { settingsTargetNotFoundMessage } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
@@ -225,16 +224,12 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
 
   registry.register(contextInspectionCommand);
 
-  registry.register(errorNavigationCommands.nextError);
-  registry.register(errorNavigationCommands.prevError);
 
   registerInteractionModeCommand<CommandContext>(registry);
 }
 
 
 const contextInspectionCommand = createContextInspectionCommand<CommandContext>({
-  description: "Inspect context window usage (token breakdown per message), or show, set or clear the current model's context window",
-  hidden: true,
   window: handleContextWindowSubcommand,
   estimate: (message) => {
     const text =
@@ -248,4 +243,3 @@ const contextInspectionCommand = createContextInspectionCommand<CommandContext>(
   },
   total: (_messages, estimates) => estimates.reduce((sum, value) => sum + value, 0),
 });
-const errorNavigationCommands = createErrorNavigationCommands<CommandContext>(true);

@@ -7,8 +7,10 @@
  */
 import {
   judge as judgeWithPort,
+  judgeSome as judgeSomeWithPort,
   type BatteryItems,
   type JudgeOptions,
+  type JudgeSomeOptions,
   type JudgeOutcome,
   type JudgmentPort,
 } from '@goodvibes-jev/judgment';
@@ -19,6 +21,7 @@ export {
   createJudgeCache,
   forgetProcessJudgments,
   type BandedReadings,
+  type PartialBandedReadings,
   type JudgeCache,
   type JudgeCacheOption,
   type JudgeCacheScope,
@@ -27,6 +30,11 @@ export {
 } from '@goodvibes-jev/judgment';
 
 export interface EngineJudgeOptions<Items extends BatteryItems, R> extends Omit<JudgeOptions<Items, R>, 'port' | 'off'> {
+  /** A port to ask instead of the installed one (a composition that owns its own). */
+  readonly port?: JudgmentPort;
+}
+
+export interface EngineJudgeSomeOptions<Items extends BatteryItems, R> extends Omit<JudgeSomeOptions<Items, R>, 'port' | 'off'> {
   /** A port to ask instead of the installed one (a composition that owns its own). */
   readonly port?: JudgmentPort;
 }
@@ -53,4 +61,13 @@ export function judge<const Items extends BatteryItems, R>(o: EngineJudgeOptions
   return 'port' in resolved
     ? judgeWithPort({ ...o, port: resolved.port })
     : judgeWithPort({ ...o, port: undefined, off: resolved.off });
+}
+
+/** `judge` asking only `only`; `settle` receives readings for those questions alone. */
+export function judgeSome<const Items extends BatteryItems, R>(o: EngineJudgeSomeOptions<Items, R>): Promise<JudgeOutcome<R>> {
+  if (o.port === undefined && isClassicOperation()) return judgeSomeWithPort({ ...o, port: undefined, off: true });
+  const resolved = o.port === undefined ? installedPort(o.site) : { port: o.port };
+  return 'port' in resolved
+    ? judgeSomeWithPort({ ...o, port: resolved.port })
+    : judgeSomeWithPort({ ...o, port: undefined, off: resolved.off });
 }

@@ -1,6 +1,5 @@
 import { createSecretsCommand } from '@goodvibes-jev/engine/terminal-shell/secrets-command';
 import { createLocalCommandActions } from '@goodvibes-jev/engine/terminal-shell/local-command-actions';
-import { handleBookmarks } from '@goodvibes-jev/engine/terminal-shell/bookmark-command';
 import 'path';
 import 'node:fs';
 import 'node:fs/promises';
@@ -8,7 +7,7 @@ import type { CommandRegistry, CommandContext, SlashCommand } from '../command-r
 
 import '@goodvibes-jev/engine/platform/platform/utils';
 import '@goodvibes-jev/engine/platform/platform/config';
-import { requireBookmarkManager, requireProviderApi, requireServiceRegistry } from './runtime-services.ts';
+import { requireProviderApi, requireServiceRegistry } from './runtime-services.ts';
 import { describePendingProjectService, pendingProjectServiceLines, projectServiceRef } from '@goodvibes-jev/engine/platform/platform/config';
 import { assertTarget, type TargetRef } from '@goodvibes-jev/engine/platform/platform/utils/target-ref';
 import {
@@ -89,7 +88,7 @@ function parseMediaCollectArgs(args: readonly string[]): { readonly providerId: 
   return { providerId, taskId, resume };
 }
 
-const localActions = createLocalCommandActions<CommandContext>(requireProviderApi, {
+export const localActions = createLocalCommandActions<CommandContext>(requireProviderApi, {
   hidden: true,
   unpinByModelId: true,
   imageHint: '<path> [prompt]',
@@ -174,28 +173,6 @@ const servicesCommand = withOwnerConfirmation<CommandContext, SlashCommand & Pic
 
 export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
   registry.register(servicesCommand);
-  registry.register({
-    name: 'expand',
-    effect: 'ui-navigation',
-    description: 'Expand blocks by type',
-    firstScreen: false,
-    usage: '[all|thinking|tool|code]',
-    argsHint: '[all|thinking|tool|code]',
-    handler(args, ctx) {
-      localActions.toggleBlocks(args[0] || 'all', false, ctx);
-    },
-  });
-  registry.register({
-    name: 'collapse',
-    effect: 'ui-navigation',
-    description: 'Collapse blocks by type',
-    firstScreen: false,
-    usage: '[all|thinking|tool|code]',
-    argsHint: '[all|thinking|tool|code]',
-    handler(args, ctx) {
-      localActions.toggleBlocks(args[0] || 'all', true, ctx);
-    },
-  });
 
   registry.register({
     name: 'agents',
@@ -223,16 +200,6 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
     },
   });
 
-  registry.register({
-    name: 'bookmarks',
-    effect: 'ui-navigation',
-    aliases: ['bm'],
-    description: 'List bookmarked blocks',
-    firstScreen: false,
-    handler(_args, ctx) {
-      handleBookmarks(ctx, () => requireBookmarkManager(ctx));
-    },
-  });
 
   registry.register(secretsCommand);
 

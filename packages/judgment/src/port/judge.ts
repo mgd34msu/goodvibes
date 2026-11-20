@@ -1,11 +1,14 @@
 import { contextFor, sharedContextFor } from '../batteries/asking.ts';
-import { readItem, type Battery, type BatteryItems, type BatteryRun } from '../batteries/battery.ts';
+import { readItem, type Battery, type BatteryItems, type BatteryRun, type PartialBatteryRun } from '../batteries/battery.ts';
 import { DEFAULT_DECISION_DEADLINE_MS } from './deadline.ts';
 import { JudgmentError } from './errors.ts';
 import { toJson, type EntryType, type JudgmentConclusion, type JudgmentPort, type JudgmentResult, type Questions } from './types.ts';
 
 /** The banded readings of a battery's questions, as `settle` receives them. */
 export type BandedReadings<Items extends BatteryItems> = BatteryRun<Items>['readings'];
+
+/** The readings of a call that asked only some questions: an unasked question has none. */
+export type PartialBandedReadings<Items extends BatteryItems> = PartialBatteryRun<Items>['readings'];
 
 /**
  * Why a decision took its fallback:
@@ -91,8 +94,6 @@ export interface JudgeOptions<Items extends BatteryItems, R> {
   readonly site: string;
   readonly battery: Battery<Items>;
   readonly state: EntryType;
-  /** Ask only these questions of the battery. */
-  readonly only?: readonly (keyof Items & string)[];
   /** Total time allowed; defaults to the port's decision deadline, then 1500 ms. */
   readonly deadlineMs?: number;
   readonly cache?: JudgeCacheOption;
@@ -104,6 +105,14 @@ export interface JudgeOptions<Items extends BatteryItems, R> {
   readonly describe?: (value: R) => string;
   /** Whether the caller still wants the answer. Aborting it rejects; it never selects the fallback. */
   readonly signal?: AbortSignal;
+}
+
+/** A judgment that asks only `only`; `settle` must handle a question without a reading. */
+export interface JudgeSomeOptions<Items extends BatteryItems, R> extends Omit<JudgeOptions<Items, R>, 'settle'> {
+  /** Ask only these questions of the battery. */
+  readonly only: readonly (keyof Items & string)[];
+  /** Turns the readings into a value; undefined means unsure, and the fallback applies. */
+  settle(readings: PartialBandedReadings<Items>): R | undefined;
 }
 
 export interface JudgeOutcome<R> {
@@ -165,7 +174,17 @@ function everyTargetCooling(port: JudgmentPort): boolean {
  * - otherwise one request bounded by the deadline; the answer, its readings and
  *   the action are written to the decision log once, when it completes.
  */
-export async function judge<const Items extends BatteryItems, R>(o: JudgeOptions<Items, R>): Promise<JudgeOutcome<R>> {
+export function judge<const Items extends BatteryItems, R>(o: JudgeOptions<Items, R>): Promise<JudgeOutcome<R>> {
+  return judgeAsked(o, Object.keys(o.battery.items));
+}
+
+/** `judge` asking only the named questions; `settle` receives readings for those alone. */
+export function judgeSome<const Items extends BatteryItems, R>(o: JudgeSomeOptions<Items, R>): Promise<JudgeOutcome<R>> {
+  return judgeAsked(o, o.only);
+}
+
+async function judgeAsked<Items extends BatteryItems, R>(o: Omit<JudgeOptions<Items, R>, 'settle'> & { settle(readings: PartialBandedReadings<Items>): R | undefined },
+  asked: readonly string[]): Promise<JudgeOutcome<R>> {
   const fallback = (why: JudgeFallbackReason, detail?: string, decisionId?: string, requested = false): JudgeOutcome<R> => ({
     value: o.fallback(why), source: 'fallback', why,
     ...(detail === undefined ? {} : { detail }),
@@ -178,7 +197,6 @@ export async function judge<const Items extends BatteryItems, R>(o: JudgeOptions
   if (port === undefined) return fallback('unavailable', 'no decision model is installed');
 
   const battery = o.battery as unknown as Battery<BatteryItems>;
-  const asked: readonly string[] = o.only ?? Object.keys(battery.items);
   const model = battery.model ?? port.model;
   const cache = o.cache === undefined ? undefined : o.cache.scope === 'process' ? processCache(port) : o.cache.store;
   const key = o.cache === undefined ? undefined : cacheKey(o.site, battery, port, model, asked, o.cache.key);
@@ -194,8 +212,8 @@ export async function judge<const Items extends BatteryItems, R>(o: JudgeOptions
     if (item === undefined) throw new RangeError(`battery ${battery.name}: no question "${name}"`);
     return [name, item.question];
   }));
-  const readAll = (answers: Readonly<Record<string, unknown>>): BandedReadings<Items> =>
-    Object.fromEntries(asked.map(name => [name, readItem(battery.items[name]!, answers[name])])) as BandedReadings<Items>;
+  const readAll = (answers: Readonly<Record<string, unknown>>): PartialBandedReadings<Items> =>
+    Object.fromEntries(asked.map(name => [name, readItem(battery.items[name]!, answers[name])])) as PartialBandedReadings<Items>;
   const action = (value: R | undefined): string => value === undefined ? 'unsure' : o.describe?.(value) ?? 'settled';
 
   let concluded: { readonly value: R | undefined } | undefined;

@@ -1,5 +1,6 @@
 /**
- * /telegram: delegated Telegram intake in a terminal.
+ * /telegram: delegated Telegram intake in a terminal, described once
+ * (command-actions/) for both terminal apps.
  *
  * A chat selected for delegated intake stops being answered normally; each of
  * its messages waits for the owner. From here the owner selects a chat
@@ -15,13 +16,15 @@
  * configures, decides, reads an original, cancels, revokes or releases.
  */
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import type { TerminalSlashCommand } from './command-registry.js';
+import type { TerminalCommandRegistry } from './command-registry.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
+import { commandRefusal } from './command-confirmation.js';
+import { defineCommand } from './command-actions/define.js';
+import { defineList, type ListRow } from './command-actions/lists.js';
+import type { ActionValues, CommandActionContext, InputDescription } from './command-actions/types.js';
+import { listInput, readAction, textInput } from './described-command-kit.js';
 
-export interface TelegramIntakeCommandContext {
-  readonly print: (text: string) => void;
-  readonly renderRequest: () => void;
-}
+export type TelegramIntakeCommandContext = CommandActionContext;
 
 export interface TelegramIntakeCommandPolicy<Context> {
   /** The daemon this terminal talks to, or the reason there is none right now. */
@@ -74,26 +77,7 @@ type Outcome = { readonly outcome: string } & Record<string, unknown>;
 
 const REVIEW_ID_PREFIX = 'external-review-';
 const SHORT_ID_CHARS = 8;
-const DEFAULT_PENDING_RETENTION_MS = 60 * 60_000;
-const DEFAULT_CONFIGURATION_LIFETIME_MS = 7 * 24 * 60 * 60_000;
-const DEFAULT_SOURCE_RETENTION_MS = 60 * 60_000;
-const DEFAULT_RECORD_RETENTION_MS = 7 * 24 * 60 * 60_000;
 const MAX_DURATION_MS = 2_147_483_647;
-
-const USAGE = [
-  'Usage:',
-  '  /telegram [list]                                   — messages waiting for you and the review queue',
-  '  /telegram configure <chatId>[/<threadId>] <bot> [--hold <time>] [--for <time>]',
-  '                                                     — select a chat; each of its messages waits for you',
-  '  /telegram approve <id> [--keep <time>] [--record <time>] — accept a waiting message for review',
-  '  /telegram deny <id>                                — refuse a waiting message; its original is released',
-  '  /telegram status <id>                              — where one message stands',
-  '  /telegram read <id>                                — show an approved message\'s original and mark it read',
-  '  /telegram cancel <id>                              — close a review or withdraw a waiting message',
-  '  /telegram revoke <configurationId>                 — capture no new messages; the chat stays held',
-  '  /telegram release <chatId>[/<threadId>|configurationId] — return the chat to normal handling',
-  'Times: 90s, 30m, 2h, 7d. Defaults: --hold 1h, --for 7d, --keep 1h, --record 7d.',
-].join('\n');
 
 /** Display-only: strip terminal control sequences from text a sender or the daemon wrote. */
 function text(value: string): string {
@@ -129,29 +113,6 @@ function parseChat(value: string): { chatId: string; threadId?: string } | null 
   const [chatId, threadId, extra] = value.split('/');
   if (!chatId || extra !== undefined || threadId === '') return null;
   return threadId === undefined ? { chatId } : { chatId, threadId };
-}
-
-/** Reads `--name value` options; returns the words left over, or the first problem. */
-function readOptions(words: readonly string[], names: readonly string[]): { options: Map<string, string>; rest: string[] } | { error: string } {
-  const options = new Map<string, string>();
-  const rest: string[] = [];
-  for (let index = 0; index < words.length; index += 1) {
-    const word = words[index]!;
-    if (!word.startsWith('--')) { rest.push(word); continue; }
-    const name = word.slice(2);
-    if (!names.includes(name)) return { error: `unknown option ${word}` };
-    const value = words[index + 1];
-    if (value === undefined || value.startsWith('--')) return { error: `${word} needs a time such as 30m, 2h or 7d` };
-    options.set(name, value);
-    index += 1;
-  }
-  return { options, rest };
-}
-
-function durationOption(options: Map<string, string>, name: string, fallback: number): number | string {
-  const raw = options.get(name);
-  if (raw === undefined) return fallback;
-  return parseIntakeDuration(raw) ?? `--${name} ${raw} is not a time such as 90s, 30m, 2h or 7d (at most 24 days)`;
 }
 
 function isHold(result: Outcome): result is Outcome & Hold {
@@ -191,180 +152,267 @@ function findMessage(list: ListResult, id: string): Match[] {
   return matches;
 }
 
-const OWNER_ONLY = new Set(['configure', 'approve', 'deny', 'read', 'cancel', 'revoke', 'release']);
 
-export function createTelegramIntakeCommand<Context extends TelegramIntakeCommandContext>(
-  policy: TelegramIntakeCommandPolicy<Context>,
-): TerminalSlashCommand<Context> {
-  return {
+const TIME_WHY = 'a time such as 90s, 30m, 2h or 7d (at most 24 days)';
+const OWNER_DECIDES = { reason: 'it decides what happens to messages sent to the owner\'s Telegram chat', instead: '/telegram list shows what waits, for the owner to decide' };
+
+let policyOf: TelegramIntakeCommandPolicy<unknown> | undefined;
+
+type Verbs = Pick<DaemonVerbCaller, 'probe' | 'invoke'>;
+function verbsOf(context: unknown): Verbs {
+  if (!policyOf) throw commandRefusal('Delegated Telegram intake is not wired in this program.');
+  const verbs = policyOf.verbs(context);
+  if ('unavailable' in verbs) throw commandRefusal(verbs.unavailable);
+  const reach = verbs.probe();
+  if (!reach.available) throw commandRefusal(`Delegated intake runs in the daemon, which this terminal cannot reach: ${reach.reason}`);
+  return verbs;
+}
+async function call<T extends Outcome>(context: unknown, operation: string, input: Record<string, unknown>): Promise<T> {
+  try {
+    return await verbsOf(context).invoke<T>(`inbound.telegram.${operation}`, input);
+  } catch (error) {
+    if (error instanceof Error && 'refusal' in error) throw error;
+    throw commandRefusal(`The daemon could not ${operation} delegated intake: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+async function listed(context: unknown): Promise<ListResult & Outcome> {
+  return await call<ListResult & Outcome>(context, 'list', {});
+}
+
+/** The owner typed it at this terminal; a model, a channel or a nested command did not. */
+function requireOwner(context: unknown, word: string): void {
+  if (!policyOf?.isOwner(context, 'telegram')) throw commandRefusal(`/telegram ${word} acts for the owner; type it yourself at this terminal. Nothing was done.`);
+}
+
+function durationOf(value: string | undefined, label: string): number {
+  const ms = parseIntakeDuration(value ?? '');
+  if (ms === null) throw commandRefusal(`${label}: "${value}" is not ${TIME_WHY}. Nothing was done.`);
+  return ms;
+}
+
+async function lookup(context: unknown, id: string): Promise<Match> {
+  const matches = findMessage(await listed(context), id);
+  if (matches.length === 0) throw commandRefusal(`No review or waiting message matches ${text(id)}.`, '/telegram list shows the ids');
+  if (matches.length > 1) throw commandRefusal(`${text(id)} matches ${matches.length} messages; type more of its id.`);
+  return matches[0]!;
+}
+
+function holdOr(result: Outcome, otherwise: string): string {
+  if (isHold(result)) throw commandRefusal(holdText(result));
+  return otherwise;
+}
+
+const WAITING = defineList<unknown>({
+  name: 'telegram.waiting',
+  async read(context) {
+    return (await listed(context)).pending.map((entry): ListRow => ({ value: pendingShortId(entry), label: pendingLine(entry).trim(), state: 'waiting' }));
+  },
+  operator: { method: 'inbound.telegram.list', input: {}, rows: { from: 'pending', value: 'approvalId', label: 'outcome' } },
+});
+const MESSAGES = defineList<unknown>({
+  name: 'telegram.messages',
+  async read(context) {
+    const list = await listed(context);
+    return [
+      ...list.pending.map((entry): ListRow => ({ value: pendingShortId(entry), label: pendingLine(entry).trim(), state: 'waiting' })),
+      ...list.records.map((record): ListRow => ({ value: reviewShortId(record), label: recordLine(record).trim(), state: record.state === 'reviewed' ? 'read' : 'in review' })),
+    ];
+  },
+  operator: { method: 'inbound.telegram.list', input: {}, rows: { from: 'records', value: 'id', label: 'state' } },
+});
+const CONFIGURATIONS = defineList<unknown>({
+  name: 'telegram.configurations',
+  async read(context) {
+    const ids = new Set((await listed(context)).records.map((record) => record.configurationId));
+    return [...ids].map((id): ListRow => ({ value: id, label: id }));
+  },
+  operator: { method: 'inbound.telegram.list', input: {}, rows: { from: 'records', value: 'configurationId', label: 'configurationId' } },
+});
+
+const WAITING_MESSAGE: InputDescription = listInput({ id: 'message', label: 'Message', help: 'A message waiting for your decision', list: WAITING });
+const ANY_MESSAGE: InputDescription = listInput({ id: 'message', label: 'Message', help: 'A waiting message or one in the review queue', list: MESSAGES });
+const CHAT: InputDescription = textInput({ id: 'chat', label: 'Chat', help: 'The chat id, with /thread for one thread of it (-1001234/7)', why: 'a Telegram chat id', typed: { position: 1 } });
+
+/** Register `/telegram` (the one description) with how this app reaches the daemon and who is typing. */
+export function registerTelegramIntakeCommand<Ctx extends TelegramIntakeCommandContext>(
+  registry: Pick<TerminalCommandRegistry<Ctx>, 'register'>,
+  policy: TelegramIntakeCommandPolicy<Ctx>,
+): void {
+  policyOf = policy as unknown as TelegramIntakeCommandPolicy<unknown>;
+  registry.register(defineCommand<Ctx>({
     name: 'telegram',
-    description: 'Delegated Telegram intake: select a chat, decide its waiting messages, read and close reviews',
-    usage: '[list] | configure <chatId>[/<threadId>] <bot> | approve|deny|status|read|cancel <id> | revoke <configurationId> | release <chatId|configurationId>',
-    argsHint: '[list|configure|approve|deny|status|read|cancel|revoke|release]',
-    effect: 'mixed',
-    readVerbs: ['list', 'status', 'help'],
-    secretArgs: {},
-    async handler(args, context) {
-      // Read before the first await: a model running this command must not act for the owner.
-      const owner = policy.isOwner(context, 'telegram');
-      const say = (message: string) => { context.print(message); context.renderRequest(); };
-      const sub = (args[0] ?? 'list').toLowerCase();
-      if (sub === 'help') { say(USAGE); return; }
-      if (OWNER_ONLY.has(sub) && !owner) {
-        say(`[telegram] /telegram ${sub} acts for the owner; type it yourself at this terminal.`);
-        return;
-      }
-      const verbs = policy.verbs(context);
-      if ('unavailable' in verbs) { say(`[telegram] ${verbs.unavailable}`); return; }
-      const reach = verbs.probe();
-      if (!reach.available) { say(`[telegram] Delegated intake runs in the daemon, which this terminal cannot reach: ${reach.reason}`); return; }
-      const call = async <T extends Outcome>(operation: string, input: Record<string, unknown>): Promise<T> =>
-        await verbs.invoke<T>(`inbound.telegram.${operation}`, input);
-      const failed = (what: string, error: unknown) => {
-        say(`[telegram] Could not ${what}: ${error instanceof Error ? error.message : String(error)}`);
-      };
-      const lookup = async (id: string | undefined): Promise<Match | null> => {
-        if (!id) { say(`[telegram] Name a message: /telegram ${sub} <id> (ids are shown by /telegram list).`); return null; }
-        const list = await call<ListResult & Outcome>('list', {});
-        const matches = findMessage(list, id);
-        if (matches.length === 0) { say(`[telegram] No review or waiting message matches ${text(id)}. /telegram list shows the ids.`); return null; }
-        if (matches.length > 1) { say(`[telegram] ${text(id)} matches ${matches.length} messages; type more of its id.`); return null; }
-        return matches[0]!;
-      };
-
-      if (sub === 'list') {
-        try {
-          const list = await call<ListResult & Outcome>('list', {});
-          if (list.records.length === 0 && list.pending.length === 0) {
-            say('[telegram] Nothing waits for you and the review queue is empty. /telegram configure selects a chat.');
-            return;
-          }
+    title: 'Telegram messages held for you',
+    summary: 'Hold a Telegram chat\'s messages for your decision, decide each one, and read and close the reviews',
+    group: 'Channels',
+    report: 'list',
+    actions: [
+      readAction<Ctx>({
+        id: 'list', label: 'See what waits for you', word: 'list',
+        sentence: 'Lists the messages waiting for your decision and the review queue.',
+        operator: { method: 'inbound.telegram.list', fields: {} },
+        async run(_values, context) {
+          const list = await listed(context);
+          if (list.records.length === 0 && list.pending.length === 0) return 'Nothing waits for you and the review queue is empty. /telegram configure holds a chat\'s messages for you.';
           const lines: string[] = [];
           if (list.pending.length > 0) lines.push(`Waiting for your decision (${list.pending.length}):`, ...list.pending.map(pendingLine));
           if (list.records.length > 0) lines.push(`Review queue (${list.records.length}):`, ...list.records.map(recordLine));
-          lines.push('/telegram approve|deny <id> decides a waiting message; /telegram read <id> shows an approved one.');
-          say(lines.join('\n'));
-        } catch (error) { failed('list delegated intake', error); }
-        return;
-      }
-
-      if (sub === 'configure') {
-        const parsed = readOptions(args.slice(1), ['hold', 'for']);
-        if ('error' in parsed) { say(`[telegram] Nothing was configured: ${parsed.error}.\n${USAGE}`); return; }
-        const chat = parsed.rest[0] ? parseChat(parsed.rest[0]) : null;
-        const accountId = parsed.rest[1];
-        if (!chat || !accountId || parsed.rest.length > 2) { say(`[telegram] Nothing was configured.\n${USAGE}`); return; }
-        const pendingRetentionMs = durationOption(parsed.options, 'hold', DEFAULT_PENDING_RETENTION_MS);
-        const configurationLifetimeMs = durationOption(parsed.options, 'for', DEFAULT_CONFIGURATION_LIFETIME_MS);
-        if (typeof pendingRetentionMs === 'string' || typeof configurationLifetimeMs === 'string') {
-          say(`[telegram] Nothing was configured: ${typeof pendingRetentionMs === 'string' ? pendingRetentionMs : configurationLifetimeMs}.`);
-          return;
-        }
-        try {
-          const result = await call('configure', {
-            ...chat, accountId, pendingRetention: 'memory-only-until-deadline', pendingRetentionMs, configurationLifetimeMs, onExpiry: 'release-original-and-hold',
+          return lines.join('\n');
+        },
+      }),
+      {
+        id: 'configure', label: 'Hold a chat\'s messages for you', word: 'configure',
+        inputs: [
+          CHAT,
+          textInput({ id: 'bot', label: 'Bot', help: 'The Telegram bot account that receives the chat', why: 'a bot account id', typed: { position: 2 } }),
+          textInput({ id: 'hold', label: 'Each message waits', help: 'How long a message is kept in memory waiting for you', why: TIME_WHY, typed: { flag: '--hold' }, optional: { default: '1h', means: 'one hour' } }),
+          textInput({ id: 'for', label: 'Hold the chat for', help: 'How long the chat is held before it goes back to normal', why: TIME_WHY, typed: { flag: '--for' }, optional: { default: '7d', means: 'seven days' } }),
+        ],
+        sentence: 'Every message in chat {chat} on {bot} waits for your decision instead of being answered, for {for} or until you change it.', done: '',
+        touches: 'another-machine', lasts: 'kept', risk: 'none', ownerOnly: OWNER_DECIDES, undoneBy: 'release',
+        operator: { method: 'inbound.telegram.configure', fields: { chatId: 'chat', accountId: 'bot' } },
+        example: { chat: '-1001234', bot: 'support-bot' },
+        async run(values, context) {
+          requireOwner(context, 'configure');
+          const chat = parseChat(values.chat ?? '');
+          if (!chat) throw commandRefusal(`"${values.chat}" is not a chat id (chatId or chatId/threadId). Nothing was configured.`);
+          const pendingRetentionMs = durationOf(values.hold, 'Each message waits');
+          const configurationLifetimeMs = durationOf(values.for, 'Hold the chat for');
+          const result = await call(context, 'configure', {
+            ...chat, accountId: values.bot!, pendingRetention: 'memory-only-until-deadline', pendingRetentionMs, configurationLifetimeMs, onExpiry: 'release-original-and-hold',
           });
-          if (isHold(result)) { say(`[telegram] ${holdText(result)}`); return; }
+          if (isHold(result)) throw commandRefusal(holdText(result));
           const identity = result.accountIdentity as { readonly username: string } | undefined;
-          say([
-            `[telegram] Chat ${text(chat.chatId)}${chat.threadId ? `/${text(chat.threadId)}` : ''} is selected for delegated intake${identity ? ` on @${text(identity.username)}` : ''}.`,
-            `Configuration ${text(String(result.configurationId))} lasts until ${when(Number(result.expiresAt))}; each message waits for your decision and is kept in memory for ${Math.round(pendingRetentionMs / 60_000)} min.`,
+          return [
+            `Chat ${text(chat.chatId)}${chat.threadId ? `/${text(chat.threadId)}` : ''} is held for you${identity ? ` on @${text(identity.username)}` : ''}.`,
+            `Configuration ${text(String(result.configurationId))} lasts until ${when(Number(result.expiresAt))}; each message is kept in memory for ${Math.round(pendingRetentionMs / 60_000)} min.`,
             'The chat is not answered normally until /telegram release.',
-          ].join('\n'));
-        } catch (error) { failed('configure delegated intake', error); }
-        return;
-      }
+          ].join('\n');
+        },
+      },
+      {
+        id: 'approve', label: 'Accept a waiting message for review', word: 'approve',
+        inputs: [
+          WAITING_MESSAGE,
+          textInput({ id: 'keep', label: 'Keep the original', help: 'How long its original stays in memory for you to read', why: TIME_WHY, typed: { flag: '--keep' }, optional: { default: '1h', means: 'one hour' } }),
+          textInput({ id: 'record', label: 'Keep the review', help: 'How long the review record is kept; at least as long as the original', why: TIME_WHY, typed: { flag: '--record' }, optional: { default: '7d', means: 'seven days' } }),
+        ],
+        sentence: '{message} goes into your review queue; nothing in it is run.', done: '',
+        touches: 'another-machine', lasts: 'not-a-change', risk: 'none', ownerOnly: OWNER_DECIDES,
+        operator: { method: 'inbound.telegram.decide', fields: { approvalId: 'message' } },
+        example: { message: '3f9a1c2e' },
+        async run(values, context) {
+          requireOwner(context, 'approve');
+          const sourceRetentionMs = durationOf(values.keep, 'Keep the original');
+          const derivedRecordRetentionMs = durationOf(values.record, 'Keep the review');
+          if (derivedRecordRetentionMs < sourceRetentionMs) throw commandRefusal('Keep the review must be at least as long as Keep the original, so the review outlives its original. Nothing was decided.');
+          return await decide(context, values, true, { sourceRetentionMs, derivedRecordRetentionMs });
+        },
+      },
+      {
+        id: 'deny', label: 'Refuse a waiting message', word: 'deny', inputs: [WAITING_MESSAGE],
+        sentence: '{message} is refused; its original is released and nothing in it is run.', done: '',
+        touches: 'another-machine', lasts: 'not-a-change', risk: 'none', ownerOnly: OWNER_DECIDES,
+        operator: { method: 'inbound.telegram.decide', fields: { approvalId: 'message' } },
+        example: { message: '3f9a1c2e' },
+        async run(values, context) {
+          requireOwner(context, 'deny');
+          return await decide(context, values, false, undefined);
+        },
+      },
+      readAction<Ctx>({
+        id: 'status', label: 'See where a message stands', word: 'status', inputs: [ANY_MESSAGE],
+        sentence: 'Shows whether {message} waits, is in review or was read, and whether its original is still kept.', example: { message: '3f9a1c2e' },
+        operator: { method: 'inbound.telegram.status', fields: { approvalId: 'message' } },
+        async run(values, context) { return await showMessage(context, values, 'status'); },
+      }),
+      {
+        id: 'read', label: 'Read an accepted message', word: 'read', inputs: [ANY_MESSAGE],
+        sentence: 'Shows the original of {message} and marks its review read.', done: '',
+        touches: 'another-machine', lasts: 'not-a-change', risk: 'none', ownerOnly: OWNER_DECIDES,
+        operator: { method: 'inbound.telegram.read', fields: { approvalId: 'message' } },
+        example: { message: '3f9a1c2e' },
+        async run(values, context) {
+          requireOwner(context, 'read');
+          return await showMessage(context, values, 'read');
+        },
+      },
+      {
+        id: 'cancel', label: 'Close a review', word: 'cancel', inputs: [ANY_MESSAGE],
+        sentence: '{message} leaves the queue and its original is released.', done: '',
+        touches: 'another-machine', lasts: 'not-a-change', risk: 'cannot-be-undone', ownerOnly: OWNER_DECIDES,
+        operator: { method: 'inbound.telegram.cancel', fields: { approvalId: 'message' } },
+        example: { message: '3f9a1c2e' },
+        async run(values, context) {
+          requireOwner(context, 'cancel');
+          const match = await lookup(context, values.message!);
+          return holdOr(await call(context, 'cancel', { ref: match.kind === 'review' ? match.record.ref : match.entry.ref }), 'Closed; its place in the queue is free and its original was released.');
+        },
+      },
+      {
+        id: 'revoke', label: 'Stop holding new messages from a chat', word: 'revoke',
+        inputs: [listInput({ id: 'configuration', label: 'Configuration', help: 'The configuration shown when you held the chat', list: CONFIGURATIONS, other: 'a configuration id shown when the chat was held' })],
+        sentence: 'No new message is captured under {configuration}; the chat stays held until you hand it back.', done: '',
+        touches: 'another-machine', lasts: 'kept', risk: 'cannot-be-undone', ownerOnly: OWNER_DECIDES,
+        operator: { method: 'inbound.telegram.revoke', fields: { configurationId: 'configuration' } },
+        example: { configuration: 'telegram-config-1' },
+        async run(values, context) {
+          requireOwner(context, 'revoke');
+          return holdOr(await call(context, 'revoke', { configurationId: values.configuration! }), 'No new message is captured. The chat stays held until /telegram release.');
+        },
+      },
+      {
+        id: 'release', label: 'Hand a chat back to normal handling', word: 'release',
+        inputs: [{ ...CHAT, help: 'The chat id (chatId/threadId for a thread), or the configuration id shown when you held it', freeTextReason: 'a chat id or configuration id' }],
+        sentence: 'Chat {chat} is answered normally again, until you change it.', done: '',
+        touches: 'another-machine', lasts: 'kept', risk: 'none', ownerOnly: OWNER_DECIDES, undoneBy: 'configure',
+        operator: { method: 'inbound.telegram.release', fields: { chatId: 'chat' } },
+        example: { chat: '-1001234' },
+        async run(values, context) {
+          requireOwner(context, 'release');
+          const target = values.chat!;
+          const configuration = target.startsWith('telegram-config-');
+          const chat = configuration ? null : parseChat(target);
+          if (!configuration && !chat) throw commandRefusal(`"${target}" is not a chat id (chatId or chatId/threadId) or a configuration id. Nothing was released.`);
+          return holdOr(await call(context, 'release', chat ?? { configurationId: target }), 'The chat is back to normal handling.');
+        },
+      },
+    ],
+  }));
+}
 
-      if (sub === 'approve' || sub === 'deny') {
-        const parsed = readOptions(args.slice(1), sub === 'approve' ? ['keep', 'record'] : []);
-        if ('error' in parsed) { say(`[telegram] Nothing was decided: ${parsed.error}.`); return; }
-        const sourceRetentionMs = durationOption(parsed.options, 'keep', DEFAULT_SOURCE_RETENTION_MS);
-        const derivedRecordRetentionMs = durationOption(parsed.options, 'record', DEFAULT_RECORD_RETENTION_MS);
-        if (typeof sourceRetentionMs === 'string' || typeof derivedRecordRetentionMs === 'string') {
-          say(`[telegram] Nothing was decided: ${typeof sourceRetentionMs === 'string' ? sourceRetentionMs : derivedRecordRetentionMs}.`);
-          return;
-        }
-        if (sub === 'approve' && derivedRecordRetentionMs < sourceRetentionMs) {
-          say('[telegram] Nothing was decided: --record must be at least as long as --keep, so the review outlives its original.');
-          return;
-        }
-        try {
-          const match = await lookup(parsed.rest[0]);
-          if (!match) return;
-          if (match.kind !== 'pending') { say(`[telegram] That message was already decided; it is in the review queue. /telegram read ${reviewShortId(match.record)} shows it.`); return; }
-          const result = await call('decide', {
-            approvalId: match.entry.approvalId, ref: match.entry.ref, approved: sub === 'approve',
-            ...(sub === 'approve' ? { choices: {
-              processingPurpose: 'accept-external-message-for-owner-review',
-              sourceRetention: 'memory-only-until-review-close-or-deadline', sourceRetentionMs,
-              derivedRecord: 'external-source-reference-only-v1', derivedRecordRetentionMs,
-              execution: 'none', ownerMayReadOriginal: true,
-            } } : {}),
-          });
-          if (isHold(result)) { say(`[telegram] ${holdText(result)}`); return; }
-          say(result.outcome === 'denied'
-            ? '[telegram] Denied; its original was released and nothing was run.'
-            : `[telegram] Approved for review (${text(result.outcome)}); nothing was run. /telegram read ${pendingShortId(match.entry)} shows the original.`);
-        } catch (error) { failed(`${sub} the message`, error); }
-        return;
-      }
+async function decide(context: unknown, values: ActionValues, approved: boolean, keep: { sourceRetentionMs: number; derivedRecordRetentionMs: number } | undefined): Promise<string> {
+  const match = await lookup(context, values.message!);
+  if (match.kind !== 'pending') throw commandRefusal(`That message was already decided; it is in the review queue.`, `/telegram read ${reviewShortId(match.record)} shows it`);
+  const result = await call(context, 'decide', {
+    approvalId: match.entry.approvalId, ref: match.entry.ref, approved,
+    ...(approved && keep ? { choices: {
+      processingPurpose: 'accept-external-message-for-owner-review',
+      sourceRetention: 'memory-only-until-review-close-or-deadline', sourceRetentionMs: keep.sourceRetentionMs,
+      derivedRecord: 'external-source-reference-only-v1', derivedRecordRetentionMs: keep.derivedRecordRetentionMs,
+      execution: 'none', ownerMayReadOriginal: true,
+    } } : {}),
+  });
+  if (isHold(result)) throw commandRefusal(holdText(result));
+  return result.outcome === 'denied'
+    ? 'Refused; its original was released and nothing was run.'
+    : `Accepted for review (${text(result.outcome)}); nothing was run. /telegram read ${pendingShortId(match.entry)} shows the original.`;
+}
 
-      if (sub === 'status' || sub === 'read') {
-        try {
-          const match = await lookup(args[1]);
-          if (!match) return;
-          const ref = match.kind === 'review' ? match.record.ref : match.entry.ref;
-          const result = await call(sub, { ref });
-          if (isHold(result)) { say(`[telegram] ${holdText(result)}`); return; }
-          if (result.outcome !== 'recorded') {
-            say(`[telegram] ${result.outcome === 'awaiting-owner' ? 'Waiting for your decision: /telegram approve or /telegram deny.' : `This message is ${text(result.outcome)}; its original is ${text(String(result.source))}.`}`);
-            return;
-          }
-          const record = result.record as ReviewRecord;
-          const lines = [`[telegram] ${recordLine(record).trim()}`];
-          if (result.source !== 'available-in-memory') lines.push('Its original is no longer in memory; ask the sender to send it again if it still needs review.');
-          const original = result.original as { readonly text: string; readonly unsupportedSources: readonly { readonly kind: string; readonly label: string }[] } | undefined;
-          if (sub === 'read' && original) {
-            lines.push('Original:', text(original.text));
-            for (const entry of original.unsupportedSources) lines.push(`  (not shown: ${text(entry.kind)} ${text(entry.label)})`);
-          }
-          say(lines.join('\n'));
-        } catch (error) { failed(`${sub} the message`, error); }
-        return;
-      }
-
-      if (sub === 'cancel') {
-        try {
-          const match = await lookup(args[1]);
-          if (!match) return;
-          const result = await call('cancel', { ref: match.kind === 'review' ? match.record.ref : match.entry.ref });
-          say(isHold(result) ? `[telegram] ${holdText(result)}` : '[telegram] Closed; its place in the queue is free and its original was released.');
-        } catch (error) { failed('cancel the review', error); }
-        return;
-      }
-
-      if (sub === 'revoke') {
-        const configurationId = args[1];
-        if (!configurationId) { say('[telegram] Usage: /telegram revoke <configurationId> (shown when you configured the chat).'); return; }
-        try {
-          const result = await call('revoke', { configurationId });
-          say(isHold(result) ? `[telegram] ${holdText(result)}` : '[telegram] No new message is captured. The chat stays held until /telegram release.');
-        } catch (error) { failed('revoke the configuration', error); }
-        return;
-      }
-
-      if (sub === 'release') {
-        const target = args[1];
-        const chat = target && !target.startsWith('telegram-config-') ? parseChat(target) : null;
-        if (!target || (!chat && !target.startsWith('telegram-config-'))) { say('[telegram] Usage: /telegram release <chatId>[/<threadId>] or /telegram release <configurationId>.'); return; }
-        try {
-          const result = await call('release', chat ?? { configurationId: target });
-          say(isHold(result) ? `[telegram] ${holdText(result)}` : '[telegram] The chat is back to normal handling.');
-        } catch (error) { failed('release the chat', error); }
-        return;
-      }
-
-      say(`[telegram] Unknown action ${text(sub)}.\n${USAGE}`);
-    },
-  };
+async function showMessage(context: unknown, values: ActionValues, operation: 'status' | 'read'): Promise<string> {
+  const match = await lookup(context, values.message!);
+  const ref = match.kind === 'review' ? match.record.ref : match.entry.ref;
+  const result = await call(context, operation, { ref });
+  if (isHold(result)) throw commandRefusal(holdText(result));
+  if (result.outcome !== 'recorded') {
+    return result.outcome === 'awaiting-owner' ? 'Waiting for your decision: /telegram approve or /telegram deny.' : `This message is ${text(result.outcome)}; its original is ${text(String(result.source))}.`;
+  }
+  const record = result.record as ReviewRecord;
+  const lines = [recordLine(record).trim()];
+  if (result.source !== 'available-in-memory') lines.push('Its original is no longer in memory; ask the sender to send it again if it still needs review.');
+  const original = result.original as { readonly text: string; readonly unsupportedSources: readonly { readonly kind: string; readonly label: string }[] } | undefined;
+  if (operation === 'read' && original) {
+    lines.push('Original:', text(original.text));
+    for (const entry of original.unsupportedSources) lines.push(`  (not shown: ${text(entry.kind)} ${text(entry.label)})`);
+  }
+  return lines.join('\n');
 }

@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   createContextInspectionCommand,
-  createErrorNavigationCommands,
 } from '@goodvibes-jev/engine/terminal-shell/context-inspection-command';
 import { registerInteractionModeCommand } from '@goodvibes-jev/engine/terminal-shell/interaction-mode-command';
 import { settingsTargetNotFoundMessage } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
@@ -37,7 +36,6 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
 
   registry.register(contextInspectionCommand);
 
-  registry.register(errorNavigationCommands.nextError);
 
   registry.register({
     name: 'profiles',
@@ -59,7 +57,6 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
     },
   });
 
-  registry.register(errorNavigationCommands.prevError);
 
   registerInteractionModeCommand<CommandContext>(registry);
 
@@ -309,9 +306,7 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
 
 
 const contextInspectionCommand = createContextInspectionCommand<CommandContext>({
-  description: 'Inspect context usage, or set/clear a custom context window for the current model',
   window: handleContextWindowSubcommand,
   estimate: (message) => estimateConversationTokens([message]),
   total: (messages) => estimateConversationTokens(messages),
 });
-const errorNavigationCommands = createErrorNavigationCommands<CommandContext>(false);

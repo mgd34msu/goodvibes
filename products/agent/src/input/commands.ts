@@ -28,7 +28,6 @@ import { registerNetworkScanRuntimeCommands } from './commands/network-scan-runt
 import { registerHealthRuntimeCommands } from './commands/health-runtime.ts';
 import { registerStatusRuntimeCommands } from './commands/status-runtime.ts';
 import { registerProviderAccountsRuntimeCommands } from './commands/provider-accounts-runtime.ts';
-import { registerConversationRuntimeCommands } from './commands/conversation-runtime.ts';
 import { registerQrcodeRuntimeCommands } from './commands/qrcode-runtime.ts';
 import { registerOnboardingRuntimeCommands } from './commands/onboarding-runtime.ts';
 import { registerTtsRuntimeCommands } from './commands/tts-runtime.ts';
@@ -116,7 +115,6 @@ export function registerBuiltinCommands(
   registerStatusRuntimeCommands(registry);
   registerUpdateCommand(registry);
   registerProviderAccountsRuntimeCommands(registry);
-  registerConversationRuntimeCommands(registry);
   registerQrcodeRuntimeCommands(registry);
   registerOnboardingRuntimeCommands(registry);
   registerTtsRuntimeCommands(registry);

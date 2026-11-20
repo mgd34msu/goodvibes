@@ -120,7 +120,6 @@ export function handleOnboardingWizardToken(state: OnboardingRouteState, token: 
       const stepIndex = Number(token.value) - 1;
       if (stepIndex < state.onboardingWizard.steps.length) {
         state.onboardingWizard.setStep(stepIndex);
-        state.onStepChange?.();
       }
     }
   }

@@ -165,7 +165,5 @@ export function ownerOnlyVerb(effect: CommandVerbEffect, because: string, instea
  * admission, every other verb of theirs reaches the connected host.
  */
 export const SHARED_COMMAND_VERBS: Readonly<Record<string, CommandVerbs>> = {
-  tasks: { defaultVerb: 'list', verbs: { list: READ_VERB, show: READ_VERB, output: READ_VERB }, otherwise: OUTWARD_VERB },
-  approval: { defaultVerb: 'matrix', verbs: { matrix: READ_VERB, review: READ_VERB }, otherwise: OUTWARD_VERB },
   'work-import': { defaultVerb: '', verbs: { preview: READ_VERB, status: READ_VERB }, otherwise: OUTWARD_VERB },
 };

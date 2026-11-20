@@ -8,6 +8,7 @@ import type {
   MediaProviderStatus,
   MediaProviderTask,
 } from './provider-registry.js';
+import { revealOrNull } from '../security/secret.js';
 import { mediaOutputKindOf } from './provider-registry.js';
 import type { ArtifactStore } from '../artifacts/index.js';
 import type { SecretsManager } from '../config/secrets.js';
@@ -64,7 +65,7 @@ class ProviderKey {
     if (this.#stored?.revision === revision) return this.#stored.value;
     let value: string | null = null;
     for (const name of this.names) {
-      const stored = (await this.secrets.get(name))?.trim();
+      const stored = revealOrNull(await this.secrets.get(name), 'dispatch')?.trim();
       if (stored) { value = stored; break; }
     }
     this.#stored = { revision, value };

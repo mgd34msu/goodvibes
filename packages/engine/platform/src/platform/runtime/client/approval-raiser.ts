@@ -158,6 +158,8 @@ export interface ClientApprovalRaiserOptions {
 interface RaisedRecord {
   readonly id: string;
   readonly status?: string | undefined;
+  /** The record's revision: a decision written back names it (`expectedRevision`). */
+  readonly revision?: unknown;
   readonly decision?: {
     readonly approved?: unknown;
     readonly remember?: unknown;
@@ -175,6 +177,12 @@ interface RaisedOnDaemon {
   readonly coalesced: boolean | undefined;
   /** Names this surface's hold on the ask, so a retried release is harmless. */
   readonly holdId: string | undefined;
+  /** The revision the raise returned, when the record came back with it. */
+  readonly revision: number | undefined;
+}
+
+function revisionOf(record: RaisedRecord | null | undefined): number | undefined {
+  return typeof record?.revision === 'number' && Number.isInteger(record.revision) ? record.revision : undefined;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -277,6 +285,7 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
         id,
         coalesced: typeof raised?.coalesced === 'boolean' ? raised.coalesced : undefined,
         holdId: typeof raised?.holdId === 'string' && raised.holdId.length > 0 ? raised.holdId : undefined,
+        revision: revisionOf(raised?.approval),
       };
     } catch (error) {
       logger.warn('[approvals] raising the ask on the daemon failed; prompting locally only', { error: summarizeError(error) });
@@ -398,7 +407,8 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
    * Deliberately not tied to the consumer's signal: the decision was taken, and
    * a turn aborted a moment later must not leave the record pending everywhere else.
    */
-  const reportLocalDecision = async (approvalId: string, decision: PermissionPromptDecision): Promise<RaisedRecord | null> => {
+  const reportLocalDecision = async (raised: RaisedOnDaemon, decision: PermissionPromptDecision): Promise<RaisedRecord | null> => {
+    const approvalId = raised.id;
     try {
       const method = decision.approved ? 'approvals.approve' : 'approvals.deny';
       // Who decided is taken from the authenticated session on the daemon, not
@@ -413,8 +423,22 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
         // Argument changes only ever apply to an approval; a deny runs nothing.
         ...(decision.approved && decision.modifiedArgs !== undefined ? { modifiedArgs: decision.modifiedArgs } : {}),
       };
-      const answered = await options.verbs.invoke<{ approval?: RaisedRecord } | null>(method, input);
-      return answered?.approval?.id === approvalId ? answered.approval : null;
+      // The person answered the ask this surface drew, whose request never changes. The decision names the
+      // revision this surface last read; one that moved since only by a claim or a note elsewhere (still
+      // waiting) is answered again at its current revision, and a settled one stays as it was decided.
+      let revision = raised.revision ?? revisionOf(await readRaised(approvalId, new AbortController().signal));
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const answered = await options.verbs.invoke<{ applied?: unknown; approval?: RaisedRecord; refusal?: { code?: unknown } } | null>(
+          method, { ...input, ...(revision === undefined ? {} : { expectedRevision: revision }) });
+        const record = answered?.approval?.id === approvalId ? answered.approval : null;
+        const waiting = record?.status === 'pending' || record?.status === 'claimed';
+        if (answered?.applied === false && answered.refusal?.code === 'APPROVAL_CHANGED' && waiting && revisionOf(record) !== revision) {
+          revision = revisionOf(record);
+          continue;
+        }
+        return record;
+      }
+      return await readRaised(approvalId, new AbortController().signal);
     } catch (error) {
       logger.warn('[approvals] recording this surface\'s decision on the daemon failed', {
         approvalId,
@@ -435,10 +459,14 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
     raised: Promise<RaisedOnDaemon | null> | RaisedOnDaemon,
     local: PermissionPromptDecision,
     requestArgs: Record<string, unknown>,
+    /** Told the write-back's promise: this ask's hold is given up only after it finished. */
+    onReporting: (reporting: Promise<unknown>) => void = () => {},
   ): Promise<PermissionPromptDecision> => {
     // An answer given before the raise landed waits for its id too, inside the
     // same bound: the record may be one another surface already answered.
-    const reporting = Promise.resolve(raised).then((record) => record ? reportLocalDecision(record.id, local) : null, () => null);
+    const reporting = Promise.resolve(raised).then((record) => record ? reportLocalDecision(record, local) : null, () => null);
+    // The hold is given up once the write-back finished, never before it: a release while still waiting would leave the ask.
+    onReporting(reporting);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<'deadline'>((resolve) => {
       timer = setTimeout(() => resolve('deadline'), options.arbiterWaitMs ?? DEFAULT_ARBITER_WAIT_MS);
@@ -463,10 +491,13 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
   };
 
   /**
-   * Leave an ask this caller raised without a decision. `release` makes the daemon cancel the record only
-   * when no other surface that raised the same ask is still waiting, so a joiner leaving never denies the others.
+   * Give up this caller's hold on an ask it raised. Without a decision it is
+   * leaving: the daemon cancels the record only when no other surface that
+   * raised the same ask is still waiting, so a joiner leaving never denies the
+   * others. With the decision in hand it confirms it received it, which is the
+   * evidence the approval's reading shows as `receipt: delivered`.
    */
-  const cancelAbandoned = (raised: RaisedOnDaemon): void => {
+  const releaseHold = (raised: RaisedOnDaemon, received: boolean): void => {
     // A daemon that does not report `coalesced` predates `release`: it would cancel outright and deny any
     // surface still waiting on the same ask, so it is left to its deadline.
     if (raised.coalesced === undefined) return;
@@ -474,9 +505,10 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
       approvalId: raised.id,
       release: true,
       ...(raised.holdId === undefined ? {} : { holdId: raised.holdId }),
-      note: 'the asking surface stopped waiting for an answer',
+      note: received ? 'the asking surface received the decision' : 'the asking surface stopped waiting for an answer',
     })).catch((error: unknown) => {
-      logger.debug('[approvals] retiring an abandoned ask on the daemon failed; its deadline still expires it', {
+      logger.debug(received ? '[approvals] confirming receipt of a decision failed; the reading says the asker has not confirmed it'
+        : '[approvals] retiring an abandoned ask on the daemon failed; its deadline still expires it', {
         approvalId: raised.id,
         error: summarizeError(error),
       });
@@ -499,10 +531,12 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
     // Set by the raise when it lands, which may be after the local answer.
     let raisedOnDaemon = null as RaisedOnDaemon | null;
     let left = false;
+    // This ask's own write-back of a local decision, which its release waits for.
+    let reported: Promise<unknown> = Promise.resolve();
     try {
       const raising = raiseOnDaemon(input);
       // A raise that lands after this caller already left still created a record.
-      void raising.then((raised) => { if (raised && left && !decided) cancelAbandoned(raised); }, () => {});
+      void raising.then((raised) => { if (raised && left && !decided) releaseHold(raised, false); }, () => {});
       const prompt = options.localPrompt();
       // The prompt is drawn now, not after the raise: the daemon's answer
       // time never decides when the person in front of this surface is asked.
@@ -531,14 +565,19 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
       if (winner.source === 'remote') return winner.decision;
       // The daemon decides: the local answer is sent there and the record's
       // final state is what runs (the local answer when no daemon answers in time).
-      return await arbitrateLocalDecision(raisedOnDaemon ?? raising, winner.decision, input.request.args);
+      return await arbitrateLocalDecision(raisedOnDaemon ?? raising, winner.decision, input.request.args, (reporting) => { reported = reporting; });
     } finally {
       settled = true;
       left = true;
       promptLifetime.abort();
       observations.abort();
       signal?.removeEventListener('abort', abort);
-      if (!decided && raisedOnDaemon) cancelAbandoned(raisedOnDaemon);
+      if (raisedOnDaemon) {
+        const raised = raisedOnDaemon;
+        // Decided: the hold confirms receipt once this surface's own write-back (if any) finished.
+        if (decided) void reported.then(() => releaseHold(raised, true), () => releaseHold(raised, true));
+        else releaseHold(raised, false);
+      }
     }
   };
 }

@@ -1,3 +1,4 @@
+import type { Secret } from '../security/secret.js';
 import { listBuiltinSubscriptionProviders } from '../config/subscription-providers.js';
 import { subscriptionAuthFreshness } from '../config/subscriptions.js';
 import type { ProviderAuthRouteDescriptor, ProviderRuntimeMetadataDeps } from './interface.js';
@@ -26,7 +27,7 @@ export interface StandardProviderAuthOptions {
  */
 export function snapshotRuntimeMetadataDeps(deps: ProviderRuntimeMetadataDeps): ProviderRuntimeMetadataDeps {
   let listed: ReturnType<ProviderRuntimeMetadataDeps['secretsManager']['listDetailed']> | undefined;
-  const values = new Map<string, Promise<string | null>>();
+  const values = new Map<string, Promise<Secret | null>>();
   let services: ReturnType<ProviderRuntimeMetadataDeps['serviceRegistry']['getAll']> | undefined;
   const inspections = new Map<string, ReturnType<ProviderRuntimeMetadataDeps['serviceRegistry']['inspect']>>();
   const subscriptions = new Map<string, ReturnType<ProviderRuntimeMetadataDeps['subscriptionManager']['get']>>();

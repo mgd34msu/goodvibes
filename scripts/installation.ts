@@ -21,6 +21,13 @@ export interface Installation extends Layout {
   service: boolean;
   unit: string;
   wrappers: Record<string, string>;
+  /**
+   * Written before the service unit is written, rewritten or removed, and
+   * dropped by the receipt that records the result. Present after a run was
+   * stopped part way: `service` and `unit` above still describe the state
+   * before that change, and {@link recoverPendingService} restores it.
+   */
+  pendingService?: { readonly service: boolean };
 }
 export type Run = (command: string, args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv; capture?: boolean }) => string;
 /**
@@ -212,6 +219,35 @@ export function recoverInterruptedUpdate(receipt: Installation, purpose: 'update
   return true;
 }
 /**
+ * A run stopped while it changed the service (the receipt says `pendingService`):
+ * for an update, the unit is put back as the receipt records it (a unit the run
+ * wrote for a receipt without a service is this installation's, so it is
+ * disabled and removed), and the receipt is written without the mark; for an
+ * uninstall, a unit that is there is adopted, so it is removed with the rest.
+ * Returns whether there was anything to recover.
+ */
+export function recoverPendingService(receipt: Installation, purpose: 'update' | 'uninstall', execute: Run): boolean {
+  if (!receipt.pendingService) return false;
+  const unit = unitPath(receipt); plainPath(unit);
+  const quietly = (args: string[]): void => { try { execute('systemctl', args, { capture: true }); } catch { /* best effort: the unit file is what is owned */ } };
+  if (purpose === 'uninstall') {
+    if (present(unit)) Object.assign(receipt, { service: true, unit: readFileSync(unit, 'utf8') });
+  } else if (receipt.service) {
+    if (receipt.unit) { atomicWrite(unit, receipt.unit, 0o644); quietly(['--user', 'daemon-reload']); quietly(['--user', 'enable', SERVICE]); }
+  } else if (present(unit)) {
+    quietly(['--user', 'disable', SERVICE]);
+    rmSync(unit, { force: true });
+    quietly(['--user', 'daemon-reload']);
+  }
+  delete receipt.pendingService;
+  if (purpose === 'update') {
+    atomicWrite(receiptPath(receipt), JSON.stringify(receipt, null, 2) + '\n');
+    console.warn('An earlier install was stopped while it changed the daemon service; the service was put back as it was before.');
+  }
+  return true;
+}
+
+/**
  * A first install writes this record, naming the release it is about to stage, before it creates anything else in
  * the program directory, and removes it once the installation receipt exists. It is the receipt for the staged
  * release: the only thing a later run may remove on its behalf.
@@ -298,6 +334,7 @@ export async function uninstall(prefix: string, purge: boolean, execute: Run = r
     await withLock(receipt.dataDir, async () => {
       if (realpathSync(process.env.HOME ?? '') !== receipt.home) throw new Error('Run uninstall as the user who owns this installation.');
       recoverInterruptedUpdate(receipt, 'uninstall');
+      recoverPendingService(receipt, 'uninstall', execute);
       assertOwnedFiles(receipt);
       if (receipt.service) {
         // A re-run after a failure that came after the unit was removed: nothing is left to stop or disable.

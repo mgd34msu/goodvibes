@@ -152,6 +152,8 @@ export class DaemonBuildGuard {
 export interface DaemonStatusConnection {
   readonly baseUrl: string;
   readonly token: string | null;
+  /** Set when this surface may not dial the daemon: nothing is read. */
+  readonly unavailable?: string | undefined;
 }
 
 /**

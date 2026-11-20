@@ -13,6 +13,7 @@
  * backend; otherwise they run on the connector too.
  */
 
+import { revealOrNull } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { registerAgentGoogleTool, type GoogleCalendarHost } from './google-tool.js';
 import type { DaemonExpectationClient } from './session-expectations.js';
@@ -65,7 +66,7 @@ export function wireAgentGoogleTool(registry: ToolRegistry, deps: GoogleToolWiri
     configManager: deps.configManager,
     secretsManager: deps.secretsManager,
     configGet: (key: string) => readGoogleConfiguration(deps.configManager, key),
-    secretGet: (key: string) => deps.secretsManager.get(key),
+    secretGet: async (key: string) => revealOrNull(await deps.secretsManager.get(key), 'dispatch'),
     captureConnectionCurrent: () => captureGoogleConnectionCurrent(deps),
     artifactStore: deps.artifactStore,
 

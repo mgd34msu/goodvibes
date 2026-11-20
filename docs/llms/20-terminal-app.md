@@ -2115,6 +2115,7 @@ export function init(api) {
 
 A plugin that declares a high-risk capability does not start below `trusted`.
 The tier is one decision per plugin for every GoodVibes program on the machine, kept in `~/.goodvibes/plugin-trust.json`.
+A tier is given to one copy of the plugin: the copy in the directory it was enabled from (or, when it was never enabled, the first one found), and that copy's manifest and entry file as they were then. A same-named copy in another directory (a repository's own `.goodvibes/plugins`), or the same copy after its code changed, starts `untrusted` until its trust is set again. The tier is not a sandbox: a plugin's code runs inside the program with its access.
 `trusted` is set by a verified signature against the publisher's Ed25519 key (saved once with `/plugin trust-key <name> <key.pem>`), or by the owner's confirmation when it does not verify.
 
 ### `/plugin`

@@ -94,6 +94,11 @@ export class TriggerManager {
   private readonly daemonBootId: string;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private supervisionTimer: ReturnType<typeof setInterval> | null = null;
+  /** The supervision pass in progress: a tick that finds one running returns (an action slower than a tick is not started twice). */
+  private supervising: Promise<void> | null = null;
+  /** The delivery claim on each trigger's owed head batch: only the claim that delivered it removes it. */
+  private readonly owedDelivering = new Map<string, number>();
+  private owedEpoch = 0;
   private inFlight = new Set<string>();
   /**
    * One incarnation per trigger record in this process, fresh on create: a
@@ -340,6 +345,14 @@ export class TriggerManager {
   /** One supervision pass: retry failed saves, reap finished children, then run due checks. */
   async supervisionTick(): Promise<void> {
     if (!this.config.enabled) return;
+    // Single-flight: one pass at a time.
+    if (this.supervising !== null) return;
+    const pass = this.supervisionPass();
+    this.supervising = pass;
+    try { await pass; } finally { if (this.supervising === pass) this.supervising = null; }
+  }
+
+  private async supervisionPass(): Promise<void> {
     try {
       if (!this.loaded) {
         // An observer only probes the lock (re-entrant once taken); the store is read when the owner has gone, not every tick.
@@ -940,8 +953,17 @@ export class TriggerManager {
       const next = record.owedStreamBatches?.[0];
       if (!next || record.state === 'cancelled' || next.nextAttemptAt > now) continue;
       const id = record.definition.id;
-      const delivered = await this.fireAction(id, `${next.reason} (delivered again after a failed attempt)`, next.fingerprint, 'stream', next.prompt)
-        .catch((error: unknown) => { logger.warn('Owed stream batch could not be delivered', { triggerId: id, error: summarizeError(error) }); return false; });
+      // Claimed before the action: a delivery of this head already under way is not started again.
+      if (this.owedDelivering.has(id)) continue;
+      const epoch = ++this.owedEpoch;
+      this.owedDelivering.set(id, epoch);
+      let delivered: boolean;
+      try {
+        delivered = await this.fireAction(id, `${next.reason} (delivered again after a failed attempt)`, next.fingerprint, 'stream', next.prompt)
+          .catch((error: unknown) => { logger.warn('Owed stream batch could not be delivered', { triggerId: id, error: summarizeError(error) }); return false; });
+      } finally {
+        if (this.owedDelivering.get(id) === epoch) this.owedDelivering.delete(id);
+      }
       const current = this.records.get(id);
       const head = current?.owedStreamBatches?.[0];
       if (!current || head?.fingerprint !== next.fingerprint || head.prompt !== next.prompt) continue;

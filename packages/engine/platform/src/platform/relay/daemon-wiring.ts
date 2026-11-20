@@ -5,6 +5,7 @@
 // of the daemon facade so the facade's boot seam stays a single call and the
 // controller itself stays free of daemon-specific types.
 
+import { revealOrNull } from '../security/secret.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { SecretsManager } from '../config/secrets.js';
 import { isFeatureGateEnabled, type FeatureFlagReader } from '../runtime/feature-flags/index.js';
@@ -241,7 +242,7 @@ export function buildDaemonRelayReachability(
     featureFlagEnabled: () => isFeatureGateEnabled(featureFlags, 'relay-connect'),
     identityStore: {
       load: async () => {
-        const raw = await secrets.get(IDENTITY_SECRET_KEY);
+        const raw = revealOrNull(await secrets.get(IDENTITY_SECRET_KEY), 'dispatch');
         return raw ? (JSON.parse(raw) as SerializedRelayIdentity) : null;
       },
       save: async (identity) => {

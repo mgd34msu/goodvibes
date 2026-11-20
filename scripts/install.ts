@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { PAIRING_DEFERRED_EXIT } from '../products/tui/scripts/pairing-exit.ts';
-import { COMMANDS, CommandError, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, discardAbandonedFirstInstall, isReleaseInUse, recordFirstInstallStaging, stagingRecordPath, plainPath, present, quote, readDataId, readInstallation, receiptPath, recoverInterruptedUpdate, run, stopService, switchRelease, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
+import { COMMANDS, CommandError, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, discardAbandonedFirstInstall, isReleaseInUse, recordFirstInstallStaging, stagingRecordPath, plainPath, present, quote, readDataId, readInstallation, receiptPath, recoverInterruptedUpdate, recoverPendingService, run, stopService, switchRelease, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
 
 export interface Options extends Layout { port: number; service: boolean; runtimeDir: string; nodePath?: string; workspace?: string; decisionPolicy?: DecisionModelPolicy }
 const ROOT = resolve(import.meta.dir, '..');
@@ -184,7 +184,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
   await withLock(options.prefix, () => withLock(options.dataDir, async () => {
     const old = readInstallation(options.prefix);
     // A first install stopped between writing its receipt and dropping its staging record leaves the record behind.
-    if (old) { recoverInterruptedUpdate(old); rmSync(stagingRecordPath(options.prefix), { force: true }); }
+    if (old) { recoverInterruptedUpdate(old); recoverPendingService(old, 'update', execute); rmSync(stagingRecordPath(options.prefix), { force: true }); }
     else discardAbandonedFirstInstall(options.prefix);
     preflight(options, old, execute);
     // A port held by anything but this installation's own service is refused
@@ -205,6 +205,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
     let stopAttempted = false;
     let wasRunning = false;
     let serviceAttempted = false;
+    let pendingServiceWritten = false;
     const settingsPaths = ['daemon', 'tui', 'shared'].map(surface => join(options.dataDir, '.goodvibes', surface, 'settings.json'));
     const metadataPaths = [dataOwner(options), join(options.dataDir, 'environment')];
     const previousMetadata = new Map(metadataPaths.map(path => { plainPath(path); return [path, present(path) ? readFileSync(path, 'utf8') : undefined] as const; }));
@@ -253,6 +254,8 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         execute('systemctl', ['--user', 'daemon-reload']);
         if (stopAttempted && wasRunning && old?.service) { execute('systemctl', ['--user', 'enable', SERVICE]); execute('systemctl', ['--user', 'start', SERVICE]); }
       }
+      // The unit is back as it was, so the receipt no longer says a service change is under way.
+      if (old && pendingServiceWritten) atomicWrite(receiptPath(options), JSON.stringify(old, null, 2) + '\n');
       if (old) rmSync(release, { recursive: true, force: true });
       else rmSync(options.prefix, { recursive: true, force: true });
     };
@@ -297,7 +300,9 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       // A first install owns everything it is about to publish from here on, so a run killed outright leaves an
       // ordinary receipt-owned installation that uninstall removes and a re-run updates. An update keeps the
       // previous receipt until the new release is ready; `current` naming another release marks it interrupted.
-      if (!old) { atomicWrite(receiptPath(options), JSON.stringify(receipt, null, 2) + '\n'); rmSync(stagingRecordPath(options.prefix), { force: true }); }
+      // It records no service yet: the service is recorded once its unit is in place (see pendingService below).
+      const firstReceipt: Installation = { ...receipt, service: false, unit: '' };
+      if (!old) { atomicWrite(receiptPath(options), JSON.stringify(firstReceipt, null, 2) + '\n'); rmSync(stagingRecordPath(options.prefix), { force: true }); }
       switchRelease(options.prefix, releaseName); published = true;
       mkdirSync(options.binDir, { recursive: true });
       for (const name of COMMANDS) {
@@ -323,6 +328,12 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
           // diagnostic visible; local service readiness is still required.
           console.warn('Jev connection check failed; continuing software installation. Resolve the account or connection problem reported above to use Jev.');
         }
+      }
+      // Receipt first: before the unit is written or removed, the receipt on disk says a service change is under way,
+      // so a run stopped before the final receipt is put back by the next one instead of refusing a unit it wrote.
+      if (options.service || old?.service) {
+        atomicWrite(receiptPath(options), JSON.stringify({ ...(old ?? firstReceipt), pendingService: { service: options.service } }, null, 2) + '\n');
+        pendingServiceWritten = true;
       }
       if (options.service) {
         if (hooks.renderUnit) atomicWrite(unitPath(options), await hooks.renderUnit(options), 0o644);

@@ -54,6 +54,7 @@
  * the same class of act.
  */
 
+import type { Secret } from '../../security/secret.js';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
@@ -84,7 +85,7 @@ export interface CredentialWriteConfig {
 /** The narrow secret surface a credential write needs. */
 export interface CredentialWriteSecrets {
   set(key: string, value: string, options?: { scope?: SecretScope | undefined }): Promise<void>;
-  get(key: string): Promise<string | null>;
+  get(key: string): Promise<Secret | null>;
   delete(key: string, options?: { scope?: SecretScope | undefined }): Promise<void>;
   /** The raw entry the scope's own stores hold: no environment, other tier or followed reference. */
   getWriteScopeEntry(key: string, scope: SecretScope): Promise<string | null>;

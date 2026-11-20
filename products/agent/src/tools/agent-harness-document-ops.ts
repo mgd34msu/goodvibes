@@ -351,6 +351,7 @@ function buildLanes(context: CommandContext): readonly DocumentOpsLane[] {
         ...snapshot.reviewPacketTimeline.items.slice(0, 5).map((event) => `${event.status}: ${event.kind} ${event.label} -> ${event.route}`),
       ],
       actionIds: ['document-review-packet-timeline', ...REVIEW_DOCUMENT_ACTIONS, ...REVIEW_COMPARE_ACTIONS, 'document-browse-artifacts', 'document-show-artifact'],
+      reviewPacketTimeline: snapshot.reviewPacketTimeline,
     },
     {
       id: 'review_packet_wizard',
@@ -468,6 +469,11 @@ function nextActions(lanes: readonly DocumentOpsLane[]): readonly string[] {
     .filter((lane) => lane.status === 'partial')
     .map((lane) => `${lane.label}: ${lane.next}`);
   return [...urgent, ...partial].slice(0, 5);
+}
+
+/** One lane as built, for the owner's own report of it (`/documents readiness`, `packet-steps`, `timeline`). */
+export function readDocumentOpsLane(context: CommandContext, laneId: DocumentOpsLaneId): DocumentOpsLane | undefined {
+  return buildLanes(context).find((lane) => lane.id === laneId);
 }
 
 export function documentOpsCatalogStatus(context: CommandContext): Record<string, unknown> {

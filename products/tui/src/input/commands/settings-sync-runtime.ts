@@ -152,7 +152,9 @@ export function registerSettingsSyncRuntimeCommands(registry: CommandRegistry): 
       {
         id: 'pull', label: 'Take the settings from a sync bundle', word: 'pull', inputs: [BUNDLE],
         sentence: 'The settings in {path} replace yours until you change it, except keys a managed lock owns; changes that touch security are shown and asked about first.', done: '',
-        touches: 'this-machine', lasts: 'kept', risk: 'none',
+        // It can loosen a protection; it asks its own question, showing exactly the security changes it read.
+        touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', asksItself: true,
+        ownerOnly: { reason: 'a sync bundle can change security settings on this machine', instead: 'Ask the owner to run /settings-sync pull <file>.' },
         operator: { terminalOnly: TERMINAL_ONLY }, example: { path: 'settings-sync.json' },
         async run(values, ctx) {
           const sourcePath = requireShellPaths(ctx).resolveWorkspacePath(values.path!);

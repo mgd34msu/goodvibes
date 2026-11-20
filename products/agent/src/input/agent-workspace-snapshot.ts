@@ -13,7 +13,7 @@ import { buildPromptContextReceiptTimeline, buildVibeSummary } from './agent-wor
 import { summarizeMemoryItem, summarizeRoutineItem } from './agent-workspace-local-library-snapshot.ts';
 import { buildReviewPacketDefaults, buildReviewPacketTimeline, buildReviewPacketWizard, readDocumentDrafts } from './agent-workspace-review-packet-snapshot.ts';
 import { buildSetupSmokeHistory, buildWorkspaceSetupWizard, setupCompletionMarkerExists } from './agent-workspace-setup-snapshot.ts';
-import { readConfigNumber, readConfigString } from './agent-workspace-snapshot-config.ts';
+import { readConfigBoolean, readConfigNumber, readConfigString } from './agent-workspace-snapshot-config.ts';
 import {
   buildAgentWorkspaceArtifactListSnapshot,
   buildAgentWorkspaceCompanionAccessSnapshot,
@@ -33,7 +33,7 @@ import {
   buildAgentWorkspaceArtifactResolver,
   type AgentWorkspaceReadFailures,
 } from './agent-workspace-snapshot-builders.ts';
-import type { AgentWorkspaceLocalLibraryItem, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
+import type { AgentWorkspaceLocalLibraryItem, AgentWorkspaceRuntimeSnapshot, AgentWorkspaceSetupPart } from './agent-workspace-types.ts';
 import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
 
 const READ_FAILURE_LABELS: Readonly<Record<string, string>> = {
@@ -232,13 +232,14 @@ export function buildAgentWorkspaceReviewPacketPart(context: CommandContext, rea
 /** The voice and media part: provider descriptors and their readiness. */
 export function buildAgentWorkspaceVoiceMediaPart(context: CommandContext) {
   const { voiceProviders, mediaProviders } = buildAgentWorkspaceVoiceMediaProvidersSnapshot(context);
-  const voiceProviderDescriptors = voiceProviders.map((provider) => ({ id: provider.id, label: provider.label, capabilities: provider.capabilities }));
-  const mediaProviderDescriptors = mediaProviders.map((provider) => ({ id: provider.id, label: provider.label, capabilities: provider.capabilities }));
-  return {
-    voiceProviders,
-    mediaProviders,
-    voiceMediaReadiness: buildAgentWorkspaceVoiceMediaReadiness({ context, voiceProviders: voiceProviderDescriptors, mediaProviders: mediaProviderDescriptors }),
-  };
+  return { voiceProviders, mediaProviders, voiceMediaReadiness: voiceMediaReadinessOf(context, voiceProviders, mediaProviders) };
+}
+
+type VoiceMediaProviders = ReturnType<typeof buildAgentWorkspaceVoiceMediaProvidersSnapshot>;
+
+function voiceMediaReadinessOf(context: CommandContext, voiceProviders: VoiceMediaProviders['voiceProviders'], mediaProviders: VoiceMediaProviders['mediaProviders']) {
+  const describe = (provider: { readonly id: string; readonly label: string; readonly capabilities: readonly string[] }) => ({ id: provider.id, label: provider.label, capabilities: provider.capabilities });
+  return buildAgentWorkspaceVoiceMediaReadiness({ context, voiceProviders: voiceProviders.map(describe), mediaProviders: mediaProviders.map(describe) });
 }
 
 /** What the Document Ops lanes read: the review packet part, the voice and media part, and a few runtime facts. */
@@ -289,46 +290,49 @@ export function buildAgentWorkspacePersonalOpsPart(context: CommandContext): Pic
 }
 
 /**
- * Assembles the full Agent workspace runtime snapshot. Composes the
- * sub-builders in agent-workspace-snapshot-builders.ts (split out of what
- * was previously one ~516-line function) plus the two live-counter builders
- * above, then maps everything onto the AgentWorkspaceRuntimeSnapshot shape.
+ * What the setup checklist is computed from: the stores and runtime facts it
+ * counts. Read once; the setup part, the briefing part and the full snapshot
+ * each build from one reading.
  */
-export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): AgentWorkspaceRuntimeSnapshot {
-  const readFailures: AgentWorkspaceReadFailures = new Map();
+function readAgentWorkspaceSetupInputs(context: CommandContext, readFailures: AgentWorkspaceReadFailures) {
   const host = readConfigString(context, 'controlPlane.host', '127.0.0.1', readFailures);
   const port = readConfigNumber(context, 'controlPlane.port', 3421, readFailures);
-  const model = context.session?.runtime?.model ?? 'unknown';
-  const provider = context.session?.runtime?.provider ?? 'unknown';
-  const currentModel = buildAgentWorkspaceCurrentModelSnapshot(context);
-  const sessionMemoryCount = buildAgentWorkspaceSessionMemoryCount(context);
-  const memorySnapshot = buildAgentWorkspaceMemorySnapshot(context, readFailures);
-  const personaSnapshot = buildAgentWorkspacePersonaSnapshot(context, readFailures);
-  const noteSnapshot = buildAgentWorkspaceNoteSnapshot(context, readFailures);
-  const skillSnapshot = buildAgentWorkspaceSkillSnapshot(context, readFailures);
-  const routineSnapshot = buildAgentWorkspaceRoutineCounters(context, readFailures);
-  const routineScheduleReceipts = buildAgentWorkspaceRoutineScheduleReceiptsSnapshot(context, readFailures);
-  const researchRunSnapshot = buildAgentWorkspaceResearchRunSnapshot(context, readFailures);
-  const reviewPacket = buildAgentWorkspaceReviewPacketPart(context, readFailures);
-  const { reviewPacketTimeline, reviewPacketWizard } = reviewPacket;
-  const setupSmokeHistory = buildSetupSmokeHistory(context);
-  const discoveredBehavior = summarizeAgentBehaviorDiscovery(context.workspace?.shellPaths);
-  // The profile functions resolve the base home themselves, from inside a profile session too.
-  const { runtimeProfiles, runtimeStarterTemplates } = buildAgentWorkspaceRuntimeProfilesSnapshot(context.workspace?.shellPaths?.homeDirectory ?? '');
-  const { voiceProviders, mediaProviders, voiceMediaReadiness } = buildAgentWorkspaceVoiceMediaPart(context);
-  const mcpSnapshot = buildAgentWorkspaceMcpServerSnapshot(context);
-  const warnings: string[] = [];
-  if (provider === 'unknown' || model === 'unknown') warnings.push('Provider/model unavailable in this runtime context.');
-  if (!context.executeCommand) warnings.push('Command dispatch is unavailable; workspace actions will show guidance only.');
-  const config = buildAgentWorkspaceConfigSettingsSnapshot(context, readFailures);
   const runtimeBaseUrl = connectedHostBaseUrl(host, port);
-  const companionAccess = buildAgentWorkspaceCompanionAccessSnapshot(context, runtimeBaseUrl);
-  const subscriptionSnapshot = buildAgentWorkspaceSubscriptionSnapshot(context);
-  const channels = buildAgentWorkspaceChannels(context);
   const homeDirectory = context.workspace?.shellPaths?.homeDirectory;
-  const nativeCredential = homeDirectory
-    ? readConnectedHostOperatorToken(homeDirectory, runtimeBaseUrl)
-    : { present: false, token: null, path: '(Agent home unavailable)', error: undefined };
+  // The profile functions resolve the base home themselves, from inside a profile session too.
+  const { runtimeProfiles, runtimeStarterTemplates } = buildAgentWorkspaceRuntimeProfilesSnapshot(homeDirectory ?? '');
+  return {
+    model: context.session?.runtime?.model ?? 'unknown',
+    provider: context.session?.runtime?.provider ?? 'unknown',
+    runtimeBaseUrl,
+    homeDirectory,
+    nativeCredential: homeDirectory
+      ? readConnectedHostOperatorToken(homeDirectory, runtimeBaseUrl)
+      : { present: false, token: null, path: '(Agent home unavailable)', error: undefined },
+    sessionMemoryCount: buildAgentWorkspaceSessionMemoryCount(context),
+    memorySnapshot: buildAgentWorkspaceMemorySnapshot(context, readFailures),
+    personaSnapshot: buildAgentWorkspacePersonaSnapshot(context, readFailures),
+    noteSnapshot: buildAgentWorkspaceNoteSnapshot(context, readFailures),
+    skillSnapshot: buildAgentWorkspaceSkillSnapshot(context, readFailures),
+    routineSnapshot: buildAgentWorkspaceRoutineCounters(context, readFailures),
+    subscriptionSnapshot: buildAgentWorkspaceSubscriptionSnapshot(context),
+    channels: buildAgentWorkspaceChannels(context),
+    discoveredBehavior: summarizeAgentBehaviorDiscovery(context.workspace?.shellPaths),
+    runtimeProfiles,
+    runtimeStarterTemplates,
+    ...buildAgentWorkspaceVoiceMediaProvidersSnapshot(context),
+  };
+}
+
+type AgentWorkspaceSetupInputs = ReturnType<typeof readAgentWorkspaceSetupInputs>;
+
+/** The setup checklist and the setup wizard built on it, from one reading of their inputs. */
+function buildAgentWorkspaceSetupFromInputs(context: CommandContext, inputs: AgentWorkspaceSetupInputs, readFailures: AgentWorkspaceReadFailures): AgentWorkspaceSetupPart {
+  const {
+    provider, model, runtimeBaseUrl, homeDirectory, nativeCredential, sessionMemoryCount, memorySnapshot, personaSnapshot, noteSnapshot,
+    skillSnapshot, routineSnapshot, subscriptionSnapshot, channels, discoveredBehavior, runtimeProfiles, runtimeStarterTemplates,
+    voiceProviders, mediaProviders,
+  } = inputs;
   const setupChecklist = buildAgentWorkspaceSetupChecklist({
     provider,
     model,
@@ -367,11 +371,112 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
   });
   const setupWizard = buildWorkspaceSetupWizard(
     setupChecklist,
-    setupSmokeHistory,
+    buildSetupSmokeHistory(context),
     // Setup status comes from the checks this Agent runs itself; artifact
     // metadata and host read models are not setup evidence.
     setupCompletionMarkerExists(context),
   );
+  return { setupChecklist, setupWizard };
+}
+
+/**
+ * The setup part: what the Agent workspace reads when it opens and on each
+ * refresh (the setup steps and the onboarding route). It reads only the stores
+ * the checklist counts, not the review packet, research runs, schedule
+ * receipts, settings or prompt receipts the full snapshot also carries.
+ */
+export function buildAgentWorkspaceSetupPart(context: CommandContext): AgentWorkspaceSetupPart {
+  const readFailures: AgentWorkspaceReadFailures = new Map();
+  return buildAgentWorkspaceSetupFromInputs(context, readAgentWorkspaceSetupInputs(context, readFailures), readFailures);
+}
+
+function runtimeWarnings(context: CommandContext, provider: string, model: string): string[] {
+  const warnings: string[] = [];
+  if (provider === 'unknown' || model === 'unknown') warnings.push('Provider/model unavailable in this runtime context.');
+  if (!context.executeCommand) warnings.push('Command dispatch is unavailable; workspace actions will show guidance only.');
+  return warnings;
+}
+
+/** What `/brief` reads: the setup part, the local libraries it counts, voice and media readiness and this device's pairing. */
+export type AgentWorkspaceBriefPart = Pick<AgentWorkspaceRuntimeSnapshot,
+  | 'provider' | 'model' | 'modelDisplayName' | 'sessionId' | 'activeRuntimeProfile' | 'executionPolicy' | 'delegatedReviewPolicy'
+  | 'knowledgeRoute' | 'knowledgeIsolation' | 'setupChecklist' | 'channels' | 'localSkills' | 'localSkillBundles' | 'localRoutines'
+  | 'localSkillCount' | 'localSkillBundleCount' | 'enabledSkillCount' | 'enabledSkillBundleCount' | 'activeSkillCount'
+  | 'localRoutineCount' | 'enabledRoutineCount' | 'localMemoryCount' | 'localMemoryPromptActiveCount' | 'localMemoryReviewQueueCount'
+  | 'localNoteCount' | 'localNoteReviewQueueCount' | 'localPersonaCount' | 'activePersonaName'
+  | 'voiceSurfaceEnabled' | 'voiceProviderCount' | 'mediaProviderCount' | 'voiceMediaReadiness' | 'companionAccess' | 'warnings'>;
+
+/** Builds only what `/brief` reads, when it runs. */
+export function buildAgentWorkspaceBriefPart(context: CommandContext): AgentWorkspaceBriefPart {
+  const readFailures: AgentWorkspaceReadFailures = new Map();
+  const inputs = readAgentWorkspaceSetupInputs(context, readFailures);
+  const { setupChecklist } = buildAgentWorkspaceSetupFromInputs(context, inputs, readFailures);
+  const { provider, model, memorySnapshot, noteSnapshot, skillSnapshot, routineSnapshot, personaSnapshot, voiceProviders, mediaProviders } = inputs;
+  const voiceSurfaceEnabled = readConfigBoolean(context, 'ui.voiceEnabled', false, readFailures);
+  const warnings = runtimeWarnings(context, provider, model);
+  warnings.push(...describeReadFailures(readFailures));
+  return {
+    provider,
+    model,
+    modelDisplayName: buildAgentWorkspaceCurrentModelSnapshot(context)?.displayName ?? model,
+    sessionId: context.session?.runtime?.sessionId ?? 'unknown',
+    activeRuntimeProfile: activeRuntimeProfileName(inputs.homeDirectory ?? ''),
+    executionPolicy: 'serial-proactive',
+    delegatedReviewPolicy: 'explicit-build-delegation-only',
+    knowledgeRoute: AGENT_KNOWLEDGE_ROUTE,
+    knowledgeIsolation: AGENT_KNOWLEDGE_ISOLATION,
+    setupChecklist,
+    channels: inputs.channels,
+    localSkills: skillSnapshot.items,
+    localSkillBundles: skillSnapshot.bundleItems,
+    localRoutines: routineSnapshot.items,
+    localSkillCount: skillSnapshot.count,
+    localSkillBundleCount: skillSnapshot.bundleCount,
+    enabledSkillCount: skillSnapshot.enabled,
+    enabledSkillBundleCount: skillSnapshot.enabledBundleCount,
+    activeSkillCount: skillSnapshot.active,
+    localRoutineCount: routineSnapshot.count,
+    enabledRoutineCount: routineSnapshot.enabled,
+    localMemoryCount: memorySnapshot.count,
+    localMemoryPromptActiveCount: memorySnapshot.promptActiveCount,
+    localMemoryReviewQueueCount: memorySnapshot.reviewQueueCount,
+    localNoteCount: noteSnapshot.count,
+    localNoteReviewQueueCount: noteSnapshot.reviewQueueCount,
+    localPersonaCount: personaSnapshot.count,
+    activePersonaName: personaSnapshot.activeName,
+    voiceSurfaceEnabled,
+    voiceProviderCount: voiceProviders.length,
+    mediaProviderCount: mediaProviders.length,
+    voiceMediaReadiness: voiceMediaReadinessOf(context, voiceProviders, mediaProviders),
+    companionAccess: buildAgentWorkspaceCompanionAccessSnapshot(context, inputs.runtimeBaseUrl),
+    warnings,
+  };
+}
+
+/**
+ * Assembles the full Agent workspace runtime snapshot. Composes the
+ * sub-builders in agent-workspace-snapshot-builders.ts (split out of what
+ * was previously one ~516-line function) plus the two live-counter builders
+ * above, then maps everything onto the AgentWorkspaceRuntimeSnapshot shape.
+ * The workspace itself builds only the setup part, and `/brief` its own part.
+ */
+export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): AgentWorkspaceRuntimeSnapshot {
+  const readFailures: AgentWorkspaceReadFailures = new Map();
+  const inputs = readAgentWorkspaceSetupInputs(context, readFailures);
+  const {
+    provider, model, runtimeBaseUrl, sessionMemoryCount, memorySnapshot, personaSnapshot, noteSnapshot, skillSnapshot, routineSnapshot,
+    subscriptionSnapshot, channels, runtimeProfiles, runtimeStarterTemplates, voiceProviders, mediaProviders,
+  } = inputs;
+  const { setupChecklist, setupWizard } = buildAgentWorkspaceSetupFromInputs(context, inputs, readFailures);
+  const currentModel = buildAgentWorkspaceCurrentModelSnapshot(context);
+  const routineScheduleReceipts = buildAgentWorkspaceRoutineScheduleReceiptsSnapshot(context, readFailures);
+  const researchRunSnapshot = buildAgentWorkspaceResearchRunSnapshot(context, readFailures);
+  const { reviewPacketTimeline, reviewPacketWizard } = buildAgentWorkspaceReviewPacketPart(context, readFailures);
+  const voiceMediaReadiness = voiceMediaReadinessOf(context, voiceProviders, mediaProviders);
+  const mcpSnapshot = buildAgentWorkspaceMcpServerSnapshot(context);
+  const warnings = runtimeWarnings(context, provider, model);
+  const config = buildAgentWorkspaceConfigSettingsSnapshot(context, readFailures);
+  const companionAccess = buildAgentWorkspaceCompanionAccessSnapshot(context, runtimeBaseUrl);
   warnings.push(...describeReadFailures(readFailures));
   const vibe = buildVibeSummary(context);
   const promptContextReceipts = buildPromptContextReceiptTimeline(context);

@@ -8,12 +8,12 @@ import type { PendingSubscriptionLogin, ProviderSubscription, SubscriptionGrant 
 import { setHarnessSetting } from '../agent/harness-control.ts';
 import { applyThemeModeSettingChange, applyThemeNameSettingChange, THEME_MODE_CONFIG_KEY, THEME_NAME_CONFIG_KEY } from '../renderer/theme-mode-config.ts';
 import { listThemeChoices, normalizeThemeName } from '../renderer/theme.ts';
-import { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
+import { buildAgentWorkspaceSetupPart } from './agent-workspace-snapshot.ts';
 import type { CommandContext } from './command-registry.ts';
 import type {
   AgentWorkspaceAction,
   AgentWorkspaceActionResult,
-  AgentWorkspaceRuntimeSnapshot,
+  AgentWorkspaceSetupPart,
 } from './agent-workspace-types.ts';
 
 const GOODVIBES_TUI_SURFACE_ROOT = 'tui';
@@ -72,7 +72,7 @@ export interface SettingMutationOutcome {
 }
 
 export interface TuiSettingsImportOutcome extends SettingMutationOutcome {
-  readonly runtimeSnapshot: AgentWorkspaceRuntimeSnapshot | null;
+  readonly runtimeSnapshot: AgentWorkspaceSetupPart | null;
 }
 
 export interface AgentWorkspaceSettingActionDisplay {
@@ -1063,7 +1063,7 @@ export async function applyAgentWorkspaceTuiSettingsImport(
 
   return {
     status: changedCount > 0 ? `Imported ${changedCount} GoodVibes settings item(s).` : 'No GoodVibes settings changed.',
-    runtimeSnapshot: buildAgentWorkspaceRuntimeSnapshot(context),
+    runtimeSnapshot: buildAgentWorkspaceSetupPart(context),
     result: {
       kind: skipped.length > 0 && changedCount === 0 ? 'error' : changedCount > 0 ? 'refreshed' : 'guidance',
       title: changedCount > 0 ? 'GoodVibes settings imported' : 'No settings changed',

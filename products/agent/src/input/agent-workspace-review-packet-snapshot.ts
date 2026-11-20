@@ -399,6 +399,7 @@ function buildReviewPacketWizardStep(input: {
   readonly modelRoute: string;
   readonly actionId: string;
   readonly backtrackRoute?: string | null;
+  readonly ownerLine: string;
 }): AgentWorkspaceReviewPacketWizardStep {
   return {
     id: input.id,
@@ -409,6 +410,7 @@ function buildReviewPacketWizardStep(input: {
     modelRoute: input.modelRoute,
     actionId: input.actionId,
     backtrackRoute: input.backtrackRoute ?? (input.status === 'done' ? input.modelRoute : null),
+    ownerLine: input.ownerLine,
   };
 }
 
@@ -447,6 +449,9 @@ export function buildReviewPacketWizard(
   const documentRoute = latestDocument
     ? `agent_documents show documentId:"${latestDocument.id}" includeVersions:true`
     : 'agent_documents list';
+  const firstOpenComment = latestDocument?.comments.find((comment) => comment.status === 'open');
+  const firstProposedSuggestion = latestDocument?.suggestions.find((suggestion) => suggestion.status === 'proposed');
+  const judgmentForDecision = defaults.revealedJudgmentArtifactId ?? defaults.judgmentArtifactId;
   const steps: AgentWorkspaceReviewPacketWizardStep[] = [];
   steps.push(buildReviewPacketWizardStep({
     id: 'draft-review',
@@ -464,6 +469,13 @@ export function buildReviewPacketWizard(
       ? documentRoute
       : 'agent_harness mode:"workspace_action" actionId:"document-create-draft"',
     actionId: latestDocument ? 'document-show-draft' : 'document-create-draft',
+    ownerLine: !latestDocument
+      ? '/documents create --title <title> <text>'
+      : firstOpenComment
+        ? `/documents resolve-comment ${latestDocument.id} ${firstOpenComment.id}`
+        : firstProposedSuggestion
+          ? `/documents accept-suggestion ${latestDocument.id} ${firstProposedSuggestion.id} (or reject-suggestion)`
+          : `/documents mark-reviewed ${latestDocument.id}`,
   }));
   steps.push(buildReviewPacketWizardStep({
     id: 'document-export',
@@ -479,6 +491,7 @@ export function buildReviewPacketWizard(
       ? `agent_documents export documentId:"${latestDocument.id}" confirm:true`
       : 'agent_harness mode:"workspace_action" actionId:"document-export-draft"',
     actionId: 'document-export-draft',
+    ownerLine: latestDocument ? `/documents export ${latestDocument.id}` : '/documents export <draft>',
     backtrackRoute: defaults.documentExportArtifactId
       ? `agent_artifacts mode:"show" artifactId:"${defaults.documentExportArtifactId}"`
       : null,
@@ -505,6 +518,9 @@ export function buildReviewPacketWizard(
           ? `agent_model_compare review artifactId:"${defaults.comparisonArtifactId}"`
           : 'agent_harness mode:"workspace_action" actionId:"document-run-compare"',
     actionId: defaults.comparisonArtifactId ? 'document-review-compare' : 'document-run-compare',
+    ownerLine: defaults.comparisonArtifactId
+      ? `/compare judge ${defaults.comparisonArtifactId} <winner> <why> --reveal`
+      : `/compare run${defaults.documentExportArtifactId ? ` --source ${defaults.documentExportArtifactId}` : ''}${latestDocument ? ` --document ${latestDocument.id}` : ''} <prompt>`,
   }));
   steps.push(buildReviewPacketWizardStep({
     id: 'reviewer-handoff',
@@ -520,6 +536,7 @@ export function buildReviewPacketWizard(
       ? `agent_model_compare handoff artifactId:"${defaults.revealedJudgmentArtifactId}" relatedArtifactIds:${JSON.stringify(defaults.relatedArtifactIds)} confirm:true`
       : 'agent_harness mode:"workspace_action" actionId:"document-export-compare"',
     actionId: 'document-export-compare',
+    ownerLine: `/compare export ${defaults.revealedJudgmentArtifactId ?? '<judgment>'} --as handoff --related ${defaults.relatedArtifactIds.length > 0 ? defaults.relatedArtifactIds.join(',') : '<artifacts>'}`,
     backtrackRoute: defaults.handoffArtifactId
       ? `agent_artifacts mode:"show" artifactId:"${defaults.handoffArtifactId}"`
       : null,
@@ -542,6 +559,7 @@ export function buildReviewPacketWizard(
       ? `agent_model_compare apply artifactId:"${defaults.revealedJudgmentArtifactId}" confirm:true or agent_model_compare routeDecision artifactId:"${defaults.revealedJudgmentArtifactId}" decision:"left-unchanged" confirm:true`
       : 'agent_harness mode:"workspace_action" actionId:"document-apply-compare"',
     actionId: 'document-apply-compare',
+    ownerLine: `/compare apply ${judgmentForDecision ?? '<judgment>'} (or record-decision to keep the model)`,
     backtrackRoute: defaults.routeDecisionArtifactId
       ? `agent_artifacts mode:"show" artifactId:"${defaults.routeDecisionArtifactId}"`
       : null,
@@ -560,6 +578,9 @@ export function buildReviewPacketWizard(
       ? `agent_model_compare handoffArchive artifactId:"${defaults.handoffArtifactId}" confirm:true`
       : 'agent_harness mode:"workspace_action" actionId:"document-export-compare"',
     actionId: 'document-export-compare',
+    ownerLine: archiveReady
+      ? `/documents share-packet ${defaults.handoffArchiveArtifactId} channel|route|webhook --to <where>`
+      : `/compare export ${defaults.handoffArtifactId ?? '<handoff>'} --as archive`,
     backtrackRoute: defaults.handoffArchiveArtifactId
       ? `agent_artifacts mode:"show" artifactId:"${defaults.handoffArchiveArtifactId}"`
       : null,

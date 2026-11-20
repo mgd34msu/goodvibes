@@ -12,8 +12,9 @@
  *  4. an action has no sentence, or its sentence leaves out a required blank;
  *  5. an action that changes something does not say how long (an action that
  *     cannot be undone says so with its risk);
- *  6. an action marked risky does not ask, or one that loosens a protection can
- *     be run by a model;
+ *  6. an action marked risky does not ask (its line asks, or it asks its own
+ *     question: `asksItself`), or one that loosens a protection can be run by a
+ *     model;
  *  7. an action cannot be reached from the guided path (a blank's list depends
  *     on a blank that comes after it, or on none);
  *  8. one choice of a blank does what another action does (a reversing word);
@@ -97,7 +98,7 @@ export function checkDescription(description: CommandDescription<never>, problem
     const example = { ...placeholders(action), ...action.example };
     const line = renderTypedLine(description, action.id, example);
     const args = [...tokenizeSlashCommand(line)].slice(1);
-    if (action.risk !== 'none') {
+    if (action.risk !== 'none' && !action.asksItself) {
       const question = (() => { try { return generatedConfirm(description)(args, {}); } catch { return undefined; } })();
       if (!question) at(action, 'it is marked risky and its line does not ask first');
     }

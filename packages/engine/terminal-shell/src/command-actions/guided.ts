@@ -85,7 +85,8 @@ export async function runGuided(
       continue;
     }
     values = asked;
-    if (action.lasts !== 'not-a-change') {
+    // An action that asks its own question, with what it read, is asked once: by itself.
+    if (action.lasts !== 'not-a-change' && !action.asksItself) {
       const risk = effectiveRisk(action, values);
       const sentence = actionSentence(action, values);
       if (ctx.confirm) {
@@ -142,7 +143,7 @@ async function fillInputs(
 
 /** Ask the sentence before a change; true to go on. */
 async function askSentence(action: ActionDescription<never>, values: ActionValues, ctx: CommandActionContext): Promise<boolean> {
-  if (action.lasts === 'not-a-change') return true;
+  if (action.lasts === 'not-a-change' || action.asksItself) return true;
   const risk = effectiveRisk(action, values);
   const sentence = actionSentence(action, values);
   if (!ctx.confirm) { ctx.print(sentence); return true; }

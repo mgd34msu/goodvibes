@@ -199,6 +199,8 @@ export interface AgentWorkspaceReviewPacketWizardStep {
   readonly modelRoute: string;
   readonly actionId: string;
   readonly backtrackRoute: string | null;
+  /** The line a person types for this step, with a blank in angle brackets where they choose. */
+  readonly ownerLine: string;
 }
 
 export interface AgentWorkspaceReviewPacketWizard {
@@ -425,3 +427,6 @@ export interface AgentWorkspaceRuntimeSnapshot {
   readonly setupWizard: AgentSetupWizard;
   readonly warnings: readonly string[];
 }
+
+/** The part of the snapshot the Agent workspace reads: its setup steps and the onboarding route built on them. */
+export type AgentWorkspaceSetupPart = Pick<AgentWorkspaceRuntimeSnapshot, 'setupChecklist' | 'setupWizard'>;

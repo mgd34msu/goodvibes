@@ -1,13 +1,13 @@
 import type { AgentWorkspaceActionResult } from './agent-workspace-types.ts';
 import type { OnboardingShellPaths } from '../runtime/onboarding/types.ts';
-import type { AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
+import type { AgentWorkspaceSetupPart } from './agent-workspace-types.ts';
 import { writeOnboardingCheckMarker, writeOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';
 import { computeOnboardingStateFromSnapshot, deriveOnboardingEntry } from './agent-workspace-onboarding-state.ts';
 import type { OnboardingState } from '../runtime/onboarding/onboarding-state.ts';
 
 export interface CompleteOnboardingParams {
   readonly awaitingRecapDismiss: boolean;
-  readonly runtimeSnapshot: AgentWorkspaceRuntimeSnapshot | null;
+  readonly runtimeSnapshot: AgentWorkspaceSetupPart | null;
   readonly shellPaths: OnboardingShellPaths | undefined;
   readonly dismissAgentWorkspace: (() => boolean) | undefined;
   readonly close: () => void;
@@ -110,7 +110,7 @@ export function completeOnboardingAction(params: CompleteOnboardingParams): Comp
 
 export interface OnSubscriptionLoginSuccessParams {
   readonly onlyGroup: string | null;
-  readonly runtimeSnapshot: AgentWorkspaceRuntimeSnapshot | null;
+  readonly runtimeSnapshot: AgentWorkspaceSetupPart | null;
   readonly shellPaths: OnboardingShellPaths | undefined;
 }
 

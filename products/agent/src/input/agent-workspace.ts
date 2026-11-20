@@ -9,9 +9,9 @@ import { AGENT_WORKSPACE_CATEGORIES } from './agent-workspace-categories.ts';
 import { jumpAgentWorkspaceSelection, moveAgentWorkspaceSelection, selectAgentWorkspaceCategory } from './agent-workspace-navigation.ts';
 import { appendAgentWorkspaceActionSearchText, backspaceAgentWorkspaceActionSearch, beginAgentWorkspaceActionSearch, clearAgentWorkspaceActionSearch, commitAgentWorkspaceActionSearchSelection, searchAgentWorkspaceActions } from './agent-workspace-search.ts';
 import { agentWorkspaceTuiSettingsImportHasChanges, applyAgentWorkspaceSettingValue, applyAgentWorkspaceTuiSettingsImport, buildAgentWorkspaceSettingActionDisplay, buildAgentWorkspaceSettingActionEffect, describeAgentWorkspaceTuiSettingsImportPlan, readAgentWorkspaceSettingFacts, type AgentWorkspaceSettingFacts, isAgentWorkspaceActionVisible, planAgentWorkspaceTuiSettingsImport, type AgentWorkspaceSettingActionDisplay, type TuiSettingsImportPlan } from './agent-workspace-settings.ts';
-import { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
+import { buildAgentWorkspaceSetupPart } from './agent-workspace-snapshot.ts';
 import { checkAgentWorkspaceHostSetup } from './agent-workspace-setup-host-status.ts';
-import type { AgentWorkspaceAction, AgentWorkspaceActionResult, AgentWorkspaceActionSearchResult, AgentWorkspaceCategory, AgentWorkspaceCategoryGroup, AgentWorkspaceCommandDispatcher, AgentWorkspaceFocusPane, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
+import type { AgentWorkspaceAction, AgentWorkspaceActionResult, AgentWorkspaceActionSearchResult, AgentWorkspaceCategory, AgentWorkspaceCategoryGroup, AgentWorkspaceCommandDispatcher, AgentWorkspaceFocusPane, AgentWorkspaceSetupPart } from './agent-workspace-types.ts';
 import { ONBOARDING_COMPLETE_SYNTHETIC_ACTION, shouldShowOnboardingFinishFooter } from './agent-workspace-onboarding-finish.ts';
 import { completeOnboardingAction, onSubscriptionLoginSuccessAction } from './agent-workspace-onboarding-actions.ts';
 import { computeOnboardingStateFromSnapshot, deriveOnboardingEntry, updateRevealedOnboardingCategories } from './agent-workspace-onboarding-state.ts';
@@ -41,7 +41,8 @@ export class AgentWorkspace {
   public selectedCategoryIndex = 0;
   public selectedActionIndex = 0;
   public status = 'Ready. Choose an operator flow; ordinary assistant work stays in the main conversation.';
-  public runtimeSnapshot: AgentWorkspaceRuntimeSnapshot | null = null;
+  /** Only the setup part: the workspace reads its setup steps and onboarding route, nothing else of the snapshot. */
+  public runtimeSnapshot: AgentWorkspaceSetupPart | null = null;
   public lastActionResult: AgentWorkspaceActionResult | null = null;
   public actionSearchActive = false;
   public actionSearchQuery = '';
@@ -78,7 +79,7 @@ export class AgentWorkspace {
     this._onlyGroup = onlyGroup ?? null;
     this._onlyActionIds = null;
     this._awaitingRecapDismiss = false;
-    this.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(context);
+    this.runtimeSnapshot = buildAgentWorkspaceSetupPart(context);
     const shellPaths = context.workspace?.shellPaths;
     this._onboardingState = computeOnboardingStateFromSnapshot(this.runtimeSnapshot, shellPaths);
     if (this._onboardingState) updateRevealedOnboardingCategories(this._onboardingState, this._revealedOnboardingCategoryIds);
@@ -130,7 +131,7 @@ export class AgentWorkspace {
     if (!context) return;
     void checkAgentWorkspaceHostSetup(context, { force }).then(() => {
       if (this.context !== context || !this.active) return;
-      this.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(context);
+      this.runtimeSnapshot = buildAgentWorkspaceSetupPart(context);
       if (this._onlyGroup === 'ONBOARDING') {
         this._onboardingState = computeOnboardingStateFromSnapshot(this.runtimeSnapshot, context.workspace?.shellPaths);
         if (this._onboardingState) updateRevealedOnboardingCategories(this._onboardingState, this._revealedOnboardingCategoryIds);
@@ -288,7 +289,7 @@ export class AgentWorkspace {
       };
       return;
     }
-    this.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(this.context);
+    this.runtimeSnapshot = buildAgentWorkspaceSetupPart(this.context);
     this.reports.clear();
     // Ctrl+R also checks the selected row's report now, wherever it reads.
     const selected = this.selectedAction ? this.reportCommandFor(this.selectedAction) : undefined;
@@ -524,7 +525,7 @@ export class AgentWorkspace {
 
   private async applySettingValue(setting: AgentConfigSetting, value: unknown, requestRender?: () => void): Promise<void> {
     const outcome = await applyAgentWorkspaceSettingValue(this.context, setting, value);
-    this.runtimeSnapshot = this.context ? buildAgentWorkspaceRuntimeSnapshot(this.context) : this.runtimeSnapshot;
+    this.runtimeSnapshot = this.context ? buildAgentWorkspaceSetupPart(this.context) : this.runtimeSnapshot;
     this.clampSelection();
     this.status = outcome.status;
     this.lastActionResult = outcome.result;

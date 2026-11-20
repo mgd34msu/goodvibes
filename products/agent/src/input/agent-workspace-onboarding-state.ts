@@ -1,6 +1,6 @@
 import type { AgentSetupWizardStep } from '../agent/setup-wizard.ts';
 import type { SetupPlanItem } from '../tools/agent-harness-setup-posture-types.ts';
-import type { AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
+import type { AgentWorkspaceSetupPart } from './agent-workspace-types.ts';
 import type { OnboardingShellPaths } from '../runtime/onboarding/types.ts';
 import {
   deriveOnboardingState,
@@ -90,7 +90,7 @@ export function updateRevealedOnboardingCategories(
  * Reads check and completion markers from shellPaths when provided.
  */
 export function computeOnboardingStateFromSnapshot(
-  snapshot: AgentWorkspaceRuntimeSnapshot | null,
+  snapshot: Pick<AgentWorkspaceSetupPart, 'setupWizard'> | null,
   shellPaths: OnboardingShellPaths | undefined,
 ): OnboardingState | null {
   const wizard = snapshot?.setupWizard;

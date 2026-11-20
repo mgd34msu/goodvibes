@@ -2,7 +2,7 @@ import type { AutomationJob } from '@goodvibes-jev/engine/platform/platform/auto
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 import { readAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { buildAgentWorkspaceRuntimeSnapshot } from '../agent-workspace-snapshot.ts';
+import { buildAgentWorkspaceBriefPart } from '../agent-workspace-snapshot.ts';
 import { WORK_PLAN_TASK_STATUSES as WORK_PLAN_STATUSES, type ProjectWorkPlanTaskStatus as WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/knowledge';
 
 type StatusCounts = Record<WorkPlanItemStatus, number>;
@@ -67,7 +67,7 @@ function formatWarnings(warnings: readonly string[]): readonly string[] {
 }
 
 export function formatAgentOperatorBriefing(ctx: CommandContext): string {
-  const snapshot = buildAgentWorkspaceRuntimeSnapshot(ctx);
+  const snapshot = buildAgentWorkspaceBriefPart(ctx);
   const workPlan = workPlanCounts(ctx);
   const jobReading = automationJobs(ctx);
   const jobs = 'jobs' in jobReading ? jobReading.jobs : [];

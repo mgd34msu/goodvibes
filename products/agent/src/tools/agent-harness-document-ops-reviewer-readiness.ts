@@ -175,6 +175,12 @@ export function buildReviewerReadinessChecklist(
   const firstHiddenJudgment = hiddenJudgments[0];
   const firstJudgmentWaiting = judgmentsWaitingOnRouteDecision[0];
   const firstHandoffMissingRelated = handoffs.find((artifact) => readMetadataStringList(artifact.metadata.relatedArtifactIds).length === 0);
+  const firstOpenComment = firstOpenCommentDocument?.comments.find((comment) => comment.status === 'open');
+  const firstProposedSuggestion = firstProposedSuggestionDocument?.suggestions.find((suggestion) => suggestion.status === 'proposed');
+  const firstDocumentMissingSource = reviewDocuments.find((document) => document.attachments.length === 0 && !document.lastArtifactId);
+  const firstComparisonMissingSource = comparisons.find((artifact) => !readString(artifact.metadata.sourceArtifactId) && !readString(artifact.metadata.documentId));
+  // The comparison a hidden judgment judged: judging it again with the names shown reveals the winner.
+  const hiddenJudgmentComparison = firstHiddenJudgment ? readString(firstHiddenJudgment.metadata.sourceArtifactId) : '';
 
   const rawChecks: ReviewerReadinessCheck[] = [
     {
@@ -204,6 +210,11 @@ export function buildReviewerReadinessChecklist(
         : firstProposedSuggestionDocument
           ? `agent_documents acceptSuggestion documentId:"${firstProposedSuggestionDocument.id}" suggestionId:"..." or agent_documents rejectSuggestion documentId:"${firstProposedSuggestionDocument.id}" suggestionId:"..."`
           : undefined,
+      ownerLine: firstOpenCommentDocument && firstOpenComment
+        ? `/documents resolve-comment ${firstOpenCommentDocument.id} ${firstOpenComment.id}`
+        : firstProposedSuggestionDocument && firstProposedSuggestion
+          ? `/documents accept-suggestion ${firstProposedSuggestionDocument.id} ${firstProposedSuggestion.id} (or reject-suggestion)`
+          : undefined,
     },
     {
       id: 'source-artifacts',
@@ -217,6 +228,11 @@ export function buildReviewerReadinessChecklist(
       repairRoute: missingSourceArtifacts > 0
         ? 'agent_documents attachArtifact documentId:"..." artifactId:"..." or agent_model_compare handoff artifactId:"..." relatedArtifactIds:"..."'
         : undefined,
+      ownerLine: firstDocumentMissingSource
+        ? `/documents attach-artifact ${firstDocumentMissingSource.id} <artifact>`
+        : firstComparisonMissingSource
+          ? `/compare export ${firstComparisonMissingSource.id} --as handoff --related <artifact>`
+          : undefined,
     },
     {
       id: 'comparison-reveal',
@@ -238,6 +254,13 @@ export function buildReviewerReadinessChecklist(
         : firstHiddenJudgment
           ? hiddenJudgmentRepairRoute(firstHiddenJudgment)
           : undefined,
+      ownerLine: firstUnrevealedComparison
+        ? `/compare judge ${firstUnrevealedComparison.id} <winner> <why> --reveal`
+        : hiddenJudgmentComparison
+          ? `/compare judge ${hiddenJudgmentComparison} <winner> <why> --reveal`
+          : firstHiddenJudgment
+            ? `/compare apply ${firstHiddenJudgment.id} (or record-decision)`
+            : undefined,
     },
     {
       id: 'route-change-decision',
@@ -253,6 +276,7 @@ export function buildReviewerReadinessChecklist(
       repairRoute: firstJudgmentWaiting
         ? `agent_model_compare apply artifactId:"${firstJudgmentWaiting.id}" or agent_model_compare routeDecision artifactId:"${firstJudgmentWaiting.id}" decision:"left-unchanged"`
         : undefined,
+      ownerLine: firstJudgmentWaiting ? `/compare apply ${firstJudgmentWaiting.id} (or record-decision to keep the model)` : undefined,
     },
     {
       id: 'handoff-archive-evidence',
@@ -267,6 +291,9 @@ export function buildReviewerReadinessChecklist(
         : 'agent_model_compare review',
       repairRoute: firstHandoffMissingRelated
         ? `agent_model_compare handoff artifactId:"${readString(firstHandoffMissingRelated.metadata.sourceArtifactId) || firstHandoffMissingRelated.id}" relatedArtifactIds:"..."`
+        : undefined,
+      ownerLine: firstHandoffMissingRelated
+        ? `/compare export ${readString(firstHandoffMissingRelated.metadata.sourceArtifactId) || firstHandoffMissingRelated.id} --as handoff --related <artifact>`
         : undefined,
     },
   ];

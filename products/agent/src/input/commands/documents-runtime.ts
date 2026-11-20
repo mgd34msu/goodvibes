@@ -12,6 +12,9 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { artifactInput } from './artifacts-runtime.ts';
 import { given, ownerRead, ownerToolCall, positiveNumber, runOwnerToolCall, splitWords } from './owner-tool-call.ts';
+import { readDocumentOpsLane } from '../../tools/agent-harness-document-ops.ts';
+import type { DocumentOpsLane, DocumentOpsLaneId } from '../../tools/agent-harness-document-ops-types.ts';
+import { formatReviewPacketSteps, formatReviewPacketTimeline, formatReviewReadiness } from './documents-review-report.ts';
 
 const TOOL = 'agent_documents';
 const LOCAL_ONLY = { terminalOnly: 'Document drafts are kept in this Agent\'s home.' } as const;
@@ -63,12 +66,18 @@ function draftChange(fields: Pick<DocumentAction, 'id' | 'label' | 'word' | 'inp
   };
 }
 
-/** The packet tools' answer for a lane read of agent_harness (the review readiness and the packet steps). */
-function laneRead(id: string, label: string, word: string, sentence: string, laneId: string): DocumentAction {
-  return ownerRead('agent_harness', readAction<CommandContext>({
-    id, label, word, sentence, operator: LOCAL_ONLY,
-    async run(_values, ctx) { return runOwnerToolCall(ctx, 'agent_harness', { mode: 'document_ops_lane', laneId, includeParameters: true }, label.toLowerCase()); },
-  }));
+/**
+ * A review packet lane told in plain words. A model is sent to agent_harness
+ * mode:"document_ops_lane" laneId:"<laneId>", which answers the same lane as JSON.
+ */
+function laneRead(id: string, label: string, word: string, sentence: string, laneId: DocumentOpsLaneId, report: (lane: DocumentOpsLane | undefined) => string): DocumentAction {
+  return {
+    ...readAction<CommandContext>({
+      id, label, word, sentence, operator: LOCAL_ONLY,
+      async run(_values, ctx) { return report(readDocumentOpsLane(ctx, laneId)); },
+    }),
+    ownerOnly: { reason: 'it is your plain-words report of the lane', instead: `Call agent_harness mode:"document_ops_lane" laneId:"${laneId}", which answers the same lane as JSON.` },
+  };
 }
 
 export function registerDocumentsRuntimeCommands(registry: CommandRegistry): void {
@@ -210,11 +219,11 @@ export function registerDocumentsRuntimeCommands(registry: CommandRegistry): voi
         sentence: 'Draft {document} is saved as a Markdown artifact with its version, until you change it.', example: { document: 'launch-plan' },
       }, 'export', (values) => ({ documentId: values.document })),
       laneRead('readiness', 'Check a draft is ready for review', 'readiness',
-        'Lists what still stands in the way of review: open comments, suggestions waiting, missing sources, hidden comparisons and the handoff.', 'reviewer_readiness'),
+        'Lists what still stands in the way of review (open comments, suggestions waiting, missing sources, hidden comparisons, the handoff), each with the line that settles it.', 'reviewer_readiness', formatReviewReadiness),
       laneRead('packet-steps', 'See the review packet steps', 'packet-steps',
-        'Shows the review packet\'s steps (review, export, compare, judge, hand off, decide, archive), which are done, and the next one.', 'review_packet_wizard'),
+        'Shows the review packet\'s steps in order (review, export, compare and judge, hand off, decide, archive), which are done, and the line for the next one.', 'review_packet_wizard', formatReviewPacketSteps),
       laneRead('timeline', 'See the review packet timeline', 'timeline',
-        'Lists, oldest first, what happened to the review packet: drafts, comments, suggestions, attachments, exports, comparisons, judgments, model decisions, presets and handoffs.', 'review_packet_timeline'),
+        'Lists, oldest first and dated, what happened to the review packet: drafts, comments, suggestions, attachments, exports, comparisons, judgments, model decisions, presets and handoffs.', 'review_packet_timeline', formatReviewPacketTimeline),
       {
         id: 'save-preset', label: 'Save a review packet preset', word: 'save-preset',
         inputs: [

@@ -201,7 +201,7 @@ export const SERVICES_COMMAND: CommandDescription<ServicesCommandContext> = {
       inputs: [listInput({ id: 'service', label: 'Service', help: 'Services from this project\'s services file that wait for you', list: PENDING })],
       sentence: '{service} from this project\'s services file is used, sending the stored key it names to the address it names, {lasts}; this loosens a protection, so you are asked with exactly what it sends and where, and only that entry is approved.', done: '',
       // It asks its own question, with the entry's facts, and approves exactly that entry (by digest).
-      touches: 'credential', lasts: 'kept', risk: 'none',
+      touches: 'credential', lasts: 'kept', risk: 'loosens-a-protection', asksItself: true,
       ownerOnly: { reason: 'whoever wrote the repository chose which of your stored keys it sends and where', instead: 'Ask the owner to run /services trust <service>.' },
       operator: { terminalOnly: TERMINAL_ONLY },
       example: { service: 'acme-api' },

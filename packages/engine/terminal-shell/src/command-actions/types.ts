@@ -94,6 +94,14 @@ export interface ActionDescription<Ctx> {
   readonly risk: ActionRisk;
   /** Only counts when the owner types it; a model is refused with the reason and what it may do instead. */
   readonly ownerOnly?: { readonly reason: string; readonly instead: string } | undefined;
+  /**
+   * The action asks its own question before it does what its risk names, with
+   * what it read at that moment (and refuses where it cannot ask). The kit then
+   * asks nothing first, on a typed line or on the guided path, so the person is
+   * asked once; its risk is still shown beside it on the first screen, in help
+   * and in the catalogue.
+   */
+  readonly asksItself?: true | undefined;
   /** The action id that undoes this one. */
   readonly undoneBy?: string | undefined;
   /**

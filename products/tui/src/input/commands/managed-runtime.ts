@@ -205,7 +205,9 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
       {
         id: 'apply', label: 'Apply a managed bundle', word: 'apply', inputs: [BUNDLE, ONLY_KEYS],
         sentence: 'The settings in {path} are applied and locked as managed until you change it (or roll it back); changes that touch security are shown and asked about first.', done: '',
-        touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'rollback',
+        // It can loosen a protection; it asks its own question, showing exactly the security changes it read.
+        touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', asksItself: true, undoneBy: 'rollback',
+        ownerOnly: { reason: 'a managed bundle can change security settings on this machine', instead: 'Ask the owner to run /managed apply <file>.' },
         operator: { terminalOnly: TERMINAL_ONLY }, example: { path: 'managed/team.json' },
         async run(values, ctx) {
           const requestedKeys = keysOf(values.keys);
@@ -228,7 +230,9 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
       {
         id: 'apply-staged', label: 'Apply the staged bundle', word: 'apply-staged', inputs: [ONLY_KEYS],
         sentence: 'The staged settings are applied and locked as managed until you change it (or roll it back); changes that touch security are shown and asked about first.', done: '',
-        touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'rollback',
+        // It can loosen a protection; it asks its own question, showing exactly the security changes staged.
+        touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', asksItself: true, undoneBy: 'rollback',
+        ownerOnly: { reason: 'a managed bundle can change security settings on this machine', instead: 'Ask the owner to run /managed apply-staged.' },
         operator: { terminalOnly: TERMINAL_ONLY }, example: {},
         async run(values, ctx) {
           const requestedKeys = keysOf(values.keys);

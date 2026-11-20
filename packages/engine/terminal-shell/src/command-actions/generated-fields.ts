@@ -117,7 +117,8 @@ export function generatedConfirm(description: CommandDescription<never>) {
     const owner = ownerOnlyFor(parsed.action, parsed.values);
     if (owner && context.invokedByModel === true) throw ownerOnlyActionRefusal(description.name, parsed.action, owner.reason, owner.instead);
     const risk = effectiveRisk(parsed.action, parsed.values);
-    if (risk === 'none') return undefined;
+    // An action that asks its own question, with what it read, is asked once: by itself.
+    if (risk === 'none' || parsed.action.asksItself) return undefined;
     return {
       title: `${parsed.action.label}?`,
       detail: `${actionSentence(parsed.action, parsed.values)} This ${riskWords(risk)}.`,

@@ -1,4 +1,4 @@
-import type { AgentWorkspaceReviewPacketWizard } from '../input/agent-workspace-types.ts';
+import type { AgentWorkspaceReviewPacketTimeline, AgentWorkspaceReviewPacketWizard } from '../input/agent-workspace-types.ts';
 
 export type DocumentOpsLaneId =
   | 'documents'
@@ -36,6 +36,8 @@ export interface DocumentOpsLane {
   readonly actionIds: readonly string[];
   readonly reviewerReadiness?: ReviewerReadinessChecklist;
   readonly reviewPacketWizard?: AgentWorkspaceReviewPacketWizard;
+  /** The whole timeline (the lane's signals list only the latest five); read by `/documents timeline`. */
+  readonly reviewPacketTimeline?: AgentWorkspaceReviewPacketTimeline;
 }
 
 export interface ReviewerReadinessChecklist {
@@ -69,6 +71,8 @@ export interface ReviewerReadinessCheck {
   readonly detail: string;
   readonly inspectRoute: string;
   readonly repairRoute?: string;
+  /** The line a person types to fix it, with a blank in angle brackets where they choose; absent when nothing is to fix. */
+  readonly ownerLine?: string | undefined;
 }
 
 export type DocumentOpsLaneResolution =

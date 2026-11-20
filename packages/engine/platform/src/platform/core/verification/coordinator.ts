@@ -345,8 +345,9 @@ export class CompletionVerification {
         const key = JSON.stringify(['atomic-evidence-v2', proposalRevision, job.aspect, job.target]);
         const cache = this.cache(access);
         if (cache.has(key)) return null;
-        const check = await verificationEvidence.run(access.port, job.state as never, { ...this.options(access), only: [job.aspect], site: verificationEvidence.name });
-        const reading = check.readings[job.aspect];
+        const check = await verificationEvidence.runSome(access.port, job.state as never, [job.aspect], { ...this.options(access), site: verificationEvidence.name });
+        // An absent reading is not an acceptance: the assertion is kept for repair, read as uncertain.
+        const reading = check.readings[job.aspect] ?? { verdict: 'uncertain', outcome: 'escalate' } as const;
         const accepted = reading.verdict === 'no' && reading.outcome === 'act';
         check.recordAction(accepted ? `Qualify this source/assertion ${job.aspect} only; no completion authority.` : `Retain this specific ${job.aspect} source/assertion for private proposal repair.`);
         access.assertCurrent();

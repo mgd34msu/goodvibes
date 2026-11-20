@@ -168,12 +168,14 @@ export async function readForbidsWriting(
   reply: string,
   options: { readonly signal?: AbortSignal | undefined } = {},
 ): Promise<{ readonly reading: ShapeReading; readonly decisionId: string | undefined; recordAction(action: string): void }> {
-  const run = await requestShape.run(port, { request: reply }, {
+  const run = await requestShape.runSome(port, { request: reply }, ['forbids_writing'], {
     site: REQUEST_SHAPE_SITE,
-    only: ['forbids_writing'],
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
-  return { reading: toShapeReading(run.readings.forbids_writing), decisionId: run.result.decisionId, recordAction: (action) => run.recordAction(action) };
+  // An absent reading settles nothing: it reads as uncertain and escalates, so the reply is asked about again.
+  const read = run.readings.forbids_writing;
+  const reading: ShapeReading = read === undefined ? { verdict: 'uncertain', probability: 0.5, outcome: 'escalate' } : toShapeReading(read);
+  return { reading, decisionId: run.result.decisionId, recordAction: (action) => run.recordAction(action) };
 }
 
 /** A shape question read yes at act: the only reading code acts on as "the user asked for this". */

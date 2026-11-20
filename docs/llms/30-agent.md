@@ -752,7 +752,7 @@ Agent channel delivery sent
 
 - A delivery that fails prints `[channels] Send failed <reason>`. `/channels deliveries [limit]` lists the stored receipts.
 - When the model runs `/channels send --yes`, the call still needs the owner's explicit request and a recorded admission from the permission gate.
-`/channel-profiles`, `/principals` and `/ci` are the slash forms of the matching `goodvibes-agent` commands.
+`/channel-profiles` is the slash form of the matching `goodvibes-agent` command; `/principals` and `/ci` are the terminal app's commands, the same description in both apps, their methods called on the connected host.
 
 ### Automation and host actions
 

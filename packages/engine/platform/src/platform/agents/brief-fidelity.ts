@@ -158,16 +158,19 @@ export async function assertAgentBriefFidelity(input: { readonly request: string
     return;
   }
   const owner = captureJudgmentPort(agentBriefFidelity.name, { ...options, assertCurrent: current, prepareResultCapture: prepareJudgmentResult });
+  const asked: readonly ('scope_conflict' | 'constraint_conflict' | 'repair_restart')[] = input.repairContext
+    ? ['scope_conflict', 'constraint_conflict', 'repair_restart'] : ['scope_conflict', 'constraint_conflict'];
   const [authorization, run] = await Promise.all([
     agentDelegationAuthorization.run(owner.port, authorizationState as never,
       { site: agentDelegationAuthorization.name, signal: owner.signal, beforeAttempt: owner.assertCurrent }),
-    agentBriefFidelity.run(owner.port, state as never,
-    { site: agentBriefFidelity.name, signal: owner.signal, beforeAttempt: owner.assertCurrent,
-      only: input.repairContext ? ['scope_conflict', 'constraint_conflict', 'repair_restart'] : ['scope_conflict', 'constraint_conflict'] }),
+    agentBriefFidelity.runSome(owner.port, state as never, asked,
+    { site: agentBriefFidelity.name, signal: owner.signal, beforeAttempt: owner.assertCurrent }),
   ]);
   owner.assertCurrent();
-  let accepted = Object.values(run.readings).every(reading => reading.verdict === 'no' && reading.outcome === 'act');
-  const held = Object.entries(run.readings).filter(([, reading]) => reading.verdict !== 'no' || reading.outcome !== 'act');
+  // An absent reading is held as unsettled, never accepted.
+  const readings = asked.map(aspect => [aspect, run.readings[aspect] ?? { verdict: 'uncertain', outcome: 'escalate' }] as const);
+  let accepted = readings.every(([, reading]) => reading.verdict === 'no' && reading.outcome === 'act');
+  const held = readings.filter(([, reading]) => reading.verdict !== 'no' || reading.outcome !== 'act');
   const focused = held.map(([aspect]) => aspect).filter((aspect): aspect is 'scope_conflict' | 'constraint_conflict' => aspect === 'scope_conflict' || aspect === 'constraint_conflict');
   const fixes: DelegationFix[] = held.filter(([check]) => check === 'repair_restart').map(([check]) => ({
     requirement: 'Continue the held completion repair instead of restarting the task', check, assessment: 'unresolved repair scope',

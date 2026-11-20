@@ -320,8 +320,11 @@ export function categoryForSideEffectKind(kind: SideEffectKind): PermissionCateg
 export async function readSideEffectKind(toolName: string, args: Record<string, unknown>, site: string, signal?: AbortSignal): Promise<{ readonly kind: SideEffectKind; readonly confident: boolean }> {
   if (isClassicOperation()) { signal?.throwIfAborted(); return codeSideEffectKind(toolName, args); }
   const state = readingState(toolName, args);
-  const run = await sideEffect.run(judgmentPort(site), state, { site, only: ['kind'], ...(signal === undefined ? {} : { signal }) });
-  return { kind: run.readings.kind.choice, confident: run.readings.kind.outcome === 'act' };
+  const run = await sideEffect.runSome(judgmentPort(site), state, ['kind'], { site, ...(signal === undefined ? {} : { signal }) });
+  const kind = run.readings.kind;
+  // An absent reading falls back to the kind code knows, never confident.
+  if (kind === undefined) return { ...codeSideEffectKind(toolName, args), confident: false };
+  return { kind: kind.choice, confident: kind.outcome === 'act' };
 }
 
 /** The shell commands a call's arguments carry, read the way the exec tool reads them (`cmd_base64` included). */
@@ -347,10 +350,12 @@ export async function readCatastrophic(
   if (isClassicOperation()) return { verdict: 'uncertain', readByGate: false, unassessed: true };
   const { workingDirectory, externalRequestEvidence, port } = options;
   const state = callReadingState('exec', { command }, workingDirectory, externalRequestEvidence);
-  const run = await executePolicyCheck(() => boundaryReading.run(port ?? judgmentPort(site), state, {
-    site, only: ['catastrophic'], ...(signal === undefined ? {} : { signal }),
+  const run = await executePolicyCheck(() => boundaryReading.runSome(port ?? judgmentPort(site), state, ['catastrophic'], {
+    site, ...(signal === undefined ? {} : { signal }),
   }), signal);
   signal?.throwIfAborted();
+  // An absent reading clears nothing: the command is unassessed, as with no decision model.
+  if (run.readings.catastrophic === undefined) return { verdict: 'uncertain', readByGate: false, unassessed: true };
   const verdict = run.readings.catastrophic.verdict;
   run.recordAction(`exec-time:${verdict}`);
   return { verdict, readByGate: false };

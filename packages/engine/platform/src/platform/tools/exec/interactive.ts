@@ -179,14 +179,16 @@ async function readDecisionPendingPrompt(command: string, transcript: string, si
   if (line === null) return null;
   const recentOutput = transcript.slice(0, transcript.lastIndexOf('\n') + 1);
   const owner = captureJudgmentPort(AWAITING_INPUT_SITE, { signal, prepareResultCapture: prepareJudgmentResult });
-  const run = await executePolicyCheck(() => execPrompt.run(owner.port, pendingPromptView(command, line, recentOutput), {
+  const run = await executePolicyCheck(() => execPrompt.runSome(owner.port, pendingPromptView(command, line, recentOutput), ['awaiting_input'], {
     site: AWAITING_INPUT_SITE,
     signal: owner.signal, beforeAttempt: owner.assertCurrent,
-    only: ['awaiting_input'],
   }), signal);
   owner.assertCurrent();
-  const awaiting = run.readings.awaiting_input.outcome === 'act' && run.readings.awaiting_input.verdict === 'yes';
-  if (run.readings.awaiting_input.outcome === 'act') run.recordAction(awaiting ? 'surfaced pending prompt' : 'not a prompt');
+  // An absent reading surfaces nothing, like an unsettled one.
+  const reading = run.readings.awaiting_input;
+  if (reading === undefined) return null;
+  const awaiting = reading.outcome === 'act' && reading.verdict === 'yes';
+  if (reading.outcome === 'act') run.recordAction(awaiting ? 'surfaced pending prompt' : 'not a prompt');
   owner.assertCurrent();
   return awaiting ? line : null;
 }

@@ -1181,8 +1181,8 @@ Prerequisites: the `gh` CLI installed and signed in (`gh auth login`) on the dae
 /ci watch my-org/my-repo#42 telegram
 /ci watch my-org/my-repo@main slack:C0123456 --fix-session
 /ci watches
-/ci watches run <id>
-/ci unwatch <id>
+/ci run <watch>
+/ci unwatch <watch>                    asks first
 ```
 
 ```sh

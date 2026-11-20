@@ -74,6 +74,21 @@ export type {
 export { AutomationManager } from './manager.js';
 
 export { readNaturalLanguageSchedule } from './schedule-reading.js';
+export {
+  explicitScheduleTiming,
+  formatScheduleTime,
+  formatScheduleTiming,
+  nextScheduleRun,
+  previewScheduleAction,
+  readScheduleTiming,
+  scheduleCreateTimingFields,
+  scheduleFieldsFromValues,
+  scheduleNameFromValues,
+  scheduleStaggerMs,
+  ScheduleValuesError,
+} from './schedule-values.js';
+export type { ScheduleFields, SchedulePreview, ScheduleTimingOptions, ScheduleValues } from './schedule-values.js';
+export { buildAutonomySchedulePrompt } from './autonomy-prompt.js';
 export type { ScheduleReading, ScheduleReadingInput } from './schedule-reading.js';
 
 export { automationActionBinding, bindAutomationAction } from './action-source.js';

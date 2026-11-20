@@ -189,7 +189,7 @@ async function readSupport(inputs: readonly GeneratedFactSupportInput[], options
     try {
       const only = SLOTS.slice(0, request.count);
       const state = generatedFactSupportState(request.group.source, request.group.extraction, request.group.jobs.slice(request.offset, request.offset + request.count));
-      const run = await Promise.race([battery.run(port, state, { signal: controller.signal, site: battery.name, only: [...only] }), aborted]);
+      const run = await Promise.race([battery.runSome(port, state, only, { signal: controller.signal, site: battery.name }), aborted]);
       assertCurrent();
       const readings = only.map((name) => run.readings[name]);
       const refusals = readings.map((reading): ClaimRefusal | undefined => reading && reading.outcome === 'act' && reading.verdict === 'yes' ? undefined

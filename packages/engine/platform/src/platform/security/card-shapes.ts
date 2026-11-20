@@ -425,10 +425,12 @@ async function detectDecisionCardShapes(text: string): Promise<readonly CardShap
   const memoKey = createHash('sha256').update(asked.join(',')).update('\n').update(masked).digest('base64');
   let answer = cardTalkAnswers.get(memoKey);
   if (answer === undefined) {
-    const run = await cardTalk.run(judgmentPort(CARD_TALK_SITE), masked, { site: CARD_TALK_SITE, only: asked });
+    const run = await cardTalk.runSome(judgmentPort(CARD_TALK_SITE), masked, asked, { site: CARD_TALK_SITE });
     const gives = (item: 'security_code' | 'expiry'): boolean => {
-      const reading = run.readings[item] as (typeof run.readings)[typeof item] | undefined;
-      return reading !== undefined && !(reading.verdict === 'no' && reading.outcome === 'act');
+      const reading = run.readings[item];
+      // A question not asked has no candidates; one asked whose reading is absent keeps its numbers as card details.
+      if (reading === undefined) return asked.includes(item);
+      return !(reading.verdict === 'no' && reading.outcome === 'act');
     };
     answer = { expiry: gives('expiry'), securityCode: gives('security_code') };
     run.recordAction(answer.expiry || answer.securityCode ? 'short numbers treated as card details' : 'short numbers left as they are');

@@ -361,11 +361,13 @@ function planCheckOwner(options: PlanCheckOptions, evidence: object) {
 async function checkRepairContinuation(port: JudgmentPort, plan: ContractPlan, ask: string, options: PlanCheckOptions): Promise<CheckOutput> {
   const output = emptyOutput(), repairContext = options.native?.contract.taskEvidence;
   if (!repairContext?.includes('"kind":"completion-repair"')) return output;
-  const run = await agentBriefFidelity.run(port, { originalUserRequest: ask, repairContext,
+  const run = await agentBriefFidelity.runSome(port, { originalUserRequest: ask, repairContext,
     specialistAssignments: planUnits(plan).map(unit => ({ task: [unit.title, unit.goal, unit.brief].join('\n') })) } as never,
-    { ...callOptions(agentBriefFidelity.name, options), only: ['repair_restart'] });
+    ['repair_restart'], callOptions(agentBriefFidelity.name, options));
   record(output, run.result.decisionId, run.result.usage);
-  const accepted = run.readings.repair_restart.verdict === 'no' && run.readings.repair_restart.outcome === 'act';
+  // An absent reading is not an acceptance: the plan is sent back for repair.
+  const restart = run.readings.repair_restart;
+  const accepted = restart !== undefined && restart.verdict === 'no' && restart.outcome === 'act';
   run.recordAction(accepted ? 'Continue only the remaining work while retaining completed results.' : 'Repair this plan before execution: account for reusable results and assign only the specific remaining work.');
   if (!accepted) output.problems.push({ code: 'uncovered-requirement', message: 'Completion repair is not a fresh task. Identify and preserve completed inspections, findings and artifacts; establish the specific remaining work from primary receipts and assign only that work. Do not replace the existing report or require a new full review without evidence that the affected work must be reopened.' });
   return output;

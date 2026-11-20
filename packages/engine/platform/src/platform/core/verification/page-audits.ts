@@ -167,8 +167,8 @@ export class PageAuditRound {
         caseEvidence: { ...submission.entry.caseEvidence, sourceIds: submission.entry.evidence.map(source => source.id) } })),
       sources: page.sources };
     const battery = page.instruction ? verificationInstructionPageAudit : verificationPageAudit;
-    const run = await battery.run(this.access.port, state as never,
-      { ...this.options(this.access), site: battery.name, only: PAGE_AUDIT_SLOT_NAMES.slice(0, members.length) })
+    const run = await battery.runSome(this.access.port, state as never, PAGE_AUDIT_SLOT_NAMES.slice(0, members.length),
+      { ...this.options(this.access), site: battery.name })
       .catch((error: unknown) => {
         // Several requirements' evidence did not fit one request: ask each on its own.
         if (error instanceof JudgmentContextLimitError) return undefined;
@@ -182,7 +182,9 @@ export class PageAuditRound {
     members.forEach(({ submission, index }, slot) => {
       const name = PAGE_AUDIT_SLOT_NAMES[slot]!;
       const requirement = submission.entry.requirement.id;
-      submission.readings[index] = { missed: run.readings[name], recordAction: action => run.recordAction(`${requirement}: ${action}`) };
+      // An absent slot settles nothing: its requirement reads as uncertain, never as met.
+      const missed = run.readings[name] ?? { kind: 'yes-no', probability: 0.5, verdict: 'uncertain', outcome: 'escalate' };
+      submission.readings[index] = { missed, recordAction: action => run.recordAction(`${requirement}: ${action}`) };
     });
   }
 

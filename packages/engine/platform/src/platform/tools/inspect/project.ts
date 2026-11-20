@@ -128,12 +128,12 @@ async function readDecisionEntryPoints(root: string, scripts: Record<string, str
   const readings = await mapWithConcurrency(candidates, ENTRY_POINT_CONCURRENCY, async (file) => {
     const content = await safeRead(join(root, file));
     await assertCapturedToolAccessCurrent();
-    const run = await projectTooling.run(judgmentPort(PROJECT_TOOLING_SITE), entryPointView(file, content, scripts), {
+    const run = await projectTooling.runSome(judgmentPort(PROJECT_TOOLING_SITE), entryPointView(file, content, scripts), ['entry_point'], {
       site: PROJECT_TOOLING_SITE,
-      only: ['entry_point'],
     });
     const reading = run.readings.entry_point;
-    const entry = reading.verdict === 'yes' && reading.outcome === 'act';
+    // An absent reading does not list the file.
+    const entry = reading !== undefined && reading.verdict === 'yes' && reading.outcome === 'act';
     run.recordAction(`${file}: ${entry ? 'entry point' : 'not listed'}`);
     return entry;
   });
@@ -215,7 +215,7 @@ async function detectProjectUnderPolicy(root: string): Promise<ProjectInfo> {
 
   if (asked.length > 0) {
     await assertCapturedToolAccessCurrent();
-    const run = await decisionOrClassic(() => projectTooling.run(
+    const run = await decisionOrClassic(() => projectTooling.runSome(
       judgmentPort(PROJECT_TOOLING_SITE),
       {
         manifests: manifests.map(([file]) => file),
@@ -224,7 +224,8 @@ async function detectProjectUnderPolicy(root: string): Promise<ProjectInfo> {
         dependencies: dependencyNames,
         ...(asked.includes('project_type') ? { sourceFiles: countSourceFiles(root) } : {}),
       },
-      { site: PROJECT_TOOLING_SITE, only: asked },
+      asked,
+      { site: PROJECT_TOOLING_SITE },
     ), () => undefined);
     const r = run?.readings;
     if (run && r) {

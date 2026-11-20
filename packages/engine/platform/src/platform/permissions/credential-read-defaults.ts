@@ -56,10 +56,12 @@ export async function readTouchesSecrets(toolName: string, args: Record<string, 
     const seen = seenByPort.get(key);
     if (seen !== undefined) return seen;
     const run = await executePolicyCheck(
-      () => sideEffect.run(port, state, { site: READ_SECRETS_SITE, only: ['secrets'], ...(signal === undefined ? {} : { signal }) }),
+      () => sideEffect.runSome(port, state, ['secrets'], { site: READ_SECRETS_SITE, ...(signal === undefined ? {} : { signal }) }),
       signal,
     );
     signal?.throwIfAborted();
+    // An absent reading cannot establish that no secret is touched, as with no decision model; it is not remembered.
+    if (run.readings.secrets === undefined) return true;
     const touches = run.readings.secrets.verdict !== 'no';
     run.recordAction(touches ? 'secrets' : 'no-secrets');
     seenByPort.set(key, touches);

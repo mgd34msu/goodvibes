@@ -758,8 +758,8 @@ export class ResponseCompletionGuard {
     const routeHere = routeInCompletionRequest && state === fullState;
     routeInCompletionRequest = false;
     const checks = await Promise.allSettled([
-      responseCompletion.run(port, state as never, { ...readingOptions,
-        only: routeHere ? ['completion_required', ...RESPONSE_COMPLETION_CHECKS] as const : RESPONSE_COMPLETION_CHECKS, site: responseCompletion.name }),
+      responseCompletion.runSome(port, state as never,
+        routeHere ? ['completion_required', ...RESPONSE_COMPLETION_CHECKS] as const : RESPONSE_COMPLETION_CHECKS, { ...readingOptions, site: responseCompletion.name }),
       hasDelegatedEvidence ? delegationConsolidation.run(port, state as never,
         { ...readingOptions, site: delegationConsolidation.name }) : Promise.resolve(null),
       executionEvidence
@@ -775,13 +775,14 @@ export class ResponseCompletionGuard {
       }
     }));
     if (failure) throw failure.error;
-    const run = (checks[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof responseCompletion.run>>>).value;
+    const run = (checks[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof responseCompletion.runSome>>>).value;
     const consolidation = (checks[1] as PromiseFulfilledResult<Awaited<ReturnType<typeof delegationConsolidation.run>> | null>).value;
     const execution = (checks[2] as PromiseFulfilledResult<Awaited<ReturnType<typeof executionAssurance.run>> | null>).value;
     if (routeHere) {
       const completionRequired = run.readings.completion_required;
       owner.assertCurrent(); current();
-      if (completionRequired.verdict === 'no' && completionRequired.outcome === 'act') {
+      // An absent reading is not a "not required": the reply is checked.
+      if (completionRequired !== undefined && completionRequired.verdict === 'no' && completionRequired.outcome === 'act') {
         // The checks read alongside it do not apply to this reply.
         run.recordAction(NOT_REQUIRED_ACTION);
         return acceptCheckedResponse();
@@ -790,8 +791,11 @@ export class ResponseCompletionGuard {
       run.recordAction(REQUIRED_ACTION);
     }
     // Only the yes/no checks were asked; every loop, lookup and summary below reads them as yes/no.
-    const completionReadings: CompletionCheckReadings = Object.fromEntries(
-      RESPONSE_COMPLETION_CHECKS.map(aspect => [aspect, run.readings[aspect]])) as unknown as CompletionCheckReadings;
+    const completionReadings: CompletionCheckReadings = Object.fromEntries(RESPONSE_COMPLETION_CHECKS.map(aspect => {
+      const reading = run.readings[aspect];
+      if (reading === undefined) throw new Error(`Completion check is missing its required ${aspect} reading`);
+      return [aspect, reading];
+    })) as unknown as CompletionCheckReadings;
     if ([...Object.values(completionReadings), ...Object.values(consolidation?.readings ?? {})]
       .some(reading => reading.verdict === 'yes' && reading.outcome === 'act')) this.hasSemanticRefusal = true;
     owner.assertCurrent(); current();
@@ -817,11 +821,11 @@ export class ResponseCompletionGuard {
       const passages = typeof Intl.Segmenter === 'function' ? [...new Intl.Segmenter(undefined, { granularity: 'sentence' }).segment(response)].map(({ segment }) => segment) : [];
       // One request over the whole answer names the first unsupported passage, with the evidence sent once.
       if (passages.length > 1 && passages.length <= MAX_ANSWER_PASSAGES && passages.join('') === response) {
-        const located = await responseCompletion.run(port, { ...state as object, passages: answerPassages(passages) } as never,
-          { ...readingOptions, only: ['unsupported_passage'], site: responseCompletion.name })
+        const located = await responseCompletion.runSome(port, { ...state as object, passages: answerPassages(passages) } as never,
+          ['unsupported_passage'], { ...readingOptions, site: responseCompletion.name })
           .catch((error: unknown) => { batch.abort(); throw error; });
         const reading = located.readings.unsupported_passage;
-        unsupportedAccepted = reading.outcome === 'act' && reading.choice === 'none';
+        unsupportedAccepted = reading !== undefined && reading.outcome === 'act' && reading.choice === 'none';
         located.recordAction(unsupportedAccepted ? 'No passage of the answer has an unsupported execution claim; all other publication checks remain required.'
           : 'Retain the named passage for primary retrieval or repair.');
         if (unsupportedAccepted) qualifications.completion.add('unsupported');

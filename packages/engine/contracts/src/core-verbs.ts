@@ -495,10 +495,18 @@ export const SCOPED_EXEMPT_VERB_CATEGORIES: Readonly<Record<string, ScopedVerbEx
   },
   'schedule-actions': {
     namespaces: ['automation.schedules'],
-    verbs: ['pause', 'resume'],
+    verbs: ['pause', 'resume', 'preview'],
     // automation.schedules.pause|resume carry the /schedule actions' own words
     // ("Pause one", "Resume one"), so the terminal, the web UI and the contract
     // say the same thing. The jobs family keeps enable/disable.
+    // automation.schedules.preview reads a schedule sheet's blanks into what
+    // would be kept (a described time read once) without keeping anything.
+  },
+  'trigger-actions': {
+    namespaces: ['watchers.triggers'],
+    verbs: ['preview'],
+    // watchers.triggers.preview reads the blanks of "Watch for something" into
+    // the definition watchers.triggers.create would keep, without keeping it.
   },
   'mcp-server-actions': {
     namespaces: ['mcp.servers'],

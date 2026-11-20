@@ -2978,6 +2978,16 @@
       "types": "./terminal-shell/dist/command-actions/data.d.ts",
       "import": "./terminal-shell/dist/command-actions/data.js"
     },
+    "./terminal-shell/principals-command": {
+      "bun": "./terminal-shell/src/principals-command.ts",
+      "types": "./terminal-shell/dist/principals-command.d.ts",
+      "import": "./terminal-shell/dist/principals-command.js"
+    },
+    "./terminal-shell/ci-command": {
+      "bun": "./terminal-shell/src/ci-command.ts",
+      "types": "./terminal-shell/dist/ci-command.d.ts",
+      "import": "./terminal-shell/dist/ci-command.js"
+    },
     "./terminal-shell/permissions-command": {
       "bun": "./terminal-shell/src/permissions-command.ts",
       "types": "./terminal-shell/dist/permissions-command.d.ts",

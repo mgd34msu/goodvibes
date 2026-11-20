@@ -40,9 +40,10 @@ async function isBroadPattern(kind: 'path' | 'host', pattern: string, effect: st
   if ((kind === 'path' ? EVERY_PATH : EVERY_HOST).has(pattern.trim())) return true;
   return decisionOrClassic<boolean | undefined>(async () => {
     const item = kind === 'path' ? 'broad_path' : 'broad_host';
-    const run = await policyBreadth.run(judgmentPort(BREADTH_SITE), { kind, pattern, effect }, { site: BREADTH_SITE, only: [item] });
-    const reading = run.readings[item]!;
-    const broad = !(reading.verdict === 'no' && reading.outcome === 'act');
+    const run = await policyBreadth.runSome(judgmentPort(BREADTH_SITE), { kind, pattern, effect }, [item], { site: BREADTH_SITE });
+    const reading = run.readings[item];
+    // An absent reading is not a no that acts, so the pattern is shown as broad.
+    const broad = !(reading !== undefined && reading.verdict === 'no' && reading.outcome === 'act');
     run.recordAction(broad ? 'flagged' : 'scoped');
     return broad;
   }, () => undefined);

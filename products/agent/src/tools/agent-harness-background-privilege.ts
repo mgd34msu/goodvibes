@@ -30,10 +30,11 @@ export async function withBackgroundPrivilegeCheck<T>(command: string, options: 
     const site = 'agent.background-process.privilege';
     const authority = captureJudgmentPort(site, { signal: options.signal });
     try {
-      const run = await (decision as Battery<{ needsPrivilege: YesNoItem }>).run(authority.port, { command: redactSensitiveData(command) },
-        { site, only: ['needsPrivilege'], signal: authority.signal });
+      const run = await (decision as Battery<{ needsPrivilege: YesNoItem }>).runSome(authority.port, { command: redactSensitiveData(command) },
+        ['needsPrivilege'], { site, signal: authority.signal });
       const reading = run.readings.needsPrivilege;
-      if (reading.outcome !== 'act' || reading.verdict === 'uncertain') return 'uncertain';
+      // An absent reading settles nothing, like an uncertain one.
+      if (reading === undefined || reading.outcome !== 'act' || reading.verdict === 'uncertain') return 'uncertain';
       run.recordAction(reading.verdict === 'yes' ? 'Keep the background privilege-prompt restriction.' : 'The command mention does not require background privilege.');
       return reading.verdict === 'yes';
     } finally { authority.consumeObservation(); }

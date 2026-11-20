@@ -102,9 +102,9 @@ async function readRoute(source: unknown, options: ModelReadingOptions) {
       const battery = decision as typeof routeReadiness;
       const authority = readinessAuthority(battery, scoped);
       try {
-        const run = await battery.run(authority.port, state as unknown as Parameters<typeof battery.run>[1], {
+        // routeReadinessFrom reads an absent reading as an unsettled dimension.
+        const run = await battery.runSome(authority.port, state as unknown as Parameters<typeof battery.runSome>[1], ['latency', 'privacy', 'cloudTransfer'], {
           site: battery.name, signal: authority.signal, beforeAttempt: authority.assertCurrent,
-          only: ['latency', 'privacy', 'cloudTransfer'],
         });
         authority.assertCurrent();
         const result = routeReadinessFrom(run);

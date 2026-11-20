@@ -728,8 +728,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
             try { return [await reviewBattery.run(reviewPort, state, { site, signal: run.abort.signal })]; }
             catch (error) {
               if (!(error instanceof JudgmentContextLimitError)) throw error;
-              const unfinished = await reviewBattery.run(reviewPort, state, { site, signal: run.abort.signal, only: ['unfinished'] });
-              const unsupported = await reviewBattery.run(reviewPort, state, { site, signal: run.abort.signal, only: ['unsupported'] });
+              const unfinished = await reviewBattery.runSome(reviewPort, state, ['unfinished'], { site, signal: run.abort.signal });
+              const unsupported = await reviewBattery.runSome(reviewPort, state, ['unsupported'], { site, signal: run.abort.signal });
               return [unfinished, unsupported];
             }
           };
@@ -759,13 +759,14 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
                 }
                 return result;
               } };
-              const review = await reviewBattery.run(meteredPort(nativeContractPort(contract, context.native, bound, claimSignal), reviewUsage),
+              const review = await reviewBattery.runSome(meteredPort(nativeContractPort(contract, context.native, bound, claimSignal), reviewUsage),
                 { ...state, claimScope: { start: scope.start, end: scope.end,
                   ...(scope.version === 2 ? { version: 2, outputDigest: scope.outputDigest } : { textDigest: scope.textDigest }),
                   text: evidence.output.slice(scope.start, scope.end) } },
-                { site, signal: claimSignal, only: ['unsupported'] });
+                ['unsupported'], { site, signal: claimSignal });
               assertOwnedContractSource(contract);
               const reading = review.readings.unsupported;
+              if (reading === undefined) throw new Error('Scoped answer review is missing its required reading');
               review.recordAction(criterionVerdict(reading) === 'met' ? 'This exact passage is supported; all other passages, original requirements and publication checks remain required.' : 'Retain this exact passage and primary evidence for focused investigation; a broad suspicion is not a new drafting task.');
               if (bindNativeInput && !stateHash || !review.result.decisionId) throw new Error('Scoped answer review has no required input/decision binding');
               // One request per passage, never split further: an unsettled passage is handed to the

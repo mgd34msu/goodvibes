@@ -427,8 +427,8 @@ export class AutoHealer {
     const asked = stage === 'llm' ? (['fixes_errors', 'only_the_fix'] as const) : (['fixes_errors'] as const);
     await this.check();
     const capture = this.reading ?? captureJudgmentPort(HEAL_ACCEPTANCE_SITE, { assertCurrent: this.checkSynchronous, signal: this.execution?.signal ?? this.invocationSignal });
-    const run = await executePolicyCheck(() => healAcceptance.run(capture.port, { file: filePath, errors, change }, {
-      site: HEAL_ACCEPTANCE_SITE, only: [...asked], beforeAttempt: capture.assertCurrent,
+    const run = await executePolicyCheck(() => healAcceptance.runSome(capture.port, { file: filePath, errors, change }, asked, {
+      site: HEAL_ACCEPTANCE_SITE, beforeAttempt: capture.assertCurrent,
       beforeAsyncAttempt: async () => { await this.check(); capture.assertCurrent(); }, signal: capture.signal,
     }), capture.signal);
     await this.check();

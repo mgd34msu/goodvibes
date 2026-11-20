@@ -8,6 +8,7 @@ import { isDelegatedCaller, runNativeMutation, type NativeMutationHost } from '.
 import { isRecord } from '../../utils/record-coerce.js';
 import { normalizeAtSchedule, normalizeCronSchedule, normalizeEverySchedule } from '../../automation/schedules.js';
 import { parseCreateAutomationJobInput, parseUpdateAutomationJobInput } from './runtime-routes.js';
+import { previewScheduleAction, ScheduleValuesError } from '../../automation/schedule-values.js';
 
 function nativeClockMeaning(value: number | undefined): string | { readonly iso: string; readonly fractionalMillisecond: number } | undefined {
   if (value === undefined) return undefined;
@@ -115,6 +116,27 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
       }
     }));
   }
+  // The web UI's schedule sheet: the blanks read into what would be kept, shown before it is kept. Nothing is written.
+  disposals.push(registerCatalogHandler<unknown, unknown>(catalog, 'automation.schedules.preview', async ({ body, context }) => {
+    const action = isRecord(body) ? body.action : undefined;
+    if (!isRecord(body) || (action !== 'add' && action !== 'change')) throw new HandlerError('action must be "add" or "change".', 'INVALID_ARGUMENT', 400, 'action');
+    const values: Record<string, string> = {};
+    for (const [key, value] of Object.entries(body)) {
+      if (typeof value !== 'string') throw new HandlerError(`${key} must be text.`, 'INVALID_ARGUMENT', 400, key);
+      values[key] = value;
+    }
+    let zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (values.zone) {
+      try { new Intl.DateTimeFormat('en-US', { timeZone: values.zone }); zone = values.zone; }
+      catch { throw new HandlerError(`zone "${values.zone}" is not a time zone.`, 'INVALID_ARGUMENT', 400, 'zone'); }
+    }
+    try {
+      return await previewScheduleAction(action, values, { zone, ...(context.signal ? { signal: context.signal } : {}) });
+    } catch (error) {
+      if (error instanceof ScheduleValuesError) throw new HandlerError(error.message, 'INVALID_ARGUMENT', 400);
+      throw error;
+    }
+  }));
   for (const method of ['automation.jobs.enable', 'automation.jobs.disable', 'automation.jobs.delete', 'automation.schedules.resume', 'automation.schedules.pause', 'automation.schedules.delete']) {
     disposals.push(registerCatalogHandler<unknown, unknown>(catalog, method, async ({ body, context }) => {
       const key = method.startsWith('automation.jobs.') ? 'jobId' : 'scheduleId';

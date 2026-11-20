@@ -408,7 +408,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/checkpoints` | List the workspace checkpoints, newest first; `/checkpoints restore <n\|id>` shows the files that would change, asks, and restores them (files only; a safety checkpoint of the current files is kept first). |
 | `/channel-profiles` | List, set, or delete per-channel session profile bindings (model, provider, permission mode) on the connected host; mutations require `--yes`. |
 | `/channels` | Inspect channel readiness, delivery receipts, or send one explicitly confirmed delivery message. |
-| `/ci` | Check a repo or PR's CI with per-job conclusions and manage standing CI watches with channel delivery; mutations require `--yes`. |
+| `/ci` | Check a repo or PR's CI with per-job conclusions and manage standing CI watches with channel delivery; removing a watch asks first. |
 | `/clear` | Start a fresh conversation; the current one is saved as its own session first. Also `/cls` and `/reset`. |
 | `/collapse` | Collapse rendered blocks by type. |
 | `/commands` | Browse all commands in a scrollable list. |

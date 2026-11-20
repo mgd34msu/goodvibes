@@ -102,11 +102,10 @@ async function findNextjsPagesRoutes(root: string, unavailable: string[], notes:
     const content = await scanRead(file, unavailable);
     if (!content) return [];
     await assertCapturedToolAccessCurrent();
-    let run: Awaited<ReturnType<typeof apiRoutes.run>>;
+    let run: Awaited<ReturnType<typeof apiRoutes.runSome>>;
     try {
-      run = await apiRoutes.run(judgmentPort(SITE), handlerView(relFile, content), {
+      run = await apiRoutes.runSome(judgmentPort(SITE), handlerView(relFile, content), HANDLER_METHODS.map(servesQuestion), {
         site: SITE,
-        only: HANDLER_METHODS.map(servesQuestion),
         ...(signal === undefined ? {} : { signal }),
       });
     } catch {
@@ -115,7 +114,9 @@ async function findNextjsPagesRoutes(root: string, unavailable: string[], notes:
       return [route('ANY', routePath, relFile, 1, 'uncertain')];
     }
     const routes = HANDLER_METHODS.flatMap((method) => {
-      const reading = routeReading(run.readings[servesQuestion(method)]);
+      // An absent reading lists the method as uncertain, never dismissed.
+      const asked = run.readings[servesQuestion(method)];
+      const reading = asked === undefined ? 'uncertain' : routeReading(asked);
       return reading === 'dismissed' ? [] : [route(method, routePath, relFile, 1, reading)];
     });
     run.recordAction(`${relFile}: ${routes.map((r) => r.method).join(', ') || 'no methods'}`);

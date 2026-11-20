@@ -13,6 +13,7 @@
  */
 
 import {
+  formatBeadTime,
   readWorkBoard,
   type BoardRow,
   type WorkBoard,
@@ -23,6 +24,7 @@ import {
   type WorkBoardTask,
 } from '@goodvibes-jev/engine/contracts';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { ConfirmOptions } from './confirm-dialog-types.js';
 import { isTextBackspace } from './delete-key-policy.js';
@@ -316,6 +318,25 @@ export class WorkBoardList {
   }
 }
 
+/**
+ * The selected row's detail on a wide screen, from the facts its node holds:
+ * the model, the time, files read and changed, tokens, the cost only when it
+ * is priced, and what it is doing now. Nothing unknown is printed.
+ */
+export function boardNodeDetail(row: BoardRow, node: Partial<ProcessNode> | undefined): PanelDetail {
+  const lines: PanelText[] = [];
+  const fact = (label: string, value: string): void => { lines.push({ text: `${label}  ${value}`, tone: 'muted' }); };
+  if (node?.model) fact('model', node.model);
+  if (node?.elapsedMs !== undefined && node.elapsedMs > 0) fact('time', formatBeadTime(node.elapsedMs).replace(/\.\ds$/, 's'));
+  if (node?.progress && (node.progress.filesRead > 0 || node.progress.filesChanged > 0)) fact('files', `${node.progress.filesRead} read · ${node.progress.filesChanged} changed`);
+  const usage = node?.usage;
+  const tokens = usage ? usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens : 0;
+  if (tokens > 0) fact('tokens', tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens));
+  if (node && node.costState !== undefined && node.costState !== 'unpriced' && typeof node.costUsd === 'number') fact('cost', `${node.costState === 'estimated' ? '~' : ''}$${node.costUsd < 0.01 ? node.costUsd.toFixed(4) : node.costUsd.toFixed(3)}`);
+  if (node?.currentActivity) fact('now', node.currentActivity.text);
+  return { title: row.title, meta: row.meta.full, blocks: lines.length > 0 ? [{ kind: 'text', lines }] : [], tail: [] };
+}
+
 // ---------------------------------------------------------------------------
 // The panel as a modal (the Agent opens this one as is)
 // ---------------------------------------------------------------------------
@@ -462,7 +483,7 @@ export class WorkBoardModal implements SurfaceModal {
     });
   }
 
-  private buildView(): WorkBoardPanelView {
+  private buildView(screenWidth: number): WorkBoardPanelView {
     const spawn = this.deps.spawn?.spawnView() ?? null;
     if (spawn) {
       return {
@@ -473,7 +494,11 @@ export class WorkBoardModal implements SurfaceModal {
       };
     }
     const selected = this.list.selected();
-    const detail = selected && this.deps.detail ? this.deps.detail(selected.row, this.list.node(selected.row)) : null;
+    // The detail inset is drawn only on a wide screen; on 80 columns it is not built at all.
+    const node = selected && screenWidth >= 90 ? this.list.node(selected.row) : undefined;
+    const detail = selected && screenWidth >= 90
+      ? this.deps.detail ? this.deps.detail(selected.row, node) : boardNodeDetail(selected.row, node as Partial<ProcessNode> | undefined)
+      : null;
     return {
       level: 'list',
       crumbs: [],
@@ -493,6 +518,6 @@ export class WorkBoardModal implements SurfaceModal {
   }
 
   render(screenWidth: number, screenHeight: number): SurfaceLayer {
-    return renderWorkBoardPanel(this.buildView(), screenWidth, screenHeight);
+    return renderWorkBoardPanel(this.buildView(screenWidth), screenWidth, screenHeight);
   }
 }

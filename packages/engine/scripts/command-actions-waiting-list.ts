@@ -6,11 +6,8 @@
  * a release is tagged.
  */
 export const COMMAND_ACTIONS_WAITING_LIST: readonly string[] = [
-  'changes',
   'checkpoint',
   'checkpoints',
-  'cost',
-  'diff',
   'image',
   'imagine',
   'keep',
@@ -21,6 +18,5 @@ export const COMMAND_ACTIONS_WAITING_LIST: readonly string[] = [
   'rewind',
   'search',
   'tts',
-  'usage',
   'voice',
 ];

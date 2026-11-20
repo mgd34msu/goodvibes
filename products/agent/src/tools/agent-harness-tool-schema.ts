@@ -238,7 +238,7 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   fields: {
     type: 'object',
     additionalProperties: { type: 'string' },
-    description: 'Editor field values for run_workspace_action, or combo fields (key, ctrl, shift, alt) for set_keybinding. For run_setup_smoke only agentBinaryOutput, statusJson, connectedHostStatusOutput, setupPostureOutput, firstAssistantTurn and notes are saved (8000 characters each, longer values are cut with a marker); other keys are listed as ignoredFields.',
+    description: 'Values for a workspace action\'s blanks (by input id) for run_workspace_action, or combo fields (key, ctrl, shift, alt) for set_keybinding. For run_setup_smoke only agentBinaryOutput, statusJson, connectedHostStatusOutput, setupPostureOutput, firstAssistantTurn and notes are saved (8000 characters each, longer values are cut with a marker); other keys are listed as ignoredFields.',
   },
   combo: {
     ...KEY_COMBO_PARAMETER_SCHEMA,

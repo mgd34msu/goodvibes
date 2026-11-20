@@ -290,7 +290,7 @@ export function createGoogleCommand(fetcher?: FeedFetcher) {
     },
     {
       id: 'forget', label: 'Remove the stored Google credentials', word: 'forget', inputs: [],
-      sentence: 'Shows which stored Google credentials (refresh token, client secret, app password, private calendar address) would go, asks, and removes exactly those; this cannot be undone, and a value stored since is kept.',
+      sentence: 'Shows which stored Google credentials (refresh token, client secret, app password, private calendar address) would go, asks, and removes exactly those, gone until you change it by connecting again; a value stored since is kept.',
       done: '', touches: 'credential', lasts: 'kept', risk: 'none',
       ownerOnly: { reason: CREDENTIAL, instead: 'Ask the owner to run /google forget.' }, operator: AGENT_ONLY, example: {},
       run: (_values, ctx) => guarded(async () => {

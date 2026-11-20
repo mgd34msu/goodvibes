@@ -100,7 +100,6 @@ export interface AgentWorkspaceActionSearchResult {
  * `command` only when the dispatched text carries a secret that must run but not be drawn.
  */
 export type AgentWorkspaceCommandDispatcher = (command: string, behavior?: 'inline' | 'compose' | 'exit', displayCommand?: string) => void;
-export type AgentWorkspacePromptDispatcher = (prompt: string) => void;
 
 export type AgentWorkspaceActionResultKind = 'guidance' | 'blocked' | 'dispatched' | 'refreshed' | 'error' | 'recap';
 
@@ -123,20 +122,6 @@ export interface AgentWorkspaceRecentReviewerHandoffArtifact {
   readonly sourceArtifactId: string;
   readonly sourceKind: string;
   readonly relatedArtifactCount: number;
-}
-
-export interface AgentWorkspaceReviewerReadinessBadge {
-  readonly status: 'ready' | 'attention' | 'needs-setup';
-  readonly summary: string;
-  readonly next: string;
-  readonly issueCount: number;
-  readonly openComments: number;
-  readonly proposedSuggestions: number;
-  readonly missingSourceArtifacts: number;
-  readonly unrevealedComparisons: number;
-  readonly hiddenJudgments: number;
-  readonly revealedJudgments: number;
-  readonly handoffsMissingRelatedArtifacts: number;
 }
 
 export type AgentWorkspaceReviewPacketTimelineEventKind =
@@ -459,7 +444,6 @@ export interface AgentWorkspaceRuntimeSnapshot {
   readonly processSupervision: AgentWorkspaceProcessSupervisionSummary;
   readonly recentReviewerHandoffArtifactCount: number;
   readonly recentReviewerHandoffArtifacts: readonly AgentWorkspaceRecentReviewerHandoffArtifact[];
-  readonly reviewerReadinessBadge: AgentWorkspaceReviewerReadinessBadge;
   readonly reviewPacketTimeline: AgentWorkspaceReviewPacketTimeline;
   readonly reviewPacketDefaults: AgentWorkspaceReviewPacketDefaults;
   readonly reviewPacketWizard: AgentWorkspaceReviewPacketWizard;

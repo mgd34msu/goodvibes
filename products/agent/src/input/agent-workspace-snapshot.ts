@@ -12,7 +12,7 @@ import { buildAgentWorkspaceSetupChecklist } from './agent-workspace-setup.ts';
 import { buildAgentWorkspaceVoiceMediaReadiness } from './agent-workspace-voice-media.ts';
 import { buildProcessSupervisionSummary, buildProjectContextSummary, buildPromptContextReceiptTimeline, buildResearchBrowserRunnerContract, buildResearchVisualReportContract, buildVibeSummary } from './agent-workspace-context-snapshot.ts';
 import { summarizeMemoryItem, summarizeRoutineItem, summarizeRuntimeProfile, summarizeStarterTemplate } from './agent-workspace-local-library-snapshot.ts';
-import { buildReviewPacketDefaults, buildReviewPacketTimeline, buildReviewPacketWizard, readDocumentDrafts, reviewerReadinessBadge } from './agent-workspace-review-packet-snapshot.ts';
+import { buildReviewPacketDefaults, buildReviewPacketTimeline, buildReviewPacketWizard, readDocumentDrafts } from './agent-workspace-review-packet-snapshot.ts';
 import { buildSetupSmokeHistory, buildWorkspaceSetupWizard, setupCompletionMarkerExists } from './agent-workspace-setup-snapshot.ts';
 import { readConfigNumber, readConfigString } from './agent-workspace-snapshot-config.ts';
 import {
@@ -251,7 +251,6 @@ export function buildAgentWorkspaceReviewPacketPart(context: CommandContext, rea
     recentReviewerHandoffs,
     documentDrafts,
     reviewPacketDefaults,
-    reviewerBadge: reviewerReadinessBadge(documentDrafts, artifactListSnapshot.items, artifactListSnapshot.available, artifactListInfo, reviewPacketDefaults),
     reviewPacketTimeline: buildReviewPacketTimeline(documentDrafts, artifactListSnapshot.items, artifactListSnapshot.available, artifactListInfo),
     reviewPacketWizard: buildReviewPacketWizard(documentDrafts, artifactListSnapshot.available, reviewPacketDefaults, artifactListInfo),
   };
@@ -339,7 +338,7 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
   const researchSourceSnapshot = buildAgentWorkspaceResearchSourceSnapshot(context, readFailures);
   const researchRunSnapshot = buildAgentWorkspaceResearchRunSnapshot(context, readFailures);
   const reviewPacket = buildAgentWorkspaceReviewPacketPart(context, readFailures);
-  const { artifactListSnapshot, recentReviewerHandoffs, reviewPacketDefaults, reviewerBadge, reviewPacketTimeline, reviewPacketWizard } = reviewPacket;
+  const { artifactListSnapshot, recentReviewerHandoffs, reviewPacketDefaults, reviewPacketTimeline, reviewPacketWizard } = reviewPacket;
   const setupSmokeHistory = buildSetupSmokeHistory(context);
   const discoveredBehavior = summarizeAgentBehaviorDiscovery(context.workspace?.shellPaths);
   // The profile functions resolve the base home themselves, from inside a profile session too.
@@ -485,7 +484,6 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     processSupervision,
     recentReviewerHandoffArtifactCount: recentReviewerHandoffs.count,
     recentReviewerHandoffArtifacts: recentReviewerHandoffs.items,
-    reviewerReadinessBadge: reviewerBadge,
     reviewPacketTimeline,
     reviewPacketDefaults,
     reviewPacketWizard,

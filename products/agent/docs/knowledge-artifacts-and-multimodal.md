@@ -145,7 +145,7 @@ Blind model comparison can run from a direct prompt or a saved text artifact id,
 
 Documents & Compare shows a chronological review packet timeline across document, comment, suggestion, attachment, export, compare, judgment, route-decision receipt, packet preset, handoff, and archive events plus a read-only review packet wizard for progress, current route hints, backtracking, route-decision guidance, refreshed-preset lineage, final archive review, and the confirmed share route.
 
-Workspace forms show inline reviewer-readiness badges before document export, reviewer handoff/archive, and route-apply actions, and packet-default hints prefill export, handoff/archive, apply, leave-unchanged, save-preset, and share fields from the latest review packet, falling back to saved preset metadata only when live evidence is missing, without bypassing confirmation.
+The workspace's Documents & Files rows open the actions of `/documents`, `/artifacts` and `/compare`; `/documents readiness` lists what still stands in the way of review (open comments, suggestions waiting, missing sources, hidden comparisons, the handoff) before an export, a handoff or archive, or applying a winner, and every change still asks or names its blanks.
 
 `autonomy` adds ongoing-work route selection plus visible queue and item inspection. Lower-level `agent_harness` adds:
 

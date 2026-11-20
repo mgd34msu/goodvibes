@@ -283,7 +283,7 @@ Settings discovery accepts `settings action:"list"` with `category`, `prefix`, `
 
 Secret-backed setting writes through `settings action:"set"` store raw values through the secret manager and return redacted output. Shared GoodVibes settings import is `settings action:"preview_import"` to see what would change and `settings action:"import"` to apply it under a current recorded admission. The preview includes source-package ownership metadata so users can see that goodvibes-tui or another published GoodVibes platform store remains source-owned and is not mutated by Agent.
 
-`import_goodvibes_settings action:"preview|apply"`, `setup action:"import_settings"` (preview) with `setup action:"import"` (apply), and `workspace action:"run" actionId:"import-goodvibes-tui-settings"` remain available for compatibility or visible form parity; lower-level `agent_harness mode:"run_workspace_action"` remains a detailed compatibility route. Connected-host lifecycle/listener settings are read-only in Agent.
+`import_goodvibes_settings action:"preview|apply"`, `setup action:"import_settings"` (preview) with `setup action:"import"` (apply), and `workspace action:"run" actionId:"import-goodvibes-tui-settings"` remain available; lower-level `agent_harness mode:"run_workspace_action"` runs a workspace row, which for a row that names a slash command's action runs that command's line with the given `fields` for its blanks, through the same runner as `run_command`. Connected-host lifecycle/listener settings are read-only in Agent.
 
 Workspace-checkpoint root and retention guards are ordinary settings: they appear in the settings screen and `settings action:"list" prefix:"checkpoints."`, are changed with `settings action:"set"`, and a wrong value is reported at start (the default then applies). They are passed to the platform's workspace checkpoint manager:
 
@@ -393,6 +393,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/agents` | Your agents: open the live view, and hand build, fix or review work to the terminal app (`hand-off`, with reason, success criteria, workspace hint, priority and review intent) and follow it (`handed-off`). |
 | `/agent-home` | Separate Agent homes and the starters they are made from, including opt-in VIBE.md starter export/import with `--include-vibe`. |
 | `/approval` | What each kind of approval asks about, and the approvals waiting on you; answer one with `/questions answer`. |
+| `/artifacts` | The saved artifacts (uploads, exports, media, reports, comparisons): list, look at one, copy one to a file, or several into a folder or ZIP. |
 | `/auth` | Review provider auth posture and export redacted auth review bundles. |
 | `/bookmarks` | List bookmarked transcript blocks. |
 | `/brief` | Show a concise Agent operator briefing and next actions. |
@@ -404,9 +405,11 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/clear` | Start a fresh conversation; the current one is saved as its own session first. Also `/cls` and `/reset`. |
 | `/collapse` | Collapse rendered blocks by type. |
 | `/compact` | Summarize the conversation to free context window. |
+| `/compare` | Blind model comparisons: send one prompt to two to four models with their names hidden (asks first: it spends money), benchmark the local models, judge, switch to the winner or record keeping the model, and save a report, handoff or ZIP. |
 | `/context` | Inspect context-window usage and token breakdown; `/context window [<size>\|clear]` shows where the current model's window came from, or sets or clears a custom window. |
 | `/conversation` | Review conversation structure, transcript hotspots, and composer posture. |
 | `/devices` | The terminal app's command: device tokens on the connected host (`list`, `rename`, `revoke`, which asks first), "Pair something" (`pair device` mints a named, separately revocable device token and shows its link and QR), and the paired phones: `nodes`, `grants`, `revoke-grant`, `captures`, `delete-capture` (asks first). |
+| `/documents` | Your Markdown drafts: write, revise, comment, take or leave a suggested change, put or attach an artifact, export, and the review packet (readiness, steps, presets, sending it). |
 | `/effort` | See or choose how hard the model thinks (`/effort set <level>`). |
 | `/cloudflare` | The connected host's optional Cloudflare integration: `status`, `requirements`, `discover`, `validate`, `verify`, and (typed by the owner only) `create-token [--new]`, `provision` and `disable`. Flags are the terminal app's; see its Cloudflare guide. |
 | `/expand` | Expand rendered blocks by type. |
@@ -417,6 +420,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/image` | Attach an image file to the next message. |
 | `/keybindings` | List keyboard bindings and the config file path. |
 | `/knowledge` | Use isolated Agent Knowledge. |
+| `/research` | Research a question or look at a page in the conversation; keep a research run, add a source to the queue, save a sourced report. |
 | `/resume` | Resume a saved Agent session. |
 | `/mail` | The terminal app's command over the Agent's own mail service: whether mail is connected, the unread inbox, read one message, save a draft, send one (asks first), and the mailbox settings and password. |
 | `/mcp` | Manage MCP servers, trust posture, and tool inventory. |
@@ -426,7 +430,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/model` | Choose the model your conversations use and its backups (`use`, `backup`, `drop-backup`), and read the list of models again (`refresh`). |
 | `/network-scan` | Turn local-network scanning for model servers on or off, or check its status. Model servers on this computer and providers whose API key is in the environment are registered at every start; the network is scanned only after `/network-scan on`, which scans at once and then at each start. |
 | `/next-error` | Jump to the next error message in the conversation. |
-| `/notes` | Open Agent-local scratchpad notes in the operator workspace. |
+| `/notes` | Your scratchpad notes: list, read, find, write, change, mark reviewed or out of date, delete (asks first), and make a memory record, persona, skill or routine from one, or add its web page to Agent Knowledge. |
 | `/notifications` | Show every notice and notification in full, newest first (each notice also shows briefly as a toast). |
 | `/notify` | Manage and send configured Agent webhook notifications. |
 | `/paste` | Insert clipboard text or image into the prompt. |

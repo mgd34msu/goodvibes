@@ -44,7 +44,6 @@ interface AgentWorkspaceToolArgs {
   readonly query?: unknown;
   readonly category?: unknown;
   readonly categoryId?: unknown;
-  readonly recordId?: unknown;
   readonly fields?: unknown;
   readonly combo?: unknown;
   readonly combos?: unknown;
@@ -139,7 +138,6 @@ function workspaceActionArgs(mode: 'workspace_action' | 'run_workspace_action', 
     mode,
     actionId,
     command: args.command,
-    recordId: args.recordId,
     fields: args.fields,
     target: actionId || args.command ? undefined : args.target,
     query: actionId || args.command ? undefined : args.query,
@@ -233,8 +231,7 @@ export function createAgentWorkspaceTool(deps: AgentWorkspaceToolDeps): Tool {
           query: { type: 'string', description: 'Catalog search text.' },
           category: { type: 'string', description: 'Workspace category filter.' },
           categoryId: { type: 'string', description: 'Workspace category id.' },
-          recordId: { type: 'string', description: 'Selected local record id for workspace editors.' },
-          fields: { type: 'object', additionalProperties: { type: 'string' }, description: 'Workspace editor field values.' },
+          fields: { type: 'object', additionalProperties: { type: 'string' }, description: 'Values for a workspace action\'s blanks, by the input ids its description lists; the row runs its command line with them.' },
           combo: { type: 'object', description: 'Single keybinding combo.' },
           combos: { type: 'array', items: { type: 'object' }, description: 'Multiple keybinding combos.' },
           key: { type: 'string', description: 'Keybinding lookup key.' },

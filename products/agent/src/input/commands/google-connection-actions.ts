@@ -5,13 +5,13 @@ import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
  * The Google connection actions, owned in one place so every surface runs the
  * same code.
  *
- * `/google` was the first caller and for a while the only one. The workspace UI
- * now offers the same routes as cards, and the rule that made this file
- * necessary is that neither surface may carry its own copy: a second
+ * `/google` runs them, and the Agent workspace's Google rows open `/google`'s
+ * own actions. The rule that made this file necessary is that no surface may
+ * carry its own copy: a second
  * implementation of "adopt the credentials on this machine" is a second thing
  * that can be wrong, and the two would drift the moment one of them was fixed.
  * So the ports, the status report, the adoption and the flow run all live here,
- * and the command and the workspace editors are thin renderers over them.
+ * and the command is a thin renderer over them.
  *
  * The split is deliberate about what each side owns: this module decides what
  * happens and returns text; the caller decides where that text goes, the
@@ -576,8 +576,8 @@ export async function forgetGoogleCredentials(
   if (result.confirmed) {
     // The private calendar address also lives as the 'Google calendar' feed
     // subscription's stored URL; forgetting the address without it would leave
-    // a live copy that /calendar refresh keeps reading. Every caller (command
-    // and workspace card) gets this because it lives here.
+    // a live copy that /calendar refresh keeps reading. Every caller gets this
+    // because it lives here.
     if (!items.includes('calendar-address')) return result.detail;
     const registry = subscriptionRegistryForWrite(ctx);
     if (registry === null) return result.detail;

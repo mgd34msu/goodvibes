@@ -219,7 +219,7 @@ export function delegationDecisionCards(context: CommandContext): readonly Deleg
       routeIds: ['delegate-build-task'],
       requiredFields: ['full original user ask', 'delegation reason', 'success criteria or expected evidence'],
       supervision: ['execution action:"history"', '/health check remote', 'GoodVibes TUI shared session'],
-      confirmationBoundary: 'Submitting delegated work requires a confirmed workspace form or slash command and an attached operator client.',
+      confirmationBoundary: 'Submitting delegated work requires a confirmed slash command and an attached operator client.',
     },
     {
       id: 'delegate-decision-review',

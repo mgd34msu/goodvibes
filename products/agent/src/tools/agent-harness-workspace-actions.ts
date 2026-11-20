@@ -21,7 +21,6 @@ export interface AgentHarnessWorkspaceActionArgs {
   readonly query?: unknown;
   readonly command?: unknown;
   readonly actionId?: unknown;
-  readonly recordId?: unknown;
   readonly fields?: unknown;
   readonly target?: unknown;
   readonly category?: unknown;

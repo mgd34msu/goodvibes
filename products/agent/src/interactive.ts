@@ -868,8 +868,6 @@ async function main(prepared: PreparedShellCliRuntime) {
       },
     },
   );
-  // Workspace forms send the owner's field text as a turn, never as composer syntax.
-  input.submitTurn = (text) => submitTurn(text);
   setupPairing = new SetupPairingController(
     { configManager, homeDirectory },
     {

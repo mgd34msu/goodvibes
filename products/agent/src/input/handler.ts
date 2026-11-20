@@ -96,12 +96,6 @@ type SelectionModalCallback = (result: SelectionResult | null) => void;
  */
 export class InputHandler extends TerminalInputHandlerState {
   public setupPairing: { handleToken(token: InputToken): boolean; cancelForTakeover(): boolean } | null = null;
-  /**
-   * Sends a workspace form's prompt as a turn, as written. Set by the shell;
-   * without one (a context with no shell) the command context's submission
-   * is used.
-   */
-  public submitTurn: ((text: string) => void) | null = null;
   public prompt = '';
 
   /**

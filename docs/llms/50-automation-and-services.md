@@ -9,7 +9,7 @@ This part covers work that runs without a conversation (scheduled routines, supe
 - Settings under `surfaces.`, `payments.`, `occasions.` and the other daemon-owned prefixes are written to the daemon's settings file, `~/.goodvibes/daemon/settings.json`, whichever app writes them.
 - How to change a setting:
   - Terminal app: `/settings <key>` opens the settings workspace at that key, and `/settings set <key> <value>` writes it directly. The value is read as JSON when it parses (`true`, `5`, `["a","b"]`, `{"k":1}`, `"quoted text"`); otherwise it is taken as text.
-  - Agent: `/settings <key>` opens the workspace, and `/settings set <key> <value>` writes text, numbers, `true`/`false` and enum words. The Agent's `/settings set` takes no JSON list or object: set those in the workspace.
+  - Agent: `/settings <key>` opens the workspace, and `/settings set <key> <value>` writes text, numbers, `true`/`false` and enum words. The Agent's `/settings set` takes no JSON list or object: set those in the settings screen (`/settings open <key>`).
   - Daemon command line: `goodvibes-daemon config set <key> <value>` (JSON or text, as the terminal app).
 
   The examples in this part use `/settings set`, the same line in both programs.
@@ -539,7 +539,7 @@ The Agent keeps local events, subscribes to ICS feeds, and connects Google or Mi
 Connecting a calendar account over OAuth needs your own OAuth client id: no client id ships with the product. Steps:
 
 1. Register a free OAuth app (Google Cloud Console for Google, the Azure portal for Microsoft) and copy its client id. A desktop or public-client app needs no secret.
-2. Put the client id in `calendar.google.clientId` or `calendar.microsoft.clientId` (the Agent workspace card "Connect Google Calendar" / "Connect Microsoft Outlook" under `/agent personal-ops` does this). A client secret, if any, goes in the secret store and is referenced by `calendar.google.clientSecretRef` / `calendar.microsoft.clientSecretRef`.
+2. Keep the client id with `/calendar use-app google <client-id>` (or `outlook`); add `--secret` to be asked for a client secret, masked. The id goes in `calendar.google.clientId` or `calendar.microsoft.clientId`; a client secret goes in the secret store and is referenced by `calendar.google.clientSecretRef` / `calendar.microsoft.clientSecretRef`. The rows "Use your own Google Calendar app" and "Use your own Outlook calendar app" under `/agent personal-ops` open the same action.
 3. Run `/calendar connect google` (or `outlook`). A browser opens; approve. On a machine with no browser, add `--with device`: Outlook shows a device code to enter on another device; Google prints a link to open anywhere, and after approving you run `/calendar connect google --with code` within ten minutes and give the 127.0.0.1 address the browser landed on (asked for masked).
 4. The answer lists the account, the transport and the scopes. `/calendar upcoming` then merges that account's events.
 
@@ -570,7 +570,7 @@ The Agent's `/google` connects one Google account for both mail and calendar. Sa
 /google drop <n>                drop a refused send
 ```
 
-The same routes are cards in the Agent workspace under Personal Ops. The terminal app has no `/google`; it uses the mail and calendar the daemon already has.
+The Agent workspace's Personal Ops rows open these same `/google` actions. The terminal app has no `/google`; it uses the mail and calendar the daemon already has.
 
 ### Choosing a path
 

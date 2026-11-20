@@ -17,7 +17,7 @@ import { computeOnboardingStateFromSnapshot, deriveOnboardingEntry, updateReveal
 import type { OnboardingState } from '../runtime/onboarding/onboarding-state.ts';
 
 export type { AgentWorkspaceChannelRisk, AgentWorkspaceChannelStatus } from './agent-workspace-channels.ts';
-export type { AgentWorkspaceAction, AgentWorkspaceActionResult, AgentWorkspaceActionSearchResult, AgentWorkspaceCategory, AgentWorkspaceCategoryId, AgentWorkspaceCommandDispatcher, AgentWorkspaceFocusPane, AgentWorkspaceLocalLibraryItem, AgentWorkspacePromptDispatcher, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
+export type { AgentWorkspaceAction, AgentWorkspaceActionResult, AgentWorkspaceActionSearchResult, AgentWorkspaceCategory, AgentWorkspaceCategoryId, AgentWorkspaceCommandDispatcher, AgentWorkspaceFocusPane, AgentWorkspaceLocalLibraryItem, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
 export { AGENT_WORKSPACE_MODAL_NAME } from './agent-workspace-types.ts';
 export { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
 export { handleAgentWorkspaceToken } from './agent-workspace-token.ts';

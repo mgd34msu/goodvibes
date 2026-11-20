@@ -2,7 +2,7 @@ import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform
 import type { CommandContext } from './command-registry.ts';
 import { AgentDocumentRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/document-registry';
 import { type AgentDocumentRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/document-registry-types';
-import type { AgentWorkspaceReviewPacketDefaults, AgentWorkspaceReviewPacketTimeline, AgentWorkspaceReviewPacketTimelineEvent, AgentWorkspaceReviewPacketWizard, AgentWorkspaceReviewPacketWizardStep, AgentWorkspaceReviewPacketWizardStepStatus, AgentWorkspaceReviewerReadinessBadge } from './agent-workspace-types.ts';
+import type { AgentWorkspaceReviewPacketDefaults, AgentWorkspaceReviewPacketTimeline, AgentWorkspaceReviewPacketTimelineEvent, AgentWorkspaceReviewPacketWizard, AgentWorkspaceReviewPacketWizardStep, AgentWorkspaceReviewPacketWizardStepStatus } from './agent-workspace-types.ts';
 import { readArtifactMetadataNumber, readArtifactMetadataString, readArtifactMetadataStringList } from './agent-workspace-artifact-metadata.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from './agent-workspace-categories.ts';
 import { buildReviewPacketPresetLineage, compactTimelineText, isDocumentExportArtifact, isModelCompareArtifact, isModelCompareExportArtifact, isModelCompareJudgmentArtifact, isModelCompareRouteDecisionArtifact, isReviewerHandoffArchiveArtifact, isReviewerHandoffArtifact, isReviewPacketPresetArtifact, isoToEpoch, reviewPacketPresetFreshness, uniqueStrings } from './agent-workspace-review-packet-utils.ts';
@@ -586,98 +586,5 @@ export function buildReviewPacketWizard(
     finalReview: finalArchiveReview,
     presetLineage,
     steps,
-  };
-}
-
-/**
- * Readiness of the review packet: only the packet's document and the artifacts
- * of its comparison count. A draft that was never meant for review, or a
- * comparison left blind on purpose, is not an issue of this packet.
- */
-export function reviewerReadinessBadge(
-  documents: readonly AgentDocumentRecord[],
-  artifacts: readonly ArtifactDescriptor[],
-  artifactListAvailable: boolean,
-  listInfo: ReviewPacketArtifactListInfo = {},
-  packet: AgentWorkspaceReviewPacketDefaults = buildReviewPacketDefaults(documents, artifacts),
-): AgentWorkspaceReviewerReadinessBadge {
-  const reviewDocuments = documents.filter((document) => document.id === packet.documentId);
-  const openComments = reviewDocuments.reduce((total, document) => total + document.comments.filter((comment) => comment.status === 'open').length, 0);
-  const proposedSuggestions = reviewDocuments.reduce((total, document) => total + document.suggestions.filter((suggestion) => suggestion.status === 'proposed').length, 0);
-  const documentsMissingSourceArtifacts = reviewDocuments.filter((document) => document.attachments.length === 0 && !document.lastArtifactId).length;
-  const packetComparison = packet.comparisonArtifactId ? artifacts.find((artifact) => artifact.id === packet.comparisonArtifactId) ?? null : null;
-  const packetComparisonId = packetComparison ? readArtifactMetadataString(packetComparison.metadata, 'comparisonId') : '';
-  const inPacket = (artifact: ArtifactDescriptor): boolean => packetComparison !== null && (
-    artifact.id === packetComparison.id
-    || (packetComparisonId.length > 0 && readArtifactMetadataString(artifact.metadata, 'comparisonId') === packetComparisonId)
-  );
-  const comparisons = artifacts.filter((artifact) => isModelCompareArtifact(artifact) && inPacket(artifact));
-  const judgments = artifacts.filter((artifact) => isModelCompareJudgmentArtifact(artifact) && inPacket(artifact));
-  const routeDecisions = artifacts.filter(isModelCompareRouteDecisionArtifact);
-  const handoffs = artifacts.filter((artifact) => isReviewerHandoffArtifact(artifact) && inPacket(artifact));
-  const revealedJudgments = judgments.filter((artifact) => (
-    artifact.metadata.revealIncludedInJudgment === true
-    && readArtifactMetadataString(artifact.metadata, 'winnerModel').length > 0
-  ));
-  const hiddenJudgments = judgments.filter((artifact) => (
-    artifact.metadata.revealIncludedInJudgment !== true
-    || readArtifactMetadataString(artifact.metadata, 'winnerModel').length === 0
-  ));
-  const routeDecisionComparisonIds = new Set(routeDecisions.map((artifact) => readArtifactMetadataString(artifact.metadata, 'comparisonId')).filter(Boolean));
-  const routeDecisionJudgmentArtifactIds = new Set(routeDecisions.map((artifact) => readArtifactMetadataString(artifact.metadata, 'judgmentArtifactId')).filter(Boolean));
-  const revealedJudgmentsWaitingOnRouteDecision = revealedJudgments.filter((artifact) => {
-    const comparisonId = readArtifactMetadataString(artifact.metadata, 'comparisonId');
-    return !routeDecisionJudgmentArtifactIds.has(artifact.id) && (!comparisonId || !routeDecisionComparisonIds.has(comparisonId));
-  });
-  const revealedComparisonIds = new Set(revealedJudgments.map((artifact) => readArtifactMetadataString(artifact.metadata, 'comparisonId')).filter(Boolean));
-  const unrevealedComparisons = comparisons.filter((artifact) => {
-    const comparisonId = readArtifactMetadataString(artifact.metadata, 'comparisonId');
-    return artifact.metadata.revealIncludedInTranscript !== true && (!comparisonId || !revealedComparisonIds.has(comparisonId));
-  });
-  const comparisonSourceMissing = comparisons.filter((artifact) => (
-    !readArtifactMetadataString(artifact.metadata, 'sourceArtifactId')
-    && !readArtifactMetadataString(artifact.metadata, 'documentId')
-  )).length;
-  const missingSourceArtifacts = documentsMissingSourceArtifacts + comparisonSourceMissing;
-  const handoffsMissingRelatedArtifacts = handoffs.filter((artifact) => readArtifactMetadataStringList(artifact.metadata, 'relatedArtifactIds').length === 0).length;
-  const issueCount = openComments
-    + proposedSuggestions
-    + missingSourceArtifacts
-    + unrevealedComparisons.length
-    + hiddenJudgments.length
-    + revealedJudgmentsWaitingOnRouteDecision.length
-    + handoffsMissingRelatedArtifacts;
-  const unverified = listInfo.truncated === true && artifactListAvailable;
-  const noPacket = reviewDocuments.length === 0 && packetComparison === null;
-  const next = !artifactListAvailable
-    ? 'Artifact listing is unavailable; run Review readiness preflight before export, archive, or route update.'
-    : noPacket && !unverified
-      ? 'No review packet yet: create a document draft or run a blind compare to start one.'
-    : openComments + proposedSuggestions > 0
-      ? 'Resolve open comments or accept/reject proposed suggestions before exporting reviewer packets.'
-      : missingSourceArtifacts > 0
-        ? 'Attach source artifacts or related evidence before export, handoff, or archive.'
-        : unrevealedComparisons.length + hiddenJudgments.length > 0
-          ? 'Reveal comparison/judgment identity before applying a model route or final reviewer handoff.'
-          : revealedJudgmentsWaitingOnRouteDecision.length > 0
-            ? 'Apply the revealed winner or explicitly leave routing unchanged before archiving.'
-            : handoffsMissingRelatedArtifacts > 0
-              ? 'Recreate reviewer handoffs with related evidence before ZIP archive.'
-              : unverified
-                ? TRUNCATED_NOTE
-                : 'Reviewer readiness preflight is clear for export, handoff archive, or route update.';
-  return {
-    // A truncated list cannot prove the packet is ready, only that the visible part has no issues.
-    status: !artifactListAvailable ? 'needs-setup' : issueCount > 0 || unverified ? 'attention' : 'ready',
-    summary: `${issueCount} issue(s): ${openComments} comment(s), ${proposedSuggestions} suggestion(s), ${missingSourceArtifacts} source/evidence gap(s), ${unrevealedComparisons.length + hiddenJudgments.length} hidden comparison item(s), ${revealedJudgmentsWaitingOnRouteDecision.length} route decision(s), ${handoffsMissingRelatedArtifacts} handoff evidence gap(s).${unverified ? ' Older artifacts were not checked.' : ''}`,
-    next,
-    issueCount,
-    openComments,
-    proposedSuggestions,
-    missingSourceArtifacts,
-    unrevealedComparisons: unrevealedComparisons.length,
-    hiddenJudgments: hiddenJudgments.length,
-    revealedJudgments: revealedJudgmentsWaitingOnRouteDecision.length,
-    handoffsMissingRelatedArtifacts,
   };
 }

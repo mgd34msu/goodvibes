@@ -134,7 +134,7 @@ function detailedHarnessModelAccessGuide(): Record<string, string> {
     supportBundles: 'Prefer support action:"status|bundle"; lower-level support-bundle modes remain available; export/import stays confirmation-gated.',
     mediaPosture: 'Prefer device action:"voice|provider" for voice/media posture. Lower-level mode:"media_posture" and mode:"media_provider" remain available; generate with agent_media_generate under current recorded effect admission.',
     sessions: 'Prefer sessions action:"list|get"; lower-level session modes remain available; save/resume/export/delete stays visible confirmed flow.',
-    workspace: 'Prefer workspace action:"status|actions|action|run|surfaces|surface|open|commands|command|run_command"; includeParameters:true inlines editor schemas.',
+    workspace: 'Prefer workspace action:"status|actions|action|run|surfaces|surface|open|commands|command|run_command"; includeParameters:true inlines the command action each row runs (its blanks and line).',
     settings: 'Prefer settings action:"list|get|set|reset|import"; list accepts category|prefix|query|includeHidden:true; lower-level settings modes remain for compatibility.',
     tools: 'List mode:"tools" with query|limit|includeParameters:true; inspect mode:"tool" with toolName|target|query.',
     modeCatalog: 'Search mode:"modes" with query|target; inspect one contract with mode:"mode" target:"...".',

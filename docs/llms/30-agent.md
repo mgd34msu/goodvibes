@@ -606,7 +606,7 @@ With no workspace at the default place: `No OpenClaw workspace found at the defa
 
 ## The Agent workspace
 
-The Agent workspace is a full-screen view of categories, each a list of actions: forms, pickers, read-only reports and confirmed changes.
+The Agent workspace is a full-screen view of categories, each a list of rows grouped by what a person does. It has no forms of its own: a row that does something names a slash command's action (shown in its Command column, such as `/memory add`), and `Enter` closes the workspace and opens that action's guided form, the same one the slash command opens (a row may fill some blanks in, such as the account of `/calendar use-app google`); a row's name and its About line are the action's own label and sentence. A setting row cycles a yes/no or a choice in place and opens the settings screen at that setting for a typed value or a `permissions.*` change; an area whose rows are all settings shows Setting, Default and Current columns, and a setting among action rows shows `now <value>`. The other rows open a picker, another category, or say what to ask in the conversation.
 It opens with `/agent [section]` or `Ctrl+G`. `/setup` opens one topic's rows of it at a time (below).
 `Ctrl+]` and `Ctrl+[` move between categories; `/` searches actions by name, category, command or detail; `Ctrl+X` or `Esc` closes it.
 Typing a letter on Home closes the workspace and puts the letter in the composer.
@@ -617,7 +617,7 @@ The workspace has these 26 categories, in this order, in eight groups; there are
 | --- | --- | --- | --- | --- |
 | START | `home` | Home | 10 | Lanes into Start, Personal Ops, Research, Documents, Automation, Messaging, Memory and Work; the interaction mode (quiet, balanced, operator). |
 | SETUP | `setup` | Setup | 11 | Not listed: `/setup` opens it with only one topic's rows. `Choose a model`: local model, main model, reasoning effort. `Sign in or out of a provider`: sign-in start and finish, sign-out, see a sign-in. `Store a password or key`: credentials, secret policy. `History and privacy`: save history. `Bring over settings from the terminal app`: settings import. |
-| ONBOARDING | `account-model` | Models | 20 | Provider and model choice, reasoning, pins, and the advanced routes (helper, tool, TTS, embeddings, system prompt, cache). |
+| ONBOARDING | `account-model` | Models | 19 | Provider and model choice, reasoning, pins, and the advanced routes (helper, tool, TTS, embeddings, system prompt, cache). |
 | ONBOARDING | `assistant-behavior` | Behavior | 11 | How chat behaves during normal work and long-running tasks. |
 | ONBOARDING | `tools-permissions` | Tools & Permissions | 13 | The permission mode and tool settings. |
 | ONBOARDING | `onboarding-display` | Interface | 9 | Display settings. |
@@ -625,30 +625,30 @@ The workspace has these 26 categories, in this order, in eight groups; there are
 | ONBOARDING | `onboarding-voice-media` | Voice & Media | 23 | Voice, TTS, image input, media generation and telephony. |
 | ONBOARDING | `onboarding-context` | Local Context | 17 | Personas, starter memories, skills, routines, and importing context files; VIBE.md and project context; the applied prompt. |
 | DAY-TO-DAY | `personal-ops` | Personal Ops | 26 | The daily operations hub: inbox, calendar, reminders, briefing, Google connection. |
-| DAY-TO-DAY | `research` | Research | 21 | Search, URL inspection, research runs, sources, sourced reports, what goes into Agent Knowledge. |
-| DAY-TO-DAY | `documents` | Documents & Files | 42 | Document drafts, review comments and suggestions, artifacts, uploads, exports, media, blind model comparison, review packets. |
-| DAY-TO-DAY | `conversation` | Conversation | 17 | Context review, compaction, prompt helpers, transcript navigation, session continuity, title, export, undo, redo, retry. |
+| DAY-TO-DAY | `research` | Research | 21 | `/research` (a question or a page into the conversation, research runs, sources, sourced reports), what goes into Agent Knowledge. |
+| DAY-TO-DAY | `documents` | Documents & Files | 42 | `/documents` (drafts, review comments and suggestions, review packets), `/artifacts`, `/compare` (blind model comparison), uploads, exports, media. |
+| DAY-TO-DAY | `conversation` | Conversation | 16 | Context review, compaction, prompt helpers, transcript navigation, session continuity, title, export, undo, redo, retry. |
 | CAPABILITIES | `tools` | Tools & MCP | 10 | Task tools and MCP servers; changes need typed confirmation. |
-| CAPABILITIES | `knowledge` | Knowledge | 17 | Agent Knowledge status, ask, search and ingest. |
-| LOCAL BEHAVIOR | `profiles` | Profiles | 11 | Named Agent profiles and starter templates. |
+| CAPABILITIES | `knowledge` | Knowledge | 16 | Agent Knowledge status, ask, search and ingest. |
+| LOCAL BEHAVIOR | `profiles` | Profiles | 10 | Named Agent profiles and starter templates. |
 | LOCAL BEHAVIOR | `owner-profile` | Your Profile | 9 | The owner profile kept by the daemon. |
-| LOCAL BEHAVIOR | `memory` | Memory | 27 | Memory records, the prompt plan and the learning curator. |
-| LOCAL BEHAVIOR | `notes` | Notes | 14 | Scratchpad notes (not memory, not Agent Knowledge). |
-| LOCAL BEHAVIOR | `personas` | Personas | 11 | Personas and VIBE.md. |
-| LOCAL BEHAVIOR | `skills` | Skills | 22 | Agent skills and bundles with their requirements. |
-| LOCAL BEHAVIOR | `routines` | Routines | 16 | Routines and their promotion to schedules. |
-| OPERATIONS | `work` | Work & Approvals | 18 | Active operator state, pending approvals, background processes, the work plan. |
+| LOCAL BEHAVIOR | `memory` | Memory | 25 | Memory records, the prompt plan and the learning curator. |
+| LOCAL BEHAVIOR | `notes` | Notes | 12 | Scratchpad notes (not memory, not Agent Knowledge): `/notes`. |
+| LOCAL BEHAVIOR | `personas` | Personas | 9 | Personas and VIBE.md. |
+| LOCAL BEHAVIOR | `skills` | Skills | 20 | Agent skills and bundles with their requirements. |
+| LOCAL BEHAVIOR | `routines` | Routines | 14 | Routines and their promotion to schedules. |
+| OPERATIONS | `work` | Work & Approvals | 16 | Active operator state, pending approvals, background processes, the work plan. |
 | OPERATIONS | `host` | Connected Host | 17 | Read-only views of the connected host: health, remote routes, host tasks and their output, sessions and the session graph, channels, schedules, knowledge, media, MCP, provider detail, routes and repair, provider auth, support bundles. |
-| OPERATIONS | `automation` | Automation | 23 | Confirmed reminders, routine promotion, and run, pause and resume of schedules and automation jobs on the connected host. |
+| OPERATIONS | `automation` | Automation | 22 | Confirmed reminders, routine promotion, and run, pause and resume of schedules and automation jobs on the connected host. |
 | FINISH | `finish` | Finish | 1 | Apply & close: writes the onboarding completion marker, so later launches start in the conversation. |
 
 Until setup is applied, the workspace opened for setup (`goodvibes-agent setup`) shows only the ONBOARDING group, and reveals its categories as setup reaches them; `/agent` shows all 26. A start whose model is not ready opens first run, not the workspace (see the install part of this file).
 `/agent <section>` opens a section (category) by its id; the guided form lists them by label.
 
-`/notes` (alias `/scratchpad`) opens Notes. `/agent-home` manages separate Agent homes from inside the Agent (`goodvibes-agent profiles` from the shell): `list` (the report), `show <home>`, `next`, `use <home>`, `use-base`, `create <name> [--starter <starter>]`, `create-learned <name>`, `delete <home>` (asks first), and the starters `starters`, `starter <starter>`, `guide`, `export-starter <starter> <file> [--include-vibe] [--overwrite]`, `import-starter <file> [--replace]` and `starter-learned <id>`.
+`/agent-home` manages separate Agent homes from inside the Agent (`goodvibes-agent profiles` from the shell): `list` (the report), `show <home>`, `next`, `use <home>`, `use-base`, `create <name> [--starter <starter>]`, `create-learned <name>`, `delete <home>` (asks first), and the starters `starters`, `starter <starter>`, `guide`, `export-starter <starter> <file> [--include-vibe] [--overwrite]`, `import-starter <file> [--replace]` and `starter-learned <id>`.
 `/agents open` and `Ctrl+O` open Your agents, the same panel as the terminal app's (see "Views" there): waiting rows first, one line per running agent, the agents finished this session, `Scheduled`, and `Background services  N healthy ›` (`b` opens it; an unhealthy service is listed by itself). `Enter` opens an agent full screen, where the composer steers it (a background process opens in the process monitor when it cannot open full screen), `s` stops it (asks first), `n` hosts a coding agent found on `PATH` on the connected host. It reads this process's agents and the connected host's. Notices that used to collect in the Activity view's recent list are in the notices (`Ctrl+N`, `/notifications`), as in the terminal app.
 `/brief` (one action) prints a briefing with next actions: the model in use, what is ready, the work plan and schedules.
-The Start category's "Import GoodVibes settings" reads the terminal app's settings once, shows the plan (counts per family, every permission and provider change, sign-ins by name), and on `yes` writes it; previous values are saved to `~/.goodvibes/agent/settings-import-undo.json`.
+The `/setup` topic's "Import GoodVibes settings" row reads the terminal app's settings once, shows the plan (counts per family, every permission and provider change, sign-ins by name) and asks in the confirm dialog; "Import them" writes exactly that plan, and previous values are saved to `~/.goodvibes/agent/settings-import-undo.json`.
 
 ## The Agent's slash commands
 
@@ -673,6 +673,20 @@ Changes are the owner's own: a model running a `/todo` change is refused. Items 
 
 `/personas` (`list`, `active`, `show`, `search`, `create`, `update`, `use`, `stop-using`, `review`, `stale`, `delete`, `discover`, `import`, and the VIBE.md actions), `/my-skills` and `/routines` (`list [--only enabled|attention]`, `show`, `search`, `create`, `update`, `enable`, `disable`, `start`, `review`, `stale`, `delete`, `discover`, `import`, `promote`, `receipts`, `receipt`, `reconcile`) take the actions of the matching `goodvibes-agent` commands above, plus `/routines start <routine>`, `/my-skills import-standard` and `/my-skills export-standard`; `/my-skills` names the bundle verbs `bundle-create`, `bundle-show` and so on, and its options are named (`create --name ... --description ... <steps>`). `/memory` is the same command as the terminal app's `/memory`.
 `/personas vibe` lists the VIBE.md candidates and which loaded; `/personas vibe-create` writes a starter (asks first before replacing one); `/personas vibe-show` prints the text; `/personas vibe-import` makes it a persona.
+
+`/notes` is the scratchpad: working context that is neither memory nor Agent Knowledge, kept in the Agent's home (bare, from a model, it runs `list`). `list`, `show <note>`, `search <words>`, `create --title <title> [--url <address>] [--tags ...] <text>`, `edit <note> [--title ...] [--url ...] [--tags ...] [<text>]` (an edit clears its reviewed mark), `review <note>`, `stale <note> <why>`, `delete <note>` (asks first). Making something from a note leaves the note and records on it what was made, and a second of the same kind is refused: `to-memory <note> [--kind ...] [--scope ...]` (title the summary, text the detail), `to-persona <note>` (not in use), `to-skill <note> [--enable]`, `to-routine <note> [--enable]` (both off until enabled, unless `--enable`), and `to-knowledge <note>` (adds the note's web page to Agent Knowledge, as `/knowledge ingest-url`; refused when the note has none).
+
+### Documents, artifacts, comparisons and research
+
+Each of these runs one call of an Agent tool as the owner's own act (the same tool the model calls, with a deny rule or plan mode still refusing); a model running the command is refused and pointed at the tool. Blanks that name a draft, comment, suggestion or artifact offer the current ones.
+
+`/documents` works on the Agent's Markdown drafts (`agent_documents`): `list [<words>] [--limit N]`, `show <draft> [--no-versions]`, `create --title <title> <text> [--tags ...] [--note ...]`, `revise <draft> [--title ...] [--body ...] [--tags ...] [--status draft|reviewed|archived] [--note ...]`, `mark-reviewed <draft>`, `comment <draft> <comment>`, `resolve-comment <draft> <comment>`, `suggest <draft> <text> [...] [--why ...]`, `accept-suggestion <draft> <suggestion>`, `reject-suggestion <draft> <suggestion>`, `insert-artifact <draft> <artifact> [--at append|prepend|replace] [--heading ...] [--reference-only]`, `attach-artifact <draft> <artifact> [--label ...] [--why ...]` and `export <draft>` (a Markdown artifact). The review packet: `readiness` and `packet-steps` (reads of the document-ops lanes), `save-preset <name> [--document ... --export ... --comparison ... --judgment ... --revealed ... --decision ... --outcome ... --handoff ... --archive ... --related ... --summary ...]`, `refresh-preset <preset> [--name ...] [--summary ...]`, and `share-packet <archive> channel|route|webhook --to <target> [--title ...] [--message ...]` (sends something outside this machine; asks first).
+
+`/artifacts` (`agent_artifacts`): `list [<words>] [--kind ...] [--type ...] [--purpose ...] [--source ...] [--limit N]`, `show <artifact> [--no-preview] [--bytes N]`, `export <artifact> <file> [--overwrite]` (byte for byte into this workspace) and `package <ids> <folder-or-zip> [--as directory|zip] [--overwrite]`. Adding an artifact to Agent Knowledge is `/knowledge ingest-artifact`.
+
+`/compare` (`agent_model_compare`): `review [<comparison>] [--view review|side-by-side] [--related ...] [--bytes N] [--reveal]` (bare, from a model), `run <prompt> [--models ...] [--count 2-4] [--source <artifact>] [--rubric ...] [--system ...] [--max-tokens N] [--tag ...] [--task ...] [--document ...] [--reveal]` and `benchmark [<task>] [...]` (the local models on the standard task, tagged `local-model-route`); both spend money and ask first. Then `judge <comparison> <winner> <why> [--notes ...] [--reveal]`, `apply <judgment>` (the main model becomes the winner), `record-decision <judgment>` (keeps the model and records why), `export <source> [--as report|handoff|archive] [--related ...] [--reveal]`, `diff-handoffs [<older>] [<newer>] [--section ...]` and `analytics [--view analytics|synthesis] [--limit N] [--tag ...] [--task ...] [--document ...] [--no-reasons]`.
+
+`/research`: `ask <question> [--sources <hints>]` and `inspect <address> [<what you want>]` send a message to the conversation, where the Agent researches with read-only web tools and adds nothing to Agent Knowledge; `start-run --title <name> <question> [--goal ... --plan ... --next ... --sources ... --note ...]` (`agent_research_runs`, a visible resumable run; nothing runs in the background), `add-source --title <source> --question <question> <summary> [--url ... --publisher ... --published ... --evidence ... --credibility ... --score ... --tags ... --note ...]` (`agent_research_sources`) and `save-report --title ... --question ... --sources <one per line: title | address | trust | note> [--report ... --summary ... --findings ... --gaps ... --recommendations ... --method ... --confidence ... --plain --require-citations --tags ...]` (`agent_research_report`).
 
 ### Personal operations
 
@@ -701,6 +715,7 @@ Changes are the owner's own: a model running a `/todo` change is refused. Items 
 | Line | Effect |
 | --- | --- |
 | `upcoming [--days N]`, `all`, `get <event>` | Events: the days ahead (with the feeds and the connected accounts), every event, one event. |
+| `use-app <google|outlook> <client-id> [--secret]` | Keeps your own OAuth app (no client id ships with the product): the id as a setting, a client secret (asked for masked) in the secret store. `connect` uses it. |
 | `connect <google|outlook> [--with browser|device|code]`, `disconnect <google|outlook>`, `accounts` | Connected calendar accounts; `connect --with code` asks for the address the browser landed on, masked. |
 | `subscribe <ics-url> [--name N] [--every MIN] [--allow-private-host]`, `unsubscribe <feed>`, `subscriptions`, `refresh [<feed>]` | iCal feeds; the address is kept as a secret. |
 | `add --title <title> --start <ISO> [--end <ISO>] [--location <loc>] [--notes <notes>]`, `delete <event>`, `import <path>`, `export [<path>]` | Local events; `delete` asks first. |

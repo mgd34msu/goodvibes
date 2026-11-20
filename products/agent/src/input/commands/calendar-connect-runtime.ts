@@ -2,7 +2,7 @@
  * calendar-connect-runtime.ts, the /calendar connect|disconnect|accounts subcommands
  * and the provider-event merge for /calendar upcoming.
  *
- * The OAuth network dance lives here (not in the workspace card) because a command
+ * The OAuth network dance lives here because a command
  * handler can print the authorization URL / device user-code IMMEDIATELY, then await
  * the browser callback or poll the device code; `--code` completes a pasted sign-in
  * started with `--device` for Google. The client id is the operator's own, from

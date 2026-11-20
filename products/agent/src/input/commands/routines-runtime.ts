@@ -272,7 +272,7 @@ const REVIEW_OWNER_ONLY = {
 };
 
 type RoutineAction = ActionDescription<CommandContext>;
-function change(fields: Pick<RoutineAction, 'id' | 'label' | 'word' | 'inputs' | 'sentence' | 'example' | 'run'> & Partial<Pick<RoutineAction, 'risk' | 'undoneBy' | 'ownerOnly' | 'lasts' | 'touches' | 'operator'>>): RoutineAction {
+function change(fields: Pick<RoutineAction, 'id' | 'label' | 'word' | 'inputs' | 'sentence' | 'example' | 'run'> & Partial<Pick<RoutineAction, 'risk' | 'undoneBy' | 'ownerOnly' | 'lasts' | 'touches' | 'operator' | 'stepTitles'>>): RoutineAction {
   return { done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', operator: LOCAL_ONLY, ...fields };
 }
 

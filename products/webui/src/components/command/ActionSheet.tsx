@@ -113,7 +113,8 @@ function ListBlank({ input, values, onChange, onLabel, placeholder }: {
   /** The chosen row's name, which the sentence and the done line say instead of its id. */
   readonly onLabel: (label: string | undefined) => void; readonly placeholder?: string | undefined;
 }) {
-  const list = !Array.isArray(input.choices) && input.choices ? input.choices : undefined;
+  // A live list, not fixed choices (Array.isArray does not narrow a readonly array).
+  const list = input.choices && 'list' in input.choices ? input.choices : undefined;
   const operator = list ? COMMAND_ACTIONS.lists[list.list] : undefined;
   const earlier = list?.dependsOn ? { [list.dependsOn]: values[list.dependsOn] ?? '' } : {};
   const ready = list?.dependsOn ? Boolean(values[list.dependsOn]) : true;

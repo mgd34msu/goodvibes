@@ -728,7 +728,7 @@ Each of these runs one call of an Agent tool as the owner's own act (the same to
 
 ### Channels and delivery
 
-`/channels` is the terminal app's command (one description for both; see "Channels" in the terminal-app guide). Here the daemon's channel methods go to the connected host, and the Agent adds what it keeps itself: `readiness [--show all|ready|attention]` (the channels it can send to and what each lacks), `configured <channel>`, `guide [<channel>]`, `triage [--limit n]`, `send`, and `deliveries [--limit n]` (the stored receipts). Channel profiles, which `/channel-profiles` used to hold, are `/channels profiles`, `profile`, `set-profile` and `remove-profile`.
+`/channels` is the terminal app's command (one description for both; see "Chat channels"). Here the daemon's channel methods go to the connected host, and the Agent adds what it keeps itself: `readiness [--show all|ready|attention]` (the channels it can send to and what each lacks), `configured <channel>`, `guide [<channel>]`, `triage [--limit n]`, `send`, and `deliveries [--limit n]` (the stored receipts). Channel profiles, which `/channel-profiles` used to hold, are `/channels profiles`, `profile`, `set-profile` and `remove-profile`.
 
 `/channels send` sends one message through one delivery target and asks first:
 

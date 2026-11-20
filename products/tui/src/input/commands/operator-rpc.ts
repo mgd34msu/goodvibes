@@ -47,12 +47,15 @@ export function getOperatorRpc(context: CommandContext): OperatorRpc {
  * command: its typed output, or a refusal saying why the daemon could not be
  * asked or what it answered.
  */
-export async function invokeOperatorMethod<M extends OperatorMethodId>(context: CommandContext, method: M, input: OperatorMethodInput<M>): Promise<OperatorMethodOutput<M>> {
+export function invokeOperatorMethod<M extends OperatorMethodId>(context: CommandContext, method: M, input: OperatorMethodInput<M>): Promise<OperatorMethodOutput<M>> {
   const rpc = getOperatorRpc(context);
-  if (!rpc.available) throw commandRefusal(rpc.reason);
-  try {
-    return await rpc.platformClient.operator.invoke(method, input);
-  } catch (error) {
-    throw commandRefusal(describeOperatorRpcError(error));
-  }
+  if (!rpc.available) return Promise.reject(commandRefusal(rpc.reason));
+  // The client's typed overload takes a conditional argument tuple that cannot
+  // be resolved against a still-generic `M` (terminal-shell connected-host-client.ts
+  // binds it the same way); both ends stay bound to `M`. Not awaited here:
+  // awaiting a generic method's output makes the compiler expand every method's.
+  const call = rpc.platformClient.operator.invoke as unknown as (methodId: M, input: OperatorMethodInput<M>) => Promise<OperatorMethodOutput<M>>;
+  let pending: Promise<OperatorMethodOutput<M>>;
+  try { pending = call.call(rpc.platformClient.operator, method, input); } catch (error) { pending = Promise.reject(error); }
+  return pending.catch((error: unknown) => { throw commandRefusal(describeOperatorRpcError(error)); });
 }

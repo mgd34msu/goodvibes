@@ -268,7 +268,7 @@ export function registerNotesRuntimeCommands(registry: CommandRegistry): void {
           const ingest = describedCommandByName('knowledge')?.actions.find((action) => action.id === 'ingest-url');
           if (!ingest) throw commandRefusal('Agent Knowledge is not available in this Agent; nothing was added.');
           // The same action /knowledge ingest-url runs, with the note's page.
-          const out = await (ingest.run as (values: Readonly<Record<string, string>>, context: CommandContext) => ReturnType<typeof ingest.run>)({ url, tags: noteTags(note).join(', '), folder: 'notes' }, ctx);
+          const out = await (ingest.run as (values: Readonly<Record<string, string>>, context: CommandContext) => ReturnType<NonNullable<typeof ingest>['run']>)({ url, tags: noteTags(note).join(', '), folder: 'notes' }, ctx);
           return typeof out === 'string' ? out : `Added ${url} to Agent Knowledge.`;
         },
       }),

@@ -35,6 +35,7 @@ import type { AgentRecord } from '../../../platform/src/platform/tools/agent/rec
 import { allowFixturePort } from '../instrument.ts';
 import { decisions } from './stores.ts';
 import { assertOutcome, type Instance, type MeasureEnv, type Scenario } from '../harness.ts';
+import { localOwnerActor } from '../../../daemon-api/src/actor.ts';
 
 const P = 'packages/engine/platform/src/platform';
 
@@ -137,7 +138,7 @@ const channelReplyFinal: Scenario = {
     const judgment = decisions(env, 'daemon');
     const ntfy = await recorder();
     const configManager = daemonConfig(env);
-    configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], { kind: 'owner', surface: 'measure' });
+    configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], localOwnerActor());
     const routeBindings = new RouteBindingManager({ store: new AutomationRouteStore({ configManager }) });
     await routeBindings.start();
     const broker = sessionBroker(env, routeBindings);
@@ -205,7 +206,7 @@ const automationRunSettle: Scenario = {
     const judgment = decisions(env, 'daemon');
     const ntfy = await recorder();
     const configManager = daemonConfig(env);
-    configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], { kind: 'owner', surface: 'measure' });
+    configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], localOwnerActor());
     const secretsManager = new SecretsManager({ surfaceRoot: 'goodvibes', globalHome: env.home, projectRoot: env.workspace });
     const subscriptionManager = new SubscriptionManager(join(env.home, '.goodvibes', 'subscriptions.json'), { secrets: secretsManager });
     const serviceRegistry = new ServiceRegistry({ user: join(env.home, '.goodvibes', 'services.json'), project: join(env.workspace, '.goodvibes', 'services.json') }, { secretsManager, subscriptionManager });

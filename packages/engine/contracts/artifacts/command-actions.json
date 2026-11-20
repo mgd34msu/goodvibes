@@ -8544,6 +8544,36 @@
           "inputs": []
         },
         {
+          "id": "files",
+          "label": "See the project instruction files",
+          "word": "files",
+          "line": "/context files",
+          "sentence": "Lists the project instruction files (AGENTS.md, CLAUDE.md and the like) read into each turn, any cut short, and any held back with why.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "The Agent reads them from this machine."
+          },
+          "inputs": []
+        },
+        {
+          "id": "given",
+          "label": "See what the last turns were given",
+          "word": "given",
+          "line": "/context given",
+          "sentence": "Shows, for the last turns, how many memories, personas, skills and routines were given to the model, how many were left out, and roughly how many tokens it took.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "The Agent keeps these records on this machine."
+          },
+          "inputs": []
+        },
+        {
           "id": "see-window",
           "label": "See the context window size",
           "word": "window",
@@ -10403,14 +10433,14 @@
           "label": "Check a draft is ready for review",
           "word": "readiness",
           "line": "/documents readiness",
-          "sentence": "Lists what still stands in the way of review: open comments, suggestions waiting, missing sources, hidden comparisons and the handoff.",
+          "sentence": "Lists what still stands in the way of review (open comments, suggestions waiting, missing sources, hidden comparisons, the handoff), each with the line that settles it.",
           "done": "",
           "touches": "reads",
           "lasts": "not-a-change",
           "risk": "none",
           "ownerOnly": {
-            "reason": "it runs agent_harness as your own confirmed act",
-            "instead": "Call the agent_harness tool, which asks before it changes anything."
+            "reason": "it is your plain-words report of the lane",
+            "instead": "Call agent_harness mode:\"document_ops_lane\" laneId:\"reviewer_readiness\", which answers the same lane as JSON."
           },
           "operator": {
             "terminalOnly": "Document drafts are kept in this Agent's home."
@@ -10422,14 +10452,33 @@
           "label": "See the review packet steps",
           "word": "packet-steps",
           "line": "/documents packet-steps",
-          "sentence": "Shows the review packet's steps (review, export, compare, judge, hand off, decide, archive), which are done, and the next one.",
+          "sentence": "Shows the review packet's steps in order (review, export, compare and judge, hand off, decide, archive), which are done, and the line for the next one.",
           "done": "",
           "touches": "reads",
           "lasts": "not-a-change",
           "risk": "none",
           "ownerOnly": {
-            "reason": "it runs agent_harness as your own confirmed act",
-            "instead": "Call the agent_harness tool, which asks before it changes anything."
+            "reason": "it is your plain-words report of the lane",
+            "instead": "Call agent_harness mode:\"document_ops_lane\" laneId:\"review_packet_wizard\", which answers the same lane as JSON."
+          },
+          "operator": {
+            "terminalOnly": "Document drafts are kept in this Agent's home."
+          },
+          "inputs": []
+        },
+        {
+          "id": "timeline",
+          "label": "See the review packet timeline",
+          "word": "timeline",
+          "line": "/documents timeline",
+          "sentence": "Lists, oldest first and dated, what happened to the review packet: drafts, comments, suggestions, attachments, exports, comparisons, judgments, model decisions, presets and handoffs.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "ownerOnly": {
+            "reason": "it is your plain-words report of the lane",
+            "instead": "Call agent_harness mode:\"document_ops_lane\" laneId:\"review_packet_timeline\", which answers the same lane as JSON."
           },
           "operator": {
             "terminalOnly": "Document drafts are kept in this Agent's home."
@@ -11241,7 +11290,7 @@
           "label": "Remove the stored Google credentials",
           "word": "forget",
           "line": "/google forget",
-          "sentence": "Shows which stored Google credentials (refresh token, client secret, app password, private calendar address) would go, asks, and removes exactly those; this cannot be undone, and a value stored since is kept.",
+          "sentence": "Shows which stored Google credentials (refresh token, client secret, app password, private calendar address) would go, asks, and removes exactly those, gone until you change it by connecting again; a value stored since is kept.",
           "done": "",
           "touches": "credential",
           "lasts": "kept",
@@ -15413,7 +15462,12 @@
           "done": "",
           "touches": "this-machine",
           "lasts": "kept",
-          "risk": "none",
+          "risk": "loosens-a-protection",
+          "riskWords": "loosens a protection",
+          "ownerOnly": {
+            "reason": "a managed bundle can change security settings on this machine",
+            "instead": "Ask the owner to run /managed apply <file>."
+          },
           "undoneBy": "rollback",
           "operator": {
             "terminalOnly": "Managed settings are kept on this machine."
@@ -15456,7 +15510,12 @@
           "done": "",
           "touches": "this-machine",
           "lasts": "kept",
-          "risk": "none",
+          "risk": "loosens-a-protection",
+          "riskWords": "loosens a protection",
+          "ownerOnly": {
+            "reason": "a managed bundle can change security settings on this machine",
+            "instead": "Ask the owner to run /managed apply-staged."
+          },
           "undoneBy": "rollback",
           "operator": {
             "terminalOnly": "Managed settings are kept on this machine."
@@ -30279,7 +30338,8 @@
           "done": "",
           "touches": "credential",
           "lasts": "kept",
-          "risk": "none",
+          "risk": "loosens-a-protection",
+          "riskWords": "loosens a protection",
           "ownerOnly": {
             "reason": "whoever wrote the repository chose which of your stored keys it sends and where",
             "instead": "Ask the owner to run /services trust <service>."
@@ -32675,7 +32735,12 @@
           "done": "",
           "touches": "this-machine",
           "lasts": "kept",
-          "risk": "none",
+          "risk": "loosens-a-protection",
+          "riskWords": "loosens a protection",
+          "ownerOnly": {
+            "reason": "a sync bundle can change security settings on this machine",
+            "instead": "Ask the owner to run /settings-sync pull <file>."
+          },
           "operator": {
             "terminalOnly": "Synced settings are kept on this machine."
           },
@@ -33829,6 +33894,21 @@
               }
             }
           ]
+        },
+        {
+          "id": "processes",
+          "label": "See commands running in the background",
+          "word": "processes",
+          "line": "/tasks processes",
+          "sentence": "Lists the commands running in the background here, which have finished, and whether a running one can be given input, a terminal, or sudo.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Background commands run in this terminal."
+          },
+          "inputs": []
         },
         {
           "id": "open",

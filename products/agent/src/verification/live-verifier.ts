@@ -1,6 +1,6 @@
 import { createVerificationCompactor } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 import { resolveVerificationHostUrl, verificationHostTarget } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
-import { bearerFor } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
+import { bearerFor, type DaemonTarget } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
 import { writeVerificationReportFiles } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 import {
   createVerificationPrimitives,
@@ -197,13 +197,12 @@ const { runCommand, commandCheck, fetchCheck, countStatuses } = createVerificati
  * only when the host is this machine's daemon. Every request of the run goes
  * to `connectedHostBaseUrl`, so the one origin check covers them all.
  */
-function connectedHostToken(homeDir: string, connectedHostBaseUrl: string, explicitToken: string | undefined): string | undefined {
-  const target = verificationHostTarget({
+function connectedHostTarget(homeDir: string, connectedHostBaseUrl: string, explicitToken: string | undefined): DaemonTarget {
+  return verificationHostTarget({
     homeDir, url: connectedHostBaseUrl, explicitToken,
     hostEnvKeys: ['GOODVIBES_CONNECTED_HOST_TOKEN'], localEnvKeys: ['GOODVIBES_DAEMON_TOKEN'],
     readJson: readJsonFile, settingsPath: join(homeDir, 'agent', 'settings.json'),
   });
-  return target.credential ? bearerFor(target.credential, connectedHostBaseUrl) : undefined;
 }
 
 function resolveConnectedHostBaseUrl(homeDir: string, explicit?: string): string {
@@ -484,7 +483,9 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
   const projectRoot = resolve(options.projectRoot);
   const binaryPath = resolve(options.binaryPath);
   const connectedHostBaseUrl = resolveConnectedHostBaseUrl(homeDir, options.connectedHostBaseUrl);
-  const token = connectedHostToken(homeDir, connectedHostBaseUrl, options.token);
+  const target = connectedHostTarget(homeDir, connectedHostBaseUrl, options.token);
+  // The bearer itself, for the commands this run starts and for redacting their output.
+  const token = target.credential ? bearerFor(target.credential, connectedHostBaseUrl) : undefined;
   const commandEnv = buildCommandEnv(homeDir, connectedHostBaseUrl, token);
   const checks: LiveVerificationCheck[] = [];
 
@@ -564,7 +565,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
       'connected-host-status',
       'Authenticated connected-host /status',
       `${connectedHostBaseUrl}/status`,
-      token,
+      target,
       (status, body) => {
         if (status !== 200) return { status: 'fail', summary: `/status returned ${status}.` };
         try {
@@ -582,7 +583,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
       'connected-host-health',
       'Authenticated connected-host /api/health',
       `${connectedHostBaseUrl}/api/health`,
-      token,
+      target,
       validateDaemonHealth,
     ),
   );
@@ -592,7 +593,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
       'openai-compatible-models',
       'OpenAI-compatible /v1/models route',
       `${connectedHostBaseUrl}/v1/models`,
-      token,
+      target,
       (status, body) => {
         if (status !== 200) return { status: 'fail', summary: `/v1/models returned ${status}.` };
         try {

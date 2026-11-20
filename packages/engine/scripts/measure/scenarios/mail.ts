@@ -65,7 +65,7 @@ const mailboxPoll: Scenario = {
     const notices: string[] = [];
     const intake = createInboundMailIntake({
       expectations: expectations.matcher, records,
-      notices: { resolveBinding: () => ({ kind: 'bound', binding: { surfaceKind: 'telegram' } }), send: async (notice) => { notices.push(JSON.stringify(notice)); return { delivered: true }; } },
+      notices: { resolveBinding: () => ({ kind: 'bound', binding: { id: 'measure-telegram', surfaceKind: 'telegram' } }), send: async (notice) => { notices.push(JSON.stringify(notice)); return { delivered: true }; } },
       noticeMode: () => 'all', now: () => new Date(),
     });
     const supervisor = new InboundMailSupervisor({

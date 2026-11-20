@@ -149,7 +149,7 @@ export async function handleGoogleChatSurfaceWebhook(req: Request, context: Surf
 }
 
 /** Whether a Google Chat space is the one-to-one conversation between one person and the app. */
-function googleChatDirect(space: Record<string, unknown> | undefined): boolean {
+function googleChatDirect(space: Record<string, unknown> | null | undefined): boolean {
   if (!space) return false;
   return space.type === 'DM' || space.singleUserBotDm === true || (space.spaceType === 'DIRECT_MESSAGE' && space.singleUserBotDm !== false);
 }

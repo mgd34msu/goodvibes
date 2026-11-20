@@ -138,11 +138,15 @@ export function formatConnectedHostRouteFailure(
  * A line the owner typed carries the explicit-request mark; one a model ran
  * does not.
  */
-export async function invokeConnectedHostMethod<M extends OperatorMethodId>(context: CommandContext, method: M, input: OperatorMethodInput<M>): Promise<OperatorMethodOutput<M>> {
+export function invokeConnectedHostMethod<M extends OperatorMethodId>(context: CommandContext, method: M, input: OperatorMethodInput<M>): Promise<OperatorMethodOutput<M>> {
+  const refusalOf = (error: unknown): Error => isHostFailure(error)
+    ? commandRefusal(formatHostFailure(error))
+    : commandRefusal(`The call to the connected host was not sent: ${error instanceof Error ? error.message : String(error)}`, 'Check the connected-host settings with /settings, then try again');
+  // Not awaited here: awaiting the output of a generic method id makes the
+  // compiler expand every method's output at once.
   try {
-    return await createConnectedHost(selectionFor(context)).invoke(method, input, { explicitUserRequest: context.invokedByModel !== true });
+    return createConnectedHost(selectionFor(context)).invoke(method, input, { explicitUserRequest: context.invokedByModel !== true }).catch((error: unknown) => { throw refusalOf(error); });
   } catch (error) {
-    if (isHostFailure(error)) throw commandRefusal(formatHostFailure(error));
-    throw commandRefusal(`The call to the connected host was not sent: ${error instanceof Error ? error.message : String(error)}`, 'Check the connected-host settings with /settings, then try again');
+    return Promise.reject(refusalOf(error));
   }
 }

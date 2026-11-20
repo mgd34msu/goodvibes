@@ -19,6 +19,7 @@ import { ProjectPlanningService } from '../../../platform/src/platform/knowledge
 import { ProjectWorkPlan } from '../../../platform/src/platform/knowledge/project-planning/work-plan.ts';
 import { decisions } from './stores.ts';
 import { assertOutcome, type Instance, type MeasureEnv, type Scenario } from '../harness.ts';
+import { localOwnerActor } from '../../../daemon-api/src/actor.ts';
 
 const P = 'packages/engine/platform/src/platform';
 const SURFACE = 'tui';
@@ -82,8 +83,9 @@ function contractSave(files: number): Scenario {
           // What a restarted process reads: another store over the same project.
           const reader = new ContractStore({ projectRoot: env.workspace, sweepIntervalMs: 0 });
           try {
-            const loaded = reader.load(contract.id);
-            assertOutcome(loaded !== null, `contract ${contract.id} does not load after the save`);
+            const read = reader.load(contract.id);
+            assertOutcome(read.kind === 'present', `contract ${contract.id} does not load after the save (${read.kind === 'failed' ? read.refusal.reason : read.kind})`);
+            const loaded = read.value;
             assertOutcome(loaded.statusLine === `step ${run + 1} of the measured run` && loaded.decisions.length === contract.decisions.length,
               `the loaded contract shows "${loaded.statusLine}" with ${loaded.decisions.length} decisions; the save made "${contract.statusLine}" with ${contract.decisions.length}`);
             assertOutcome(loaded.inputSnapshot?.files?.length === files, `the loaded contract names ${loaded.inputSnapshot?.files?.length ?? 0} captured files, not ${files}`);
@@ -200,7 +202,7 @@ const configSetMany: Scenario = {
     const manager = new ConfigManager({ surfaceRoot: SURFACE, homeDir: env.home, workingDir: env.workspace });
     return {
       async op(run) {
-        const result = manager.setMany(SETTINGS_BATCH(run), { kind: 'owner', surface: SURFACE });
+        const result = manager.setMany(SETTINGS_BATCH(run), localOwnerActor());
         assertOutcome(result.ok, `the settings were not saved: ${result.ok ? '' : result.refusal.reason}`);
         return { keysSaved: result.saved.length };
       },

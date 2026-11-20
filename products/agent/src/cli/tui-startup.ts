@@ -183,7 +183,7 @@ export function applyInitialTuiCliState(options: {
   };
   // `/setup` → Run first-run again: the three steps, whether or not a model is ready.
   commandContext.openFirstRun = () => {
-    const deps = firstRunDeps(commandContext, shellPaths, render, true);
+    const deps = firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); });
     if (!deps.pushSurfaceModal) return;
     const modal = new FirstRunModal(deps);
     deps.pushSurfaceModal(modal);

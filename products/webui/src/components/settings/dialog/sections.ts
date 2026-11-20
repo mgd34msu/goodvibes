@@ -164,9 +164,10 @@ const SECTION_BY_ID = new Map(SETTINGS_SECTIONS.map((s) => [s.id, s]));
 const PAGE_BY_ID = new Map(SETTINGS_PAGES.map((p) => [p.id, p]));
 
 /** The order sections render in on their page: the topic's own order. */
-const PAGE_SECTION_ORDER: Readonly<Record<SettingsPageId, readonly SettingsSectionId[]>> = Object.fromEntries(
+const PAGE_SECTION_ORDER: ReadonlyMap<SettingsPageId, readonly SettingsSectionId[]> = new Map(
   SETTING_TOPICS.map((topic) => [topic.id, topic.sections.map((section) => section.id).filter(isSectionId)]),
-) as Record<SettingsPageId, readonly SettingsSectionId[]>;
+);
+const pageSectionOrder = (id: SettingsPageId): readonly SettingsSectionId[] => PAGE_SECTION_ORDER.get(id) ?? [];
 
 export function settingsPage(id: SettingsPageId): SettingsPageDef {
   return PAGE_BY_ID.get(id) ?? SETTINGS_PAGES[0];
@@ -179,7 +180,7 @@ export function pageOfSection(id: SettingsSectionId): SettingsPageId {
 
 /** A page's sections, in the order they render. */
 export function sectionsOfPage(id: SettingsPageId): SettingsSectionDef[] {
-  return PAGE_SECTION_ORDER[id].map((sectionId) => settingsSection(sectionId));
+  return pageSectionOrder(id).map((sectionId) => settingsSection(sectionId));
 }
 
 /** Old or alternate section names that deep links may carry. */
@@ -272,7 +273,7 @@ export function matchSettingsPages(matches: readonly SectionMatch[]): PageMatch[
   const byId = new Map(matches.map((m) => [m.id, m]));
   const out: PageMatch[] = [];
   for (const page of SETTINGS_PAGES) {
-    const sections = PAGE_SECTION_ORDER[page.id]
+    const sections = pageSectionOrder(page.id)
       .map((id) => byId.get(id))
       .filter((m): m is SectionMatch => Boolean(m));
     if (sections.length === 0) continue;

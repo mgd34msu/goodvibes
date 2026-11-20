@@ -76,6 +76,7 @@ export class ApprovalBroker {
     //
     // (undocumented)
     listApprovals(limit?: number): SharedApprovalRecord[];
+    presentationOf(record: SharedApprovalRecord, full?: boolean): AskPresentation | undefined;
     // Warning: (ae-forgotten-export) The symbol "RequestSharedApprovalInput" needs to be exported by the entry point embed.d.ts
     // Warning: (ae-forgotten-export) The symbol "RaisedApproval" needs to be exported by the entry point embed.d.ts
     raiseApproval(input: RequestSharedApprovalInput): Promise<RaisedApproval>;
@@ -111,6 +112,8 @@ export class ApprovalBroker {
     // (undocumented)
     subscribe(listener: ApprovalListener): () => void;
     useHomeNode(nodeId: string | (() => string)): void;
+    // Warning: (ae-forgotten-export) The symbol "AskPresentation" needs to be exported by the entry point embed.d.ts
+    usePresentation(presenter: ((request: PermissionPromptRequest, sessionId?: string | undefined) => AskPresentation) | null): void;
     // Warning: (ae-forgotten-export) The symbol "ApprovalRelayPort" needs to be exported by the entry point embed.d.ts
     useRelay(relay: ApprovalRelayPort | null): void;
 }
@@ -560,7 +563,7 @@ export interface SubmitSharedSessionMessageInput {
 
 // Warnings were encountered during analysis:
 //
-// platform/src/platform/control-plane/approval-broker.ts:641:66 - (ae-forgotten-export) The symbol "OwnerApprovalGuard" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/approval-broker.ts:644:66 - (ae-forgotten-export) The symbol "OwnerApprovalGuard" needs to be exported by the entry point embed.d.ts
 // platform/src/platform/control-plane/session-broker.ts:245:5 - (ae-forgotten-export) The symbol "PersistentStore" needs to be exported by the entry point embed.d.ts
 // platform/src/platform/control-plane/session-broker.ts:245:5 - (ae-forgotten-export) The symbol "SharedSessionStoreSnapshot" needs to be exported by the entry point embed.d.ts
 // platform/src/platform/control-plane/session-broker.ts:247:5 - (ae-forgotten-export) The symbol "RouteBindingManager" needs to be exported by the entry point embed.d.ts

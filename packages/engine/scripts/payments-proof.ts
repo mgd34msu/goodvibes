@@ -52,6 +52,7 @@ import type { ChannelPolicyDecision } from '../platform/src/platform/channels/in
 import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.ts';
 import { startFixtureMerchant, type FixtureMerchant } from '../test/helpers/fixture-merchant.ts';
 import { FixtureCheckoutDriver, readFixtureCheckout } from '../test/helpers/fixture-checkout-driver.ts';
+import { Secret } from '../platform/src/platform/security/secret.ts';
 
 // Every reading the flow asks is recorded here, so each case can show them.
 const asked: string[] = [];
@@ -281,7 +282,8 @@ async function runScenario(merchant: FixtureMerchant, scenario: Scenario): Promi
     cards: new DaemonCardStore({
       filePath: join(root, 'payments-cards.json'),
       secrets: {
-        async get(key) { return secrets.get(key) ?? null; },
+        // The store hands out a Secret, as the daemon's encrypted store does.
+        async get(key) { const text = secrets.get(key); return text === undefined ? null : Secret.of(text, key); },
         async set(key, value) { secrets.set(key, value); },
         async delete(key) { secrets.delete(key); },
       },

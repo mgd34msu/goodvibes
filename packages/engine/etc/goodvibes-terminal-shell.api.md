@@ -1101,14 +1101,10 @@ export const processOutputError: {
         observations: Map<string, boolean | undefined>;
         recordPublication(): void;
     }>;
-    run(port: JudgmentPort_2, state: EntryType, options?: RunOptions<    {
-    error: YesNoItem;
-    }> | undefined): Promise<BatteryRun<    {
+    run(port: JudgmentPort_2, state: EntryType, options?: RunOptions): Promise<BatteryRun<    {
     error: YesNoItem;
     }>>;
-    runSome(port: JudgmentPort_2, state: EntryType, only: readonly "error"[], options?: Omit<RunOptions<    {
-    error: YesNoItem;
-    }>, "only"> | undefined): Promise<PartialBatteryRun<    {
+    runSome(port: JudgmentPort_2, state: EntryType, only: readonly "error"[], options?: RunOptions): Promise<PartialBatteryRun<    {
     error: YesNoItem;
     }>>;
     name: string;

@@ -799,7 +799,7 @@ type ApprovalRememberTier = NonNullable<OperatorMethodInput<'approvals.approve'>
 const APPROVAL_REMEMBER_TIERS: readonly ApprovalRememberTier[] = ['session', 'exact', 'command-class', 'path', 'tool'];
 
 /** The approve body: the contract's input, with an unknown remember tier refused before anything is sent. */
-function approveInput(approvalId: string, input: ApprovalApproveInput = {}): OperatorMethodInput<'approvals.approve'> {
+function approveInput(approvalId: string, input: ApprovalApproveInput): OperatorMethodInput<'approvals.approve'> {
   // The owner pressed approve: say so, so a decision that must be the owner's own (trusting a workspace) counts it.
   const { rememberTier, ...rest } = input;
   if (rememberTier === undefined) return { ...rest, approvalId, disposition: 'approved' };
@@ -827,7 +827,7 @@ function configSetValue(key: string, value: unknown): JsonValue {
 }
 
 /** Optional deny payload: `note` rides the audit trail; `reason` is the broker's structured user-declined feedback. */
-export type ApprovalDenyInput = Pick<OperatorMethodInput<'approvals.deny'>, 'note' | 'reason'>;
+export type ApprovalDenyInput = Pick<OperatorMethodInput<'approvals.deny'>, 'expectedRevision' | 'note' | 'reason'>;
 
 /** One durable approval rule (permissions.rules.list): a remembered decision at a generalizing tier. Deleting it makes matching asks prompt again. */
 export type PermissionRuleRecord = OperatorMethodOutput<'permissions.rules.list'>['rules'][number];
@@ -1536,23 +1536,25 @@ export const client = {
     // approvals.*: the TOutput below is the contract's reply with the exec-prompt
     // attribution added (see ApprovalRecord).
     approvals: {
-      list: () => invokeOperator('approvals.list'),
+      // `approvalId` reads that one approval as it stands now (its revision included).
+      list: (input: OperatorMethodInput<'approvals.list'> = {}) => invokeOperator('approvals.list', input),
       // selectedHunks: an index array into the pending approval's own
       // edit list. Omit it to approve the whole request. The daemon computes
       // modifiedArgs server-side, this call never carries a computed diff.
-      approve: async (approvalId: string, input?: ApprovalApproveInput) =>
+      // Each answer names the revision it was made against: one that moved meanwhile is refused with how it stands now.
+      approve: async (approvalId: string, input: ApprovalApproveInput) =>
         invokeOperator('approvals.approve', approveInput(approvalId, input)),
-      cancel: (approvalId: string) =>
-        invokeOperator('approvals.cancel', { approvalId }),
-      claim: (approvalId: string) =>
-        invokeOperator('approvals.claim', { approvalId }),
+      cancel: (approvalId: string, input: Pick<OperatorMethodInput<'approvals.cancel'>, 'expectedRevision'> = {}) =>
+        invokeOperator('approvals.cancel', { approvalId, ...input }),
+      claim: (approvalId: string, input: Pick<OperatorMethodInput<'approvals.claim'>, 'expectedRevision'>) =>
+        invokeOperator('approvals.claim', { approvalId, ...input }),
       // deny sends the optional text as `note` (the audit trail) and `reason` (the
       // broker's structured user-declined feedback); `recorded.reasonStored` reports
       // whether the reason was kept.
-      deny: (approvalId: string, input?: ApprovalDenyInput) =>
+      deny: (approvalId: string, input: ApprovalDenyInput) =>
         invokeOperator(
           'approvals.deny',
-          { approvalId, disposition: 'denied', ...(input?.note ? { note: input.note } : {}), ...(input?.reason ? { reason: input.reason } : {}) },
+          { approvalId, disposition: 'denied', expectedRevision: input.expectedRevision, ...(input.note ? { note: input.note } : {}), ...(input.reason ? { reason: input.reason } : {}) },
         ),
     },
     // Durable approval rules (permissions.rules.*): the remembered-decision store,

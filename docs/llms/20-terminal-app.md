@@ -1017,7 +1017,7 @@ When a file was changed after that call (by you, another tool or another program
 
 ### Models, providers and sign-in
 
-`/model` is described once for both programs. Bare, it opens its actions with "See your model and the others you can use" first (`list`; a model or a script running it bare gets that report): `use <model>` ("Switch model"), `refresh` ("Read the list of models again"), and under "Choose backup models…" `backup <model>` and `drop-backup <model>`.
+`/model` is described once for both programs. Bare, it opens its actions with "See your model and the others you can use" first (`list`; a model or a script running it bare gets that report): `use <model>` ("Switch model"), `refresh` ("Read the list of models again"), and in the group "Choose backup models…" `backup <model>` and `drop-backup <model>`.
 `/model use openai:gpt-5.4` switches the main chat model, saves it in `provider.model` and prints `Now using <model> (<provider>).` and, when the requested reasoning level does not exist on that model, the level used instead.
 When the provider is not signed in, the terminal app asks for its API key on a hidden line before the switch lands.
 An unknown id is refused with the provider registry's reason. `/model use` alone asks which model, from the models you can switch to.
@@ -1099,7 +1099,7 @@ An existing target is not overwritten without `--overwrite`.
 
 - The review: `review` (every count), `tokens` (paired-device tokens), `attack-paths` (risky routes through MCP servers).
 - What is trusted: `trust` (permission mode, secrets, services, plugin and MCP trust), `folder` (this folder's trust), `trust-folder` (loosens a protection, asks first, only you), `restrict-folder`, `save-trust <file> [--replace]` (owner-only file, secret names not values), `read-trust <file>`.
-- Policies: see "Policy bundles" in the permissions part.
+- Policies: see "Managed policy bundles" in the permissions part.
 - Sandbox and sandbox sessions: see "The exec sandbox" in the permissions part.
 - Screens: `security-screen`, `policy-screen`, `sandbox-screen`.
 

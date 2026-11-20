@@ -679,7 +679,15 @@ export type CompanionChatMessage = {
         cause: string;
         changed: {
             text: string;
+            known: boolean;
             files: readonly string[];
+            commands: number;
+            messages: number;
+            unknown: number;
+        };
+        attempts?: {
+            count: number;
+            times: readonly number[];
         };
         next: readonly ({
             action: "choose-model" | "details" | "other-model" | "retry" | "sign-in" | "start-daemon";
@@ -2192,7 +2200,7 @@ export { forSession as forSessionRuntime }
 export const FOUNDATION_METADATA: {
     readonly productId: "goodvibes";
     readonly productVersion: "3.3.1";
-    readonly operatorMethodCount: 646;
+    readonly operatorMethodCount: 648;
     readonly operatorEventCount: 37;
     readonly peerEndpointCount: 6;
 };
@@ -3239,7 +3247,7 @@ export const OPERATION_KEY_SCHEMA: Readonly<{
 export const OPERATOR_CONTRACT: OperatorContractManifest;
 
 // @public (undocumented)
-export const OPERATOR_METHOD_IDS: readonly ["accounts.snapshot", "acp.agents.list", "acp.sessions.create", "approvals.approve", "approvals.cancel", "approvals.claim", "approvals.deny", "approvals.list", "approvals.raise", "artifacts.content.get", "artifacts.create", "artifacts.get", "artifacts.list", "authority.status", "automation.heartbeat.list", "automation.heartbeat.run", "automation.integration.snapshot", "automation.jobs.create", "automation.jobs.delete", "automation.jobs.disable", "automation.jobs.enable", "automation.jobs.list", "automation.jobs.run", "automation.jobs.update", "automation.runs.cancel", "automation.runs.get", "automation.runs.list", "automation.runs.retry", "automation.schedules.create", "automation.schedules.delete", "automation.schedules.list", "automation.schedules.pause", "automation.schedules.resume", "automation.schedules.run", "batch.jobs.cancel", "batch.jobs.create", "batch.jobs.get", "batch.jobs.list", "batch.providerBatches.cancel", "batch.run", "batch.runtime.get", "browser.click", "browser.extract", "browser.history.back", "browser.history.forward", "browser.navigate", "browser.press", "browser.provision", "browser.readText", "browser.screenshot", "browser.scroll", "browser.select", "browser.sessions.attach", "browser.sessions.close", "browser.sessions.launch", "browser.sessions.list", "browser.sessions.release", "browser.snapshot", "browser.status", "browser.tabs.close", "browser.tabs.create", "browser.tabs.list", "browser.tabs.switch", "browser.type", "browser.waitFor", "calendar.calendars.list", "calendar.events.create", "calendar.events.delete", "calendar.events.get", "calendar.events.list", "calendar.events.update", "calendar.ics.export", "calendar.ics.import", "channels.accounts.action.default", "channels.accounts.action.named", "channels.accounts.get", "channels.accounts.list", "channels.accounts.surface.list", "channels.actions.invoke", "channels.actions.list", "channels.actions.surface.list", "channels.agent_tools.list", "channels.agent_tools.surface.list", "channels.allowlist.edit", "channels.allowlist.resolve", "channels.authorize", "channels.capabilities.list", "channels.capabilities.surface.list", "channels.directory.query", "channels.doctor.get", "channels.drafts.delete", "channels.drafts.get", "channels.drafts.list", "channels.drafts.save", "channels.inbox.applyLabels", "channels.inbox.list", "channels.inbox.triage", "channels.lifecycle.get", "channels.policies.audit", "channels.policies.list", "channels.policies.update", "channels.profiles.delete", "channels.profiles.get", "channels.profiles.list", "channels.profiles.set", "channels.repairs.list", "channels.routing.assign", "channels.routing.delete", "channels.routing.list", "channels.setup.get", "channels.status", "channels.targets.resolve", "channels.test.send", "channels.tools.invoke", "channels.tools.list", "channels.tools.surface.list", "checkin.config.get", "checkin.config.set", "checkin.receipts.list", "checkin.run", "checkpoints.create", "checkpoints.diff", "checkpoints.list", "checkpoints.restore", "checkpoints.restorePreview", "checkpoints.revertHunk", "checkpoints.revertHunkPreview", "ci.status", "ci.watches.create", "ci.watches.delete", "ci.watches.list", "ci.watches.run", "cloudflare.credentials.verify", "cloudflare.disable", "cloudflare.provision", "cloudflare.resources.list", "cloudflare.status", "cloudflare.token.create", "cloudflare.token.requirements.get", "cloudflare.worker.verify", "companion.chat.events.stream", "companion.chat.messages.create", "companion.chat.messages.edit", "companion.chat.messages.list", "companion.chat.messages.retry", "companion.chat.messages.search", "companion.chat.messages.steer", "companion.chat.queuedMessages.delete", "companion.chat.queuedMessages.edit", "companion.chat.queuedMessages.list", "companion.chat.sessions.close", "companion.chat.sessions.create", "companion.chat.sessions.delete", "companion.chat.sessions.get", "companion.chat.sessions.list", "companion.chat.sessions.reopen", "companion.chat.sessions.update", "companion.chat.turns.cancel", "config.get", "config.reset", "config.set", "config.setMany", "continuity.snapshot", "contracts.budget", "contracts.cancel", "contracts.dispatch", "contracts.get", "contracts.list", "contracts.remove", "contracts.reply", "contracts.retryUnit", "contracts.start", "contracts.status", "contracts.summaries", "control.auth.current", "control.auth.login", "control.auth.logout", "control.clients.list", "control.contract", "control.events.catalog", "control.events.stream", "control.messages.list", "control.methods.get", "control.methods.list", "control.snapshot", "control.status", "control.web", "cost.attribution.get", "credentials.delete", "credentials.get", "credentials.set", "deliveries.get", "deliveries.list", "devices.artifacts.delete", "devices.artifacts.list", "devices.artifacts.read", "devices.capability.request", "devices.grants.list", "devices.grants.revoke", "devices.housekeeping.run", "devices.nodes.list", "email.attachment.get", "email.draft.create", "email.draft.update", "email.drafts.list", "email.expectation.cancel", "email.expectation.list", "email.expectation.open", "email.expectation.wait", "email.inbound.status", "email.inbox.list", "email.inbox.read", "email.inbox.update", "email.send", "flags.graduation.report", "flags.status", "fleet.archive", "fleet.archiveFinished", "fleet.archived.list", "fleet.attempts.judge", "fleet.attempts.list", "fleet.attempts.pick", "fleet.conflicts.list", "fleet.conflicts.resolve", "fleet.conflicts.retry", "fleet.graph.get", "fleet.interrupt", "fleet.list", "fleet.observed.steer", "fleet.resume", "fleet.snapshot", "fleet.stop", "fleet.unarchive", "health.snapshot", "homeassistant.conversation.cancel", "homeassistant.conversation.health", "homeassistant.conversation.stream", "homeassistant.conversation.submit", "homeassistant.homeGraph.askHomeGraph", "homeassistant.homeGraph.browse", "homeassistant.homeGraph.export", "homeassistant.homeGraph.generateHomeGraphPacket", "homeassistant.homeGraph.generateRoomPage", "homeassistant.homeGraph.import", "homeassistant.homeGraph.ingestHomeGraphArtifact", "homeassistant.homeGraph.ingestHomeGraphNote", "homeassistant.homeGraph.ingestHomeGraphUrl", "homeassistant.homeGraph.linkHomeGraphKnowledge", "homeassistant.homeGraph.listHomeGraphIssues", "homeassistant.homeGraph.map", "homeassistant.homeGraph.pages.list", "homeassistant.homeGraph.refinement.run", "homeassistant.homeGraph.refinement.task.cancel", "homeassistant.homeGraph.refinement.task.get", "homeassistant.homeGraph.refinement.tasks.list", "homeassistant.homeGraph.refreshDevicePassport", "homeassistant.homeGraph.reindex", "homeassistant.homeGraph.reset", "homeassistant.homeGraph.reviewHomeGraphFact", "homeassistant.homeGraph.sources.list", "homeassistant.homeGraph.status", "homeassistant.homeGraph.syncHomeGraph", "homeassistant.homeGraph.unlinkHomeGraphKnowledge", "inbound.telegram.cancel", "inbound.telegram.configure", "inbound.telegram.decide", "inbound.telegram.list", "inbound.telegram.read", "inbound.telegram.release", "inbound.telegram.revoke", "inbound.telegram.status", "inbox.answer", "inbox.delivery", "inbox.list", "inbox.post", "inbox.withdraw", "intelligence.snapshot", "judgment.battery.run", "knowledge.ask", "knowledge.candidate.decide", "knowledge.candidate.get", "knowledge.candidates.list", "knowledge.connector.doctor", "knowledge.connector.get", "knowledge.connectors.list", "knowledge.extraction.get", "knowledge.extractions.list", "knowledge.graphql.execute", "knowledge.graphql.schema", "knowledge.ingest.artifact", "knowledge.ingest.bookmarks", "knowledge.ingest.browserHistory", "knowledge.ingest.connector", "knowledge.ingest.url", "knowledge.ingest.urls", "knowledge.issue.review", "knowledge.issues.list", "knowledge.item.get", "knowledge.job-run.cancel", "knowledge.job-runs.list", "knowledge.job.get", "knowledge.job.run", "knowledge.jobs.list", "knowledge.lint", "knowledge.map", "knowledge.nodes.list", "knowledge.packet", "knowledge.projection.materialize", "knowledge.projection.render", "knowledge.projections.list", "knowledge.refinement.run", "knowledge.refinement.task.cancel", "knowledge.refinement.task.get", "knowledge.refinement.tasks.list", "knowledge.reindex", "knowledge.report.get", "knowledge.reports.list", "knowledge.schedule.delete", "knowledge.schedule.enable", "knowledge.schedule.get", "knowledge.schedule.save", "knowledge.schedules.list", "knowledge.search", "knowledge.source.extraction.get", "knowledge.sources.list", "knowledge.status", "knowledge.usage.list", "local_auth.bootstrap.delete", "local_auth.sessions.delete", "local_auth.status", "local_auth.users.create", "local_auth.users.delete", "local_auth.users.password.rotate", "local_auth.users.scopes.set", "mcp.config.get", "mcp.servers.list", "mcp.servers.quarantine.accept", "mcp.servers.reload", "mcp.servers.remove", "mcp.servers.reveal", "mcp.servers.role.set", "mcp.servers.tools.block", "mcp.servers.tools.exempt", "mcp.servers.tools.unblock", "mcp.servers.tools.unexempt", "mcp.servers.trust.set", "mcp.servers.upsert", "mcp.tools.list", "media.analyze", "media.collect", "media.generate", "media.providers.list", "media.transform", "memory.consolidation.decide", "memory.consolidation.receipts", "memory.doctor", "memory.embeddings.default.set", "memory.projections.get", "memory.projections.list", "memory.records.add", "memory.records.delete", "memory.records.export", "memory.records.get", "memory.records.import", "memory.records.links.add", "memory.records.links.list", "memory.records.list", "memory.records.search", "memory.records.search-semantic", "memory.records.update", "memory.records.update-review", "memory.review-queue", "memory.snapshots.list", "memory.snapshots.restore", "memory.vector.rebuild", "memory.vector.stats", "models.current.get", "models.current.set", "models.list", "multimodal.analyze", "multimodal.packet", "multimodal.providers.list", "multimodal.status", "multimodal.writeback", "notifications.deadLetters.list", "notifications.deadLetters.replay", "occasions.acknowledge", "occasions.answer", "occasions.confirm", "occasions.conflict.resolve", "occasions.gifts", "occasions.interview.answer", "occasions.interview.get", "occasions.interview.record", "occasions.list", "occasions.pending", "occasions.plans.confirm", "occasions.plans.list", "occasions.plans.propose", "occasions.plans.remove", "occasions.plans.update", "occasions.propose", "occasions.remove", "occasions.state", "occasions.sweep", "occasions.update", "ops.doctor", "ops.memory.get", "pairing.handoff.complete", "pairing.handoff.create", "pairing.posture.get", "pairing.tokens.create", "pairing.tokens.delete", "pairing.tokens.list", "pairing.tokens.migrate", "pairing.tokens.rename", "pairing.tokens.revokeShared", "panels.list", "panels.open", "payments.budget.status", "payments.cards.create", "payments.cards.delete", "payments.cards.list", "payments.checkout.approve", "payments.checkout.begin", "payments.purchase.approve", "payments.purchase.cancel", "payments.purchase.deny", "payments.purchase.reconcile", "payments.purchase.securityCode", "payments.purchase.status", "payments.purchases.list", "payments.standing.create", "payments.standing.delete", "payments.standing.list", "permissions.rules.delete", "permissions.rules.list", "power.keepAwake.set", "power.status.get", "principals.create", "principals.delete", "principals.get", "principals.list", "principals.resolve", "principals.update", "profile.append", "profile.forget", "profile.get", "profile.person", "profile.provenance", "profile.read", "profile.set", "profile.status", "profile.undo", "projectPlanning.decisions.list", "projectPlanning.decisions.record", "projectPlanning.language.get", "projectPlanning.state.get", "projectPlanning.status", "projectPlanning.workPlan.clearCompleted", "projectPlanning.workPlan.snapshot", "projectPlanning.workPlan.task.create", "projectPlanning.workPlan.task.delete", "projectPlanning.workPlan.task.get", "projectPlanning.workPlan.task.status", "projectPlanning.workPlan.task.update", "projectPlanning.workPlan.tasks.list", "projectPlanning.workPlan.tasks.reorder", "providers.get", "providers.list", "providers.usage.get", "push.subscriptions.create", "push.subscriptions.delete", "push.subscriptions.list", "push.subscriptions.reconcile", "push.subscriptions.verify", "push.vapid.get", "quota.fanout.get", "quota.snapshot.get", "relay.codes.list", "relay.codes.revoke", "relay.pairing.mint", "relay.reachability.get", "remote.backends.list", "remote.backends.register", "remote.backends.remove", "remote.node_host.contract", "remote.pair.requests.approve", "remote.pair.requests.list", "remote.pair.requests.reject", "remote.peers.disconnect", "remote.peers.get", "remote.peers.invoke", "remote.peers.list", "remote.peers.token.revoke", "remote.peers.token.rotate", "remote.snapshot", "remote.work.cancel", "remote.work.list", "review.snapshot", "rewind.apply", "rewind.conversation.host.register", "rewind.conversation.host.release", "rewind.conversation.hosts.list", "rewind.conversation.requests.answer", "rewind.conversation.requests.take", "rewind.plan", "rewind.undo", "routes.bindings.create", "routes.bindings.delete", "routes.bindings.list", "routes.bindings.update", "routes.snapshot", "runtime.metrics.get", "runtime.state.get", "scheduler.capacity", "security.settings", "services.install", "services.restart", "services.start", "services.status", "services.stop", "services.uninstall", "sessions.changes.get", "sessions.close", "sessions.contextUsage.get", "sessions.create", "sessions.delete", "sessions.detach", "sessions.followUp", "sessions.get", "sessions.hosted.attach", "sessions.hosted.create", "sessions.hosted.detach", "sessions.hosted.history", "sessions.hosted.kill", "sessions.hosted.list", "sessions.hosted.share", "sessions.hosted.workspaces", "sessions.inputs.cancel", "sessions.inputs.deliver", "sessions.inputs.list", "sessions.integration.snapshot", "sessions.list", "sessions.messages.create", "sessions.messages.list", "sessions.permissionMode.get", "sessions.permissionMode.set", "sessions.queuedMessages.delete", "sessions.queuedMessages.edit", "sessions.queuedMessages.list", "sessions.register", "sessions.reopen", "sessions.search", "sessions.steer", "sessions.toolCalls.cancel", "sessions.turns.cancel", "settings.snapshot", "skills.create", "skills.delete", "skills.get", "skills.list", "skills.update", "stepup.challenge.mint", "stepup.credentials.list", "stepup.credentials.register", "stepup.credentials.remove", "surfaces.list", "tailscale.get", "tailscale.serve.run", "tailscale.serve.stop", "tasks.cancel", "tasks.create", "tasks.get", "tasks.list", "tasks.retry", "tasks.status", "telemetry.errors.list", "telemetry.events.list", "telemetry.metrics.get", "telemetry.otlp.logs", "telemetry.otlp.metrics", "telemetry.otlp.traces", "telemetry.snapshot", "telemetry.stream", "telemetry.traces.list", "update.check", "update.status", "voice.local.install", "voice.local.status", "voice.providers.list", "voice.realtime.session", "voice.setup", "voice.status", "voice.stt", "voice.tts", "voice.tts.stream", "voice.voices.list", "voice.wake.model.get", "voice.wake.provision", "voice.wake.status", "watchers.create", "watchers.delete", "watchers.list", "watchers.run", "watchers.start", "watchers.stop", "watchers.triggers.cancel", "watchers.triggers.create", "watchers.triggers.grant.list", "watchers.triggers.grant.register", "watchers.triggers.history", "watchers.triggers.list", "watchers.triggers.reset", "watchers.triggers.status", "watchers.update", "web_search.providers.list", "web_search.query", "workLedger.execution.cancel", "workLedger.execution.resume", "workLedger.execution.start", "workLedger.execution.status", "workLedger.history", "workLedger.importLegacy", "workLedger.intake.admit", "workLedger.intake.cancel", "workLedger.intake.capture", "workLedger.intake.get", "workLedger.intake.resume", "workLedger.prepareLegacyImport", "workLedger.project", "workLedger.snapshot", "workLedger.submission.get", "workLedger.submit", "workLedger.turn.cancel", "workLedger.turn.session", "workLedger.turn.start", "workLedger.turn.startAgent", "workLedger.turn.status", "workspaces.registrations.add", "workspaces.registrations.list", "workspaces.registrations.remove", "workspaces.resolve", "worktrees.discard", "worktrees.setup.run", "worktrees.snapshot"];
+export const OPERATOR_METHOD_IDS: readonly ["accounts.snapshot", "acp.agents.list", "acp.sessions.create", "approvals.approve", "approvals.cancel", "approvals.claim", "approvals.deny", "approvals.list", "approvals.raise", "artifacts.content.get", "artifacts.create", "artifacts.get", "artifacts.list", "authority.status", "automation.heartbeat.list", "automation.heartbeat.run", "automation.integration.snapshot", "automation.jobs.create", "automation.jobs.delete", "automation.jobs.disable", "automation.jobs.enable", "automation.jobs.list", "automation.jobs.run", "automation.jobs.update", "automation.runs.cancel", "automation.runs.get", "automation.runs.list", "automation.runs.retry", "automation.schedules.create", "automation.schedules.delete", "automation.schedules.list", "automation.schedules.pause", "automation.schedules.preview", "automation.schedules.resume", "automation.schedules.run", "batch.jobs.cancel", "batch.jobs.create", "batch.jobs.get", "batch.jobs.list", "batch.providerBatches.cancel", "batch.run", "batch.runtime.get", "browser.click", "browser.extract", "browser.history.back", "browser.history.forward", "browser.navigate", "browser.press", "browser.provision", "browser.readText", "browser.screenshot", "browser.scroll", "browser.select", "browser.sessions.attach", "browser.sessions.close", "browser.sessions.launch", "browser.sessions.list", "browser.sessions.release", "browser.snapshot", "browser.status", "browser.tabs.close", "browser.tabs.create", "browser.tabs.list", "browser.tabs.switch", "browser.type", "browser.waitFor", "calendar.calendars.list", "calendar.events.create", "calendar.events.delete", "calendar.events.get", "calendar.events.list", "calendar.events.update", "calendar.ics.export", "calendar.ics.import", "channels.accounts.action.default", "channels.accounts.action.named", "channels.accounts.get", "channels.accounts.list", "channels.accounts.surface.list", "channels.actions.invoke", "channels.actions.list", "channels.actions.surface.list", "channels.agent_tools.list", "channels.agent_tools.surface.list", "channels.allowlist.edit", "channels.allowlist.resolve", "channels.authorize", "channels.capabilities.list", "channels.capabilities.surface.list", "channels.directory.query", "channels.doctor.get", "channels.drafts.delete", "channels.drafts.get", "channels.drafts.list", "channels.drafts.save", "channels.inbox.applyLabels", "channels.inbox.list", "channels.inbox.triage", "channels.lifecycle.get", "channels.policies.audit", "channels.policies.list", "channels.policies.update", "channels.profiles.delete", "channels.profiles.get", "channels.profiles.list", "channels.profiles.set", "channels.repairs.list", "channels.routing.assign", "channels.routing.delete", "channels.routing.list", "channels.setup.get", "channels.status", "channels.targets.resolve", "channels.test.send", "channels.tools.invoke", "channels.tools.list", "channels.tools.surface.list", "checkin.config.get", "checkin.config.set", "checkin.receipts.list", "checkin.run", "checkpoints.create", "checkpoints.diff", "checkpoints.list", "checkpoints.restore", "checkpoints.restorePreview", "checkpoints.revertHunk", "checkpoints.revertHunkPreview", "ci.status", "ci.watches.create", "ci.watches.delete", "ci.watches.list", "ci.watches.run", "cloudflare.credentials.verify", "cloudflare.disable", "cloudflare.provision", "cloudflare.resources.list", "cloudflare.status", "cloudflare.token.create", "cloudflare.token.requirements.get", "cloudflare.worker.verify", "companion.chat.events.stream", "companion.chat.messages.create", "companion.chat.messages.edit", "companion.chat.messages.list", "companion.chat.messages.retry", "companion.chat.messages.search", "companion.chat.messages.steer", "companion.chat.queuedMessages.delete", "companion.chat.queuedMessages.edit", "companion.chat.queuedMessages.list", "companion.chat.sessions.close", "companion.chat.sessions.create", "companion.chat.sessions.delete", "companion.chat.sessions.get", "companion.chat.sessions.list", "companion.chat.sessions.reopen", "companion.chat.sessions.update", "companion.chat.turns.cancel", "config.get", "config.reset", "config.set", "config.setMany", "continuity.snapshot", "contracts.budget", "contracts.cancel", "contracts.dispatch", "contracts.get", "contracts.list", "contracts.remove", "contracts.reply", "contracts.retryUnit", "contracts.start", "contracts.status", "contracts.summaries", "control.auth.current", "control.auth.login", "control.auth.logout", "control.clients.list", "control.contract", "control.events.catalog", "control.events.stream", "control.messages.list", "control.methods.get", "control.methods.list", "control.snapshot", "control.status", "control.web", "cost.attribution.get", "credentials.delete", "credentials.get", "credentials.set", "deliveries.get", "deliveries.list", "devices.artifacts.delete", "devices.artifacts.list", "devices.artifacts.read", "devices.capability.request", "devices.grants.list", "devices.grants.revoke", "devices.housekeeping.run", "devices.nodes.list", "email.attachment.get", "email.draft.create", "email.draft.update", "email.drafts.list", "email.expectation.cancel", "email.expectation.list", "email.expectation.open", "email.expectation.wait", "email.inbound.status", "email.inbox.list", "email.inbox.read", "email.inbox.update", "email.send", "flags.graduation.report", "flags.status", "fleet.archive", "fleet.archiveFinished", "fleet.archived.list", "fleet.attempts.judge", "fleet.attempts.list", "fleet.attempts.pick", "fleet.conflicts.list", "fleet.conflicts.resolve", "fleet.conflicts.retry", "fleet.graph.get", "fleet.interrupt", "fleet.list", "fleet.observed.steer", "fleet.resume", "fleet.snapshot", "fleet.stop", "fleet.unarchive", "health.snapshot", "homeassistant.conversation.cancel", "homeassistant.conversation.health", "homeassistant.conversation.stream", "homeassistant.conversation.submit", "homeassistant.homeGraph.askHomeGraph", "homeassistant.homeGraph.browse", "homeassistant.homeGraph.export", "homeassistant.homeGraph.generateHomeGraphPacket", "homeassistant.homeGraph.generateRoomPage", "homeassistant.homeGraph.import", "homeassistant.homeGraph.ingestHomeGraphArtifact", "homeassistant.homeGraph.ingestHomeGraphNote", "homeassistant.homeGraph.ingestHomeGraphUrl", "homeassistant.homeGraph.linkHomeGraphKnowledge", "homeassistant.homeGraph.listHomeGraphIssues", "homeassistant.homeGraph.map", "homeassistant.homeGraph.pages.list", "homeassistant.homeGraph.refinement.run", "homeassistant.homeGraph.refinement.task.cancel", "homeassistant.homeGraph.refinement.task.get", "homeassistant.homeGraph.refinement.tasks.list", "homeassistant.homeGraph.refreshDevicePassport", "homeassistant.homeGraph.reindex", "homeassistant.homeGraph.reset", "homeassistant.homeGraph.reviewHomeGraphFact", "homeassistant.homeGraph.sources.list", "homeassistant.homeGraph.status", "homeassistant.homeGraph.syncHomeGraph", "homeassistant.homeGraph.unlinkHomeGraphKnowledge", "inbound.telegram.cancel", "inbound.telegram.configure", "inbound.telegram.decide", "inbound.telegram.list", "inbound.telegram.read", "inbound.telegram.release", "inbound.telegram.revoke", "inbound.telegram.status", "inbox.answer", "inbox.delivery", "inbox.list", "inbox.post", "inbox.withdraw", "intelligence.snapshot", "judgment.battery.run", "knowledge.ask", "knowledge.candidate.decide", "knowledge.candidate.get", "knowledge.candidates.list", "knowledge.connector.doctor", "knowledge.connector.get", "knowledge.connectors.list", "knowledge.extraction.get", "knowledge.extractions.list", "knowledge.graphql.execute", "knowledge.graphql.schema", "knowledge.ingest.artifact", "knowledge.ingest.bookmarks", "knowledge.ingest.browserHistory", "knowledge.ingest.connector", "knowledge.ingest.url", "knowledge.ingest.urls", "knowledge.issue.review", "knowledge.issues.list", "knowledge.item.get", "knowledge.job-run.cancel", "knowledge.job-runs.list", "knowledge.job.get", "knowledge.job.run", "knowledge.jobs.list", "knowledge.lint", "knowledge.map", "knowledge.nodes.list", "knowledge.packet", "knowledge.projection.materialize", "knowledge.projection.render", "knowledge.projections.list", "knowledge.refinement.run", "knowledge.refinement.task.cancel", "knowledge.refinement.task.get", "knowledge.refinement.tasks.list", "knowledge.reindex", "knowledge.report.get", "knowledge.reports.list", "knowledge.schedule.delete", "knowledge.schedule.enable", "knowledge.schedule.get", "knowledge.schedule.save", "knowledge.schedules.list", "knowledge.search", "knowledge.source.extraction.get", "knowledge.sources.list", "knowledge.status", "knowledge.usage.list", "local_auth.bootstrap.delete", "local_auth.sessions.delete", "local_auth.status", "local_auth.users.create", "local_auth.users.delete", "local_auth.users.password.rotate", "local_auth.users.scopes.set", "mcp.config.get", "mcp.servers.list", "mcp.servers.quarantine.accept", "mcp.servers.reload", "mcp.servers.remove", "mcp.servers.reveal", "mcp.servers.role.set", "mcp.servers.tools.block", "mcp.servers.tools.exempt", "mcp.servers.tools.unblock", "mcp.servers.tools.unexempt", "mcp.servers.trust.set", "mcp.servers.upsert", "mcp.tools.list", "media.analyze", "media.collect", "media.generate", "media.providers.list", "media.transform", "memory.consolidation.decide", "memory.consolidation.receipts", "memory.doctor", "memory.embeddings.default.set", "memory.projections.get", "memory.projections.list", "memory.records.add", "memory.records.delete", "memory.records.export", "memory.records.get", "memory.records.import", "memory.records.links.add", "memory.records.links.list", "memory.records.list", "memory.records.search", "memory.records.search-semantic", "memory.records.update", "memory.records.update-review", "memory.review-queue", "memory.snapshots.list", "memory.snapshots.restore", "memory.vector.rebuild", "memory.vector.stats", "models.current.get", "models.current.set", "models.list", "multimodal.analyze", "multimodal.packet", "multimodal.providers.list", "multimodal.status", "multimodal.writeback", "notifications.deadLetters.list", "notifications.deadLetters.replay", "occasions.acknowledge", "occasions.answer", "occasions.confirm", "occasions.conflict.resolve", "occasions.gifts", "occasions.interview.answer", "occasions.interview.get", "occasions.interview.record", "occasions.list", "occasions.pending", "occasions.plans.confirm", "occasions.plans.list", "occasions.plans.propose", "occasions.plans.remove", "occasions.plans.update", "occasions.propose", "occasions.remove", "occasions.state", "occasions.sweep", "occasions.update", "ops.doctor", "ops.memory.get", "pairing.handoff.complete", "pairing.handoff.create", "pairing.posture.get", "pairing.tokens.create", "pairing.tokens.delete", "pairing.tokens.list", "pairing.tokens.migrate", "pairing.tokens.rename", "pairing.tokens.revokeShared", "panels.list", "panels.open", "payments.budget.status", "payments.cards.create", "payments.cards.delete", "payments.cards.list", "payments.checkout.approve", "payments.checkout.begin", "payments.purchase.approve", "payments.purchase.cancel", "payments.purchase.deny", "payments.purchase.reconcile", "payments.purchase.securityCode", "payments.purchase.status", "payments.purchases.list", "payments.standing.create", "payments.standing.delete", "payments.standing.list", "permissions.rules.delete", "permissions.rules.list", "power.keepAwake.set", "power.status.get", "principals.create", "principals.delete", "principals.get", "principals.list", "principals.resolve", "principals.update", "profile.append", "profile.forget", "profile.get", "profile.person", "profile.provenance", "profile.read", "profile.set", "profile.status", "profile.undo", "projectPlanning.decisions.list", "projectPlanning.decisions.record", "projectPlanning.language.get", "projectPlanning.state.get", "projectPlanning.status", "projectPlanning.workPlan.clearCompleted", "projectPlanning.workPlan.snapshot", "projectPlanning.workPlan.task.create", "projectPlanning.workPlan.task.delete", "projectPlanning.workPlan.task.get", "projectPlanning.workPlan.task.status", "projectPlanning.workPlan.task.update", "projectPlanning.workPlan.tasks.list", "projectPlanning.workPlan.tasks.reorder", "providers.get", "providers.list", "providers.usage.get", "push.subscriptions.create", "push.subscriptions.delete", "push.subscriptions.list", "push.subscriptions.reconcile", "push.subscriptions.verify", "push.vapid.get", "quota.fanout.get", "quota.snapshot.get", "relay.codes.list", "relay.codes.revoke", "relay.pairing.mint", "relay.reachability.get", "remote.backends.list", "remote.backends.register", "remote.backends.remove", "remote.node_host.contract", "remote.pair.requests.approve", "remote.pair.requests.list", "remote.pair.requests.reject", "remote.peers.disconnect", "remote.peers.get", "remote.peers.invoke", "remote.peers.list", "remote.peers.token.revoke", "remote.peers.token.rotate", "remote.snapshot", "remote.work.cancel", "remote.work.list", "review.snapshot", "rewind.apply", "rewind.conversation.host.register", "rewind.conversation.host.release", "rewind.conversation.hosts.list", "rewind.conversation.requests.answer", "rewind.conversation.requests.take", "rewind.plan", "rewind.undo", "routes.bindings.create", "routes.bindings.delete", "routes.bindings.list", "routes.bindings.update", "routes.snapshot", "runtime.metrics.get", "runtime.state.get", "scheduler.capacity", "security.settings", "services.install", "services.restart", "services.start", "services.status", "services.stop", "services.uninstall", "sessions.changes.get", "sessions.close", "sessions.contextUsage.get", "sessions.create", "sessions.delete", "sessions.detach", "sessions.followUp", "sessions.get", "sessions.hosted.attach", "sessions.hosted.create", "sessions.hosted.detach", "sessions.hosted.history", "sessions.hosted.kill", "sessions.hosted.list", "sessions.hosted.share", "sessions.hosted.workspaces", "sessions.inputs.cancel", "sessions.inputs.deliver", "sessions.inputs.list", "sessions.integration.snapshot", "sessions.list", "sessions.messages.create", "sessions.messages.list", "sessions.permissionMode.get", "sessions.permissionMode.set", "sessions.queuedMessages.delete", "sessions.queuedMessages.edit", "sessions.queuedMessages.list", "sessions.register", "sessions.reopen", "sessions.search", "sessions.steer", "sessions.toolCalls.cancel", "sessions.turns.cancel", "settings.snapshot", "skills.create", "skills.delete", "skills.get", "skills.list", "skills.update", "stepup.challenge.mint", "stepup.credentials.list", "stepup.credentials.register", "stepup.credentials.remove", "surfaces.list", "tailscale.get", "tailscale.serve.run", "tailscale.serve.stop", "tasks.cancel", "tasks.create", "tasks.get", "tasks.list", "tasks.retry", "tasks.status", "telemetry.errors.list", "telemetry.events.list", "telemetry.metrics.get", "telemetry.otlp.logs", "telemetry.otlp.metrics", "telemetry.otlp.traces", "telemetry.snapshot", "telemetry.stream", "telemetry.traces.list", "update.check", "update.status", "voice.local.install", "voice.local.status", "voice.providers.list", "voice.realtime.session", "voice.setup", "voice.status", "voice.stt", "voice.tts", "voice.tts.stream", "voice.voices.list", "voice.wake.model.get", "voice.wake.provision", "voice.wake.status", "watchers.create", "watchers.delete", "watchers.list", "watchers.run", "watchers.start", "watchers.stop", "watchers.triggers.cancel", "watchers.triggers.create", "watchers.triggers.grant.list", "watchers.triggers.grant.register", "watchers.triggers.history", "watchers.triggers.list", "watchers.triggers.preview", "watchers.triggers.reset", "watchers.triggers.status", "watchers.update", "web_search.providers.list", "web_search.query", "workLedger.execution.cancel", "workLedger.execution.resume", "workLedger.execution.start", "workLedger.execution.status", "workLedger.history", "workLedger.importLegacy", "workLedger.intake.admit", "workLedger.intake.cancel", "workLedger.intake.capture", "workLedger.intake.get", "workLedger.intake.resume", "workLedger.prepareLegacyImport", "workLedger.project", "workLedger.snapshot", "workLedger.submission.get", "workLedger.submit", "workLedger.turn.cancel", "workLedger.turn.session", "workLedger.turn.start", "workLedger.turn.startAgent", "workLedger.turn.status", "workspaces.registrations.add", "workspaces.registrations.list", "workspaces.registrations.remove", "workspaces.resolve", "worktrees.discard", "worktrees.setup.run", "worktrees.snapshot"];
 
 // @public
 export const OPERATOR_WORK_CANCEL_REASON = "cancelled by the requester";
@@ -4101,6 +4109,36 @@ export interface OperatorMethodInputMap {
     "automation.schedules.pause": {
         scheduleId: string;
         expectedMutationRevision?: string;
+    };
+    // (undocumented)
+    "automation.schedules.preview": {
+        action: "add" | "change";
+        zone?: string;
+        schedule?: string;
+        prompt?: string;
+        when?: string;
+        at?: string;
+        every?: string;
+        cron?: string;
+        tz?: string;
+        stagger?: string;
+        name?: string;
+        target?: string;
+        model?: string;
+        provider?: string;
+        deliver?: string;
+        outside?: string;
+        source?: string;
+        reasoning?: string;
+        thinking?: string;
+        wake?: string;
+        fallback?: string;
+        tool?: string;
+        template?: string;
+        light?: string;
+        paused?: string;
+        task?: string;
+        success?: string;
     };
     // (undocumented)
     "automation.schedules.resume": {
@@ -8843,6 +8881,21 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "watchers.triggers.list": {};
     // (undocumented)
+    "watchers.triggers.preview": {
+        name: string;
+        kind?: string;
+        command?: string;
+        match?: string;
+        url?: string;
+        path?: string;
+        every?: string;
+        then?: string;
+        say?: string;
+        deliver?: string;
+        grant?: string;
+        definition?: string;
+    };
+    // (undocumented)
     "watchers.triggers.reset": {
         id: string;
     };
@@ -10114,6 +10167,57 @@ export interface OperatorMethodOutputMap {
                     move: "decide" | "nothing" | "raise-again" | "refresh" | "wait";
                     text: string;
                 })[];
+            };
+            presentation?: {
+                kind: "answer-command-prompt" | "change-files" | "change-setting" | "claim" | "decision" | "fetch" | "hand-off-work" | "mcp-tool" | "other-tool" | "purchase" | "question" | "queued-action" | "report" | "run-command" | "send-message" | "start-agent";
+                mark: "ask" | "cannot-undo" | "question";
+                question: string;
+                place?: {
+                    short: string;
+                    full: string;
+                };
+                subject?: {
+                    kind: "command" | "money" | "paths" | "text" | "urls";
+                    lines: readonly string[];
+                };
+                body?: string;
+                consequence?: {
+                    text: string;
+                    withPlace: string;
+                    tone: "cannot-undo" | "plain";
+                };
+                choices: readonly ({
+                    id: string;
+                    label: string;
+                    key?: string;
+                    default?: boolean;
+                    danger?: boolean;
+                    value?: string;
+                })[];
+                remember: {
+                    offered: boolean;
+                    tiers?: readonly ({
+                        tier: string;
+                        label: string;
+                        detail: string;
+                    })[];
+                    why?: string;
+                };
+                typeToRefuse: boolean;
+                countdown?: {
+                    verb: string;
+                    at: number;
+                };
+                origin?: {
+                    sessionTitle?: string;
+                    by: string;
+                };
+                why: string;
+                details: readonly ({
+                    label: string;
+                    value: string;
+                })[];
+                title: string;
             };
         })[];
     } & {
@@ -12687,6 +12791,13 @@ export interface OperatorMethodOutputMap {
         readonly [key: string]: unknown;
     });
     // (undocumented)
+    "automation.schedules.preview": {
+        summary: string;
+        input: ({} & {
+            readonly [key: string]: JsonValue;
+        });
+    };
+    // (undocumented)
     "automation.schedules.resume": ({
         id: string;
         enabled: boolean;
@@ -15021,7 +15132,15 @@ export interface OperatorMethodOutputMap {
                 cause: string;
                 changed: {
                     text: string;
+                    known: boolean;
                     files: readonly string[];
+                    commands: number;
+                    messages: number;
+                    unknown: number;
+                };
+                attempts?: {
+                    count: number;
+                    times: readonly number[];
                 };
                 next: readonly ({
                     action: "choose-model" | "details" | "other-model" | "retry" | "sign-in" | "start-daemon";
@@ -15176,7 +15295,15 @@ export interface OperatorMethodOutputMap {
                 cause: string;
                 changed: {
                     text: string;
+                    known: boolean;
                     files: readonly string[];
+                    commands: number;
+                    messages: number;
+                    unknown: number;
+                };
+                attempts?: {
+                    count: number;
+                    times: readonly number[];
                 };
                 next: readonly ({
                     action: "choose-model" | "details" | "other-model" | "retry" | "sign-in" | "start-daemon";
@@ -24650,7 +24777,7 @@ export interface OperatorMethodOutputMap {
                 })[];
             };
             presentation?: {
-                kind: "answer-command-prompt" | "change-files" | "change-setting" | "claim" | "decision" | "fetch" | "hand-off-work" | "mcp-tool" | "other-tool" | "purchase" | "question" | "queued-action" | "report" | "run-command" | "start-agent";
+                kind: "answer-command-prompt" | "change-files" | "change-setting" | "claim" | "decision" | "fetch" | "hand-off-work" | "mcp-tool" | "other-tool" | "purchase" | "question" | "queued-action" | "report" | "run-command" | "send-message" | "start-agent";
                 mark: "ask" | "cannot-undo" | "question";
                 question: string;
                 place?: {
@@ -24807,7 +24934,7 @@ export interface OperatorMethodOutputMap {
                 })[];
             };
             presentation?: {
-                kind: "answer-command-prompt" | "change-files" | "change-setting" | "claim" | "decision" | "fetch" | "hand-off-work" | "mcp-tool" | "other-tool" | "purchase" | "question" | "queued-action" | "report" | "run-command" | "start-agent";
+                kind: "answer-command-prompt" | "change-files" | "change-setting" | "claim" | "decision" | "fetch" | "hand-off-work" | "mcp-tool" | "other-tool" | "purchase" | "question" | "queued-action" | "report" | "run-command" | "send-message" | "start-agent";
                 mark: "ask" | "cannot-undo" | "question";
                 question: string;
                 place?: {
@@ -24963,7 +25090,7 @@ export interface OperatorMethodOutputMap {
                 })[];
             };
             presentation?: {
-                kind: "answer-command-prompt" | "change-files" | "change-setting" | "claim" | "decision" | "fetch" | "hand-off-work" | "mcp-tool" | "other-tool" | "purchase" | "question" | "queued-action" | "report" | "run-command" | "start-agent";
+                kind: "answer-command-prompt" | "change-files" | "change-setting" | "claim" | "decision" | "fetch" | "hand-off-work" | "mcp-tool" | "other-tool" | "purchase" | "question" | "queued-action" | "report" | "run-command" | "send-message" | "start-agent";
                 mark: "ask" | "cannot-undo" | "question";
                 question: string;
                 place?: {
@@ -25107,7 +25234,7 @@ export interface OperatorMethodOutputMap {
                 })[];
             };
             presentation?: {
-                kind: "answer-command-prompt" | "change-files" | "change-setting" | "claim" | "decision" | "fetch" | "hand-off-work" | "mcp-tool" | "other-tool" | "purchase" | "question" | "queued-action" | "report" | "run-command" | "start-agent";
+                kind: "answer-command-prompt" | "change-files" | "change-setting" | "claim" | "decision" | "fetch" | "hand-off-work" | "mcp-tool" | "other-tool" | "purchase" | "question" | "queued-action" | "report" | "run-command" | "send-message" | "start-agent";
                 mark: "ask" | "cannot-undo" | "question";
                 question: string;
                 place?: {
@@ -25250,7 +25377,7 @@ export interface OperatorMethodOutputMap {
                 })[];
             };
             presentation?: {
-                kind: "answer-command-prompt" | "change-files" | "change-setting" | "claim" | "decision" | "fetch" | "hand-off-work" | "mcp-tool" | "other-tool" | "purchase" | "question" | "queued-action" | "report" | "run-command" | "start-agent";
+                kind: "answer-command-prompt" | "change-files" | "change-setting" | "claim" | "decision" | "fetch" | "hand-off-work" | "mcp-tool" | "other-tool" | "purchase" | "question" | "queued-action" | "report" | "run-command" | "send-message" | "start-agent";
                 mark: "ask" | "cannot-undo" | "question";
                 question: string;
                 place?: {
@@ -27820,6 +27947,7 @@ export interface OperatorMethodOutputMap {
                 writable: boolean;
             };
         })[];
+        heldForTrust?: readonly string[];
     };
     // (undocumented)
     "mcp.servers.list": {
@@ -27891,6 +28019,7 @@ export interface OperatorMethodOutputMap {
                     writable: boolean;
                 };
             })[];
+            heldForTrust?: readonly string[];
         };
     };
     // (undocumented)
@@ -27936,6 +28065,7 @@ export interface OperatorMethodOutputMap {
                     writable: boolean;
                 };
             })[];
+            heldForTrust?: readonly string[];
         };
     };
     // (undocumented)
@@ -28017,6 +28147,7 @@ export interface OperatorMethodOutputMap {
                     writable: boolean;
                 };
             })[];
+            heldForTrust?: readonly string[];
         };
     };
     // (undocumented)
@@ -28065,6 +28196,7 @@ export interface OperatorMethodOutputMap {
                     writable: boolean;
                 };
             })[];
+            heldForTrust?: readonly string[];
         };
     };
     // (undocumented)
@@ -28113,6 +28245,7 @@ export interface OperatorMethodOutputMap {
                     writable: boolean;
                 };
             })[];
+            heldForTrust?: readonly string[];
         };
     };
     // (undocumented)
@@ -28161,6 +28294,7 @@ export interface OperatorMethodOutputMap {
                     writable: boolean;
                 };
             })[];
+            heldForTrust?: readonly string[];
         };
     };
     // (undocumented)
@@ -28209,6 +28343,7 @@ export interface OperatorMethodOutputMap {
                     writable: boolean;
                 };
             })[];
+            heldForTrust?: readonly string[];
         };
     };
     // (undocumented)
@@ -28255,6 +28390,7 @@ export interface OperatorMethodOutputMap {
                     writable: boolean;
                 };
             })[];
+            heldForTrust?: readonly string[];
         };
     };
     // (undocumented)
@@ -28300,6 +28436,7 @@ export interface OperatorMethodOutputMap {
                     writable: boolean;
                 };
             })[];
+            heldForTrust?: readonly string[];
         };
     };
     // (undocumented)
@@ -36638,6 +36775,15 @@ export interface OperatorMethodOutputMap {
         })[];
     };
     // (undocumented)
+    "watchers.triggers.preview": {
+        summary: string;
+        input: {
+            definition: ({} & {
+                readonly [key: string]: JsonValue;
+            });
+        };
+    };
+    // (undocumented)
     "watchers.triggers.reset": {
         trigger: {
             id: string;
@@ -42929,8 +43075,12 @@ export type TurnEvent =
     providerName?: string | undefined;
     provider?: string | undefined;
     model?: string | undefined;
-    changedFiles?: readonly string[] | undefined;
-    changedUnknown?: boolean | undefined;
+    changes?: {
+        readonly files: readonly string[];
+        readonly commands: number;
+        readonly messages: number;
+        readonly unknown: number;
+    } | undefined;
     fallbackOrderSet?: boolean | undefined;
     fallbackNote?: string | undefined;
     refusal?: 'no-provider' | 'no-model' | 'daemon-unreachable' | 'workspace-not-registered' | undefined;

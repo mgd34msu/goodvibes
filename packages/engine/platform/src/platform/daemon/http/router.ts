@@ -425,7 +425,7 @@ export class DaemonHttpRouter {
         // A channel's inbound message and a GitHub event are the exception: they are taken and saved (the broker's held
         // input, the operation log's owed start) and started after the restart (a refused provider may not deliver again).
         const closed = asset === null ? this.context.workAdmission?.refusalResponse() ?? null : null;
-        const refused = closed !== null && startsWork(req.method) && !this.holdsInboundDelivery(new URL(req.url).pathname) ? closed : null;
+        const refused = closed !== null && startsWork(req.method) && !this.holdsInboundDelivery(new URL(req.url).pathname, req.method) ? closed : null;
         // An error leaves as the route wrote it: its code is the fact a client reads, so nothing is attached for a model to read.
         const response = asset ?? (refused ?? await this.requests.route(req).catch((error: unknown) => {
           if (error instanceof DecisionModelPolicyChangedError) throw error;
@@ -1175,8 +1175,9 @@ export class DaemonHttpRouter {
   }
 
   /** Whether a delivery to this path is saved and held through a self-update's restart instead of refused. */
-  private holdsInboundDelivery(pathname: string): boolean {
-    return pathname === '/webhook/github' || this.context.channelPlugins.getByPath(pathname) !== null;
+  private holdsInboundDelivery(pathname: string, method: string): boolean {
+    // The GitHub delivery is the route that serves it (POST /webhook/github), as the dispatcher above matches it.
+    return (pathname === '/webhook/github' && method === 'POST') || this.context.channelPlugins.getByPath(pathname) !== null;
   }
 
   private async handleGitHubWebhook(req: Request): Promise<Response> {

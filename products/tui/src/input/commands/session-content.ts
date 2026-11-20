@@ -1,4 +1,6 @@
 import { join } from 'path';
+import { createUndoCommands, refuseWhileTurnRuns } from '@goodvibes-jev/engine/terminal-shell/everyday-commands';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
 import { TemplateManager, parseTemplateArgs, type TemplateDeleteResult, type TemplateScope } from '@goodvibes-jev/engine/platform/platform/templates';
@@ -10,69 +12,10 @@ import { dropFileChange, redoLastFileChange, undoLastFileChange } from '@goodvib
 
 export function registerSessionContentCommands(registry: CommandRegistry): void {
   registry.register(contentCommands.titleCommand);
+  registry.register(undoCommands.undo);
+  registry.register(undoCommands.redo);
 
-  registry.register({
-    name: 'undo',
-    aliases: [],
-    description:
-      'Undo last action. /undo rewind reverses the last /rewind. /undo file reverts every file the last write/edit call changed (/undo file drop sets aside an entry a later change blocks). /undo alone removes the last conversation turn',
-    usage: '[rewind|file [drop]]',
-    argsHint: '[rewind|file]',
-    async handler(args, ctx) {
-      if (args[0] === 'rewind') {
-        const result = await undoLastRewind(ctx);
-        ctx.print(result.message);
-        return;
-      }
-      if (args[0] === 'file') {
-        if (args[1] === 'drop') dropFileChange(ctx.workspace.fileUndoManager, 'undo', (text) => ctx.print(text));
-        else undoLastFileChange(ctx.workspace.fileUndoManager, (text) => ctx.print(text));
-        return;
-      }
-      if (ctx.isGenerating?.()) {
-        ctx.print('A turn is still running. Stop it with Esc or let it finish, then /undo.');
-        return;
-      }
-      const success = ctx.session.conversationManager.undo();
-      if (success) {
-        ctx.print('Last turn undone. Use /redo to restore. Tip: /undo file to revert a file write/edit.');
-        ctx.renderRequest();
-      } else {
-        ctx.print('Nothing to undo. Tip: use /undo file to revert the last file write/edit.');
-      }
-    },
-  });
 
-  registry.register({
-    name: 'redo',
-    description:
-      'Redo last undone action. /redo rewind re-applies the last undone /rewind. /redo file re-applies the last reverted file. /redo alone restores a conversation turn',
-    usage: '[rewind|file [drop]]',
-    argsHint: '[rewind|file]',
-    async handler(args, ctx) {
-      if (args[0] === 'rewind') {
-        const result = await redoLastRewind(ctx);
-        ctx.print(result.message);
-        return;
-      }
-      if (args[0] === 'file') {
-        if (args[1] === 'drop') dropFileChange(ctx.workspace.fileUndoManager, 'redo', (text) => ctx.print(text));
-        else redoLastFileChange(ctx.workspace.fileUndoManager, (text) => ctx.print(text));
-        return;
-      }
-      if (ctx.isGenerating?.()) {
-        ctx.print('A turn is still running. Stop it with Esc or let it finish, then /redo.');
-        return;
-      }
-      const success = ctx.session.conversationManager.redo();
-      if (success) {
-        ctx.print('Turn restored. Tip: /redo file to re-apply a reverted file.');
-        ctx.renderRequest();
-      } else {
-        ctx.print('Nothing to redo. Tip: use /redo file to re-apply the last reverted file.');
-      }
-    },
-  });
 
   registry.register(contentCommands.retryCommand);
 
@@ -323,7 +266,29 @@ export const contentCommands = createSessionContentCommands<CommandContext, Reco
   failed: (_action, error) => 'Export failed: ' + summarizeError(error),
   title: (title) => `Conversation title: ${title}`,
   titleSet: (title) => `Title set to: ${title}`,
-  retryDescription: 'Retry the last request while retaining completed work',
   retryRemovesLastTurn: false,
 });
 
+/** `/undo` and `/redo` are single-action commands shared with the other terminal app (terminal-shell/everyday-commands.ts). */
+const undoCommands = createUndoCommands<CommandContext>({
+  async undo(values, ctx) {
+    const print = (text: string) => ctx.print(text);
+    if (values.what === 'file') { undoLastFileChange(ctx.workspace.fileUndoManager, print); return; }
+    if (values.what === 'set-aside') { dropFileChange(ctx.workspace.fileUndoManager, 'undo', print); return; }
+    if (values.what === 'rewind')  return (await undoLastRewind(ctx)).message; 
+    refuseWhileTurnRuns(ctx, '/undo');
+    if (!ctx.session.conversationManager.undo()) throw commandRefusal('There is nothing to undo.', 'To take back the last file write or edit: /undo file');
+    ctx.renderRequest();
+    return 'Last turn undone; /redo brings it back.';
+  },
+  async redo(values, ctx) {
+    const print = (text: string) => ctx.print(text);
+    if (values.what === 'file') { redoLastFileChange(ctx.workspace.fileUndoManager, print); return; }
+    if (values.what === 'set-aside') { dropFileChange(ctx.workspace.fileUndoManager, 'redo', print); return; }
+    if (values.what === 'rewind')  return (await redoLastRewind(ctx)).message; 
+    refuseWhileTurnRuns(ctx, '/redo');
+    if (!ctx.session.conversationManager.redo()) throw commandRefusal('There is nothing to redo.', 'To write a reverted file change again: /redo file');
+    ctx.renderRequest();
+    return 'Turn restored.';
+  },
+});

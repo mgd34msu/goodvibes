@@ -125,6 +125,7 @@ export function createDurabilityServices(input: DurabilityServicesInput): Durabi
   // rebuilt; they get one copy before a schema migration and no daily copy.
   const storeSnapshotScheduler = new StoreSnapshotScheduler({
     stores: [{ name: 'memory store', dbPath: input.memoryDbPath }],
+    ...(input.workAdmitted ? { workAdmitted: input.workAdmitted } : {}),
   });
   storeSnapshotScheduler.start();
 

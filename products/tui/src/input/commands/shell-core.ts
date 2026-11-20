@@ -12,6 +12,7 @@ import {
 } from '../../renderer/compaction-preview.ts';
 import { ensureProviderKeyThenSelect } from '../provider-key-intake.ts';
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { createCompactCommand } from '@goodvibes-jev/engine/terminal-shell/everyday-commands';
 import { helpForCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 
 const coreActions = createShellCoreActions<CommandContext>(
@@ -41,12 +42,9 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
   const navigation = createShellNavigationCommands<CommandContext>({
     shortcutsHidden: false,
     shortcutsFallback: 'Press ? for every command and keyboard shortcut.',
-    quitAliases: [':q', ':wq', 'exit'],
   });
 
   registry.register(coreActions.model);
-
-  registry.register(navigation.commands);
 
   registry.register(navigation.shortcuts);
 
@@ -139,45 +137,7 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
 
   registry.register(coreActions.clear);
 
-  registry.register({
-    name: 'compact',
-    aliases: [],
-    description: 'Summarize conversation to free context window',
-    async handler(_args, ctx) {
-      const messages = ctx.session.conversationManager.getMessagesForLLM();
-      // contextWindow IS reachable from CommandContext, the same
-      // call compactConversation() (runtime-services.ts) already makes to scale
-      // its own behaviour by window size. Previously hardcoded to 0 here, which
-      // silently suppressed buildCompactionPreview()'s capacity-% clause even
-      // though the builder has always supported it.
-      // 0 when the window is unknown: the preview then leaves out the capacity clause.
-      const contextWindow =
-        ctx.provider.providerRegistry.getKnownContextWindowForModel(ctx.provider.providerRegistry.getCurrentModel()) ?? 0;
-      const memStore = ctx.session.sessionMemoryStore;
-      const pinnedMemoryCount = memStore ? memStore.list().length : 0;
-      // Pre-compact preview: honest estimate, clearly labelled.
-      const preview = buildCompactionPreview({ messages, contextWindow, pinnedMemoryCount, trigger: 'manual' });
-      ctx.print(preview);
-      let result: Awaited<ReturnType<typeof compactConversation>>;
-      try {
-        result = await compactConversation(ctx);
-      } catch (error) {
-        if (!(error instanceof CompactBusyError)) throw error;
-        ctx.print(error.message);
-        return;
-      }
-      if (result.kind === 'summarised') {
-        // Post-compact notice: uses real CompactionEvent figures, plus the
-        // quality-score grade line when one was computed.
-        ctx.print(buildCompactionAfterNotice({ event: result.event, pinnedMemoryCount, qualityScore: result.qualityScore }));
-      } else if (result.kind === 'dropped') {
-        ctx.print(`[Context] Dropped the ${result.dropped} oldest message(s) without a summary and kept the last ${result.kept}: this model's context window is too small to summarise them. Their tool results are gone; re-read any file you still need. /session compactions lists it.`);
-      } else {
-        ctx.print(`[Context] Nothing was compacted: ${result.reason}.`);
-      }
-      ctx.renderRequest();
-    },
-  });
+  registry.register(compactCommand);
 
 
   registry.register({
@@ -220,21 +180,41 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
     },
   });
 
-  registry.register({
-    name: 'debug',
-    aliases: [],
-    description: 'Toggle debug mode',
-    handler(_args, ctx) {
-      ctx.session.runtime.debugMode = !ctx.session.runtime.debugMode;
-      ctx.print(`Debug mode: ${ctx.session.runtime.debugMode ? 'ON' : 'OFF'}`);
-      // Honest quiet counter for direct terminal writes the guard intercepted
-      // (routed here instead of spamming the transcript). (item 1a.)
-      const intercepted = ctx.session.runtime.terminalWritesIntercepted ?? 0;
-      if (intercepted > 0) {
-        ctx.print(`Terminal writes intercepted this session: ${intercepted} (details in the activity log)`);
-      }
-    },
-  });
-
   registry.register(coreActions.effort);
 }
+
+/** `/compact` is a single-action command shared with the other terminal app (terminal-shell/everyday-commands.ts). */
+const compactCommand = createCompactCommand<CommandContext>(async (_values, ctx) => {
+  const messages = ctx.session.conversationManager.getMessagesForLLM();
+  // contextWindow IS reachable from CommandContext, the same
+  // call compactConversation() (runtime-services.ts) already makes to scale
+  // its own behaviour by window size. Previously hardcoded to 0 here, which
+  // silently suppressed buildCompactionPreview()'s capacity-% clause even
+  // though the builder has always supported it.
+  // 0 when the window is unknown: the preview then leaves out the capacity clause.
+  const contextWindow =
+    ctx.provider.providerRegistry.getKnownContextWindowForModel(ctx.provider.providerRegistry.getCurrentModel()) ?? 0;
+  const memStore = ctx.session.sessionMemoryStore;
+  const pinnedMemoryCount = memStore ? memStore.list().length : 0;
+  // Pre-compact preview: honest estimate, clearly labelled.
+  const preview = buildCompactionPreview({ messages, contextWindow, pinnedMemoryCount, trigger: 'manual' });
+  ctx.print(preview);
+  let result: Awaited<ReturnType<typeof compactConversation>>;
+  try {
+    result = await compactConversation(ctx);
+  } catch (error) {
+    if (!(error instanceof CompactBusyError)) throw error;
+    ctx.print(error.message);
+    return;
+  }
+  if (result.kind === 'summarised') {
+    // Post-compact notice: uses real CompactionEvent figures, plus the
+    // quality-score grade line when one was computed.
+    ctx.print(buildCompactionAfterNotice({ event: result.event, pinnedMemoryCount, qualityScore: result.qualityScore }));
+  } else if (result.kind === 'dropped') {
+    ctx.print(`[Context] Dropped the ${result.dropped} oldest message(s) without a summary and kept the last ${result.kept}: this model's context window is too small to summarise them. Their tool results are gone; re-read any file you still need. /session compactions lists it.`);
+  } else {
+    ctx.print(`[Context] Nothing was compacted: ${result.reason}.`);
+  }
+  ctx.renderRequest();
+});

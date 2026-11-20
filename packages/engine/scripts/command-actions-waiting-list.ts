@@ -117,7 +117,6 @@ export const COMMAND_ACTIONS_WAITING_LIST: readonly string[] = [
   'subscription',
   'tasks',
   'teamwork',
-  'telegram',
   'template',
   'test',
   'title',

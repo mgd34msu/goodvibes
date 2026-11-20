@@ -235,6 +235,10 @@ export async function processTelegramUpdate(
     }),
   });
   const delegated = await context.delegatedTelegram?.selects(chatId, threadId) ?? false;
+  // A delegated review keeps the third party's text only in this process, so it cannot be held through a restart:
+  // during the hold the update is refused and stays with Telegram (the poller does not move past it; a webhook is resent).
+  const heldByUpdate = delegated ? context.workRefusal?.() ?? null : null;
+  if (heldByUpdate) return heldByUpdate;
   const botUsername = readString(context.configManager.get('surfaces.telegram.botUsername'));
   const botHandle = normalizeBotUsername(botUsername);
   const task = delegated ? '' : extractTelegramTask(message, botUsername);

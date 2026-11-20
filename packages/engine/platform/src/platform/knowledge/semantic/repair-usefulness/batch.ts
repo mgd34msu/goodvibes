@@ -1,6 +1,6 @@
 import { defineBattery, STAKES_BANDS, toJson, yesNo, type JsonValue } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
-import { judge } from '../../../runtime/judge.js';
+import { judgeSome } from '../../../runtime/judge.js';
 import { KnowledgeRepairFactUsefulnessHeldError as Held } from './types.js';
 
 /** One request reads up to this many facts of one source, with the source text sent once. */
@@ -103,7 +103,7 @@ export async function readFactUsefulnessBatches(input: FactUsefulnessBatchInput,
     assertJudgmentInput(state);
     const only = FACT_USEFULNESS_SLOTS.slice(0, facts.length);
     requests += 1;
-    const outcome = await judge({
+    const outcome = await judgeSome({
       site: enrichmentFactUsefulness.name, battery: enrichmentFactUsefulness, only: [...only], state, deadlineMs: FACT_USEFULNESS_DEADLINE_MS,
       ...(signal ? { signal } : {}),
       settle: (readings): readonly ('yes' | 'no' | 'unsettled')[] | null => only.map((name) => {

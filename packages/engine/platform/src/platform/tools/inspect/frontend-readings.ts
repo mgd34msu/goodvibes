@@ -10,7 +10,7 @@
  * `reading: 'unassessed'` or, where the report has no such value, as
  * uncertain with the result's `assessment_note` saying why.
  */
-import { judge } from '../../runtime/judge.js';
+import { judgeSome } from '../../runtime/judge.js';
 import {
   frontendFinding,
   frontendLineView,
@@ -272,13 +272,14 @@ export async function inspectStacking(content: string, file: string, signal?: Ab
  * (a module's nature does not change); an unsure, late or unavailable reading lists it as uncertain.
  */
 async function readServerOnly(module: string, signal?: AbortSignal): Promise<CandidateReading> {
-  const { value } = await judge<typeof frontendFinding.items, CandidateReading>({
+  const { value } = await judgeSome<typeof frontendFinding.items, CandidateReading>({
     site: SITE,
     battery: frontendFinding,
     only: ['server_only'],
     state: { module },
     cache: { key: module, scope: 'process' },
-    settle: ({ server_only: reading }) => reading.verdict === 'yes' ? 'real' : reading.verdict === 'no' ? 'dismissed' : undefined,
+    // An absent reading is unsure: the module is listed as uncertain.
+    settle: ({ server_only: reading }) => reading === undefined ? undefined : reading.verdict === 'yes' ? 'real' : reading.verdict === 'no' ? 'dismissed' : undefined,
     fallback: (why) => why === 'off' ? 'unassessed' : 'uncertain',
     describe: (reading) => `server_only: ${reading}`,
     ...(signal === undefined ? {} : { signal }),

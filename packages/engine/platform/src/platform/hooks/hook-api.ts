@@ -1,4 +1,4 @@
-import { judge } from '../runtime/judge.js';
+import { judgeSome } from '../runtime/judge.js';
 import { rankClassicCatalog } from '../runtime/classic-catalog.js';
 import { hookContractSearch } from './batteries/contract-search.js';
 import type { HookPointContract } from './contracts.js';
@@ -152,7 +152,7 @@ export function createHookApi(options: CreateHookApiOptions): HookApi {
       if (local.length > 0) return local;
       const asked = contracts.map((contract) => contract.pattern).filter((pattern) => pattern in hookContractSearch.items);
       if (asked.length === 0) return [];
-      const { value } = await judge({
+      const { value } = await judgeSome({
         site: HOOK_CONTRACT_SEARCH_SITE,
         battery: hookContractSearch,
         state: { query },

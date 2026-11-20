@@ -4,11 +4,12 @@ import { dirname } from 'node:path';
 import type { ExportMessage } from '@goodvibes-jev/engine/platform/platform/export';
 import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import type { TerminalSlashCommand } from './command-registry.js';
+import { createRetryCommand, createTitleCommand } from './everyday-commands.js';
+import type { CommandActionContext } from './command-actions/types.js';
 import { commandRefusal } from './command-confirmation.js';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
 import { formatTranscript, type TranscriptFormat } from './session-export-format.js';
-interface ContentContext {
+interface ContentContext extends CommandActionContext {
   readonly session: {
     readonly runtime: { readonly model: string; readonly provider: string; readonly sessionId: string };
     readonly conversationManager: {
@@ -35,7 +36,6 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
   readonly failed: (action: string, error: unknown) => string;
   readonly title: (title: string) => string;
   readonly titleSet: (title: string) => string;
-  readonly retryDescription: string;
   readonly retryRemovesLastTurn: boolean;
   /**
    * Redacts the transcript before it becomes a file. Defaults to the platform's
@@ -78,48 +78,22 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
     if (!path) return false;
     try { return statSync(policy.paths(ctx).resolveWorkspacePath(path)).isFile(); } catch { return false; }
   }
-  const titleCommand: TerminalSlashCommand<Context> = {
-    name: 'title',
-    effect: 'session-lifecycle',
-    description: 'Show or set the conversation title',
-    usage: '[text]',
-    argsHint: '[text]',
-    // The title is the rest of the line exactly as typed.
-    rawRest: 0,
-    handler(args, ctx) {
-      if (!args.length)
-        ctx.print(ctx.session.conversationManager.title ? policy.title(ctx.session.conversationManager.title) : 'No title set.');
-      else {
-        ctx.session.conversationManager.title = args.join(' ');
-        ctx.print(policy.titleSet(ctx.session.conversationManager.title));
-        ctx.renderRequest();
-      }
-    },
-  };
-  const retryCommand: TerminalSlashCommand<Context> = {
-    name: 'retry',
-    effect: 'session-lifecycle',
-    aliases: ['r'],
-    description: policy.retryDescription,
-    usage: '[modified text]',
-    argsHint: '[modified text]',
-    // The modified message is sent exactly as typed.
-    rawRest: 0,
-    handler(args, ctx) {
-      const last = ctx.session.conversationManager.getLastUserMessage();
-      if (!last) {
-        throw commandRefusal('No message to retry.');
-      }
-      if (!ctx.submitTurn) {
-        throw commandRefusal('Retry is unavailable here: this surface cannot resubmit a message, so the conversation was left unchanged.');
-      }
-      // Remove the old turn only when the message can be sent again, and send
-      // nothing if it could not be removed (that would duplicate the turn).
-      if (policy.retryRemovesLastTurn && !ctx.session.conversationManager.undo()) {
-        throw commandRefusal('Nothing was retried: the last turn could not be removed, and sending it again would duplicate it. Type the message as a new prompt if you still want an answer.');
-      }
-      ctx.submitTurn(args.length ? args.join(' ') : last);
-    },
-  };
+  const titleCommand = createTitleCommand<Context>(async (values, ctx) => {
+    const text = (values.text ?? '').trim();
+    if (!text) return ctx.session.conversationManager.title ? policy.title(ctx.session.conversationManager.title) : 'This conversation has no title yet.';
+    ctx.session.conversationManager.title = text;
+    ctx.renderRequest();
+    return policy.titleSet(text);
+  });
+  const retryCommand = createRetryCommand<Context>(async (values, ctx) => {
+    const last = ctx.session.conversationManager.getLastUserMessage();
+    if (!last) throw commandRefusal('There is no message to send again.');
+    if (!ctx.submitTurn) throw commandRefusal('This surface cannot send a message again, so the conversation was left unchanged.');
+    // Remove the old turn only when the message can be sent again, and send nothing if it could not be removed (that would duplicate the turn).
+    if (policy.retryRemovesLastTurn && !ctx.session.conversationManager.undo()) {
+      throw commandRefusal('Nothing was sent: the last turn could not be removed, and sending it again would duplicate it. Type the message as a new prompt if you still want an answer.');
+    }
+    ctx.submitTurn(values.message ? values.message : last);
+  });
   return { exportConversation, exportReplaces, titleCommand, retryCommand };
 }

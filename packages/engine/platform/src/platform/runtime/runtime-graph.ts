@@ -675,6 +675,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       processManager,
       unattendedRuns,
       sessionIsLive: (sessionId: string) => sessionBroker.getSession(sessionId) !== null,
+      workAdmitted,
     })
     : undefined;
   if (triggerManager) scope.ownUntilRegistered('trigger manager', async () => { triggerManager.shutdown(); await triggerManager.join(); });
@@ -863,6 +864,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       && !pauseController.isPaused('memory-consolidation')
       && admitExpensiveWork('memory consolidation').allowed,
     snapshotTick: () => storeSnapshotScheduler.tick(),
+    workAdmitted,
     heartbeat: async () => {
       if (runsRoutines(automationManager)) await automationManager.triggerHeartbeat({ source: 'wake-catchup' });
     },

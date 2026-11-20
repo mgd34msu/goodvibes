@@ -341,6 +341,12 @@ export interface SnapshotStoreTarget {
 
 export interface StoreSnapshotSchedulerOptions {
   readonly stores: readonly SnapshotStoreTarget[];
+  /**
+   * Whether new work is admitted (daemon/work-admission.ts). While it is not (a
+   * self-update's restart) no snapshot starts, so none is cut off; a day-old
+   * store is still due (read from the snapshot files) at the next check.
+   */
+  readonly workAdmitted?: (() => boolean) | undefined;
   /** Daily-snapshot retention class limits; bounded by default. */
   readonly retention?: RetentionPolicy | undefined;
   readonly now?: (() => number) | undefined;
@@ -489,6 +495,7 @@ export class StoreSnapshotScheduler {
   /** One sweep: snapshot stores whose newest daily copy is a day old, then prune. */
   async tick(): Promise<void> {
     if (this.stopped) return;
+    if (this.options.workAdmitted?.() === false) { this.scheduleNext(); return; }
     try {
       const now = (this.options.now ?? Date.now)();
       for (const store of this.options.stores) {

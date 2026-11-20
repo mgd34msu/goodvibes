@@ -3003,6 +3003,11 @@
       "types": "./terminal-shell/dist/described-command-kit.d.ts",
       "import": "./terminal-shell/dist/described-command-kit.js"
     },
+    "./terminal-shell/everyday-commands": {
+      "bun": "./terminal-shell/src/everyday-commands.ts",
+      "types": "./terminal-shell/dist/everyday-commands.d.ts",
+      "import": "./terminal-shell/dist/everyday-commands.js"
+    },
     "./terminal-shell/workstream-command": {
       "bun": "./terminal-shell/src/workstream-command.ts",
       "types": "./terminal-shell/dist/workstream-command.d.ts",

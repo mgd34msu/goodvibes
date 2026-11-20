@@ -7,6 +7,7 @@ import { startFreshConversation } from './fresh-conversation.ts';
 import '@goodvibes-jev/engine/platform/platform/utils';
 import '@goodvibes-jev/engine/platform/platform/utils';
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { createCompactCommand, refuseWhileTurnRuns } from '@goodvibes-jev/engine/terminal-shell/everyday-commands';
 import { helpForCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 
 function commandCategory(commandName: string): string {
@@ -145,12 +146,9 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
   const navigation = createShellNavigationCommands<CommandContext>({
     shortcutsHidden: true,
     shortcutsFallback: 'Press ? for every command and keyboard shortcut.',
-    quitAliases: [':q', ':wq'],
   });
 
   registry.register(coreActions.model);
-
-  registry.register(navigation.commands);
 
   registry.register(navigation.shortcuts);
 
@@ -184,28 +182,22 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
 
   registry.register(coreActions.clear);
 
-  registry.register({
-    name: 'compact',
-    effect: 'session-lifecycle',
-    aliases: [],
-    description: 'Summarize conversation to free context window',
-    async handler(_args, ctx) {
-      if (ctx.isGenerating?.()) {
-        ctx.print('A turn is still running. Stop it with Esc or let it finish, then /compact.');
-        return;
-      }
-      ctx.print('Compacting conversation...');
-      const receipt = await compactConversation(ctx);
-      ctx.print(
-        receipt
-          ? `Conversation compacted (${receipt.messagesBefore} to ${receipt.messagesAfter} messages).`
-          : 'Nothing was compacted: the conversation is already short enough or compaction was declined.',
-      );
-      ctx.renderRequest();
-    },
-  });
+  registry.register(compactCommand);
 
   registry.register(navigation.quit);
 
   registry.register(coreActions.effort);
 }
+
+/** `/compact` is a single-action command shared with the other terminal app (terminal-shell/everyday-commands.ts). */
+const compactCommand = createCompactCommand<CommandContext>(async (_values, ctx) => {
+  refuseWhileTurnRuns(ctx, '/compact');
+  ctx.print('Compacting conversation...');
+  const receipt = await compactConversation(ctx);
+  ctx.print(
+    receipt
+      ? `Conversation compacted (${receipt.messagesBefore} to ${receipt.messagesAfter} messages).`
+      : 'Nothing was compacted: the conversation is already short enough or compaction was declined.',
+  );
+  ctx.renderRequest();
+});

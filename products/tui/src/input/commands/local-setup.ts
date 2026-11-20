@@ -26,7 +26,17 @@ import { assertTarget, targetRef, TargetChangedError, type TargetRef } from '@go
 
 /** The bundle file a setup import shows, by the digest of what it holds: the import applies only that content. */
 function setupImportRef(pathArg: string, parsed: unknown): TargetRef<'setup-import'> {
-  return targetRef('setup-import', pathArg, { bundle: parsed }, { bundle: `the bundle in ${pathArg} as shown` });
+  // Each setting is a fact of its own, so a rewritten file is refused naming the settings that differ.
+  const config = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as { config?: unknown }).config : undefined;
+  const settings = config && typeof config === 'object' && !Array.isArray(config) ? config as Record<string, unknown> : {};
+  const rest = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? { ...(parsed as Record<string, unknown>), config: undefined } : parsed;
+  const facts: Record<string, unknown> = { bundle: rest };
+  const shown: Record<string, string> = { bundle: `the rest of ${pathArg}` };
+  for (const [key, value] of Object.entries(settings)) {
+    facts[`setting ${key}`] = value;
+    shown[`setting ${key}`] = JSON.stringify(value)?.slice(0, 80) ?? String(value);
+  }
+  return targetRef('setup-import', pathArg, facts, shown);
 }
 
 type SetupSnapshot = Awaited<ReturnType<typeof buildSetupReviewSnapshot>>;

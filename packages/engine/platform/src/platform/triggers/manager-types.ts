@@ -96,6 +96,11 @@ export interface TriggerManagerOptions {
   readonly daemonBootId?: string | undefined;
   readonly sessionIsLive?: ((sessionId: string) => boolean) | undefined;
   /**
+   * Whether new work is admitted (daemon/work-admission.ts). While it is not (a
+   * self-update's restart) nothing new starts here and what was due stays due.
+   */
+  readonly workAdmitted?: (() => boolean) | undefined;
+  /**
    * Subscribes to `watchers.triggers.enabled`; returns the unsubscribe. With
    * it, turning the setting on starts supervising stored triggers at once.
    */

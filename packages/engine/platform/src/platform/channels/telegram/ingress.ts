@@ -36,6 +36,7 @@ import { looksLikeSecretRef } from '../../config/secret-ref-refusal.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { IngressProcessingHealth, ingressOutcome, type ChannelIngressAlarm } from '../ingress-alarm.js';
+import { isAdmissionRefusal, WORK_ADMISSION_RECHECK_MS } from '../../daemon/work-admission.js';
 import { TelegramApiError, TelegramBotApi, TelegramUpdateResponseError, type TelegramBotIdentity, type TelegramUpdate } from './api.js';
 import { channelCredentials } from '../credential-holder.js';
 import { TelegramPollingReceiveProgress, TelegramReceiveCoverageError, type TelegramReceiveScope } from './receive-progress.js';
@@ -1164,6 +1165,14 @@ export class TelegramIngressSupervisor {
             botId: api.botId,
             ...(sourceAccount ? { acquireSourceAccount: sourceAccount.acquire } : {}),
           });
+          // The daemon is restarting into an update and could not keep this update (a delegated review): it is not
+          // an attempt; the poller waits, and a stop leaves the offset before it so the next process fetches it again.
+          if (isAdmissionRefusal(response) && updateId !== null) {
+            attempt -= 1;
+            await this.delay(WORK_ADMISSION_RECHECK_MS);
+            if (this.stopped) return;
+            continue;
+          }
           const outcome = ingressOutcome(response);
           if (outcome === 'failed' && updateId !== null && !lastAttempt) {
             const dictated = Number(response.headers.get('retry-after'));

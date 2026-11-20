@@ -157,6 +157,8 @@ const TIME_WHY = 'a time such as 90s, 30m, 2h or 7d (at most 24 days)';
 const OWNER_DECIDES = { reason: 'it decides what happens to messages sent to the owner\'s Telegram chat', instead: '/telegram list shows what waits, for the owner to decide' };
 
 let policyOf: TelegramIntakeCommandPolicy<unknown> | undefined;
+/** The daemon takes a message by its full reference and a chat with its retention choices, which the terminal reads from the list it shows. */
+const BY_REFERENCE = { terminalOnly: 'the daemon takes the message\'s full reference, which the terminal reads from the list it shows' } as const;
 
 type Verbs = Pick<DaemonVerbCaller, 'probe' | 'invoke'>;
 function verbsOf(context: unknown): Verbs {
@@ -269,7 +271,7 @@ export function registerTelegramIntakeCommand<Ctx extends TelegramIntakeCommandC
         ],
         sentence: 'Every message in chat {chat} on {bot} waits for your decision instead of being answered, for {for} or until you change it.', done: '',
         touches: 'another-machine', lasts: 'kept', risk: 'none', ownerOnly: OWNER_DECIDES, undoneBy: 'release',
-        operator: { method: 'inbound.telegram.configure', fields: { chatId: 'chat', accountId: 'bot' } },
+        operator: BY_REFERENCE,
         example: { chat: '-1001234', bot: 'support-bot' },
         async run(values, context) {
           requireOwner(context, 'configure');
@@ -298,7 +300,7 @@ export function registerTelegramIntakeCommand<Ctx extends TelegramIntakeCommandC
         ],
         sentence: '{message} goes into your review queue; nothing in it is run.', done: '',
         touches: 'another-machine', lasts: 'not-a-change', risk: 'none', ownerOnly: OWNER_DECIDES,
-        operator: { method: 'inbound.telegram.decide', fields: { approvalId: 'message' } },
+        operator: BY_REFERENCE,
         example: { message: '3f9a1c2e' },
         async run(values, context) {
           requireOwner(context, 'approve');
@@ -312,7 +314,7 @@ export function registerTelegramIntakeCommand<Ctx extends TelegramIntakeCommandC
         id: 'deny', label: 'Refuse a waiting message', word: 'deny', inputs: [WAITING_MESSAGE],
         sentence: '{message} is refused; its original is released and nothing in it is run.', done: '',
         touches: 'another-machine', lasts: 'not-a-change', risk: 'none', ownerOnly: OWNER_DECIDES,
-        operator: { method: 'inbound.telegram.decide', fields: { approvalId: 'message' } },
+        operator: BY_REFERENCE,
         example: { message: '3f9a1c2e' },
         async run(values, context) {
           requireOwner(context, 'deny');
@@ -322,14 +324,14 @@ export function registerTelegramIntakeCommand<Ctx extends TelegramIntakeCommandC
       readAction<Ctx>({
         id: 'status', label: 'See where a message stands', word: 'status', inputs: [ANY_MESSAGE],
         sentence: 'Shows whether {message} waits, is in review or was read, and whether its original is still kept.', example: { message: '3f9a1c2e' },
-        operator: { method: 'inbound.telegram.status', fields: { approvalId: 'message' } },
+        operator: BY_REFERENCE,
         async run(values, context) { return await showMessage(context, values, 'status'); },
       }),
       {
         id: 'read', label: 'Read an accepted message', word: 'read', inputs: [ANY_MESSAGE],
         sentence: 'Shows the original of {message} and marks its review read.', done: '',
         touches: 'another-machine', lasts: 'not-a-change', risk: 'none', ownerOnly: OWNER_DECIDES,
-        operator: { method: 'inbound.telegram.read', fields: { approvalId: 'message' } },
+        operator: BY_REFERENCE,
         example: { message: '3f9a1c2e' },
         async run(values, context) {
           requireOwner(context, 'read');
@@ -340,7 +342,7 @@ export function registerTelegramIntakeCommand<Ctx extends TelegramIntakeCommandC
         id: 'cancel', label: 'Close a review', word: 'cancel', inputs: [ANY_MESSAGE],
         sentence: '{message} leaves the queue and its original is released.', done: '',
         touches: 'another-machine', lasts: 'not-a-change', risk: 'cannot-be-undone', ownerOnly: OWNER_DECIDES,
-        operator: { method: 'inbound.telegram.cancel', fields: { approvalId: 'message' } },
+        operator: BY_REFERENCE,
         example: { message: '3f9a1c2e' },
         async run(values, context) {
           requireOwner(context, 'cancel');
@@ -353,7 +355,7 @@ export function registerTelegramIntakeCommand<Ctx extends TelegramIntakeCommandC
         inputs: [listInput({ id: 'configuration', label: 'Configuration', help: 'The configuration shown when you held the chat', list: CONFIGURATIONS, other: 'a configuration id shown when the chat was held' })],
         sentence: 'No new message is captured under {configuration}; the chat stays held until you hand it back.', done: '',
         touches: 'another-machine', lasts: 'kept', risk: 'cannot-be-undone', ownerOnly: OWNER_DECIDES,
-        operator: { method: 'inbound.telegram.revoke', fields: { configurationId: 'configuration' } },
+        operator: BY_REFERENCE,
         example: { configuration: 'telegram-config-1' },
         async run(values, context) {
           requireOwner(context, 'revoke');
@@ -365,7 +367,7 @@ export function registerTelegramIntakeCommand<Ctx extends TelegramIntakeCommandC
         inputs: [{ ...CHAT, help: 'The chat id (chatId/threadId for a thread), or the configuration id shown when you held it', freeTextReason: 'a chat id or configuration id' }],
         sentence: 'Chat {chat} is answered normally again, until you change it.', done: '',
         touches: 'another-machine', lasts: 'kept', risk: 'none', ownerOnly: OWNER_DECIDES, undoneBy: 'configure',
-        operator: { method: 'inbound.telegram.release', fields: { chatId: 'chat' } },
+        operator: BY_REFERENCE,
         example: { chat: '-1001234' },
         async run(values, context) {
           requireOwner(context, 'release');

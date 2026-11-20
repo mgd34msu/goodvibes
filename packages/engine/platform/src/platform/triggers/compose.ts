@@ -27,6 +27,8 @@ export interface TriggerSupervisorDeps {
   readonly unattendedRuns?: UnattendedRuns | undefined;
   /** False when the session that created a trigger is gone; such triggers are reaped. */
   readonly sessionIsLive?: ((sessionId: string) => boolean) | undefined;
+  /** Whether new work is admitted (daemon/work-admission.ts); no action fires while it is not. */
+  readonly workAdmitted?: (() => boolean) | undefined;
 }
 
 /** The live `watchers.triggers.*` settings. */
@@ -75,6 +77,7 @@ export function createTriggerSupervisor(deps: TriggerSupervisorDeps): TriggerMan
     }),
     probeTools,
     ...(deps.sessionIsLive ? { sessionIsLive: deps.sessionIsLive } : {}),
+    ...(deps.workAdmitted ? { workAdmitted: deps.workAdmitted } : {}),
     watchEnabled: (onChange) => configManager.subscribe('watchers.triggers.enabled', (enabled) => { onChange(enabled === true); }),
   });
   return manager;

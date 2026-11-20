@@ -93,7 +93,7 @@ interface PendingNtfyChatReply {
 
 interface DaemonSurfaceActionContext {
   /** Whether the daemon takes new work (work-admission.ts): a message that arrives while it does not is held for after the restart. */
-  readonly workAdmission?: Pick<import('./work-admission.js').DaemonWorkAdmission, 'open'> | undefined;
+  readonly workAdmission?: Pick<import('./work-admission.js').DaemonWorkAdmission, 'open' | 'refusalResponse'> | undefined;
   readonly telegramSourceAccounts?: import('../channels/telegram/source-account.js').TelegramSourceAccountReader | undefined;
   readonly delegatedTelegram?: import('./delegated-telegram-intake.js').DelegatedTelegramIntake | undefined;
   readonly serviceRegistry: ServiceRegistry;
@@ -311,6 +311,7 @@ export class DaemonSurfaceActionHelper {
       delegatedTelegram: this.context.delegatedTelegram,
       ...(this.context.deliverSurfaceNotice ? { deliverSurfaceNotice: this.context.deliverSurfaceNotice } : {}),
       hasPaymentReplyWindow: () => this.paymentReplies.pending > 0,
+      workRefusal: () => this.context.workAdmission?.refusalResponse() ?? null,
       serviceRegistry: this.context.serviceRegistry,
       secretsManager: this.context.secretsManager,
       configManager: this.context.configManager,

@@ -16,7 +16,7 @@
  */
 import type { JsonValue } from '@goodvibes-jev/judgment';
 import { inboundMessage } from './batteries/inbound-message.js';
-import { judge } from '../runtime/judge.js';
+import { judgeSome } from '../runtime/judge.js';
 import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { maskDigits } from '../security/batteries/card-talk.js';
 import { findCardNumberShapes } from '../security/card-shapes.js';
@@ -129,7 +129,7 @@ export async function readInboundMessage(questions: InboundQuestions, options: {
     ...(questions.proposal !== undefined ? { proposal: snapshotJudgmentInput({ task: questions.proposal.task, summary: questions.proposal.summary }) as JsonValue } : {}),
     ...(questions.approval !== undefined ? { approval: questions.approval } : {}),
   };
-  const outcome = await withConfiguredDecisionModelPolicy(() => judge({
+  const outcome = await withConfiguredDecisionModelPolicy(() => judgeSome({
     site: SITE,
     battery: inboundMessage,
     state,

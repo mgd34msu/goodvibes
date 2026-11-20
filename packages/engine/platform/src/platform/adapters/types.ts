@@ -95,6 +95,13 @@ export type TrySpawnAgentFn = (
 ) => TrySpawnAgentResult | Promise<TrySpawnAgentResult>;
 
 export interface SurfaceAdapterContext {
+  /**
+   * The daemon's "not taking new work" refusal while a self-update's restart
+   * holds admission (daemon/work-admission.ts), else null. A path that cannot
+   * keep its message through the restart (delegated Telegram review, whose
+   * source text never leaves the process) answers it, so the provider keeps the message.
+   */
+  readonly workRefusal?: (() => Response | null) | undefined;
   /** Avoid provider identity I/O for ordinary messages without payment waits. */
   readonly hasPaymentReplyWindow?: (() => boolean) | undefined;
   /** Explicit daemon-owned selected lane; absence preserves existing Telegram behavior. */

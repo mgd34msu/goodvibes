@@ -63,6 +63,12 @@ export interface MemoryConsolidationSchedulerOptions {
   readonly checkIntervalMs?: number | undefined;
   /** Optional receipt sink invoked after every run (in addition to the log + ring). */
   readonly onReceipt?: ((receipt: MemoryConsolidationRunReceipt) => void) | undefined;
+  /**
+   * Whether new work is admitted (daemon/work-admission.ts). While it is not (a
+   * self-update's restart) no pass starts and the last-run time is not moved,
+   * so a pass that was due runs after the restart (its cursor is on disk).
+   */
+  readonly workAdmitted?: (() => boolean) | undefined;
 }
 
 export class MemoryConsolidationScheduler {
@@ -169,6 +175,7 @@ export class MemoryConsolidationScheduler {
       if (this.lastRunAt === null) this.lastRunAt = Math.min(now, readMemoryConsolidationCursor(this.options.memoryRegistry)?.at ?? 0);
       const config = resolveMemoryConsolidationConfig(this.options.configSource);
       if (!config.enabled) return;
+      if (this.options.workAdmitted?.() === false) return;
 
       const idleNow = this.options.isIdle();
       if (idleNow && this.idleSince === null) this.idleSince = now;

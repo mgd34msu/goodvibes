@@ -1,5 +1,5 @@
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
-import { judge } from '../../../runtime/judge.js';
+import { judgeSome } from '../../../runtime/judge.js';
 import { knowledgeTerms } from '../../passages.js';
 import { ANSWER_EXCERPT_SLOTS, answerExcerptSelection, answerExcerptState, type AnswerExcerptReadingSource } from './battery.js';
 import { answerExcerptSpans } from './spans.js';
@@ -70,7 +70,7 @@ export async function readAnswerExcerpts(input: {
   const state = answerExcerptState({ query: input.query, source: input.source, context: input.context, passages: shortlist });
   assertJudgmentInput(state);
   const slots = ANSWER_EXCERPT_SLOTS.slice(0, shortlist.length);
-  const outcome = await judge({
+  const outcome = await judgeSome({
     site: answerExcerptSelection.name, battery: answerExcerptSelection, only: slots, state,
     ...(input.signal ? { signal: input.signal } : {}),
     settle: (readings): readonly number[] | null | undefined => {

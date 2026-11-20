@@ -58,6 +58,7 @@ import type {
 } from './types.js';
 import { validateDefinition } from './validation.js';
 import { retentionFrom, TriggerDisabledError, type TriggerManagerConfig, type TriggerManagerOptions } from './manager-types.js';
+import { WORK_ADMISSION_RECHECK_MS } from '../daemon/work-admission.js';
 
 export * from './manager-types.js';
 
@@ -835,6 +836,15 @@ export class TriggerManager {
     this.requireEnabled('fire a trigger');
     const record = this.records.get(id);
     if (!record) return false;
+    // The daemon takes no new work (a self-update's restart): nothing fires. The edge or dedup mark this firing
+    // took is given back (a condition still true fires after the restart) and a stream batch stays owed.
+    if (this.options.workAdmitted?.() === false) {
+      if (rollback && record.ruleState === rollback.applied) {
+        this.records.set(id, { ...record, ruleState: rollback.restore, updatedAt: this.now() });
+        this.persist(id);
+      }
+      return false;
+    }
     const action = record.definition.action;
     const now = this.now();
     let result: string;
@@ -1050,6 +1060,13 @@ export class TriggerManager {
     const record = this.records.get(id);
     if (!record || record.state === 'fired' || record.state === 'cancelled' || record.state === 'firing') return;
     this.requireEnabled('fire an on-exit trigger');
+    // The daemon takes no new work (a self-update's restart): the exit is saved as owed, without a strike,
+    // and delivered by the supervision pass once work is admitted again (after the restart).
+    if (this.options.workAdmitted?.() === false) {
+      this.records.set(id, { ...record, state: 'backoff', pendingExit: termination, nextCheckAt: now + WORK_ADMISSION_RECHECK_MS, updatedAt: now });
+      this.persist(id);
+      return;
+    }
     const retry = record.pendingExit !== undefined;
     this.records.set(id, { ...record, state: 'firing', pendingExit: termination, lastError: undefined, updatedAt: now,
       runs: [...record.runs, { at: now, outcome: 'checked', detail: retry ? 'delivering the on-exit action again' : `process ${termination.state} (${termination.reason}); delivering its action`, termination }],

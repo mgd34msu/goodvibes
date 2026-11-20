@@ -1,4 +1,4 @@
-import { judge } from '../runtime/judge.js';
+import { judgeSome } from '../runtime/judge.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { ENTITY_ALIAS_SLOTS, entityAlias } from './batteries/entity-alias.js';
@@ -128,7 +128,7 @@ export async function readKnowledgeEntityAliases(
       throw error;
     }
     const slots = ENTITY_ALIAS_SLOTS.slice(0, candidates.length);
-    const outcome = await judge({
+    const outcome = await judgeSome({
       site: SITE, battery: entityAlias, only: slots,
       state: { entity, candidates, evidence },
       ...(signal ? { signal } : {}),

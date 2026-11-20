@@ -30,6 +30,8 @@ export interface IdlePowerServicesDeps {
   /** The store a turn's memory use is counted on (consolidation's decay reads the counters); absent: `memoryRegistry`. */
   readonly usageRegistry?: MemoryRegistry | undefined;
   readonly runtimeBus: RuntimeEventBus;
+  /** Whether new work is admitted (daemon/work-admission.ts); no consolidation pass starts while it is not. */
+  readonly workAdmitted?: (() => boolean) | undefined;
   /** True when no session is busy, the consolidation scheduler's idle gate. */
   readonly isIdle: () => boolean;
   /** Sleep-edge checkpoint + a wake catch-up tick (store snapshots). */
@@ -111,6 +113,7 @@ export function wireIdlePowerAndLiveTurn(deps: IdlePowerServicesDeps): IdlePower
     memoryRegistry: deps.memoryRegistry,
     configSource: deps.configManager,
     isIdle: deps.isIdle,
+    ...(deps.workAdmitted ? { workAdmitted: deps.workAdmitted } : {}),
     onReceipt: deps.onConsolidationReceipt ?? ((receipt) => {
       const text = formatConsolidationReceipt(receipt);
       if (text) consolidationReceiptStore.notify(`memory-consolidation:${receipt.runId}`, text);

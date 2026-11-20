@@ -1,4 +1,7 @@
 import type { TerminalSlashCommand } from './command-registry.js';
+import { defineCommand, type DescribedCommand } from './command-actions/define.js';
+import type { CommandActionContext } from './command-actions/types.js';
+import { doAction } from './described-command-kit.js';
 export interface BasicShellCommandContext {
   readonly print: (message: string) => void;
   readonly pasteFromClipboard?: (() => { readonly pasted: boolean }) | undefined;
@@ -29,32 +32,23 @@ export function createBasicShellCommands<Context extends BasicShellCommandContex
   };
 }
 
+/**
+ * `/shortcuts` and `/quit`. `/quit` is described once (command-actions/): one
+ * action, the same in both terminal apps. A bare `:q` or `:wq` typed in the
+ * composer still closes the program (feed-token-routes.ts); those are keys,
+ * not names of this command. The command palette is `/help` (and `?`, Ctrl+P).
+ */
 export function createShellNavigationCommands<
-  Context extends {
+  Context extends CommandActionContext & {
     print(text: string): void;
     exit(): void;
-    readonly openCommandPalette?: (() => void) | undefined;
     readonly openShortcutsOverlay?: (() => void) | undefined;
   },
 >(policy: {
   readonly shortcutsHidden: boolean;
   readonly shortcutsFallback: string;
-  readonly quitAliases: string[];
-}): { commands: TerminalSlashCommand<Context>; shortcuts: TerminalSlashCommand<Context>; quit: TerminalSlashCommand<Context> } {
+}): { shortcuts: TerminalSlashCommand<Context>; quit: DescribedCommand<Context> } {
   return {
-    commands: {
-      name: 'commands',
-      effect: 'ui-navigation',
-      aliases: ['cmds'],
-      description: 'Open help: every command and keyboard shortcut in one searchable list (the same list as ? and /help)',
-      handler(_args, context) {
-        if (context.openCommandPalette) {
-          context.openCommandPalette();
-          return;
-        }
-        context.print('Use /help <command> for one command\'s actions and lines.');
-      },
-    },
     shortcuts: {
       name: 'shortcuts',
       effect: 'ui-navigation',
@@ -69,14 +63,19 @@ export function createShellNavigationCommands<
         context.print(policy.shortcutsFallback);
       },
     },
-    quit: {
+    quit: defineCommand<Context>({
       name: 'quit',
-      effect: 'session-lifecycle',
-      aliases: policy.quitAliases,
-      description: 'Exit the application',
-      handler(_args, context) {
-        context.exit();
-      },
-    },
+      title: 'Quit',
+      summary: 'Close this program',
+      group: 'Shell',
+      actions: [
+        doAction<Context>({
+          id: 'quit', label: 'Close this program', word: '',
+          sentence: 'This program closes; work the daemon runs goes on without it.',
+          ownerOnly: { reason: 'it closes the program you are using', instead: 'Say that the work is done; the owner closes the program.' },
+          async run(_values, context) { context.exit(); },
+        }),
+      ],
+    }),
   };
 }

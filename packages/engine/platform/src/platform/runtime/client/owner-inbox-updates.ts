@@ -285,11 +285,14 @@ export function withAnswerDelivery(inbox: AnswerDeliveryPort, options: AnswerDel
     async find(id) {
       const item = await inbox.find(id);
       if (item && item.status !== 'open') {
-        // The model read the answer itself; it is taken, and it is not told a second time.
+        // The model read the answer itself, in this tool result: it is taken and delivered, and it is not told a second time.
         forgetRemote(item.id);
         const session = sessionId();
         const mine = isAskedBySession(item, session, fileOf(session));
-        if (item.status === 'answered' && mine && held(item.id) && home.claim(item.id)) forgetOwnerQuestion(item.id);
+        if (item.status === 'answered' && mine && held(item.id) && home.take(item.id)) {
+          home.confirmDelivered([item.id]);
+          forgetOwnerQuestion(item.id);
+        }
       }
       return item;
     },

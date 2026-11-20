@@ -660,7 +660,7 @@ The commands listed in the table under "Commands that exist in both but behave d
 `/work [daemon-project-id] | start|status|cancel|resume <work-id> | submit-file <JSON-path> | submission-status | submission-retry | submission-discard | intake-status | intake-retry | intake-resume | intake-cancel` works with native work on the connected host.
 Bare `/work` (optionally naming a project) shows native work, intent, attention, evidence and history, read only.
 `/work submit-file <JSON-path>` submits original owner source from a file; `submission-status`, `submission-retry` and `submission-discard` follow up on it.
-`/work intake-status|intake-retry|intake-resume|intake-cancel` inspect or move forward a captured conversation input (the same as the `run --intake-*` flags).
+`/work intake-status|intake-retry|intake-resume|intake-cancel` inspect or move forward a captured conversation input (the same as the `run --intake-*` flags). A message whose intake did not answer (it may have been recorded) is not counted as sent and is not sent again on its own: the Agent says `Your message may have been sent`, keeps the text in the composer (a message from the phone or a plan is kept aside instead of being retried every few seconds), and `/work intake-status` tells whether it arrived before it is sent again.
 `/work start|status|cancel|resume <work-id>` acts on one native attempt.
 
 `/workplan` is the Agent's local to-do list (the model's `agent_work_plan` tool keeps the same list); it records items and their status and runs nothing.

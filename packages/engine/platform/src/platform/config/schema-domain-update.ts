@@ -25,6 +25,7 @@ export interface UpdateConfig {
   auto: boolean;
   autoUpdateAtLaunch: boolean;
   launchCheckTimeoutMs: number;
+  applyTimeoutMs: number;
   intervalMinutes: number;
   firstCheckSeconds: number;
   releasesUrl: string;
@@ -38,6 +39,7 @@ export const updateConfigDefaults = {
     auto: true,
     autoUpdateAtLaunch: true,
     launchCheckTimeoutMs: 2500,
+    applyTimeoutMs: 45_000,
     intervalMinutes: 60,
     firstCheckSeconds: 30,
     releasesUrl: DAEMON_RELEASES_LATEST_URL,
@@ -66,6 +68,13 @@ export const updateConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     description: 'Maximum milliseconds spent checking for a terminal update at launch; the installed version starts if the check cannot complete',
     ...intRange(250, 30_000),
+  },
+  {
+    key: 'update.applyTimeoutMs',
+    label: 'Longest the start-up update may take (ms)',
+    type: 'number',
+    description: 'Maximum milliseconds the terminal app and the Agent spend downloading, verifying and swapping in a new release at launch. Past it, an update that has not started replacing files is cancelled and tried at the next launch; one already replacing files finishes in the background and says so when it is done',
+    ...intRange(5_000, 300_000),
   },
   {
     key: 'update.intervalMinutes',

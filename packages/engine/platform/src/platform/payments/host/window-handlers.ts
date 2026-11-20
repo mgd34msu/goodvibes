@@ -62,7 +62,7 @@ export function purchaseWindowStatusHandler(deps: PaymentWindowHandlerDeps, oper
 
 /** Explicit owner choices have no model interpretation step. Transport-created
  * pairing authority, live scopes and exact window ownership still decide in code. */
-export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, action: 'approve' | 'deny' | 'cancel', operations?: Pick<CheckoutOperations, 'cancel'>): TypedHandler<unknown, unknown> {
+export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, action: 'approve' | 'deny' | 'cancel', operations?: Pick<CheckoutOperations, 'cancel'> & Partial<Pick<CheckoutOperations, 'recordOwnerStop'>>): TypedHandler<unknown, unknown> {
   return async ({ body, context }) => {
     assertConfirmed(body, context);
     const input = record(body);
@@ -86,7 +86,18 @@ export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, acti
           return operations.cancel(purchaseId, operationId);
         }
         if (!replies || windowId === undefined) throw unavailable();
-        return replies.answer({ purchaseId, windowId, action });
+        // Save, then acknowledge: an owner's "no" is on the purchase's record
+        // before it is reported accepted, so a restart cannot resume the window
+        // and buy on silence. A record that cannot be written refuses the answer.
+        const stop = action !== 'approve' && replies.inspect(purchaseId).some(window => window.windowId === windowId)
+          ? operations?.recordOwnerStop?.(purchaseId) ?? null : null;
+        try {
+          return replies.answer({ purchaseId, windowId, action });
+        } catch (error) {
+          // The record already says the owner stopped it: the purchase stops, never proceeds on silence.
+          stop?.abort();
+          throw error;
+        }
       });
     } catch (error) {
       if (error instanceof HandlerError) throw error;

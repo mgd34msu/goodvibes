@@ -1,26 +1,9 @@
-import { createAuthBundleHandler } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
-import { createAuthReviewHandler } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
-import { existsSync } from 'node:fs';
+import { createAuthCommand } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
 import 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import '@goodvibes-jev/engine/platform/platform/config';
 import '@/runtime/index.ts';
 import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
-import { requireSecretsManager, requireServiceRegistry, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
-import { commandRefusal, stripYesFlag } from './confirmation.ts';
-
-/**
- * `/auth bundle export <path>` over an existing file replaces what it holds,
- * for the owner and for a model-run command alike, so the registry asks once
- * first; a new file is written at once.
- */
-function authBundleExportConfirmation(args: readonly string[], resolvePath: (path: string) => string) {
-  const words = args.filter((word) => word !== '--yes');
-  if (words[0] !== 'bundle' || words[1] !== 'export' || !words[2]) return undefined;
-  const target = resolvePath(words[2]);
-  if (!existsSync(target)) return undefined;
-  return { title: `Replace ${target}?`, detail: `${target} already exists; the auth review bundle replaces it, and what it holds now cannot be recovered.`, confirmLabel: 'Replace' };
-}
 
 interface AuthReviewBundle {
   readonly version: 1;
@@ -42,63 +25,8 @@ function inspectAuthBundle(bundle: AuthReviewBundle): string {
   ].join('\n');
 }
 
-export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'auth',
-    effect: 'mixed',
-    description: 'Review provider auth posture and export redacted auth review bundles',
-    firstScreen: false,
-    usage: '[review|show <provider>|repair <provider>|bundle export <path>|bundle inspect <path>]',
-    confirm: (args, ctx) => authBundleExportConfirmation(args, (path) => requireShellPaths(ctx).resolveWorkspacePath(path)),
-    // Login and local-auth lines are refused here, but a password typed into one must still never reach the input history.
-    secretArgs: { subcommands: { login: [4], 'local add-user': [3], 'local rotate-password': [3], 'local revoke-session': [2] } },
-    async handler(args, ctx) {
-      const parsed = stripYesFlag(args);
-      const commandArgs = [...parsed.rest];
-      const sub = commandArgs[0] ?? 'review';
-      if (sub === 'local') {
-        ctx.print(
-          [
-            'Connected-host auth management is outside GoodVibes Agent.',
-            'Agent connects to a GoodVibes host owned outside this package and does not create, delete, rotate, revoke, or clear connected-host auth users, sessions, or bootstrap credentials.',
-            'Use the owning GoodVibes host for connected-host auth administration.',
-            'Agent auth commands available here: /auth review, /auth show <provider>, /auth repair <provider>, /auth bundle export <path>, /auth bundle inspect <path>.',
-          ].join('\n'),
-        );
-        return;
-      }
-      if (sub === 'login') {
-        ctx.print(
-          [
-            'Connected-host login is outside GoodVibes Agent.',
-            'Agent does not create, exchange, store, rotate, revoke, or clear connected-host sessions.',
-            'Use the owning GoodVibes host for connected-host auth administration.',
-          ].join('\n'),
-        );
-        return;
-      }
-
-      const shellPaths = requireShellPaths(ctx);
-      const subscriptions = requireSubscriptionManager(ctx);
-      const serviceRegistry = requireServiceRegistry(ctx);
-      const secretsManager = requireSecretsManager(ctx);
-      if (await handleAuthReview(commandArgs, ctx, { serviceRegistry, subscriptionManager: subscriptions, secretsManager })) return;
-
-      if (
-        await handleAuthBundle(commandArgs, ctx, {
-          secretsManager,
-          subscriptions,
-          resolvePath: (path) => shellPaths.resolveWorkspacePath(path),
-        })
-      )
-        return;
-      throw commandRefusal('Usage: /auth [review|show <provider>|bundle export <path>|bundle inspect <path>]');
-    },
-  });
-}
-
-const handleAuthReview = createAuthReviewHandler<CommandContext>({
-  reportFailure: true,
+/** `/auth` is one description shared with the other terminal app (terminal-shell/auth-review-command.ts). */
+const authCommand = createAuthCommand<CommandContext, AuthReviewBundle>({
   review: (snapshot, builtinProviders) => [
     'Auth Review',
     '  connected host auth managed outside goodvibes-agent',
@@ -149,10 +77,10 @@ const handleAuthReview = createAuthReviewHandler<CommandContext>({
       ? ['  next', ...inspection.nextActions.map((action) => `    ${action}`)]
       : ['  No active repair actions suggested.']),
   ],
-});
-
-const handleAuthBundle = createAuthBundleHandler<CommandContext, AuthReviewBundle>({
-  reportReadFailure: true,
   build: (base) => ({ ...base, externalRuntimeAuth: 'managed-outside-agent' }),
   inspect: (value) => inspectAuthBundle(value as AuthReviewBundle),
 });
+
+export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry): void {
+  registry.register(authCommand);
+}

@@ -8,6 +8,7 @@ import { checkReleaseUpdate, prepareReleaseUpdate, requireBinaryUpdateInstall, c
   type ReleaseUpdateCheck, type SuiteUpdateConfigurationSource,
 } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
 import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../../runtime/workspace-update-policy.ts';
+import { recordSwapFailure, type UpdateSwapProgress } from '@goodvibes-jev/engine/terminal-shell/launch-auto-update';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
 import { requireShellPaths } from './runtime-services.ts';
@@ -34,6 +35,8 @@ export interface ApplyUpdateOptions {
   readonly signal?: AbortSignal | undefined;
   /** Original runtime/idle ownership, rechecked by the shared updater before effects. */
   readonly assertCurrent?: (() => void) | undefined;
+  /** Lets a launch budget tell a cancelled update from one whose swap had begun (terminal-shell/launch-auto-update.ts). */
+  readonly progress?: UpdateSwapProgress | undefined;
 }
 function assertOwner(check: (() => void) | undefined): void {
   assertSynchronousJudgmentGuard(check, () => new Error('Agent update ownership must complete synchronously'));
@@ -43,25 +46,35 @@ function assertOwner(check: (() => void) | undefined): void {
 export async function applyUpdate(options: ApplyUpdateOptions): Promise<SuiteUpdateResult | undefined> {
   options = { ...options, io: captureUpdateFileIo(options.io ?? realUpdateFileIo) };
   const selected = retainSuiteUpdateConfiguration(options.configManager);
+  const progress = options.progress;
   const current = () => { options.signal?.throwIfAborted(); selected.assertCurrent(); assertOwner(options.assertCurrent); selected.assertCurrent(); options.signal?.throwIfAborted(); };
   current();
   const prepared = await prepareReleaseUpdate(options, {
     latestUrl: REPO_RELEASES_LATEST_URL, downloadBase: releaseDownloadBaseUrl,
     asset: resolveAgentBinaryAssetName, fallback: fallbackUpdateCommand,
     unsupportedSuffix: '', assertActive: current,
+    target: (tag) => { if (progress) progress.targetTag = tag; },
     repairRequired: version => { current(); return installedSuiteNeedsRepair({ ...options, version, webuiDirectory: selected.webuiDirectory }); },
   });
   if (!prepared) return;
   current();
-  const result = await applySuiteUpdate({
-    fetchImpl: options.fetchImpl, downloadBaseUrl: prepared.baseUrl,
-    execPath: options.execPath, platform: options.platform, arch: options.arch,
-    version: prepared.latestTag, io: options.io ?? realUpdateFileIo,
-    webuiDirectory: selected.webuiDirectory, assertCurrent: current,
-    ...(options.signal ? { signal: options.signal } : {}),
-  });
-  options.print(formatSuiteUpdateReport(result, 'updated'));
-  return result;
+  try {
+    const result = await applySuiteUpdate({
+      fetchImpl: options.fetchImpl, downloadBaseUrl: prepared.baseUrl,
+      execPath: options.execPath, platform: options.platform, arch: options.arch,
+      version: prepared.latestTag, io: options.io ?? realUpdateFileIo,
+      webuiDirectory: selected.webuiDirectory, assertCurrent: current,
+      ...(options.signal ? { signal: options.signal } : {}),
+      // Just before the live swap: an abort after this point is reported late instead of racing the swap.
+      beforeCommit: () => { if (progress) progress.begun = true; },
+    });
+    if (progress) { progress.begun = true; progress.committed = true; }
+    options.print(formatSuiteUpdateReport(result, 'updated'));
+    return result;
+  } catch (error) {
+    recordSwapFailure(progress, error);
+    throw error;
+  }
 }
 export interface RollbackUpdateOptions {
   readonly execPath: string;

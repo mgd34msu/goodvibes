@@ -65,6 +65,8 @@ export function rowsFromOutput(spec: ListRowsFromOutput, output: unknown, earlie
   if (!Array.isArray(list)) return [];
   const kept = spec.where ? list.filter((entry) => String(readPath(entry, spec.where!.field)) === fillBlanks(spec.where!.equals, earlier)) : list;
   const entries = spec.each ? kept.flatMap((entry) => { const inner = readPath(entry, spec.each!); return Array.isArray(inner) ? inner : []; }) : kept;
+  const seen = new Set<string>();
+  // One row per value: a shop bought from twice is one shop.
   return entries.map((entry): ListRow => {
     const text = (path: string | undefined): string | undefined => {
       if (path === undefined) return undefined;
@@ -77,7 +79,7 @@ export function rowsFromOutput(spec: ListRowsFromOutput, output: unknown, earlie
       ...(text(spec.detail) !== undefined ? { detail: text(spec.detail) } : {}),
       ...(text(spec.state) !== undefined ? { state: text(spec.state) } : {}),
     };
-  });
+  }).filter((row) => !seen.has(row.value) && seen.add(row.value) !== undefined);
 }
 
 /** The input an operator method is called with for a list, its blanks filled. */

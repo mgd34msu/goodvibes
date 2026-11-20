@@ -39,6 +39,8 @@ export interface UpdateSettings {
   readonly autoUpdateAtLaunch?: boolean;
   /** How long the launch-time version check may take before it is skipped. Defaults to 2500; clamped to [250, 30000]. */
   readonly launchCheckTimeoutMs?: number;
+  /** How long the launch-time download, verification and swap may take before it is deferred (`update.applyTimeoutMs`, default 45000, 5000 to 300000). */
+  readonly applyTimeoutMs?: number;
   /**
    * Keep checking for a newer release WHILE the agent runs, and install it at
    * an idle moment. Mirrors the daemon's `update.auto`. Default: follows
@@ -59,6 +61,8 @@ export interface UpdateSettings {
 
 const LAUNCH_CHECK_MIN_TIMEOUT_MS = 250;
 const LAUNCH_CHECK_MAX_TIMEOUT_MS = 30_000;
+const APPLY_MIN_TIMEOUT_MS = 5_000;
+const APPLY_MAX_TIMEOUT_MS = 300_000;
 const MIN_INTERVAL_MINUTES = 5;
 const MAX_INTERVAL_MINUTES = 24 * 60;
 const MAX_FIRST_CHECK_SECONDS = 60 * 60;
@@ -78,6 +82,7 @@ export function readUpdateSettings(configManager: Pick<ConfigManager, 'getRaw'>)
   const out: {
     autoUpdateAtLaunch?: boolean;
     launchCheckTimeoutMs?: number;
+    applyTimeoutMs?: number;
     auto?: boolean;
     intervalMinutes?: number;
     firstCheckSeconds?: number;
@@ -87,6 +92,8 @@ export function readUpdateSettings(configManager: Pick<ConfigManager, 'getRaw'>)
   if (typeof timeout === 'number' && Number.isFinite(timeout) && timeout > 0) {
     out.launchCheckTimeoutMs = Math.min(LAUNCH_CHECK_MAX_TIMEOUT_MS, Math.max(LAUNCH_CHECK_MIN_TIMEOUT_MS, Math.floor(timeout)));
   }
+  const applyTimeout = readClamped(src['applyTimeoutMs'], APPLY_MIN_TIMEOUT_MS, APPLY_MAX_TIMEOUT_MS);
+  if (applyTimeout !== undefined) out.applyTimeoutMs = applyTimeout;
   if (typeof src['auto'] === 'boolean') out.auto = src['auto'];
   const interval = readClamped(src['intervalMinutes'], MIN_INTERVAL_MINUTES, MAX_INTERVAL_MINUTES);
   if (interval !== undefined) out.intervalMinutes = interval;

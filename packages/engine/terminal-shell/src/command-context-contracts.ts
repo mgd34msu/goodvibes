@@ -41,6 +41,8 @@ export interface TerminalCommandUiActions<Target extends ModelPickerTarget> {
   pasteFromClipboard?: () => {
     pasted: boolean;
     kind: 'image' | 'text' | 'none';
+    /** Lines of pasted text (0 for an image): what a receipt may report. */
+    lines: number;
     marker?: string;
   };
   executeCommand?: (name: string, args: string[]) => Promise<boolean>;

@@ -1,4 +1,3 @@
-import { mayOfferCardEntryFlow, describeCardEntryRefusal } from '@goodvibes-jev/engine/platform/platform/payments';
 import type { OperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import type { ConcealedInputRequest } from './concealed-input.js';
 import { isPairedOperatorPrincipal } from './native/native-paired-principal.js';
@@ -194,8 +193,8 @@ export function createCardEntryPrompter<Context extends CardPromptContext>(
         cancelled = true;
         ctx.print(
           submitted
-            ? '[payments] Stopped. The card was already being sent and may have been stored; /payments status shows the cards the host has.'
-            : '[payments] Stopped. Nothing was sent and the answers so far were discarded. Re-run /payments card to start again.',
+            ? '[payments] Stopped. The card was already being sent and may have been stored; /payments cards shows the cards the host has.'
+            : '[payments] Stopped. Nothing was sent and the answers so far were discarded. Choose "Add a card" in /payments to start again.',
         );
       },
     });
@@ -213,13 +212,13 @@ export function createCardEntryPrompter<Context extends CardPromptContext>(
 export function describeCardFailure(error: unknown, attempt: 'add' | 'remove' = 'add'): string {
   if (error instanceof CardHostError) return error.message;
   const unchanged = attempt === 'add' ? 'Nothing was saved' : 'Nothing was removed';
-  const rerun = attempt === 'add' ? '/payments card' : '/payments card remove <id> confirm';
+  const rerun = attempt === 'add' ? '/payments add-card' : '/payments remove-card <card>';
   const status = failureStatus(error);
   const category = classifyFailure(error)?.category;
   if (status === 400 || status === 422) {
     return attempt === 'add'
       ? `The daemon rejected a card field as invalid (it needs a number with enough digits, an expiry month from 1 to 12 with a four-digit year, and a 3 or 4 digit security code). ${unchanged}; run ${rerun} to enter the card again.`
-      : `The daemon rejected the card id. ${unchanged}; /payments status lists each card with its id.`;
+      : `The daemon rejected the card id. ${unchanged}; /payments cards lists each card.`;
   }
   if (category === 'authentication' || category === 'authorization') {
     return `The selected daemon refused this terminal's credential for payments. ${unchanged}. Check the selected host, its pairing and the payments scope, then run ${rerun} again.`;
@@ -230,7 +229,7 @@ export function describeCardFailure(error: unknown, attempt: 'add' | 'remove' = 
   if (status !== undefined && status >= 500) {
     return `The daemon could not ${attempt === 'add' ? 'store' : 'remove'} the card. ${unchanged}. Run ${rerun} again; if it fails again, the daemon's log has the reason.`;
   }
-  return `The daemon did not answer, so it is not known whether the card was ${attempt === 'add' ? 'stored' : 'removed'}. Run /payments status to see which cards it holds before trying again.`;
+  return `The daemon did not answer, so it is not known whether the card was ${attempt === 'add' ? 'stored' : 'removed'}. Run /payments cards to see which cards it holds before trying again.`;
 }
 
 function failureStatus(error: unknown): number | undefined {
@@ -309,121 +308,10 @@ export function describeCard(card: CardSummary): string {
 /** Status lines for the cards the host holds: metadata only, nothing that could rebuild a card. */
 export function renderCardList(list: { readonly cards: readonly CardSummary[]; readonly defaultCardId: string }): string[] {
   const lines = [`Payment cards on the selected daemon: ${list.cards.length}`];
-  if (list.cards.length === 0) lines.push('  none. Run /payments card to add one.');
+  if (list.cards.length === 0) lines.push('  none. Add one with /payments add-card.');
   for (const card of list.cards) lines.push(`  ${card.id === list.defaultCardId ? '*' : ' '} ${describeCard(card)} [id ${stripDangerousAnsi(card.id)}]`);
   lines.push('');
-  lines.push('Run /payments card to add a card (masked input, chained prompts, sent to the daemon in one request).');
-  if (list.cards.length > 0) lines.push('Run /payments card remove <id> to delete one from the daemon; it asks you to repeat the command with "confirm".');
+  lines.push('/payments add-card adds a card (each field hidden, sent to the daemon in one request).');
+  if (list.cards.length > 0) lines.push('/payments remove-card deletes one from the daemon; it asks first.');
   return lines;
-}
-
-/** Never ask for card material until the deterministic entry-surface check passes. */
-export function createPaymentCardCommands<Context extends CardPromptContext>(policy: {
-  readonly surface: string;
-  readonly announcement: string;
-  readonly promptFields: (context: Context, fields: readonly CardField[], index: number) => void;
-  readonly status: (context: Context) => string[] | Promise<string[]>;
-  readonly address?: ((context: Context, kind: 'billing' | 'shipping') => void) | undefined;
-  readonly pending?: ((context: Context) => Promise<void>) | undefined;
-  /** `/payments approve <merchant> <item> <maximum>`: approve one purchase in advance. */
-  readonly approve?: ((context: Context, args: readonly string[]) => Promise<void>) | undefined;
-  /** `/payments standing ...`: purchases a scheduled or triggered run may make. */
-  readonly standing?: ((context: Context, args: readonly string[]) => Promise<void>) | undefined;
-  /** Delete one card from the selected daemon; present on surfaces that can reach a host. */
-  readonly remove?: ((context: Context, id: string) => Promise<{ readonly deleted: boolean }>) | undefined;
-  readonly description: string;
-  readonly usage: string;
-  readonly argsHint: string;
-}) {
-  const refuseModelEntry = (context: Context): boolean => {
-    if (context.invokedByModel !== true) return false;
-    context.print('[payments] Card and address details are typed only by the person at the keyboard. A model-run command cannot start that entry; ask the owner to run /payments card or /payments address themselves.');
-    return true;
-  };
-  function startCardEntryFlow(context: Context, surface: string = policy.surface): void {
-    if (refuseModelEntry(context)) return;
-    if (!mayOfferCardEntryFlow(surface)) {
-      context.print(describeCardEntryRefusal(surface));
-      return;
-    }
-    if (!context.beginConcealedInput) {
-      context.print('[payments] Concealed input is unavailable on this surface.');
-      return;
-    }
-    context.print(policy.announcement);
-    policy.promptFields(context, CARD_ENTRY_FIELDS, 0);
-  }
-  async function removeCard(
-    rest: readonly string[],
-    context: Context,
-    remove: (context: Context, id: string) => Promise<{ readonly deleted: boolean }>,
-  ): Promise<void> {
-    const id = rest[0] ?? '';
-    if (id.length === 0) {
-      context.print('Usage: /payments card remove <id> confirm. /payments status lists each card with its id.');
-      return;
-    }
-    // Deleting is permanent and a model must not be able to spend or destroy the owner's cards.
-    if (context.invokedByModel === true) {
-      context.print('[payments] Removing a card is done only by the person at the keyboard. Ask the owner to run /payments card remove <id> themselves.');
-      return;
-    }
-    if ((rest[1] ?? '').toLowerCase() !== 'confirm') {
-      context.print(`[payments] Nothing was removed. This permanently deletes card ${stripDangerousAnsi(id)} (number, expiry, security code and name) from the selected daemon and cannot be undone. To go ahead run: /payments card remove ${stripDangerousAnsi(id)} confirm`);
-      return;
-    }
-    try {
-      const result = await remove(context, id);
-      context.print(result.deleted
-        ? `[payments] Card ${stripDangerousAnsi(id)} was deleted from the selected daemon. Cancel it with the issuer too if it should stop working everywhere.`
-        : `[payments] The daemon reported no card with id ${stripDangerousAnsi(id)}; nothing was removed. /payments status lists the cards it holds.`);
-    } catch (error: unknown) {
-      context.print(`[payments] ${describeCardFailure(error, 'remove')}`);
-    }
-    context.renderRequest();
-  }
-  function runPaymentsCommand(args: readonly string[], context: Context): void | Promise<void> {
-    const sub = (args[0] ?? '').toLowerCase();
-    if (sub === 'pending' && policy.pending) return policy.pending(context);
-    if (sub === 'approve' && policy.approve) return policy.approve(context, args.slice(1));
-    if (sub === 'standing' && policy.standing) return policy.standing(context, args.slice(1));
-    if (!sub || sub === 'status') {
-      const lines = policy.status(context);
-      if (Array.isArray(lines)) {
-        context.print(lines.join('\n'));
-        return;
-      }
-      return lines.then((resolved) => { context.print(resolved.join('\n')); });
-    }
-    if (sub === 'card' && (args[1] ?? '').toLowerCase() === 'remove' && policy.remove) {
-      return removeCard(args.slice(2), context, policy.remove);
-    }
-    if (sub === 'card') {
-      startCardEntryFlow(context);
-      return;
-    }
-    if (sub === 'address' && policy.address) {
-      const kind = (args[1] ?? '').toLowerCase();
-      if (kind !== 'billing' && kind !== 'shipping') {
-        context.print('Usage: /payments address <billing|shipping>');
-        return;
-      }
-      if (refuseModelEntry(context)) return;
-      policy.address(context, kind);
-      return;
-    }
-    context.print('Usage: /payments [' + (policy.address ? 'card|address <billing|shipping>|status' : 'card|status') + (policy.pending ? '|pending' : '')
-      + (policy.approve ? '|approve <merchant> <item> <maximum>' : '') + (policy.standing ? '|standing [list|add|remove]' : '') + ']');
-  }
-  function registerPaymentCardCommands(registry: Pick<import('./command-registry.js').TerminalCommandRegistry<Context>, 'register'>): void {
-    registry.register({
-      name: 'payments',
-      effect: 'connected-host-state',
-      description: policy.description,
-      usage: policy.usage,
-      argsHint: policy.argsHint,
-      handler: (args, context) => runPaymentsCommand(args, context),
-    });
-  }
-  return { startCardEntryFlow, runPaymentsCommand, registerPaymentCardCommands };
 }

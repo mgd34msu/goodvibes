@@ -1,10 +1,14 @@
-import { createCardEntryPrompter, createPaymentCardHost, createPaymentCardCommands, renderCardList, describeCard, describeCardFailure, CARD_ENTRY_FIELDS, CardHostError, type CardField } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
+import { createCardEntryPrompter, createPaymentCardHost, renderCardList, describeCard, describeCardFailure, CARD_ENTRY_FIELDS, CardHostError, type CardField } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
+import { createPaymentWindowCommand } from '@goodvibes-jev/engine/terminal-shell/payment-window-command';
+import { registerPaymentsCommand } from '@goodvibes-jev/engine/terminal-shell/payments-command';
+import { paymentsAddressConfigKey, type PaymentsAddressKind } from '@goodvibes-jev/engine/terminal-shell/payments-settings';
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
 import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
 import { bindCredential, daemonTarget } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-target';
 /**
- * /payments card, capture a payment card through the composer's concealed
- * input mode and store it on the selected paired daemon with one
+ * The terminal app's host for `/payments` (terminal-shell/payments-command.ts):
+ * "Add a card" captures a payment card through the composer's concealed input
+ * mode and stores it on the selected paired daemon with one
  * `payments.cards.create` request.
  *
  * The daemon is what completes a purchase, and it only spends from a card in
@@ -16,12 +20,12 @@ import { bindCredential, daemonTarget } from '@goodvibes-jev/engine/platform/pla
  * returns (label, kind, brand, last four digits, expiry). Esc before the last
  * answer discards everything. A refusal or failure prints fixed text, never the
  * request or the daemon's own message, which could quote what was typed.
- * `/payments status` lists the cards the daemon holds from `payments.cards.list`.
+ * `/payments cards` lists the cards the daemon holds from `payments.cards.list`.
  *
  * Billing and shipping address are ordinary (non-secret) config fields, real
  * structured CONFIG_SCHEMA entries (payments.billingAddress.* and
  * payments.shippingAddress.*); this command points the user at the Payments
- * settings category (or /config payments) for them rather than routing plain
+ * settings category (or /payments address) for them rather than routing plain
  * text through the concealed (masked) input path where it does not belong.
  *
  * ── Card details are entered only at a local terminal or the webui ────────
@@ -41,12 +45,11 @@ import { bindCredential, daemonTarget } from '@goodvibes-jev/engine/platform/pla
  * below), which the platform's allowlist accepts, so this gate changes nothing
  * about today's behavior. What it buys is that the refusal already exists
  * the moment this app (or a shared command registry) ever grows a path that
- * lets `/payments card` be reached from somewhere else: the check is real
+ * lets "Add a card" be reached from somewhere else: the check is real
  * and platform-driven, not an implicit "this is the TUI so it's fine" assumption.
  */
 
-import type { CommandContext } from '../command-registry.ts';
-import { approvePurchaseInAdvance, manageStandingAuthorizations, openPendingPaymentWindows } from './payments-pending.ts';
+import { isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 import { ownerOperatorConnectionPolicy } from './operator-connection-policy.ts';
 
 import '@goodvibes-jev/engine/platform/platform/payments';
@@ -70,10 +73,11 @@ async function renderCardStatus(ctx: CommandContext): Promise<string[]> {
   } catch (error: unknown) {
     lines = ['Payment cards on the selected daemon could not be read:', `  ${describeCardFailure(error)}`];
   }
-  lines.push('Run /payments pending to review and answer purchase approval/veto windows on the selected paired host.');
-  lines.push(
-    'Billing/shipping address, budgets, windows and the rest of the payment capability are ordinary config values: set them via /config payments or the Settings > Payments category.',
-  );
+  for (const kind of ['billing', 'shipping'] as const) {
+    const set = (['name', 'line1', 'city', 'postalCode', 'country'] as const).map((field) => ctx.platform.configManager.get(paymentsAddressConfigKey(kind, field) as never)).filter((value) => typeof value === 'string' && value.length > 0);
+    lines.push(`${kind === 'billing' ? 'Billing' : 'Shipping'} address: ${set.length > 0 ? set.join(', ') : 'not set (/payments address)'}`);
+  }
+  lines.push('/payments pending shows the purchases waiting for your answer; budgets and windows are in Settings > Payments.');
   return lines;
 }
 
@@ -102,13 +106,13 @@ const promptCardChain = createCardEntryPrompter<CommandContext>(
     // The card goes only to the daemon that was selected when its entry began.
     if (!chosen || now !== chosen) {
       const where = (id: string | null | undefined): string => id ? id.replace(/#.*$/, '') : 'none';
-      return Promise.reject(new CardHostError(`The selected daemon changed while the card was being entered (it was ${where(chosen)}, now ${where(now)}${chosen && now && where(chosen) === where(now) ? ', with another credential' : ''}). Run /payments card again to enter it for the daemon selected now.`));
+      return Promise.reject(new CardHostError(`The selected daemon changed while the card was being entered (it was ${where(chosen)}, now ${where(now)}${chosen && now && where(chosen) === where(now) ? ', with another credential' : ''}). Choose "Add a card" in /payments again to enter it for the daemon selected now.`));
     }
     return cardHost.create(ctx, card);
   },
   {
     prompt: (field) => `[payments] Enter ${field.label} (e.g. ${field.placeholder}): masked; Enter to continue, Esc to stop.`,
-    stored: (card) => `\n[payments] Card stored on the selected daemon: ${describeCard(card)}. Billing/shipping address and the rest of the payment capability are ordinary config values; set them via /config payments or the Settings > Payments category.`,
+    stored: (card) => `\n[payments] Card stored on the selected daemon: ${describeCard(card)}. Set the addresses purchases use with /payments address; budgets and windows are in Settings > Payments.`,
   },
 );
 
@@ -117,7 +121,7 @@ function promptCardFields(ctx: CommandContext, fields: readonly CardField[], ind
   if (index === 0) {
     const daemon = selectedCardDaemon(ctx);
     if (!daemon) {
-      ctx.print('[payments] No paired daemon is selected, or its credential cannot be read. Check the selected host and pairing (/host), then run /payments card again. Nothing was asked or sent.');
+      ctx.print('[payments] No paired daemon is selected, or its credential cannot be read. Check the selected host and pairing (/host), then choose "Add a card" in /payments again. Nothing was asked or sent.');
       return;
     }
     cardEntryDaemons.set(ctx, daemon);
@@ -125,16 +129,28 @@ function promptCardFields(ctx: CommandContext, fields: readonly CardField[], ind
   promptCardChain(ctx, fields, index);
 }
 
-export const { startCardEntryFlow, runPaymentsCommand, registerPaymentCardCommands } = createPaymentCardCommands<CommandContext>({
-  surface: CARD_ENTRY_SURFACE,
-  announcement: `Entering ${CARD_ENTRY_FIELDS.length} card field(s): masked; Esc to stop at any point. The card is sent to the selected daemon after the last one.`,
-  promptFields: promptCardFields,
-  status: renderCardStatus,
-  pending: openPendingPaymentWindows,
-  approve: approvePurchaseInAdvance,
-  standing: manageStandingAuthorizations,
-  remove: (ctx, id) => cardHost.remove(ctx, id),
-  description: 'Payment card setup, pending purchase approval/veto windows, purchases approved in advance and standing authorisations for scheduled purchases',
-  usage: '/payments [card [remove <id>]|status|pending|approve <merchant> <item> <maximum>|standing [list|add <shops> <item> <per-purchase> <per-period> <days> [<last day>]|remove <id>]]',
-  argsHint: '[card|status|pending|approve|standing]',
+const openPendingPaymentWindows = createPaymentWindowCommand<CommandContext>({
+  ...ownerOperatorConnectionPolicy, isOwner: (context) => isDirectOwnerCommandContext(context, 'payments'),
 });
+
+/** An address field written to this machine's settings, which the daemon on this machine reads. */
+async function setAddress(ctx: CommandContext, kind: PaymentsAddressKind, fields: Readonly<Record<string, string>>): Promise<string> {
+  for (const [field, value] of Object.entries(fields)) {
+    ctx.platform.configManager.setDynamic(paymentsAddressConfigKey(kind, field as never), value);
+  }
+  return `Kept in this machine's settings (${Object.keys(fields).length} field${Object.keys(fields).length === 1 ? '' : 's'}).`;
+}
+
+/** Register `/payments` with this app's host. */
+export function registerPaymentCardCommands(registry: CommandRegistry): void {
+  registerPaymentsCommand<CommandContext>(registry, {
+    cardEntrySurface: CARD_ENTRY_SURFACE,
+    policy: { ...ownerOperatorConnectionPolicy, isOwner: (context) => isDirectOwnerCommandContext(context, 'payments') },
+    status: renderCardStatus,
+    promptCardFields,
+    listCards: (ctx) => cardHost.list(ctx),
+    removeCard: (ctx, id) => cardHost.remove(ctx, id),
+    setAddress,
+    pending: openPendingPaymentWindows,
+  });
+}

@@ -1073,6 +1073,11 @@
       "types": "./platform/dist/platform/config/schema.d.ts",
       "import": "./platform/dist/platform/config/schema.js"
     },
+    "./platform/platform/config/setting-topics": {
+      "bun": "./platform/src/platform/config/setting-topics.ts",
+      "types": "./platform/dist/platform/config/setting-topics.d.ts",
+      "import": "./platform/dist/platform/config/setting-topics.js"
+    },
     "./platform/platform/types/grid": {
       "bun": "./platform/src/platform/types/grid.ts",
       "types": "./platform/dist/platform/types/grid.d.ts",
@@ -2957,6 +2962,11 @@
       "bun": "./terminal-shell/src/command-actions/data.ts",
       "types": "./terminal-shell/dist/command-actions/data.d.ts",
       "import": "./terminal-shell/dist/command-actions/data.js"
+    },
+    "./terminal-shell/todo-command": {
+      "bun": "./terminal-shell/src/todo-command.ts",
+      "types": "./terminal-shell/dist/todo-command.d.ts",
+      "import": "./terminal-shell/dist/todo-command.js"
     },
     "./terminal-shell/described-command-kit": {
       "bun": "./terminal-shell/src/described-command-kit.ts",

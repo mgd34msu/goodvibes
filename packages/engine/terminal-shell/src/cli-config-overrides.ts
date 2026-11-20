@@ -61,10 +61,24 @@ export function applyTerminalRuntimeConfigDefaults(configManager: ConfigManager)
 }
 
 /**
+ * The settings notices this process has put in front of the person, by their
+ * one line (describeIngestionNotice). A daemon's receipt for the same file and
+ * key is written by the same formatter, so the app's own notice and the
+ * attached daemon's are recognised as one and shown once.
+ */
+const shownSettingsNotices = new Set<string>();
+
+/** True the first time `line` is offered in this process; false when it was already shown. */
+export function firstShowingOfSettingsNotice(line: string): boolean {
+  if (shownSettingsNotices.has(line)) return false;
+  shownSettingsNotices.add(line);
+  return true;
+}
+
+/**
  * Shows every settings value the app could not read as written: first the ones
  * the start-up load set aside (their copy on stderr is wiped when the full
- * screen opens), then each later load's as it happens. A value read under its
- * new name is information; one skipped or refused is a warning. Returns the
+ * screen opens), then each later load's as it happens, as warnings. Returns the
  * unsubscribe function.
  */
 export function announceSettingsIngestionNotices(
@@ -73,12 +87,9 @@ export function announceSettingsIngestionNotices(
 ): () => void {
   // Each notice once per session: a later load (a daemon attaching, a settings
   // reload) reports the same stray setting again, and saying it twice reads as two problems.
-  const shown = new Set<string>();
   const announce = (notice: SettingsIngestionNotice): void => {
-    const id = `${notice.action} ${notice.key} ${notice.file}`;
-    if (shown.has(id)) return;
-    shown.add(id);
-    show(describeIngestionNotice(notice), notice.action === 'mapped' ? 'info' : 'warning');
+    const line = describeIngestionNotice(notice);
+    if (firstShowingOfSettingsNotice(line)) show(line, 'warning');
   };
   for (const notice of configManager.getIngestionQuarantine()) announce(notice);
   return configManager.subscribeIngestionNotices(announce);

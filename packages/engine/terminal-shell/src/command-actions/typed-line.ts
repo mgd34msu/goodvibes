@@ -287,18 +287,22 @@ export function actionButton(action: ActionShape): string {
  * What an action sends to its operator method: each field (a dot path) takes
  * the value of the input it names. `input:first` and `input:rest` take the
  * first line and the lines after it as a list (a command and its arguments),
- * `input:lines` all lines as a list, and `input:pairs` NAME=VALUE lines as an
- * object. A blank value is left out, so the method sees only what was given.
+ * `input:lines` all lines as a list, `input:pairs` NAME=VALUE lines as an
+ * object, and `input:number` a number. `=<json>` is a fixed value the method
+ * always takes (`=true` for its `confirm`). A blank value is left out, so the
+ * method sees only what was given.
  */
 export function operatorInputFromValues(fields: Readonly<Record<string, string>>, values: ActionValues): Record<string, unknown> {
   const input: Record<string, unknown> = {};
   for (const [field, spec] of Object.entries(fields)) {
-    const [id, shape] = spec.split(':') as [string, string | undefined];
-    const raw = values[id];
+    const [id, shape] = spec.startsWith('=') ? ['', '='] as [string, string] : spec.split(':') as [string, string | undefined];
+    const raw = shape === '=' ? spec.slice(1) : values[id];
     if (raw === undefined || raw === '') continue;
     const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
     let value: unknown = raw;
-    if (shape === 'first') value = lines[0];
+    if (shape === '=') value = JSON.parse(raw) as unknown;
+    else if (shape === 'number') value = Number(raw);
+    else if (shape === 'first') value = lines[0];
     else if (shape === 'rest') value = lines.slice(1);
     else if (shape === 'lines') value = lines;
     else if (shape === 'pairs') {

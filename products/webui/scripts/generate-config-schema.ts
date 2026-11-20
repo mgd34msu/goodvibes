@@ -53,6 +53,10 @@ export const TS_OUT_PATH = resolve(ROOT, 'src/lib/generated/config-schema.ts');
 
 export interface ConfigSchemaEntrySnapshot {
   readonly key: string;
+  /** The setting's name in plain words (CONFIG_SCHEMA `label`), shown above its key. */
+  readonly label: string;
+  /** When a change takes effect, only where the engine declares it. */
+  readonly appliesWhen?: 'now' | 'next-answer' | 'next-session' | 'restart';
   readonly type: 'boolean' | 'number' | 'string' | 'enum' | 'object';
   readonly default: unknown;
   readonly description: string;
@@ -96,6 +100,8 @@ export interface ConfigSchemaSnapshot {
 export async function loadSchemaSnapshot(): Promise<ConfigSchemaSnapshot> {
   const entries: ConfigSchemaEntrySnapshot[] = CONFIG_SCHEMA.filter(s => !s.deprecated).map((s) => ({
     key: s.key,
+    label: s.label,
+    ...(s.appliesWhen ? { appliesWhen: s.appliesWhen } : {}),
     type: s.type,
     default: s.default,
     description: s.description,
@@ -148,6 +154,8 @@ export function renderTs(snapshot: ConfigSchemaSnapshot): string {
     '',
     'export interface ConfigSchemaEntry {',
     '  readonly key: string;',
+    '  readonly label: string;',
+    "  readonly appliesWhen?: 'now' | 'next-answer' | 'next-session' | 'restart';",
     "  readonly type: 'boolean' | 'number' | 'string' | 'enum' | 'object';",
     '  readonly default: unknown;',
     '  readonly description: string;',

@@ -1,8 +1,8 @@
 /**
  * masked-entry-modal.ts, the local-auth password prompt as a kit modal.
  *
- * `/local-auth add-user <name>` and `/local-auth rotate-password <name>` with
- * no password argument, and the Local Auth modal's a / p actions, open this.
+ * The Local Auth modal's a / p actions open this (`/local-auth add` and
+ * `/local-auth password` ask on a hidden line, typed twice, instead).
  * It is the only way to set a local password that keeps the plaintext out of
  * argv, input history, the transcript and scrollback: keystrokes land in a
  * private buffer that is never rendered (the row shows dots), and the buffer

@@ -49,7 +49,7 @@ class LocalAuthModalSurface implements ConfigModalSurface {
   readonly actions: ConfigModalAction[] = [
     { key: 'a', id: 'add-user', label: 'add user' },
     { key: 'p', id: 'rotate-pw', label: 'rotate password', enabledFor: (row) => usernameOf(row) !== null },
-    // /local-auth delete-user asks in its own dialog, naming the user and what is lost; a second press here would ask twice.
+    // /local-auth remove asks in its own dialog, naming the user and what is lost; a second press here would ask twice.
     { key: 'd', id: 'delete', label: 'delete user', enabledFor: (row) => usernameOf(row) !== null },
     { key: 'b', id: 'clear-bootstrap', label: 'clear bootstrap', enabledFor: () => this.bootstrapPresent },
   ];
@@ -111,11 +111,11 @@ class LocalAuthModalSurface implements ConfigModalSurface {
       case 'delete': {
         const username = usernameOf(ctx.row);
         if (!username) return;
-        runModalCommand(ctx, 'local-auth', ['delete-user', username], `/local-auth delete-user ${username}`, { pending: `Deleting ${username}…` });
+        runModalCommand(ctx, 'local-auth', ['remove', username], `/local-auth remove ${username}`, { pending: `Deleting ${username}…` });
         break;
       }
       case 'clear-bootstrap':
-        runModalCommand(ctx, 'local-auth', ['clear-bootstrap-file'], '/local-auth clear-bootstrap-file', { pending: 'Clearing bootstrap credential file…' });
+        runModalCommand(ctx, 'local-auth', ['remove-first-run-file'], '/local-auth remove-first-run-file', { pending: 'Clearing bootstrap credential file…' });
         break;
       default:
         return;

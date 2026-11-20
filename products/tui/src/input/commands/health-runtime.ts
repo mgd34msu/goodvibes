@@ -371,8 +371,8 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
           lines.push('  domain: auth');
           lines.push(
             ...(auth.bootstrapCredentialPresent
-              ? ['  /auth local review', '  /auth local rotate-password admin <password>', '  /auth local clear-bootstrap-file']
-              : ['  /auth local review']),
+              ? ['  /local-auth review', '  /local-auth password admin', '  /local-auth remove-first-run-file']
+              : ['  /local-auth review']),
           );
           lines.push('  verify: /health auth');
         } else if (domain === 'accounts') {

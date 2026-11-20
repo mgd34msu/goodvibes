@@ -755,6 +755,8 @@ The web UI has five destinations, chosen in the sidebar and reflected in the add
 | Personal | `personal` | `calendar`, `mail`, `occasions` | Calendar, mail and dates the owner cares about. In Mail, Mark read, Archive and Delete send the message's mailbox generation with its UID; a draft opened from Drafts and saved again replaces that draft (the folder keeps one copy); opening a reply or a draft while the composer holds unsaved writing asks first. |
 | Phone | `phone` | none | Lets this browser act as a device node (camera, location, clipboard on request). |
 
+A message typed in Chat, or a steer or follow-up sent from Work, is held by the tab until the daemon answers for it, scoped to the daemon and the signed-in account and cleared on sign-out. A send that failed or got no answer stays as a failed message with Resend (also after a reload of the tab or after leaving the chat and coming back); Resend sends it again under its own id, so the daemon records it at most once, keeps it a steer when it was one, and uploads only the attached files that did not upload before. A send with no answer says it may have been sent. When a new chat cannot be created, the message and its files go back to the composer; text typed since is kept, with the returned text after it. A wake phrase sent with `voice.wake.autoSubmit` goes as its own message and leaves the composer as it was. Unanswered steers and follow-ups are never dropped from the list in Work by newer ones.
+
 Old addresses still work: `?view=sessions` and `?view=hosted-sessions` open Work on `sessions`; `?view=fleet` and `?view=approvals-tasks` open Work on `all`; `?view=knowledge`, `?view=memory` open Library; `?view=calendar`, `?view=mail`, `?view=dates` open Personal; `?view=admin`, `?view=providers`, `?view=principals` and `?view=checkin` open the settings dialog.
 
 ### The settings dialog
@@ -763,9 +765,9 @@ The settings dialog opens from the account menu, or with `?settings=<section>` i
 
 | Page | Sections (`?settings=` id) | What they hold |
 | --- | --- | --- |
-| General | `general` Appearance and behavior, `network` Network, `all` Advanced, `about` About | Theme, density, language; Tailscale, Cloudflare, relay and the listeners; supervised triggers and every other setting; daemon status, this browser's connection, local sign-in. |
+| General | `general` Display, `network` Network, `all` Advanced, `about` About | Theme, density, language; Tailscale, Cloudflare, relay and the listeners; supervised triggers and every other setting; daemon status, this browser's connection, local sign-in. |
 | Account | `account` Sign-in, `devices` Devices and pairing, `people` People and channels | Sign-in, operator token, step-up verification, owner profile, mail and calendar accounts; paired devices and their tokens, power, this browser as a phone node, Telegram delegated intake; principals and channel profiles. |
-| Models and providers | `models`, `credentials` Credentials, `usage` Usage | The current model, providers, sign-in routes, decision models; the credential store and accounts; usage, budgets, payments. |
+| Models and providers | `models` Model, `credentials` Credentials, `usage` Usage | The current model, providers, sign-in routes, decision models; the credential store and accounts; usage, budgets, payments. |
 | Voice | `voice` | Dictation, spoken replies, wake word. |
 | Notifications | `notifications`, `checkins` Check-ins | Push notifications, installing the app, occasion reminders; check-in settings. |
 | Memory | `memory` | Memory provenance and diagnostics. |

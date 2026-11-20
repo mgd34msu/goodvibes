@@ -44,6 +44,17 @@ const USER: InputDescription = {
 const PASSWORD: InputDescription = {
   id: 'password', label: 'Password', help: 'Hidden as you type', kind: 'secret', required: true, typed: { flag: '--password' },
 };
+// Typed twice in the guided path, so one mistyped character cannot set a password nobody knows.
+const PASSWORD_AGAIN: InputDescription = {
+  id: 'again', label: 'Password again', help: 'The same password, to catch a typing mistake', kind: 'secret',
+  required: { default: '', defaultMeans: 'not typed a second time' }, typed: { flag: '--again' },
+};
+
+function samePassword(values: Readonly<Record<string, string>>, what: string): string {
+  if (!values.password) throw commandRefusal(`${what}: no password was given.`);
+  if (values.again && values.again !== values.password) throw commandRefusal(`${what}: the two passwords are not the same.`, 'Type the same password twice.');
+  return values.password;
+}
 
 const LOCAL_AUTH_COMMAND: CommandDescription<CommandContext> = {
   name: 'local-auth',
@@ -89,6 +100,7 @@ const LOCAL_AUTH_COMMAND: CommandDescription<CommandContext> = {
       inputs: [
         { id: 'user', label: 'User name', help: 'The name they sign in with', kind: 'text', freeTextReason: 'a name you choose for them', required: true, typed: { position: 1 } },
         PASSWORD,
+        PASSWORD_AGAIN,
         { id: 'role', label: 'Role', help: 'What they may do once signed in', kind: 'choice', choices: ROLES, required: { default: 'user', defaultMeans: 'a user, not an administrator' }, typed: { flag: '--role' } },
       ],
       sentence: '{user} will be able to sign in to this machine\'s daemon and web app as a {role}, until you change it.',
@@ -97,9 +109,9 @@ const LOCAL_AUTH_COMMAND: CommandDescription<CommandContext> = {
       operator: { method: 'local_auth.users.create', fields: { username: 'user', password: 'password', roles: 'role' } },
       example: { user: 'sam', role: 'user' },
       async run(values, ctx) {
-        if (!values.password) throw commandRefusal(`No user was added: no password was given for ${values.user}.`);
+        const password = samePassword(values, 'No user was added');
         try {
-          requireLocalUserAuthManager(ctx).addUser(values.user!, values.password, [values.role || 'user']);
+          requireLocalUserAuthManager(ctx).addUser(values.user!, password, [values.role || 'user']);
         } catch (error) {
           throw commandRefusal(`No user was added: ${summarizeError(error)}`, undefined, 'NOT_DONE');
         }
@@ -123,16 +135,16 @@ const LOCAL_AUTH_COMMAND: CommandDescription<CommandContext> = {
       },
     },
     {
-      id: 'change-password', label: 'Change someone\'s password', word: 'password', inputs: [USER, PASSWORD],
+      id: 'change-password', label: 'Change someone\'s password', word: 'password', inputs: [USER, PASSWORD, PASSWORD_AGAIN],
       sentence: '{user}\'s password will be replaced and everyone signed in as {user} is signed out, until you change it.',
       done: 'Changed {user}\'s password; their open sessions were ended.',
       touches: 'credential', lasts: 'kept', risk: 'none',
       operator: { method: 'local_auth.users.password.rotate', fields: { username: 'user', password: 'password' } },
       example: { user: 'sam' },
       async run(values, ctx) {
-        if (!values.password) throw commandRefusal(`The password for ${values.user} was not changed: no password was given.`);
+        const password = samePassword(values, `The password for ${values.user} was not changed`);
         try {
-          requireLocalUserAuthManager(ctx).rotatePassword(values.user!, values.password);
+          requireLocalUserAuthManager(ctx).rotatePassword(values.user!, password);
         } catch (error) {
           throw commandRefusal(`The password for ${values.user} was not changed: ${summarizeError(error)}`, undefined, 'NOT_DONE');
         }

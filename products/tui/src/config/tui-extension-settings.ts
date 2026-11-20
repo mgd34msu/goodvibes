@@ -1,9 +1,10 @@
 /**
  * TUI settings the TUI reads from settings.json, all through `get()`.
  *
- * `update.autoUpdateAtLaunch`, `update.launchCheckTimeoutMs` and
- * `checkpoints.*` are platform schema settings. `statusline.*`,
- * `session.autoTitle` and `update.applyTimeoutMs` are the TUI's own settings,
+ * `update.autoUpdateAtLaunch`, `update.launchCheckTimeoutMs`,
+ * `update.applyTimeoutMs` and `checkpoints.*` are platform schema settings
+ * (the Agent reads the same ones). `statusline.*` and `session.autoTitle` are
+ * the TUI's own settings,
  * registered on its config manager (config/host-settings.ts) from the
  * descriptors below. Either way the loader knows the key, a value of the wrong
  * type or out of range is reported at start and the default applies, and
@@ -88,16 +89,6 @@ export function readSessionSettings(configManager: SettingsReader): SessionSetti
 
 // ─── update.*, launch-time self-update behavior ─────────────────────────────
 
-export const UPDATE_APPLY_TIMEOUT_SETTING: HostNumberSetting = Object.freeze({
-  key: 'update.applyTimeoutMs',
-  type: 'number',
-  default: 45_000,
-  integer: true,
-  min: 5_000,
-  max: 300_000,
-  description: 'Milliseconds the launch-time download, verification and swap of a new release may take; past it the update is left for the next launch.',
-});
-
 /**
  * Launch-time self-update behavior. The feature itself (check at launch,
  * install via the checksum-verified download/verify/swap path, restart onto the
@@ -117,7 +108,7 @@ export function readUpdateSettings(configManager: SettingsReader): UpdateSetting
   return {
     autoUpdateAtLaunch: configManager.get('update.autoUpdateAtLaunch'),
     launchCheckTimeoutMs: configManager.get('update.launchCheckTimeoutMs'),
-    applyTimeoutMs: readHostSetting(configManager, UPDATE_APPLY_TIMEOUT_SETTING),
+    applyTimeoutMs: configManager.get('update.applyTimeoutMs'),
   };
 }
 
@@ -126,7 +117,6 @@ export const TUI_EXTENSION_SETTINGS: readonly HostSetting[] = Object.freeze([
   STATUSLINE_COMMAND_SETTING,
   STATUSLINE_TIMEOUT_SETTING,
   SESSION_AUTO_TITLE_SETTING,
-  UPDATE_APPLY_TIMEOUT_SETTING,
 ]);
 
 // ─── checkpoints.*, workspace checkpoint root-guard options ─────────────────

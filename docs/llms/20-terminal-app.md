@@ -544,7 +544,7 @@ It imports only values that differ from the current settings.
 It holds back permission, sandbox, listener, service and storage settings unless `--include-security` is given.
 It applies all values or none.
 Without `--yes` it lists each change as `current -> new`, changes nothing and exits `2`.
-With `daemon.connectedHost.url` set, the daemon's settings go to that daemon with the token stored for it (or a `/auth login daemon` session); with none stored, nothing is sent and the import fails with `CREDENTIAL_NOT_FOR_TARGET`. This machine's daemon token is never sent to another daemon.
+With `daemon.connectedHost.url` set, the daemon's settings go to that daemon with the token stored for it (or an `/accounts sign-in daemon` session); with none stored, nothing is sent and the import fails with `CREDENTIAL_NOT_FOR_TARGET`. This machine's daemon token is never sent to another daemon.
 
 ```sh
 goodvibes support-bundle export goodvibes-bundle.json
@@ -720,6 +720,8 @@ The default table of the terminal app:
 | `open-notifications` | `Ctrl+N` | Open the notifications; the status bar counts the unread ones. |
 | `failure-other-model` | `Alt+O` | On the newest failed turn: choose another model and send the prompt again. |
 | `failure-details` | `Alt+I` | On the newest failed turn: show what the provider said. |
+
+After a failed turn the footer offers `Alt+R retry`: the failed prompt is sent again in place of the failed turn. The failed turn stays in the transcript, and the offer stays, until the replacement is submitted: when the memory refresh before it fails, or the session or the failed turn changes meanwhile, nothing is taken away and `Alt+R` tries again. When the failed turn had already run tools, the footer says `Alt+R continue` instead: the tool results are kept and the turn continues from them, so their effects are not repeated.
 
 `Shift+Tab` cycles `ask-me` → `jev-decides` → `just-vibes` → `yolo` → `ask-me`.
 Before `yolo` it asks for confirmation (default No); declining skips to the mode after it.
@@ -986,7 +988,7 @@ The rewind is previewed in the Changes view: `Previewing rewind of turn "<label>
 Cancelling prints `Rewind cancelled: nothing changed.`
 A wrong scope prints `Unknown scope "<word>". Use one of: files | conversation | both.`
 `/rewind` refuses while a turn is running.
-`/undo rewind` reverses the last `/rewind`; `/redo rewind` applies it again.
+`/undo rewind` reverses the last `/rewind`; `/redo rewind` applies it again. Each replaces the whole conversation, so each refuses, changing nothing, when messages were added since (`/undo rewind` since the rewind, `/redo rewind` since the undo), naming how many; both check again after asking about files, and both report when the restored conversation could not be saved.
 
 ### Restoring a checkpoint
 
@@ -1060,26 +1062,23 @@ A provider without subscription sign-in is refused: `OAuth is not configured for
 `/subscription bundle export <path> --yes` writes the sign-ins to a file and warns `This file contains active sign-in tokens. Keep it private and delete it after use.`; `bundle import <path>` without `--yes` only lists what it would do.
 `/subscription logout openai` prints `Logged out of openai. Ambient API key resolution will apply again if configured.`
 
-`/login [provider <name> start|finish <code>|service <daemon|listener> <baseUrl> <username> [password] [secretKey]]` and `/logout [provider <name>|service <daemon|listener> <baseUrl> [secretKey]]` are front doors: `provider` forms point to `/subscription`, `service` forms point to `/auth login` and `/auth logout`.
+`/accounts` is described once for both programs: bare, it opens its list of actions with "See your provider accounts" first (a model or a script running it bare gets that report). The actions are `review` (each provider's routes, sign-in freshness and issues), `show <provider>`, `routes <provider>`, `repair <provider>` (what to fix, with the steps as rows to run), `open` (the providers screen), `sign-in <daemon|listener> <address> --user <name>` and `sign-out <daemon|listener> <address>` (a listener session may be kept under another name with `--key <name>`).
+`/accounts sign-in daemon https://host.example:3421 --user admin` asks for the password on a hidden line, then asks "Sign in to a daemon or listener?" with the sentence `Your password for admin will be sent to https://host.example:3421 to sign in to the daemon; the session it gives is kept until you change it (signing out ends it).` (it sends something outside this machine).
+`http://` to another machine is refused because the credential would travel unencrypted: `Not signed in: <host> is another machine and http:// would send the credential unencrypted. Use https://<host>. Nothing was sent.`
+A refused sign-in says `Not signed in: the daemon answered HTTP <status>. Check the address, user name and password, then try again. Nothing was stored.`
+A sign-in that answers with a redirect is not followed: `Not signed in: <origin> answered with a redirect to <origin>, and the password is sent only to the address you typed.`
+A listener session is stored with the address that issued it; `/accounts sign-out listener <address>` sends it only to that address, and for any other address refuses with `The listener session stored as <key> was issued by <origin>; it is never sent to <address>. Nothing was sent or removed.`
+The Agent has the same `/accounts`; its `sign-in` and `sign-out` refuse, because the Agent keeps no daemon or listener session (the host it connects to manages its own sign-in).
+Provider subscriptions are signed in and out with `/subscription`.
 
-`/accounts [review|panel|show <provider>|routes <provider>|repair <provider>]` (alias `/account`) reviews each provider's sign-in routes, subscription windows and billing path.
-`/accounts show openai` lists the routes; `/accounts repair openai` says what to fix.
+`/auth` (both programs) shows how you are signed in to model providers: `review` (the report a bare `/auth` runs where no list can be shown), `show <provider>`, `repair <provider>`, `export <file> [--replace]` (a summary of stored secret names and provider sign-ins, no secret or token, readable by you only; an existing file is kept unless `--replace`, which asks first) and `inspect <file>`.
 
-`/auth [review|show <provider>|repair <provider>|bundle export <path>|bundle inspect <path>|login <daemon|listener> <baseUrl> <username> [password] [secretKey]|logout <daemon|listener> <baseUrl> [secretKey]|local <review|panel|add-user|delete-user|rotate-password|revoke-session|clear-bootstrap-file>]` reviews provider auth and signs in to or out of a daemon or listener.
-`/auth login daemon https://host.example:3421 admin` asks for the password with masked input.
-A password typed on the command line works but prints a warning that it stays visible.
-`http://` to another machine is refused because the credential would travel unencrypted: `... Use https://<host>. Nothing was sent.`
-A refused sign-in prints `Auth login failed (HTTP <status>). Check the base URL, username and password, then retry.`
-A sign-in that answers with a redirect is not followed: `Auth login refused: <origin> answered with a redirect to <origin>, and the password is sent only to the address you typed.`
-A listener session is stored with the address that issued it; `/auth logout listener <baseUrl>` sends it only to that address, and for any other address prints `The listener session stored as <key> was issued by <origin>; it is never sent to <baseUrl>. Nothing was sent or removed.`
+`/local-auth` (terminal app) chooses who may sign in to this machine's daemon and web app: `review` (the users, their roles, the open sessions and the first-run sign-in file), `open` (the local sign-in screen), `add <name> [--role user|admin]`, `remove <name>` (asks first; it cannot be undone), `password <name>`, `sign-out <session>` (sessions are chosen from the list of who is signed in) and `remove-first-run-file`. A password is asked on a hidden line, twice in the guided path; typed on the line it is `--password <password>` (with `--again <password>` to check it), kept in the input history as `<redacted>`. The role defaults to `user`; `admin` loosens a protection, so a model cannot choose it.
 
-`/local-auth [review|panel|add-user <username> <password> [roles]|delete-user <username>|rotate-password <username> <password>|revoke-session <session-id-or-token>|clear-bootstrap-file]` (alias `/auth-local`) manages the local daemon and listener users from inside the app. `/local-auth add-user alice` without a password opens a masked prompt; roles default to `user`.
+`/secrets` (both programs) keeps passwords and keys where programs can read them, without showing them. Bare, it opens its actions with "See your secrets" first; the actions are `list`, `set <name> [<value>] [--scope project|user] [--storage secure|plaintext]` (without the value it asks on a hidden line; `project` and `secure` are the defaults, `plaintext` loosens a protection), `link <name> <reference>` (a `goodvibes://secrets/...` address in a password manager), `get <name>` (says whether it is stored, never its value), `test <reference>`, `providers` (where a secret can be read from, with an example line for each), `storage` (the storage rule, how many are encrypted or plain text, and where each store is), `trust <name>` (use a secret from this project's store; it loosens a protection, so it asks and a model cannot run it), `delete <name> [--scope project|user] [--storage secure|plaintext]` (asks first; it cannot be undone) and `use <name> [<value>]`, which keeps a value as an environment variable for this session only: `$<NAME> is set for this session only.` with `(N characters, value not shown.)`.
+In the Agent a credential the daemon reads is filed in the daemon's tier whatever scope is asked, and `set` says so.
 
-`/secrets <subcommand>` manages persistent secrets with the same forms as the `goodvibes secrets` command, plus `get <KEY>` (shows whether it resolves) and `trust <KEY>`.
-`/secret <NAME>` asks for a value with masked input and keeps it as an environment variable for this session only: `[Secret] Stored NAME (N characters, value hidden). Available to shell/tool runs as $NAME.`
-
-While a value is asked for with masked input (the same in both programs), the composer shows a bullet per character and holds the value apart from the prompt: typing, a terminal paste, the paste key (`Ctrl+V`), the cursor keys, `Home`, `End`, `Backspace` and `Delete` edit it, `Enter` hands it over, `Esc` or `Ctrl+C` cancels; undo, redo, the kill ring, history search, the command line and the other editor shortcuts are not offered, so the value never reaches them. A command line that carries a credential is kept in the input history with `<redacted>` in its place: `/secrets set <KEY> <value>` (also after `--`), `/config set` and the Agent's `/settings set` for a credential key, `/notify add <url>`, the Agent's `/channels send --webhook <url>` and `/calendar connect <provider> --code <code-or-address>`.
-`/storage [review|list|delete <key>]` reviews secure storage posture and lists stored key names; deletion is done with `/secrets delete <key>`.
+While a value is asked for with masked input (the same in both programs), the composer shows a bullet per character and holds the value apart from the prompt: typing, a terminal paste, the paste key (`Ctrl+V`), the cursor keys, `Home`, `End`, `Backspace` and `Delete` edit it, `Enter` hands it over, `Esc` or `Ctrl+C` cancels; undo, redo, the kill ring, history search, the command line and the other editor shortcuts are not offered, so the value never reaches them. A command line that carries a credential is kept in the input history with `<redacted>` in its place: `/secrets set <name> <value>` and `/secrets use <name> <value>`, `/local-auth add` and `password` with `--password`, `/accounts sign-in` with `--password`, `/config set` and the Agent's `/settings set` for a credential key, `/notify add <url>`, the Agent's `/channels send --webhook <url>` and `/calendar connect <provider> --code <code-or-address>`. The line a guided action shows ("This will run", "The command for this is") leaves a secret out, so typing it back asks for the secret on a hidden line.
 
 `/usage [turns|agents]` opens the Usage view on a tab.
 `/cost [panel|budget <usd>|attribution [24h|7d] [--json]]` opens Usage, sets the session budget alert (`/cost budget 5` prints `Cost budget alert set to $5.00.`; `0` disables it), or prints cost attributed per agent over the last 24 hours or 7 days from the daemon.
@@ -1525,6 +1524,8 @@ Each move prints a line naming both models, the position in the fallback order, 
 ```
 
 When prices are unknown the line says `[cost data unavailable]`. In the terminal app a second line names the billing class left and joined, for example `[Failover] billing: API key → Subscription: billing class changed`, and while the move is in force the header and footer name the model answering, with `failover from <selected model>`. In a headless run (`goodvibes run`, `goodvibes-agent run`) the move is one line on standard error, `[Failover] <from> -> <to>, <position>; <to> answers the rest of this turn.`, and the result's `model` and `provider` name the model that answered. Text the failed attempt had already streamed is withdrawn (`DRAFT_WITHDRAWN`) before the next model streams its answer. A companion chat (`companion.chat.*`) moves the same way: the reply's `metadata.failover` holds the moves (`from`, `to`, `because`), `answeredBy` and the `[Failover]` lines, and the `turn.completed` envelope carries the same `metadata`; when nothing is left to try, the `turn.error` text ends with the `[Failover] Stopped:` line. The selection itself never changes: the next turn starts on the selected model again.
+
+The same order serves the model calls made outside a turn: context compaction (the summary and the distilled brief), the helper and tool models, the check-in note, native work intake, knowledge enrichment, image understanding and the private verification proposal (which moves with its turn, so the rest of that turn continues on the model it moved to). Each moves only for that one call: the model's other sign-in first, then the first entry of `provider.fallbackModels` not yet tried whose provider is signed in; with no order, or every entry tried, the call fails with the error as before. Image understanding moves only to a model that reads images and stays in its scope (a local-only reading never goes to a cloud model). A call that succeeds the first time sends no other request. Background calls report a move or a stop in the log, not the conversation.
 
 Set a fallback order (it applies from the next failure, in every program that reads the same settings). `/model fallback` ("Choose a backup model", in both programs) lists the models you can select and adds the one you pick to the end of the order; `/model fallback <model> [<model>...]` sets the whole order; `/model fallback clear` empties it. The same setting by key:
 

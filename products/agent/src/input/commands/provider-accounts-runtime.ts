@@ -34,14 +34,15 @@ async function loadProviderAccountSnapshot(context: CommandContext): Promise<Pro
 }
 
 import { createProviderAccountCommands } from '@goodvibes-jev/engine/terminal-shell/provider-account-commands';
+import { commandRefusal } from './confirmation.ts';
+
+const CONNECTED_HOST_SIGN_IN = 'The Agent keeps no daemon or listener session: it connects to a GoodVibes host that manages its own sign-in. Sign in from the terminal app (goodvibes) or the web app of that host.';
 
 export const { registerProviderAccountsRuntimeCommands } = createProviderAccountCommands<
   CommandContext,
   ProviderAccountRecord,
   ProviderAccountSnapshot
 >({
-  usage: '[review|show <provider>|routes <provider>|repair <provider>]',
-  hidden: true,
   load: loadProviderAccountSnapshot,
   open: (ctx) => {
     ctx.print(
@@ -98,4 +99,7 @@ export const { registerProviderAccountsRuntimeCommands } = createProviderAccount
         `  ${record.providerId}  active route ${formatProviderAuthRouteId(record.activeRoute)}  preferred route ${formatProviderAuthRouteId(record.preferredRoute)}  auth ${record.authFreshness}  models ${record.modelCount}  issues ${record.issues.length}`,
     ),
   ],
+  // The Agent holds no daemon or listener session: the host it connects to manages its own sign-in.
+  signIn: async () => { throw commandRefusal(CONNECTED_HOST_SIGN_IN); },
+  signOut: async () => { throw commandRefusal(CONNECTED_HOST_SIGN_IN); },
 });

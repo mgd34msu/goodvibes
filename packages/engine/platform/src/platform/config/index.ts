@@ -130,7 +130,9 @@ export type {
   EffectiveConfigEntry,
   LocalConfigReader,
 } from './daemon-config-read.js';
-export type { GoodVibesConfig, ConfigKey, ConfigValue, ConfigSetting, PermissionMode, PermissionAction, PermissionsToolConfig, NotificationsConfig } from './schema.js';
+export type { GoodVibesConfig, ConfigKey, ConfigValue, ConfigSetting, SettingAppliesWhen, PermissionMode, PermissionAction, PermissionsToolConfig, NotificationsConfig } from './schema.js';
+export { SETTING_TOPICS, UNCLAIMED_SETTINGS_SECTION, sectionOfNamespace, topicOf } from './setting-topics.js';
+export type { SettingTopic, SettingTopicId, SettingSection } from './setting-topics.js';
 export type { HostedInboxScreening } from './schema-types-surfaces.js';
 export { DEFAULT_CONFIG, CONFIG_KEYS, CONFIG_SCHEMA, isValidConfigKey } from './schema.js';
 export { ConfigError } from '../types/errors.js';

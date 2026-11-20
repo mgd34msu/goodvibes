@@ -82,7 +82,7 @@ export interface SettingsSectionDef {
 export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
   {
     id: 'general',
-    label: 'Appearance and behavior',
+    label: 'Display',
     page: 'general',
     description: 'Appearance and how GoodVibes behaves on this browser.',
     namespaces: ['display', 'ui', 'behavior', 'daemon', 'update', 'diagnostics'],
@@ -118,7 +118,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
   },
   {
     id: 'models',
-    label: 'Current model and providers',
+    label: 'Model',
     page: 'models',
     description: 'The model new chats use, and the providers that serve it.',
     namespaces: ['provider', 'judgment', 'pricing', 'cache'],

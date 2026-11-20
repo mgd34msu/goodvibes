@@ -14,7 +14,7 @@ type ProviderCatalogContext = {
   readonly provider: Pick<CommandContext['provider'], 'providerRegistry'>;
   /** Only key presence is read from the credential store, so only `get` is required of it. */
   readonly platform: Pick<CommandContext['platform'], 'configManager' | 'serviceRegistry' | 'subscriptionManager'>
-    & { readonly secretsManager?: { get(key: string): Promise<string | null> } | undefined };
+    & { readonly secretsManager?: { get(key: string): Promise<Secret | null> } | undefined };
 };
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 

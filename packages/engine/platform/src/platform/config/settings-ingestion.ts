@@ -63,9 +63,10 @@ import { VERSION } from '../version.js';
 import { logger } from '../utils/logger.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { homedir } from 'node:os';
 
-/** What the reader did with a setting it could not ingest as written: skipped it, refused the file, or read it under its current name (`mapped`). */
-export type SettingsIngestionAction = 'skipped' | 'refused' | 'mapped';
+/** What the reader did with a setting it could not ingest as written: skipped it (its default applies) or refused the file. */
+export type SettingsIngestionAction = 'skipped' | 'refused';
 
 /** One setting that did not make it into the resolved config, and why. */
 export interface SettingsIngestionNotice {
@@ -343,17 +344,6 @@ function adaptStoredTerminalTheme(raw: Record<string, unknown>): Record<string, 
   return { ...raw, display: { ...display, theme: name } };
 }
 
-/**
- * The decision-model policy values saved before they were renamed, one to one:
- * someone who chose no decision model keeps none, and someone who chose to stop
- * when it fails keeps stopping. Read as the current value; the file is not rewritten.
- */
-const LEGACY_DECISION_MODEL_POLICIES: Readonly<Record<string, string>> = Object.freeze({
-  'Classic - Off': 'No Decision Model',
-  'Default - On': 'Decision Model Only',
-  Preferred: 'Hybrid',
-});
-
 /** Known keys whose stored value fails the schema entry that defines them. */
 function screenSchemaValues(
   raw: Record<string, unknown>,
@@ -369,15 +359,6 @@ function screenSchemaValues(
       const retired = retiredPermissionModeNotice(hit.value);
       if (retired !== undefined) {
         found.push({ file, key: setting.key, reason: retired, remedy: 'set permissions.mode to a current mode to silence this', action: 'skipped' });
-      }
-    }
-    if (setting.key === 'judgment.policy') {
-      const current = typeof hit.value === 'string' ? LEGACY_DECISION_MODEL_POLICIES[hit.value] : undefined;
-      if (current !== undefined && isPlainObject(raw.judgment)) {
-        raw.judgment.policy = current;
-        found.push({ file, key: setting.key, action: 'mapped',
-          reason: `as "${current}": "${String(hit.value)}" is its earlier name, and the file is not rewritten`,
-          remedy: `set judgment.policy to "${current}" to silence this` });
       }
     }
     const failure = schemaFailure(setting, readDotPath(raw, setting.key).value);
@@ -505,10 +486,9 @@ export function announceIngestionNotice(
 ): void {
   const fields = { file: entry.file, key: entry.key, reason: entry.reason, remedy: entry.remedy };
   if (entry.action === 'refused') logger.error('goodvibes settings: a setting could not be ingested', fields);
-  else if (entry.action === 'mapped') logger.warn('goodvibes settings: a setting saved under an earlier name was read under its current one', fields);
   else logger.warn('goodvibes settings: a setting was skipped', fields);
   // A refusal stops the program, so it is said every time, with its remedy.
-  // A skipped or renamed setting is said once per tree, in one short line: not
+  // A skipped setting is said once per tree, in one short line: not
   // again by the next command, the next program or the next settings reload.
   if (entry.action !== 'refused' && !firstMention(entry)) return;
   try {
@@ -524,7 +504,7 @@ const mentioned = new Set<string>();
 const NOTICE_RECORD = 'settings-notices.json';
 
 /**
- * Whether this skipped or renamed setting is news: not shown before by this
+ * Whether this skipped setting is news: not shown before by this
  * process, and not recorded as shown in the tree its file belongs to (the
  * `.goodvibes` directory two levels above `<app>/settings.json`), which every
  * program and command of that tree reads. Keyed by the action and the key, not
@@ -547,13 +527,28 @@ function firstMention(entry: SettingsIngestionNotice): boolean {
   return true;
 }
 
-/** A one-line, owner-facing summary of one notice: what, where and why, briefly. */
+/** A path under the home directory written from `~`, as a person reads it. */
+function shortPath(file: string): string {
+  const home = homedir();
+  return home && (file === home || file.startsWith(`${home}/`)) ? `~${file.slice(home.length)}` : file;
+}
+
+/**
+ * The one owner-facing line for a notice, the same on stderr, in the app and in
+ * the daemon's receipt (so a receipt and the app's own notice for the same file
+ * and key read alike and are shown once): `Setting <key> ignored (<file>): <why>.`
+ * or, for a refusal, the reason and the remedy as well.
+ */
 export function describeIngestionNotice(entry: SettingsIngestionNotice): string {
-  if (entry.action === 'refused') return `goodvibes settings: REFUSED ${entry.key} in ${entry.file}, ${entry.reason}. ${entry.remedy}`;
-  const verb = entry.action === 'mapped' ? 'read' : 'ignored';
+  const where = shortPath(entry.file);
+  if (entry.action === 'refused') {
+    return entry.key === '(whole file)'
+      ? `Settings file ${where} refused: ${entry.reason}. ${entry.remedy}`
+      : `Setting ${entry.key} refused (${where}): ${entry.reason}. ${entry.remedy}`;
+  }
   // The first clause of the reason; the full reason and remedy are in the activity log.
   const why = entry.reason.split(';')[0]!.trim().replace(/^is /, '');
-  return `goodvibes settings: ${verb} ${entry.key} in ${entry.file} (${why}).`;
+  return `Setting ${entry.key} ignored (${where}): ${why}.`;
 }
 
 /** Options for {@link ingestSettingsFile}; all seams are injectable for tests. */

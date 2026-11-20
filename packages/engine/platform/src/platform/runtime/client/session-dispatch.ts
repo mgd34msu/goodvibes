@@ -518,7 +518,7 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
       // The daemon grants a claim to one caller. Refused: another surface holds
       // this input and will answer it. Failed to reach the daemon: it stays
       // queued and the next tick tries again, so nothing is lost either way.
-      // A claim this process already holds is renewed with its token once half
+      // A claim this process already holds is renewed with its token once a quarter of
       // its lease has passed, so it never lapses while the input waits here.
       const held = claimedUnstarted.get(key);
       if (held && !sameTarget(held.targetId, active)) continue;

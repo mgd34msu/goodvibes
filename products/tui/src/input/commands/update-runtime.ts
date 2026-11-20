@@ -1,5 +1,5 @@
 import { DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { applySuiteUpdate, installedSuiteNeedsRepair, rollbackSuiteUpdate, SuiteUpdateRecoveryError, type SuiteUpdateResult } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { applySuiteUpdate, installedSuiteNeedsRepair, rollbackSuiteUpdate, type SuiteUpdateResult } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { createSelfUpdateCommand, retainSuiteUpdateConfiguration, formatSuiteUpdateReport } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
 import {
   checkReleaseUpdate,
@@ -8,6 +8,7 @@ import {
   type ReleaseUpdateCheck,
 } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
 import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../../runtime/workspace-update-policy.ts';
+import { recordSwapFailure, type UpdateSwapProgress } from '@goodvibes-jev/engine/terminal-shell/launch-auto-update';
 /** `/update` uses the platform's shared suite transaction. Every installed
  * sibling product and its native/browser companions comes from the same
  * release; an explicitly configured installer-owned WebUI keeps its served
@@ -22,7 +23,6 @@ import { spawnSync } from 'node:child_process';
 import {
   captureUpdateFileIo,
   PREVIOUS_FILE_SUFFIX,
-  UpdateTransactionError,
   realUpdateFileIo,
   type UpdateFileIo,
 } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
@@ -41,24 +41,8 @@ function releaseDownloadBaseUrl(tag: string): string {
   return daemonReleaseDownloadBaseUrl(tag);
 }
 
-/**
- * External progress for launch-time budgets. Preparation is cancellable until
- * the synchronous live commit; a compensated failure is not an installation.
- * A completed commit or explicit recovery fence must never be called a clean
- * deferral when a launch caller is deciding what happened on disk.
- */
-export interface UpdateSwapProgress {
-  /** The disk update committed or requires recovery; it cannot be called a clean deferral. */
-  begun: boolean;
-  /** True once every target file has been swapped into place and the update is fully installed. */
-  committed: boolean;
-  /** The release tag being installed, set as soon as the target is resolved (before any download). */
-  targetTag: string | null;
-}
-
-export function createUpdateSwapProgress(): UpdateSwapProgress {
-  return { begun: false, committed: false, targetTag: null };
-}
+/** External progress for launch-time budgets: one record, shared with the Agent (terminal-shell/launch-auto-update.ts). */
+export { createUpdateSwapProgress, type UpdateSwapProgress } from '@goodvibes-jev/engine/terminal-shell/launch-auto-update';
 
 /** The failure an aborted update ends with, raised only while nothing has been written yet. */
 export const UPDATE_ABORTED_MESSAGE = 'update cancelled before any file was replaced';
@@ -205,10 +189,7 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<SuiteUpd
     options.print(formatSuiteUpdateReport(result, 'updated', result.programs.includes('goodvibes-daemon') && service.managed ? [`Daemon restart: ${service.restartCommand}`] : []));
     return result;
   } catch (error) {
-    if (progress && error instanceof UpdateTransactionError) {
-      progress.begun = error.receipt.committed || error.receipt.recoveryRequired;
-      progress.committed = error.receipt.committed;
-    } else if (progress && error instanceof SuiteUpdateRecoveryError) { progress.begun = true; progress.committed = error.committed; }
+    recordSwapFailure(progress, error);
     throw error;
   }
 }

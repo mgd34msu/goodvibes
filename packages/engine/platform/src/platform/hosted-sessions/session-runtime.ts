@@ -618,7 +618,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
 }
 
 /** The owner inbox as a hosted session uses it: asks and reads there, and settles a session that ended. */
-export type HostedOwnerQuestions = QuestionInbox & Pick<OwnerInbox, 'claim' | 'settleSession'>;
+export type HostedOwnerQuestions = QuestionInbox & Pick<OwnerInbox, 'take' | 'confirmDelivered' | 'settleSession'>;
 
 /** The hosted session whose turn runs under each mode owner (an agent a turn started inherits it). */
 const hostedTurnSessions = new WeakMap<ExecutionModeOwner, string>();

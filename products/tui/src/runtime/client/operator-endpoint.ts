@@ -25,7 +25,7 @@
  * Which daemon and which credential is the engine's one resolver
  * (platform/runtime/client/daemon-target-resolver.ts): the daemon this terminal
  * was pointed at (`daemon.connectedHost.url`) with the bearer stored for that
- * address, or a `/auth login daemon` session held for it; otherwise the daemon
+ * address, or an `/accounts sign-in daemon` session held for it; otherwise the daemon
  * on this machine with `GOODVIBES_DAEMON_TOKEN` or the token read (or minted)
  * from its own state directory. This machine's token is never sent to another
  * daemon's address.
@@ -318,7 +318,7 @@ function withGatewayRouteForWsOnlyVerbs(
  * The verb caller every client seam shares. The endpoint and its client are
  * resolved on first use and kept while nothing they depend on moved: the
  * settings revision, the token override, the token file and this terminal's
- * own credential record (`/auth login daemon`, `/auth logout`, a connect with a
+ * own credential record (`/accounts sign-in daemon`, `/accounts sign-out`, a connect with a
  * new token: a revision for its writes here, a `stat` for one from another
  * process). Two `stat` calls per verb; before this, every verb re-read the
  * token file and built a new client.

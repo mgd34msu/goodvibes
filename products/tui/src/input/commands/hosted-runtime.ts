@@ -138,7 +138,7 @@ interface HostedCommandSeams {
  * The verbs go through `createDaemonVerbCaller`; the stream needs the base
  * URL and bearer directly, and takes both from `resolveDaemonEndpoint`, the
  * resolver the verb caller uses, so the stream dials the same daemon with the
- * same credential (a connected daemon's stored token, an /auth login session,
+ * same credential (a connected daemon's stored token, an /accounts sign-in session,
  * GOODVIBES_DAEMON_TOKEN, or this machine's operator token for the local one).
  */
 function resolveSeams(context: CommandContext): HostedCommandSeams | null {

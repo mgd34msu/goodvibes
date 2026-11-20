@@ -10,6 +10,7 @@
 import { FeatureAnnouncementStore, featureAnnouncementsPath, createSandboxContainmentAnnouncer } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
 import { readClientCompatibilityFloor } from '@goodvibes-jev/engine/platform/platform/control-plane/build-compatibility';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { firstShowingOfSettingsNotice } from '@goodvibes-jev/engine/terminal-shell/cli-config-overrides';
 
 /** A daemon receipt line (already a human one-liner, e.g. "restarted after a crash at 2026-11-15 14:32"). */
 export interface DaemonReceiptLike {
@@ -93,7 +94,8 @@ export async function readExternalDaemonAttach(
     for (const entry of receipts) {
       if (entry && typeof (entry as { text?: unknown }).text === 'string') {
         const text = (entry as { text: string }).text;
-        if (text.trim().length > 0) notices.push(text);
+        // A settings notice this app already showed for the same file and key (one formatter writes both) is said once.
+        if (text.trim().length > 0 && firstShowingOfSettingsNotice(text)) notices.push(text);
       }
     }
     // Acknowledge only what was parsed, so a response lost in transit leaves

@@ -324,13 +324,13 @@ const promptCardChain = createCardEntryPrompter<CommandContext>(
     // The card goes only to the daemon that was selected when its entry began.
     if (!chosen || now !== chosen) {
       const where = (id: string | null | undefined): string => id ? id.replace(/#.*$/, '') : 'none';
-      return Promise.reject(new CardHostError(`The selected daemon changed while the card was being entered (it was ${where(chosen)}, now ${where(now)}${chosen && now && where(chosen) === where(now) ? ', with another credential' : ''}). Run /payments card again to enter it for the daemon selected now.`));
+      return Promise.reject(new CardHostError(`The selected daemon changed while the card was being entered (it was ${where(chosen)}, now ${where(now)}${chosen && now && where(chosen) === where(now) ? ', with another credential' : ''}). Choose "Add a card" in /payments again to enter it for the daemon selected now.`));
     }
     return cardHost.create(ctx, card);
   },
   {
     prompt: (field) => `[payments] Enter ${field.label} (e.g. ${field.placeholder}), masked; Enter to continue, Esc to stop.`,
-    stored: (card) => `\n[payments] Card stored on the selected daemon: ${describeCard(card)}. Run /payments address billing and /payments address shipping if those are not set yet.`,
+    stored: (card) => `\n[payments] Card stored on the selected daemon: ${describeCard(card)}. Set the addresses purchases use with /payments address if they are not set yet.`,
   },
 );
 
@@ -339,7 +339,7 @@ function promptCardFields(ctx: CommandContext, fields: readonly CardField[], ind
   if (index === 0) {
     const daemon = selectedCardDaemon(ctx);
     if (!daemon) {
-      ctx.print('[payments] No paired daemon is selected, or its credential cannot be read. Check the selected host and pairing (/host), then run /payments card again. Nothing was asked or sent.');
+      ctx.print('[payments] No paired daemon is selected, or its credential cannot be read. Check the selected host and pairing (/host), then choose "Add a card" in /payments again. Nothing was asked or sent.');
       return;
     }
     cardEntryDaemons.set(ctx, daemon);

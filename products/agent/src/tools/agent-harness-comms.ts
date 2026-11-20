@@ -1,4 +1,5 @@
 import type { CommandContext } from '../input/command-registry.ts';
+import { isSecret } from '@goodvibes-jev/engine/platform/platform/security';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
@@ -513,7 +514,9 @@ export async function channelDraftSendHandoff(
   // What is checked is all the text that leaves: the fields as sent, and each
   // attachment's label and artifact id.
   const outwardEffectContent = (deliveryInput: Parameters<NonNullable<Parameters<typeof queueDraftToSend>[3]>>[0]): Readonly<Record<string, string | undefined>> => {
-    const { attachments, ...fields } = deliveryInput;
+    const { attachments, webhook, ...rest } = deliveryInput;
+    // The webhook URL is checked as the text that would be dispatched.
+    const fields = { ...rest, ...(webhook === undefined ? {} : { webhook: isSecret(webhook) ? webhook.reveal('dispatch') : webhook }) };
     if (!attachments || attachments.length === 0) return fields;
     return { ...fields, attachments: attachments.map((attachment) => (attachment.label ? `${attachment.label} (${attachment.artifactId})` : attachment.artifactId)).join('\n') };
   };
@@ -564,7 +567,8 @@ export async function channelDraftSendHandoff(
         message: publicText(result.message),
         title: publicText(result.title),
         target: { ...result.target,
-          ...(result.target.address ? { address: publicText(result.target.address) } : {}),
+          // A webhook address is a Secret: its scheme and host are what is shown.
+          ...(result.target.address ? { address: isSecret(result.target.address) ? result.target.addressShown ?? '(secret)' : publicText(result.target.address) } : {}),
           ...(result.target.routeId ? { routeId: publicText(result.target.routeId) } : {}),
           ...(result.target.label ? { label: publicText(result.target.label) } : {}),
         },

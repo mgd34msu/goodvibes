@@ -178,10 +178,10 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
       boundary: 'Review subcommands are read-only; bundle export/import or auth/trust bundle export writes local files and requires explicit confirmation.',
     };
   }
-  if (root === 'mcp' || root === 'voice' || root === 'subscription' || root === 'secrets' || root === 'secret') {
+  if (root === 'mcp' || root === 'voice' || root === 'subscription' || root === 'secrets') {
     return {
       confirmation,
-      preferredModelTool: root === 'secrets' || root === 'secret'
+      preferredModelTool: root === 'secrets'
         ? settingsActions('list', 'get', 'set', 'reset')
         : `${agentHarnessModes('workspace_actions', 'open_ui_surface')} or ${settingsActions('list', 'get', 'set')}`,
       boundary: 'Harness-owned configuration, secret, voice, subscription, and MCP commands can expose credentials or external account state. Mutations require explicit user intent and should prefer secret refs over raw values.',

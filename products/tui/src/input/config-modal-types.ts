@@ -100,7 +100,7 @@ export interface ConfigModalActionContext {
    * Execute a slash command, the seam a migrated action
    * uses to reach its existing command. This is how a migrated action
    * preserves parity: the mutation still runs through its existing, tested
-   * command (e.g. `/settings-sync resolve`, `/local-auth delete-user`).
+   * command (e.g. `/settings-sync resolve`, `/local-auth remove`).
    */
   readonly executeCommand?: (name: string, args: string[]) => Promise<unknown>;
   /** Open another named modal surface (cross-surface navigation, e.g. the

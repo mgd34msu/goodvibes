@@ -713,6 +713,28 @@ export class CheckoutOperations {
   statusReport(id?: string): { readonly operations: readonly PaymentOperationView[]; readonly unreadable: readonly PaymentUnreadableOperation[] } {
     return id === undefined ? this.store.report() : { operations: this.store.list(id), unreadable: [] };
   }
+  /**
+   * The owner's "no" to an open purchase window (a veto, a denied approval),
+   * written to the operation's record before the answer is reported accepted:
+   * the operation says `cancelling` on disk, so a daemon that stops right after
+   * never resumes that window (a cancelling operation is not resumable) and
+   * never buys on it. Unlike {@link cancel} it does not abort: the window's own
+   * answer ends the purchase with its report. Throws when the record could not
+   * be written; null when this host runs no such live purchase. The returned
+   * `abort` stops the purchase outright, for an answer that then could not be
+   * applied to its window (the record already says it is stopping).
+   */
+  recordOwnerStop(id: string): { readonly abort: () => void } | null {
+    const operation = this.active.get(id); if (!operation) return null;
+    const previous = operation.writer.read();
+    if (!isLivePaymentOperation(previous.state)) return null;
+    if (previous.state !== 'cancelling') {
+      operation.cancelRequested = true;
+      if (!this.transition(operation.writer, { ...previous, state: 'cancelling', updatedAtMs: this.now() })) return null;
+    }
+    return { abort: () => operation.abort.abort(new CheckoutOwnershipError()) };
+  }
+
   cancel(id: string, operationId: string): PaymentOperationCancellation {
     if (this.closed) throw new PaymentOperationStoreError('busy', 'This payment host is shutting down and no longer takes stop requests. '
       + `Read payments.purchase.status for purchase ${id} once the daemon is running again.`);

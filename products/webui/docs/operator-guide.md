@@ -54,9 +54,9 @@ the top finds a section by name or by the setting inside it.
 
 | Page | Sections | What it covers |
 | --- | --- | --- |
-| General | Appearance and behavior, Network, About, Advanced | Theme (including GoodVibes Neon), density, how devices reach the daemon (Tailscale, relay, listeners), the daemon and connection status, and every remaining daemon setting |
+| General | Display, Network, About, Advanced | Theme (including GoodVibes Neon), density, how devices reach the daemon (Tailscale, relay, listeners), the daemon and connection status, and every remaining daemon setting |
 | Account | Sign-in, Devices and pairing, People and channels | How this browser signs in, passkey step-up, owner profile and mail/calendar accounts, paired devices and their tokens, power keep-awake, this browser as a phone node, and the named identities behind each channel |
-| Models and providers | Current model and providers, Credentials, Usage | The model new chats use, provider status and sign-in routes, what the credential store holds, and per-provider usage and budgets |
+| Models and providers | Model, Credentials, Usage | The model new chats use, provider status and sign-in routes, what the credential store holds, and per-provider usage and budgets |
 | Voice | Voice | Dictation, spoken replies and the wake word |
 | Notifications | Notifications, Check-ins | Push notifications and install, occasion reminders, and the proactive check-in schedule and receipts |
 | Memory | Memory | Provenance chips, consolidation and the daemon's memory use |

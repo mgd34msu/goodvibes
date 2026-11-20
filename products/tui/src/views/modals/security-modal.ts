@@ -122,7 +122,7 @@ class SecurityModalSurface implements ConfigModalSurface {
       rows.push(infoRow('empty:1', 'Paired devices appear here with their age and rotation due date once paired (d manage devices).', { fg: MODAL_TONES.dim }));
       if (quarantinedMcp.length > 0) rows.push(infoRow('empty:mcp', 'MCP quarantine still active despite no registered tokens.', WARN));
       rows.push(headerRow('empty:title', 'Inspect further'));
-      rows.push(infoRow('empty:storage', '/storage review — inspect secure secret storage and environment overrides', { fg: MODAL_TONES.dim }));
+      rows.push(infoRow('empty:storage', '/secrets storage — how secrets are kept, and which an environment variable overrides', { fg: MODAL_TONES.dim }));
       rows.push(infoRow('empty:mcptrust', '/mcp review     — servers that need attention: not connected, or tools held back', { fg: MODAL_TONES.dim }));
       return { id: 'tokens', label: 'Tokens', header, rows, emptyText: '' };
     }

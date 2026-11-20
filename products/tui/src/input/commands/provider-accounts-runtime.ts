@@ -19,12 +19,12 @@ export { presentRecommendedActions } from '@goodvibes-jev/engine/terminal-shell/
 
 import { createProviderAccountCommands } from '@goodvibes-jev/engine/terminal-shell/provider-account-commands';
 import { presentRecommendedActions } from '@goodvibes-jev/engine/terminal-shell/provider-account-actions';
+import { signInToService, signOutOfService } from './platform-access-runtime.ts';
 export const { registerProviderAccountsRuntimeCommands } = createProviderAccountCommands<
   CommandContext,
   ProviderAccountRecord,
   ProviderAccountSnapshot
 >({
-  usage: '[review|panel|show <provider>|routes <provider>|repair <provider>]',
   load: loadProviderAccountSnapshot,
   open: (ctx) => {
     ctx.openModal?.('providers-modal');
@@ -81,4 +81,6 @@ export const { registerProviderAccountsRuntimeCommands } = createProviderAccount
   ],
   afterRepair: (ctx, record) => presentRecommendedActions(ctx, record.providerId, record.recommendedActions),
   afterShow: (ctx, record) => presentRecommendedActions(ctx, record.providerId, record.recommendedActions),
+  signIn: signInToService,
+  signOut: signOutOfService,
 });

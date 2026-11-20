@@ -1,6 +1,9 @@
-import { runLaunchUpdatePreflight } from '@goodvibes-jev/engine/terminal-shell/launch-update-preflight';
 import {
-  withTimeout,
+  runLaunchAutoUpdate as runSharedLaunchAutoUpdate,
+  type LaunchAutoUpdateInput,
+  type LaunchAutoUpdateOutcome,
+} from '@goodvibes-jev/engine/terminal-shell/launch-auto-update';
+import {
   restartOntoUpdatedBinary as restart,
   type RestartOntoUpdatedBinaryOptions,
 } from '@goodvibes-jev/engine/terminal-shell/service-io';
@@ -46,9 +49,9 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime
  * stubbed fetch, a stubbed apply, and pinned fixture versions, never the
  * live build VERSION and never the real network.
  */
-import { detectInstallKind, normalizeVersion, type UpdateFetchLike } from '../runtime/update-check.ts';
-import { applyUpdate, checkForUpdate, createUpdateSwapProgress, type ApplyUpdateOptions } from '../input/commands/update-runtime.ts';
-import { configuredSuiteWebuiDirectory, installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, type SuiteUpdateResult } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { detectInstallKind, type UpdateFetchLike } from '../runtime/update-check.ts';
+import { applyUpdate, checkForUpdate, type ApplyUpdateOptions } from '../input/commands/update-runtime.ts';
+import { configuredSuiteWebuiDirectory, installedSuiteNeedsRepair, type SuiteUpdateResult } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { readUpdateSettings, type UpdateSettings } from '../config/tui-extension-settings.ts';
 import { runDaemonHandover, type DaemonHandoverOutcome } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { resolveGoodVibesDaemonExecutable } from './service-posture.ts';
@@ -71,74 +74,31 @@ function launchCheckFile(configManager: Partial<Pick<ConfigManager, 'getControlP
  */
 export const LAUNCH_UPDATED_FROM_ENV = 'GOODVIBES_LAUNCH_UPDATED_FROM';
 
-/** Default budget for the launch-time version check; user-tunable via update.launchCheckTimeoutMs. */
-export const LAUNCH_UPDATE_CHECK_TIMEOUT_MS = 2500;
+export { LAUNCH_UPDATE_CHECK_TIMEOUT_MS, LAUNCH_APPLY_TIMEOUT_MS, type LaunchAutoUpdateOutcome } from '@goodvibes-jev/engine/terminal-shell/launch-auto-update';
 
-/** Default budget for the launch-time download+verify+swap; user-tunable via update.applyTimeoutMs. Generous, a binary download over a slow connection genuinely takes a while, but bounded so launch is never held hostage. */
-export const LAUNCH_APPLY_TIMEOUT_MS = 45_000;
-
-export type LaunchAutoUpdateOutcome =
-  | {
-      readonly action: 'continue';
-      readonly reason:
-        | 'just-updated'
-        | 'disabled'
-        | 'not-swappable-install'
-        | 'already-current'
-        | 'check-skipped'
-        | 'update-failed'
-        /** The budget ran out before anything was written, and the work was cancelled. */
-        | 'update-deferred'
-        /** The budget ran out after the swap had begun; it is left to finish and report its own outcome. */
-        | 'update-in-background';
-    }
-  | { readonly action: 'restart'; readonly latestTag: string }
-  | { readonly action: 'halt'; readonly error: unknown };
-
-export interface RunLaunchAutoUpdateOptions {
-  readonly fetchImpl: UpdateFetchLike;
-  readonly execPath: string;
+export interface RunLaunchAutoUpdateOptions extends LaunchAutoUpdateInput {
   readonly platform: NodeJS.Platform;
   readonly arch: string;
-  readonly currentVersion: string;
   readonly settings: UpdateSettings;
-  readonly env: NodeJS.ProcessEnv;
-  readonly print: (line: string) => void;
   readonly configManager: { get(key: string): unknown };
   /** Injectable so tests observe the install step instead of swapping real files. */
   readonly apply?: (options: ApplyUpdateOptions) => Promise<SuiteUpdateResult | void>;
   readonly repairRequired?: ((version: string) => boolean) | undefined;
-  readonly timeoutMs?: number;
-  /** Overrides the download+verify+swap budget; defaults to settings.applyTimeoutMs ?? LAUNCH_APPLY_TIMEOUT_MS. */
-  readonly applyTimeoutMs?: number;
-  /** Where the last successful release lookup is remembered, so a launch within a few hours of it does not ask again. */
-  readonly lastCheckFile?: string | undefined;
 }
 
 /**
- * The launch-time decision: receipt-and-continue (restarted process), skip
- * (disabled / unswappable / current / unreachable), install-and-restart, or
- * fail-and-continue on the current version. Never throws.
+ * The terminal app's launch update: the shared sequence
+ * (terminal-shell/launch-auto-update.ts) with this program's installer,
+ * release check and restart marker. Never throws.
  */
-export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): Promise<LaunchAutoUpdateOutcome> {
-  const preflight = await runLaunchUpdatePreflight(options, {
+export function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): Promise<LaunchAutoUpdateOutcome> {
+  return runSharedLaunchAutoUpdate(options, {
     updatedFromKey: LAUNCH_UPDATED_FROM_ENV,
-    defaultCheckTimeoutMs: LAUNCH_UPDATE_CHECK_TIMEOUT_MS,
     check: checkForUpdate,
     unswappable: () => undefined,
     repairRequired: version => options.repairRequired?.(version) ?? (options.apply === undefined && installedSuiteNeedsRepair({ execPath: options.execPath, platform: options.platform, arch: options.arch, version,
       webuiDirectory: configuredSuiteWebuiDirectory(options.configManager) })),
-  });
-  if (!preflight.proceed) return preflight.outcome;
-  const check = preflight.check;
-
-  const applyTimeoutMs = options.applyTimeoutMs ?? options.settings.applyTimeoutMs ?? LAUNCH_APPLY_TIMEOUT_MS;
-  options.print(`downloading ${check.latestTag}…`);
-  const controller = new AbortController();
-  const progress = createUpdateSwapProgress();
-  try {
-    const apply = options.apply ?? applyUpdate;
-    const applyPromise = apply({
+    apply: ({ signal, progress }) => (options.apply ?? applyUpdate)({
       fetchImpl: options.fetchImpl,
       execPath: options.execPath,
       platform: options.platform,
@@ -146,62 +106,12 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
       currentVersion: options.currentVersion,
       print: options.print,
       configManager: options.configManager,
-      signal: controller.signal,
+      signal,
       progress,
-    });
-    // Losing the race abandons this promise. A cancelled download rejects
-    // shortly after and that is the expected end of the work, so it stays
-    // quiet. A swap that was already running is different: its late outcome is
-    // reported below, because the launch has already told the user to expect it.
-    // The race still sees every rejection that arrives before the budget runs out.
-    let reportLateOutcome = false;
-    applyPromise.then(
-      (late) => {
-        if (reportLateOutcome && late) options.print(`background update finished: v${late.version} is installed; restart to use it`);
-      },
-      (error) => {
-        if (!reportLateOutcome) return;
-        const detail = error instanceof Error ? error.message : String(error);
-        options.print(
-          suiteUpdateRequiresRecovery(error)
-            ? `background update requires recovery: ${detail}; restart ${'`'}goodvibes${'`'} to run the recovery before using this install`
-            : `background update failed: ${detail}; the installed version may be unchanged, check with ${'`'}goodvibes status${'`'}`,
-        );
-      },
-    );
-    const applyResult = await withTimeout(applyPromise, applyTimeoutMs);
-    if (applyResult === 'timeout') {
-      if (!progress.begun) {
-        // Nothing has been written yet, so the work can genuinely be called
-        // off, cancel the download in flight, then say it was deferred.
-        controller.abort();
-        options.print('update deferred: will retry next launch');
-        return { action: 'continue', reason: 'update-deferred' };
-      }
-      // The swap had already started when the budget ran out. A swap is never
-      // interrupted, so cancelling here would be a lie in the other direction.
-      // It has not necessarily finished, so say it is still running and let its
-      // own outcome be reported when it settles.
-      reportLateOutcome = true;
-      options.print(`update still finishing in background; restart to use v${normalizeVersion(progress.targetTag ?? check.latestTag)} once it completes`);
-      return { action: 'continue', reason: 'update-in-background' };
-    }
-    // The release may move between preflight and apply. Production reports
-    // only the version its completed suite transaction actually installed.
-    if (applyResult === undefined && options.apply === undefined) return { action: 'continue', reason: 'already-current' };
-    const installedTag = applyResult ? `v${applyResult.version}` : check.latestTag;
-    options.print(`auto-update: ${installedTag} installed; restarting onto the new version`);
-    return { action: 'restart', latestTag: installedTag };
-  } catch (error) {
-    if (suiteUpdateRequiresRecovery(error)) {
-      options.print(`auto-update requires recovery: ${error instanceof Error ? error.message : String(error)}; startup stopped before loading installed companions`);
-      return { action: 'halt', error };
-    }
-    options.print(
-      `auto-update failed: ${error instanceof Error ? error.message : String(error)}; starting the current version v${normalizeVersion(options.currentVersion)}`,
-    );
-    return { action: 'continue', reason: 'update-failed' };
-  }
+    }),
+    applyReportsInstalled: options.apply === undefined,
+    command: 'goodvibes',
+  });
 }
 
 export interface SelfUpdateAtLaunchParams {

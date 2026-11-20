@@ -2,6 +2,7 @@ import { revealOrNull } from '@goodvibes-jev/engine/platform/platform/security';
 import { createAuthCommand } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
 import type { ServiceSignIn, ServiceSignOut } from '@goodvibes-jev/engine/terminal-shell/provider-account-commands';
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
 import { readDaemonSessionToken, writeDaemonSessionToken } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-credentials';
@@ -222,188 +223,23 @@ async function endServiceSession(
   ctx.print(`Signed out of the ${input.target} at ${input.baseUrl.origin}: ${revoked} The stored token ${input.secretKey} was removed.`);
 }
 
-export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'login',
-    description: 'Front-door login flow for provider subscriptions and local service sessions',
-    usage: '[provider <name> start|finish <code>|service <daemon|listener> <baseUrl> <username> [password] [secretKey]]',
-    // The service password and a provider sign-in code are never kept in the input history.
-    secretArgs: {
-      subcommands: { service: [4] },
-      select: (args) => (args[0]?.toLowerCase() === 'provider' && args[2]?.toLowerCase() === 'finish' ? [3] : []),
-    },
-    async handler(args, ctx) {
-      const shellPaths = requireShellPaths(ctx);
-      const target = (args[0] ?? '').toLowerCase();
-      if (target === 'provider') {
-        const provider = args[1];
-        const mode = args[2]?.toLowerCase();
-        if (!provider || !mode) {
-          ctx.print('Usage: /login provider <name> start|finish <code>');
-          return;
-        }
-        if (ctx.executeCommand) {
-          await ctx.executeCommand('subscription', ['login', provider, mode, ...args.slice(3)]);
-          return;
-        }
-        ctx.print(`Use /subscription login ${provider} ${mode}${args[3] ? ` ${args[3]}` : ''}`);
-        return;
-      }
-      if (target === 'service') {
-        if (ctx.executeCommand) {
-          await ctx.executeCommand('auth', ['login', ...args.slice(1)]);
-          return;
-        }
-        ctx.print('Use /auth login <daemon|listener> <baseUrl> <username> [password] [secretKey]');
-        return;
-      }
-      ctx.print(
-        'Usage: /login [provider <name> start|finish <code>|service <daemon|listener> <baseUrl> <username> [password] [secretKey]]',
-      );
-    },
-  });
-
-  registry.register({
-    name: 'logout',
-    description: 'Front-door logout flow for provider subscription sessions and supported overrides',
-    usage: '[provider <name>|service <daemon|listener> <baseUrl> [secretKey]]',
-    async handler(args, ctx) {
-      const target = (args[0] ?? '').toLowerCase();
-      if (target === 'service') {
-        if (ctx.executeCommand) {
-          await ctx.executeCommand('auth', ['logout', ...args.slice(1)]);
-          return;
-        }
-        ctx.print('Use /auth logout <daemon|listener> <baseUrl> [secretKey]');
-        return;
-      }
-      if (target !== 'provider' || !args[1]) {
-        ctx.print('Usage: /logout provider <name> | /logout service <daemon|listener> <baseUrl> [secretKey]');
-        return;
-      }
-      if (ctx.executeCommand) {
-        await ctx.executeCommand('subscription', ['logout', args[1]]);
-        return;
-      }
-      ctx.print(`Use /subscription logout ${args[1]}`);
-    },
-  });
-
-  registry.register({
-    name: 'install',
-    description: 'Review install posture (the support bundle carries the install facts)',
-    usage: '[review]',
-    async handler(args, ctx) {
-      const sub = args[0] ?? 'review';
-      if (sub === 'review') {
-        const profiles = requireProfileManager(ctx).list();
-        const secretKeys = await requireSecretsManager(ctx).list();
-        ctx.print(
-          [
-            'Install Review',
-            `  version: ${VERSION}`,
-            `  profiles: ${profiles.length}`,
-            `  secret keys: ${secretKeys.length}`,
-          ].join('\n'),
-        );
-        return;
-      }
-      ctx.print('Usage: /install [review]\n  The install facts for a support thread are in /setup support-bundle <dir> (platform-review.json).');
-    },
-  });
-
-  registerUpdateCommand(registry);
-
-  registry.register({
-    name: 'auth',
-    description: 'Review auth posture, and sign in to or out of a daemon or listener session',
-    usage:
-      '[review|show <provider>|repair <provider>|bundle export <path>|bundle inspect <path>|login <daemon|listener> <baseUrl> <username> [password] [secretKey]|logout <daemon|listener> <baseUrl> [secretKey]|local <review|panel|add-user|delete-user|rotate-password|revoke-session|clear-bootstrap-file>]',
-    secretArgs: { subcommands: { login: [4], 'local add-user': [3], 'local rotate-password': [3], 'local revoke-session': [2] } },
-    confirm: (args, ctx) => authBundleExportConfirmation(args, (path) => requireShellPaths(ctx).resolveWorkspacePath(path)),
-    async handler(args, ctx) {
-      const shellPaths = requireShellPaths(ctx);
-      const sub = args[0] ?? 'review';
-      const subscriptions = requireSubscriptionManager(ctx);
-      const serviceRegistry = requireServiceRegistry(ctx);
-      const secretsManager = requireSecretsManager(ctx);
-      if (sub === 'local') {
-        handleLocalAuthCommand(args.slice(1), ctx);
-        return;
-      }
-      if (await handleAuthReview(args, ctx, { serviceRegistry, subscriptionManager: subscriptions, secretsManager })) return;
-
-      if (
-        await handleAuthBundle(args, ctx, {
-          secretsManager,
-          subscriptions,
-          resolvePath: (path) => shellPaths.resolveWorkspacePath(path),
-        })
-      )
-        return;
-
-      if (sub === 'login') {
-        const target = args[1];
-        const username = args[3];
-        const password = args[4];
-        if ((target !== 'daemon' && target !== 'listener') || !args[2] || !username) {
-          ctx.print('Usage: /auth login <daemon|listener> <baseUrl> <username> [password] [secretKey]  (omit the password to be asked for it with masked input)');
-          return;
-        }
-        const baseUrl = serviceBaseUrl(ctx, args[2], 'Auth login');
-        if (!baseUrl) return;
-        const secretKey = sessionTokenKey(target, args[5]);
-        const exchange = (secret: string): Promise<void> =>
-          exchangeServiceLogin(ctx, { target, baseUrl, username, password: secret, secretKey });
-        if (password) {
-          ctx.print('Warning: a password typed on the command line stays visible on screen. Omit it to be asked with masked input.');
-          await exchange(password);
-          return;
-        }
-        if (!ctx.beginConcealedInput) {
-          ctx.print('Masked input is unavailable on this surface; pass the password as the fifth argument.');
-          return;
-        }
-        ctx.print(`Enter the ${target} password for ${username}: masked; Enter to sign in, Esc to cancel.`);
-        ctx.beginConcealedInput({
-          label: `${target} password`,
-          onSubmit: async (value) => {
-            if (value.length === 0) {
-              ctx.print('Auth login cancelled: no password entered.');
-              return;
-            }
-            await exchange(value);
-          },
-          onCancel: () => ctx.print('Auth login cancelled.'),
-        });
-        return;
-      }
-
-      if (sub === 'logout') {
-        const target = args[1];
-        if ((target !== 'daemon' && target !== 'listener') || !args[2]) {
-          ctx.print('Usage: /auth logout <daemon|listener> <baseUrl> [secretKey]');
-          return;
-        }
-        const baseUrl = serviceBaseUrl(ctx, args[2], 'Auth logout');
-        if (!baseUrl) return;
-        await endServiceSession(ctx, { target, baseUrl, secretKey: sessionTokenKey(target, args[3]) });
-        return;
-      }
-
-      ctx.print(
-        'Usage: /auth [review|show <provider>|bundle export <path>|bundle inspect <path>|login <daemon|listener> <baseUrl> <username> [password] [secretKey]|logout <daemon|listener> <baseUrl> [secretKey]|local <review|panel|add-user|delete-user|rotate-password|revoke-session|clear-bootstrap-file>]',
-      );
-    },
-  });
+/** Sign in to a daemon or listener (`/accounts sign-in`): the password goes only to the address given. */
+export async function signInToService(ctx: CommandContext, input: ServiceSignIn): Promise<void> {
+  const baseUrl = serviceBaseUrl(input.address, 'Not signed in');
+  await exchangeServiceLogin(ctx, { target: input.service, baseUrl, username: input.user, password: input.password, secretKey: sessionTokenKey(input.service, input.key || undefined) });
 }
 
-const handleAuthReview = createAuthReviewHandler<CommandContext>({
-  reportFailure: false,
+/** Sign out of a daemon or listener (`/accounts sign-out`). */
+export async function signOutOfService(ctx: CommandContext, input: ServiceSignOut): Promise<void> {
+  const baseUrl = serviceBaseUrl(input.address, 'Not signed out');
+  await endServiceSession(ctx, { target: input.service, baseUrl, secretKey: sessionTokenKey(input.service, input.key || undefined) });
+}
+
+/** `/auth` is one description shared with the other terminal app (terminal-shell/auth-review-command.ts). */
+const authCommand = createAuthCommand<CommandContext, AuthReviewBundle>({
   review: (snapshot, builtinProviders) => [
-    'Auth Review',
-    '  daemon login route: /login',
-    '  listener login route: /login',
+    'Provider sign-ins',
+    '  a daemon or listener: /accounts sign-in',
     `  stored secrets: ${snapshot.secretKeyCount}`,
     `  built-in providers: ${builtinProviders.length}${builtinProviders.length > 0 ? ` (${builtinProviders.join(', ')})` : ''}`,
     `  active subscriptions: ${snapshot.activeSubscriptions}${
@@ -453,10 +289,35 @@ const handleAuthReview = createAuthReviewHandler<CommandContext>({
       ? ['  next:', ...inspection.nextActions.map((action) => `    ${action}`)]
       : ['  No active repair actions suggested.']),
   ],
-});
-
-const handleAuthBundle = createAuthBundleHandler<CommandContext, AuthReviewBundle>({
-  reportReadFailure: false,
   build: (base) => ({ ...base, daemonLoginUrl: 'http://127.0.0.1:3421/login', listenerLoginUrl: 'http://127.0.0.1:3422/login' }),
   inspect: (value) => inspectAuthBundle(value as AuthReviewBundle),
 });
+
+export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry): void {
+  registry.register({
+    name: 'install',
+    description: 'Review install posture (the support bundle carries the install facts)',
+    usage: '[review]',
+    async handler(args, ctx) {
+      const sub = args[0] ?? 'review';
+      if (sub === 'review') {
+        const profiles = requireProfileManager(ctx).list();
+        const secretKeys = await requireSecretsManager(ctx).list();
+        ctx.print(
+          [
+            'Install Review',
+            `  version: ${VERSION}`,
+            `  profiles: ${profiles.length}`,
+            `  secret keys: ${secretKeys.length}`,
+          ].join('\n'),
+        );
+        return;
+      }
+      ctx.print('Usage: /install [review]\n  The install facts for a support thread are in /setup support-bundle <dir> (platform-review.json).');
+    },
+  });
+
+  registerUpdateCommand(registry);
+
+  registry.register(authCommand);
+}

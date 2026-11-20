@@ -1,6 +1,10 @@
 import { retainSuiteUpdateConfiguration, type SuiteUpdateConfigurationSource } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
-import { installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, type SuiteUpdateResult } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import { runLaunchUpdatePreflight } from '@goodvibes-jev/engine/terminal-shell/launch-update-preflight';
+import { installedSuiteNeedsRepair, type SuiteUpdateResult } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import {
+  runLaunchAutoUpdate as runSharedLaunchAutoUpdate,
+  type LaunchAutoUpdateInput,
+  type LaunchAutoUpdateOutcome,
+} from '@goodvibes-jev/engine/terminal-shell/launch-auto-update';
 import { restartOntoUpdatedBinary as restart, type RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';
 export type { RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';
 import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime/workspace-update-policy.ts';
@@ -23,6 +27,10 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime
  *   - a successful update restarts into the new binary and the restarted
  *     process prints a receipt naming both versions, so the swap is never
  *     silent.
+ *   - the download, verification and swap get `update.applyTimeoutMs`, as in
+ *     the terminal app (one sequence, terminal-shell/launch-auto-update.ts):
+ *     before the swap begins the work is cancelled and deferred to the next
+ *     launch; a swap already under way finishes and reports itself.
  *   - every swap keeps the outgoing file at `<path>.previous`; rollback is
  *     one command (`/update rollback`).
  *
@@ -64,37 +72,20 @@ function launchCheckFile(configManager: Partial<Pick<ConfigManager, 'getControlP
  */
 export const LAUNCH_UPDATED_FROM_ENV = 'GOODVIBES_AGENT_LAUNCH_UPDATED_FROM';
 
-/** Default budget for the launch-time version check; user-tunable via update.launchCheckTimeoutMs. */
-export const LAUNCH_UPDATE_CHECK_TIMEOUT_MS = 2500;
+export { LAUNCH_UPDATE_CHECK_TIMEOUT_MS, LAUNCH_APPLY_TIMEOUT_MS, type LaunchAutoUpdateOutcome } from '@goodvibes-jev/engine/terminal-shell/launch-auto-update';
 
-export type LaunchAutoUpdateOutcome =
-  | {
-      readonly action: 'continue';
-      readonly reason: 'just-updated' | 'disabled' | 'not-swappable-install' | 'already-current' | 'check-skipped' | 'update-failed';
-    }
-  | { readonly action: 'restart'; readonly latestTag: string }
-  | { readonly action: 'halt'; readonly reason: 'update-recovery-required' };
 export class AgentUpdateRecoveryRequiredError extends Error {
   constructor() { super('Agent startup stopped: the suite update requires recovery before this installation can run'); this.name = 'AgentUpdateRecoveryRequiredError'; }
 }
 
-export interface RunLaunchAutoUpdateOptions {
-  readonly fetchImpl: UpdateFetchLike;
-  readonly execPath: string;
+export interface RunLaunchAutoUpdateOptions extends LaunchAutoUpdateInput {
   readonly platform: NodeJS.Platform;
   readonly arch: string;
-  readonly currentVersion: string;
   readonly settings: UpdateSettings;
-  readonly env: NodeJS.ProcessEnv;
-  readonly print: (line: string) => void;
-  /** Injectable so tests observe the install step instead of swapping real files. */
   readonly configManager?: SuiteUpdateConfigurationSource | undefined;
-  /** Explicit injected installers may retain their existing void completion contract. */
+  /** Injectable so tests observe the install step instead of swapping real files. */
   readonly apply?: (options: ApplyUpdateOptions) => Promise<SuiteUpdateResult | void>;
-  readonly timeoutMs?: number;
   readonly repairRequired?: ((version: string) => boolean) | undefined;
-  /** Where the last successful release lookup is remembered, so a launch within a few hours of it does not ask again. */
-  readonly lastCheckFile?: string | undefined;
   /** Injectable so tests observe the durable receipt without writing beside a real executable. */
   readonly recordReceipt?: (entry: {
     readonly execPath: string;
@@ -105,20 +96,20 @@ export interface RunLaunchAutoUpdateOptions {
 }
 
 /**
- * The launch-time decision: receipt-and-continue (restarted process), skip
- * (disabled / unswappable / current / unreachable), install-and-restart, or
- * fail-and-continue on the current version. Never throws.
+ * The Agent's launch update: the shared sequence
+ * (terminal-shell/launch-auto-update.ts), with the same budget on the
+ * download, verification and swap as the terminal app, and this program's
+ * installer, release check, restart marker and durable receipt. Never throws.
  */
 export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): Promise<LaunchAutoUpdateOutcome> {
   let configuration: ReturnType<typeof retainSuiteUpdateConfiguration>;
   try { configuration = retainSuiteUpdateConfiguration(options.configManager); }
   catch (error) {
-    options.print(`auto-update failed: ${error instanceof Error ? error.message : String(error)}, starting the current version v${normalizeVersion(options.currentVersion)}`);
+    options.print(`auto-update failed: ${error instanceof Error ? error.message : String(error)}; starting the current version v${normalizeVersion(options.currentVersion)}`);
     return { action: 'continue', reason: 'update-failed' };
   }
-  const preflight = await runLaunchUpdatePreflight(options, {
+  return runSharedLaunchAutoUpdate(options, {
     updatedFromKey: LAUNCH_UPDATED_FROM_ENV,
-    defaultCheckTimeoutMs: LAUNCH_UPDATE_CHECK_TIMEOUT_MS,
     check: checkForUpdate,
     repairRequired: version => options.repairRequired?.(version) ?? (options.apply === undefined && installedSuiteNeedsRepair({
       execPath: options.execPath, platform: options.platform, arch: options.arch, version, webuiDirectory: configuration.webuiDirectory,
@@ -127,48 +118,32 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
       kind === 'source'
         ? 'auto-update skipped: running from source (dev checkout)'
         : 'auto-update skipped: package-managed install, update with: bun add -g @goodvibes-jev/agent',
-  });
-  if (!preflight.proceed) return preflight.outcome;
-  const check = preflight.check;
-
-  try {
-    const apply = options.apply ?? applyUpdate;
-    configuration.assertCurrent();
-    const installed = await apply({
-      fetchImpl: options.fetchImpl,
-      execPath: options.execPath,
-      platform: options.platform,
-      arch: options.arch,
-      currentVersion: options.currentVersion,
-      configManager: options.configManager, assertCurrent: configuration.assertCurrent,
-      print: options.print,
-    });
-    // The default suite installer reports the actual committed release. Its
-    // no-op result cannot become a fabricated update receipt or restart.
-    if (!installed && apply === applyUpdate) return { action: 'continue', reason: 'already-current' };
-    const installedTag = installed ? `v${normalizeVersion(installed.version)}` : check.latestTag;
-    // Durable before the restart, not after: this process is about to hand over
-    // and the line printed below is wiped by the alternate screen a moment
-    // later. The receipt is the only trace that survives to tell someone the
-    // binary they are looking at is not the one they installed.
-    (options.recordReceipt ?? recordSelfUpdate)({
+    apply: ({ signal, progress }) => {
+      configuration.assertCurrent();
+      return (options.apply ?? applyUpdate)({
+        fetchImpl: options.fetchImpl,
+        execPath: options.execPath,
+        platform: options.platform,
+        arch: options.arch,
+        currentVersion: options.currentVersion,
+        configManager: options.configManager, assertCurrent: configuration.assertCurrent,
+        print: options.print,
+        signal,
+        progress,
+      });
+    },
+    applyReportsInstalled: options.apply === undefined,
+    // Durable before the restart: the printed line is wiped by the alternate
+    // screen a moment later, and this receipt is the only trace that the binary
+    // running is not the one that was installed.
+    installed: (installedTag) => (options.recordReceipt ?? recordSelfUpdate)({
       execPath: options.execPath,
       fromVersion: options.currentVersion,
       toVersion: installedTag,
       trigger: 'launch',
-    });
-    options.print(`auto-update: ${installedTag} installed, restarting onto the new version`);
-    return { action: 'restart', latestTag: installedTag };
-  } catch (error) {
-    if (suiteUpdateRequiresRecovery(error)) {
-      options.print(`auto-update requires recovery: ${error instanceof Error ? error.message : String(error)}; startup stopped`);
-      return { action: 'halt', reason: 'update-recovery-required' };
-    }
-    options.print(
-      `auto-update failed: ${error instanceof Error ? error.message : String(error)}, starting the current version v${normalizeVersion(options.currentVersion)}`,
-    );
-    return { action: 'continue', reason: 'update-failed' };
-  }
+    }),
+    command: 'goodvibes-agent',
+  });
 }
 
 export interface SelfUpdateAtLaunchParams {

@@ -11,13 +11,12 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
 
 // ---------------------------------------------------------------------------
-// Work Plan modal. Lists the project work plan's tasks (the planning service's
+// To-do list modal. Lists the project work plan's tasks (the planning service's
 // rows, the same plan the work_plan tool and the operator methods keep) with a
-// progress summary and status counts. Every change runs through the
-// `/work-plan` command. Status changes, delete and clear keep the modal open;
-// add and edit close it and leave the command in the composer to finish
-// (`/work-plan add `, `/work-plan edit <id> <title>`), and export closes it so
-// the written path is visible. Owner, source, notes and links are folded into
+// progress summary and status counts. Every change runs through the `/todo`
+// command. Status changes, delete and clear keep the modal open; add and edit
+// close it and open the command's form to finish (`/todo add`,
+// `/todo edit <id>`), and export closes it so the written path is visible. Owner, source, notes and links are folded into
 // each row label.
 // ---------------------------------------------------------------------------
 
@@ -25,11 +24,6 @@ type WorkPlanItemStatus = ProjectWorkPlanTaskStatus;
 
 const STATUS_LABEL: Record<WorkPlanItemStatus, string> = {
   pending: '[ ]', in_progress: '[>]', blocked: '[!]', done: '[x]', failed: '[✕]', cancelled: '[-]',
-};
-
-/** `/work-plan <subcommand> <id>` for each status. */
-const STATUS_COMMAND: Record<WorkPlanItemStatus, string> = {
-  pending: 'pending', in_progress: 'start', blocked: 'block', done: 'done', failed: 'fail', cancelled: 'cancel',
 };
 
 const STATUS_ORDER: readonly WorkPlanItemStatus[] = ['pending', 'in_progress', 'blocked', 'done', 'failed', 'cancelled'];
@@ -58,18 +52,18 @@ function linkedSegments(item: WorkPlanItemLike): string {
 }
 
 /**
- * Close the modal, then run `/work-plan <args>` so what it prints (or leaves in
+ * Close the modal, then run `/todo <args>` so what it prints (or leaves in
  * the composer) is in front of the user rather than behind the modal.
  */
 function closeAndRun(ctx: ConfigModalActionContext, args: string[]): void {
   const run = ctx.executeCommand;
-  const label = `/work-plan ${args.join(' ')}`;
+  const label = `/todo ${args.join(' ')}`;
   if (!run) { ctx.setStatus(`Not run: ${label} (this session has no command runner).`); return; }
   ctx.close();
   let started: Promise<unknown>;
-  try { started = Promise.resolve(run('work-plan', args)); } catch (error) { started = Promise.reject(error); }
+  try { started = Promise.resolve(run('todo', args)); } catch (error) { started = Promise.reject(error); }
   void started.then(
-    (found) => { if (found === false) ctx.print(`Not a command: /work-plan (${label} was not run).`); },
+    (found) => { if (found === false) ctx.print(`Not a command: /todo (${label} was not run).`); },
     (error: unknown) => {
       const refused = readRefusal(error);
       ctx.print(`Failed: ${label}: ${refused ? formatRefusal(refused) : summarizeError(error)}`);
@@ -188,20 +182,20 @@ class WorkPlanModalSurface implements ConfigModalSurface {
       return { id: item.taskId, label: `${STATUS_LABEL[item.status]} ${item.title}${owner}${source}  updated ${compactDate(item.updatedAt)}${notes}${linkPart}` };
     });
 
-    return { title: 'Work Plan', tabs: [{ id: 'items', label: 'Items', header, rows, emptyText: this.loading ? 'Reading the work plan...' : 'No work plan items yet.', hints: ['enter cycle status', '1-6 set status', 'd delete', 'c clear done', 'a add', 'e edit', 'x export'] }] };
+    return { title: 'To-do list', tabs: [{ id: 'items', label: 'Items', header, rows, emptyText: this.loading ? 'Reading the work plan...' : 'No work plan items yet.', hints: ['enter cycle status', '1-6 set status', 'd delete', 'c clear done', 'a add', 'e edit', 'x export'] }] };
   }
 
   onAction(id: string, ctx: ConfigModalActionContext): void {
     if (id === 'refresh') { this.refresh(); ctx.setStatus('Reading the work plan again.'); return; }
     const reload = (): void => this.refresh();
-    if (id === 'clearCompleted') { runModalCommand(ctx, 'work-plan', ['clear-done'], '/work-plan clear-done', { afterSettle: reload }); return; }
+    if (id === 'clearCompleted') { runModalCommand(ctx, 'todo', ['clear-done'], '/todo clear-done', { afterSettle: reload }); return; }
     if (id === 'add') { closeAndRun(ctx, ['add']); return; }
     if (id === 'export') { closeAndRun(ctx, ['export']); return; }
     const item = ctx.row ? this.itemFrom(ctx.row.id) : undefined;
     if (!item) return;
     if (id === 'edit') { closeAndRun(ctx, ['edit', item.taskId]); return; }
-    if (id === 'cycleStatus') { runModalCommand(ctx, 'work-plan', ['cycle', item.taskId], `/work-plan cycle ${item.taskId}`, { afterSettle: reload }); return; }
-    if (id === 'remove') { runModalCommand(ctx, 'work-plan', ['remove', item.taskId], `/work-plan remove ${item.taskId}`, { afterSettle: reload }); return; }
+    if (id === 'cycleStatus') { runModalCommand(ctx, 'todo', ['next', item.taskId], `/todo next ${item.taskId}`, { afterSettle: reload }); return; }
+    if (id === 'remove') { runModalCommand(ctx, 'todo', ['remove', item.taskId], `/todo remove ${item.taskId}`, { afterSettle: reload }); return; }
     if (id === 'jumpAgent') {
       const agentId = item.agentId;
       if (!agentId) return;
@@ -220,7 +214,7 @@ class WorkPlanModalSurface implements ConfigModalSurface {
       id === 'setPending' ? 'pending' : id === 'setInProgress' ? 'in_progress' : id === 'setBlocked' ? 'blocked'
       : id === 'setDone' ? 'done' : id === 'setFailed' ? 'failed' : id === 'setCancelled' ? 'cancelled' : null;
     if (!status) return;
-    runModalCommand(ctx, 'work-plan', [STATUS_COMMAND[status], item.taskId], `/work-plan ${STATUS_COMMAND[status]} ${item.taskId}`, { afterSettle: reload });
+    runModalCommand(ctx, 'todo', ['mark', item.taskId, status], `/todo mark ${item.taskId} ${status}`, { afterSettle: reload });
   }
 }
 

@@ -247,7 +247,6 @@ try {
     // Long enough that anything appearing inside this proof arrived on the
     // stream and not on a poll tick.
     refreshIntervalMs: 600_000,
-    liveRefreshIntervalMs: 600_000,
     subscribe: async ({ onUpdate, onTerminate }) => {
       const resolved = resolveConnectedHostConnection(connectedHostAccess);
       if ('reason' in resolved) return null;

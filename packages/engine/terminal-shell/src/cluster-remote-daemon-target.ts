@@ -24,7 +24,7 @@
  *                   local address at its port, or its declared public URL
  *                   once that proves it is this daemon), this machine's
  *                   operator token from <daemon home>/operator-tokens.json;
- *                   for any other daemon, the token or `/auth login daemon`
+ *                   for any other daemon, the token or `/accounts sign-in daemon`
  *                   session stored for that exact origin, else a refusal.
  *                   This machine's token is never sent to another daemon.
  *

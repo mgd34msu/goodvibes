@@ -4,7 +4,7 @@ import type { AgentWorkspaceSetupChecklistItem } from './agent-workspace-setup.t
 import type { AgentWorkspaceVoiceMediaReadiness } from './agent-workspace-voice-media.ts';
 import type { AgentBehaviorDiscoverySnapshot } from '../agent/behavior-discovery-summary.ts';
 import type { AgentSetupWizard } from '../agent/setup-wizard.ts';
-import type { AgentWorkspaceEditorKind, AgentWorkspaceLocalEditorKind } from './agent-workspace-editor-kinds.ts';
+import type { WorkspaceActionTarget } from './workspace-actions.ts';
 import type { AgentWorkspaceLocalLibraryItem } from '@goodvibes-jev/engine/terminal-shell/agent-turn/local-library-items';
 
 export type { AgentWorkspaceLocalLibraryItem };
@@ -51,81 +51,22 @@ export const AGENT_WORKSPACE_CATEGORY_IDS = [
 
 export type AgentWorkspaceCategoryId = (typeof AGENT_WORKSPACE_CATEGORY_IDS)[number];
 
-export type AgentWorkspaceActionKind = 'command' | 'guidance' | 'workspace' | 'editor' | 'setting' | 'settings-import' | 'model-picker' | 'settings-modal' | 'local-selection' | 'local-operation' | 'onboarding-complete';
-
-// The editor-kind unions grow with every new card, so they live in their own
-// module and are re-exported here, this stays the one place to import them.
-export type { AgentWorkspaceEditorKind, AgentWorkspaceLocalEditorKind } from './agent-workspace-editor-kinds.ts';
-
-export type AgentWorkspaceLocalOperation =
-  | 'memory-edit'
-  | 'memory-review'
-  | 'memory-stale'
-  | 'memory-delete'
-  | 'note-edit'
-  | 'note-review'
-  | 'note-stale'
-  | 'note-delete'
-  | 'note-promote-memory'
-  | 'note-promote-persona'
-  | 'note-promote-skill'
-  | 'note-promote-routine'
-  | 'note-promote-knowledge-url'
-  | 'persona-edit'
-  | 'persona-use'
-  | 'persona-review'
-  | 'persona-clear'
-  | 'persona-delete'
-  | 'skill-edit'
-  | 'skill-enable'
-  | 'skill-disable'
-  | 'skill-review'
-  | 'skill-delete'
-  | 'routine-edit'
-  | 'routine-start'
-  | 'routine-enable'
-  | 'routine-disable'
-  | 'routine-review'
-  | 'routine-delete';
-
-export interface AgentWorkspaceEditorField {
-  readonly id: string;
-  readonly label: string;
-  readonly value: string;
-  readonly required: boolean;
-  readonly multiline: boolean;
-  readonly hint: string;
-  readonly redact?: boolean;
-  /**
-   * The value is read exactly as typed, never trimmed: a password, secret,
-   * token or key whose leading or trailing space is part of it.
-   */
-  readonly verbatim?: true;
-}
-
-export interface AgentWorkspaceLocalEditor {
-  readonly kind: AgentWorkspaceEditorKind;
-  readonly mode: 'create' | 'update' | 'delete';
-  readonly recordId?: string;
-  readonly title: string;
-  readonly fields: readonly AgentWorkspaceEditorField[];
-  readonly selectedFieldIndex: number;
-  readonly message: string;
-  /**
-   * `info` for help text, `warn` for a refusal, missing confirmation or failed
-   * save. The workspace settles it when the editor is shown; a builder may
-   * state it for a form that opens in an already-failed state.
-   */
-  readonly messageTone?: 'info' | 'warn';
-}
+/**
+ * `act`: runs a described command's action (its guided form, the same one the
+ * slash command opens); `command`: runs a typed line; `setting`: one setting,
+ * cycled in place or opened in the settings screen; the rest open a picker, an
+ * area of this workspace, or say something.
+ */
+export type AgentWorkspaceActionKind = 'act' | 'command' | 'guidance' | 'workspace' | 'setting' | 'settings-import' | 'model-picker' | 'settings-modal' | 'onboarding-complete';
 
 export interface AgentWorkspaceAction {
   readonly id: string;
   readonly label: string;
   readonly detail: string;
   readonly command?: string;
+  /** For an `act` row: the described command and action it runs. */
+  readonly act?: WorkspaceActionTarget;
   readonly targetCategoryId?: AgentWorkspaceCategoryId;
-  readonly editorKind?: AgentWorkspaceEditorKind;
   readonly settingKey?: string;
   readonly settingValueHint?: string;
   readonly modelPickerTarget?: ModelPickerTarget;
@@ -133,9 +74,6 @@ export interface AgentWorkspaceAction {
   readonly settingsTarget?: string;
   readonly visibleWhenSettingKey?: string;
   readonly visibleWhenSettingValue?: string | boolean | number;
-  readonly localKind?: AgentWorkspaceLocalEditorKind;
-  readonly selectionDelta?: number;
-  readonly localOperation?: AgentWorkspaceLocalOperation;
   readonly kind: AgentWorkspaceActionKind;
   readonly safety: 'safe' | 'read-only' | 'delegates' | 'blocked';
   readonly commandBehavior?: 'inline' | 'compose' | 'exit';

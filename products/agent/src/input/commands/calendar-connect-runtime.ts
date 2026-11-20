@@ -6,8 +6,8 @@
  * handler can print the authorization URL / device user-code IMMEDIATELY, then await
  * the browser callback or poll the device code; `--code` completes a pasted sign-in
  * started with `--device` for Google. The client id is the operator's own, from
- * config, and its secret from the secret manager (captured by the advanced workspace
- * card). No secret is ever put into a command string.
+ * config, and its secret from the secret manager (both kept by /calendar use-app).
+ * No secret is ever put into a command string.
  *
  * The service is injectable so tests drive every path against fakes with no real
  * network, port, or browser.
@@ -18,6 +18,10 @@ import type { CommandContext } from '../command-registry.ts';
 import { requireSecretsManager } from './runtime-services.ts';
 import { CalendarOAuthService, type CalendarConfigReader, type CalendarSecretSlice, type ConnectResult } from '../../agent/calendar/calendar-oauth-service.ts';
 import { commandRefusal } from './confirmation.ts';
+import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
+import { routeConfigWrite } from '../../config/daemon-config-routing.ts';
+import type { ConfigKey } from '../../config/index.ts';
+import { CALENDAR_OAUTH_CLIENT_ID_KEYS, CALENDAR_OAUTH_CLIENT_SECRET_KEYS } from '../../agent/calendar/calendar-oauth-service.ts';
 
 /** Factory seam: production builds the real service from context; tests inject a fake. */
 export type CalendarServiceFactory = (ctx: CommandContext) => CalendarOAuthService;
@@ -137,6 +141,37 @@ function printConnectResult(ctx: CommandContext, label: string, result: ConnectR
     `  via     ${via}`,
     `  scopes  ${(result.account?.scopes ?? []).join(', ') || '(none reported)'}`,
   ].join('\n'));
+}
+
+/**
+ * `/calendar use-app`: keeps the owner's own OAuth app for one provider. The
+ * client id is a plain setting routed to its owner; a client secret goes
+ * through the secret-backed writer (a reference in config, the value only in
+ * the secret store). Two writes, id first, so a failure says which half is kept.
+ */
+export async function useCalendarApp(ctx: CommandContext, account: CalendarProvider, clientId: string, clientSecret: string): Promise<string> {
+  const provider = providerOf(account);
+  const label = PROVIDER_LABEL[provider];
+  const id = clientId.trim();
+  if (!id) throw commandRefusal('Nothing was kept: the client id is empty.');
+  const configManager = ctx.platform.configManager;
+  const homeDir = configManager.getHomeDirectory();
+  try {
+    await routeConfigWrite(configManager, CALENDAR_OAUTH_CLIENT_ID_KEYS[provider], id, homeDir ? { homeDir } : {});
+  } catch (error) {
+    throw commandRefusal(`Nothing was kept: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (clientSecret.length > 0) {
+    // The secret-backed writer needs the settings store's dynamic setter.
+    const settings = configManager as unknown as { get: (key: ConfigKey) => unknown; setDynamic: (key: ConfigKey, value: unknown) => void; save: () => void };
+    try {
+      await persistSecretBackedConfigValue(settings, requireSecretsManager(ctx), CALENDAR_OAUTH_CLIENT_SECRET_KEYS[provider] as unknown as ConfigKey, clientSecret);
+      settings.save();
+    } catch (error) {
+      throw commandRefusal(`The client id was kept; the client secret was not: ${error instanceof Error ? error.message : String(error)}`, `Give the secret again: /calendar use-app ${account} ${id} --secret`);
+    }
+  }
+  return `Kept your ${label} app (client id ${id}${clientSecret.length > 0 ? ', client secret in the secret store' : ''}). Sign in with /calendar connect ${account}.`;
 }
 
 export async function disconnectCalendar(

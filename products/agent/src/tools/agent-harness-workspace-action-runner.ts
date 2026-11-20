@@ -2,10 +2,8 @@ import { captureStatefulCatalogRequest } from './agent-harness-stateful-catalog-
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { AgentHarnessToolDeps } from './agent-harness-tool-types.ts';
 import { clearSetupCheckpoint, markSetupCheckpoint, setupCheckpointSummary } from './agent-harness-setup-posture.ts';
-import { runLocalWorkspaceAction } from './agent-harness-local-operations.ts';
-import { AGENT_WORKSPACE_CATEGORIES, buildWorkspaceEditorContext, createWorkspaceEditor, describeWorkspaceAction, describeWorkspaceCategory, listWorkspaceActions, resolveWorkspaceActionDetail } from './agent-harness-workspace-actions.ts';
+import { AGENT_WORKSPACE_CATEGORIES, describeWorkspaceAction, describeWorkspaceCategory, readFieldMap, resolveWorkspaceActionDetail, workspaceRowLine } from './agent-harness-workspace-actions.ts';
 import { runTranslatedWorkspaceCommand } from './agent-harness-command-runner.ts';
-import { runWorkspaceEditorAction } from './agent-harness-workspace-editor-runner.ts';
 import { effectOutput, error, output, readString, requireConfirmedAction } from './agent-harness-tool-utils.ts';
 import { formatHarnessError } from '../agent/harness-control.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -15,13 +13,6 @@ import { assertModelReadingInputCurrent, captureModelReadingInput, withModelRead
 import { capturedHarnessSettingsImportPreview, harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
 import { getOnboardingCheckMarkerPath, getOnboardingCompletionMarkerPath, writeOnboardingCheckMarker, writeOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';
 import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
-
-/** Editors that read the runtime snapshot (templates, selected routine, handoff artifacts, review defaults, OAuth status); the rest run the same on the empty fallback. */
-const EDITOR_KINDS_USING_RUNTIME_CONTEXT: ReadonlySet<string> = new Set([
-  'profile', 'routine-schedule', 'calendar-oauth-google', 'calendar-oauth-outlook',
-  'document-export', 'document-review-packet-preset', 'document-review-packet-share',
-  'model-compare-handoff-diff', 'model-compare-apply', 'model-compare-route-decision', 'model-compare-export',
-]);
 
 export async function runWorkspaceAction(
   deps: AgentHarnessToolDeps,
@@ -51,11 +42,18 @@ export async function runWorkspaceAction(
     return error(`Workspace action ${action.id} is blocked in Agent: ${action.detail}`);
   }
   if (action.kind === 'guidance') {
-    const editorContext = buildWorkspaceEditorContext(deps.commandContext, args);
     return output({
       status: 'guidance',
-      action: describeWorkspaceAction(category, action, { includeEditor: true, editorContext, lookup }),
+      action: describeWorkspaceAction(category, action, { includeBlanks: true, lookup }),
     });
+  }
+  // A row that runs a described action runs its typed line, with the model's
+  // `fields` for the blanks, through the same command runner as run_command:
+  // a missing blank is refused with its choices, an owner-only action is refused.
+  if (action.kind === 'act' && action.act) {
+    const line = workspaceRowLine(action, readFieldMap(args.fields));
+    if (!line) return error(`Workspace action ${action.id} names no command.`);
+    return runTranslatedWorkspaceCommand(deps, args, line, options);
   }
   if (action.kind === 'workspace' && action.targetCategoryId) {
     const target = AGENT_WORKSPACE_CATEGORIES.find((entry) => entry.id === action.targetCategoryId);
@@ -118,19 +116,6 @@ export async function runWorkspaceAction(
       return error(`Settings import failed after it started and may be partially applied: ${formatHarnessError(err)}. Inspect the settings before retrying; nothing was retried.`);
     }
   }
-  if (action.kind === 'editor' && action.editorKind) {
-    const editorContext = buildWorkspaceEditorContext(deps.commandContext, args);
-    // An editor built on the empty fallback context has no selected routine, templates or handoff artifacts to act on.
-    if (editorContext?.contextUnavailable && EDITOR_KINDS_USING_RUNTIME_CONTEXT.has(action.editorKind)) {
-      return error(`Workspace action ${action.id} was not run and nothing was changed: ${editorContext.contextUnavailable} Fix the cause, then call this action again.`);
-    }
-    const editor = createWorkspaceEditor(action.editorKind, editorContext);
-    if (!editor) return error(`No workspace editor route exists for ${action.editorKind}.`);
-    return runWorkspaceEditorAction(deps, action, editor, args, options);
-  }
-  if (action.kind === 'local-selection' || action.kind === 'local-operation') {
-    return runLocalWorkspaceAction(deps, action, args, options);
-  }
   if (action.kind === 'onboarding-complete') {
     const confirmationError = requireConfirmedAction(args, options, 'Onboarding completion');
     if (confirmationError) return error(confirmationError);
@@ -168,11 +153,10 @@ export async function runWorkspaceAction(
       },
     });
   }
-  const editorContext = buildWorkspaceEditorContext(deps.commandContext, args);
   return effectOutput({
     status: 'no_direct_effect',
     done: false,
     reason: 'This workspace action has no effect run_workspace_action can perform; nothing was run. Use the routes in its description.',
-    action: describeWorkspaceAction(category, action, { includeEditor: true, editorContext, lookup }),
+    action: describeWorkspaceAction(category, action, { includeBlanks: true, lookup }),
   });
 }

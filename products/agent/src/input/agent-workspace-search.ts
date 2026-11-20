@@ -38,12 +38,11 @@ export function searchAgentWorkspaceActions(
         action.label,
         action.detail,
         action.command ?? '',
-        action.editorKind ?? '',
+        action.act ? `/${action.act.command} ${action.act.action ?? ''}` : '',
         action.targetCategoryId ?? '',
         action.modelPickerFlow ?? '',
         action.modelPickerTarget ?? '',
         action.settingsTarget ?? '',
-        action.localOperation ?? '',
         action.safety,
       ].join(' ').toLowerCase();
       if (terms.every((term) => haystack.includes(term))) {
@@ -80,13 +79,12 @@ function scoreActionSearchResult(
   const { category, action } = result;
   let score = 0;
   score += scoreField(action.id, terms, exactQuery, 90, 28);
-  score += scoreField(action.editorKind, terms, exactQuery, 85, 26);
+  score += scoreField(action.act ? `${action.act.command} ${action.act.action ?? ''}`.trim() : undefined, terms, exactQuery, 85, 26);
   score += scoreField(action.command, terms, exactQuery, 75, 22);
   score += scoreField(action.label, terms, exactQuery, 65, 18);
   score += scoreField(action.modelPickerTarget, terms, exactQuery, 58, 18);
   score += scoreField(action.settingsTarget, terms, exactQuery, 58, 18);
   score += scoreField(action.modelPickerFlow, terms, exactQuery, 54, 16);
-  score += scoreField(action.localOperation, terms, exactQuery, 50, 16);
   score += scoreField(action.targetCategoryId, terms, exactQuery, 40, 12);
   score += scoreField(action.detail, terms, exactQuery, 24, 6);
   score += scoreField(category.id, terms, exactQuery, 30, 8);

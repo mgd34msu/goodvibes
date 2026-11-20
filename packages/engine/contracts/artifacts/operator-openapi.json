@@ -3,7 +3,7 @@
   "info": {
     "title": "GoodVibes Operator API",
     "version": "3.3.1",
-    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 646 cataloged methods: 534 with dedicated REST bindings, 112 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
+    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 648 cataloged methods: 534 with dedicated REST bindings, 114 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
   },
   "servers": [
     {
@@ -5922,6 +5922,252 @@
                               "requester",
                               "work",
                               "next"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "presentation": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "run-command",
+                                  "answer-command-prompt",
+                                  "change-files",
+                                  "fetch",
+                                  "start-agent",
+                                  "hand-off-work",
+                                  "change-setting",
+                                  "mcp-tool",
+                                  "other-tool",
+                                  "purchase",
+                                  "send-message",
+                                  "question",
+                                  "decision",
+                                  "claim",
+                                  "queued-action",
+                                  "report"
+                                ]
+                              },
+                              "mark": {
+                                "type": "string",
+                                "enum": [
+                                  "ask",
+                                  "cannot-undo",
+                                  "question"
+                                ]
+                              },
+                              "question": {
+                                "type": "string"
+                              },
+                              "place": {
+                                "type": "object",
+                                "properties": {
+                                  "short": {
+                                    "type": "string"
+                                  },
+                                  "full": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "short",
+                                  "full"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "subject": {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "command",
+                                      "paths",
+                                      "urls",
+                                      "text",
+                                      "money"
+                                    ]
+                                  },
+                                  "lines": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "lines"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "body": {
+                                "type": "string"
+                              },
+                              "consequence": {
+                                "type": "object",
+                                "properties": {
+                                  "text": {
+                                    "type": "string"
+                                  },
+                                  "withPlace": {
+                                    "type": "string"
+                                  },
+                                  "tone": {
+                                    "type": "string",
+                                    "enum": [
+                                      "plain",
+                                      "cannot-undo"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "text",
+                                  "withPlace",
+                                  "tone"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "choices": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "label": {
+                                      "type": "string"
+                                    },
+                                    "key": {
+                                      "type": "string"
+                                    },
+                                    "default": {
+                                      "type": "boolean"
+                                    },
+                                    "danger": {
+                                      "type": "boolean"
+                                    },
+                                    "value": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "label"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "remember": {
+                                "type": "object",
+                                "properties": {
+                                  "offered": {
+                                    "type": "boolean"
+                                  },
+                                  "tiers": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "tier": {
+                                          "type": "string"
+                                        },
+                                        "label": {
+                                          "type": "string"
+                                        },
+                                        "detail": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "tier",
+                                        "label",
+                                        "detail"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "why": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "offered"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "typeToRefuse": {
+                                "type": "boolean"
+                              },
+                              "countdown": {
+                                "type": "object",
+                                "properties": {
+                                  "verb": {
+                                    "type": "string"
+                                  },
+                                  "at": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "verb",
+                                  "at"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "origin": {
+                                "type": "object",
+                                "properties": {
+                                  "sessionTitle": {
+                                    "type": "string"
+                                  },
+                                  "by": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "by"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "why": {
+                                "type": "string"
+                              },
+                              "details": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "label": {
+                                      "type": "string"
+                                    },
+                                    "value": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "label",
+                                    "value"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "mark",
+                              "question",
+                              "choices",
+                              "remember",
+                              "typeToRefuse",
+                              "why",
+                              "details",
+                              "title"
                             ],
                             "additionalProperties": false
                           }
@@ -37485,16 +37731,51 @@
                                   "text": {
                                     "type": "string"
                                   },
+                                  "known": {
+                                    "type": "boolean"
+                                  },
                                   "files": {
                                     "type": "array",
                                     "items": {
                                       "type": "string"
                                     }
+                                  },
+                                  "commands": {
+                                    "type": "number"
+                                  },
+                                  "messages": {
+                                    "type": "number"
+                                  },
+                                  "unknown": {
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
                                   "text",
-                                  "files"
+                                  "known",
+                                  "files",
+                                  "commands",
+                                  "messages",
+                                  "unknown"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "attempts": {
+                                "type": "object",
+                                "properties": {
+                                  "count": {
+                                    "type": "number"
+                                  },
+                                  "times": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "number"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "count",
+                                  "times"
                                 ],
                                 "additionalProperties": false
                               },
@@ -39296,16 +39577,51 @@
                                   "text": {
                                     "type": "string"
                                   },
+                                  "known": {
+                                    "type": "boolean"
+                                  },
                                   "files": {
                                     "type": "array",
                                     "items": {
                                       "type": "string"
                                     }
+                                  },
+                                  "commands": {
+                                    "type": "number"
+                                  },
+                                  "messages": {
+                                    "type": "number"
+                                  },
+                                  "unknown": {
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
                                   "text",
-                                  "files"
+                                  "known",
+                                  "files",
+                                  "commands",
+                                  "messages",
+                                  "unknown"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "attempts": {
+                                "type": "object",
+                                "properties": {
+                                  "count": {
+                                    "type": "number"
+                                  },
+                                  "times": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "number"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "count",
+                                  "times"
                                 ],
                                 "additionalProperties": false
                               },
@@ -104174,6 +104490,12 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "heldForTrust": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
@@ -104656,6 +104978,12 @@
                             ],
                             "additionalProperties": false
                           }
+                        },
+                        "heldForTrust": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         }
                       },
                       "required": [
@@ -104946,6 +105274,12 @@
                               "source"
                             ],
                             "additionalProperties": false
+                          }
+                        },
+                        "heldForTrust": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
                           }
                         }
                       },
@@ -105478,6 +105812,12 @@
                             ],
                             "additionalProperties": false
                           }
+                        },
+                        "heldForTrust": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         }
                       },
                       "required": [
@@ -105820,6 +106160,12 @@
                             ],
                             "additionalProperties": false
                           }
+                        },
+                        "heldForTrust": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         }
                       },
                       "required": [
@@ -106160,6 +106506,12 @@
                               "source"
                             ],
                             "additionalProperties": false
+                          }
+                        },
+                        "heldForTrust": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
                           }
                         }
                       },
@@ -106503,6 +106855,12 @@
                             ],
                             "additionalProperties": false
                           }
+                        },
+                        "heldForTrust": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         }
                       },
                       "required": [
@@ -106845,6 +107203,12 @@
                             ],
                             "additionalProperties": false
                           }
+                        },
+                        "heldForTrust": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         }
                       },
                       "required": [
@@ -107174,6 +107538,12 @@
                             ],
                             "additionalProperties": false
                           }
+                        },
+                        "heldForTrust": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         }
                       },
                       "required": [
@@ -107496,6 +107866,12 @@
                               "source"
                             ],
                             "additionalProperties": false
+                          }
+                        },
+                        "heldForTrust": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
                           }
                         }
                       },
@@ -170600,6 +170976,7 @@
           "acp.agents.list",
           "acp.sessions.create",
           "approvals.raise",
+          "automation.schedules.preview",
           "channels.test.send",
           "checkpoints.create",
           "checkpoints.diff",
@@ -170705,6 +171082,7 @@
           "watchers.triggers.grant.register",
           "watchers.triggers.history",
           "watchers.triggers.list",
+          "watchers.triggers.preview",
           "watchers.triggers.reset",
           "watchers.triggers.status",
           "worktrees.discard",
@@ -171419,6 +171797,14 @@
       "category": "automation",
       "access": "admin",
       "rest": "POST /api/automation/schedules/{scheduleId}/pause",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "automation.schedules.preview",
+      "category": "automation",
+      "access": "authenticated",
+      "rest": null,
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
     },
@@ -175968,6 +176354,14 @@
     },
     {
       "id": "watchers.triggers.list",
+      "category": "watchers",
+      "access": "admin",
+      "rest": null,
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "watchers.triggers.preview",
       "category": "watchers",
       "access": "admin",
       "rest": null,

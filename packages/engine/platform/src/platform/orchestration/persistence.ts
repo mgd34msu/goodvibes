@@ -354,6 +354,23 @@ export function writeWorkstreamSnapshot(projectRoot: SnapshotRoot, workstream: W
  * contract. Returns the bytes freed. A root without a namespace is refused, so
  * this never empties the shared directory.
  */
+/**
+ * Removes one workstream's snapshot that its owner never recorded as started:
+ * a crash right after the workstream was created and before the owner's own
+ * record of the start leaves it behind, and the owner then starts that
+ * workstream again from its own record. True when a file was removed.
+ */
+export function discardUnrecordedWorkstreamSnapshot(location: SnapshotRoot, workstreamId: string): boolean {
+  let path: string;
+  try { path = snapshotPath(location, workstreamId); }
+  catch { return false; }
+  try { unlinkSync(path); return true; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 export function removeWorkstreamSnapshots(location: SnapshotRoot): number {
   if (typeof location === 'string') throw new RangeError('only a namespaced snapshot directory can be removed');
   const dir = orchestrationDir(location);

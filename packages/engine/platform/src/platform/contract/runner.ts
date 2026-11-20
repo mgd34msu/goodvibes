@@ -115,6 +115,12 @@ const drainingClaims = new Map<string, Promise<void>>();
 const drainingKey = (projectRoot: string, contractId: string): string => `${projectRoot}\u0000${contractId}`;
 
 export interface ContractRunnerDeps {
+  /**
+   * Awaited before the contracts on disk resume: the providers from the home's
+   * provider files load after start, and a resumed unit's agent names its
+   * model, which is refused until its provider is registered.
+   */
+  readonly providersReady?: (() => Promise<void>) | undefined;
   readonly judgmentLog?: Pick<import('@goodvibes-jev/judgment').DecisionLog, 'get'> | undefined;
   readonly readOwnerEvidence?: OwnerEvidenceReader | undefined;
   readonly getSelectedModel?: (() => Pick<import('../providers/registry-types.js').ModelDefinition, 'id' | 'provider' | 'registryKey' | 'displayName'>) | undefined;
@@ -1934,7 +1940,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       return { escalationId };
     },
     flushWorkPlan: () => boundedWait(planSync.flush(), WORK_PLAN_FLUSH_LIMIT_MS),
-    resumeAll: () => resume.resumeAll(),
+    resumeAll: async () => { await deps.providersReady?.(); return resume.resumeAll(); },
     importContract: (snapshotJson, force = false) => {
       // Replacing the stored object under a live run would leave that run
       // mutating a detached copy whose final checkpoint is then refused.

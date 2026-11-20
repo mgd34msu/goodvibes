@@ -19,7 +19,7 @@ import {
   subscriptionRegistryForRead,
   unsubscribeCalendarFeed,
 } from './calendar-subscription-runtime.ts';
-import { calendarAccounts, connectCalendar, disconnectCalendar, fetchProviderUpcoming, sourceLabel } from './calendar-connect-runtime.ts';
+import { calendarAccounts, connectCalendar, disconnectCalendar, fetchProviderUpcoming, sourceLabel, useCalendarApp } from './calendar-connect-runtime.ts';
 import { commandRefusal } from './confirmation.ts';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
 
@@ -187,6 +187,7 @@ export function registerCalendarRuntimeCommands(registry: CommandRegistry): void
     exportFile: (ctx, dest) => plainly(() => exportEvents(ctx, dest)),
     accounts: (ctx) => plainly(() => calendarAccounts(ctx)),
     connect: (ctx, provider, how, code) => plainly(() => connectCalendar(ctx, provider, how, code)),
+    useApp: (ctx, provider, clientId, clientSecret) => plainly(() => useCalendarApp(ctx, provider, clientId, clientSecret)),
     disconnect: (ctx, provider) => plainly(() => disconnectCalendar(ctx, provider)),
     subscriptions: (ctx) => plainly(() => calendarFeeds(ctx)),
     subscriptionRows: (ctx) => calendarFeedRows(ctx),

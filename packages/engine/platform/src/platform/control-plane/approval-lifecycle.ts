@@ -400,7 +400,7 @@ export function approvalRefusal(code: ApprovalRefusalCode, record: SharedApprova
     case 'APPROVAL_CHANGED':
       return refusal({
         code, state, status: 409,
-        reason: detail ?? `It changed since revision you read; it is now at revision ${record?.revision ?? '?'}. Nothing was applied.`,
+        reason: detail ?? `It changed since the revision you read; it is now at revision ${record?.revision ?? '?'}. Nothing was applied.`,
         next: ['Show the returned reading again, then act on it with its revision.'],
       });
     case 'APPROVAL_EXPIRED':

@@ -41,6 +41,7 @@ import { IllegalContractTransitionError, isTerminalUnitStatus, type ContractFail
 import { rollUpContractUsage, type UsagePricing } from './usage.js';
 import type { UnitWatchdog } from './watchdog.js';
 import { groupTakesSharedTree, groupWorkstreamInput, takeSharedTreeForGroup } from './workstreams.js';
+import { discardUnrecordedWorkstreamSnapshot } from '../orchestration/persistence.js';
 
 /** What the runner hands `createEngine` for one contract. */
 export interface ContractEngineInput {
@@ -231,6 +232,11 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
       const input: CreateWorkstreamInput = groupWorkstreamInput(contract, group, run.env.config(), contract.usage);
       const engine = run.engine;
       if (engine === null) throw new Error(`contract ${contract.id} has no engine`);
+      // A snapshot of this group that the contract never recorded as started is left from a start a crash cut
+      // off (the workstream was written, the contract's record of it was not): the group starts again from the contract.
+      if (discardUnrecordedWorkstreamSnapshot({ root: contract.projectRoot, namespace: contract.id }, group.id)) {
+        run.decide('resumed', group.id, `group ${group.id} starts again: its workstream from a start cut off by a restart was not recorded by the contract and is replaced`);
+      }
       engine.createWorkstream(input);
       run.moveGroup(group, 'running');
       engine.start(group.id);

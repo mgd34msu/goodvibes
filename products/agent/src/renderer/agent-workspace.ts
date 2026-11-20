@@ -2,10 +2,8 @@ import type {
   AgentWorkspace,
   AgentWorkspaceAction,
   AgentWorkspaceCategory,
-  AgentWorkspaceLocalEditor,
-  AgentWorkspaceRuntimeSnapshot,
 } from '../input/agent-workspace.ts';
-import type { AgentWorkspaceEditorKind } from '../input/agent-workspace-types.ts';
+import { workspaceActionLine } from '../input/workspace-actions.ts';
 import type { AgentWorkspaceSetupChecklistItem } from '../input/agent-workspace-setup.ts';
 import type { SurfaceLayer } from './surface-kit.ts';
 import { getDisplayWidth, wrapText } from '../utils/terminal-width.ts';
@@ -47,8 +45,7 @@ function resultPalette(): { text: string; good: string; muted: string; dim: stri
   };
 }
 import { actionResultColor, type AgentWorkspaceContextLine as ContextLine } from './agent-workspace-style.ts';
-import { buildEditorRows } from './agent-workspace-editor-rows.ts';
-import { compactText, reviewerReadinessContextLines, snapshotLines, snapshotWarningLines } from './agent-workspace-context-lines.ts';
+import { compactText, snapshotLines, snapshotWarningLines } from './agent-workspace-context-lines.ts';
 import { ONBOARDING_COMPLETE_SYNTHETIC_ACTION, ONBOARDING_CRITICAL_STEP_IDS } from '../input/agent-workspace-onboarding-finish.ts';
 
 function onboardingCategoryReadiness(
@@ -123,15 +120,14 @@ function buildLeftRows(workspace: AgentWorkspace, height: number): WorkspaceRow[
   return visibleRows.slice(0, height);
 }
 
+/** The right-hand column of an action row: the line it runs, or what kind of row it is. */
 function actionCommand(action: AgentWorkspaceAction): string {
+  if (action.kind === 'act' && action.act) return workspaceActionLine(action.act);
   if (action.kind === 'workspace') return 'open area';
-  if (action.kind === 'editor') return action.editorKind ? `edit ${action.editorKind}` : 'edit form';
   if (action.kind === 'setting') return action.settingKey ? `setting ${action.settingKey}` : 'setting';
   if (action.kind === 'settings-import') return 'import GoodVibes settings';
   if (action.kind === 'model-picker') return action.modelPickerFlow === 'model' ? 'model picker' : 'provider/model picker';
   if (action.kind === 'settings-modal') return action.settingsTarget ? `settings ${action.settingsTarget}` : 'settings';
-  if (action.kind === 'local-selection') return action.selectionDelta && action.selectionDelta < 0 ? 'select previous' : 'select next';
-  if (action.kind === 'local-operation') return action.localOperation ?? '(local action)';
   if (action.kind === 'onboarding-complete') return 'apply and close';
   return action.command ?? '(guidance)';
 }
@@ -146,265 +142,6 @@ interface OnboardingActionColumns {
   readonly currentValue: string;
 }
 
-function editorPurposeLabel(editorKind: AgentWorkspaceEditorKind): string {
-  switch (editorKind) {
-    case 'secret-link': return 'Link secret reference';
-    case 'secret-set': return 'Store secret';
-    case 'secret-test': return 'Test secret reference';
-    case 'secret-delete': return 'Delete secret';
-    case 'subscription-login-start': return 'Sign in to provider';
-    case 'subscription-login-finish': return 'Finish provider sign-in';
-    case 'subscription-logout': return 'Sign out of provider';
-    case 'subscription-inspect': return 'Inspect subscription';
-    case 'provider-add': return 'Add custom provider';
-    case 'provider-remove': return 'Remove custom provider';
-    case 'provider-use': return 'Choose provider';
-    case 'provider-inspect': return 'Inspect provider';
-    case 'provider-routes': return 'Edit provider routes';
-    case 'provider-account-repair': return 'Repair provider account';
-    case 'memory': return 'Edit memory';
-    case 'memory-search': return 'Search memory';
-    case 'memory-get': return 'Get memory record';
-    case 'memory-explain': return 'Explain memory';
-    case 'memory-promote': return 'Promote memory';
-    case 'memory-link': return 'Link memory';
-    case 'memory-export': return 'Export memory';
-    case 'memory-import': return 'Import memory';
-    case 'memory-handoff-export': return 'Export memory handoff';
-    case 'memory-handoff-inspect': return 'Inspect memory handoff';
-    case 'memory-handoff-import': return 'Import memory handoff';
-    case 'memory-vector-rebuild': return 'Rebuild memory vectors';
-    case 'note': return 'Edit note';
-    case 'persona': return 'Edit persona';
-    case 'persona-search': return 'Search personas';
-    case 'persona-show': return 'Show persona';
-    case 'persona-discovery-import': return 'Import persona files';
-    case 'skill': return 'Edit skill';
-    case 'skill-search': return 'Search skills';
-    case 'skill-show': return 'Show skill';
-    case 'skill-discovery-import': return 'Import skill files';
-    case 'skill-standard-import': return 'Import shared skill';
-    case 'skill-standard-export': return 'Export skill to share';
-    case 'routine': return 'Edit routine';
-    case 'routine-search': return 'Search routines';
-    case 'routine-show': return 'Show routine';
-    case 'routine-discovery-import': return 'Import routine files';
-    case 'profile': return 'Edit profile';
-    case 'profile-from-discovered': return 'Create profile from files';
-    case 'profile-show': return 'Show profile';
-    case 'profile-default': return 'Set default profile';
-    case 'profile-default-clear': return 'Clear default profile';
-    case 'profile-delete': return 'Delete profile';
-    case 'profile-template-export': return 'Export profile template';
-    case 'profile-template-import': return 'Import profile template';
-    case 'profile-template-show': return 'Show profile template';
-    case 'profile-template-from-discovered': return 'Create template from files';
-    case 'knowledge-url': return 'Ingest URL';
-    case 'knowledge-urls': return 'Ingest URLs';
-    case 'knowledge-file': return 'Ingest file';
-    case 'knowledge-bookmarks': return 'Import bookmarks';
-    case 'knowledge-browser-history': return 'Import browser history';
-    case 'knowledge-connector-ingest': return 'Run connector ingest';
-    case 'knowledge-connector-show': return 'Show connector';
-    case 'knowledge-connector-doctor': return 'Check connector health';
-    case 'knowledge-reindex': return 'Reindex knowledge';
-    case 'knowledge-search': return 'Search knowledge';
-    case 'knowledge-ask': return 'Ask knowledge';
-    case 'knowledge-get': return 'Get knowledge record';
-    case 'knowledge-map': return 'Map knowledge';
-    case 'knowledge-review-issue': return 'Review knowledge issue';
-    case 'knowledge-consolidate': return 'Consolidate knowledge';
-    case 'knowledge-packet': return 'Build knowledge packet';
-    case 'knowledge-explain': return 'Explain knowledge';
-    case 'delegate-task': return 'Delegate build task';
-    case 'document-browse': return 'Browse documents';
-    case 'document-show': return 'Show document';
-    case 'document-create': return 'Create document';
-    case 'document-update': return 'Revise document';
-    case 'document-review': return 'Review document';
-    case 'document-comment': return 'Add comment';
-    case 'document-resolve-comment': return 'Resolve comment';
-    case 'document-suggest': return 'Propose suggestion';
-    case 'document-accept-suggestion': return 'Accept suggestion';
-    case 'document-reject-suggestion': return 'Reject suggestion';
-    case 'document-insert-artifact': return 'Insert artifact';
-    case 'document-attach-artifact': return 'Attach artifact';
-    case 'document-export': return 'Export document';
-    case 'document-reviewer-readiness': return 'Review readiness preflight';
-    case 'document-review-packet-wizard': return 'Run packet wizard';
-    case 'document-review-packet-preset': return 'Save packet preset';
-    case 'document-review-packet-preset-refresh': return 'Refresh packet preset';
-    case 'document-review-packet-share': return 'Share review packet';
-    case 'model-compare': return 'Compare models';
-    case 'model-compare-review': return 'Review comparison';
-    case 'model-compare-handoff-diff': return 'Diff reviewer handoffs';
-    case 'model-compare-judge': return 'Judge comparison';
-    case 'model-compare-apply': return 'Apply comparison winner';
-    case 'model-compare-route-decision': return 'Record route decision';
-    case 'model-compare-export': return 'Export comparison';
-    case 'model-compare-analytics': return 'View comparison analytics';
-    case 'local-model-benchmark': return 'Run local benchmark';
-    case 'auth-show': return 'Show auth status';
-    case 'auth-repair': return 'Repair auth';
-    case 'auth-bundle-export': return 'Export auth bundle';
-    case 'auth-bundle-inspect': return 'Inspect auth bundle';
-    case 'trust-bundle-export': return 'Save the trust summary to a file';
-    case 'trust-bundle-inspect': return 'Read a saved trust summary';
-    case 'support-bundle-export': return 'Export support bundle';
-    case 'support-bundle-inspect': return 'Inspect support bundle';
-    case 'support-bundle-import': return 'Import support bundle';
-    case 'subscription-bundle-export': return 'Export subscription bundle';
-    case 'subscription-bundle-inspect': return 'Inspect subscription bundle';
-    case 'voice-enable': return 'Enable voice';
-    case 'voice-disable': return 'Disable voice';
-    case 'voice-bundle-export': return 'Export voice bundle';
-    case 'voice-bundle-inspect': return 'Inspect voice bundle';
-    case 'tts-prompt': return 'Test TTS prompt';
-    case 'image-input': return 'Attach image';
-    case 'artifact-browser': return 'Browse artifacts';
-    case 'artifact-show': return 'Show artifact';
-    case 'artifact-export-file': return 'Export artifact to file';
-    case 'artifact-export-package': return 'Export artifact package';
-    case 'artifact-promote-knowledge': return 'Promote artifact to knowledge';
-    case 'media-generate': return 'Generate media';
-    case 'conversation-export': return 'Export conversation';
-    case 'conversation-events': return 'Show conversation events';
-    case 'conversation-groups': return 'Show conversation groups';
-    case 'conversation-find': return 'Find conversation';
-    case 'effort-level': return 'Set effort level';
-    case 'channel-show': return 'Show channel';
-    case 'channel-doctor': return 'Check channel health';
-    case 'channel-setup': return 'Set up channel';
-    case 'channel-send': return 'Send to channel';
-    case 'session-save': return 'Save session';
-    case 'session-load': return 'Load session';
-    case 'session-rename': return 'Rename session';
-    case 'session-resume': return 'Resume session';
-    case 'session-info': return 'Inspect session';
-    case 'session-export-saved': return 'Export saved session';
-    case 'session-search': return 'Search sessions';
-    case 'session-delete': return 'Delete session';
-    case 'session-fork': return 'Fork session';
-    case 'session-graph': return 'Inspect session graph';
-    case 'owner-profile-read': return 'Read your profile';
-    case 'owner-profile-get': return 'Show a profile field';
-    case 'owner-profile-person': return 'Look up one person';
-    case 'owner-profile-provenance': return 'Trace where a fact came from';
-    case 'owner-profile-set': return 'Correct a profile fact';
-    case 'owner-profile-forget': return 'Forget a profile fact';
-    case 'owner-profile-forget-note': return 'Forget a note or person';
-    case 'owner-profile-status': return 'Check profile status';
-    case 'task-list-filter': return 'Filter task list';
-    case 'task-show': return 'Show task';
-    case 'task-output': return 'View task output';
-    case 'health-repair': return 'Check one health area';
-    case 'approval-review': return 'Review approval';
-    case 'approval-approve': return 'Approve request';
-    case 'approval-deny': return 'Deny request';
-    case 'approval-cancel': return 'Cancel approval';
-    case 'automation-job-run': return 'Run automation job';
-    case 'automation-job-pause': return 'Pause automation job';
-    case 'automation-job-resume': return 'Resume automation job';
-    case 'automation-run-cancel': return 'Cancel automation run';
-    case 'automation-run-retry': return 'Retry automation run';
-    case 'routine-receipt': return 'View routine receipt';
-    case 'schedule-receipt': return 'View schedule receipt';
-    case 'mode-preset': return 'Set mode preset';
-    case 'mode-domain': return 'Set mode domain';
-    case 'setting-set': return 'Set setting';
-    case 'model-pin': return 'Pin model';
-    case 'model-unpin': return 'Unpin model';
-    case 'workplan-add': return 'Add work item';
-    case 'workplan-show': return 'Show work plan';
-    case 'workplan-status': return 'Check work plan status';
-    case 'workplan-delete': return 'Delete work item';
-    case 'workplan-clear-completed': return 'Clear completed items';
-    case 'routine-schedule': return 'Schedule routine';
-    case 'skill-bundle': return 'Edit skill bundle';
-    case 'skill-bundle-search': return 'Search skill bundles';
-    case 'skill-bundle-show': return 'Show skill bundle';
-    case 'skill-bundle-update': return 'Update skill bundle';
-    case 'skill-bundle-enable': return 'Enable skill bundle';
-    case 'skill-bundle-disable': return 'Disable skill bundle';
-    case 'skill-bundle-review': return 'Review skill bundle';
-    case 'skill-bundle-stale': return 'Mark bundle stale';
-    case 'skill-bundle-delete': return 'Delete skill bundle';
-    case 'learned-behavior': return 'Review learned behavior';
-    case 'web-research': return 'Run web research';
-    case 'web-fetch': return 'Fetch from web';
-    case 'research-run': return 'Run research';
-    case 'research-source': return 'Manage research source';
-    case 'research-report': return 'Show research report';
-    case 'notify-webhook': return 'Add notification webhook';
-    case 'notify-webhook-remove': return 'Remove notification webhook';
-    case 'notify-webhook-clear': return 'Clear notification webhooks';
-    case 'notify-webhook-test': return 'Test notification webhook';
-    case 'notify-send': return 'Send notification';
-    default: return `Edit ${editorKind}`;
-  }
-}
-
-function localOperationLabel(localOperation: string): string {
-  switch (localOperation) {
-    case 'routine-start': return 'Start routine';
-    case 'persona-activate':
-    case 'persona-use': return 'Activate persona';
-    case 'persona-clear': return 'Deactivate persona';
-    case 'persona-edit': return 'Edit persona';
-    case 'persona-review': return 'Review persona';
-    case 'persona-delete': return 'Delete persona';
-    case 'memory-edit': return 'Edit memory';
-    case 'memory-review': return 'Review memory';
-    case 'memory-stale': return 'Mark memory stale';
-    case 'memory-delete': return 'Delete memory';
-    case 'note-edit': return 'Edit note';
-    case 'note-review': return 'Review note';
-    case 'note-stale': return 'Mark note stale';
-    case 'note-delete': return 'Delete note';
-    case 'note-promote-memory': return 'Promote note to memory';
-    case 'note-promote-persona': return 'Promote note to persona';
-    case 'note-promote-skill': return 'Promote note to skill';
-    case 'note-promote-routine': return 'Promote note to routine';
-    case 'note-promote-knowledge-url': return 'Promote note to knowledge';
-    case 'skill-edit': return 'Edit skill';
-    case 'skill-enable': return 'Enable skill';
-    case 'skill-disable': return 'Disable skill';
-    case 'skill-review': return 'Review skill';
-    case 'skill-delete': return 'Delete skill';
-    case 'routine-edit': return 'Edit routine';
-    case 'routine-enable': return 'Enable routine';
-    case 'routine-disable': return 'Disable routine';
-    case 'routine-review': return 'Review routine';
-    case 'routine-delete': return 'Delete routine';
-    default: return 'Apply local action';
-  }
-}
-
-function onboardingActionLabel(workspace: AgentWorkspace, action: AgentWorkspaceAction): string {
-  if (action.kind === 'settings-import') return 'Import GoodVibes preferences';
-  if (action.kind === 'model-picker') return action.modelPickerFlow === 'model' ? 'Choose model' : 'Choose provider and model';
-  if (action.kind === 'settings-modal') return 'Open settings';
-  if (action.kind === 'workspace') {
-    if (action.targetCategoryId) {
-      const target = workspace.categories.find((c) => c.id === action.targetCategoryId);
-      const label = target ? target.label : action.targetCategoryId;
-      return `Switch to ${label}`;
-    }
-    return 'Switch to setup area';
-  }
-  if (action.kind === 'editor') return action.editorKind ? editorPurposeLabel(action.editorKind) : 'Open form';
-  if (action.kind === 'local-selection') return 'Move selection';
-  if (action.kind === 'local-operation') return action.localOperation ? localOperationLabel(action.localOperation) : 'Apply local action';
-  if (action.kind === 'onboarding-complete') return 'Finish setup';
-  if (action.kind === 'command') {
-    const cmd = action.command ?? '';
-    return action.commandBehavior === 'inline' ? `Run: ${cmd}` : `Open: ${cmd}`;
-  }
-  if (action.safety === 'read-only') return 'Review';
-  if (action.safety === 'blocked') return 'Unavailable in this setup step';
-  return 'Open';
-}
-
 function onboardingActionColumns(workspace: AgentWorkspace, action: AgentWorkspaceAction): OnboardingActionColumns {
   if (action.kind === 'setting') {
     return workspace.settingActionDisplay(action) ?? {
@@ -413,14 +150,13 @@ function onboardingActionColumns(workspace: AgentWorkspace, action: AgentWorkspa
       currentValue: '(unknown)',
     };
   }
-  // Non-setting rows keep the 3-column layout but use placeholders for Default and Current,
-  // since those concepts only make sense for actual settings. The action label carries
-  // the meaning of the row.
-  return {
-    setting: action.label,
-    defaultValue: '—',
-    currentValue: '—',
-  };
+  return { setting: action.label, defaultValue: '', currentValue: '' };
+}
+
+/** A setting row in an area that also holds actions: its name, and its value now in the second column. */
+function settingNow(workspace: AgentWorkspace, action: AgentWorkspaceAction): string {
+  const shown = workspace.settingActionDisplay(action);
+  return shown ? `now ${shown.currentValue}` : actionCommand(action);
 }
 
 function actionMetaLine(workspace: AgentWorkspace, category: AgentWorkspaceCategory, action: AgentWorkspaceAction): ContextLine {
@@ -432,51 +168,11 @@ function actionMetaLine(workspace: AgentWorkspace, category: AgentWorkspaceCateg
 }
 
 function shouldRenderOnboardingSettingsTable(actions: readonly AgentWorkspaceAction[]): boolean {
-  // Always use the Setting/Default/Current 3-column layout on ONBOARDING pages so the
-  // user gets a consistent visual structure across every category, even ones that mix
-  // settings with editors, guidance, or pickers. Non-setting rows fill Default/Current
-  // with placeholders via onboardingActionColumns().
+  // The Setting / Default / Current table is for an area whose rows are all
+  // settings. Where rows are actions, the columns are what each is and the line
+  // it runs; a setting among them shows its value now.
   const nonFinish = actions.filter((a) => a.kind !== 'onboarding-complete');
-  return nonFinish.length > 0;
-}
-
-function editorContextLines(editor: AgentWorkspaceLocalEditor, snapshot: AgentWorkspaceRuntimeSnapshot | null): ContextLine[] {
-  const selected = editor.fields[editor.selectedFieldIndex];
-  const lines: ContextLine[] = [
-    { text: editor.title, fg: PALETTE.title, bold: true },
-    { text: compactText(editor.message), fg: editor.messageTone === 'warn' ? PALETTE.warn : PALETTE.info },
-  ];
-  if (selected) {
-    lines.push(
-      { text: `Editing: ${selected.label}${selected.required ? ' (required)' : ''}`, fg: PALETTE.title, bold: true },
-      { text: compactText(selected.hint), fg: PALETTE.muted },
-    );
-  }
-  lines.push(...reviewerReadinessContextLines(editor, snapshot));
-  if (editor.kind === 'model-compare-handoff-diff') {
-    const left = editor.fields.find((field) => field.id === 'leftArtifactId')?.value.trim();
-    const right = editor.fields.find((field) => field.id === 'rightArtifactId')?.value.trim();
-    lines.push(
-      { text: 'Split view: compare left and right reviewer handoff artifacts without changing model routing.', fg: PALETTE.good },
-      { text: 'Section jumps: all, metadata, policy, related, comparison.', fg: PALETTE.info },
-      left && right
-        ? { text: `Current diff: ${left} -> ${right}.`, fg: PALETTE.good }
-        : { text: 'No complete handoff pair selected; submitting lists recent saved handoffs.', fg: PALETTE.info },
-    );
-    if (snapshot?.recentReviewerHandoffArtifacts.length) {
-      const choices = snapshot.recentReviewerHandoffArtifacts
-        .slice(0, 4)
-        .map((artifact) => `${artifact.id} (${artifact.sourceKind}; related ${artifact.relatedArtifactCount})`)
-        .join(', ');
-      lines.push({ text: `Recent choices: ${choices}.`, fg: PALETTE.muted });
-    }
-  } else if (editor.kind === 'document-reviewer-readiness') {
-    lines.push(
-      { text: 'Preflight checks: comments, suggestions, source artifacts, comparison reveal, route decisions, handoff evidence.', fg: PALETTE.info },
-      { text: 'Use before export, handoff archive, or applying a comparison winner.', fg: PALETTE.good },
-    );
-  }
-  return lines;
+  return nonFinish.length > 0 && nonFinish.every((a) => a.kind === 'setting');
 }
 
 function buildContextRows(workspace: AgentWorkspace, category: AgentWorkspaceCategory, action: AgentWorkspaceAction | null, width: number): WorkspaceRow[] {
@@ -495,7 +191,6 @@ function buildContextRows(workspace: AgentWorkspace, category: AgentWorkspaceCat
         fg: workspace.actionSearchQuery.length > 0 && workspace.actionSearchResults.length === 0 ? PALETTE.warn : PALETTE.info,
       },
     ] satisfies ContextLine[] : []),
-    ...(workspace.localEditor ? editorContextLines(workspace.localEditor, workspace.runtimeSnapshot) : []),
   ];
 
   const selectedActionLines: ContextLine[] = action
@@ -524,7 +219,6 @@ function onboardingFinishPrerequisitesMet(workspace: AgentWorkspace): boolean {
 }
 
 function buildActionRows(workspace: AgentWorkspace, width: number, height: number): WorkspaceRow[] {
-  if (workspace.localEditor) return buildEditorRows(workspace.localEditor, width, height);
   const category = workspace.selectedActionCategory;
   const onboarding = isOnboardingCategory(category);
   // Apply the consistent Setting/Default/Current 3-column layout to EVERY category, not
@@ -554,7 +248,7 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
   rows.push({
     text: settingTable
       ? `  ${padDisplay(workspace.actionSearchActive ? 'Result' : 'Setting', labelWidth)}  ${padDisplay('Default', valueWidth)}  ${padDisplay('Current', valueWidth)}`
-      : `  ${padDisplay(workspace.actionSearchActive ? 'Result' : onboarding ? 'Option' : 'Action', labelWidth)}  ${padDisplay('Does', commandWidth)}`,
+      : `  ${padDisplay(workspace.actionSearchActive ? 'Result' : 'Action', labelWidth)}  ${padDisplay('Command', commandWidth)}`,
     fg: PALETTE.muted,
     bold: true,
   });
@@ -653,7 +347,7 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
       const [first = '', ...rest] = labelRows(columns ? columns.setting : label);
       const text = columns
         ? `${marker} ${padDisplay(first, labelWidth)}  ${padDisplay(columns.defaultValue, valueWidth)}  ${padDisplay(columns.currentValue, valueWidth)}`
-        : `${marker} ${padDisplay(first, labelWidth)}  ${padDisplay(actionCommand(action), commandWidth)}`;
+        : `${marker} ${padDisplay(first, labelWidth)}  ${padDisplay(action.kind === 'setting' ? settingNow(workspace, action) : actionCommand(action), commandWidth)}`;
       const style = {
         selected: selected && workspace.focusPane === 'actions',
         fg: action.safety === 'blocked' ? PALETTE.warn : selected ? PALETTE.text : PALETTE.info,
@@ -688,9 +382,6 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
 
 /** Key / action pairs for the keycap hint row (Esc is the title row's keycap). */
 function footerText(workspace: AgentWorkspace): string {
-  if (workspace.localEditor) {
-    return 'Enter next/save · Up/Down field · Backspace edit · Ctrl+J newline · Esc cancel';
-  }
   if (workspace.actionSearchActive) {
     return 'Up/Down results · Enter open · Backspace edit search · Esc clear';
   }
@@ -737,7 +428,7 @@ export function renderAgentWorkspace(workspace: AgentWorkspace, width: number, h
     width,
     height,
     title: 'Agent workspace',
-    stateLabel: workspace.localEditor ? `Editing: ${workspace.localEditor.title}` : workspace.actionSearchActive ? 'Search' : workspace.focusPane === 'categories' ? 'Categories' : 'Actions',
+    stateLabel: workspace.actionSearchActive ? 'Search' : workspace.focusPane === 'categories' ? 'Categories' : 'Actions',
     leftHeader: 'Operator Areas',
     mainHeader: workspace.actionSearchActive
       ? `Search actions · ${workspace.actions.length} result${workspace.actions.length === 1 ? '' : 's'}`

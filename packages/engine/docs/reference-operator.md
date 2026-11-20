@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `646`
+- Methods: `648`
 - Events: `37`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -6032,6 +6032,252 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
               "next"
             ],
             "additionalProperties": false
+          },
+          "presentation": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "run-command",
+                  "answer-command-prompt",
+                  "change-files",
+                  "fetch",
+                  "start-agent",
+                  "hand-off-work",
+                  "change-setting",
+                  "mcp-tool",
+                  "other-tool",
+                  "purchase",
+                  "send-message",
+                  "question",
+                  "decision",
+                  "claim",
+                  "queued-action",
+                  "report"
+                ]
+              },
+              "mark": {
+                "type": "string",
+                "enum": [
+                  "ask",
+                  "cannot-undo",
+                  "question"
+                ]
+              },
+              "question": {
+                "type": "string"
+              },
+              "place": {
+                "type": "object",
+                "properties": {
+                  "short": {
+                    "type": "string"
+                  },
+                  "full": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "short",
+                  "full"
+                ],
+                "additionalProperties": false
+              },
+              "subject": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "command",
+                      "paths",
+                      "urls",
+                      "text",
+                      "money"
+                    ]
+                  },
+                  "lines": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "kind",
+                  "lines"
+                ],
+                "additionalProperties": false
+              },
+              "body": {
+                "type": "string"
+              },
+              "consequence": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "withPlace": {
+                    "type": "string"
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "plain",
+                      "cannot-undo"
+                    ]
+                  }
+                },
+                "required": [
+                  "text",
+                  "withPlace",
+                  "tone"
+                ],
+                "additionalProperties": false
+              },
+              "choices": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "default": {
+                      "type": "boolean"
+                    },
+                    "danger": {
+                      "type": "boolean"
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "remember": {
+                "type": "object",
+                "properties": {
+                  "offered": {
+                    "type": "boolean"
+                  },
+                  "tiers": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "tier": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "tier",
+                        "label",
+                        "detail"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "why": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "offered"
+                ],
+                "additionalProperties": false
+              },
+              "typeToRefuse": {
+                "type": "boolean"
+              },
+              "countdown": {
+                "type": "object",
+                "properties": {
+                  "verb": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "verb",
+                  "at"
+                ],
+                "additionalProperties": false
+              },
+              "origin": {
+                "type": "object",
+                "properties": {
+                  "sessionTitle": {
+                    "type": "string"
+                  },
+                  "by": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "by"
+                ],
+                "additionalProperties": false
+              },
+              "why": {
+                "type": "string"
+              },
+              "details": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "mark",
+              "question",
+              "choices",
+              "remember",
+              "typeToRefuse",
+              "why",
+              "details",
+              "title"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -7990,6 +8236,7 @@ Answer one open inbox item with one of its `options`, or with `text` when it has
                 "mcp-tool",
                 "other-tool",
                 "purchase",
+                "send-message",
                 "question",
                 "decision",
                 "claim",
@@ -8821,6 +9068,7 @@ The asking session reports what became of the answer to a question it posted: `d
                 "mcp-tool",
                 "other-tool",
                 "purchase",
+                "send-message",
                 "question",
                 "decision",
                 "claim",
@@ -9666,6 +9914,7 @@ Everything waiting on the owner in one list, newest first: permission asks (kind
                   "mcp-tool",
                   "other-tool",
                   "purchase",
+                  "send-message",
                   "question",
                   "decision",
                   "claim",
@@ -10486,6 +10735,7 @@ Leave the owner a question or a queued action from a process that is not the dae
                 "mcp-tool",
                 "other-tool",
                 "purchase",
+                "send-message",
                 "question",
                 "decision",
                 "claim",
@@ -11249,6 +11499,7 @@ Take back an open item this caller posted, because the answer is no longer neede
                 "mcp-tool",
                 "other-tool",
                 "purchase",
+                "send-message",
                 "question",
                 "decision",
                 "claim",
@@ -26750,6 +27001,161 @@ Stop a schedule from running until it is resumed; it is kept. The same as /sched
     "enabled"
   ],
   "additionalProperties": true
+}
+```
+
+#### `automation.schedules.preview`
+
+Read the values of "Schedule something to run" (action add) or "Change a schedule" (action change), the /schedule blanks by name (prompt, when, at, every, cron, tz, stagger, name, target, model, provider, deliver, outside, source, reasoning, thinking, wake, fallback, tool, template, light, paused; for change: schedule, task, success), into what would be kept: summary is the reading in words ("Read as: 0 9 * * 1-5 [Europe/Vienna]. Next run: ..."), and input is the body of automation.schedules.create (add) or automation.jobs.update (change). Nothing is kept. A described time (when) is read once, by the decision model when one is set, else only the fixed forms (an ISO time, a cron pattern, every 30m, in 2h) are read. zone is the caller's time zone, used when tz is blank.
+
+- Title: `Preview a Schedule`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: none
+- Scopes: `read:automation-content`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "add",
+        "change"
+      ]
+    },
+    "zone": {
+      "type": "string"
+    },
+    "schedule": {
+      "type": "string"
+    },
+    "prompt": {
+      "type": "string"
+    },
+    "when": {
+      "type": "string"
+    },
+    "at": {
+      "type": "string"
+    },
+    "every": {
+      "type": "string"
+    },
+    "cron": {
+      "type": "string"
+    },
+    "tz": {
+      "type": "string"
+    },
+    "stagger": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "deliver": {
+      "type": "string"
+    },
+    "outside": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "reasoning": {
+      "type": "string"
+    },
+    "thinking": {
+      "type": "string"
+    },
+    "wake": {
+      "type": "string"
+    },
+    "fallback": {
+      "type": "string"
+    },
+    "tool": {
+      "type": "string"
+    },
+    "template": {
+      "type": "string"
+    },
+    "light": {
+      "type": "string"
+    },
+    "paused": {
+      "type": "string"
+    },
+    "task": {
+      "type": "string"
+    },
+    "success": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "action"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {},
+          {
+            "type": "array",
+            "items": {}
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "summary",
+    "input"
+  ],
+  "additionalProperties": false
 }
 ```
 
@@ -42264,16 +42670,51 @@ Return the messages of a companion-chat session, oldest first. With neither `lim
                   "text": {
                     "type": "string"
                   },
+                  "known": {
+                    "type": "boolean"
+                  },
                   "files": {
                     "type": "array",
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "commands": {
+                    "type": "number"
+                  },
+                  "messages": {
+                    "type": "number"
+                  },
+                  "unknown": {
+                    "type": "number"
                   }
                 },
                 "required": [
                   "text",
-                  "files"
+                  "known",
+                  "files",
+                  "commands",
+                  "messages",
+                  "unknown"
+                ],
+                "additionalProperties": false
+              },
+              "attempts": {
+                "type": "object",
+                "properties": {
+                  "count": {
+                    "type": "number"
+                  },
+                  "times": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "required": [
+                  "count",
+                  "times"
                 ],
                 "additionalProperties": false
               },
@@ -43500,16 +43941,51 @@ Return a companion-chat session record together with its full message history.
                   "text": {
                     "type": "string"
                   },
+                  "known": {
+                    "type": "boolean"
+                  },
                   "files": {
                     "type": "array",
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "commands": {
+                    "type": "number"
+                  },
+                  "messages": {
+                    "type": "number"
+                  },
+                  "unknown": {
+                    "type": "number"
                   }
                 },
                 "required": [
                   "text",
-                  "files"
+                  "known",
+                  "files",
+                  "commands",
+                  "messages",
+                  "unknown"
+                ],
+                "additionalProperties": false
+              },
+              "attempts": {
+                "type": "object",
+                "properties": {
+                  "count": {
+                    "type": "number"
+                  },
+                  "times": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "required": [
+                  "count",
+                  "times"
                 ],
                 "additionalProperties": false
               },
@@ -84556,7 +85032,7 @@ Send a composed email via the configured SMTP account. Irreversible external sen
 
 #### `flags.graduation.report`
 
-Return the feature defaults report: every platform capability with its current default, default-disposition state (dark = default-off with no evidence, soaking = accumulating evidence, graduate-candidate = judged ready and awaiting a release decision, graduated = default on, blocked = held off with a dated reason), and its validation evidence. The daemon collects no validation readings, so every entry's evidence says "no evidence collected"; the only instrumentation, the permissions divergence simulation, runs in the terminal app with /policy simulate and reports there. releaseBlockers lists every graduate-candidate entry: capabilities judged ready that are neither on by default nor held with a dated reason.
+Return the feature defaults report: every platform capability with its current default, default-disposition state (dark = default-off with no evidence, soaking = accumulating evidence, graduate-candidate = judged ready and awaiting a release decision, graduated = default on, blocked = held off with a dated reason), and its validation evidence. The daemon collects no validation readings, so every entry's evidence says "no evidence collected"; the only instrumentation, the permissions divergence simulation, runs in the terminal app with /security simulate-policy and reports there. releaseBlockers lists every graduate-candidate entry: capabilities judged ready that are neither on by default nor held with a dated reason.
 
 - Title: `Feature Defaults Report`
 - Source: `builtin`
@@ -121132,6 +121608,12 @@ Return effective MCP config from global, external, and project sources. Environm
         ],
         "additionalProperties": false
       }
+    },
+    "heldForTrust": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -121582,6 +122064,12 @@ Read every MCP config file again and reconnect the servers that were added, remo
             ],
             "additionalProperties": false
           }
+        },
+        "heldForTrust": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -121871,6 +122359,12 @@ Remove a project/global MCP server config and disconnect it without daemon resta
               "source"
             ],
             "additionalProperties": false
+          }
+        },
+        "heldForTrust": {
+          "type": "array",
+          "items": {
+            "type": "string"
           }
         }
       },
@@ -122387,6 +122881,12 @@ Keep a server's role (what kind of server it is) with its entry in the MCP confi
             ],
             "additionalProperties": false
           }
+        },
+        "heldForTrust": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -122692,6 +123192,12 @@ Keep a block of one tool with its MCP server's entry in the config file that hol
               "source"
             ],
             "additionalProperties": false
+          }
+        },
+        "heldForTrust": {
+          "type": "array",
+          "items": {
+            "type": "string"
           }
         }
       },
@@ -123001,6 +123507,12 @@ Keep an exemption of one tool with its MCP server's entry in the owner's global 
             ],
             "additionalProperties": false
           }
+        },
+        "heldForTrust": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -123308,6 +123820,12 @@ Drop the block kept for one tool with its MCP server's entry, and this daemon's 
               "source"
             ],
             "additionalProperties": false
+          }
+        },
+        "heldForTrust": {
+          "type": "array",
+          "items": {
+            "type": "string"
           }
         }
       },
@@ -123617,6 +124135,12 @@ Drop the exemption kept for one tool with its MCP server's entry and apply it at
             ],
             "additionalProperties": false
           }
+        },
+        "heldForTrust": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -123918,6 +124442,12 @@ Keep a server's trust level with its entry in the MCP config file that holds it 
               "source"
             ],
             "additionalProperties": false
+          }
+        },
+        "heldForTrust": {
+          "type": "array",
+          "items": {
+            "type": "string"
           }
         }
       },
@@ -124320,6 +124850,12 @@ Persist a project/global MCP server config and reconnect the changed runtime ser
               "source"
             ],
             "additionalProperties": false
+          }
+        },
+        "heldForTrust": {
+          "type": "array",
+          "items": {
+            "type": "string"
           }
         }
       },
@@ -166980,6 +167516,121 @@ List the supervised triggers: id, label, kind, what each watches, state, how oft
 }
 ```
 
+#### `watchers.triggers.preview`
+
+Read the blanks of "Watch for something" (the /triggers watch values by name: name, kind finishes|prints|page|file|written, command one word per line, match, url, path, every, then ask|run, say, deliver, grant, definition) into what would be kept: summary is what it watches and does in one sentence, and input is the body of watchers.triggers.create ({ definition }). Nothing is made. A grant is looked up among the commands the owner let triggers run.
+
+- Title: `Preview a trigger`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:watchers`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "command": {
+      "type": "string"
+    },
+    "match": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "every": {
+      "type": "string"
+    },
+    "then": {
+      "type": "string"
+    },
+    "say": {
+      "type": "string"
+    },
+    "deliver": {
+      "type": "string"
+    },
+    "grant": {
+      "type": "string"
+    },
+    "definition": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "input": {
+      "type": "object",
+      "properties": {
+        "definition": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {},
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "definition"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "summary",
+    "input"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `watchers.triggers.reset`
 
 Close the breaker of a trigger that stopped after repeated failures, once the cause is fixed. Refused, with the reason, when the trigger is not stopped.
@@ -191306,6 +191957,252 @@ Every approval record transition, pushed the moment the broker records it: an as
       ],
       "additionalProperties": false
     },
+    "presentation": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "run-command",
+            "answer-command-prompt",
+            "change-files",
+            "fetch",
+            "start-agent",
+            "hand-off-work",
+            "change-setting",
+            "mcp-tool",
+            "other-tool",
+            "purchase",
+            "send-message",
+            "question",
+            "decision",
+            "claim",
+            "queued-action",
+            "report"
+          ]
+        },
+        "mark": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "cannot-undo",
+            "question"
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "place": {
+          "type": "object",
+          "properties": {
+            "short": {
+              "type": "string"
+            },
+            "full": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "short",
+            "full"
+          ],
+          "additionalProperties": false
+        },
+        "subject": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "command",
+                "paths",
+                "urls",
+                "text",
+                "money"
+              ]
+            },
+            "lines": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "lines"
+          ],
+          "additionalProperties": false
+        },
+        "body": {
+          "type": "string"
+        },
+        "consequence": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "withPlace": {
+              "type": "string"
+            },
+            "tone": {
+              "type": "string",
+              "enum": [
+                "plain",
+                "cannot-undo"
+              ]
+            }
+          },
+          "required": [
+            "text",
+            "withPlace",
+            "tone"
+          ],
+          "additionalProperties": false
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "default": {
+                "type": "boolean"
+              },
+              "danger": {
+                "type": "boolean"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "remember": {
+          "type": "object",
+          "properties": {
+            "offered": {
+              "type": "boolean"
+            },
+            "tiers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "tier": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "tier",
+                  "label",
+                  "detail"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "why": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "offered"
+          ],
+          "additionalProperties": false
+        },
+        "typeToRefuse": {
+          "type": "boolean"
+        },
+        "countdown": {
+          "type": "object",
+          "properties": {
+            "verb": {
+              "type": "string"
+            },
+            "at": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "verb",
+            "at"
+          ],
+          "additionalProperties": false
+        },
+        "origin": {
+          "type": "object",
+          "properties": {
+            "sessionTitle": {
+              "type": "string"
+            },
+            "by": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "by"
+          ],
+          "additionalProperties": false
+        },
+        "why": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "mark",
+        "question",
+        "choices",
+        "remember",
+        "typeToRefuse",
+        "why",
+        "details",
+        "title"
+      ],
+      "additionalProperties": false
+    },
     "createdAt": {
       "type": "number"
     }
@@ -192008,6 +192905,7 @@ A question, claim, purchase window or queued action in the owner inbox was poste
                 "mcp-tool",
                 "other-tool",
                 "purchase",
+                "send-message",
                 "question",
                 "decision",
                 "claim",

@@ -1,77 +1,87 @@
 /**
- * Workspace rows that open a described command's action instead of a form.
- * Each converted command adds its rows in its own file under
- * `workspace-actions/`; the workspace consults this registry before it opens
- * a form, so a row needs no edit of the category tables to start using the
- * guided path. When every command is converted, the rows name their actions
- * directly and this registry and the form engine go.
+ * The Agent workspace is a view over the described slash commands
+ * (terminal-shell/command-actions/): a row that does something names the
+ * command and action it runs, and opening it opens that action's guided form,
+ * the same one the slash command opens. The row's name, what it does and
+ * whether it only reads all come from the action's description, so the
+ * workspace and the command cannot say different things.
  */
-import { describedCommandByName, runGuided } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import {
+  describedCommandByName,
+  fillSentence,
+  lastsWords,
+  renderTypedLine,
+  runGuided,
+  type ActionDescription,
+  type ActionValues,
+  type CommandDescription,
+} from '@goodvibes-jev/engine/terminal-shell/command-actions';
 import type { CommandContext } from './command-registry.ts';
-import { VERBOSITY_WORKSPACE_ACTIONS } from './workspace-actions/verbosity.ts';
-import { MY_SKILLS_WORKSPACE_ACTIONS } from './workspace-actions/my-skills.ts';
-import { TODO_WORKSPACE_ACTIONS } from './workspace-actions/todo.ts';
-import { SECRETS_WORKSPACE_ACTIONS } from './workspace-actions/secrets.ts';
-import { MEMORY_WORKSPACE_ACTIONS } from './workspace-actions/memory.ts';
-import { SESSION_WORKSPACE_ACTIONS } from './workspace-actions/session.ts';
-import { CHANNELS_WORKSPACE_ACTIONS } from './workspace-actions/channels.ts';
-import { SECURITY_WORKSPACE_ACTIONS } from './workspace-actions/security.ts';
-import { HEALTH_WORKSPACE_ACTIONS } from './workspace-actions/health.ts';
-import { PROVIDER_WORKSPACE_ACTIONS } from './workspace-actions/provider.ts';
-import { EFFORT_WORKSPACE_ACTIONS } from './workspace-actions/effort.ts';
-import { BUNDLE_WORKSPACE_ACTIONS } from './workspace-actions/bundle.ts';
-import { AGENTS_WORKSPACE_ACTIONS } from './workspace-actions/agents.ts';
-import { ABOUT_ME_WORKSPACE_ACTIONS } from './workspace-actions/about-me.ts';
-import { AGENT_HOME_WORKSPACE_ACTIONS } from './workspace-actions/agent-home.ts';
-import { KNOWLEDGE_WORKSPACE_ACTIONS } from './workspace-actions/knowledge.ts';
-import { PERSONAS_WORKSPACE_ACTIONS } from './workspace-actions/personas.ts';
-import { ROUTINES_WORKSPACE_ACTIONS } from './workspace-actions/routines.ts';
-import { TASKS_WORKSPACE_ACTIONS } from './workspace-actions/tasks.ts';
 
+/** What a row runs: a command, one of its actions (by id or typed word), and any values the row fills in. */
 export interface WorkspaceActionTarget {
-  /** The described command's name. */
   readonly command: string;
-  /** The action id in its description. */
-  readonly action: string;
+  readonly action?: string | undefined;
+  readonly values?: ActionValues | undefined;
 }
 
-// Each converted command spreads its own rows here. /mcp's rows name its actions directly (`command` rows), so it adds none.
-const TARGETS: ReadonlyMap<string, WorkspaceActionTarget> = new Map(Object.entries({
-  ...AGENTS_WORKSPACE_ACTIONS,
-  ...ABOUT_ME_WORKSPACE_ACTIONS,
-  ...AGENT_HOME_WORKSPACE_ACTIONS,
-  ...KNOWLEDGE_WORKSPACE_ACTIONS,
-  ...PERSONAS_WORKSPACE_ACTIONS,
-  ...ROUTINES_WORKSPACE_ACTIONS,
-  ...TASKS_WORKSPACE_ACTIONS,
-  ...VERBOSITY_WORKSPACE_ACTIONS,
-  ...MY_SKILLS_WORKSPACE_ACTIONS,
-  ...TODO_WORKSPACE_ACTIONS,
-  ...SECRETS_WORKSPACE_ACTIONS,
-  ...MEMORY_WORKSPACE_ACTIONS,
-  ...SESSION_WORKSPACE_ACTIONS,
-  ...CHANNELS_WORKSPACE_ACTIONS,
-  ...SECURITY_WORKSPACE_ACTIONS,
-  ...HEALTH_WORKSPACE_ACTIONS,
-  ...PROVIDER_WORKSPACE_ACTIONS,
-  ...EFFORT_WORKSPACE_ACTIONS,
-  ...BUNDLE_WORKSPACE_ACTIONS,
-}));
+interface ResolvedTarget {
+  readonly command: CommandDescription<never>;
+  readonly action: ActionDescription<never> | undefined;
+}
 
-/** The action a workspace row's form kind now opens, or undefined while the row still opens its form. */
-export function workspaceActionFor(editorKind: string): WorkspaceActionTarget | undefined {
-  return TARGETS.get(editorKind);
+/** The described command and action a row names, or undefined while the command is not described. */
+export function resolveWorkspaceAction(target: WorkspaceActionTarget): ResolvedTarget | undefined {
+  const command = describedCommandByName(target.command);
+  if (!command) return undefined;
+  const wanted = target.action;
+  const action = wanted ? command.actions.find((candidate) => candidate.id === wanted) ?? command.actions.find((candidate) => candidate.word === wanted) : undefined;
+  return { command, action };
+}
+
+/** The line a person could type for the row. */
+export function workspaceActionLine(target: WorkspaceActionTarget): string {
+  const resolved = resolveWorkspaceAction(target);
+  if (resolved?.action) return renderTypedLine(resolved.command, resolved.action.id, target.values ?? {});
+  return `/${target.command}${target.action ? ` ${target.action}` : ''}`;
+}
+
+/** The row's name: the action's own label, or the command's title for a row that opens the whole command. */
+export function workspaceActionLabel(target: WorkspaceActionTarget): string {
+  const resolved = resolveWorkspaceAction(target);
+  if (resolved?.action) return resolved.action.label;
+  if (resolved && !target.action) return resolved.command.title;
+  return workspaceActionLine(target);
+}
+
+/** What the row does: the action's sentence, its blanks still to be filled shown as "…". */
+export function workspaceActionDetail(target: WorkspaceActionTarget): string {
+  const resolved = resolveWorkspaceAction(target);
+  if (resolved?.action) {
+    const blanks: Record<string, string> = Object.fromEntries(resolved.action.inputs.map((input) => [input.id, '…']));
+    const values = { ...blanks, ...target.values };
+    return fillSentence(resolved.action.sentence, values, lastsWords(resolved.action, values));
+  }
+  if (resolved) return `${resolved.command.summary}.`;
+  return `Runs ${workspaceActionLine(target)}.`;
+}
+
+/** Whether the row only reads (it changes nothing). */
+export function workspaceActionReadsOnly(target: WorkspaceActionTarget): boolean {
+  const action = resolveWorkspaceAction(target)?.action;
+  return action ? action.lasts === 'not-a-change' && action.touches === 'reads' : false;
 }
 
 /**
- * Open the action's guided path over the composer. False when it cannot be
- * shown here (no picker on this surface, or the command is not described), so
- * the row falls back to its form.
+ * Open the row's action over the composer: its guided form, or the command's
+ * own list when the row names the whole command. False when this surface
+ * cannot show a guided form or the command is not described; the caller then
+ * runs the typed line instead.
  */
 export function openWorkspaceAction(target: WorkspaceActionTarget, context: CommandContext | null | undefined): boolean {
-  const described = describedCommandByName(target.command);
-  const action = described?.actions.find((candidate) => candidate.id === target.action);
-  if (!described || !action || !context?.openSelection) return false;
-  void runGuided(described, { action }, context);
+  const resolved = resolveWorkspaceAction(target);
+  if (!resolved || !context?.openSelection) return false;
+  // A row whose action the command no longer has opens the command's own list.
+  void runGuided(resolved.command, resolved.action ? { action: resolved.action, ...(target.values ? { values: target.values } : {}) } : {}, context);
   return true;
 }

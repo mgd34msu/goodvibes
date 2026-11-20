@@ -1297,6 +1297,252 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
       ],
       "additionalProperties": false
     },
+    "presentation": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "run-command",
+            "answer-command-prompt",
+            "change-files",
+            "fetch",
+            "start-agent",
+            "hand-off-work",
+            "change-setting",
+            "mcp-tool",
+            "other-tool",
+            "purchase",
+            "send-message",
+            "question",
+            "decision",
+            "claim",
+            "queued-action",
+            "report"
+          ]
+        },
+        "mark": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "cannot-undo",
+            "question"
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "place": {
+          "type": "object",
+          "properties": {
+            "short": {
+              "type": "string"
+            },
+            "full": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "short",
+            "full"
+          ],
+          "additionalProperties": false
+        },
+        "subject": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "command",
+                "paths",
+                "urls",
+                "text",
+                "money"
+              ]
+            },
+            "lines": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "lines"
+          ],
+          "additionalProperties": false
+        },
+        "body": {
+          "type": "string"
+        },
+        "consequence": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "withPlace": {
+              "type": "string"
+            },
+            "tone": {
+              "type": "string",
+              "enum": [
+                "plain",
+                "cannot-undo"
+              ]
+            }
+          },
+          "required": [
+            "text",
+            "withPlace",
+            "tone"
+          ],
+          "additionalProperties": false
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "default": {
+                "type": "boolean"
+              },
+              "danger": {
+                "type": "boolean"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "remember": {
+          "type": "object",
+          "properties": {
+            "offered": {
+              "type": "boolean"
+            },
+            "tiers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "tier": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "tier",
+                  "label",
+                  "detail"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "why": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "offered"
+          ],
+          "additionalProperties": false
+        },
+        "typeToRefuse": {
+          "type": "boolean"
+        },
+        "countdown": {
+          "type": "object",
+          "properties": {
+            "verb": {
+              "type": "string"
+            },
+            "at": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "verb",
+            "at"
+          ],
+          "additionalProperties": false
+        },
+        "origin": {
+          "type": "object",
+          "properties": {
+            "sessionTitle": {
+              "type": "string"
+            },
+            "by": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "by"
+          ],
+          "additionalProperties": false
+        },
+        "why": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "mark",
+        "question",
+        "choices",
+        "remember",
+        "typeToRefuse",
+        "why",
+        "details",
+        "title"
+      ],
+      "additionalProperties": false
+    },
     "createdAt": {
       "type": "number"
     }
@@ -1785,6 +2031,7 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
                 "mcp-tool",
                 "other-tool",
                 "purchase",
+                "send-message",
                 "question",
                 "decision",
                 "claim",

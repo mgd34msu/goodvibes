@@ -13,7 +13,6 @@ import type { CommandContext } from './command-registry.ts';
 import type {
   AgentWorkspaceAction,
   AgentWorkspaceActionResult,
-  AgentWorkspaceLocalEditor,
   AgentWorkspaceRuntimeSnapshot,
 } from './agent-workspace-types.ts';
 
@@ -60,8 +59,9 @@ type SettingActionEffect =
     readonly value: unknown;
   }
   | {
-    readonly kind: 'editor';
-    readonly editor: AgentWorkspaceLocalEditor;
+    /** The settings screen, opened at this setting: a value to type, or a permission change to look at first. */
+    readonly kind: 'open';
+    readonly key: string;
     readonly status: string;
     readonly result: AgentWorkspaceActionResult;
   };
@@ -427,14 +427,10 @@ export function buildAgentWorkspaceSettingActionEffect(
     // A permission setting decides what runs without asking, so its row shows
     // the change first and saves on the next Enter instead of cycling at once.
     if (String(setting.key).startsWith('permissions.')) {
-      const editor = createSettingEditor(setting, String(cycled), action);
       return {
-        kind: 'editor',
-        editor: {
-          ...editor,
-          message: `Change ${setting.key} from ${String(currentValue ?? '(unset)')} to ${String(cycled)}? Press Enter to save, edit the value first, or Esc to leave it unchanged.`,
-        },
-        status: `Confirm ${setting.key}.`,
+        kind: 'open',
+        key: setting.key,
+        status: `Opened ${setting.key} in settings; it changes only when you choose there.`,
         result: { kind: 'guidance', title: `Change ${setting.key}`, detail: setting.description, safety: action.safety },
       };
     }
@@ -442,12 +438,12 @@ export function buildAgentWorkspaceSettingActionEffect(
   }
 
   return {
-    kind: 'editor',
-    editor: createSettingEditor(setting, String(currentValue ?? ''), action),
-    status: `Editing ${setting.key}.`,
+    kind: 'open',
+    key: setting.key,
+    status: `Opened ${setting.key} in settings.`,
     result: {
       kind: 'guidance',
-      title: `Edit ${setting.key}`,
+      title: `Change ${setting.key}`,
       detail: setting.description,
       safety: action.safety,
     },
@@ -1062,47 +1058,4 @@ export async function applyAgentWorkspaceTuiSettingsImport(
   };
 }
 
-/** The confirm form the owner's import row opens over a plan. */
-export function createAgentWorkspaceSettingsImportEditor(plan: TuiSettingsImportPlan): AgentWorkspaceLocalEditor {
-  return {
-    kind: 'settings-import',
-    mode: 'create',
-    title: 'Import GoodVibes settings',
-    selectedFieldIndex: 0,
-    message: 'Review the changes in the result pane (PageUp and PageDown scroll it). Type yes to write exactly these; Esc leaves everything as it is.',
-    fields: [
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: `Type yes to apply ${plan.settings.filter((entry) => entry.status === 'would_import').length} setting change(s) and ${plan.subscriptionValues.length} provider sign-in(s).` },
-    ],
-  };
-}
-
 export { planHasChanges as agentWorkspaceTuiSettingsImportHasChanges };
-
-function createSettingEditor(setting: AgentConfigSetting, currentValue: string, action: AgentWorkspaceAction): AgentWorkspaceLocalEditor {
-  const valueHint = setting.type === 'number'
-    ? 'Enter a number.'
-    : setting.type === 'string'
-      ? 'Enter a value. Leave empty to clear it.'
-      : setting.enumValues
-        ? `Allowed values: ${setting.enumValues.join(', ')}.`
-        : action.detail;
-  return {
-    kind: 'setting-set',
-    mode: 'update',
-    recordId: setting.key,
-    title: `Set ${setting.key}`,
-    selectedFieldIndex: 0,
-    message: action.detail,
-    fields: [
-      {
-        id: 'value',
-        label: setting.key,
-        value: currentValue,
-        required: false,
-        multiline: false,
-        hint: action.settingValueHint ?? valueHint,
-        redact: isCredentialSettingKey(setting.key),
-      },
-    ],
-  };
-}

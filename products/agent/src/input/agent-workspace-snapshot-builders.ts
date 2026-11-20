@@ -30,7 +30,11 @@ import { readMailboxStatus } from './commands/email-settings.ts';
 import { heldHostMailboxReading, readHostMailboxStatus } from './agent-workspace-host-mailbox.ts';
 import { CALENDAR_OAUTH_CLIENT_ID_KEYS } from '../agent/calendar/calendar-oauth-service.ts';
 import { readConfigBoolean, readConfigNumber, readConfigString, readFallbackOrderText } from './agent-workspace-snapshot-config.ts';
-import type { AgentWorkspaceCalendarOAuthConfigStatus } from './agent-workspace-calendar-oauth-editor.ts';
+/** Whether a calendar OAuth client id is kept for each provider (no I/O; read from settings). */
+export interface AgentWorkspaceCalendarOAuthConfigStatus {
+  readonly google: boolean;
+  readonly microsoft: boolean;
+}
 import type { AgentWorkspaceEmailConnectStatus } from './agent-workspace-types.ts';
 
 /**

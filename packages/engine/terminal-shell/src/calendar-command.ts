@@ -53,6 +53,8 @@ export interface CalendarHost<Ctx> {
   readonly exportFile?: ((ctx: Ctx, dest: string) => Promise<string>) | undefined;
   readonly accounts?: ((ctx: Ctx) => Promise<string>) | undefined;
   readonly connect?: ((ctx: Ctx, provider: CalendarProvider, how: CalendarSignIn, code: string) => Promise<string | void>) | undefined;
+  /** Keep the owner's own OAuth app (client id, and a client secret when the app has one) that signing in to `provider` uses. */
+  readonly useApp?: ((ctx: Ctx, provider: CalendarProvider, clientId: string, clientSecret: string) => Promise<string>) | undefined;
   readonly disconnect?: ((ctx: Ctx, provider: CalendarProvider) => Promise<string>) | undefined;
   readonly subscriptions?: ((ctx: Ctx) => Promise<string>) | undefined;
   readonly subscriptionRows?: ((ctx: Ctx) => Promise<readonly ListRow[]>) | undefined;
@@ -212,6 +214,20 @@ export function registerCalendarCommand<Ctx extends CommandActionContext>(regist
       },
     },
     {
+      id: 'use-app', label: 'Use your own calendar app to sign in', word: 'use-app',
+      inputs: [
+        PROVIDER,
+        textInput({ id: 'clientId', label: 'Client id', help: 'The OAuth client id your Google Cloud or Azure app registration shows', why: 'an id only the provider can give you', typed: { position: 2 } }),
+        { id: 'clientSecret', label: 'Client secret', help: 'Only for an app registered as a confidential client; kept in the secret store, never shown', kind: 'secret', required: { default: '', defaultMeans: 'none (a desktop app has none)' }, typed: { flag: '--secret' } },
+      ],
+      sentence: 'Signing in to your {provider} calendar uses your own app, client id {clientId}, until you change it; then sign in with /calendar connect.', done: '',
+      touches: 'credential', lasts: 'kept', risk: 'none',
+      ownerOnly: { reason: 'it keeps an app credential that signing in to a calendar uses', instead: '/calendar accounts shows what is signed in' },
+      operator: { terminalOnly: AGENT_ONLY },
+      example: { provider: 'google', clientId: '123-abc.apps.googleusercontent.com' },
+      async run(values, ctx) { return host.useApp ? await host.useApp(ctx, values.provider as CalendarProvider, values.clientId!, values.clientSecret ?? '') : missing('Keeping a calendar app', AGENT_ONLY); },
+    },
+    {
       id: 'disconnect', label: 'Sign out of a calendar account', word: 'disconnect', inputs: [PROVIDER],
       sentence: 'This program signs out of your {provider} calendar and forgets its sign-in.', done: '',
       touches: 'credential', lasts: 'kept', risk: 'cannot-be-undone',
@@ -272,7 +288,7 @@ export function registerCalendarCommand<Ctx extends CommandActionContext>(regist
     report: 'upcoming',
     firstScreenRows: [
       'upcoming', 'get', 'add', 'change', 'delete',
-      { label: 'Connect a calendar…', actions: ['status', 'accounts', 'connect', 'disconnect'] },
+      { label: 'Connect a calendar…', actions: ['status', 'accounts', 'use-app', 'connect', 'disconnect'] },
       { label: 'Calendar feeds…', actions: ['subscriptions', 'subscribe', 'refresh', 'unsubscribe'] },
       { label: 'Every event and files…', actions: ['all', 'import', 'export'] },
     ],

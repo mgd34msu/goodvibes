@@ -1074,6 +1074,65 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "text": "sample"
               }
             ]
+          },
+          "presentation": {
+            "kind": "run-command",
+            "mark": "ask",
+            "question": "sample",
+            "place": {
+              "short": "sample",
+              "full": "sample"
+            },
+            "subject": {
+              "kind": "command",
+              "lines": [
+                "sample"
+              ]
+            },
+            "body": "sample",
+            "consequence": {
+              "text": "sample",
+              "withPlace": "sample",
+              "tone": "plain"
+            },
+            "choices": [
+              {
+                "id": "sample",
+                "label": "sample",
+                "key": "sample",
+                "default": false,
+                "danger": false,
+                "value": "sample"
+              }
+            ],
+            "remember": {
+              "offered": false,
+              "tiers": [
+                {
+                  "tier": "sample",
+                  "label": "sample",
+                  "detail": "sample"
+                }
+              ],
+              "why": "sample"
+            },
+            "typeToRefuse": false,
+            "countdown": {
+              "verb": "sample",
+              "at": 0
+            },
+            "origin": {
+              "sessionTitle": "sample",
+              "by": "sample"
+            },
+            "why": "sample",
+            "details": [
+              {
+                "label": "sample",
+                "value": "sample"
+              }
+            ],
+            "title": "sample"
           }
         }
       ]
@@ -4465,6 +4524,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "enabled": false
     }
   },
+  "automation.schedules.preview": {
+    "methodId": "automation.schedules.preview",
+    "http": null,
+    "status": 200,
+    "body": {
+      "summary": "sample",
+      "input": {}
+    }
+  },
   "automation.schedules.resume": {
     "methodId": "automation.schedules.resume",
     "http": {
@@ -7525,8 +7593,18 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "cause": "sample",
             "changed": {
               "text": "sample",
+              "known": false,
               "files": [
                 "sample"
+              ],
+              "commands": 0,
+              "messages": 0,
+              "unknown": 0
+            },
+            "attempts": {
+              "count": 0,
+              "times": [
+                0
               ]
             },
             "next": [
@@ -7760,8 +7838,18 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "cause": "sample",
             "changed": {
               "text": "sample",
+              "known": false,
               "files": [
                 "sample"
+              ],
+              "commands": 0,
+              "messages": 0,
+              "unknown": 0
+            },
+            "attempts": {
+              "count": 0,
+              "times": [
+                0
               ]
             },
             "next": [
@@ -20945,6 +21033,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "writable": false
           }
         }
+      ],
+      "heldForTrust": [
+        "sample"
       ]
     }
   },
@@ -21059,6 +21150,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "writable": false
             }
           }
+        ],
+        "heldForTrust": [
+          "sample"
         ]
       }
     }
@@ -21131,6 +21225,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "writable": false
             }
           }
+        ],
+        "heldForTrust": [
+          "sample"
         ]
       }
     }
@@ -21260,6 +21357,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "writable": false
             }
           }
+        ],
+        "heldForTrust": [
+          "sample"
         ]
       }
     }
@@ -21335,6 +21435,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "writable": false
             }
           }
+        ],
+        "heldForTrust": [
+          "sample"
         ]
       }
     }
@@ -21410,6 +21513,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "writable": false
             }
           }
+        ],
+        "heldForTrust": [
+          "sample"
         ]
       }
     }
@@ -21485,6 +21591,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "writable": false
             }
           }
+        ],
+        "heldForTrust": [
+          "sample"
         ]
       }
     }
@@ -21560,6 +21669,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "writable": false
             }
           }
+        ],
+        "heldForTrust": [
+          "sample"
         ]
       }
     }
@@ -21633,6 +21745,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "writable": false
             }
           }
+        ],
+        "heldForTrust": [
+          "sample"
         ]
       }
     }
@@ -21705,6 +21820,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "writable": false
             }
           }
+        ],
+        "heldForTrust": [
+          "sample"
         ]
       }
     }
@@ -29833,6 +29951,17 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "next": "sample"
         }
       ]
+    }
+  },
+  "watchers.triggers.preview": {
+    "methodId": "watchers.triggers.preview",
+    "http": null,
+    "status": 200,
+    "body": {
+      "summary": "sample",
+      "input": {
+        "definition": {}
+      }
     }
   },
   "watchers.triggers.reset": {

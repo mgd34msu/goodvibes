@@ -27,9 +27,13 @@ export interface McpWorkspaceForm extends McpWorkspaceFormBase {
 
 import type { McpServerConfig } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 import type { CommandContext } from './command-registry.ts';
 import { requireMcpApi, requireShellPaths } from './commands/runtime-services.ts';
+
+/** The one strict confirm rule: only yes (or y, true) confirms; a blank never does. */
+function isAffirmative(value: string): boolean {
+  return /^(y|yes|true)$/i.test(value.trim());
+}
 
 export type McpWorkspaceMode = PlatformMcpWorkspaceMode<'reload-confirm'>;
 

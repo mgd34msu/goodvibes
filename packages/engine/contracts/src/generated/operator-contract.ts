@@ -6284,6 +6284,252 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "next"
                     ],
                     "additionalProperties": false
+                  },
+                  "presentation": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "run-command",
+                          "answer-command-prompt",
+                          "change-files",
+                          "fetch",
+                          "start-agent",
+                          "hand-off-work",
+                          "change-setting",
+                          "mcp-tool",
+                          "other-tool",
+                          "purchase",
+                          "send-message",
+                          "question",
+                          "decision",
+                          "claim",
+                          "queued-action",
+                          "report"
+                        ]
+                      },
+                      "mark": {
+                        "type": "string",
+                        "enum": [
+                          "ask",
+                          "cannot-undo",
+                          "question"
+                        ]
+                      },
+                      "question": {
+                        "type": "string"
+                      },
+                      "place": {
+                        "type": "object",
+                        "properties": {
+                          "short": {
+                            "type": "string"
+                          },
+                          "full": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "short",
+                          "full"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "subject": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "command",
+                              "paths",
+                              "urls",
+                              "text",
+                              "money"
+                            ]
+                          },
+                          "lines": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "lines"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "body": {
+                        "type": "string"
+                      },
+                      "consequence": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          },
+                          "withPlace": {
+                            "type": "string"
+                          },
+                          "tone": {
+                            "type": "string",
+                            "enum": [
+                              "plain",
+                              "cannot-undo"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "text",
+                          "withPlace",
+                          "tone"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "choices": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "key": {
+                              "type": "string"
+                            },
+                            "default": {
+                              "type": "boolean"
+                            },
+                            "danger": {
+                              "type": "boolean"
+                            },
+                            "value": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "label"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "remember": {
+                        "type": "object",
+                        "properties": {
+                          "offered": {
+                            "type": "boolean"
+                          },
+                          "tiers": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "tier": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "detail": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "tier",
+                                "label",
+                                "detail"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "why": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "offered"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "typeToRefuse": {
+                        "type": "boolean"
+                      },
+                      "countdown": {
+                        "type": "object",
+                        "properties": {
+                          "verb": {
+                            "type": "string"
+                          },
+                          "at": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "verb",
+                          "at"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "origin": {
+                        "type": "object",
+                        "properties": {
+                          "sessionTitle": {
+                            "type": "string"
+                          },
+                          "by": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "by"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "why": {
+                        "type": "string"
+                      },
+                      "details": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "label",
+                            "value"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "mark",
+                      "question",
+                      "choices",
+                      "remember",
+                      "typeToRefuse",
+                      "why",
+                      "details",
+                      "title"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -8235,6 +8481,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "mcp-tool",
                         "other-tool",
                         "purchase",
+                        "send-message",
                         "question",
                         "decision",
                         "claim",
@@ -9061,6 +9308,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "mcp-tool",
                         "other-tool",
                         "purchase",
+                        "send-message",
                         "question",
                         "decision",
                         "claim",
@@ -9900,6 +10148,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "mcp-tool",
                           "other-tool",
                           "purchase",
+                          "send-message",
                           "question",
                           "decision",
                           "claim",
@@ -10714,6 +10963,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "mcp-tool",
                         "other-tool",
                         "purchase",
+                        "send-message",
                         "question",
                         "decision",
                         "claim",
@@ -11475,6 +11725,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "mcp-tool",
                         "other-tool",
                         "purchase",
+                        "send-message",
                         "question",
                         "decision",
                         "claim",
@@ -27031,6 +27282,156 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "idempotent": true
       },
       {
+        "id": "automation.schedules.preview",
+        "title": "Preview a Schedule",
+        "description": "Read the values of \"Schedule something to run\" (action add) or \"Change a schedule\" (action change), the /schedule blanks by name (prompt, when, at, every, cron, tz, stagger, name, target, model, provider, deliver, outside, source, reasoning, thinking, wake, fallback, tool, template, light, paused; for change: schedule, task, success), into what would be kept: summary is the reading in words (\"Read as: 0 9 * * 1-5 [Europe/Vienna]. Next run: ...\"), and input is the body of automation.schedules.create (add) or automation.jobs.update (change). Nothing is kept. A described time (when) is read once, by the decision model when one is set, else only the fixed forms (an ISO time, a cron pattern, every 30m, in 2h) are read. zone is the caller's time zone, used when tz is blank.",
+        "category": "automation",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "read:automation-content"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "add",
+                "change"
+              ]
+            },
+            "zone": {
+              "type": "string"
+            },
+            "schedule": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "when": {
+              "type": "string"
+            },
+            "at": {
+              "type": "string"
+            },
+            "every": {
+              "type": "string"
+            },
+            "cron": {
+              "type": "string"
+            },
+            "tz": {
+              "type": "string"
+            },
+            "stagger": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "target": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "deliver": {
+              "type": "string"
+            },
+            "outside": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "reasoning": {
+              "type": "string"
+            },
+            "thinking": {
+              "type": "string"
+            },
+            "wake": {
+              "type": "string"
+            },
+            "fallback": {
+              "type": "string"
+            },
+            "tool": {
+              "type": "string"
+            },
+            "template": {
+              "type": "string"
+            },
+            "light": {
+              "type": "string"
+            },
+            "paused": {
+              "type": "string"
+            },
+            "task": {
+              "type": "string"
+            },
+            "success": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string"
+            },
+            "input": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {},
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "summary",
+            "input"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
+      },
+      {
         "id": "automation.schedules.resume",
         "title": "Resume a Schedule",
         "description": "Let a paused schedule run again at its next time, until you change it. The same as /schedule resume <schedule>.",
@@ -42504,16 +42905,51 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "text": {
                             "type": "string"
                           },
+                          "known": {
+                            "type": "boolean"
+                          },
                           "files": {
                             "type": "array",
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "commands": {
+                            "type": "number"
+                          },
+                          "messages": {
+                            "type": "number"
+                          },
+                          "unknown": {
+                            "type": "number"
                           }
                         },
                         "required": [
                           "text",
-                          "files"
+                          "known",
+                          "files",
+                          "commands",
+                          "messages",
+                          "unknown"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "attempts": {
+                        "type": "object",
+                        "properties": {
+                          "count": {
+                            "type": "number"
+                          },
+                          "times": {
+                            "type": "array",
+                            "items": {
+                              "type": "number"
+                            }
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "times"
                         ],
                         "additionalProperties": false
                       },
@@ -43740,16 +44176,51 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "text": {
                             "type": "string"
                           },
+                          "known": {
+                            "type": "boolean"
+                          },
                           "files": {
                             "type": "array",
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "commands": {
+                            "type": "number"
+                          },
+                          "messages": {
+                            "type": "number"
+                          },
+                          "unknown": {
+                            "type": "number"
                           }
                         },
                         "required": [
                           "text",
-                          "files"
+                          "known",
+                          "files",
+                          "commands",
+                          "messages",
+                          "unknown"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "attempts": {
+                        "type": "object",
+                        "properties": {
+                          "count": {
+                            "type": "number"
+                          },
+                          "times": {
+                            "type": "array",
+                            "items": {
+                              "type": "number"
+                            }
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "times"
                         ],
                         "additionalProperties": false
                       },
@@ -84833,7 +85304,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "flags.graduation.report",
         "title": "Feature Defaults Report",
-        "description": "Return the feature defaults report: every platform capability with its current default, default-disposition state (dark = default-off with no evidence, soaking = accumulating evidence, graduate-candidate = judged ready and awaiting a release decision, graduated = default on, blocked = held off with a dated reason), and its validation evidence. The daemon collects no validation readings, so every entry's evidence says \"no evidence collected\"; the only instrumentation, the permissions divergence simulation, runs in the terminal app with /policy simulate and reports there. releaseBlockers lists every graduate-candidate entry: capabilities judged ready that are neither on by default nor held with a dated reason.",
+        "description": "Return the feature defaults report: every platform capability with its current default, default-disposition state (dark = default-off with no evidence, soaking = accumulating evidence, graduate-candidate = judged ready and awaiting a release decision, graduated = default on, blocked = held off with a dated reason), and its validation evidence. The daemon collects no validation readings, so every entry's evidence says \"no evidence collected\"; the only instrumentation, the permissions divergence simulation, runs in the terminal app with /security simulate-policy and reports there. releaseBlockers lists every graduate-candidate entry: capabilities judged ready that are neither on by default nor held with a dated reason.",
         "category": "flags",
         "source": "builtin",
         "access": "authenticated",
@@ -121321,6 +121792,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 ],
                 "additionalProperties": false
               }
+            },
+            "heldForTrust": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": [
@@ -121778,6 +122255,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     ],
                     "additionalProperties": false
                   }
+                },
+                "heldForTrust": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               },
               "required": [
@@ -122069,6 +122552,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "source"
                     ],
                     "additionalProperties": false
+                  }
+                },
+                "heldForTrust": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
                   }
                 }
               },
@@ -122590,6 +123079,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     ],
                     "additionalProperties": false
                   }
+                },
+                "heldForTrust": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               },
               "required": [
@@ -122897,6 +123392,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "source"
                     ],
                     "additionalProperties": false
+                  }
+                },
+                "heldForTrust": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
                   }
                 }
               },
@@ -123207,6 +123708,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "source"
                     ],
                     "additionalProperties": false
+                  }
+                },
+                "heldForTrust": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
                   }
                 }
               },
@@ -123519,6 +124026,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     ],
                     "additionalProperties": false
                   }
+                },
+                "heldForTrust": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               },
               "required": [
@@ -123830,6 +124343,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     ],
                     "additionalProperties": false
                   }
+                },
+                "heldForTrust": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               },
               "required": [
@@ -124133,6 +124652,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "source"
                     ],
                     "additionalProperties": false
+                  }
+                },
+                "heldForTrust": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
                   }
                 }
               },
@@ -124538,6 +125063,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "source"
                     ],
                     "additionalProperties": false
+                  }
+                },
+                "heldForTrust": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
                   }
                 }
               },
@@ -167501,6 +168032,157 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "idempotent": true
       },
       {
+        "id": "watchers.triggers.preview",
+        "title": "Preview a trigger",
+        "description": "Read the blanks of \"Watch for something\" (the /triggers watch values by name: name, kind finishes|prints|page|file|written, command one word per line, match, url, path, every, then ask|run, say, deliver, grant, definition) into what would be kept: summary is what it watches and does in one sentence, and input is the body of watchers.triggers.create ({ definition }). Nothing is made. A grant is looked up among the commands the owner let triggers run.",
+        "category": "watchers",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "read:watchers"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "match": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "every": {
+              "type": "string"
+            },
+            "then": {
+              "type": "string"
+            },
+            "say": {
+              "type": "string"
+            },
+            "deliver": {
+              "type": "string"
+            },
+            "grant": {
+              "type": "string"
+            },
+            "definition": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string"
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "definition": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {},
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "definition"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "summary",
+            "input"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "TRIGGER_OPERATOR_REQUIRED",
+            "status": 403,
+            "meaning": "The caller is not an administrative operator with watcher access; call with the owner's operator credential."
+          },
+          {
+            "code": "TRIGGER_NOT_FOUND",
+            "status": 404,
+            "meaning": "No trigger has that id; list the triggers to see their ids."
+          },
+          {
+            "code": "TRIGGER_EXISTS",
+            "status": 409,
+            "meaning": "A trigger with that id exists; pick another id or cancel the existing one first."
+          },
+          {
+            "code": "TRIGGERS_OFF",
+            "status": 409,
+            "meaning": "The trigger family is off; set watchers.triggers.enabled to true and try again."
+          },
+          {
+            "code": "TRIGGER_RESET_REFUSED",
+            "status": 409,
+            "meaning": "The trigger is not stopped by its breaker, so there is nothing to reset; list the triggers to see its state."
+          },
+          {
+            "code": "TRIGGER_DEFINITION_INVALID",
+            "status": 400,
+            "meaning": "A field of the definition or grant was refused; the message names it. Fix it and send again."
+          },
+          {
+            "code": "TRIGGER_OTHER_PROCESS",
+            "status": 409,
+            "meaning": "Another GoodVibes process supervises these triggers; change them from that process, or close it so this one takes over."
+          },
+          {
+            "code": "TRIGGER_GRANT_CHANGED",
+            "status": 409,
+            "meaning": "The named grant no longer matches what the trigger was approved for; register the grant again and recreate the trigger."
+          }
+        ]
+      },
+      {
         "id": "watchers.triggers.reset",
         "title": "Reset a trigger's breaker",
         "description": "Close the breaker of a trigger that stopped after repeated failures, once the cause is fixed. Refused, with the reason, when the trigger is not stopped.",
@@ -191994,6 +192676,252 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               ],
               "additionalProperties": false
             },
+            "presentation": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "run-command",
+                    "answer-command-prompt",
+                    "change-files",
+                    "fetch",
+                    "start-agent",
+                    "hand-off-work",
+                    "change-setting",
+                    "mcp-tool",
+                    "other-tool",
+                    "purchase",
+                    "send-message",
+                    "question",
+                    "decision",
+                    "claim",
+                    "queued-action",
+                    "report"
+                  ]
+                },
+                "mark": {
+                  "type": "string",
+                  "enum": [
+                    "ask",
+                    "cannot-undo",
+                    "question"
+                  ]
+                },
+                "question": {
+                  "type": "string"
+                },
+                "place": {
+                  "type": "object",
+                  "properties": {
+                    "short": {
+                      "type": "string"
+                    },
+                    "full": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "short",
+                    "full"
+                  ],
+                  "additionalProperties": false
+                },
+                "subject": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "command",
+                        "paths",
+                        "urls",
+                        "text",
+                        "money"
+                      ]
+                    },
+                    "lines": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "lines"
+                  ],
+                  "additionalProperties": false
+                },
+                "body": {
+                  "type": "string"
+                },
+                "consequence": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "withPlace": {
+                      "type": "string"
+                    },
+                    "tone": {
+                      "type": "string",
+                      "enum": [
+                        "plain",
+                        "cannot-undo"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "withPlace",
+                    "tone"
+                  ],
+                  "additionalProperties": false
+                },
+                "choices": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "key": {
+                        "type": "string"
+                      },
+                      "default": {
+                        "type": "boolean"
+                      },
+                      "danger": {
+                        "type": "boolean"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "remember": {
+                  "type": "object",
+                  "properties": {
+                    "offered": {
+                      "type": "boolean"
+                    },
+                    "tiers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "tier": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "tier",
+                          "label",
+                          "detail"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "why": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "offered"
+                  ],
+                  "additionalProperties": false
+                },
+                "typeToRefuse": {
+                  "type": "boolean"
+                },
+                "countdown": {
+                  "type": "object",
+                  "properties": {
+                    "verb": {
+                      "type": "string"
+                    },
+                    "at": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "verb",
+                    "at"
+                  ],
+                  "additionalProperties": false
+                },
+                "origin": {
+                  "type": "object",
+                  "properties": {
+                    "sessionTitle": {
+                      "type": "string"
+                    },
+                    "by": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "by"
+                  ],
+                  "additionalProperties": false
+                },
+                "why": {
+                  "type": "string"
+                },
+                "details": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "label",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "mark",
+                "question",
+                "choices",
+                "remember",
+                "typeToRefuse",
+                "why",
+                "details",
+                "title"
+              ],
+              "additionalProperties": false
+            },
             "createdAt": {
               "type": "number"
             }
@@ -192705,6 +193633,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "mcp-tool",
                         "other-tool",
                         "purchase",
+                        "send-message",
                         "question",
                         "decision",
                         "claim",
@@ -193334,10 +194263,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       }
     ],
     "schemaCoverage": {
-      "methods": 646,
-      "typedInputs": 641,
+      "methods": 648,
+      "typedInputs": 643,
       "genericInputs": 5,
-      "typedOutputs": 644,
+      "typedOutputs": 646,
       "genericOutputs": 2
     },
     "eventCoverage": {
@@ -193346,8 +194275,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       "withWireEvents": 36
     },
     "validationCoverage": {
-      "methods": 646,
-      "validated": 639,
+      "methods": 648,
+      "validated": 641,
       "skippedGeneric": 0,
       "skippedUntyped": 7
     }

@@ -432,7 +432,6 @@ export class InputHandler extends TerminalInputHandlerState {
       context,
       (command, behavior, displayCommand) => this.dispatchAgentWorkspaceCommand(command, context, behavior, displayCommand),
       categoryId,
-      (prompt) => this.dispatchAgentWorkspacePrompt(prompt, context),
       onlyGroup as import('./agent-workspace-types.ts').AgentWorkspaceCategoryGroup | undefined,
       () => this.requestRender(),
     );
@@ -458,9 +457,8 @@ export class InputHandler extends TerminalInputHandlerState {
     behavior?: 'inline' | 'compose' | 'exit',
     displayCommand: string = command,
   ): void {
-    // Default to 'inline' so editor submissions stay inside the workspace modal.
-    // Closing the modal mid-flow (the old 'compose' default) traps users in the
-    // wrong context and was the primary symptom of the broken onboarding flow.
+    // Default to 'inline' so a row's typed line runs inside the workspace and its
+    // output shows in the result pane.
     const resolved = behavior ?? 'inline';
     const { name, args } = parseSlashCommand(command);
     if (!name) return;
@@ -544,14 +542,6 @@ export class InputHandler extends TerminalInputHandlerState {
     this.requestRender();
   }
 
-  private dispatchAgentWorkspacePrompt(prompt: string, context: CommandContext): void {
-    this.closeAgentWorkspaceModal();
-    // The owner's field text (a document body, a URL) is not composer input:
-    // `@model:` or a leading `!` in it is sent, not acted on.
-    if (this.submitTurn) this.submitTurn(prompt);
-    else context.submitTurn?.(prompt);
-    this.requestRender();
-  }
   public handleModelPickerCommit(): boolean {
     return false;
   }
@@ -664,7 +654,6 @@ export class InputHandler extends TerminalInputHandlerState {
         context,
         (command, behavior, displayCommand) => this.dispatchAgentWorkspaceCommand(command, context, behavior, displayCommand),
         undefined,
-        (prompt) => this.dispatchAgentWorkspacePrompt(prompt, context),
         undefined,
         () => this.requestRender(),
       );

@@ -5,14 +5,12 @@ import { captureStatefulCatalogRequest } from './agent-harness-stateful-catalog-
 import { captureModelReadingSnapshotGuard, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 import type { CommandContext } from '../input/command-registry.ts';
-import { createAgentWorkspaceEditor } from '../input/agent-workspace-activation.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';
-import { buildAgentWorkspaceEditorContextPart } from '../input/agent-workspace-snapshot.ts';
-import type { AgentWorkspaceAction, AgentWorkspaceCategory, AgentWorkspaceEditorKind, AgentWorkspaceLocalEditor, AgentWorkspaceLocalLibraryItem, AgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-types.ts';
+import type { AgentWorkspaceAction, AgentWorkspaceCategory } from '../input/agent-workspace-types.ts';
 import { parseSlashCommand } from '../input/slash-command-parser.ts';
+import { resolveWorkspaceAction, workspaceActionLine } from '../input/workspace-actions.ts';
+import { describeActionForModel, describeCommandForModel, renderTypedLine } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 import { describeCommandPolicy } from './agent-harness-metadata.ts';
-import { describeLocalWorkspaceModelExecution } from './agent-harness-local-operations.ts';
-import { describeWorkspaceEditorModelExecution, workspaceEditorRouteHint } from './agent-harness-workspace-editor-execution.ts';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 import { readOffset } from './agent-harness-tool-utils.ts';
 import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
@@ -31,16 +29,6 @@ export interface AgentHarnessWorkspaceActionArgs {
   readonly includeParameters?: unknown;
   readonly limit?: unknown;
   readonly offset?: unknown;
-}
-
-export interface WorkspaceEditorContext {
-  readonly runtimeStarterTemplates: AgentWorkspaceRuntimeSnapshot['runtimeStarterTemplates'];
-  readonly selectedRoutine: AgentWorkspaceLocalLibraryItem | null;
-  readonly recentReviewerHandoffArtifacts: AgentWorkspaceRuntimeSnapshot['recentReviewerHandoffArtifacts'];
-  readonly reviewPacketDefaults: AgentWorkspaceRuntimeSnapshot['reviewPacketDefaults'] | null;
-  readonly calendarOAuthConfigStatus: AgentWorkspaceRuntimeSnapshot['calendarOAuthConfigStatus'] | null;
-  /** Set when the runtime snapshot could not be read: the lists above are empty because of that, not because nothing exists. */
-  readonly contextUnavailable?: string;
 }
 
 export interface WorkspaceActionLookup {
@@ -62,8 +50,8 @@ export type WorkspaceActionResolution =
     readonly candidates: readonly { readonly actionId: string; readonly categoryId: string; readonly label: string; readonly command?: string }[];
   };
 
-
-function readFieldMap(value: unknown): Readonly<Record<string, string>> {
+/** The values a model gave for a row's blanks (`fields`), as text. */
+export function readFieldMap(value: unknown): Readonly<Record<string, string>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, typeof entry === 'string' ? entry : String(entry)]));
 }
@@ -100,24 +88,6 @@ export function describeWorkspaceCategory(category: AgentWorkspaceCategory): Rec
   };
 }
 
-export function describeWorkspaceEditor(editor: AgentWorkspaceLocalEditor): Record<string, unknown> {
-  return {
-    kind: editor.kind,
-    mode: editor.mode,
-    title: editor.title,
-    message: editor.message,
-    fields: editor.fields.map((field) => ({
-      id: field.id,
-      label: field.label,
-      required: field.required,
-      multiline: field.multiline,
-      hint: field.hint,
-      redact: field.redact === true,
-      default: field.redact ? '<redacted>' : field.value,
-    })),
-  };
-}
-
 function previewText(value: string, maxLength = 56): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 3).trimEnd()}...`;
@@ -129,16 +99,10 @@ function commandRouteHint(command: string): string {
   return describeCommandPolicy(commandName).preferredModelTool ?? `workspace action:"run_command" commandName:"${commandName}"`;
 }
 
-function localActionRouteHint(action: AgentWorkspaceAction): string {
-  const modelExecution = describeLocalWorkspaceModelExecution(action);
-  const tool = modelExecution && typeof modelExecution.tool === 'string' ? modelExecution.tool : '';
-  return tool || 'agent_local_registry';
-}
 
 function workspaceActionRouteHint(action: AgentWorkspaceAction): string {
   if (action.kind === 'settings-import') return 'settings action:"import"';
   if (action.id === 'account-local-server-health') return 'models action:"smoke"';
-  if (action.id === 'account-run-local-model-benchmark') return 'agent_model_compare';
   if (action.id === 'assistant-browser-cockpit') return 'computer action:"open_browser"';
   if (action.id === 'research-briefing') return 'research action:"briefing"';
   if (action.id === 'research-workflow-plan') return 'research action:"plan"';
@@ -165,69 +129,52 @@ function workspaceActionRouteHint(action: AgentWorkspaceAction): string {
   ) return 'autonomy action:"queue"';
   if (action.id === 'memory-learning-curator') return 'memory action:"curator"';
   if (action.id === 'memory-prompt-plan') return 'memory action:"curator" includeParameters:true';
-  if (action.id === 'memory-posture') return 'memory action:"status"';
+  if (action.kind === 'act' && action.act) return commandRouteHint(workspaceActionLine(action.act));
   if (action.command) return commandRouteHint(action.command);
-  if (action.editorKind) return workspaceEditorRouteHint(action.editorKind);
-  if (action.kind === 'local-selection' || action.kind === 'local-operation') return localActionRouteHint(action);
   // Compatibility detail route remains: agent_harness mode:"open_ui_surface".
   if (action.targetCategoryId || action.kind === 'workspace') return 'workspace action:"open"';
   if (action.kind === 'guidance') return action.safety === 'blocked' ? 'main conversation policy' : 'main conversation';
   return 'workspace action:"action"';
 }
 
-function selectedRoutineFromArgs(
-  snapshot: Pick<AgentWorkspaceRuntimeSnapshot, 'localRoutines'>,
-  args: AgentHarnessWorkspaceActionArgs,
-): AgentWorkspaceLocalLibraryItem | null {
-  const fields = readFieldMap(args.fields);
-  const routineId = readString(args.recordId) || readString(fields.routineId) || readString(fields.id);
-  if (!routineId) return null;
-  return snapshot.localRoutines.find((routine) => routine.id === routineId || routine.name.toLowerCase() === routineId.toLowerCase()) ?? null;
+/**
+ * A row that runs a described command's action, as the model's command
+ * catalogue gives that action: its line, blanks, sentence, what it touches and
+ * whether only the owner may run it; the row's own preset values; and how to
+ * run it (run_workspace_action with `fields` for the blanks, or run_command
+ * with the whole line).
+ */
+function describedRow(action: AgentWorkspaceAction, withBlanks: boolean): Record<string, unknown> {
+  if (action.kind !== 'act' || !action.act) return {};
+  const resolved = resolveWorkspaceAction(action.act);
+  const line = workspaceActionLine(action.act);
+  if (!resolved) return { command: line, described: false };
+  return {
+    command: line,
+    ...(action.act.values ? { presetValues: action.act.values } : {}),
+    ...(withBlanks ? resolved.action ? { described: describeActionForModel(resolved.command, resolved.action) } : { described: describeCommandForModel(resolved.command) } : {}),
+    modelExecution: {
+      route: 'run_workspace_action',
+      fields: 'the action\'s blanks by id, as in described.inputs',
+      orRunCommand: `agent_harness mode:"run_command" command:"${line} ..."`,
+      note: 'A blank left out is refused with its label and current choices; an owner-only action is refused for a model with what to do instead.',
+    },
+  };
 }
 
-export function buildWorkspaceEditorContext(context: CommandContext, args: AgentHarnessWorkspaceActionArgs): WorkspaceEditorContext {
-  try {
-    // Only the parts an editor reads, not the whole workspace.
-    const snapshot = buildAgentWorkspaceEditorContextPart(context);
-    return {
-      runtimeStarterTemplates: snapshot.runtimeStarterTemplates,
-      selectedRoutine: selectedRoutineFromArgs(snapshot, args),
-      recentReviewerHandoffArtifacts: snapshot.recentReviewerHandoffArtifacts,
-      reviewPacketDefaults: snapshot.reviewPacketDefaults,
-      calendarOAuthConfigStatus: snapshot.calendarOAuthConfigStatus,
-    };
-  } catch (err) {
-    if (err instanceof ToolInputProjectionError) throw err;
-    return {
-      runtimeStarterTemplates: [],
-      selectedRoutine: null,
-      recentReviewerHandoffArtifacts: [],
-      reviewPacketDefaults: null,
-      calendarOAuthConfigStatus: null,
-      contextUnavailable: `The workspace runtime snapshot could not be read (${err instanceof Error ? err.message : String(err)}), so starter templates, the selected routine, reviewer handoff artifacts and OAuth status are not listed.`,
-    };
-  }
-}
-
-export function createWorkspaceEditor(
-  editorKind: AgentWorkspaceEditorKind,
-  editorContext: WorkspaceEditorContext | null,
-): AgentWorkspaceLocalEditor | null {
-  return createAgentWorkspaceEditor(editorKind, {
-    runtimeStarterTemplates: editorContext?.runtimeStarterTemplates ?? [],
-    selectedRoutine: editorKind === 'routine-schedule' ? editorContext?.selectedRoutine ?? null : null,
-    recentReviewerHandoffArtifacts: editorContext?.recentReviewerHandoffArtifacts ?? [],
-    reviewPacketDefaults: editorContext?.reviewPacketDefaults ?? null,
-    calendarOAuthConfigStatus: editorContext?.calendarOAuthConfigStatus ?? null,
-  });
+/** The typed line a model's run of a row makes: the row's command and action, its preset values, then the model's `fields`. */
+export function workspaceRowLine(action: AgentWorkspaceAction, fields: Readonly<Record<string, string>>): string | null {
+  if (action.kind !== 'act' || !action.act) return null;
+  const resolved = resolveWorkspaceAction(action.act);
+  if (!resolved?.action) return workspaceActionLine(action.act);
+  return renderTypedLine(resolved.command, resolved.action.id, { ...action.act.values, ...fields });
 }
 
 export function describeWorkspaceAction(
   category: AgentWorkspaceCategory,
   action: AgentWorkspaceAction,
-  options: { readonly includeEditor?: boolean; readonly editorContext?: WorkspaceEditorContext | null; readonly lookup?: WorkspaceActionLookup } = {},
+  options: { readonly includeBlanks?: boolean; readonly lookup?: WorkspaceActionLookup } = {},
 ): Record<string, unknown> {
-  const editor = options.includeEditor && action.editorKind ? createWorkspaceEditor(action.editorKind, options.editorContext ?? null) : null;
   return {
     id: action.id,
     categoryId: category.id,
@@ -239,13 +186,9 @@ export function describeWorkspaceAction(
     safety: action.safety,
     modelRoute: workspaceActionRouteHint(action),
     ...(action.command ? { command: action.command } : {}),
+    ...describedRow(action, options.includeBlanks === true),
     ...(action.targetCategoryId ? { targetCategoryId: action.targetCategoryId } : {}),
-    ...(action.editorKind ? { editorKind: action.editorKind } : {}),
-    ...(action.localKind ? { localKind: action.localKind } : {}),
-    ...(action.localOperation ? { localOperation: action.localOperation } : {}),
     ...(options.lookup ? { lookup: options.lookup } : {}),
-    ...(editor ? { editor: describeWorkspaceEditor(editor) } : {}),
-    ...(editor && options.editorContext?.contextUnavailable ? { contextUnavailable: options.editorContext.contextUnavailable } : {}),
     ...(action.kind === 'settings-import' ? {
       modelExecution: {
         route: 'settings-import',
@@ -265,12 +208,6 @@ export function describeWorkspaceAction(
         note: 'Opens the connected-host browser/PWA cockpit through the configured web route; readiness inspection also reports certified workspace category coverage, mobile/PWA controls, and first-run receipt evidence without creating a separate Agent-hosted web app.',
       },
     } : {}),
-    ...(action.kind === 'local-selection' || action.kind === 'local-operation' ? {
-      modelExecution: describeLocalWorkspaceModelExecution(action),
-    } : {}),
-    ...(action.kind === 'editor' && action.editorKind ? {
-      modelExecution: describeWorkspaceEditorModelExecution(action.editorKind),
-    } : {}),
   };
 }
 
@@ -289,10 +226,8 @@ function describeWorkspaceActionSummary(
     safety: action.safety,
     modelRoute: workspaceActionRouteHint(action),
     ...(action.command ? { command: action.command } : {}),
+    ...(action.act ? { command: workspaceActionLine(action.act) } : {}),
     ...(action.targetCategoryId ? { targetCategoryId: action.targetCategoryId } : {}),
-    ...(action.editorKind ? { editorKind: action.editorKind } : {}),
-    ...(action.localKind ? { localKind: action.localKind } : {}),
-    ...(action.localOperation ? { localOperation: action.localOperation } : {}),
   };
 }
 
@@ -321,8 +256,7 @@ export async function listWorkspaceActionsPage(
   const categoryId = readString(args.categoryId || args.category);
   const limit = clampReadLimit(args.limit, defaultLimit, maxLimit);
   const offset = readOffset(args.offset);
-  const includeEditor = args.includeParameters === true;
-  const editorContext = includeEditor ? buildWorkspaceEditorContext(context, args) : null;
+  const includeBlanks = args.includeParameters === true;
   const entries = allWorkspaceActions().filter(entry => !categoryId || entry.category.id === categoryId);
   const categories = AGENT_WORKSPACE_CATEGORIES.filter(category => !categoryId || category.id === categoryId);
   const source = query ? await withModelReadingSource({ query, args, categories: AGENT_WORKSPACE_CATEGORIES },
@@ -349,8 +283,8 @@ export async function listWorkspaceActionsPage(
   request.assertCurrent();
   const actions = source
     .slice(offset, offset + limit)
-    .map((entry) => includeEditor
-      ? describeWorkspaceAction(entry.category, entry.action, { includeEditor, editorContext })
+    .map((entry) => includeBlanks
+      ? describeWorkspaceAction(entry.category, entry.action, { includeBlanks })
       : describeWorkspaceActionSummary(entry.category, entry.action));
   return { actions, offset, matched: source.length };
 }
@@ -390,13 +324,13 @@ export function resolveWorkspaceActionIdentity(args: AgentHarnessWorkspaceAction
         actionId: entry.action.id,
         categoryId: entry.category.id,
         label: entry.action.label,
-        ...(entry.action.command ? { command: entry.action.command } : {}),
+        ...(entry.action.command ? { command: entry.action.command } : entry.action.act ? { command: workspaceActionLine(entry.action.act) } : {}),
       })),
     };
   };
   return settle(entries.filter((entry) => entry.action.id === lookup.input), 'id')
     ?? settle(entries.filter((entry) => entry.action.label === lookup.input), 'label')
-    ?? (commandInput ? settle(entries.filter((entry) => entry.action.command === commandInput), 'command') : null)
+    ?? (commandInput ? settle(entries.filter((entry) => entry.action.command === commandInput || (entry.action.act !== undefined && workspaceActionLine(entry.action.act) === commandInput)), 'command') : null)
     ?? settle(entries.filter((entry) => entry.action.id.toLowerCase() === normalized), 'case-insensitive-id')
     ?? settle(entries.filter((entry) => entry.action.label.toLowerCase() === normalized), 'case-insensitive-label');
 }

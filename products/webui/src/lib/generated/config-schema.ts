@@ -1867,7 +1867,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "boolean",
     "default": false,
-    "description": "Run the wake-word detector, listening continuously for the wake phrase on the configured input device. Turning it on starts a supervised capture process and a persistent listening indicator; turning it off stops it and releases the device immediately. WHERE IT LISTENS depends on the voice.wake.surfaces.* rows: the terminal captures through a recorder subprocess and is on by default, the agent captures the same way and is opted in per surface, and a browser tab captures through getUserMedia and is opted in per origin. Off by default because an always-on microphone must be an explicit act, not something a user discovers after the fact. THE MODEL IS ALREADY THERE: installing goodvibes downloads and checksum-verifies the pinned classifier, and a daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup step at all. Turning it on in the terminal app or Agent (settings, /config, a model's settings call) runs the same setup as /voice wake setup: it turns the wake rows on, fetches any missing wake-word model files and shows the plan; installing a speech-to-text engine is only proposed."
+    "description": "Run the wake-word detector, listening continuously for the wake phrase on the configured input device. Turning it on starts a supervised capture process and a persistent listening indicator; turning it off stops it and releases the device immediately. WHERE IT LISTENS depends on the voice.wake.surfaces.* rows: the terminal captures through a recorder subprocess and is on by default, the agent captures the same way and is opted in per surface, and a browser tab captures through getUserMedia and is opted in per origin. Off by default because an always-on microphone must be an explicit act, not something a user discovers after the fact. THE MODEL IS ALREADY THERE: installing goodvibes downloads and checksum-verifies the pinned classifier, and a daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup step at all. Turning it on in the terminal app or Agent (settings, /settings, a model's settings call) runs the same setup as /voice wake setup: it turns the wake rows on, fetches any missing wake-word model files and shows the plan; installing a speech-to-text engine is only proposed."
   },
   {
     "key": "voice.wake.models",
@@ -3626,7 +3626,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Start the daemon at login",
     "type": "boolean",
     "default": false,
-    "description": "Whether the daemon's service starts on its own at login. The daemon applies every change, however it is set (a settings screen, /config set, the Agent's /settings set, goodvibes-daemon config set, the API, or an edit of the daemon's settings file): on installs the service when it is not installed and enables it at login (systemd enable; a LaunchAgent with RunAtLoad); off disables it at login and leaves it installed and running. A value set while no daemon runs is applied when the daemon next starts. goodvibes-daemon install-service turns it on and uninstall-service off. A Windows logon task starts at login while installed whatever its value. A daemon setting, in the daemon's settings file."
+    "description": "Whether the daemon's service starts on its own at login. The daemon applies every change, however it is set (a settings screen, /settings set in either terminal program, goodvibes-daemon config set, the API, or an edit of the daemon's settings file): on installs the service when it is not installed and enables it at login (systemd enable; a LaunchAgent with RunAtLoad); off disables it at login and leaves it installed and running. A value set while no daemon runs is applied when the daemon next starts. goodvibes-daemon install-service turns it on and uninstall-service off. A Windows logon task starts at login while installed whatever its value. A daemon setting, in the daemon's settings file."
   },
   {
     "key": "service.restartOnFailure",
@@ -3651,7 +3651,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "service.serviceName",
-    "label": "Service name",
+    "label": "Name of the daemon's service",
     "type": "string",
     "default": "",
     "description": "Name of the daemon's service unit, used by the installer, the daemon's and the terminal apps' service commands and onboarding alike. Empty (the default) uses goodvibes (goodvibes.service under systemd) on Linux and Windows, and sh.goodvibes.daemon (the launchd label) on macOS."
@@ -4450,7 +4450,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "tools.hooksFile",
-    "label": "Hooks file",
+    "label": "File that defines hooks",
     "type": "string",
     "default": "hooks.json",
     "description": "Hook configuration file name, relative to the project working directory (so the default is <project>/hooks.json, not a file under .goodvibes)"
@@ -4960,7 +4960,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "boolean",
     "default": false,
-    "description": "Enable the versioned policy bundle registry with promote/rollback semantics and the /policy load, simulate, diff, promote, and rollback commands. Enforcement requires passing divergence-gate evidence first; default off until that evidence exists."
+    "description": "Enable the versioned policy bundle registry with promote/rollback semantics and the /security load-policy, simulate-policy, compare-policy, enforce-policy and restore-policy actions. Enforcement requires passing divergence-gate evidence first; default off until that evidence exists."
   },
   {
     "key": "policy.requireSignedBundles",
@@ -5126,7 +5126,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "boolean",
     "default": false,
-    "description": "Reserved for choosing an execution strategy (single/cohort/background/remote) on every conversation turn. No turn reads a strategy yet, so this setting changes nothing today. The planner that /project-plan mode, override, explain and status work with is consulted when /workstream drafts a plan, whatever this setting says."
+    "description": "Reserved for choosing an execution strategy (single/cohort/background/remote) on every conversation turn. No turn reads a strategy yet, so this setting changes nothing today. The planner that /work planner, planner-mode, planner-override and planner-explain work with is consulted when /workstream drafts a plan, whatever this setting says."
   },
   {
     "key": "tools.outputSchemaFingerprints",
@@ -5916,7 +5916,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "policy-as-code",
     "name": "Policy-as-Code",
-    "description": "Enables the versioned policy bundle registry with promote/rollback semantics. Before enforcement, /policy simulate shows the rule diff and the calls this installation recorded that the bundle would decide differently, and /policy promote --yes confirms them. Exposes /policy load, /policy simulate, /policy diff, /policy promote, and /policy rollback commands.",
+    "description": "Enables the versioned policy bundle registry with promote/rollback semantics. Before enforcement, /security simulate-policy shows the rule diff and the calls this installation recorded that the bundle would decide differently, and /security enforce-policy confirms them. Exposes /security load-policy, simulate-policy, compare-policy, enforce-policy and restore-policy.",
     "domain": "policy",
     "enablement": {
       "key": "policy.registryEnabled",
@@ -5935,7 +5935,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "adaptive-execution-planner",
     "name": "Adaptive Execution Planner",
-    "description": "Reserved for choosing an execution strategy (single/cohort/background/remote) on every conversation turn. No turn reads a strategy yet, so turning this on changes nothing today. /project-plan mode, override, explain and status work without it: they configure the planner /workstream drafting consults.",
+    "description": "Reserved for choosing an execution strategy (single/cohort/background/remote) on every conversation turn. No turn reads a strategy yet, so turning this on changes nothing today. /work planner, planner-mode, planner-override and planner-explain work without it: they configure the planner /workstream drafting consults.",
     "domain": "planner",
     "enablement": {
       "key": "planner.adaptive",

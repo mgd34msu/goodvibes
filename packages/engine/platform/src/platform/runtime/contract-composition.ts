@@ -294,6 +294,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
     providerHealth: routeProviderHealth(options.providerRegistry),
   }, options.providerRegistry.benchmarks, () => options.providerRegistry.ready());
   const runner = createContractRunner({
+    providersReady: () => options.providerRegistry.ready(),
     judgmentLog: options.judgmentLog,
     readOwnerEvidence: options.surfaceRoot || options.ownerConversationMessages
       ? createOwnerReadEvidenceReader({

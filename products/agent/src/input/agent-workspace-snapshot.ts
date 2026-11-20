@@ -291,20 +291,6 @@ export function buildAgentWorkspaceDocumentOpsPart(context: CommandContext, read
   };
 }
 
-/** What a workspace editor opened by a model tool reads: starter templates, routines, the review packet part, calendar OAuth status. */
-export function buildAgentWorkspaceEditorContextPart(context: CommandContext): Pick<AgentWorkspaceRuntimeSnapshot,
-  'runtimeStarterTemplates' | 'localRoutines' | 'recentReviewerHandoffArtifacts' | 'reviewPacketDefaults' | 'calendarOAuthConfigStatus'> {
-  const { runtimeStarterTemplates } = buildAgentWorkspaceRuntimeProfilesSnapshot(context.workspace?.shellPaths?.homeDirectory ?? '');
-  const reviewPacket = buildAgentWorkspaceReviewPacketPart(context);
-  return {
-    runtimeStarterTemplates: runtimeStarterTemplates.map(summarizeStarterTemplate),
-    localRoutines: buildAgentWorkspaceRoutineCounters(context).items,
-    recentReviewerHandoffArtifacts: reviewPacket.recentReviewerHandoffs.items,
-    reviewPacketDefaults: reviewPacket.reviewPacketDefaults,
-    calendarOAuthConfigStatus: buildAgentWorkspaceCalendarOAuthConfigStatus(context),
-  };
-}
-
 /**
  * What the Personal Ops lanes read: channels, notes, and routines with their
  * schedule receipts. A lane read builds this part once; comparing it again

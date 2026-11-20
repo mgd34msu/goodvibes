@@ -68,7 +68,7 @@ import { CATALOG_PAGE_MAX, CATALOG_PAGE_SIZE, catalogEnvelope, catalogFilters, e
 import { CATALOG_QUERIES as CQ } from './agent-harness-catalog-filters.ts';
 import { describeHarnessMode, HARNESS_MODE_DESCRIPTORS, HARNESS_READ_MODES, installedModeDescriptors, listHarnessModes, type AgentHarnessMode } from './agent-harness-mode-catalog.ts';
 import { describeHarnessUiSurface, listHarnessUiSurfaces, openHarnessUiSurface, totalHarnessUiSurfaces } from './agent-harness-ui-surface-metadata.ts';
-import { AGENT_WORKSPACE_CATEGORIES, allWorkspaceActions, buildWorkspaceEditorContext, describeWorkspaceAction, describeWorkspaceCategory, listWorkspaceActionsPage, resolveWorkspaceActionDetail } from './agent-harness-workspace-actions.ts';
+import { AGENT_WORKSPACE_CATEGORIES, allWorkspaceActions, describeWorkspaceAction, describeWorkspaceCategory, listWorkspaceActionsPage, resolveWorkspaceActionDetail } from './agent-harness-workspace-actions.ts';
 import { connectedHostSummary, describeConnectedHostCapability, settingsPolicySummary } from './agent-harness-metadata.ts';
 import { countHarnessSettingCatalog, formatHarnessError, resolveEffectiveHarnessSetting } from '../agent/harness-control.ts';
 import { harnessSettingsCatalog, isHarnessSettingsQuery } from './agent-harness-settings-catalog.ts';
@@ -738,9 +738,8 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         }
         if (dispatchMode === 'workspace_action') {
           const resolved = await resolveWorkspaceActionDetail(args, catalogOptions);
-          const editorContext = buildWorkspaceEditorContext(deps.commandContext, args);
           if (resolved?.status === 'found') {
-            return output(describeWorkspaceAction(resolved.category, resolved.action, { includeEditor: true, editorContext, lookup: resolved.lookup }));
+            return output(describeWorkspaceAction(resolved.category, resolved.action, { includeBlanks: true, lookup: resolved.lookup }));
           }
           if (resolved?.status === 'ambiguous') {
             return error(`Ambiguous Agent workspace action ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`);

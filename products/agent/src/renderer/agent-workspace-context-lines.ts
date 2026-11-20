@@ -1,6 +1,6 @@
 import { presetForMode } from '@goodvibes-jev/engine/platform/platform/gate';
 import { nativeWorkLedgerLines } from './native-work-ledger.ts';
-import type { AgentWorkspace, AgentWorkspaceCategory, AgentWorkspaceLocalEditor, AgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace.ts';
+import type { AgentWorkspace, AgentWorkspaceCategory, AgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace.ts';
 import { buildAssistantCockpitFromWorkspaceSnapshot, type AssistantCockpitLane, type AssistantCockpitLaneState, type AssistantCockpitStatus } from '../agent/assistant-cockpit.ts';
 import { formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
 import { truncateDisplay } from '../utils/terminal-width.ts';
@@ -132,14 +132,14 @@ function compactLocalLibraryLines(
   title: string,
   items: readonly AgentWorkspaceRuntimeSnapshot['localPersonas'][number][],
   emptyText: string,
-  selectedId: string | null,
 ): ContextLine[] {
   const lines: ContextLine[] = [];
   if (items.length === 0) {
     lines.push({ text: `${title}: 0. ${emptyText}`, fg: PALETTE.warn });
     return lines;
   }
-  const selected = items.find((item) => item.id === selectedId) ?? items[0]!;
+  // The newest; each action that changes one asks which.
+  const selected = items[0]!;
   const status = [
     selected.active ? 'active' : '',
     selected.enabled === true ? 'enabled' : selected.enabled === false ? 'disabled' : '',
@@ -152,7 +152,7 @@ function compactLocalLibraryLines(
     selected.startCount !== undefined ? `starts ${selected.startCount}` : '',
   ].filter(Boolean).join(', ');
   lines.push({
-    text: `${title}: ${items.length}; selected ${selected.name}${status ? ` (${status})` : ''}.`,
+    text: `${title}: ${items.length}; newest ${selected.name}${status ? ` (${status})` : ''}.`,
     fg: selected.reviewState === 'stale' ? PALETTE.warn : PALETTE.info,
     bold: selected.active === true,
   });
@@ -360,57 +360,10 @@ function reviewPacketTimelineLines(snapshot: AgentWorkspaceRuntimeSnapshot): Con
   ];
 }
 
-function reviewerReadinessBadgeColor(status: AgentWorkspaceRuntimeSnapshot['reviewerReadinessBadge']['status']): string {
-  if (status === 'ready') return PALETTE.good;
-  if (status === 'attention') return PALETTE.warn;
-  return PALETTE.warn;
-}
-
-function reviewerReadinessBadgeLabel(status: AgentWorkspaceRuntimeSnapshot['reviewerReadinessBadge']['status']): string {
-  if (status === 'ready') return 'ready';
-  if (status === 'attention') return 'attention';
-  return 'setup needed';
-}
-
 function researchContractColor(status: string): string {
   if (status === 'ready-with-confirmation' || status === 'visual-report-packet-ready') return PALETTE.good;
   if (status === 'needs-review') return PALETTE.warn;
   return PALETTE.info;
-}
-
-export function reviewerReadinessContextLines(editor: AgentWorkspaceLocalEditor, snapshot: AgentWorkspaceRuntimeSnapshot | null): ContextLine[] {
-  if (!snapshot) return [];
-  if (
-    editor.kind !== 'document-export'
-    && editor.kind !== 'model-compare-export'
-    && editor.kind !== 'model-compare-apply'
-  ) {
-    return [];
-  }
-  const badge = snapshot.reviewerReadinessBadge;
-  const reportKind = editor.kind === 'model-compare-export'
-    ? editor.fields.find((field) => field.id === 'reportKind')?.value.trim().toLowerCase()
-    : '';
-  const scope = editor.kind === 'document-export'
-    ? 'Document export'
-    : editor.kind === 'model-compare-apply'
-      ? 'Route apply'
-      : reportKind === 'archive' || reportKind === 'handoffarchive'
-        ? 'Handoff archive'
-        : reportKind === 'handoff'
-          ? 'Reviewer handoff'
-          : 'Compare export';
-  return [
-    {
-      text: `${scope} readiness: ${reviewerReadinessBadgeLabel(badge.status)} - ${badge.summary}`,
-      fg: reviewerReadinessBadgeColor(badge.status),
-      bold: badge.status !== 'ready',
-    },
-    {
-      text: `Preflight next: ${compactText(badge.next, 110)}`,
-      fg: badge.status === 'ready' ? PALETTE.good : PALETTE.info,
-    },
-  ];
 }
 
 export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspaceCategory, snapshot: AgentWorkspaceRuntimeSnapshot | null): ContextLine[] {
@@ -574,13 +527,13 @@ export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspac
       { text: `Learning curator: memory queue ${snapshot.localMemoryReviewQueueCount}; note queue ${snapshot.localNoteReviewQueueCount}; setup gaps ${behaviorNeedsSetup}; injected review ${injectedNeedsReview}.`, fg: behaviorNeedsSetup > 0 || injectedNeedsReview > 0 ? PALETTE.warn : PALETTE.good },
       { text: 'Prompt plan: score reviewed context, show suppressed records, and route review before behavior expands.', fg: PALETTE.good },
       { text: `Active persona: ${snapshot.activePersonaName}.`, fg: PALETTE.info },
-      ...compactLocalLibraryLines('Agent Memory', snapshot.localMemories, 'Create one with Create memory.', workspace.selectedLocalLibraryItem('memory')?.id ?? null),
+      ...compactLocalLibraryLines('Agent Memory', snapshot.localMemories, 'Keep one with /memory add.'),
       { text: 'Secrets are rejected or redacted; use secret references.', fg: PALETTE.warn },
     );
   } else if (category.id === 'notes') {
     base.push(
       { text: `Scratchpad notes: ${snapshot.localNoteCount}; review queue: ${snapshot.localNoteReviewQueueCount}`, fg: PALETTE.info },
-      ...compactLocalLibraryLines('Scratchpad Notes', snapshot.localNotes, 'Create one with Create note.', workspace.selectedLocalLibraryItem('note')?.id ?? null),
+      ...compactLocalLibraryLines('Scratchpad Notes', snapshot.localNotes, 'Write one with /notes create.'),
       { text: 'Notes stay local unless promoted by explicit action.', fg: PALETTE.warn },
     );
   } else if (category.id === 'personas') {
@@ -588,15 +541,15 @@ export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspac
     base.push(
       { text: `VIBE.md: ${vibe.applied} applied; ${vibe.blocked} blocked; ${vibe.truncated} truncated.`, fg: vibe.blocked > 0 ? PALETTE.warn : vibe.applied > 0 ? PALETTE.good : PALETTE.muted },
       { text: `Personas: ${snapshot.localPersonaCount}; active: ${snapshot.activePersonaName}`, fg: PALETTE.info },
-      ...compactLocalLibraryLines('Persona Library', snapshot.localPersonas, 'Create one with Create persona.', workspace.selectedLocalLibraryItem('persona')?.id ?? null),
+      ...compactLocalLibraryLines('Persona Library', snapshot.localPersonas, 'Make one with /personas create.'),
       { text: 'VIBE.md is personality; project context files are separate workspace instructions.', fg: PALETTE.good },
       { text: 'Personas shape the serial main-conversation assistant.', fg: PALETTE.good },
     );
   } else if (category.id === 'skills') {
     base.push(
       { text: `Skills: ${snapshot.localSkillCount}; enabled: ${snapshot.enabledSkillCount}; bundles: ${snapshot.localSkillBundleCount}; enabled bundles: ${snapshot.enabledSkillBundleCount}; active skills: ${snapshot.activeSkillCount}`, fg: PALETTE.info },
-      ...compactLocalLibraryLines('Skill Library', snapshot.localSkills, 'Create one with Create skill.', workspace.selectedLocalLibraryItem('skill')?.id ?? null),
-      ...compactLocalLibraryLines('Skill Bundles', snapshot.localSkillBundles, 'Create one after adding skills.', null),
+      ...compactLocalLibraryLines('Skill Library', snapshot.localSkills, 'Make one with /my-skills create.'),
+      ...compactLocalLibraryLines('Skill Bundles', snapshot.localSkillBundles, 'Make one with /my-skills bundle-create.'),
       { text: 'Enabled skills/bundles become operating guidance; secrets are rejected.', fg: PALETTE.warn },
     );
   } else if (category.id === 'routines') {
@@ -608,7 +561,7 @@ export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspac
       { text: `Schedule-ready routines: ${ready.length}; setup gaps: ${needsSetup.length}; review needed: ${needsReview.length}`, fg: needsSetup.length > 0 || needsReview.length > 0 ? PALETTE.warn : PALETTE.good },
       routineNextActionLine(snapshot),
       compactRoutineReceiptLine(snapshot),
-      ...compactLocalLibraryLines('Routine Library', snapshot.localRoutines, 'Create one with Create routine.', workspace.selectedLocalLibraryItem('routine')?.id ?? null),
+      ...compactLocalLibraryLines('Routine Library', snapshot.localRoutines, 'Make one with /routines create.'),
       { text: 'Scheduling requires a confirmed action.', fg: PALETTE.warn },
     );
   } else if (category.id === 'work') {

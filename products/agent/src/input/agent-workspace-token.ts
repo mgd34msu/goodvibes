@@ -13,21 +13,6 @@ export function handleAgentWorkspaceToken(
 ): boolean {
   if (!workspace.active) return false;
 
-  if (workspace.localEditor) {
-    if (token.type === 'text') {
-      workspace.appendEditorText(token.value);
-    } else if (token.type === 'key') {
-      if (token.logicalName === 'escape') workspace.cancelLocalEditor();
-      else if (token.logicalName === 'enter') workspace.submitEditorFieldOrForm(requestRender);
-      else if (token.logicalName === 'tab' || token.logicalName === 'down') workspace.moveEditorField(1);
-      else if (token.logicalName === 'up') workspace.moveEditorField(-1);
-      else if (isTextBackspace(token.logicalName)) workspace.editorBackspace();
-      else if (token.logicalName === 'j' && token.ctrl === true) workspace.appendEditorNewline();
-    }
-    requestRender();
-    return true;
-  }
-
   if (token.type === 'key') {
     if (workspace.actionSearchActive) {
       if (token.logicalName === 'escape') workspace.clearActionSearch();

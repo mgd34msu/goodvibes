@@ -1,11 +1,14 @@
 import { openWorkspaceAction, type WorkspaceActionTarget } from './workspace-actions.ts';
+import { describedCommandByName, isCommandReport, renderCommandReport, type ActionDescription } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
+import { captureCommandPrint } from './workspace-command-output.ts';
 import type { AgentConfigSetting } from '../config/settings-catalog.ts';
 import type { CommandContext } from './command-registry.ts';
 import { activateAgentWorkspaceSelection } from './agent-workspace-activation.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from './agent-workspace-categories.ts';
 import { jumpAgentWorkspaceSelection, moveAgentWorkspaceSelection, selectAgentWorkspaceCategory } from './agent-workspace-navigation.ts';
 import { appendAgentWorkspaceActionSearchText, backspaceAgentWorkspaceActionSearch, beginAgentWorkspaceActionSearch, clearAgentWorkspaceActionSearch, commitAgentWorkspaceActionSearchSelection, searchAgentWorkspaceActions } from './agent-workspace-search.ts';
-import { agentWorkspaceTuiSettingsImportHasChanges, applyAgentWorkspaceSettingValue, applyAgentWorkspaceTuiSettingsImport, buildAgentWorkspaceSettingActionDisplay, buildAgentWorkspaceSettingActionEffect, describeAgentWorkspaceTuiSettingsImportPlan, isAgentWorkspaceActionVisible, planAgentWorkspaceTuiSettingsImport, type AgentWorkspaceSettingActionDisplay, type TuiSettingsImportPlan } from './agent-workspace-settings.ts';
+import { agentWorkspaceTuiSettingsImportHasChanges, applyAgentWorkspaceSettingValue, applyAgentWorkspaceTuiSettingsImport, buildAgentWorkspaceSettingActionDisplay, buildAgentWorkspaceSettingActionEffect, describeAgentWorkspaceTuiSettingsImportPlan, readAgentWorkspaceSettingFacts, type AgentWorkspaceSettingFacts, isAgentWorkspaceActionVisible, planAgentWorkspaceTuiSettingsImport, type AgentWorkspaceSettingActionDisplay, type TuiSettingsImportPlan } from './agent-workspace-settings.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
 import { checkAgentWorkspaceHostSetup } from './agent-workspace-setup-host-status.ts';
 import { readHostMailboxStatus } from './agent-workspace-host-mailbox.ts';
@@ -21,6 +24,16 @@ export type { AgentWorkspaceAction, AgentWorkspaceActionResult, AgentWorkspaceAc
 export { AGENT_WORKSPACE_MODAL_NAME } from './agent-workspace-types.ts';
 export { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
 export { handleAgentWorkspaceToken } from './agent-workspace-token.ts';
+
+/** A command's short report as the pane shows it: null lines while it is being read. */
+export interface CommandReportReading {
+  readonly command: string;
+  /** The line that prints it. */
+  readonly line: string;
+  /** The report action's own name. */
+  readonly label: string;
+  readonly lines: readonly string[] | null;
+}
 
 export class AgentWorkspace {
   public active = false;
@@ -39,6 +52,8 @@ export class AgentWorkspace {
   public workContextScrollFor: string | null = null;
   public resultScrollFor: AgentWorkspaceActionResult | null = null;
   private context: CommandContext | null = null;
+  /** Each command's short report, read once per opening when one of its rows is first selected. */
+  private readonly reports = new Map<string, CommandReportReading>();
   private dispatchCommand: AgentWorkspaceCommandDispatcher | null = null;
   private _onlyGroup: AgentWorkspaceCategoryGroup | null = null;
   /** The rows a `/setup` topic shows; null shows every row. */
@@ -54,6 +69,7 @@ export class AgentWorkspace {
     this.workContextScroll = 0;
     context.nativeWorkLedger?.open();
     this.dispatchCommand = dispatchCommand;
+    this.reports.clear();
     this._onlyGroup = onlyGroup ?? null;
     this._onlyActionIds = null;
     this._awaitingRecapDismiss = false;
@@ -247,6 +263,11 @@ export class AgentWorkspace {
     return buildAgentWorkspaceSettingActionDisplay(this.context, action);
   }
 
+  /** A setting row's name, what it does, value and default, in the setting's own words. */
+  settingFacts(action: AgentWorkspaceAction): AgentWorkspaceSettingFacts | null {
+    return readAgentWorkspaceSettingFacts(this.context, action);
+  }
+
   focusCategories(): void {
     this.focusPane = 'categories';
   }
@@ -281,6 +302,7 @@ export class AgentWorkspace {
       return;
     }
     this.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(this.context);
+    this.reports.clear();
     this.readHostSetup(true);
     this.status = 'Runtime context refreshed; checking the connected host again.';
     this.lastActionResult = { kind: 'refreshed', title: 'Runtime context refreshed', detail: 'Provider, model, session, local memory, runtime endpoint, and Agent knowledge route posture were re-read from the live command context. The connected host is being checked again; its setup steps update when it answers.' };
@@ -310,6 +332,37 @@ export class AgentWorkspace {
 
   activateSelected(requestRender?: () => void): void {
     activateAgentWorkspaceSelection(this, requestRender);
+  }
+
+  /**
+   * The short report of `command` (its report action: what the command
+   * prints when run bare), for the pane beside a selected row. Read the first
+   * time a row of that command is selected in this opening, by running that
+   * read exactly as the command does; until it lands the reading says so.
+   * Undefined for a command with no report that only reads.
+   */
+  commandReport(command: string): CommandReportReading | undefined {
+    const known = this.reports.get(command);
+    if (known) return known;
+    const context = this.context;
+    const described = describedCommandByName(command);
+    const action = described?.report ? described.actions.find((candidate) => candidate.id === described.report) : undefined;
+    // Only a read that needs nothing filled in, and never one that opens a screen.
+    if (!context || !described || !action || action.id === 'open' || action.touches !== 'reads' || action.lasts !== 'not-a-change'
+      || action.inputs.some((input) => input.required === true)) return undefined;
+    const reading: CommandReportReading = { command, line: `/${command}${action.word ? ` ${action.word}` : ''}`, label: action.label, lines: null };
+    this.reports.set(command, reading);
+    const run = action.run as unknown as (values: Readonly<Record<string, string>>, ctx: CommandContext) => ReturnType<ActionDescription<never>['run']>;
+    void captureCommandPrint(context, () => run({}, context)).then((outcome) => {
+      if (this.context !== context || this.reports.get(command) !== reading) return;
+      const returned = outcome.ok ? outcome.value : undefined;
+      const text = outcome.ok
+        ? [...outcome.lines, typeof returned === 'string' ? returned : isCommandReport(returned) ? renderCommandReport(returned) : ''].join('\n')
+        : (() => { const refused = readRefusal(outcome.error); return refused ? formatRefusal(refused) : outcome.error instanceof Error ? outcome.error.message : String(outcome.error); })();
+      this.reports.set(command, { ...reading, lines: text.split('\n').map((line) => line.trimEnd()).filter((line) => line.trim().length > 0) });
+      this.requestRender?.();
+    });
+    return reading;
   }
 
   /** Opens the row's described action over the composer (the workspace closes); false when this surface cannot. */

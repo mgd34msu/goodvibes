@@ -450,6 +450,29 @@ export function buildAgentWorkspaceSettingActionEffect(
   };
 }
 
+/** A setting row's facts in the setting's own words, read as `/settings get` reads them: its name, what it does, its value and default. */
+export interface AgentWorkspaceSettingFacts {
+  readonly label: string;
+  readonly description: string;
+  readonly currentValue: string;
+  readonly defaultValue: string;
+}
+
+export function readAgentWorkspaceSettingFacts(context: CommandContext | null, action: AgentWorkspaceAction): AgentWorkspaceSettingFacts | null {
+  const settingKey = action.settingKey?.trim();
+  const configManager = context?.platform?.configManager;
+  if (!settingKey || !configManager) return null;
+  const setting = agentWorkspaceSettingSchema(context, settingKey);
+  if (!setting) return null;
+  const label = 'label' in setting && typeof setting.label === 'string' && setting.label ? setting.label : action.label;
+  return {
+    label,
+    description: setting.description,
+    currentValue: compactSettingValue(settingKey, readAgentSettingValue(configManager, setting)),
+    defaultValue: compactSettingValue(settingKey, setting.default),
+  };
+}
+
 export function buildAgentWorkspaceSettingActionDisplay(
   context: CommandContext | null,
   action: AgentWorkspaceAction,

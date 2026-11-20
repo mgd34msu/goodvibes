@@ -4,7 +4,6 @@ import type {
   AgentWorkspaceCategory,
 } from '../input/agent-workspace.ts';
 import { workspaceActionLine } from '../input/workspace-actions.ts';
-import type { AgentWorkspaceSetupChecklistItem } from '../input/agent-workspace-setup.ts';
 import type { SurfaceLayer } from './surface-kit.ts';
 import { getDisplayWidth, wrapText } from '../utils/terminal-width.ts';
 import { GLYPHS } from './ui-primitives.ts';
@@ -45,38 +44,13 @@ function resultPalette(): { text: string; good: string; muted: string; dim: stri
   };
 }
 import { actionResultColor, type AgentWorkspaceContextLine as ContextLine } from './agent-workspace-style.ts';
-import { compactText, snapshotLines, snapshotWarningLines } from './agent-workspace-context-lines.ts';
+import { workspacePaneLines } from './agent-workspace-context-lines.ts';
 import { ONBOARDING_COMPLETE_SYNTHETIC_ACTION, ONBOARDING_CRITICAL_STEP_IDS } from '../input/agent-workspace-onboarding-finish.ts';
-
-function onboardingCategoryReadiness(
-  category: AgentWorkspaceCategory,
-  checklist: readonly AgentWorkspaceSetupChecklistItem[],
-): 'ready' | 'attention' | 'optional' {
-  const CATEGORY_CHECKLIST_MAP: Record<string, readonly string[]> = {
-    'setup': ['provider-model', 'connected-host-auth', 'runtime'],
-    'account-model': ['provider-model', 'subscriptions'],
-    'assistant-behavior': [],
-    'tools-permissions': [],
-    'onboarding-display': [],
-    'onboarding-channels': ['channels'],
-    'onboarding-voice-media': ['voice-media'],
-    'onboarding-context': ['agent-knowledge', 'persona', 'skills', 'routines', 'memory', 'notes', 'profile'],
-    'onboarding-automation': [],
-  };
-  const itemIds = CATEGORY_CHECKLIST_MAP[category.id];
-  if (!itemIds || itemIds.length === 0) return 'optional';
-  const mapped = itemIds.map((id) => checklist.find((item) => item.id === id));
-  if (mapped.every((item) => item?.status === 'ready')) return 'ready';
-  if (mapped.some((item) => item?.status === 'blocked' || item?.status === 'recommended')) return 'attention';
-  return 'optional';
-}
 
 function buildLeftRows(workspace: AgentWorkspace, height: number): WorkspaceRow[] {
   const rows: WorkspaceRow[] = [];
   let selectedRenderedIndex = 0;
   let lastGroup = '';
-  const checklist = workspace.runtimeSnapshot?.setupChecklist ?? [];
-
   workspace.categories.forEach((category, index) => {
     if (category.group !== lastGroup) {
       rows.push({ text: category.group, kind: 'group', bold: true });
@@ -85,24 +59,11 @@ function buildLeftRows(workspace: AgentWorkspace, height: number): WorkspaceRow[
     const selected = index === workspace.selectedCategoryIndex;
     if (selected) selectedRenderedIndex = rows.length;
     const marker = selected ? GLYPHS.navigation.selected : ' ';
-    let readinessGlyph = '';
-    let readinessFg: string | undefined;
-    if (isOnboardingCategory(category)) {
-      const readiness = onboardingCategoryReadiness(category, checklist);
-      if (readiness === 'ready') {
-        readinessGlyph = GLYPHS.status.success;
-        readinessFg = PALETTE.good;
-      } else if (readiness === 'attention') {
-        readinessGlyph = '!';
-        readinessFg = PALETTE.warn;
-      }
-    }
-    const readinessMark = readinessGlyph ? `${readinessGlyph} ` : '  ';
     rows.push({
-      text: `  ${marker} ${readinessMark}${category.label}`,
+      text: `  ${marker} ${category.label}`,
       selected: selected && workspace.focusPane === 'categories',
       kind: 'item',
-      fg: selected ? PALETTE.text : readinessFg ?? PALETTE.muted,
+      fg: selected ? PALETTE.text : PALETTE.muted,
       bold: selected,
     });
   });
@@ -160,14 +121,6 @@ function settingNow(workspace: AgentWorkspace, action: AgentWorkspaceAction): st
   return shown ? `now ${shown.currentValue}` : actionCommand(action);
 }
 
-function actionMetaLine(workspace: AgentWorkspace, category: AgentWorkspaceCategory, action: AgentWorkspaceAction): ContextLine {
-  // Same About-style detail line on every category.
-  return {
-    text: `About: ${compactText(action.detail, 100)}`,
-    fg: action.safety === 'blocked' ? PALETTE.warn : PALETTE.muted,
-  };
-}
-
 function shouldRenderOnboardingSettingsTable(actions: readonly AgentWorkspaceAction[]): boolean {
   // The Setting / Default / Current table is for an area whose rows are all
   // settings. Where rows are actions, the columns are what each is and the line
@@ -177,31 +130,19 @@ function shouldRenderOnboardingSettingsTable(actions: readonly AgentWorkspaceAct
 }
 
 function buildContextRows(workspace: AgentWorkspace, category: AgentWorkspaceCategory, action: AgentWorkspaceAction | null, width: number): WorkspaceRow[] {
-  // Warnings lead the context: a short pane shows them before anything else,
-  // and every area scrolls to the rest.
-  const lines: ContextLine[] = [
-    ...snapshotWarningLines(workspace.runtimeSnapshot),
-    { text: category.label, fg: PALETTE.title, bold: true },
-    { text: category.summary, fg: PALETTE.subtitle },
-    ...(workspace.actionSearchActive ? [
-      { text: 'Action Search', fg: PALETTE.title, bold: true },
+  const lines: ContextLine[] = workspace.actionSearchActive
+    ? [
+      { text: 'Search', fg: PALETTE.title, bold: true },
       {
         text: workspace.actionSearchQuery.length > 0
-          ? `Query: ${workspace.actionSearchQuery} (${workspace.actionSearchResults.length} result${workspace.actionSearchResults.length === 1 ? '' : 's'})`
-          : 'Type to search every Agent workspace action.',
+          ? `${workspace.actionSearchResults.length} row${workspace.actionSearchResults.length === 1 ? '' : 's'} match "${workspace.actionSearchQuery}".`
+          : 'Type to search every row of every area.',
         fg: workspace.actionSearchQuery.length > 0 && workspace.actionSearchResults.length === 0 ? PALETTE.warn : PALETTE.info,
       },
-    ] satisfies ContextLine[] : []),
-  ];
-
-  const selectedActionLines: ContextLine[] = action
-    ? [
-      { text: `Selected: ${action.label}`, fg: PALETTE.title, bold: true },
-      actionMetaLine(workspace, category, action),
+      { text: '', fg: PALETTE.muted },
+      ...workspacePaneLines(workspace, category, action),
     ]
-    : [];
-  const snapshotContextLines = snapshotLines(workspace, category, workspace.runtimeSnapshot);
-  lines.push(...selectedActionLines, ...snapshotContextLines);
+    : workspacePaneLines(workspace, category, action);
 
   return lines.flatMap((entry): WorkspaceRow[] => {
     if (entry.text.length === 0) return [{ text: '', kind: 'empty', dim: true }];
@@ -417,11 +358,15 @@ export function renderAgentWorkspace(workspace: AgentWorkspace, width: number, h
   }
   if (category.id !== 'work' && contextRows.length <= metrics.contextRows) workspace.workContextScroll = 0;
   else {
-    const count = Math.max(1, metrics.contextRows - 1);
+    const count = Math.max(1, metrics.contextRows - 2);
     workspace.workContextScroll = Math.min(workspace.workContextScroll, Math.max(0, contextRows.length - count));
+    // A pane longer than its room scrolls; the first and last rows say which way there is more.
+    const visible = contextRows.slice(workspace.workContextScroll, workspace.workContextScroll + count);
+    const more = contextRows.length - workspace.workContextScroll - visible.length;
     shownContextRows = [
-      { text: `${category.id === 'work' ? 'Ledger details' : 'Details'} ${workspace.workContextScroll + 1}–${Math.min(contextRows.length, workspace.workContextScroll + count)}/${contextRows.length} · ${workspace.lastActionResult ? 'Ctrl+PgUp/PgDn' : 'PgUp/PgDn'}`, fg: PALETTE.muted },
-      ...contextRows.slice(workspace.workContextScroll, workspace.workContextScroll + count),
+      ...(workspace.workContextScroll > 0 ? [{ text: `${GLYPHS.navigation.moreAbove} more above (${workspace.lastActionResult ? 'Ctrl+PgUp' : 'PgUp'})`, fg: PALETTE.dim, dim: true }] : []),
+      ...visible,
+      ...(more > 0 ? [{ text: `${GLYPHS.navigation.moreBelow} more below (${workspace.lastActionResult ? 'Ctrl+PgDn' : 'PgDn'})`, fg: PALETTE.dim, dim: true }] : []),
     ];
   }
 

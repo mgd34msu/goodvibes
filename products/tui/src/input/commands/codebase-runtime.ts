@@ -23,6 +23,9 @@ import type { CodeIndexStats, CodeContextResult, CodeIndexReindexActivity } from
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { isCodeIndexAutoStartEnabled, CODE_INDEX_MAX_FILES, CODE_INDEX_MAX_FILE_BYTES, CODE_INDEX_MAX_TOTAL_BYTES } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { doAction, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -45,7 +48,7 @@ function renderAutoInjectionState(flagEnabled: boolean, settingEnabled: boolean)
   }
   const reasons: string[] = [];
   if (!flagEnabled) reasons.push('agent-passive-code-injection flag off (default off); enable in the settings modal flags section');
-  if (!settingEnabled) reasons.push('storage.codeIndexEnabled off: /config to change');
+  if (!settingEnabled) reasons.push('storage.codeIndexEnabled off: /settings to change');
   return `  auto-injection: off (${reasons.join('; ')})`;
 }
 
@@ -84,7 +87,7 @@ function renderCodeIndexStatus(stats: CodeIndexStats, configManager: Pick<Config
   );
   const autoStart = isCodeIndexAutoStartEnabled(configManager);
   lines.push(
-    `  auto-build on startup: ${autoStart ? 'on' : 'off'} (storage.codeIndexEnabled, default off; /config to change)`,
+    `  auto-build on startup: ${autoStart ? 'on' : 'off'} (storage.codeIndexEnabled, default off; /settings to change)`,
   );
   // Passive code auto-injection state (flag + setting) and the last tool-site reindex.
   lines.push(renderAutoInjectionState(extras.flagEnabled, autoStart));
@@ -155,92 +158,67 @@ function renderSearchResults(results: readonly CodeContextResult[]): string {
     .join('\n');
 }
 
-function parseLimitArg(args: readonly string[]): { readonly limit: number | undefined; readonly queryTokens: string[] } {
-  const limitIdx = args.indexOf('--limit');
-  let limit: number | undefined;
-  if (limitIdx !== -1 && args[limitIdx + 1]) {
-    const parsed = parseInt(args[limitIdx + 1]!, 10);
-    if (!Number.isNaN(parsed)) limit = parsed;
-  }
-  const queryTokens = args.filter((token, index) => {
-    if (token === '--limit') return false;
-    if (limitIdx !== -1 && index === limitIdx + 1) return false;
-    return true;
-  });
-  return { limit, queryTokens };
+function storeOf(ctx: CommandContext) {
+  const store = ctx.session.codeIndexStore;
+  if (!store) throw commandRefusal('The code index is not available in this session.');
+  return store;
 }
 
-const USAGE = 'Usage:\n'
-  + '  /codebase build\n'
-  + '  /codebase status\n'
-  + '  /codebase search <query...> [--limit n]';
+const TERMINAL_ONLY = { terminalOnly: 'The code index is kept by this terminal for this project.' } as const;
 
 // ---------------------------------------------------------------------------
 // Command
 // ---------------------------------------------------------------------------
 
 export function registerCodebaseRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
+  registry.register(defineCommand<CommandContext>({
     name: 'codebase',
-    description: 'Repo source-tree code index: build, inspect, and search',
-    usage: 'build | status | search <query...> [--limit n]',
-    argsHint: 'build | status | search <query>',
-    async handler(args: string[], ctx: CommandContext) {
-      const store = ctx.session.codeIndexStore;
-      if (!store) {
-        ctx.print('The code index is not available in this session.');
-        return;
-      }
-
-      const sub = args[0];
-
-      if (!sub || sub === 'status') {
-        ctx.print(renderCodeIndexStatus(store.stats(), ctx.platform.configManager, {
-          flagEnabled: ctx.session.isPassiveCodeInjectionFlagEnabled?.() ?? false,
-          reindexActivity: ctx.session.codeIndexReindexScheduler?.lastActivity() ?? null,
-        }));
-        return;
-      }
-
-      if (sub === 'build' || sub === 'reindex') {
-        if (store.isBuilding()) {
-          const progress = store.buildProgress();
-          ctx.print(
-            progress
-              ? `A build is already in progress (${progress.scanned}/${progress.total} files scanned).`
-              : 'A build is already in progress.',
-          );
-          return;
-        }
-        store.scheduleBuild();
-        ctx.print('Build scheduled: track progress with /codebase status, or in Your agents (F2) under Background services (b).');
-        return;
-      }
-
-      if (sub === 'search') {
-        const { limit, queryTokens } = parseLimitArg(args.slice(1));
-        const query = queryTokens.join(' ').trim();
-        if (!query) {
-          ctx.print('Usage: /codebase search <query...> [--limit n]');
-          return;
-        }
-        const results = await store.search(query, limit !== undefined ? { limit } : undefined);
-        if (results.length === 0) {
-          const stats = store.stats();
-          ctx.print(
-            stats.lastSearchError
-              ? `Search failed: ${stats.lastSearchError}`
-              : stats.indexedChunks === 0
-                ? 'No results: the code index is empty. Run /codebase build first.'
-                : 'No matching chunks found.',
-          );
-          return;
-        }
-        ctx.print(`${results.length} result(s):\n${renderSearchResults(results)}`);
-        return;
-      }
-
-      ctx.print(USAGE);
-    },
-  });
+    title: 'Code index',
+    summary: 'This project\'s code index: how it stands, build it, and search it',
+    group: 'Knowledge',
+    report: 'status',
+    actions: [
+      readAction<CommandContext>({
+        id: 'status', label: 'See how the code index stands', word: 'status',
+        sentence: 'Shows what is indexed, how search results are found, what was skipped, and the last build and reindex.', operator: TERMINAL_ONLY,
+        async run(_values, ctx) {
+          return renderCodeIndexStatus(storeOf(ctx).stats(), ctx.platform.configManager, {
+            flagEnabled: ctx.session.isPassiveCodeInjectionFlagEnabled?.() ?? false,
+            reindexActivity: ctx.session.codeIndexReindexScheduler?.lastActivity() ?? null,
+          });
+        },
+      }),
+      doAction<CommandContext>({
+        id: 'build', label: 'Build the code index', word: 'build',
+        sentence: 'The code index of this project is built in the background; Your agents shows it under Background services while it runs.', operator: TERMINAL_ONLY,
+        async run(_values, ctx) {
+          const store = storeOf(ctx);
+          if (store.isBuilding()) {
+            const progress = store.buildProgress();
+            throw commandRefusal(progress ? `A build is already running (${progress.scanned}/${progress.total} files read).` : 'A build is already running.');
+          }
+          store.scheduleBuild();
+          return 'Build started: /codebase status, or Your agents (F2) under Background services (b), shows how it goes.';
+        },
+      }),
+      readAction<CommandContext>({
+        id: 'search', label: 'Search the code index', word: 'search',
+        inputs: [
+          textInput({ id: 'words', label: 'Words', help: 'What to look for in the code', why: 'your own words', typed: { tail: true } }),
+          { id: 'limit', label: 'How many', help: 'The most results to show', kind: 'number', freeTextReason: 'a whole number', required: { default: '', defaultMeans: 'the usual number' }, typed: { flag: '--limit' } },
+        ],
+        sentence: 'Finds the parts of this project\'s code that match {words}, each labelled semantic or lexical.', example: { words: 'retry backoff', limit: '5' }, operator: TERMINAL_ONLY,
+        async run(values, ctx) {
+          const store = storeOf(ctx);
+          const limit = values.limit ? Number.parseInt(values.limit, 10) : Number.NaN;
+          const results = await store.search(values.words!, Number.isNaN(limit) ? undefined : { limit });
+          if (results.length === 0) {
+            const stats = store.stats();
+            return stats.lastSearchError ? `Search failed: ${stats.lastSearchError}` : stats.indexedChunks === 0 ? 'No results: the code index is empty. Build it: /codebase build' : 'No matching code found.';
+          }
+          return `${results.length} result(s):\n${renderSearchResults(results)}`;
+        },
+      }),
+    ],
+  }));
 }

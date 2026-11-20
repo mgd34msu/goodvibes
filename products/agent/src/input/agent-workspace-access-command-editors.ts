@@ -78,7 +78,7 @@ const ACCESS_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceAccessCommandEd
     message: 'Export a redacted trust review bundle. Type yes on the final field to confirm.',
     fields: [
       { id: 'path', label: 'Output path', value: 'trust-review-bundle.json', required: true, multiline: false, hint: 'Workspace-relative JSON path to write.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /trust bundle export with --yes.' },
+      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to write it (/security save-trust).' },
     ],
   },
   'trust-bundle-inspect': {
@@ -97,7 +97,7 @@ const ACCESS_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceAccessCommandEd
     message: 'Export a redacted provider subscription bundle. Type yes on the final field to confirm.',
     fields: [
       { id: 'path', label: 'Output path', value: 'subscription-bundle.json', required: true, multiline: false, hint: 'Workspace-relative JSON path to write.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /subscription bundle export with --yes.' },
+      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /provider export with --yes.' },
     ],
   },
   'subscription-bundle-inspect': {

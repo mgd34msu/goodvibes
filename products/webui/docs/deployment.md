@@ -81,8 +81,9 @@ Because the bundle and the API arrive same-origin over HTTPS, everything
 works with zero cross-origin configuration:
 
 - Open the HTTPS hostname in your phone's browser.
-- Sign in once with your operator token (stored only as the browser session
-  token, `goodvibes.webui.token`).
+- Sign in once with your operator token. The daemon binds it to an HttpOnly,
+  SameSite=Strict, Secure cookie that no page script can read; nothing
+  token-shaped is kept in the browser's storage.
 - The app is now reachable from anywhere on your tailnet.
 
 HTTPS here is not optional polish: service workers, the installable app, the

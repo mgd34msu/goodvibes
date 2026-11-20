@@ -18,9 +18,9 @@ import type {
 // 'Governance' (policy preflight, MCP/plugin quarantine, latest incident, and
 // the MCP attack-path review). Read-model-backed: buildView reads the snapshot,
 // which shows the last token audit of record and never audits on a read. 'r'
-// runs an audit; 'f' (preflight) routes to `/policy preflight`; 'i' opens the
-// latest incident (its agent in /agents when it names one, else /forensics
-// latest). Selection-blind port: the earlier view's
+// runs an audit; 'f' (preflight) routes to `/security preflight`; 'i' opens the
+// latest incident (its agent in /agents when it names one, else /health
+// failure latest). Selection-blind port: the earlier view's
 // selected-token scope/rotation detail is folded into each token row label.
 // Determinism: absolute ISO timestamps (never Date.now()).
 // ---------------------------------------------------------------------------
@@ -192,13 +192,13 @@ class SecurityModalSurface implements ConfigModalSurface {
       ctx.requestRender();
       return;
     }
-    if (id === 'preflight') { runModalCommand(ctx, 'policy', ['preflight'], '/policy preflight'); return; }
+    if (id === 'preflight') { runModalCommand(ctx, 'security', ['preflight'], '/security preflight'); return; }
     const incident = id === 'jumpToIncident' ? this.deps.readModel.getSnapshot().latestIncident : null;
     if (incident) {
       if (incident.agentId) {
         runModalCommand(ctx, 'agents', ['--target', incident.agentId], `/agents --target ${incident.agentId}`, { pending: `Opening Agents on ${incident.agentId}.`, done: `Opened Agents on ${incident.agentId}.` });
       } else {
-        runModalCommand(ctx, 'forensics', ['latest'], '/forensics latest', { pending: 'Opening the latest incident report.', done: 'Opened the latest incident report.' });
+        runModalCommand(ctx, 'health', ['failure', 'latest'], '/health failure latest', { pending: 'Showing the latest failure report.', done: 'Showed the latest failure report.' });
       }
       return;
     }

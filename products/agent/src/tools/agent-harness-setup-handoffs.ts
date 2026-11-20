@@ -133,7 +133,7 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
           label: 'Inspect pairing posture',
           kind: 'diagnostic',
           effect: 'read-only',
-          userRoute: '/qrcode (alias /pair)',
+          userRoute: '/devices pair device',
           modelRoute: 'agent_harness mode:"pairing_posture" includeParameters:true',
           nextStep: 'Use the visible QR/manual pairing routes when the user needs a non-file token handoff.',
           safety: 'Read-only pairing posture; no token is printed by setup posture.',

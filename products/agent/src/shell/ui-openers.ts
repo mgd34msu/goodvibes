@@ -390,6 +390,6 @@ function paletteShortcuts(keybindingsManager: KeybindingsManager | undefined): r
   if (!keybindingsManager) return [];
   return [
     ...shortcutGroups(keybindingsManager).flatMap((group) => group.items.map(([key, description]) => ({ key, description }))),
-    { key: 'keybindings.json', description: `Change any key: edit ${keybindingsManager.getConfigPath()}` },
+    { key: 'keybindings.json', description: 'Change any key in its file', detail: `Edit ${keybindingsManager.getConfigPath()}: { "action": { "key": "x", "ctrl": true } }.` },
   ];
 }

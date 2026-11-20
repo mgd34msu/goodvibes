@@ -237,7 +237,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
       modals.profilePicker,
       modals.bookmark,
       modals.contextInspector,
-      modals.shortcuts,
       modals.modelPicker,
       modals.filePicker,
       modals.blockActions,

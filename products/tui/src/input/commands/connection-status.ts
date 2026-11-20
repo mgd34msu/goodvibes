@@ -189,7 +189,7 @@ export function describeConnectionProbe(
     surface,
     state: 'unreachable',
     detail: `${label} could not be checked: ${errorText(error)}`,
-    nextActions: ['Check that the daemon is running and reachable: /doctor'],
+    nextActions: ['Check that the daemon is running and reachable: /health'],
   };
 }
 

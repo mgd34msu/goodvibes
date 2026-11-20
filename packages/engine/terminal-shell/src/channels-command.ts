@@ -177,7 +177,8 @@ function host(): ChannelsHost<unknown> {
   return hostOf;
 }
 
-const CHANNELS = defineList<unknown>({
+/** The daemon's channels as a live list ("Pair something" under /devices chooses from it too). */
+export const CHANNELS_LIST = defineList<unknown>({
   name: 'channels',
   async read(ctx) {
     const body = await host().invoke(ctx, 'channels.status', {});
@@ -201,7 +202,7 @@ const PROFILES = defineList<unknown>({
 });
 
 const SURFACE_OTHER = 'a channel kind the daemon does not report yet (slack, telegram, discord, ntfy, webhook, ...)';
-const CHANNEL: InputDescription = listInput({ id: 'channel', label: 'Channel', help: 'One of the daemon\'s channels', list: CHANNELS, other: SURFACE_OTHER });
+const CHANNEL: InputDescription = listInput({ id: 'channel', label: 'Channel', help: 'One of the daemon\'s channels', list: CHANNELS_LIST, other: SURFACE_OTHER });
 const PROFILE_CHANNEL: InputDescription = listInput({ id: 'channel', label: 'Channel', help: 'A channel kind; its sessions get the profile', list: PROFILES, other: SURFACE_OTHER });
 const CHANNEL_ID: InputDescription = textInput({ id: 'id', label: 'One conversation', help: 'The id of one conversation in that channel; blank means the whole channel kind', why: 'a conversation id on that channel', typed: { position: 2 }, optional: { default: '', means: 'the whole channel kind' } });
 const LIMIT = (help: string): InputDescription => ({ id: 'limit', label: 'How many', help, kind: 'number', required: { default: '10', defaultMeans: 'ten' }, typed: { flag: '--limit' } });

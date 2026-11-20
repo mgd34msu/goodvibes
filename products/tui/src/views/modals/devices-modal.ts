@@ -101,7 +101,7 @@ class DevicesModalSurface implements ConfigModalSurface {
     rows.push(infoRow('intro', 'Devices paired to this daemon. Each has its own token; revoke one without affecting the others.', { fg: MODAL_TONES.dim }));
 
     if (tokens.length === 0) {
-      rows.push(infoRow('empty', 'No devices paired yet: run /pair (or open the pairing QR) to add one.'));
+      rows.push(infoRow('empty', 'No devices paired yet: run /devices pair to add one.'));
     } else {
       for (const token of tokens) {
         rows.push({ id: `${DEVICE_ROW_PREFIX}${token.id}`, label: formatDeviceLine(token, now) });

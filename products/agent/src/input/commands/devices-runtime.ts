@@ -1,34 +1,37 @@
-import type { CommandRegistry } from '../command-registry.ts';
-import {
-  DEVICE_CAPABILITY_SUBCOMMANDS,
-  DEVICE_CAPABILITY_USAGE,
-  deviceCapabilityConfirmation,
-  runDeviceCapabilitySubcommand,
-} from '@goodvibes-jev/engine/terminal-shell/device-capabilities-command';
-import { commandRefusal, stripYesFlag } from './confirmation.ts';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import type { PublicPairingToken } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { registerDevicesCommand } from '@goodvibes-jev/engine/terminal-shell/devices-command';
+import { CHANNELS_LIST } from '@goodvibes-jev/engine/terminal-shell/channels-command';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { mintAgentDevicePairing } from '../../agent/device-pairing.ts';
+import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
+import { invokeConnectedHostMethod } from '../connected-host-routes.ts';
+import { requirePlatform, requireShellPaths } from './runtime-services.ts';
 
 /**
- * Register /devices: the phones paired with the daemon as device nodes, the
- * "always allow" grants with revoke, and the captures the daemon is keeping
- * with delete. The same lines as the terminal app's /devices; revoking a grant
- * and deleting a capture ask once (the registry's confirmation), and `--yes`
- * typed by the owner answers in advance.
+ * `/devices` is one description shared with the terminal app
+ * (terminal-shell/devices-command.ts). Here the device tokens are the
+ * connected host's (`pairing.tokens.*`), "Pair something" pairs a phone or
+ * another device by minting a named device token on the host and showing its
+ * link and QR, and the paired phones, grants and captures come from the
+ * daemon's `devices.*` verbs. Pairing this terminal, the relay and channel
+ * setup are the terminal app's, and are refused here saying where they are.
  */
 export function registerDevicesRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'devices',
-    effect: 'connected-host-state',
-    aliases: ['device'],
-    description: 'Paired phones: the device nodes, always-allow grants (revoke) and retained captures (delete)',
-    usage: `[${DEVICE_CAPABILITY_USAGE}]`,
-    argsHint: '[nodes|grants|revoke-grant|captures|delete-capture]',
-    subcommands: DEVICE_CAPABILITY_SUBCOMMANDS,
-    confirm: (args) => deviceCapabilityConfirmation(args.length ? args : ['nodes']),
-    async handler(args, ctx) {
-      const { rest } = stripYesFlag(args);
-      const line = rest.length ? rest : ['nodes'];
-      if (await runDeviceCapabilitySubcommand(line, ctx.platform.devices, (message) => ctx.print(message))) return;
-      throw commandRefusal(`Unknown /devices subcommand: ${line[0]}. Use: ${DEVICE_CAPABILITY_USAGE}`);
+  registerDevicesCommand<CommandContext>(registry, {
+    async tokens(ctx) {
+      const listed = await invokeConnectedHostMethod(ctx, 'pairing.tokens.list', {});
+      // The contract's token entries are the pairing store's public tokens.
+      return { where: 'the connected host', tokens: listed.tokens as unknown as readonly PublicPairingToken[], sharedRevoked: listed.legacySharedRevoked };
     },
-  });
+    rename: async (ctx, id, name) => (await invokeConnectedHostMethod(ctx, 'pairing.tokens.rename', { id, name })).renamed,
+    revoke: async (ctx, id) => (await invokeConnectedHostMethod(ctx, 'pairing.tokens.delete', { id })).revoked,
+    devices: (ctx) => ctx.platform.devices,
+    async pairDevice(ctx, name) {
+      const verbs = createAgentDaemonVerbCaller({ configManager: requirePlatform(ctx).configManager, homeDirectory: requireShellPaths(ctx).homeDirectory });
+      const outcome = await mintAgentDevicePairing(verbs, name ? { name } : {});
+      if (!outcome.ok) throw commandRefusal(outcome.error, outcome.next);
+      return outcome.text;
+    },
+  }, CHANNELS_LIST);
 }

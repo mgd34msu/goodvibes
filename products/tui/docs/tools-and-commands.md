@@ -263,11 +263,11 @@ Representative slash-command families, with a one-line summary of each:
 | --- | --- |
 | `/model` | Select or display the current LLM model |
 | `/settings` | Open the fullscreen configuration workspace |
-| `/config` | Open the fullscreen configuration workspace, or set a key directly |
+| `/config` | Open the settings screen at a setting (`/config open <setting>`), or change one setting (`/config set <key> <value>`) |
 | `/memory` | Project memory: remember decisions, constraints, incidents and patterns with where each came from; bare opens the list of actions |
 | `/knowledge` | Structured knowledge graph: ingest URLs and bookmarks, inspect issues, and build compact prompt packets |
 | `/remote` | Inspect, dispatch, and review self-hosted remote runners and artifacts |
-| `/sandbox` | Review and configure VM isolation policy for MCP and evaluation runtimes |
+| `/security` | What protects this machine: the short status, tokens, MCP routes, what is trusted and this folder's trust, policy bundles, the sandbox and its sessions |
 | `/plugin` | Manage plugins, trust, review, and ecosystem paths |
 | `/marketplace` | Browse the unified plugin and skill marketplace |
 | `/session` | Sessions: resume, save, copy, export as a file or upload for a link, branches and cross-session tasks |
@@ -276,7 +276,7 @@ Representative slash-command families, with a one-line summary of each:
 | `/tts` | Submit a prompt for live TTS playback, or control always-speak mode |
 | `/cloudflare` | Inspect and manage optional Cloudflare batch and control-plane integration |
 | `/mcp` | Manage MCP servers and their tools |
-| `/incident` | Open, export, and capture incident review bundles |
+| `/health` | Is everything working: the short status, one area in detail, a problem described, this session's failure reports (see, save, keep in memory), stopping an agent, the runtime store |
 | `/replay` | Deterministic replay: load, step, seek, diff, and export recorded runs |
 | `/eval` | Evaluate the product on real tasks: run a task suite through goodvibes run, compare baselines, and gate regressions |
 | `/session` | Session lifecycle and orchestration: list, resume, fork, save, export, and cross-session task handoff |
@@ -289,7 +289,7 @@ Representative slash-command families, with a one-line summary of each:
 | `/checkpoints` | List workspace checkpoints, newest first; `/checkpoints restore <n\|id>` previews and restores the files of one |
 | `/editor` | Edit the current composer draft in your `$EDITOR`, then resume with the result |
 
-`/editor` (alias `/ed`) opens the current composer draft in your `$VISUAL`/`$EDITOR`, suspends the TUI while the editor runs, and loads the edited text back into the composer when you save and quit. Set `$EDITOR` (e.g. `export EDITOR=nvim`) for it to work.
+`/editor` opens the current composer draft in your `$VISUAL`/`$EDITOR`, suspends the TUI while the editor runs, and loads the edited text back into the composer when you save and quit. Set `$EDITOR` (e.g. `export EDITOR=nvim`) for it to work.
 
 Composer capture markers: a single line beginning with `# ` (a hash and a space) saves the rest as a session-memory note and does NOT send a turn (a quick "jot this down"), and a confirmation names what was saved and where. (`#482 is failing` (no space), `## ...` markdown headings and multi-line text that starts with `#` are left alone and sent normally.) A typed prompt that starts or ends with `@model:<id>` (`@model:opus summarize this`, `summarize this @model:opus`) switches model exactly as `/model <id>` does (same label, reasoning effort and missing-key prompt) and then sends the rest; only a whole token at either end counts, the same rule as the Agent, and when the switch does not land the rest stays in the composer instead of going to the old model. The existing `!# <text>` still pins to session memory and also sends the text as a prompt. Text that is not typed into the composer (a skill's body found by its trigger, `/retry`, a template, `/image`, a form, speech) is sent as written and never read for these markers.
 
@@ -428,7 +428,7 @@ The recovery offer, session picker, profile picker, and config rows are all pick
 
 In a searchable modal, `/` focuses the filter, and any keystroke that no row hotkey claims also arms the filter and starts the query with that character.
 
-The config modals (`/memory`, `/work-plan`, `/marketplace`, `/plugin`, `/services`, `/subscription` and the others built on the config-modal host) have an always-live search row: every typed character goes into the search and never fires an action. An action fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from `Ctrl+G` followed by its key (the hint bar shows `^G c` for the keys a terminal cannot send as a Ctrl chord: `c`, `h`, `i`, `j`, `m`, digits and capitals). An action that deletes, uninstalls or clears asks for the same keys a second time; `Esc` cancels it.
+The config modals (`/memory`, `/work-plan`, `/marketplace`, `/plugin`, `/services open`, `/provider open` and the others built on the config-modal host) have an always-live search row: every typed character goes into the search and never fires an action. An action fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from `Ctrl+G` followed by its key (the hint bar shows `^G c` for the keys a terminal cannot send as a Ctrl chord: `c`, `h`, `i`, `j`, `m`, digits and capitals). An action that deletes, uninstalls or clears asks for the same keys a second time; `Esc` cancels it.
 
 ### System
 
@@ -491,7 +491,7 @@ When an agent is spawned, it can be given its own git worktree. On completion, c
 
 ## Hook system
 
-Hooks fire on lifecycle events throughout a session. They are configured in `hooks.json` in the project working directory (or a custom file set in `tools.hooksFile`, also resolved against the project working directory). A hooks file inside a workspace you have not trusted is not loaded and runs nothing: a cloned repository cannot bring commands that run on its first event. At start the app says once that the workspace's hooks wait on its trust; `/trust workspace trusted` loads them at once. A hooks file outside the workspace (an absolute `tools.hooksFile`), or a workspace that is your home directory, is yours and loads as before.
+Hooks fire on lifecycle events throughout a session. They are configured in `hooks.json` in the project working directory (or a custom file set in `tools.hooksFile`, also resolved against the project working directory). A hooks file inside a workspace you have not trusted is not loaded and runs nothing: a cloned repository cannot bring commands that run on its first event. At start the app says once that the workspace's hooks wait on its trust; `/security trust-folder` loads them at once. A hooks file outside the workspace (an absolute `tools.hooksFile`), or a workspace that is your home directory, is yours and loads as before.
 
 ### Event path format
 
@@ -654,7 +654,7 @@ GoodVibes also reads MCP servers already configured for other tools, read-only: 
 }
 ```
 
-A server with a `url` instead of a `command` is a remote HTTP server. Give it a `headers` object (for example `"headers": { "Authorization": "Bearer ..." }`) to send credentials on every request; the headers are never shown by the read routes, and an edit that does not resend them keeps them. Fields GoodVibes does not model are kept when it rewrites the file. A server name may not contain `:` or `/`; such an entry is skipped with a warning rather than blocking other edits. `trustMode: "allow-all"` is honoured only from the global config: in a project file it is ignored (with a warning) and the default trust mode applies, so a checked-out repository cannot grant its own servers unrestricted trust. The project files (`.mcp/mcp.json` and `.goodvibes/mcp.json` in the workspace) start no server until you trust the workspace (an undecided workspace counts as not trusted), and until then a server they name does not take the place of one of yours with the same name; the app says so once at start, and `/trust workspace trusted` starts them. Your own files (`~/.config/mcp/mcp.json`, `~/.mcp/mcp.json`, Claude Desktop's) are not affected.
+A server with a `url` instead of a `command` is a remote HTTP server. Give it a `headers` object (for example `"headers": { "Authorization": "Bearer ..." }`) to send credentials on every request; the headers are never shown by the read routes, and an edit that does not resend them keeps them. Fields GoodVibes does not model are kept when it rewrites the file. A server name may not contain `:` or `/`; such an entry is skipped with a warning rather than blocking other edits. `trustMode: "allow-all"` is honoured only from the global config: in a project file it is ignored (with a warning) and the default trust mode applies, so a checked-out repository cannot grant its own servers unrestricted trust. The project files (`.mcp/mcp.json` and `.goodvibes/mcp.json` in the workspace) start no server until you trust the workspace (an undecided workspace counts as not trusted), and until then a server they name does not take the place of one of yours with the same name; the app says so once at start, and `/security trust-folder` starts them. Your own files (`~/.config/mcp/mcp.json`, `~/.mcp/mcp.json`, Claude Desktop's) are not affected.
 
 One tool of a server can be ruled on its own. `/mcp block <server> <tool>` refuses every call to it for this session only, whatever the server's trust level and limits allow. `/mcp block <server> <tool> --keep` keeps the block with the server's entry as `"deniedTools": ["<tool>"]` until you change it, after a restart too. `/mcp exempt <server> <tool>` keeps `"allowedTools": ["<tool>"]`: calls to that tool pass the server's `allowedPaths` and `allowedHosts`, while a blocked server, held-back tools or a block of the same tool still refuse it. An exemption loosens what a server may do, so it is yours alone: it asks first and is refused when the model runs it, the daemon refuses it for the Agent's model, and it is kept only in your global config (an `allowedTools` list in a project file is ignored with a warning, like `allow-all`). `/mcp unblock <server> <tool>` removes this session's block and the kept one, and says which it removed; it loosens, so it asks first and is refused when the model runs it. `/mcp unexempt <server> <tool>` removes only a kept exemption. On a server's row in Settings -> MCP, typing `block`, `unblock`, `exempt` or `unexempt` (a tool is optional) opens that `/mcp` action for the server, the `/mcp` screen's form edits the blocked tools, and the web app lists each server's tools with their rules under Settings > Permissions > MCP tool rules. A rule written while a server runs applies at once, without restarting it: a call not yet sent to a newly blocked tool ends. `/mcp servers` lists each rule with where it came from (this session or the config).
 
@@ -741,12 +741,11 @@ Beyond direct local plugins, a local-first curated distribution channel covers p
 > project-planning→planning. The runtime-ops consoles (cockpit, orchestration,
 > tasks, worktrees, approvals, communication, …) open **Agents**; tokens and
 > cost open **Usage**; git, diff and review open **Changes**. The old names
-> still work as `/panel <name>` and as command palette search words. The
-> command front-doors below are unchanged.
+> still work as command palette search words.
 
 Many commands also have matching modals and control rooms. High-signal examples:
 
-- provider accounts and health: `/health <pillar>` reviews one domain at a time, with pillars for `setup` (install/setup issues), `services` (service registry inspections), `sandbox` (isolation posture), `accounts` and `auth` (provider accounts and auth users), `settings` (settings integrity), `remote` (remote runtime), `continuity` (last-session pointer and recovery-file state), `worktrees` (tracked worktree cleanup state), `maintenance` (context usage and session upkeep), and `term` (terminal capability posture such as color depth and synchronized output)
+- provider accounts and health: `/health` prints `✓ Everything is working.` or each thing that is not with `Fix:` and the line that fixes it; `/health check <area>` reviews one area: `setup`, `services`, `provider`, `sandbox`, `accounts`, `auth`, `settings`, `intelligence`, `remote`, `mcp`, `memory`, `metrics`, `continuity`, `worktrees`, `maintenance` and `terminal`
 - knowledge and memory review
 - remote peers and work queues
 - channels and deliveries
@@ -763,7 +762,7 @@ GoodVibes includes a post-execution and operator-repair stack:
 
 - `/eval` runs a task suite (default `.goodvibes/eval/tasks`: one directory per task with a `task.json` instruction and a `verify.sh`) through headless `goodvibes run`, lets each task's script decide pass or fail, compares runs with a baseline, and gates on a failed or regressed task
 - `/replay` loads and steps deterministic replay runs
-- `/incident` opens, exports, and captures forensics bundles
+- `/health failure`, `/health save-failure` and `/health keep-failure` show, save and keep this session's failure reports
 - Health and diagnostics surfaces expose repair actions, transport issues, task failure state, and replay hooks
 - telemetry exporters can write to local ledgers, console sinks, or OTLP bridges
 - retention and pruning policy keeps checkpoint/snapshot growth bounded
@@ -802,7 +801,7 @@ The TUI displays the platform-returned answer text, sources, facts, linked objec
 
 `/tts stop` cancels active playback and pending TTS requests without deleting the text response.
 
-`/config tts` opens the TTS category in the fullscreen configuration workspace. It manages the defaults used by spoken-output clients:
+`/config open tts` opens the TTS category in the fullscreen configuration workspace. It manages the defaults used by spoken-output clients:
 
 | Key | What its row does |
 | --- | --- |
@@ -839,7 +838,7 @@ Some command families are especially important when you are running GoodVibes as
 - `/schedule` for cron-like and interval-based automation
 - `/hooks` for managed hook inspection and simulation
 - `/remote` for dispatching and recovering distributed work
-- `/sandbox` for isolation review and the live sandbox session
+- `/security sandbox` and `/security sandbox-sessions` for isolation review and the live sandbox sessions
 
 There is no standalone `/workflow` command; contract and workflow state is visible in Agents (`F2`, `Ctrl+O` or `/agents`).
 

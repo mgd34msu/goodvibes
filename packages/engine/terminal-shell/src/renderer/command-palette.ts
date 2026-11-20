@@ -61,13 +61,14 @@ function drawDetail(palette: PaletteView, entry: PaletteEntry | null, canvas: Pa
       { text: entry.right, style: { fg: t.brand, bold: true } },
       blank,
       { text: entry.title, style: { fg: t.textMuted } },
+      ...(entry.summary !== entry.title ? [blank, { text: entry.summary, style: { fg: t.textFaint } }] : []),
     ]);
     return;
   }
   const live = palette.describe(entry.id);
   insetLines(canvas, p, p.l, p.top, [
     { text: entry.title, style: { fg: t.text, bold: true } },
-    { text: `/${entry.id}`, style: { fg: t.brand } },
+    { text: entry.line ? `/${entry.line.command} ${entry.line.args.join(' ')}` : `/${entry.id}`, style: { fg: t.brand } },
     ...(live ? [{ text: live, style: { fg: t.textMuted } }] : []),
     blank,
     ...(entry.summary ? [{ text: entry.summary, style: { fg: t.textMuted } }, blank] : []),

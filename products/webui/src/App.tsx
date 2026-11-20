@@ -26,7 +26,7 @@ import { RelayOverflowBanner } from './components/status/RelayOverflowBanner';
 import { WakeBanner } from './components/voice/WakeBanner';
 import { useWakeHost } from './lib/voice/useWake';
 import { DaemonReceipts } from './components/status/DaemonReceipts';
-import { forgetUnendedSignIn, getCurrentAuth, hasStoredTokenSync, retryDaemonSignOut, signOut, client as platformClient } from './lib/goodvibes';
+import { forgetUnendedSignIn, getCurrentAuth, hasSignInSync, retryDaemonSignOut, signOut, client as platformClient } from './lib/goodvibes';
 import { queryKeys } from './lib/queries';
 import { hostedSessionsFromListResult } from './lib/hosted-sessions';
 import { ChatView } from './views/ChatView';
@@ -527,7 +527,7 @@ export default function App() {
   // it validates; with NO stored token, show the gate immediately (no white-screen, and
   // no working-looking-but-401ing shell).
   const authPending = auth.isPending;
-  const hasToken = hasStoredTokenSync();
+  const hasToken = hasSignInSync();
   // A genuine 401 (not a network failure) is the ONLY thing that means "signed out",
   // this classification must win over everything else below, including a health-poll
   // outage that happens to be in flight at the same moment: a bad token always routes

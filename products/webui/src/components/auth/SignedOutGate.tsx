@@ -11,8 +11,9 @@
  * and a refusal is reported in one place.
  *
  * Everything else sits in "Other ways to sign in", in this order: paste a
- * sign-in code (setExplicitAuthToken checks it with auth.current and clears it
- * on refusal), the relay code for a device that cannot reach the computer
+ * sign-in code (setExplicitAuthToken has the daemon check it and bind it to an
+ * HttpOnly cookie, or, over the relay, holds it in memory; a refused code
+ * changes nothing), the relay code for a device that cannot reach the computer
  * directly, the username and password (works only while the first-run password
  * is still kept), and where to find a code.
  *

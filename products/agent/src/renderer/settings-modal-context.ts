@@ -100,7 +100,7 @@ export const CATEGORY_INFO: Record<SettingsCategory, string> = {
   notifications:
     'Adaptive notification-burst suppression: the observation window, trip threshold, and cooldown that collapse a rapid run of same-domain notifications to panel-only. Critical/milestone/alert notifications are always exempt.',
   policy:
-    'Policy-as-code bundle loading: where the policy registry loads its initial bundle from at startup, and the file path when loading from disk. A loaded bundle is a candidate: /policy simulate shows the recorded calls it would decide differently, and /policy promote --yes enforces it.',
+    'Policy-as-code bundle loading: where the policy registry loads its initial bundle from at startup, and the file path when loading from disk. A loaded bundle is a candidate: /security simulate-policy shows the recorded calls it would decide differently, and /security enforce-policy enforces it.',
   fetch:
     'Fetch-tool response sanitization: the default sanitize mode, and default trusted/blocked host lists layered under any per-call overrides. The built-in SSRF-risk block applies independently.',
   security:
@@ -110,7 +110,7 @@ export const CATEGORY_INFO: Record<SettingsCategory, string> = {
   device:
     'How a paired phone\'s camera, screen, location, clipboard, and device commands are reached. Every capture and effect asks the person first; "always allow" writes one durable grant for that capability on that phone, revocable in the grants surface. Also sets how long a picture the phone took is kept before it is deleted (24 hours by default), how often housekeeping sweeps, and how long a grant lasts before it expires.',
   memory:
-    "This runtime's own memory-pressure defense: the RSS budget (0 = auto: min of 25% of system RAM and 4096 MB), the elevated/high/critical tier thresholds that shed caches and pause deferrable background jobs, the leak tripwire (sustained growth rate that triggers a graceful exit with a receipt), and the absolute hard-limit backstop as a percent of the kill ceiling. Live state under /health memory.",
+    "This runtime's own memory-pressure defense: the RSS budget (0 = auto: min of 25% of system RAM and 4096 MB), the elevated/high/critical tier thresholds that shed caches and pause deferrable background jobs, the leak tripwire (sustained growth rate that triggers a graceful exit with a receipt), and the absolute hard-limit backstop as a percent of the kill ceiling. Live state under /health check memory.",
   payments:
     "The payment capability's budgets, shipping preference, CVV handling, and the two decision windows: a veto window for in-budget purchases (silence proceeds) and an approval window for above-budget ones (silence denies). The daemon holds the card and executes every purchase; these settings configure it. Card number, expiry and CVV are never entered here, they live in the daemon secret store, write-only across every wire.",
 };

@@ -52,34 +52,15 @@ export type ConnectionRoute = 'direct' | 'relay';
 // A route is transport, not identity: flipping it re-opens the live streams (their
 // hooks depend on the route) and lets in-flight requests finish or fail on their own.
 // It never bumps the client lifetime, so drafts, attachments and the query cache
-// survive a device moving between its home network and the relay. The last route that
-// answered is remembered for this tab session beside the pairing, so a reload away
-// from home starts on the relay instead of waiting for the direct probe to fail.
+// survive a device moving between its home network and the relay. A page starts on
+// the direct route: the relay pairing is held in memory only (relay-pairing.ts), so a
+// reload has no relay to start on.
 // ---------------------------------------------------------------------------
 
-const ROUTE_SESSION_KEY = 'goodvibes.webui.relayRoute';
-
-function readRememberedRoute(): ConnectionRoute {
-  try {
-    return globalThis.sessionStorage?.getItem(ROUTE_SESSION_KEY) === 'relay' && getStoredRelayPairing() ? 'relay' : 'direct';
-  } catch {
-    return 'direct';
-  }
-}
-
-function rememberRoute(route: ConnectionRoute): void {
-  try {
-    if (route === 'relay') globalThis.sessionStorage?.setItem(ROUTE_SESSION_KEY, route);
-    else globalThis.sessionStorage?.removeItem(ROUTE_SESSION_KEY);
-  } catch {
-    // Unusable session storage only costs the head start on the next load.
-  }
-}
-
-let activeRoute: ConnectionRoute = readRememberedRoute();
+let activeRoute: ConnectionRoute = 'direct';
 const listeners = new Set<() => void>();
 
-/** Current active route: the remembered one for this tab session, else 'direct'. */
+/** Current active route: 'direct' until the relay answers where the direct route does not. */
 export function getActiveRoute(): ConnectionRoute {
   return activeRoute;
 }
@@ -88,7 +69,6 @@ export function getActiveRoute(): ConnectionRoute {
 export function setActiveRoute(route: ConnectionRoute): void {
   if (activeRoute === route) return;
   activeRoute = route;
-  rememberRoute(route);
   for (const listener of listeners) listener();
 }
 

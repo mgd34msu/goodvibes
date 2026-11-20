@@ -20,7 +20,7 @@ All of these flow into the same runtime routing, picker, metadata, and health su
 
 No provider keeps a list of models in the program. A provider's list is what its own endpoint answers (its models listing, for example OpenAI's `/v1/models` and, when signed in with a subscription, the plan's own list), else its last answer on disk, else the pinned model catalog's rows for it (the models.dev snapshot each release pins). A model the provider lists that the catalog does not know yet is selectable the day it ships, marked unclassified. A model you type that no list names is still sent, and the provider's refusal, if it refuses, is reported as it is.
 
-The lists are read again in the background, never on a request's path: at start-up (a list on disk younger than a day answers without a request), after a sign-in (a subscription's list is stored per account), when the model picker opens (again answered from disk while a list is younger than a day), on `/refresh-models` (always read), and when an endpoint refuses a model as unknown (at most once a minute per provider). Each read is one listing request per sign-in. `goodvibes doctor` and `goodvibes-agent status` show the provider, the sign-in order and where the list came from and how old it is.
+The lists are read again in the background, never on a request's path: at start-up (a list on disk younger than a day answers without a request), after a sign-in (a subscription's list is stored per account), when the model picker opens (again answered from disk while a list is younger than a day), on `/model refresh` (always read), and when an endpoint refuses a model as unknown (at most once a minute per provider). Each read is one listing request per sign-in. `goodvibes doctor` and `goodvibes-agent status` show the provider, the sign-in order and where the list came from and how old it is.
 
 ## Native chat/runtime providers
 
@@ -28,7 +28,7 @@ Native providers carry their own client for a vendor's first-party API, rather t
 
 | Provider | What it talks to |
 | --- | --- |
-| `openai` | OpenAI, with two ways of signing in: a ChatGPT subscription (the Codex surface, `/subscription login openai start`) and an OpenAI API key. One provider, one model list. Requests use the subscription when it is set up, else the API key; with both set up, a request the subscription fails is asked again of the same model through the API key, and the turn says so once |
+| `openai` | OpenAI, with two ways of signing in: a ChatGPT subscription (the Codex surface, `/provider sign-in openai`) and an OpenAI API key. One provider, one model list. Requests use the subscription when it is set up, else the API key; with both set up, a request the subscription fails is asked again of the same model through the API key, and the turn says so once |
 | `anthropic` | The Anthropic Messages API with an Anthropic API key |
 | `gemini` | The Google Gemini API |
 | `amazon-bedrock` | AWS Bedrock, authenticated with AWS credentials; the live model list comes from Bedrock's own catalog call |
@@ -301,7 +301,7 @@ Seven voice providers are built in. Each declares which directions it supports: 
 
 The `local` provider runs free, offline engines: whisper.cpp or faster-whisper for STT, and Piper or Kokoro for TTS. Pointing `voice.local.*` at engine and model paths you installed yourself never downloads anything; it reports `unconfigured` until all three keys for a direction (engine, binary, model path) are set. Running `/voice setup` instead performs a managed one-act install that fetches the Piper TTS engine and a default voice automatically, and the whisper STT engine and model where a bundle is hosted for your platform. See [voice-and-live-tts.md](voice-and-live-tts.md).
 
-The TUI `/tts` command uses providers that advertise `tts-stream` for live local playback. Configure defaults through `/config tts`: `tts.provider` chooses the streaming provider, `tts.voice` chooses a provider voice, and `tts.llmProvider` / `tts.llmModel` optionally override the response model. `/tts` uses the active chat model by default when the TTS LLM override is empty. See [Voice and live TTS](voice-and-live-tts.md) for command usage and playback requirements.
+The TUI `/tts` command uses providers that advertise `tts-stream` for live local playback. Configure defaults through `/config open tts`: `tts.provider` chooses the streaming provider, `tts.voice` chooses a provider voice, and `tts.llmProvider` / `tts.llmModel` optionally override the response model. `/tts` uses the active chat model by default when the TTS LLM override is empty. See [Voice and live TTS](voice-and-live-tts.md) for command usage and playback requirements.
 
 ## Media and multimodal providers
 

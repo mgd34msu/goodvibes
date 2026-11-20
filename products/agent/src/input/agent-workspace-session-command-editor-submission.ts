@@ -40,7 +40,7 @@ const SESSION_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceSession
     );
   },
   'effort-level': (_editor, readField) => dispatchCommandEditorSubmission(
-    `/effort ${quoteSlashCommandArg(readField('level'))}`,
+    `/effort set ${quoteSlashCommandArg(readField('level'))}`,
     'Opening reasoning effort change',
     'The workspace handed reasoning effort selection to the shell-owned command router.',
     'safe',

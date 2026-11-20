@@ -24,7 +24,6 @@ import { registerNetworkScanRuntimeCommands } from './commands/network-scan-runt
 import { registerHealthRuntimeCommands } from './commands/health-runtime.ts';
 import { registerStatusRuntimeCommands } from './commands/status-runtime.ts';
 import { registerProviderAccountsRuntimeCommands } from './commands/provider-accounts-runtime.ts';
-import { registerQrcodeRuntimeCommands } from './commands/qrcode-runtime.ts';
 import { registerOnboardingRuntimeCommands } from './commands/onboarding-runtime.ts';
 import { registerTtsRuntimeCommands } from './commands/tts-runtime.ts';
 import { registerAgentWorkspaceRuntimeCommands } from './commands/agent-workspace-runtime.ts';
@@ -38,7 +37,6 @@ import { registerTelegramIntakeCommands } from './commands/telegram-intake-runti
 import { registerBriefRuntimeCommands } from './commands/brief-runtime.ts';
 import { registerSupportBundleRuntimeCommands } from './commands/support-bundle-runtime.ts';
 import { registerOwnerProfileRuntimeCommands } from './commands/owner-profile-runtime.ts';
-import { registerOperatorActionRuntimeCommands } from './commands/operator-actions-runtime.ts';
 import { registerConnectedHostAdminCommands } from './commands/connected-host-admin-runtime.ts';
 import { registerOwnerInboxCommands } from './commands/owner-inbox-runtime.ts';
 import { registerCloudflareRuntimeCommands } from './commands/cloudflare-runtime.ts';
@@ -71,7 +69,6 @@ export function registerBuiltinCommands(
   registerBriefRuntimeCommands(registry);
   registerSupportBundleRuntimeCommands(registry);
   registerOwnerProfileRuntimeCommands(registry);
-  registerOperatorActionRuntimeCommands(registry);
   registerConnectedHostAdminCommands(registry);
   registerOwnerInboxCommands(registry);
   registerCloudflareRuntimeCommands(registry);
@@ -101,7 +98,6 @@ export function registerBuiltinCommands(
   registerStatusRuntimeCommands(registry);
   registerUpdateCommand(registry);
   registerProviderAccountsRuntimeCommands(registry);
-  registerQrcodeRuntimeCommands(registry);
   registerOnboardingRuntimeCommands(registry);
   registerTtsRuntimeCommands(registry);
   registerLocalRuntimeCommands(registry);

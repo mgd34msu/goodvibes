@@ -1,4 +1,7 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { doAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 import type { ReviewHunk } from '../../views/diff-review-model.ts';
 import { hunkPatchText, buildHunkRevertReceiptBlock } from '../../views/diff-review-model.ts';
 
@@ -102,16 +105,19 @@ export async function revertReviewHunk(ctx: CommandContext, hunk: ReviewHunk): P
  * hunk's file, line range and patch excerpt; x reverts a hunk (asks first).
  */
 export function registerReviewRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
+  registry.register(defineCommand<CommandContext>({
     name: 'review',
-    aliases: [],
-    description: 'Review this session\'s diff hunk-by-hunk, steer comments, or revert a hunk',
-    handler(_args, ctx) {
-      if (!ctx.openChanges) {
-        ctx.print('The Changes view is not available in this session.');
-        return;
-      }
-      ctx.openChanges({ source: 'session' });
-    },
-  });
+    title: 'Review this session\'s changes',
+    summary: 'Review this session\'s file changes hunk by hunk: comment to steer the model, or revert a hunk',
+    group: 'Changes',
+    actions: [doAction<CommandContext>({
+      id: 'review', label: 'Review this session\'s changes', word: '', touches: 'reads',
+      sentence: 'Opens this session\'s file changes hunk by hunk: c comments on a hunk, Enter sends the comments to the model, x reverts a hunk (it asks first).',
+      operator: { terminalOnly: 'It is a terminal screen over this session\'s changes.' },
+      async run(_values, ctx) {
+        if (!ctx.openChanges) throw commandRefusal('The Changes view is not available in this session.');
+        ctx.openChanges({ source: 'session' });
+      },
+    })],
+  }));
 }

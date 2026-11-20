@@ -55,6 +55,8 @@ export interface PaletteShortcut {
   readonly key: string;
   /** What it does, in a sentence. */
   readonly description: string;
+  /** More about it, shown in the detail pane (the file a key is changed in). */
+  readonly detail?: string | undefined;
 }
 
 interface CuratedEntry {
@@ -194,7 +196,7 @@ export function buildPaletteEntries(
     const entry: PaletteEntry = {
       id: line.id, kind: 'command', title: line.title, summary: line.summary, description: line.summary,
       category: categories.get(line.command) ?? 'Other', group: line.group, aliases: [], keywords: line.keywords,
-      actions: [], needsArgs: false, right: `/${line.command} ${line.args.join(' ')}`, line: { command: line.command, args: line.args },
+      actions: [], needsArgs: false, right: `/${line.command}`, line: { command: line.command, args: line.args },
     };
     // After the last curated row of its group, so it reads with its neighbours.
     const index = entries.reduce((last, candidate, at) => candidate.group === line.group ? at : last, -1);
@@ -207,7 +209,7 @@ export function buildPaletteEntries(
       id: `key:${index}`,
       kind: 'shortcut',
       title: shortcut.description,
-      summary: shortcut.description,
+      summary: shortcut.detail ?? shortcut.description,
       description: shortcut.description,
       category: 'Keyboard shortcuts',
       group: 'Keyboard shortcuts',

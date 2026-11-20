@@ -15,7 +15,7 @@ user. Both install the TUI with the daemon, Agent and WebUI; npm installs do not
 install this workspace.
 
 The checkout installer pairs the local TUI with the daemon and registers a project
-workspace; after the release installer, pair from the TUI with `/host pair` (see
+workspace; after the release installer, pair from the TUI with `/devices pair host` (see
 [host pairing](host-pairing.md)). Launch `goodvibes` from that directory, then configure a conversation provider below.
 Jev credentials and conversation-provider credentials serve different purposes.
 Use `goodvibes --version` and `goodvibes-daemon --version` to inspect the installed

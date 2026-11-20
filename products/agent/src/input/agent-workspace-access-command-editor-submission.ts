@@ -61,14 +61,14 @@ const ACCESS_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceAccessCo
   'subscription-bundle-export': (editor, readField) => {
     if (!isAffirmative(readField('confirm'))) return unconfirmed(editor, 'Subscription bundle export not confirmed. Type yes, then press Enter.');
     return dispatchCommandEditorSubmission(
-      `/subscription bundle export ${quoteSlashCommandArg(readField('path'))} --yes`,
+      `/provider export ${quoteSlashCommandArg(readField('path'))} --yes`,
       'Opening subscription bundle export',
       'The workspace handed a confirmed subscription bundle export command to the shell-owned command router.',
       'safe',
     );
   },
   'subscription-bundle-inspect': (_editor, readField) => dispatchCommandEditorSubmission(
-    `/subscription bundle inspect ${quoteSlashCommandArg(readField('path'))}`,
+    `/provider inspect ${quoteSlashCommandArg(readField('path'))}`,
     'Opening subscription bundle inspection',
     'The workspace handed a read-only subscription bundle inspect command to the shell-owned command router.',
     'read-only',

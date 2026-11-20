@@ -2988,6 +2988,11 @@
       "types": "./terminal-shell/dist/calendar-command.d.ts",
       "import": "./terminal-shell/dist/calendar-command.js"
     },
+    "./terminal-shell/devices-command": {
+      "bun": "./terminal-shell/src/devices-command.ts",
+      "types": "./terminal-shell/dist/devices-command.d.ts",
+      "import": "./terminal-shell/dist/devices-command.js"
+    },
     "./terminal-shell/agents-command": {
       "bun": "./terminal-shell/src/agents-command.ts",
       "types": "./terminal-shell/dist/agents-command.d.ts",

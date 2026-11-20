@@ -89,7 +89,7 @@ export function TriggersPanel() {
                 <Row
                   leading={<StatusDot tone={row.gaveUp || row.state === 'failed' || row.lastError || row.state === 'backoff' ? 'warn' : row.state === 'running' || row.state === 'firing' || row.state === 'idle' ? 'ok' : 'idle'} srLabel={row.state} />}
                   title={row.label}
-                  meta={[row.watching, row.state, `fired ${row.fired}`, row.lastError ? `last error: ${row.lastError}` : ''].filter(Boolean).join(' · ')}
+                  meta={[row.watching, row.state === 'fired' ? '' : row.state, `fired ${row.fired} time${row.fired === 1 ? '' : 's'}`, row.lastError ? `last error: ${row.lastError}` : ''].filter(Boolean).join(' · ')}
                   trailing={(
                     <span className="gv-action-buttons">
                       <Button size="sm" variant="secondary" aria-expanded={openRuns === row.id} onClick={() => setOpenRuns((now) => (now === row.id ? null : row.id))}>

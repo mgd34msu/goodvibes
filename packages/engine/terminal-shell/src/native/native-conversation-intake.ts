@@ -663,7 +663,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
             return { status: command ? 'unknown' : 'unavailable', cause, request: request(), message: isJournalPhase(phase)
                     ? 'The durable intake journal could not be confirmed. No further request or ordinary turn was sent. The visible original input and dispatch claim are preserved.'
                     : !command && cause === 'principal'
-                    ? 'This terminal is not paired with the connected host, so nothing was sent to it. Pair it (/setup pair in the Agent, /host pair in the terminal app) to use it.'
+                    ? 'This terminal is not paired with the connected host, so nothing was sent to it. Pair it (/setup pair in the Agent, /devices pair host in the terminal app) to use it.'
                     : !command && (cause === 'network' || cause === 'host_changed')
                     ? 'The connected host could not be reached, so nothing was sent to it.'
                     : !command

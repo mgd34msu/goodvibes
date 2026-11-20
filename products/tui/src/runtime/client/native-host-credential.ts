@@ -94,7 +94,7 @@ export type NativeHostCredential =
  * one, the bearer every other verb presents there: `GOODVIBES_DAEMON_TOKEN`
  * when set, otherwise the operator token this user already holds. The daemon
  * treats it as the owner's own machine, so there is no pairing step. A daemon on another machine is never sent that token; it is
- * paired with /host pair. Live scopes are enforced by each operation; a read
+ * paired with /devices pair host. Live scopes are enforced by each operation; a read
  * does not require write/admin.
  */
 export function resolveNativeHostCredential(options: NativeHostCredentialOptions): NativeHostCredential {
@@ -127,11 +127,11 @@ export function resolveNativeHostCredential(options: NativeHostCredentialOptions
     // For a daemon on another machine, a pairing whose reply was lost is settled
     // by repeating it under its attempt id (the host answers with the credential
     // it made, never a second one), so nothing is swapped in under it meanwhile.
-    if (pairing?.status === 'unknown') return { available: false, identity, reason: 'The reply to this terminal\'s pairing request was lost. Run /host pair --bootstrap-shared to repeat it.' };
+    if (pairing?.status === 'unknown') return { available: false, identity, reason: 'The reply to this terminal\'s pairing request was lost. Run /devices pair host --bootstrap-shared to repeat it.' };
     if (pairing?.status === 'missing') {
       return { available: false, identity, reason: onThisMachine
-        ? 'The daemon on this machine is selected, but its operator token could not be read (it must be your own private file). Start the daemon once, or pair this terminal with /host pair.'
-        : 'This terminal has no device credential for the daemon on another machine; pair it with /host pair.' };
+        ? 'The daemon on this machine is selected, but its operator token could not be read (it must be your own private file). Start the daemon once, or pair this terminal with /devices pair host.'
+        : 'This terminal has no device credential for the daemon on another machine; pair it with /devices pair host.' };
     }
     return { available: false, identity, reason: 'The TUI host credential store is unavailable.' };
   } catch {

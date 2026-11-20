@@ -62,7 +62,7 @@ export interface IntegrationsConfig {
 
 /** Policy bundles: registry enablement, signature requirement, bundle source + path. */
 export interface PolicyConfig {
-  /** Versioned policy bundle registry with promote/rollback and the /policy commands. */
+  /** Versioned policy bundle registry with promote/rollback and the /security policy actions. */
   registryEnabled: boolean;
   /** Reject policy bundles with invalid or missing HMAC signatures in managed mode (restart to apply). */
   requireSignedBundles: boolean;
@@ -275,7 +275,7 @@ export const featureConfigSettings: ConfigSettingRow[] = [
     appliesWhen: 'now',
     type: 'boolean',
     description:
-      'Enable the versioned policy bundle registry with promote/rollback semantics and the /policy load, simulate, diff, promote, and rollback commands. Enforcement requires passing divergence-gate evidence first; default off until that evidence exists.',
+      'Enable the versioned policy bundle registry with promote/rollback semantics and the /security load-policy, simulate-policy, compare-policy, enforce-policy and restore-policy actions. Enforcement requires passing divergence-gate evidence first; default off until that evidence exists.',
   },
   {
     key: 'policy.requireSignedBundles',

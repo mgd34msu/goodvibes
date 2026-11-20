@@ -9,9 +9,11 @@
  *   1. captures the token (and any offer set) and strips both from the URL
  *      IMMEDIATELY, so the one-time secret never lingers in the address bar or
  *      a history entry;
- *   2. stores it via the existing token store and validates it against the
- *      daemon's cheap authenticated `auth.current` call (setExplicitAuthToken,
- *      which self-clears a token the daemon rejects);
+ *   2. signs in with it (setExplicitAuthToken: the daemon checks it and binds
+ *      it to an HttpOnly cookie no page script can read; over the relay it is
+ *      held in memory for this page; a refused code changes nothing). The
+ *      sign-in starts before the app renders (mount-app.tsx primeAuthToken),
+ *      so no first request goes out without it;
  *   3. on success, invalidates every query so the shell reveals itself, and,
  *      if the link carried a non-empty offer set, publishes it via `offers` so
  *      the app can render the accept/decline UI. A plain `#pair=<token>` link

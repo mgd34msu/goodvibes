@@ -121,7 +121,7 @@ export class RelayCodeStore {
     try {
       const file = readDocument<RelayCodesFile>(this.filePath, {
         label: 'relay-codes',
-        recovery: 'Relay codes started empty: every device paired through the relay pairs again (/relay pair); the preserved copy is kept beside it.',
+        recovery: 'Relay codes started empty: every device paired through the relay pairs again (/devices pair relay); the preserved copy is kept beside it.',
         validate: parseFile,
       });
       for (const raw of file?.codes ?? []) {

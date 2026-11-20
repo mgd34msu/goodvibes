@@ -54,7 +54,7 @@ export type HooksFileTrustGate = RepositoryFileGate;
 /** The hooks file was not loaded because the workspace it sits in is not trusted yet. */
 export class HooksFileAwaitingTrustError extends Error {
   constructor(readonly path: string) {
-    super(`The hooks file ${path} is in this workspace, which you have not trusted, so its hooks are not loaded and run nothing. Run /trust workspace trusted to load them.`);
+    super(`The hooks file ${path} is in this workspace, which you have not trusted, so its hooks are not loaded and run nothing. Run /security trust-folder to load them.`);
     this.name = 'HooksFileAwaitingTrustError';
   }
 }

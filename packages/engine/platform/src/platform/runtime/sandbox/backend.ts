@@ -57,12 +57,12 @@ export function buildSandboxLaunchPlan(
   if (!availability.available || !availability.bwrapPath) {
     throw new ContainmentUnavailableError(
       `A ${profile.id} sandbox session was not started: no boundary is available on this host (${availability.reason}).`,
-      'Install bubblewrap (the bwrap program), or start a host session with no boundary and the host network on purpose: /sandbox session start <profile> --host.');
+      'Install bubblewrap (the bwrap program), or start a host session with no boundary and the host network on purpose: /security start-sandbox <profile> --host.');
   }
   if (profile.network === 'disabled' && !availability.networkIsolationGuaranteed) {
     throw new ContainmentUnavailableError(
       `A ${profile.id} sandbox session was not started: its profile has network off, and this host's boundary cannot take the network away.`,
-      'Allow user namespaces with network isolation for bubblewrap on this host, or start a host session on purpose: /sandbox session start <profile> --host.');
+      'Allow user namespaces with network isolation for bubblewrap on this host, or start a host session on purpose: /security start-sandbox <profile> --host.');
   }
   const extras = writableExtras.filter((path) => isAbsolute(path));
   return Object.freeze({

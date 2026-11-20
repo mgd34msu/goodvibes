@@ -12,7 +12,6 @@ import {
   login,
   setExplicitAuthToken,
   signOut,
-  WEBUI_TOKEN_STORE_KEY,
 } from '../../../../lib/goodvibes';
 import { queryKeys } from '../../../../lib/queries';
 import { compactJson } from '../../../../lib/object';
@@ -61,8 +60,8 @@ export function AccountSection() {
   });
 
   const loginDiagnostics = {
-    route: 'POST /login',
-    transport: 'raw fetch without Authorization header or cookies',
+    route: 'POST /api/browser-session (over the relay: POST /login, kept in memory)',
+    transport: 'raw fetch; the daemon answers with an HttpOnly cookie, never the token',
     currentAuth: auth.data,
     currentAuthError: errorDebugValue(auth.error),
     localAuth: localAuth.data,
@@ -86,7 +85,8 @@ export function AccountSection() {
         title="Current sign-in"
         description={(
           <>
-            Your daemon owns sign-in. This browser keeps only its session token, under <code>{WEBUI_TOKEN_STORE_KEY}</code>.
+            Your daemon owns sign-in. This browser holds it in a cookie no page script can read; over the
+            relay it is held in memory only, until the page reloads.
           </>
         )}
       >
@@ -132,7 +132,7 @@ export function AccountSection() {
 
       <SettingsBlock
         title="Operator token"
-        description={<>Paste a token deliberately. It is checked with <code>platform.auth.current()</code>; an invalid token is cleared at once.</>}
+        description={<>Paste a token deliberately. The daemon checks it before this browser uses it; a refused token changes nothing.</>}
       >
         <form className="settings-form" onSubmit={submitToken}>
           <Field label="Operator token">
@@ -146,7 +146,7 @@ export function AccountSection() {
           </Field>
           <div className="settings-actions">
             <Button disabled={clearTokenMutation.isPending} onClick={() => clearTokenMutation.mutate()}>
-              Clear stored token
+              Sign out
             </Button>
             <Button type="submit" disabled={tokenMutation.isPending || !token.trim()}>
               Validate and store

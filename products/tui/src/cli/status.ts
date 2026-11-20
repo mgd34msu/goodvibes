@@ -225,7 +225,7 @@ function renderWorkspaceSection(workspace: CliWorkspaceStatus | null): string[] 
   if (!workspace) return [];
   return [
     'Workspace:',
-    `  trust: ${workspace.trustLevel}${workspace.trustLegacyIgnored ? ' (a trust.json inside this workspace is not honored; choose a level with /trust workspace)' : ''}`,
+    `  trust: ${workspace.trustLevel}${workspace.trustLegacyIgnored ? ' (a trust.json inside this workspace is not honored; choose a level with /security trust-folder or /security restrict-folder)' : ''}`,
     ...(workspace.trustFault ? [`  trust record: damaged, autonomous work stays restricted until a level is chosen (${workspace.trustFault})`] : []),
     `  registration: ${registrationLine(workspace)}`,
     `  root: ${workspace.registrationRoot}`,
@@ -254,7 +254,7 @@ function renderSandboxSection(sandbox: CliSandboxStatus | null): string[] {
 /**
  * The `Relay:` block, config + feature-flag gate only. The live registration
  * state lives in the running daemon's memory and no verb exposes it, so no
- * client reads it: this CLI reports the gate, and `/relay status` in the
+ * client reads it: this CLI reports the gate, and `/devices relay-status` in the
  * terminal app reports the same gate plus an honest "not readable here" for the
  * live half. "active" means the gate that lets a running daemon register.
  */
@@ -267,7 +267,7 @@ function renderRelaySection(relay: CliRelayStatus | null): string[] {
     `  configEnabled (relay.enabled): ${yesNo(relay.configEnabled)}`,
     `  featureEnabled (relay-connect flag): ${yesNo(relay.featureEnabled)}`,
     `  url: ${relay.url || '(not set)'}`,
-    '  rendezvousId: derived from the daemon\'s relay identity key; /relay status shows it while the daemon is registered',
+    '  rendezvousId: derived from the daemon\'s relay identity key; /devices relay-status shows it while the daemon is registered',
     `  requireStepUpForMutations: ${yesNo(relay.requireStepUpForMutations)}`,
     '  Threat model: the relay operator sees only ciphertext and connection metadata; self-host your own relay for full control.',
     '',

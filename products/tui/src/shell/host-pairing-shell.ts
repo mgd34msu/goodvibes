@@ -29,7 +29,7 @@ export function wireHostPairingShell(options: {
       input.ensureInputCursorVisible();
       input.autocomplete?.reset(); render();
     },
-    // No modal open but, at most, command mode: the /pair line that started this is still in it.
+    // No modal open but, at most, command mode: the /devices pair line that started this is still in it.
     canPresent: () => options.canPresent() && !input.concealedInput
       && input.surfaceModals.modals().every((modal) => modal === input.modals.command)
       && !input.searchManager.active && !input.historySearch.active,

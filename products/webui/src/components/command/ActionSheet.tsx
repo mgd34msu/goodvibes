@@ -318,7 +318,7 @@ export function ActionSheet({ open, onClose, command, action: actionId, prefill 
       if (!found) return;
       const shape = asActionShape(found.action);
       toast({
-        title: actionDoneLine(shape, { ...sent, ...labels }) || found.action.label,
+        title: actionDoneLine(shape, said) || found.action.label,
         description: `From a terminal: ${renderTypedLine(asCommandShape(found.command), found.action.id, withoutSecrets(shape, sent))}`,
         tone: 'success',
       });
@@ -331,6 +331,17 @@ export function ActionSheet({ open, onClose, command, action: actionId, prefill 
     onError: (error: unknown) => setProblem(`${found?.action.label ?? 'Action'}: not done. ${formatError(error)}`),
   });
   const shown = useMemo(() => (found ? found.action.inputs.filter((input) => isShown(asInput(input), values)) : []), [found, values]);
+  /** The words of a fixed choice ("Refuse every call") for the sentence; the blank that decides how long it lasts keeps its value. */
+  const said = useMemo(() => {
+    const out: Record<string, string> = { ...sent, ...labels };
+    const lastsBy = found && typeof found.action.lasts === 'object' ? found.action.lasts.byInput : undefined;
+    for (const input of found?.action.inputs ?? []) {
+      if (!Array.isArray(input.choices) || input.id === lastsBy || sent[input.id] === undefined) continue;
+      const choice = input.choices.find((entry) => entry.value === sent[input.id]);
+      if (choice) out[input.id] = choice.label;
+    }
+    return out;
+  }, [found, sent, labels]);
   const missing = shown.filter((input) => input.required === true && !values[input.id]);
   if (!found) return null;
   const shape = asActionShape(found.action);
@@ -373,7 +384,7 @@ export function ActionSheet({ open, onClose, command, action: actionId, prefill 
           </div>
         )))}
         <div ref={outcomeRef} className="gv-action-sheet__outcome">
-          <p className="gv-action-sheet__sentence">{actionSentence(shape, { ...sent, ...labels })}</p>
+          <p className="gv-action-sheet__sentence">{actionSentence(shape, said)}</p>
           {fresh && preview ? <p className="gv-action-sheet__preview" role="status">{preview.summary}</p> : null}
           {problem ? <p className="gv-action-sheet__problem" role="alert">{problem}</p> : null}
         </div>

@@ -27,13 +27,13 @@ High-signal TUI routes:
 | `/agent` | Open the fullscreen operator workspace. |
 | `/work [daemon-project-id]` | Inspect native work, intent, attention, evidence and history on the authenticated connected host; read only. |
 | `/workstream` | Plan work as a draft (`propose <goal>`), review and edit it (`show`, `edit`, `drop`, `move`, `retask`), then `approve` and `launch` it as a contract; `list`, `status`, `cancel` or `reply` to running workstreams, `retry <id> <unit>` to give one unit a fresh agent, and `budget <id> <dollars>` to let a workstream waiting on its budget continue. |
-| `/help` and `/commands` | Discover registered slash commands. |
-| `/health`, `/compat`, `/auth` | Inspect runtime, connected-host, compatibility, and auth posture. |
+| `/help` | Discover registered slash commands. |
+| `/health`, `/auth` | Inspect runtime, connected-host, compatibility, and auth posture. |
 | `/model`, `/provider`, `/effort` | Inspect or change provider/model/reasoning routes. |
 | `/knowledge` | Use isolated Agent Knowledge. |
 | `/vibe`, `/memory`, `/notes`, `/personas`, `/skills`, `/routines` | Manage VIBE.md personality and Agent-local behavior libraries. |
 | `/approval`, `/automation`, `/schedule` | Read posture and run exact confirmed operator actions. |
-| `/channels`, `/notify`, `/qrcode` | Pair companions, inspect channel readiness, review delivery receipts, and send confirmed messages. |
+| `/channels`, `/notify`, `/devices` | Pair companions, inspect channel readiness, review delivery receipts, and send confirmed messages. |
 | `/media`, `/voice`, `/tts` | Inspect media/voice readiness, generate media, and run spoken turns. |
 | `/mcp`, `/secrets`, `/settings`, `/config` | Inspect or update Agent-local configuration. |
 | `/delegate` | Hand explicit build/fix/review work to GoodVibes TUI with a confirmed handoff brief. Each hand-off is recorded in the Agent home; `/delegate status` lists them and `/delegate status <session-id>` shows the session's input state and latest answer. A hand-off whose task could not be delivered removes the empty session it created. |
@@ -401,39 +401,36 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/automation` | Run confirmed connected-host automation actions from the Agent TUI. |
 | `/bookmarks` | List bookmarked transcript blocks. |
 | `/brief` | Show a concise Agent operator briefing and next actions. |
-| `/bundle` | Export, inspect, or import redacted Agent support bundles from the TUI. |
-| `/calendar` | Manage a local calendar: list upcoming events, import or export .ics files, and add or remove events. |
+| `/bundle` | Save this Agent's settings and setup to a redacted file, check one, or load settings back from one. |
+| `/calendar` | The terminal app's command on the Agent's own events, its calendar feeds and calendar accounts: what is coming up, every event, add or remove one, import or export .ics files, subscribe to feeds, sign in or out of Google or Outlook. Removing asks first. |
 | `/checkpoints` | List the workspace checkpoints, newest first; `/checkpoints restore <n\|id>` shows the files that would change, asks, and restores them (files only; a safety checkpoint of the current files is kept first). |
-| `/channel-profiles` | List, set, or delete per-channel session profile bindings (model, provider, permission mode) on the connected host; mutations require `--yes`. |
-| `/channels` | Inspect channel readiness, delivery receipts, or send one explicitly confirmed delivery message. |
+| `/channels` | The terminal app's command with the connected host's channels: status, setup, repairs, who may reach the assistant, per-channel profiles (formerly `/channel-profiles`), a test message; and the Agent's own readiness, setup guide, inbox, confirmed sends and delivery receipts. |
 | `/ci` | Check a repo or PR's CI with per-job conclusions and manage standing CI watches with channel delivery; removing a watch asks first. |
 | `/clear` | Start a fresh conversation; the current one is saved as its own session first. Also `/cls` and `/reset`. |
 | `/collapse` | Collapse rendered blocks by type. |
-| `/commands` | Browse all commands in a scrollable list. |
 | `/compact` | Summarize the conversation to free context window. |
-| `/compat` | Inspect connected-host compatibility and Agent Knowledge route readiness. |
-| `/config` | Open the fullscreen configuration workspace. |
+| `/config` | Opens its list: open the settings screen at a setting (`/config open <setting>`), or change one setting (`/config set`, refused here: the Agent changes settings on its settings screen). |
 | `/context` | Inspect context-window usage and token breakdown; `/context window [<size>\|clear]` shows where the current model's window came from, or sets or clears a custom window. |
 | `/conversation` | Review conversation structure, transcript hotspots, and composer posture. |
 | `/delegate` | Explicitly delegate build/fix/review work to GoodVibes TUI with reason, success criteria, workspace hint, priority, and explicit review intent. |
-| `/devices` | Paired phones on the connected host: `nodes` (each phone and what it can serve), `grants` and `revoke-grant <grant-id> --yes` (always-allow answers), `captures` and `delete-capture <capture-id> --yes` (photos and screen captures the daemon is keeping, deleted now). |
-| `/effort` | Show or set reasoning effort level. |
+| `/devices` | The terminal app's command: device tokens on the connected host (`list`, `rename`, `revoke`, which asks first), "Pair something" (`pair device` mints a named, separately revocable device token and shows its link and QR), and the paired phones: `nodes`, `grants`, `revoke-grant`, `captures`, `delete-capture` (asks first). |
+| `/effort` | See or choose how hard the model thinks (`/effort set <level>`). |
 | `/cloudflare` | The connected host's optional Cloudflare integration: `status`, `requirements`, `discover`, `validate`, `verify`, and (typed by the owner only) `create-token [--new]`, `provision` and `disable`. Flags are the terminal app's; see its Cloudflare guide. |
-| `/email` | Configure direct email, read inbox summaries read-only, and send a confirmed message. |
 | `/expand` | Expand rendered blocks by type. |
 | `/session` | Sessions: resume, save, copy, save the conversation as a Markdown or text file, read the cross-session task graph. |
 | `/google` | Connect the Google account behind mail and calendar: adopt credentials already on this machine, or run the setup flow. |
-| `/health` | Review startup posture, connected-host readiness, provider health, and Agent continuity. |
+| `/health` | Opens its list; from a model or script prints the short status (`✓ Everything is working.`, or each problem with `Fix:` and its line). Actions: See what needs attention (`report`), Check one area (`check <area>`), Describe a problem (`diagnose <symptom>`), See the runtime store (`state`), Check the connected host's compatibility (`compat [--json]`, Agent Knowledge route readiness). |
 | `/help` | Show available commands and keyboard shortcuts. |
 | `/image` | Attach an image file to the next message. |
 | `/keybindings` | List keyboard bindings and the config file path. |
 | `/knowledge` | Use isolated Agent Knowledge. |
 | `/resume` | Resume a saved Agent session. |
+| `/mail` | The terminal app's command over the Agent's own mail service: whether mail is connected, the unread inbox, read one message, save a draft, send one (asks first), and the mailbox settings and password. |
 | `/mcp` | Manage MCP servers, trust posture, and tool inventory. |
 | `/media` | Inspect media providers or generate media through configured providers; `/media generate collect <provider> <task-id> [key=value ...]` collects a job that was still running when the wait ended. |
 | `/memory` | Add, search, review, stale, or delete Agent-local memory records. `/memory files sync` writes standing records as markdown files and commits them in their own repository; `files review` shows what editing those files would change; `files apply <id>...` applies the proposals you name. A command run by the model may sync and review but not apply. `/memory snapshots` lists the copies of memory (daily, before an upgrade, before a restore) with their record counts; `/memory restore <name|latest|date>` replaces all memory with one copy after one confirmation, copies the records it replaces first and names that copy so the restore can be undone. |
 | `/mode` | Manage Agent interaction mode and per-domain verbosity. |
-| `/model` | Select or display the current LLM model. |
+| `/model` | Choose the model your conversations use and its backups (`use`, `backup`, `drop-backup`), and read the list of models again (`refresh`). |
 | `/network-scan` | Turn local-network scanning for model servers on or off, or check its status. Model servers on this computer and providers whose API key is in the environment are registered at every start; the network is scanned only after `/network-scan on`, which scans at once and then at each start. |
 | `/next-error` | Jump to the next error message in the conversation. |
 | `/notes` | Open Agent-local scratchpad notes in the operator workspace. |
@@ -447,34 +444,29 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/plugin` | List plugins with their trust tier, enable, disable, reload or quarantine one (`/plugin enable <name>`, `/plugin disable <name>`, `/plugin reload`, `/plugin quarantine <name> [add\|lift]`), and set what each one may register: `/plugin trust <name> <untrusted\|limited\|trusted>`, `/plugin capabilities <name>`, `/plugin verify <name>`, `/plugin trust-key <name> <key.pem>`. An untrusted plugin gets panels, commands and file reads only; `limited` adds the tools, providers and hooks its manifest declares and gateway methods, channels and delivery strategies; `trusted` adds its high-risk capabilities. The tier is shared with the terminal app and the daemon. Marking a plugin trusted when its signature does not verify needs `--yes`. |
 | `/prev-error` | Jump to the previous error message in the conversation. |
 | `/principals` | Manage the connected host's cross-channel principal identity registry; unmapped senders show as "unknown principal" in session attribution. |
-| `/provider` | Switch provider or manage custom providers. |
-| `/qrcode` | Pair a device: the connected host mints a named, separately revocable device token and the Agent shows its link and QR. |
-| `/quit` | Exit the application. |
+| `/provider` | Where your models come from: switch provider, add your own, sign in with a subscription, and choose how requests are routed. |
+| `/quit` | Close this program (a model cannot run it). |
 | `/redo` | Redo the last undone conversation turn; `/redo file` re-applies the last reverted file change. |
-| `/refresh-models` | Refresh model catalog, metadata, and token limits. |
 | `/retry` | Re-send the last user message, optionally with modified text. |
 | `/routines` | Manage Agent-local routines and explicit routine schedule promotion. |
 | `/save` | Save the current session. |
 | `/schedule` | Inspect schedules, create confirmed reminders, and promote routines to connected schedules. |
 | `/secrets` | Manage secrets, external secret refs, and storage policy. |
-| `/security` | Inspect security posture, attack paths, and review state. |
+| `/security` | Opens its list; from a model or script prints the short status. Actions: the review, paired-device tokens, risky MCP routes; what is trusted, this folder's trust (`folder`, `trust-folder`, `restrict-folder`: until you trust the folder, its repository's hooks file is not loaded and the MCP servers its `.mcp/mcp.json` and `.goodvibes/mcp.json` name do not start), the trust summary file (`save-trust`, `read-trust`); the policy bundles; the sandbox and MCP containment. |
 | `/session` | Inspect session continuity and cross-session graph state. |
 | `/settings` | Open, inspect, set, or reset Agent settings. |
 | `/setup` | Open the Agent workspace; on a fresh Agent home the workspace opens into setup first. |
 | `/shortcuts` | Show keyboard shortcuts. |
 | `/skills` | Manage Agent-local skills and skill bundles. |
-| `/status` | Show the current model and its context window, with where the window came from (its catalog provider, the consensus of catalog providers, a family default, or a user override). |
-| `/subscription` | Manage provider subscription sessions. |
+| `/status` | Shows the current model and its context window, with where the window came from (its catalog provider, the consensus of catalog providers, a family default, or a user override). |
 | `/tasks` | Inspect connected-host tasks without starting or mutating local background work. |
 | `/title` | Show or set the conversation title. |
-| `/trust` | Review trust posture, set this workspace's trust (`/trust workspace trusted\|restricted`), and export portable trust bundles. Until you trust the workspace, its repository's hooks file is not loaded and the MCP servers its `.mcp/mcp.json` and `.goodvibes/mcp.json` name do not start; the Agent says so once at start. Your own hooks and MCP files are not affected. |
 | `/tts` | Submit a normal prompt and play the assistant response through live TTS. |
 | `/undo` | Undo the last conversation turn; `/undo file` reverts every file the last write/edit call changed. |
 | `/unpin` | Unpin a model from the favorites list. |
-| `/update` | Check for a newer release; for binary installs, verify and apply it or roll back to the kept previous version. |
+| `/update` | Opens its list: see whether a newer release is out (`check`), install it (`apply`), go back to the version before (`rollback`), see the daemon's updates (`daemon [--check]`). |
 | `/vibe` | Inspect, create, show, or import VIBE.md personality files. |
 | `/voice` | Review voice posture, provision the managed local-voice runtime and the wake-word models (`/voice wake status`, `/voice wake setup --yes`), and export portable voice metadata. |
-| `/welcome` | Open the Agent workspace, or print the setup guide with `/welcome print`. |
 
 ## Related docs
 

@@ -1,5 +1,5 @@
 /**
- * channel-pairing.ts, guided `/channel pair` flow.
+ * channel-pairing.ts, the "A chat channel" choice of `/devices pair` (Pair something).
  *
  * Adapters and their credential requirements are driven from the platform's
  * getBuiltinSetupSchema, the same setup-schema source every GoodVibes
@@ -9,25 +9,22 @@
  * config reference), so the plaintext never lands in config or the
  * transcript.
  *
- *   /channel pair                  → list adapters + how many credentials are set
- *   /channel pair <surface>        → show the adapter's declared fields, ask for
- *                                     every missing required one (and offer the
- *                                     optional ones, skippable), then enable the
- *                                     surface once every required field is set
- *   /channel pair <surface> verify → a REAL round-trip: send a test message
- *                                     through the daemon (channels.test.send)
- *                                     and report the actual delivered/error
- *                                     outcome, never a fabricated success.
+ *   /devices pair channel <surface> → show the adapter's declared fields, ask
+ *                                      for every missing required one (and offer
+ *                                      the optional ones, skippable), then enable
+ *                                      the surface once every required field is set
+ *
+ * A real round-trip (a test message through the daemon) is `/channels test <surface>`.
  */
 import { getBuiltinSetupSchema } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { ChannelSetupFieldDescriptor, ChannelSetupSchema, ChannelSurface } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { CommandContext } from '../command-registry.ts';
 import type { ConfigManager, ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
-import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 
 /**
- * Surfaces pairable through /channel pair, every ChannelSurface except the
+ * Surfaces pairable through /devices pair channel, every ChannelSurface except the
  * two internal render surfaces ('tui', 'web'), which are not externally
  * paired channels. The `satisfies Record<...>` shape makes this exhaustive:
  * a new ChannelSurface value that isn't listed here fails to compile.
@@ -100,7 +97,7 @@ function fieldHint(field: ChannelSetupFieldDescriptor, schema: ChannelSetupSchem
 
 function listAdapters(ctx: CommandContext): void {
   const configManager = ctx.platform.configManager;
-  const lines: string[] = ['Channel adapters: pair with /channel pair <surface>:', ''];
+  const lines: string[] = ['Channel adapters: pair with /devices pair channel <surface>:', ''];
   for (const surface of PAIRABLE_SURFACES) {
     const schema = getBuiltinSetupSchema(surface);
     const creds = credentialFields(schema);
@@ -113,7 +110,7 @@ function listAdapters(ctx: CommandContext): void {
     lines.push(`  ${surface.padEnd(14)} ${schema.label.padEnd(22)} ${state.padEnd(12)} ${enabled ? '(enabled)' : ''}`);
   }
   lines.push('');
-  lines.push('Run /channel pair <surface> to see and enter its declared credentials.');
+  lines.push('Run /devices pair channel <surface> to see and enter its declared credentials.');
   ctx.print(lines.join('\n'));
 }
 
@@ -146,7 +143,7 @@ async function finishPairing(ctx: CommandContext, schema: ChannelSetupSchema, st
   const missing = missingRequired(schema, configManager);
   if (missing.length > 0) {
     // Enabling a surface with a required value missing would start it half-configured.
-    ctx.print(`\n${schema.label} was NOT enabled: still missing ${missing.map((f) => f.label).join(', ')} (required). Re-run /channel pair ${schema.surface} to enter ${missing.length === 1 ? 'it' : 'them'}.`);
+    ctx.print(`\n${schema.label} was NOT enabled: still missing ${missing.map((f) => f.label).join(', ')} (required). Re-run /devices pair channel ${schema.surface} to enter ${missing.length === 1 ? 'it' : 'them'}.`);
     ctx.renderRequest();
     return;
   }
@@ -157,13 +154,13 @@ async function finishPairing(ctx: CommandContext, schema: ChannelSetupSchema, st
     // The switch is the daemon's: it counts as on only once the daemon took it.
     const refused = await daemonRefusal(configManager, enabledKey);
     if (refused) {
-      ctx.print(`\n${schema.label}: every required value is set${storedAny ? ' and the new ones are stored' : ''}, but the surface was NOT enabled: the daemon refused ${enabledKey} (${refused}). Fix that, then run /channel pair ${schema.surface} again.`);
+      ctx.print(`\n${schema.label}: every required value is set${storedAny ? ' and the new ones are stored' : ''}, but the surface was NOT enabled: the daemon refused ${enabledKey} (${refused}). Fix that, then run /devices pair channel ${schema.surface} again.`);
       ctx.renderRequest();
       return;
     }
   }
   const state = enabledKey === undefined ? '' : wasEnabled ? ' The surface was already enabled.' : ' The surface is enabled.';
-  ctx.print(`\n${schema.label}: every required value is set${storedAny ? ' and the new ones are stored' : ''}.${state} Verify with: /channel pair ${schema.surface} verify`);
+  ctx.print(`\n${schema.label}: every required value is set${storedAny ? ' and the new ones are stored' : ''}.${state} Send a test message with: /channels test ${schema.surface}`);
   ctx.renderRequest();
 }
 
@@ -214,7 +211,7 @@ function promptMissingFields(
   }
   const configKey = field.configKey as ConfigKey;
   if (!ctx.beginConcealedInput) {
-    ctx.print(`[pair] This surface cannot take typed input; set ${missing.slice(index).map((f) => `${f.label} (${f.configKey})`).join(', ')} with /config, then run /channel pair ${schema.surface} again.`);
+    ctx.print(`[pair] This surface cannot take typed input; set ${missing.slice(index).map((f) => `${f.label} (${f.configKey})`).join(', ')} with /config, then run /devices pair channel ${schema.surface} again.`);
     return;
   }
   const what = field.required ? 'required' : 'optional, Enter to skip';
@@ -239,70 +236,19 @@ function promptMissingFields(
         });
     },
     onCancel: () => {
-      ctx.print(`[pair] Stopped. Re-run /channel pair ${schema.surface} to finish the remaining values.`);
+      ctx.print(`[pair] Stopped. Re-run /devices pair channel ${schema.surface} to finish the remaining values.`);
     },
   });
 }
 
-/**
- * Verify a surface: report which declared credentials resolve locally, then
- * perform a REAL round-trip through the daemon (channels.test.send) and
- * report the actual delivered/error outcome, never a fabricated success.
- */
-async function verifySurface(ctx: CommandContext, schema: ChannelSetupSchema): Promise<void> {
-  const configManager = ctx.platform.configManager;
-  const creds = credentialFields(schema);
-  const lines: string[] = [`Verifying ${schema.label} (${schema.surface}):`];
-  const missing: ChannelSetupFieldDescriptor[] = [];
-  for (const field of creds) {
-    const ok = fieldConfigured(field, configManager);
-    if (!ok && field.required) missing.push(field);
-    lines.push(`  ${ok ? '[set] ' : field.required ? '[missing]' : '[unset]'} ${field.label}${field.required ? '' : ' (optional)'}`);
-  }
-  lines.push('');
-  if (missing.length === 0) {
-    lines.push('Every required value is set. The live test below is what shows they work.');
-  } else {
-    lines.push(`${missing.length} required value(s) missing: ${missing.map((f) => f.label).join(', ')}.`);
-    lines.push(`Run /channel pair ${schema.surface} to enter them.`);
-  }
-  ctx.print(lines.join('\n'));
-
-  const rpc = getOperatorRpc(ctx);
-  if (!rpc.available) {
-    ctx.print(`\n[verify] Cannot perform a live round-trip: ${rpc.reason}`);
-    return;
-  }
-  ctx.print(`\n[verify] Sending a real test message through ${schema.surface}...`);
-  try {
-    const result = await rpc.platformClient.operator.invoke('channels.test.send', { surface: schema.surface });
-    if (result.delivered) {
-      ctx.print(`[verify] delivered:true${result.responseId ? ` (responseId: ${result.responseId})` : ''}${result.address ? ` → ${result.address}` : ''}`);
-    } else {
-      ctx.print(`[verify] delivered:false; ${result.error ?? 'the daemon returned no error detail'}`);
-    }
-  } catch (error) {
-    ctx.print(`[verify] round-trip request failed: ${describeOperatorRpcError(error)}`);
-  }
-}
-
-/** Entry point for `/channel pair [...]`. */
-export async function runChannelPairing(args: readonly string[], ctx: CommandContext): Promise<void> {
-  const surface = args[0];
+/** Set up one surface: ask for its missing values, then switch it on; an empty surface lists the adapters. */
+export async function runChannelPairing(surface: string, ctx: CommandContext): Promise<void> {
   if (!surface) {
     listAdapters(ctx);
     return;
   }
   const schema = findSchema(surface);
-  if (!schema) {
-    ctx.print(`Unknown channel "${surface}". Available: ${PAIRABLE_SURFACES.join(', ')}`);
-    return;
-  }
-  const action = (args[1] ?? '').toLowerCase();
-  if (action === 'verify' || action === 'test') {
-    await verifySurface(ctx, schema);
-    return;
-  }
+  if (!schema) throw commandRefusal(`Unknown channel "${surface}". Available: ${PAIRABLE_SURFACES.join(', ')}`);
 
   const configManager = ctx.platform.configManager;
   ctx.print(renderSurface(schema, configManager).join('\n'));

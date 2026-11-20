@@ -108,7 +108,7 @@ export async function describeDaemonUpdates(verbs: DaemonUpdateVerbs, check: boo
       ...(status.currentVersion ? [`  running:  ${status.currentVersion}`] : []),
       ...formatDaemonUpdateStatusLines(status),
       ...(check ? formatDaemonUpdateCheckLine(status.check, status.offReason) : []),
-      ...(check ? [] : ['  next: /update daemon check runs one check now']),
+      ...(check ? [] : ['  next: /update daemon --check runs one check now']),
     ].join('\n');
   } catch (error) {
     return [

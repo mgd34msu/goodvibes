@@ -4,7 +4,7 @@ This part explains who decides whether a tool call runs, what always comes to th
 
 ## Terms used in this part
 
-How settings are written in this part: the examples use the terminal app's `/config set <key> <value>`, where the value is read as JSON when it parses (`true`, `5`, `["a","b"]`, `"text"`) and as text otherwise. The Agent has no `/config set` (its `/config` only opens the settings workspace); there the same change is `/settings set <key> <value>`, which takes text, numbers, `true`/`false` and the allowed words of an enum, but not a JSON list or object: set a list or object setting in the Agent's settings workspace (`/settings <key>`).
+How settings are written in this part: the examples use the terminal app's `/config set <key> <value>`, where the value is read as JSON when it parses (`true`, `5`, `["a","b"]`, `"text"`) and as text otherwise. In the Agent `/config set` is refused and names the settings screen (`/config open <key>` opens it); there the same change is `/settings set <key> <value>`, which takes text, numbers, `true`/`false` and the allowed words of an enum, but not a JSON list or object: set a list or object setting in the Agent's settings workspace (`/settings <key>`).
 
 | Term | Meaning |
 | --- | --- |
@@ -152,10 +152,10 @@ Older saved values still load: `safe-owner`, `prompt`, `normal`, `accept-edits` 
 A channel profile gives every session a channel starts its own model, provider and permission mode.
 
 ```text
-/channel profiles set slack --permission-mode plan
-/channel profiles set slack C0123456 --model openai:gpt-5.4 --permission-mode ask-me
-/channel profiles get slack
-/channel profiles delete slack C0123456
+/channels set-profile slack --permission-mode plan
+/channels set-profile slack C0123456 --model openai:gpt-5.4 --permission-mode ask-me
+/channels profile slack
+/channels remove-profile slack C0123456
 ```
 
 ```sh
@@ -652,15 +652,15 @@ Enabled monitoring needs 1 to 100 budgets. Optional per budget: `battery` or `si
 A managed policy is a versioned bundle of rules the gate reads before the owner's remembered rules. It is used only when `permissions.engine` is `policy-engine` (restart to apply) and `policy.registryEnabled` is `true`.
 
 ```text
-/policy                        open the policy panel
-/policy load <bundle-file>     load a candidate bundle from a JSON file
-/policy simulate               rule diff and the recorded calls the candidate decides differently
-/policy diff                   rule diff, current against candidate
-/policy lint                   lint the active and candidate bundles
-/policy preflight              review proactive policy and MCP risk state
-/policy promote --yes          enforce the candidate /policy simulate showed (a candidate loaded or changed since is refused: simulate it first)
-/policy rollback               restore the previous active bundle
-/policy status
+/security policy-screen                   open the policy screen (terminal app)
+/security policy                          the bundle in force, the candidate, the history
+/security load-policy <bundle-file>       load a candidate bundle from a JSON file
+/security simulate-policy                 rule diff and the recorded calls the candidate decides differently
+/security compare-policy                  rule diff, current against candidate
+/security lint-policy                     lint the active and candidate bundles
+/security preflight                       review proactive policy and MCP risk state
+/security enforce-policy                  enforce the candidate simulate-policy showed (asks first; only you; a candidate loaded or changed since is refused: simulate it first)
+/security restore-policy                  restore the previous active bundle (asks first; only you)
 ```
 
 ### Bundle file format
@@ -671,7 +671,7 @@ A bundle is one JSON object:
 | --- | --- | --- |
 | `bundleId` | yes | A non-empty string naming this bundle version. |
 | `issuedAt` | no | ISO 8601 time the bundle was issued. Part of the signed content. |
-| `issuer` | no | Who issued it, shown in `/policy status`. Part of the signed content. |
+| `issuer` | no | Who issued it, shown in `/security policy`. Part of the signed content. |
 | `payload` | yes | `{ "version": <number>, "rules": [ ... ], "description": "<text>" }`. `rules` must be an array. |
 | `signature` | no | Hex HMAC-SHA256 of the canonical JSON of `{ bundleId, issuedAt, issuer, payload }` (keys sorted at every level, undefined fields left out). |
 
@@ -712,14 +712,14 @@ Loading and promoting it:
 /config set permissions.engine policy-engine
 /config set policy.registryEnabled true
 (restart the app)
-/policy load /home/me/policy/team.json
-/policy simulate
-/policy promote --yes
+/security load-policy /home/me/policy/team.json
+/security simulate-policy
+/security enforce-policy
 ```
 
-The managed evaluator's default for a call no rule matches is deny; that deny is reported as managed policy only when a rule decided it, so an unmatched call continues through the ordinary order. `/policy load` reports `[policy] Candidate loaded` and suggests `/policy simulate`; a refused bundle prints `[policy] Load failed: <reason>` and leaves the current and candidate bundles unchanged. A promoted bundle is recorded in `policy-activation.json` beside `permission-rules.json` and is enforced again at the next start while it is unchanged.
+The managed evaluator's default for a call no rule matches is deny; that deny is reported as managed policy only when a rule decided it, so an unmatched call continues through the ordinary order. `/security load-policy` reports `[policy] Candidate loaded` and suggests `/security simulate-policy`; a refused bundle prints `[policy] Load failed: <reason>` and leaves the current and candidate bundles unchanged. A promoted bundle is recorded in `policy-activation.json` beside `permission-rules.json` and is enforced again at the next start while it is unchanged.
 
-`policy.bundleSource` `file` with `policy.bundlePath` (absolute, or relative to the working directory) loads a bundle as a candidate at start; a bundle that cannot be read or is refused is logged and named in `/policy status`. `policy.requireSignedBundles` refuses every bundle without a valid signature made with the hex key in `GOODVIBES_POLICY_SIGNING_KEY` (at least 16 bytes, 32 hex characters; restart to apply). A bundle whose signature is present but does not verify is refused whatever this setting says. `permissions.simulation` (default on) runs the other evaluator beside the active one and records where they disagree, without changing what is enforced; `permissions.divergenceDashboard`, `permissions.divergenceThreshold` and `permissions.maxDivergenceRecords` control that record. `/policy` is a terminal-app command.
+`policy.bundleSource` `file` with `policy.bundlePath` (absolute, or relative to the working directory) loads a bundle as a candidate at start; a bundle that cannot be read or is refused is logged and named in `/security policy`. `policy.requireSignedBundles` refuses every bundle without a valid signature made with the hex key in `GOODVIBES_POLICY_SIGNING_KEY` (at least 16 bytes, 32 hex characters; restart to apply). A bundle whose signature is present but does not verify is refused whatever this setting says. `permissions.simulation` (default on) runs the other evaluator beside the active one and records where they disagree, without changing what is enforced; `permissions.divergenceDashboard`, `permissions.divergenceThreshold` and `permissions.maxDivergenceRecords` control that record. The policy actions of `/security` work in both terminal programs; the policy screen is the terminal app's.
 
 ## Workspace trust
 
@@ -732,17 +732,17 @@ Every workspace (working directory) has a trust level: `trusted`, `restricted`, 
 | undecided | Reads run. Calls settled without asking run. The first call that would ask you raises the trust question instead: "New workspace: choose a trust level", with "Trust this workspace" and "Keep restricted (read-only)". Choosing trust forwards the original ask to you. |
 
 ```text
-/trust workspace               show the level, whether it is decided, and the registration
-/trust workspace trusted       (also: trust, full, yes)
-/trust workspace restricted    (also: restrict, readonly, read-only, no)
-/trust review                  review trust posture
-/trust bundle export <path>
-/trust bundle inspect <path>
+/security folder                     show the level, whether it is decided, and the registration
+/security trust-folder               trust this folder (loosens a protection: asks first, only you)
+/security restrict-folder            restrict this folder
+/security trust                      what is trusted: permission mode, secrets, services, plugins, MCP servers
+/security save-trust <file> [--replace]
+/security read-trust <file>
 ```
 
-- Decisions are kept in `~/.goodvibes/shared/workspace-registrations.json`, one row per directory by its real path, shared by every product. A `trust.json` inside a project is not honoured; `/trust workspace` says so when it finds one.
+- Decisions are kept in `~/.goodvibes/shared/workspace-registrations.json`, one row per directory by its real path, shared by every product. A `trust.json` inside a project is not honoured; `/security folder` says so when it finds one.
 - When a decision cannot be saved, it applies to this session only and the app says it will ask again next time.
-- With nobody to answer (a headless run without `--answer-permissions`), a call that needs the trust answer is refused: `Workspace trust for <dir> is undecided and the trust question was not answered here, so the workspace stays undecided.` Fix: run `/trust workspace trusted` in the terminal app, or answer the workspace-trust prompt of a run started with `--answer-permissions`.
+- With nobody to answer (a headless run without `--answer-permissions`), a call that needs the trust answer is refused: `Workspace trust for <dir> is undecided and the trust question was not answered here, so the workspace stays undecided.` Fix: run `/security trust-folder`, or answer the workspace-trust prompt of a run started with `--answer-permissions`.
 - An unreadable trust record is treated as restricted for autonomous work until a level is chosen.
 - `goodvibes status` shows `Workspace: trust: <level>` and the registration.
 
@@ -777,26 +777,27 @@ How the sandbox affects asks: in `ask-me`, a call asked about only because of wh
 The `repl` tool is registered only where the sandbox is available; each evaluation runs as one sandboxed command.
 
 ```text
-/sandbox                       open the sandbox panel
-/sandbox review                the current boundary
-/sandbox recommend
-/sandbox profiles
-/sandbox presets
-/sandbox preset <contained|host-mcp>
-/sandbox apply-preset <contained|host-mcp>
-/sandbox set-mcp <disabled|contained>
-/sandbox probe
-/sandbox doctor
-/sandbox session list
-/sandbox session start <command|mcp-server> [--host] [label]
-/sandbox session inspect <session-id>
-/sandbox session run <session-id> <command> [args]
-/sandbox session stop <session-id>
+/security sandbox-screen                         open the sandbox screen (terminal app)
+/security sandbox                                the current boundary
+/security sandbox-advice                         what to set, and why
+/security sandbox-profiles
+/security sandbox-presets                        each preset, what it sets and its notes
+/security sandbox-probe
+/security contain-mcp                            MCP servers start inside their own boundary
+/security host-mcp                               MCP servers start as host processes (loosens a protection: asks first, only you)
+/health check sandbox                            the boundary on this host, checked
+/security sandbox-sessions
+/security start-sandbox <command|mcp-server> [--host] [name]
+/security sandbox-session <session>
+/security run-in-sandbox <session> <command line>
+/security stop-sandbox <session>
+/security save-sandbox <session> <file>
+/security read-sandbox <file>
 ```
 
-A sandbox session is contained or not started. On a host without bubblewrap, or for the `command` profile (network off) on a host whose bubblewrap cannot take the network away, `/sandbox session start` refuses and names why, with the next step (install bubblewrap). `--host` starts a host session on purpose: no boundary and the host network, whatever the profile says; the session's backend is `host` and its detail line reads `asked for with --host`.
+A sandbox session is contained or not started. On a host without bubblewrap, or for the `command` profile (network off) on a host whose bubblewrap cannot take the network away, `/security start-sandbox` refuses and names why, with the next step (install bubblewrap). `--host` starts a host session on purpose: no boundary and the host network, whatever the profile says; the session's backend is `host` and its detail line reads `asked for with --host`.
 
-`/sandbox` is a terminal-app command; in the Agent, change `sandbox.enabled`, `sandbox.judgment` and `sandbox.mcpIsolation` with `/settings set <key> <value>`, and the two list settings in the settings workspace (`/settings sandbox`). `goodvibes status` prints an `Exec sandbox:` block: `active`, `configEnabled`, `backend` (`bubblewrap`), `available`, `network: isolation confirmed`. The QEMU backend is retired; `/sandbox qemu` and the old QEMU subcommands answer that it was retired. Old settings `sandbox.qemu*`, `sandbox.vmBackend`, `sandbox.replIsolation` and `sandbox.windowsMode` are removed from a settings file on load, and a VM `sandbox.mcpIsolation` value becomes `contained`.
+The sandbox actions of `/security` work in both terminal programs; sandbox sessions and the sandbox screen are the terminal app's. In the Agent, change `sandbox.enabled` and `sandbox.judgment` with `/settings set <key> <value>`, and the two list settings in the settings workspace (`/settings sandbox`). `goodvibes status` prints an `Exec sandbox:` block: `active`, `configEnabled`, `backend` (`bubblewrap`), `available`, `network: isolation confirmed`. The QEMU backend is retired. Old settings `sandbox.qemu*`, `sandbox.vmBackend`, `sandbox.replIsolation` and `sandbox.windowsMode` are removed from a settings file on load, and a VM `sandbox.mcpIsolation` value becomes `contained`.
 
 `permissions.commandParser` (`ast` default, or `flat`) decides whether an `exec` command is parsed into segments first; `ast` refuses a command with a segment that runs nothing.
 
@@ -910,15 +911,15 @@ In `goodvibes run` and `goodvibes-agent run`, a call that needs the owner is ref
 | A tool never runs, in any mode except `yolo`: "refused by the setting permissions.tools.<x> = deny". | A per-tool deny. | `/config set permissions.tools.<x> prompt`. |
 | "refused by the saved rule ..." | A remembered deny rule. | `/permissions rules`, then revoke it. |
 | "plan mode is on and <tool> would change something". | Plan mode. | `/plan off` or Shift+Tab. |
-| Writes refused in a new directory with "Workspace trust ... is undecided". | Trust question unanswered. | `/trust workspace trusted`. |
-| Writes refused: "Explicit restricted workspace forbids this operation". | Workspace set to restricted. | `/trust workspace trusted`. |
+| Writes refused in a new directory with "Workspace trust ... is undecided". | Trust question unanswered. | `/security trust-folder`. |
+| Writes refused: "Explicit restricted workspace forbids this operation". | Workspace set to restricted. | `/security trust-folder`. |
 | A request from Slack never runs in `yolo`. | A channel request always needs the owner's answer. | Answer it in the terminal app, the web UI or the conversation; or ask from the terminal. |
 | A request from email, a webhook or ntfy is refused. | Those surfaces cannot direct changes. | Ask from the terminal, Telegram or another owned surface. |
 | `just-vibes` finished without doing some steps. | They were held. | `/held`, `/held approve <id>`, then ask to carry on. |
 | "Decision model ... failing" once, then work continues. | `Hybrid` fell back. | Fix the endpoint or key named in the notice; the app says when it answers again. |
 | Work stops with a decision-model error. | `Decision Model Only` and the model failed. | Fix the model, or `/config set judgment.policy Hybrid`. |
 | Commands have no network. | The exec sandbox turns it off. | Add every command of the line to `sandbox.egressAllowlist`, and have a working decision model: without one the sandbox never opens the network. |
-| A contained MCP server does not start. | `sandbox.mcpIsolation` is `contained` and bubblewrap is missing. | Install bubblewrap, or `/sandbox set-mcp disabled`. |
+| A contained MCP server does not start. | `sandbox.mcpIsolation` is `contained` and bubblewrap is missing. | Install bubblewrap, or `/security host-mcp`. |
 
 ## Settings reference for this part
 

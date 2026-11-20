@@ -457,7 +457,7 @@ export class McpRegistry {
     const entry = effective.servers.find((candidate) => candidate.server.name === serverName);
     if (!entry) {
       const held = effective.held?.find((candidate) => candidate.server.name === serverName);
-      if (held) throw new Error(`it is named in ${held.source.path}, a file in this workspace, which you have not trusted, so it is not started. Run /trust workspace trusted to start it.`);
+      if (held) throw new Error(`it is named in ${held.source.path}, a file in this workspace, which you have not trusted, so it is not started. Run /security trust-folder to start it.`);
       return;
     }
     await this.connectServer(entry.server);

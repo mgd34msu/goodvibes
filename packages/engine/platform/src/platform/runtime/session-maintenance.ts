@@ -128,7 +128,7 @@ export function evaluateSessionMaintenance(input: SessionMaintenanceInput): Sess
       reasons.push(`Only ${remainingTokens.toLocaleString()} tokens remain before the window edge.`);
     }
     if (autoCompactEnabled) reasons.push('Auto-compact runs before the next turn.');
-    nextSteps.push('/compact', '/panel tokens');
+    nextSteps.push('/compact', '/usage');
   } else if ((warningsEnabled && usagePct >= Math.max(70, autoCompactEnabled ? thresholdPct - 10 : 70)) || staleByMessageGrowth) {
     level = 'watch';
     reasons.push(staleByMessageGrowth
@@ -136,7 +136,7 @@ export function evaluateSessionMaintenance(input: SessionMaintenanceInput): Sess
       : autoCompactEnabled
         ? `Context usage is climbing toward the ${thresholdPct}% auto-compact threshold.`
         : `Context usage is high (${usagePct}%) and auto-compaction is off.`);
-    nextSteps.push('/panel tokens');
+    nextSteps.push('/usage');
     if (guidanceMode === 'guided') nextSteps.push('/context');
   } else {
     reasons.push('Context pressure is currently within the stable operating band.');

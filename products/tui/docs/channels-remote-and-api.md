@@ -146,34 +146,34 @@ Key remote API paths:
 
 A dispatched runner is an external agent that runs its own tools, so its tool ceiling is held at the one place this side decides: its permission asks. The runner is told its tools in its prompt, and an ask for a call outside them (a command from a runner without `exec`, an edit from a read-only one; a call of unknown kind counts as a command) is answered with a refusal before you or Jev are asked, and the reason is kept on the runner. A runner given a write scope has an edit outside it, or any command, refused the same way. `/remote contract <runner>` shows the tools and scope it is held to.
 
-## /channel command
+## /channels command
 
-The `/channel` command gives in-session visibility into the channel runtime state.
+`/channels` is one command in both terminal programs; `/channels` alone lists its actions, and a model or script running it bare gets "See your channels". In this app:
 
-| Invocation | Output |
+| Line | What you get |
 |---|---|
-| `/channel` | Opens the Routes view in the TUI |
-| `/channel panel` | Same as above |
-| `/channel pair [surface]` | Guided channel pairing: lists adapters, asks for every missing required value (optional ones can be skipped with Enter), enables the surface once every required value is set or says which are missing; `/channel pair <surface> verify` sends a real test message |
-| `/channel status` | Builds a full integration review (routes, delivery, sessions, tasks, pending approvals) |
-| `/channel routes` | Raw route binding snapshot from the integration helper service |
-| `/channel delivery` | Current delivery snapshot: per-route delivery counts and last-error state |
-| `/channel policy [surface]` | The daemon's ingress rules for each surface (who may reach the assistant: direct messages, groups, threads, mention, allowlists, allowed commands), with whether the surface is enabled in settings |
-| `/channel policy set <surface> [--enabled on\|off] [--require-mention on\|off] [--dm-policy allow\|deny\|inherit] [--group-policy allow\|deny\|inherit] [--allow-users a,b\|none] ...` | Change those rules through the daemon; asks once first, because it changes who has access |
-| `/channel profiles [list\|get\|set\|delete]` | Per-channel model and permission-mode profile bindings |
+| `/channels status` | Each channel the daemon has, on or off, ready or not |
+| `/channels setup <channel>` | What a channel needs to be set up (no value shown) |
+| `/channels doctor <channel>` | The daemon's checks on a channel and the repairs it offers |
+| `/channels test <channel>` | A real test message through the daemon, with the delivered or error outcome (asks first) |
+| `/channels accounts` | The channel accounts: configured, linked, signed in |
+| `/channels rules [<channel>]` | The daemon's rules for who may reach the assistant on each channel (direct messages, groups, threads, mention, lists, allowed commands), with whether the channel is on in settings |
+| `/channels set-rules <channel> [--enabled on\|off] [--require-mention on\|off] [--dm-policy allow\|deny\|inherit] [--group-policy allow\|deny\|inherit] [--allow-users a,b\|none] ...` | Change those rules through the daemon; asks once first, because it changes who has access, and counts only when the owner types it |
+| `/channels profiles`, `profile`, `set-profile`, `remove-profile` | Per-channel model, provider and permission mode |
+| `/channels overview` | What the channels carry: route families, sessions, tasks, waiting approvals, remote contracts |
+| `/channels routes` | The route binding snapshot |
+| `/channels delivery` | The delivery snapshot: per-route delivery counts and last-error state |
+| `/channels open` | Opens the Routes view |
+| `/channels telegram-cursor` | Recover the Telegram update cursor |
 
-`status`, `routes`, `delivery`, and `policy` accept `--json` for
-machine-readable output; `pair` and `profiles` are interactive/CRUD
-subcommands and do not take it.
+The Agent's own actions (`readiness`, `configured`, `guide`, `triage`, `send`, `deliveries`) are refused here, saying so. Pairing a channel (asking for every missing required value, then switching it on) is "Pair something" under `/devices`: `/devices pair channel <channel>`.
 
 Examples:
 
 ```
-/channel routes
-/channel status --json
-/channel delivery
-/channel policy slack
-/channel policy set slack --require-mention on --allow-users U123,U456
+/channels routes
+/channels rules slack
+/channels set-rules slack --require-mention on --allow-users U123,U456
 ```
 
 ## GitHub event narration
@@ -206,7 +206,7 @@ When a turn or agent task runs longer than the configured threshold, GoodVibes f
 
 ### Configuration
 
-Set `behavior.notifyAfterSeconds` in `/config behavior` (or `settings.json`):
+Set `behavior.notifyAfterSeconds` in `/config open behavior` (or `settings.json`):
 
 ```json
 {

@@ -9,7 +9,7 @@ This part covers work that runs without a conversation (scheduled routines, supe
 - Settings under `surfaces.`, `payments.`, `occasions.` and the other daemon-owned prefixes are written to the daemon's settings file, `~/.goodvibes/daemon/settings.json`, whichever app writes them.
 - How to change a setting:
   - Terminal app: `/settings <key>` opens the settings workspace at that key, and `/config set <key> <value>` writes it directly. The value is read as JSON when it parses (`true`, `5`, `["a","b"]`, `{"k":1}`, `"quoted text"`); otherwise it is taken as text.
-  - Agent: `/settings <key>` opens the workspace, and `/settings set <key> <value>` writes text, numbers, `true`/`false` and enum words. The Agent has no `/config set` (its `/config` only opens the workspace), and `/settings set` takes no JSON list or object: set those in the workspace.
+  - Agent: `/settings <key>` opens the workspace, and `/settings set <key> <value>` writes text, numbers, `true`/`false` and enum words. In the Agent `/config set` is refused and names the settings screen (`/config open <key>` opens it), and `/settings set` takes no JSON list or object: set those in the workspace.
   - Daemon command line: `goodvibes-daemon config set <key> <value>` (JSON or text, as the terminal app).
 
   The examples in this part use the terminal app's `/config set`; in the Agent type `/settings set` with the same key and value.
@@ -405,7 +405,7 @@ Status failures and fixes:
 | --- | --- | --- |
 | `EMAIL_NOT_CONFIGURED` | Host or user missing. | Steps 1 and 2 above. |
 | `EMAIL_CREDENTIALS_MISSING` | Password secret missing. | `/secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD <password>` |
-| unreachable | The daemon cannot be reached. | Check the daemon with `/doctor` and `goodvibes status`. |
+| unreachable | The daemon cannot be reached. | Check the daemon with `/health` and `goodvibes status`. |
 
 ### Mailbox settings in the Agent: `/mail settings`, `/mail set`, `/mail password`
 
@@ -688,7 +688,7 @@ Each surface has an ingress policy.
 /channels set-rules matrix --allow-users none
 ```
 
-`/channels set-rules` options: `--enabled`, `--require-mention`, `--allow-dms`, `--allow-groups`, `--allow-threads`, `--commands-without-mention` take `on` or `off`; `--dm-policy` and `--group-policy` take `allow`, `deny` or `inherit`; `--allow-users`, `--allow-channels`, `--allow-group-ids`, `--allowed-commands` take a comma list or `none`. A list replaces the whole stored list on every surface, so to remove one admitted sender set the list again without him (for example `/channels set-rules telegram --allow-users <your-id>`); include yourself, or you lock yourself out. `--open on` makes a shared channel: while every list is empty, every sender is admitted and no owner claim is raised (off by default); everyone on it talks as a guest. The operator method `channels.policies.update` takes the same field as `open`, and `channels.policies.list` reports it.
+`/channels set-rules` asks first and counts only when the owner types it (it decides who may reach the assistant). Options: `--enabled`, `--require-mention`, `--allow-dms`, `--allow-groups`, `--allow-threads`, `--commands-without-mention`, `--open` take `on` or `off`; `--dm-policy` and `--group-policy` take `allow`, `deny` or `inherit`; `--allow-users`, `--allow-channels`, `--allow-group-ids`, `--allowed-commands` take a comma list or `none`. A list replaces the whole stored list on every surface, so to remove one admitted sender set the list again without him (for example `/channels set-rules telegram --allow-users <your-id>`); include yourself, or you lock yourself out. `--open on` makes a shared channel: while every list is empty, every sender is admitted and no owner claim is raised (off by default); everyone on it talks as a guest. The operator method `channels.policies.update` takes the same field as `open`, and `channels.policies.list` reports it.
 
 A message names a command only when its first word is written as one (`/status`, `!status`, `/status@yourbot`); `allowedCommands` limits those.
 

@@ -609,7 +609,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     label: 'external-services',
     run: async () => {
       // Register the persistent companion-pairing token as the daemon's shared
-      // bearer, so tokens scanned from the /qrcode modal's QR actually
+      // bearer, so tokens scanned from the pairing modal's QR (/devices pair device) actually
       // authenticate against the daemon this surface adopts.
       const daemonHomeDir = resolveGoodVibesDaemonHome(services.homeDirectory);
       const companionTokenRecord = resolveDaemonCompanionToken(daemonHomeDir, GOODVIBES_TUI_SURFACE_ROOT);

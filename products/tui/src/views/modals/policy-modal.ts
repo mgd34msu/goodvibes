@@ -26,7 +26,7 @@ import type {
 // gate, history, permission audit, lint findings, preflight review, and
 // simulation samples render as non-selectable rows (the host windows/scrolls
 // them). EVERY dispatchable key in the original view (s/f/l/p/b) already
-// routed to `/policy <sub>` via executeCommand, none were in-view mutations.
+// routes to a `/security` policy action via executeCommand, none are in-view mutations.
 // Promote and rollback change the active enforcement bundle, so they use the
 // host's standard second-press confirm (like device revoke and sandbox stop). Determinism:
 // timestamps are formatted (fmtTime/fmtRate), never read from the clock.
@@ -121,7 +121,7 @@ class PolicyModalSurface implements ConfigModalSurface {
       push('No policy bundles loaded.');
       push('Bundle: none active, none candidate. Gate: n/a.', DIM);
       push('Get started');
-      push('/policy load: load a policy bundle to begin governance review', DIM);
+      push('/security load-policy <file>: load a policy bundle to begin governance review', DIM);
       return { title: 'Policy And Governance', tabs: [{ id: 'governance', label: 'Governance', header, rows, emptyText: '' }] };
     }
 
@@ -200,13 +200,16 @@ class PolicyModalSurface implements ConfigModalSurface {
   }
 
   onAction(id: string, ctx: ConfigModalActionContext): void {
-    // "Rollout" in the WO brief maps to the registry's actual subcommand,
-    // there is no separate `/policy rollout`.
-    const sub = id === 'simulate' ? 'simulate' : id === 'preflight' ? 'preflight' : id === 'lint' ? 'lint' : id === 'promote' ? 'promote' : id === 'rollback' ? 'rollback' : null;
-    if (!sub) return;
-    // The modal's own confirmation on promote is the operator's yes to the changes simulate showed.
-    const args = sub === 'promote' ? [sub, '--yes'] : [sub];
-    runModalCommand(ctx, 'policy', args, `/policy ${args.join(' ')}`);
+    // Each key runs the matching `/security` policy action. Enforce and go
+    // back change the policy in force, so they use the host's second-press
+    // confirm; that confirmation is the operator's yes to what simulate showed.
+    const word: Readonly<Record<string, string>> = {
+      simulate: 'simulate-policy', preflight: 'preflight', lint: 'lint-policy', promote: 'enforce-policy', rollback: 'restore-policy',
+    };
+    const action = word[id];
+    if (!action) return;
+    const args = id === 'promote' || id === 'rollback' ? [action, '--yes'] : [action];
+    runModalCommand(ctx, 'security', args, `/security ${args.join(' ')}`);
   }
 }
 

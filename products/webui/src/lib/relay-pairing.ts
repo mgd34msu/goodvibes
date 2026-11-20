@@ -14,10 +14,11 @@
  * like the token pairing flow, and for the same reason: a `#`-fragment is never sent
  * to a server, so the payload never lands in an access log or a Referer header. The
  * relay docs call the payload itself "treat it like a credential", whoever holds a
- * valid one can reach the daemon through the relay, so it is stored locally, not
- * transmitted anywhere else, and can be cleared like a token.
+ * valid one can reach the daemon through the relay, so it is held in this page's
+ * memory only (a reload forgets it), never transmitted anywhere else, and cleared
+ * with the sign-in.
  *
- * Once stored, the platform client construction (lib/goodvibes.ts / lib/relay-connection.ts)
+ * Once held, the platform client construction (lib/goodvibes.ts / lib/relay-connection.ts)
  * picks it up and uses it to build a relay-backed `fetch` for whenever the direct
  * connection is unreachable, see relay-connection.ts's routedFetch.
  *
@@ -30,15 +31,12 @@ import {
   encodeRelayPairingString,
   type RelayPairingPayload,
 } from '@goodvibes-jev/engine/transport-core/relay';
-import { invalidateClientLifetime, RELAY_PAIRING_STORAGE_KEY } from './client-lifetime';
-export { RELAY_PAIRING_STORAGE_KEY } from './client-lifetime';
+import { noteRelayPairingChanged } from './client-lifetime';
 
 export type { RelayPairingPayload };
 
 /** The fragment key the relay pairing link uses: `#relay=<gvrelay1.…>`. */
 export const RELAY_PAIRING_FRAGMENT_KEY = 'relay';
-
-/** localStorage key the pairing payload is persisted under (JSON of RelayPairingPayload). */
 
 /**
  * Extract a relay pairing code from a URL hash string (`window.location.hash`), or
@@ -83,77 +81,19 @@ export function decodeRelayPairingCode(code: string): RelayPairingPayload {
 export { encodeRelayPairingString };
 
 // ---------------------------------------------------------------------------
-// Local persistence
+// Held for the life of the page
 // ---------------------------------------------------------------------------
 
-function hasStorage(): boolean {
-  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
-}
-
 /**
- * A locally-detected notice (corrupt stored data, not a daemon-origin one), consumed
- * once, surfaced through the SAME one-line dismissible notice component
- * DaemonReceipts.tsx already renders for the daemon's own receipts
- * (useDaemonReceipts.ts merges this in), since both are the same kind of thing to an
- * operator: a plain line about something that happened, with a dismiss button.
- * Session-scoped (not persisted) and cleared after being read once via
- * takeRelayPairingCorruptionNotice.
+ * The pairing carries this device's relay code, a credential, so it is held in memory
+ * only: never in localStorage, sessionStorage or IndexedDB. A reload forgets it, and the
+ * relay route then asks for the relay code and a sign-in again.
  */
-let corruptionNotice: { readonly id: string; readonly text: string; readonly at: number } | null = null;
+let heldPairing: RelayPairingPayload | null = null;
 
-/** Consume the pending corruption notice, if any. Returns null every call after the first. */
-export function takeRelayPairingCorruptionNotice(): { readonly id: string; readonly text: string; readonly at: number } | null {
-  const notice = corruptionNotice;
-  corruptionNotice = null;
-  return notice;
-}
-
-/**
- * A pairing storage refused to keep (private mode, full quota). It still serves this
- * session, so a scan that cannot be saved is not a scan that silently does nothing.
- */
-let sessionPairing: RelayPairingPayload | null = null;
-
-/** Read the stored relay pairing, or null if none is stored or it fails to parse. */
+/** The relay pairing this page holds, or null. */
 export function getStoredRelayPairing(): RelayPairingPayload | null {
-  if (sessionPairing !== null) return sessionPairing;
-  if (!hasStorage()) return null;
-  try {
-    const raw = window.localStorage.getItem(RELAY_PAIRING_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      typeof parsed !== 'object' || parsed === null
-      || typeof (parsed as Record<string, unknown>).relayUrl !== 'string'
-      || typeof (parsed as Record<string, unknown>).rid !== 'string'
-      || typeof (parsed as Record<string, unknown>).daemonPublicKey !== 'string'
-      || typeof (parsed as Record<string, unknown>).code !== 'string'
-    ) {
-      console.warn('[relay-pairing] stored relay pairing record has an unrecognized shape, discarding it and treating this device as unpaired.');
-      window.localStorage.removeItem(RELAY_PAIRING_STORAGE_KEY);
-      corruptionNotice = {
-        id: `relay-pairing-corrupt-${Date.now()}`,
-        text: 'Your saved relay connection details could not be read and were reset. Pair again if you reach this daemon through the relay.',
-        at: Date.now(),
-      };
-      return null;
-    }
-    return parsed as RelayPairingPayload;
-  } catch (error) {
-    console.warn('[relay-pairing] stored relay pairing record failed to parse, discarding it and treating this device as unpaired.', error);
-    try {
-      window.localStorage.removeItem(RELAY_PAIRING_STORAGE_KEY);
-    } catch {
-      // Storage already unusable (e.g. this catch fired because of a storage-access
-      // failure, not a parse failure), nothing more can be done here.
-    }
-    corruptionNotice = {
-      id: `relay-pairing-corrupt-${Date.now()}`,
-      text: 'Your saved relay connection details could not be read and were reset. Pair again if you reach this daemon through the relay.',
-      at: Date.now(),
-    };
-    return null;
-  }
+  return heldPairing;
 }
 
 /** What an operator needs to see before a scanned relay pairing is stored. */
@@ -191,33 +131,18 @@ export function describeRelayPairingForConfirmation(
   return { relayHost, fingerprint, replacesExisting };
 }
 
-/** Persist a relay pairing payload for this device. */
+/** Hold a relay pairing for this page. */
 export function storeRelayPairing(payload: RelayPairingPayload): void {
-  if (!hasStorage()) {
-    sessionPairing = payload;
-    invalidateClientLifetime();
-    return;
-  }
-  const serialized = JSON.stringify(payload);
-  try {
-    if (sessionPairing === null && window.localStorage.getItem(RELAY_PAIRING_STORAGE_KEY) === serialized) return;
-    window.localStorage.setItem(RELAY_PAIRING_STORAGE_KEY, serialized);
-    sessionPairing = null;
-  } catch {
-    sessionPairing = payload;
-  }
-  invalidateClientLifetime();
+  const held = heldPairing;
+  if (held !== null && held.relayUrl === payload.relayUrl && held.rid === payload.rid
+    && held.daemonPublicKey === payload.daemonPublicKey && held.code === payload.code) return;
+  heldPairing = payload;
+  noteRelayPairingChanged();
 }
 
-/** Clear the stored relay pairing, this device no longer has a relay route to any daemon. */
+/** Forget the relay pairing: this page no longer has a relay route to any daemon. */
 export function clearStoredRelayPairing(): void {
-  sessionPairing = null;
-  if (hasStorage()) {
-    try {
-      window.localStorage.removeItem(RELAY_PAIRING_STORAGE_KEY);
-    } catch {
-      // Storage is unusable; the in-memory pairing is already gone, which is all that remains to clear.
-    }
-  }
-  invalidateClientLifetime();
+  if (heldPairing === null) return;
+  heldPairing = null;
+  noteRelayPairingChanged();
 }

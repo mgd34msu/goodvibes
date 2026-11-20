@@ -22,20 +22,20 @@ export class HostPairingController extends TerminalHostPairingController<Pairing
         },
         format: formatTuiHostPairing,
         readRecovery: readTuiHostPairing,
-        command: '/host pair',
+        command: '/devices pair host',
         pairedRecovery: (host) =>
           formatTuiHostPairing({
             status: 'paired-unverified',
             host,
             message:
-              'Pairing credential stored for this host. Verification was interrupted; rerun /host pair. No second credential will be created.',
+              'Pairing credential stored for this host. Verification was interrupted; rerun /devices pair host. No second credential will be created.',
           }),
         unknownRecovery: (host) =>
           formatTuiHostPairing({
             status: 'unknown',
             host,
             message:
-              'The reply to a pairing request was lost. Run /host pair --bootstrap-shared to repeat the same request: the host answers it with the credential it made, never a second one. Or run /host pair --apply to forget the attempt and pair from scratch.',
+              'The reply to a pairing request was lost. Run /devices pair host --bootstrap-shared to repeat the same request: the host answers it with the credential it made, never a second one. Or run /devices pair host --apply to forget the attempt and pair from scratch.',
           }),
       },
       ui,

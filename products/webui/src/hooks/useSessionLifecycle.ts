@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../lib/client-lifetime';
-import { hasStoredTokenSync, client as platformClient } from '../lib/goodvibes';
+import { hasSignInSync, client as platformClient } from '../lib/goodvibes';
 import { formatError, isDefiniteRefusal, serializeError } from '../lib/errors';
 import { asRecord } from '../lib/object';
 import { queryKeys } from '../lib/queries';
@@ -90,7 +90,7 @@ export function useSessionLifecycle(id: string, onClose: () => void) {
   useEffect(() => {
     onCloseRef.current = onClose;
   });
-  const current = () => isClientLifetimeCurrent(lifetime) && hasStoredTokenSync();
+  const current = () => isClientLifetimeCurrent(lifetime) && hasSignInSync();
 
   const show = (next: Phase, text?: string) => {
     if (!mounted.current || !current()) return;

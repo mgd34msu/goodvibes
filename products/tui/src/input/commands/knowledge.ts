@@ -1,78 +1,33 @@
-import { handleKnowledgeMutationCommand } from '@goodvibes-jev/engine/terminal-shell/knowledge-mutation-command';
-import { handleKnowledgeReadCommand } from '@goodvibes-jev/engine/terminal-shell/knowledge-read-command';
-import { readKnowledgeAskArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
+/**
+ * `/knowledge` in the terminal app (terminal-shell/knowledge-command.ts): the
+ * app's own structured knowledge, its knowledge view, and its way of printing.
+ */
+import { registerKnowledgeCommand } from '@goodvibes-jev/engine/terminal-shell/knowledge-command';
 import { createKnowledgeAnswerRenderer } from '@goodvibes-jev/engine/terminal-shell/knowledge-answer';
-import '@goodvibes-jev/engine/terminal-shell/command-arguments';
 import { createKnowledgeLabels } from '@goodvibes-jev/engine/terminal-shell/knowledge-labels';
-const { nodeLabel } = createKnowledgeLabels(' confidence=');
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import type { KnowledgeService } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import type { CommandContext, SlashCommand } from '../command-registry.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+
+const { nodeLabel } = createKnowledgeLabels(' confidence=');
 
 type KnowledgeAskInput = Parameters<KnowledgeService['ask']>[0];
 type KnowledgeAskResult = Awaited<ReturnType<KnowledgeService['ask']>>;
 
-function requireKnowledgeApi(context: CommandContext) {
-  const knowledgeApi = context.clients?.knowledgeApi;
-  if (!knowledgeApi) {
-    context.print('[knowledge] Knowledge API is not available in this runtime.');
-    return null;
-  }
-  return knowledgeApi;
-}
-
-function requireKnowledgeAsk(context: CommandContext): ((input: KnowledgeAskInput) => Promise<KnowledgeAskResult>) | null {
+function askOf(context: CommandContext): ((input: KnowledgeAskInput) => Promise<KnowledgeAskResult>) | undefined {
   const serviceAsk = context.extensions.knowledgeService?.ask?.bind(context.extensions.knowledgeService);
   if (serviceAsk) return serviceAsk;
-
-  const clientAsk = (
-    context.clients?.knowledgeApi as unknown as { ask?: (input: KnowledgeAskInput) => Promise<KnowledgeAskResult> } | undefined
-  )?.ask;
-  if (clientAsk) return clientAsk;
-
-  context.print('[knowledge] Knowledge ask is not available in this runtime.');
-  return null;
+  return (context.clients?.knowledgeApi as unknown as { ask?: (input: KnowledgeAskInput) => Promise<KnowledgeAskResult> } | undefined)?.ask;
 }
 
-const renderKnowledgeAskResult = createKnowledgeAnswerRenderer({ nodeLabel, separator: ': ' });
-
-export const knowledgeCommand: SlashCommand = {
-  name: 'knowledge',
-  aliases: ['know'],
-  description: 'Structured knowledge graph: ingest URLs/bookmarks, inspect issues, and build compact prompt packets',
-  usage: '<subcommand> [args]',
-  // Letting an ingest fetch from private hosts loosens the network guard, so that line asks once.
-  confirm(args) {
-    const sub = (args[0] ?? '').toLowerCase();
-    if ((sub !== 'ingest-url' && sub !== 'import-urls' && sub !== 'import-bookmarks') || !args.includes('--allow-private-hosts')) return undefined;
-    return {
-      title: 'Let this import fetch from private network hosts?',
-      detail: `${sub === 'ingest-url' ? 'The address' : 'Every address in the list'} may then be fetched from addresses on your local network or this machine, which ingests normally refuse.`,
-      confirmLabel: 'Allow',
-    };
-  },
-  argsHint:
-    'status|ask|ingest-url|import-bookmarks|import-urls|list|search|get|queue|review-issue|candidates|reports|schedules|lint|packet|explain|reindex|consolidate|cancel-run',
-  handler: async (args: string[], context: CommandContext): Promise<void> => {
-    const knowledge = requireKnowledgeApi(context);
-    if (!knowledge) {
-      return;
-    }
-    if (args.length === 0 && context.openKnowledgeView) {
-      context.openKnowledgeView();
-      return;
-    }
-    const sub = (args[0] ?? 'status').toLowerCase();
-    const rest = args.slice(1);
-    // A knowledge read does not depend on the transcript: its answer is printed
-    // once, in the session that asked for it.
-    const sessionId = context.session.runtime.sessionId;
-    const print = (text: string): void => context.print(text);
-
-    const answer = await handleKnowledgeReadCommand(
-      sub,
-      rest,
-      {
+export function registerKnowledgeRuntimeCommands(registry: CommandRegistry): void {
+  registerKnowledgeCommand<CommandContext>(registry, {
+    ports(ctx) {
+      const knowledge = ctx.clients?.knowledgeApi;
+      if (!knowledge) throw commandRefusal('[knowledge] Knowledge is not available in this session.');
+      // A knowledge answer is printed once, in the session that asked for it.
+      const sessionId = ctx.session.runtime.sessionId;
+      return {
         status: () => knowledge.status.get(),
         nodes: (limit) => knowledge.graph.nodes.list(limit),
         issues: (limit) => knowledge.graph.issues.list(limit),
@@ -84,86 +39,33 @@ export const knowledgeCommand: SlashCommand = {
         reports: (limit) => knowledge.consolidation.reports(limit),
         schedules: (limit) => knowledge.jobs.schedules.list(limit),
         packet: (query, scopes) => knowledge.packets.buildPrompt(query, scopes),
-      },
-      {
-        statusTitle: '[knowledge] Structured knowledge status',
-        headingSuffix: ':',
-        fieldSeparator: ': ',
-        scoreSeparator: '=',
-        nodeKind: 'kind',
-      },
-    );
-    if (answer) {
-      print(
-        context.session.runtime.sessionId === sessionId
-          ? answer.join('\n')
-          : `[knowledge] The session changed while /knowledge ${sub} was reading, so its answer is not shown here. Run it again.`,
-      );
-      return;
-    }
-    if (
-      await handleKnowledgeMutationCommand(
-        sub,
-        rest,
-        print,
-        {
-          sessionId: () => sessionId,
-          url: (input) => knowledge.ingest.url(input),
-          bookmarksFile: (input) => knowledge.ingest.bookmarksFile(input),
-          urlsFile: (input) => knowledge.ingest.urlsFile(input),
-          review: (input) => knowledge.graph.issues.review(input),
-          reindex: () => knowledge.status.reindex(),
-          run: (id, options) => knowledge.jobs.run(id, options),
-          runs: (limit, jobId) => knowledge.jobs.runs(limit, jobId),
-          cancelRun: (runId) => knowledge.jobs.cancelRun(runId),
-          describeError: summarizeError,
-        },
-        { fieldSeparator: ': ', reviewer: 'tui', sourceLabel: 'source' },
-      )
-    )
-      return;
-    switch (sub) {
-      case 'ask': {
-        const ask = requireKnowledgeAsk(context);
-        if (!ask) return;
-        const input = readKnowledgeAskArguments(rest, true);
-        const query = input.query;
-        if (!query) {
-          print(
-            '[knowledge] Usage: /knowledge ask <query> [--space <knowledgeSpaceId>] [--limit <n>] [--mode <concise|standard|detailed>]',
-          );
-          return;
-        }
-        const result = await ask(input);
-        print(renderKnowledgeAskResult(result));
-        break;
-      }
-
-      default:
-        print(
-          [
-            'Usage: /knowledge <subcommand>',
-            '  status',
-            '  ask <query> [--space <knowledgeSpaceId>] [--limit <n>] [--mode <concise|standard|detailed>]',
-            '  ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>] [--allow-private-hosts]',
-            '  import-bookmarks <path> [--allow-private-hosts]',
-            '  import-urls <path> [--allow-private-hosts]',
-            '  list [--kind <sources|nodes|issues>] [--limit <n>]',
-            '  search <query> [--limit <n>]',
-            '  get <id>',
-            '  queue [limit]',
-            '  review-issue <issueId> <accept|reject|resolve|reopen|edit|forget> [--reviewer <name>] [--value <json-object>]',
-            '  candidates [limit]',
-            '  reports [limit]',
-            '  schedules',
-            '  lint',
-            '  packet <task...> [--scope <path> ...]',
-            '  explain <task...> [--scope <path> ...]',
-            '  reindex',
-            '  consolidate [light|deep]',
-            '  cancel-run [runId]',
-          ].join('\n'),
-        );
-    }
-  },
-};
+        url: (input) => knowledge.ingest.url(input),
+        bookmarksFile: (input) => knowledge.ingest.bookmarksFile(input),
+        urlsFile: (input) => knowledge.ingest.urlsFile(input),
+        review: (input) => knowledge.graph.issues.review(input),
+        reindex: () => knowledge.status.reindex(),
+        run: (id, options) => knowledge.jobs.run(id, options),
+        runs: (limit, jobId) => knowledge.jobs.runs(limit, jobId),
+        cancelRun: (runId) => knowledge.jobs.cancelRun(runId),
+        ask: askOf(ctx),
+        sessionId: () => sessionId,
+      };
+    },
+    open(ctx) {
+      if (!ctx.openKnowledgeView) throw commandRefusal('The knowledge view is not available in this session.', '/knowledge status shows how it stands.');
+      ctx.openKnowledgeView();
+    },
+    presentation: {
+      statusTitle: '[knowledge] Structured knowledge',
+      headingSuffix: ':',
+      fieldSeparator: ': ',
+      scoreSeparator: '=',
+      nodeKind: 'kind',
+      reviewer: 'tui',
+      sourceLabel: 'source',
+      renderAsk: createKnowledgeAnswerRenderer({ nodeLabel, separator: ': ' }),
+    },
+    spacesRefused: undefined,
+    more: { unavailable: 'Files, artifacts, browser history, connectors and the map are Agent Knowledge\'s; in the terminal app add pages with /knowledge ingest-url or import-urls.' },
+  });
+}

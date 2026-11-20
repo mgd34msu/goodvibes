@@ -10,7 +10,7 @@
  * actually does:
  *
  *   - Migrate this browser, mints a fresh, named token for THIS session and
- *     immediately swaps the stored auth token to it (setExplicitAuthToken), so
+ *     immediately swaps this browser's sign-in to it (setExplicitAuthToken), so
  *     a browser still relying on the legacy shared token gets its own without
  *     ever being signed out mid-flow.
  *   - Revoke the shared token, gated by a danger confirm naming the exact

@@ -10,7 +10,10 @@
  * in /config's Automation group is never the only place this feature's
  * behavior is visible.
  */
-import type { CommandRegistry } from '../command-registry.ts';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { readAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 
@@ -37,53 +40,52 @@ export function renderReceipt(receipt: CheckinReceipt): string {
   return parts.join('\n');
 }
 
+function rpcOf(ctx: CommandContext) {
+  const rpc = getOperatorRpc(ctx);
+  if (!rpc.available) throw commandRefusal(rpc.reason);
+  return rpc;
+}
+
 export function registerCheckinRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
+  registry.register(defineCommand<CommandContext>({
     name: 'checkin',
-    description: 'Proactive check-in: view config + recent receipts, or trigger one now',
-    usage: '[run]',
-    argsHint: '[run]',
-    async handler(args, ctx) {
-      const rpc = getOperatorRpc(ctx);
-      if (!rpc.available) {
-        ctx.print(`[checkin] ${rpc.reason}`);
-        return;
-      }
-
-      if (args[0] === 'run') {
-        try {
-          const result = await rpc.platformClient.operator.invoke('checkin.run', {});
-          const lines = [`[checkin run] outcome: ${result.outcome}`, `  ${result.summary}`];
-          if (result.deliveryId) lines.push(`  delivery id: ${result.deliveryId}`);
-          ctx.print(lines.join('\n'));
-        } catch (error) {
-          ctx.print(`[checkin run] ${describeOperatorRpcError(error)}`);
-        }
-        return;
-      }
-
-      if (args.length > 0) {
-        ctx.print('Usage: /checkin [run]');
-        return;
-      }
-
-      try {
-        const [{ config }, { receipts }] = await Promise.all([
-          rpc.platformClient.operator.invoke('checkin.config.get', {}),
-          rpc.platformClient.operator.invoke('checkin.receipts.list', { limit: 10 }),
-        ]);
-        const lines = [renderConfig(config), ''];
-        if (receipts.length === 0) {
-          lines.push('No check-in receipts yet.');
-        } else {
-          lines.push('Recent receipts:');
-          lines.push(...receipts.map(renderReceipt));
-        }
-        lines.push('', '  /checkin run: trigger one now');
-        ctx.print(lines.join('\n'));
-      } catch (error) {
-        ctx.print(`[checkin] ${describeOperatorRpcError(error)}`);
-      }
-    },
-  });
+    title: 'Check-ins',
+    summary: 'The proactive check-in: its settings and what each one did, or one now',
+    group: 'Automation',
+    report: 'status',
+    actions: [
+      readAction<CommandContext>({
+        id: 'status', label: 'See check-in settings and what they did', word: 'status',
+        sentence: 'Shows whether check-ins are on, when they run and where they go, and the last ten check-ins: quiet, delivered or skipped.',
+        operator: { method: 'checkin.receipts.list', fields: {} },
+        async run(_values, ctx) {
+          const rpc = rpcOf(ctx);
+          try {
+            const [{ config }, { receipts }] = await Promise.all([
+              rpc.platformClient.operator.invoke('checkin.config.get', {}),
+              rpc.platformClient.operator.invoke('checkin.receipts.list', { limit: 10 }),
+            ]);
+            return [renderConfig(config), '', ...(receipts.length === 0 ? ['No check-ins yet.'] : ['Recent check-ins:', ...receipts.map(renderReceipt)]), '', '  Change them in /settings (Automation); check in now: /checkin run'].join('\n');
+          } catch (error) {
+            throw commandRefusal(describeOperatorRpcError(error));
+          }
+        },
+      }),
+      {
+        id: 'run', label: 'Check in now', word: 'run', inputs: [],
+        sentence: 'One check-in runs now: it reads how things stand and, when something needs you, sends a message to the check-in channel.', done: '',
+        touches: 'another-machine', lasts: 'not-a-change', risk: 'sends-out',
+        operator: { method: 'checkin.run', fields: {} }, example: {},
+        async run(_values, ctx) {
+          const rpc = rpcOf(ctx);
+          try {
+            const result = await rpc.platformClient.operator.invoke('checkin.run', {});
+            return [`Check-in: ${result.outcome}`, `  ${result.summary}`, ...(result.deliveryId ? [`  delivery ${result.deliveryId}`] : [])].join('\n');
+          } catch (error) {
+            throw commandRefusal(describeOperatorRpcError(error));
+          }
+        },
+      },
+    ],
+  }));
 }

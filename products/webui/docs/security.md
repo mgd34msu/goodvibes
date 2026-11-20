@@ -15,17 +15,30 @@ stores in browser code.
 
 ## Auth
 
-- Username/password login goes through the daemon login route, a direct
-  request without Authorization headers or cookies; only the returned browser
-  session is stored.
-- Operator tokens are accepted when pasted or scanned by the user, or handed
-  off by a `#pair=` link, and always validated against the daemon; a rejected
-  token self-clears.
+- On the direct route (the page talks to the daemon's own origin) every sign-in
+  (a username and password, a pasted or scanned code or token, a `#pair=` link)
+  is one `POST /api/browser-session`: the daemon checks what was presented and
+  binds it to an HttpOnly, SameSite=Strict cookie (Secure over TLS) that no page
+  script can read. The credential never comes back to the page; the page reads
+  only the marker beside it (`goodvibes_identity`: a fresh generation and who is
+  signed in), which is how every tab notices a sign-in or sign-out. A refused
+  code changes nothing.
+- A request that authenticates by that cookie is held to the page's origin: a
+  state-changing one must carry the daemon's own Origin (or one listed in
+  `controlPlane.cors.allowedOrigins`), and a read, the event stream included, is
+  refused when it names another origin. A page on another port of the same host
+  carries the cookie but cannot use it.
+- On the relay route the relay tunnel builds every request in the page, so the
+  bearer is held in memory only, for the life of the page, and the relay
+  pairing likewise; a reload asks for the relay code and a sign-in again.
+- Signing out ends the daemon session (`POST /logout`) and clears the cookie
+  and the marker.
 - A pairing link's one-time token is captured and stripped from the URL
   immediately, so it never lingers in the address bar or a history entry, and
   the QR scanner never renders or logs the secret it carried.
-- Browser token storage uses the platform token store key
-  `goodvibes.webui.token`.
+- Nothing token-shaped is written to localStorage, sessionStorage or IndexedDB
+  by any sign-in path. The service worker never caches an API response or any
+  response the daemon marks `no-store` or `private`.
 
 Browser code must not read or scrape:
 
@@ -39,10 +52,10 @@ credential resolution for downstream services. They are not WebUI auth tokens.
 
 ## Relay and step-up
 
-A stored relay pairing lets the app tunnel calls through a rendezvous relay
+A relay pairing held for the page lets the app tunnel calls through a rendezvous relay
 when the daemon is unreachable directly. The tunnel is end to end encrypted
 against the daemon's public key from the pairing, and the pairing itself
-carries no identity, so storing it signs nobody in. The daemon gates
+carries no identity, so holding it signs nobody in. The daemon gates
 state-changing relay calls behind a WebAuthn step-up assertion, judged by the
 operator method each call reaches rather than its HTTP verb; a state-changing
 call without a fresh assertion is refused, the passkey ceremony runs, and the

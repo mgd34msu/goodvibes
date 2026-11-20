@@ -14,7 +14,7 @@
  */
 import { useCallback, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { hasStoredTokenSync, client as platformClient } from '../lib/goodvibes';
+import { hasSignInSync, client as platformClient } from '../lib/goodvibes';
 import { isClientLifetimeCurrent, type ClientLifetime } from '../lib/client-lifetime';
 import { subscribeEvents } from '../lib/event-stream';
 import { queryKeys } from '../lib/queries';
@@ -42,7 +42,7 @@ export function useWorkPlan(lifetime: ClientLifetime, enabled: boolean) {
   const query = useQuery({
     queryKey: queryKeys.workPlanSnapshot(scope),
     queryFn: ({ signal }) => readInContractScope(lifetime, signal, () => platformClient.workPlan.snapshot()),
-    enabled: enabled && hasStoredTokenSync() && isClientLifetimeCurrent(lifetime),
+    enabled: enabled && hasSignInSync() && isClientLifetimeCurrent(lifetime),
     retry: false,
   });
 

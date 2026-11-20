@@ -162,9 +162,9 @@ function pairingRoutes(): readonly PairingRoute[] {
     {
       id: 'qr-pairing',
       label: 'QR pairing',
-      detail: 'Owner-terminal route: the user types /pair (optionally --name <device name>) in the live Agent terminal; it mints a named, revocable device token on the connected host and shows its link and QR code. Granting a new device access is the owner\'s to type, so a model invocation of /pair is refused. The device token is revoked in the web app under settings, security, devices.',
+      detail: 'Owner-terminal route: the user types /devices pair device (optionally --name <device name>) in the live Agent terminal; it mints a named, revocable device token on the connected host and shows its link and QR code. Granting a new device access is the owner\'s to type, so a model invocation of /devices pair is refused. The device token is revoked in the web app under settings, security, devices.',
       effect: 'owner-terminal-only',
-      command: '/pair',
+      command: '/devices pair device',
     },
     {
       id: 'pairing-ui',
@@ -273,7 +273,7 @@ function describeRoute(route: PairingRoute, options: {
       policy: {
         effect: route.effect,
         values: 'Pairing posture returns the endpoint binding with its advertised address, and token presence only; raw companion tokens, QR payloads and the absolute token file path are never returned by this read-only mode.',
-        mutation: 'Device pairing (/pair, which mints a device token) is an owner-terminal flow that a model cannot run. Companion connection, channel sends, provider/model changes, approval actions, and attachment flows stay explicit visible user flows.',
+        mutation: 'Device pairing (/devices pair, which mints a device token) is an owner-terminal flow that a model cannot run. Companion connection, channel sends, provider/model changes, approval actions, and attachment flows stay explicit visible user flows.',
       },
       modelAccess: {
         inspectPairing: 'agent_harness mode:"pairing_posture"',
@@ -290,7 +290,7 @@ function describeRoute(route: PairingRoute, options: {
 }
 
 function pairingRouteModelRoute(route: PairingRoute): string {
-  if (route.effect === 'owner-terminal-only') return `none for a model; ask the user to type ${route.command ?? '/pair'}`;
+  if (route.effect === 'owner-terminal-only') return `none for a model; ask the user to type ${route.command ?? '/devices pair device'}`;
   if (route.id === 'pairing-ui') return 'agent_harness mode:"workspace_action" target:"pair"';
   return previewHarnessText(route.harnessRoute ?? 'agent_harness mode:"pairing_route"');
 }
@@ -406,20 +406,20 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
       status: controlPlaneReady ? 'ready' : hasToken && endpointEnabledUnknown(state) ? 'attention' : 'setup-needed',
       userOutcome: 'Pair a phone or companion surface without exposing the raw operator token in chat.',
       summary: controlPlaneReady
-        ? 'A connected-host operator token is present and the control plane is enabled; pairing is an owner-terminal flow the user starts with /pair, which mints a named, revocable device token on the connected host and shows its link and QR code.'
+        ? 'A connected-host operator token is present and the control plane is enabled; pairing is an owner-terminal flow the user starts with /devices pair, which mints a named, revocable device token on the connected host and shows its link and QR code.'
         : !hasToken
           ? 'No connected-host operator token is present, so companion pairing needs local token provisioning first.'
           : endpointEnabledUnknown(state)
             ? 'A connected-host operator token is present, but the control-plane setting could not be read, so the pairing QR may point at a listener that is not running.'
             : 'A connected-host operator token is present, but the control plane is disabled, so a pairing QR would point at a listener that is not running.',
       nextStep: controlPlaneReady
-        ? 'Ask the user to type /pair in the live Agent terminal when they want to pair a companion.'
+        ? 'Ask the user to type /devices pair device in the live Agent terminal when they want to pair a companion.'
         : !hasToken
           ? 'Provision connected-host auth (setupRoutes), then enable the control plane before QR pairing.'
-          : 'Enable the control plane (host action:"service" endpointId:"controlPlane"), then ask the user to type /pair.',
+          : 'Enable the control plane (host action:"service" endpointId:"controlPlane"), then ask the user to type /devices pair device.',
       capabilities: ['QR pairing', 'pairing link', 'revocable device token'],
       modelRoute: 'agent_harness mode:"pairing_route" pairingRouteId:"qr-pairing"',
-      userRoute: '/pair',
+      userRoute: '/devices pair device',
       setupRoutes: [
         'setup action:"item" setupItemId:"connected-host-auth"',
         'setup action:"token" setupItemId:"connected-host-auth" confirm:true explicitUserRequest:"..."',
@@ -430,7 +430,7 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
         controlPlaneEnabled: endpointEnabledUnknown(state) ? null : endpointEnabled(state),
         rawTokenReturned: false,
       },
-      policy: 'Pairing display and the raw-token fallback are owner-terminal flows; a model invocation of /pair is refused.',
+      policy: 'Pairing display and the raw-token fallback are owner-terminal flows; a model invocation of /devices pair is refused.',
     },
     {
       id: 'mobile-command-routing',
@@ -601,7 +601,7 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
         ? 'Run a capability with phone action:"run" (or photo, screenshot, location, notify); the daemon asks the owner when no grant covers it.'
         : liveDevice.unavailable
           ? 'Check the connected host (host action:"status"), then read this posture again.'
-          : 'Ask the owner to pair a phone (/pair in the Agent terminal).',
+          : 'Ask the owner to pair a phone (/devices pair device in the Agent terminal).',
       capabilities: [
         'camera permission posture',
         'screen capture permission posture',
@@ -713,7 +713,7 @@ export async function pairingPostureSummary(context: CommandContext, rawArgs: Ag
       routes: filtered.map((route) => describeRoute(route, { includeParameters, deviceCapabilityMap: deviceMap })),
       returned: filtered.length,
       total: routes.length,
-      policy: `${deviceMap.policy} Device pairing (/pair), companion connection, channel delivery, task, approval, provider/model, and attachment actions remain explicit visible user flows.`,
+      policy: `${deviceMap.policy} Device pairing (/devices pair), companion connection, channel delivery, task, approval, provider/model, and attachment actions remain explicit visible user flows.`,
     };
     current.assertCurrent?.();
     return result;

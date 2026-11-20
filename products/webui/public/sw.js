@@ -14,9 +14,10 @@
  * THE HONESTY LINE, this is the whole point, do not cross it:
  *   The daemon is the single source of truth for every piece of live data
  *   (sessions, approvals, config, auth, memory, ...). The service worker
- *   NEVER caches an API response. `/api/*`, `/login`, `/status`, `/task`,
- *   `/config`, and every event-stream go straight to the network with no
- *   fallback. So when the app opens offline (or the daemon is unreachable),
+ *   NEVER caches an API response. `/api/*`, `/login`, `/logout`, `/status`,
+ *   `/task`, `/config`, and every event-stream go straight to the network with
+ *   no fallback, and no response the daemon marks `no-store` or `private` (every
+ *   answer that carries or depends on a sign-in) is ever written to a cache. So when the app opens offline (or the daemon is unreachable),
  *   the SHELL loads from cache but every data call fails, and the app shows
  *   its existing "Can't reach the daemon" state (DaemonUnreachableGate). The
  *   offline app reads as an honest degraded state, never as stale-live data.
@@ -27,7 +28,7 @@
  * deletes every cache that is not the current version.
  */
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const SHELL_CACHE = `goodvibes-shell-${CACHE_VERSION}`;
 const ASSET_CACHE = `goodvibes-assets-${CACHE_VERSION}`;
 /** Every cache name this worker ever creates starts with one of these; activation cleans only those. */
@@ -45,10 +46,17 @@ const SHELL_URLS = ['/', '/index.html', '/manifest.webmanifest', '/goodvibes-ico
 
 // Paths whose responses must NEVER be cached, the daemon owns this data and it
 // must always be fetched live or fail honestly. Matched against the pathname.
-const NEVER_CACHE_PREFIXES = ['/api/', '/login', '/status', '/task', '/config'];
+const NEVER_CACHE_PREFIXES = ['/api/', '/login', '/logout', '/status', '/task', '/config'];
 
 function isNeverCache(url) {
   return NEVER_CACHE_PREFIXES.some((prefix) => url.pathname === prefix || url.pathname.startsWith(prefix));
+}
+
+// A response the daemon marks as not to be kept (an authenticated answer, a sign-in) is
+// never written to a cache, whatever its path.
+function mayBeCached(response) {
+  const control = (response.headers.get('cache-control') || '').toLowerCase();
+  return !/\b(?:no-store|private)\b/.test(control);
 }
 
 // Only genuine, immutable build output is cache-first. In a Vite PRODUCTION
@@ -123,7 +131,7 @@ async function networkFirstShell(event, request) {
   const cache = await caches.open(SHELL_CACHE);
   const network = fetch(request)
     .then((response) => {
-      if (response && response.ok && isHtmlResponse(response)) {
+      if (response && response.ok && isHtmlResponse(response) && mayBeCached(response)) {
         // waitUntil keeps the worker alive until the write lands; a failed write
         // only costs the next offline open, never this page load.
         event.waitUntil(cache.put('/index.html', response.clone()).catch(() => undefined));
@@ -171,7 +179,7 @@ async function cacheFirstAsset(event, request) {
   const response = await fetch(request);
   // Only cache successful, same-origin, basic responses, never an opaque or
   // error response (which would poison the cache with a broken asset).
-  if (response && response.ok && response.type === 'basic') {
+  if (response && response.ok && response.type === 'basic' && mayBeCached(response)) {
     event.waitUntil(cache.put(request, response.clone()).then(() => trimAssetCache(cache)).catch(() => undefined));
   }
   return response;

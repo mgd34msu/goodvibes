@@ -110,7 +110,7 @@ goodvibes
 - **Reach it from your phone or a chat app.** `goodvibes pair` prints a QR
   code that signs your phone in to the web app (run
   `goodvibes-daemon webui enable --lan` first so your phone can reach it).
-  `/channel pair telegram` connects a Telegram bot; Slack, Discord, Signal,
+  `/devices pair channel telegram` connects a Telegram bot; Slack, Discord, Signal,
   WhatsApp, Matrix and others work the same way.
   ([web app](products/webui/docs/operator-guide.md#signing-in-and-pairing),
   [channels](products/tui/docs/channels-remote-and-api.md#channel-command))

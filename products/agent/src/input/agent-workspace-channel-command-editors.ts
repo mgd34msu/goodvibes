@@ -23,7 +23,7 @@ const CHANNEL_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceChannelCommand
       { id: 'channel', label: 'Channel target', value: '', required: false, multiline: false, hint: 'Optional surface[:route][ | label], such as slack:C123 | Ops or telephony:+15551234567. The route id is taken whole, colons included.' },
       { id: 'route', label: 'Route target', value: '', required: false, multiline: false, hint: 'Optional route id, or route id | label.' },
       { id: 'webhook', label: 'Webhook URL', value: '', required: false, multiline: false, hint: 'Optional http(s) webhook target.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /channels send with --yes.' },
+      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to send it; /channels send asks once more before it goes.' },
     ],
   },
   'channel-doctor': {

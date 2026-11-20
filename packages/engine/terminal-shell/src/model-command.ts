@@ -113,7 +113,9 @@ function isSetUp(provider: LLMProvider): boolean {
 /** One provider's line: how many models it has now, and why its list could not be read when it could not. */
 function providerRefreshLine(name: string, count: number, report: ProviderApiLiveModelRefreshReport | undefined): string {
   const models = `${count} model${count === 1 ? '' : 's'}`;
-  if (!report) return `  ${name}: ${models} from the built-in catalog (it does not list its own models)`;
+  if (!report) return count === 0
+    ? `  ${name}: no models: it does not list its own, and the built-in catalog has none for it`
+    : `  ${name}: ${models} from the built-in catalog (it does not list its own models)`;
   if (report.skippedReason === 'local-endpoint-unavailable') {
     return `  ${name}: could not be read, its server is not running; ${count === 0 ? 'no models until it runs' : `${models} kept from its last list`}`;
   }
@@ -130,8 +132,9 @@ function providerRefreshLine(name: string, count: number, report: ProviderApiLiv
     const found = count === 0 ? 'no models: it answered with an empty list' : `${models} found`;
     return `  ${name}: ${found}${changes.length > 0 ? ` (${changes.join(', ')})` : ''}${report.note ? `; ${report.note}` : ''}`;
   }
+  // A list not read and no error: the provider was not asked, because it has nothing to sign in with yet.
   const from = report.source === 'cache' ? 'its last list' : 'the built-in catalog';
-  return `  ${name}: not read again, ${count === 0 ? 'no models' : `${models} from ${from}`}`;
+  return `  ${name}: not asked, it has no key or sign-in to list models with yet; ${count === 0 ? 'no models until it has one' : `${models} from ${from}`}`;
 }
 
 async function refreshModels(ctx: ModelCommandContext, api: ProviderApi): Promise<string> {

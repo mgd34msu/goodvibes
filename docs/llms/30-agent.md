@@ -18,7 +18,7 @@ These work in the Agent exactly as described under the named heading of the term
 | Keys inside lists and forms | "Keys inside lists and forms" |
 | How slash commands are typed and quoted | "How slash commands work" |
 | Saved sessions, crash snapshots, session locks, branches | "Sessions" |
-| Provider model lists (`/refresh-models` reads every provider's list again, as in the terminal app), providers, API-key and subscription sign-in, local servers, custom providers, routing roles, reasoning effort, synthetic failover, the OpenAI sign-in move, `provider.fallbackModels` | "Models and providers" and "Failover" (the Agent moves a failed turn along `provider.fallbackModels` the same way) |
+| Provider model lists (`/model refresh` reads every provider's list again, as in the terminal app), providers, API-key and subscription sign-in, local servers, custom providers, routing roles, reasoning effort, synthetic failover, the OpenAI sign-in move, `provider.fallbackModels` | "Models and providers" and "Failover" (the Agent moves a failed turn along `provider.fallbackModels` the same way) |
 | Tools and the permission gate | "Tools" |
 | Helper agents, archetypes, worktrees | "Helper agents and worktrees" |
 | Contracts and workstreams | "Contracts, workstreams and work plans" |
@@ -244,7 +244,7 @@ Undoing a file change and restoring a checkpoint use the same lines as the termi
 
 ### Hooks in the Agent
 
-The Agent loads hooks exactly as the terminal app does (see "Hooks" in the terminal-app part): from the file its own setting `tools.hooksFile` names, resolved against the working directory, `<project>/hooks.json` by default, with the same event paths, command hook contract, rules in every mode and trust rules. A hooks file in a workspace that is not trusted waits for trust, and the Agent says so once at start; `/trust workspace trusted` (hidden but available) trusts the workspace and loads the waiting file at once, with no restart.
+The Agent loads hooks exactly as the terminal app does (see "Hooks" in the terminal-app part): from the file its own setting `tools.hooksFile` names, resolved against the working directory, `<project>/hooks.json` by default, with the same event paths, command hook contract, rules in every mode and trust rules. A hooks file in a workspace that is not trusted waits for trust, and the Agent says so once at start; `/security trust-folder` trusts the workspace and loads the waiting file at once, with no restart.
 The Agent has no `/hooks` command and no `hooks validate`. To manage its hooks:
 
 1. Edit `<project>/hooks.json` by hand (the terminal app's `/hooks scaffold` writes the same file when both programs use the default `tools.hooksFile`).
@@ -281,7 +281,7 @@ On top of the files under "Project instructions", the Agent applies:
 | `auth` | Read only: `auth`, `auth status`, `auth review`, `auth users`, `auth sessions`. User administration is done with `goodvibes auth` or in the daemon. |
 | `tasks` | `tasks list` and `tasks show <taskId>` read the connected host's tasks; submission is refused. |
 | `bundle` | `bundle export [path]`, `bundle inspect <path>`, `bundle import <path> [--yes]`. Import checks every value before changing any and without `--yes` lists what it would set and exits `2`. A host on another machine (`controlPlane.host`) gets its settings with its own pairing or `GOODVIBES_CONNECTED_HOST_TOKEN`, never this machine's daemon token; with neither the import is refused and nothing is sent. |
-| `/model`, `/provider` | `/provider add <name> <baseURL> [apiKey]` also takes an API key. |
+| `/model`, `/effort`, `/provider` | The same commands as the terminal app's. `/provider sign-in` always finishes with `/provider finish <provider> <code or address>` (the Agent does not listen for the browser), and `/provider open` refuses because the Agent has no sign-ins screen. |
 | `/settings` | A guided command, the same in both programs: `open [where]` (the report: the settings screen at a topic, setting or search), `list [words]`, `get <setting>`, `set <setting> <value>` and `reset <setting>`; a setting is chosen by its name. A model changes a setting through the settings tool, which asks the owner for a loosening change. |
 | `/agents` | Opens Your agents only; it takes no `list`, `host` or `--target`. `n` in the panel hosts a coding agent instead of `/agents host`. |
 | `/memory` | The same command as the terminal app's `/memory` (see "Memory and knowledge" in the terminal app's part): bare, it opens the list of actions, "See your memory" first; `open` opens the workspace's Memory page; `injections` refuses, because the Agent records no per-turn memory. |
@@ -292,28 +292,27 @@ On top of the files under "Project instructions", the Agent applies:
 | `/schedule` | `list`, `edit <id> --cron <expr> --yes`, `remind --at <iso> --message <text> --yes`, `receipts`, `reconcile`, `receipt <id>`, `promote-routine <routine-id> --cron <expr> --yes` (see "Automation and host actions" below). |
 | `/calendar` | The same command as the terminal app's, on the Agent's own events, its calendar feeds and its calendar accounts; `change` and `status` (the daemon's calendar) are the terminal app's (see "Personal operations" below). |
 | `/payments` | Adds `address <billing|shipping>`. |
-| `/devices` | `nodes`, `grants`, `revoke-grant <grant-id>`, `captures`, `delete-capture <capture-id>` only; tokens are managed in the daemon. |
-| `/qrcode` | `[--name <device name>]` mints a named device token and shows its link and QR. |
+| `/devices` | The terminal app's command: device tokens on the connected host (`list`, `rename`, `revoke`), "Pair something" (`pair device [--name <name>]` mints a named device token and shows its link and QR), and the paired phones (`nodes`, `grants`, `revoke-grant`, `captures`, `delete-capture`). Pairing this terminal, the relay, channel setup and the shared token are the terminal app's and are refused here saying so. |
 | `/intelligence` | Only `install <file|language>`. |
 | `/tts` | `<prompt>` and `stop` only. |
 | `/undo`, `/redo`, `/retry` | `/undo` and `/redo` take `file` (as in the terminal app) but not `rewind`; `/retry` re-sends the last message. |
 | `/approval` | Adds `approve <id> --yes`, `deny <id> --yes`, `cancel <id> --yes`. |
-| `/health` | Domains `review`, `setup`, `approvals`, `host`, `provider`, `accounts`, `auth`, `settings`, `remote`, `mcp`, `memory`, `continuity`, `maintenance`, `repair [domain]`, or a symptom. |
-| `/status` | The current model and its context window with where the window came from, and the worktrees the start-up pass removed or kept. |
-| `/services` | `list` and `trust <name> --yes` only. |
+| `/health` | The same description as the terminal app's. `check` reads `setup`, `services` (the connected host's integrations), `provider`, `accounts`, `auth`, `settings`, `remote`, `mcp`, `memory`, `continuity`, `maintenance` and `approvals`; the other areas, the failure reports and `stop-agent` are refused and name the terminal app. `/health compat [--json]` is `goodvibes-agent compat`. |
+| `/status` | The same description as the terminal app's; here it shows the current model and its context window with where the window came from, and the worktrees the start-up pass removed or kept. |
+| `/services` | The same command as the terminal app's; `open` refuses because the Agent has no services screen. |
 | `/tasks` | Read only: `list`, `show`, `output`. |
 | `/workstream` | `start` is refused: work is started by planning it (`/workstream plan`, `approve`, `launch`), by asking for it in a message, or with `/work submit-file`. |
-| `/welcome` | Opens the Agent workspace. |
 | `/setup` | A guided command with the same topics as the terminal app's `/setup`. `Choose a model`, `Sign in or out of a provider`, `Store a password or key`, `History and privacy` and `Bring over settings from the terminal app` open the workspace with only that topic's rows; `Add a provider of your own` runs `/provider add <name> <address>`; `Connect chat apps and services`, `How GoodVibes works with you`, `Safety and sandboxing`, `Memory and context`, `Paired devices and voice` and `Scheduled routines, watchers and triggers` open the matching workspace area; the topics marked `on the daemon` say to run `goodvibes setup` where the daemon runs. `Pair the Agent with a GoodVibes host` (`/setup pair [--name <name>] [--apply]`) and `Unpair the Agent from the GoodVibes host` (`/setup unpair`) (applying a pairing and unpairing only when the owner types it); `Run first-run again` opens the three steps. |
 | `/auth` | `review`, `show <provider>`, `repair <provider>`, `bundle export <path>`, `bundle inspect <path>` only; no daemon sign-in or local users. |
-| `/update` | `check`, `apply`, `rollback`, `daemon [check]` only. |
+| `/update` | The same description as the terminal app's; `review`, `save-review` and `read-review` are refused and name the terminal app. |
 | `/save` | Saves to `<project>/.goodvibes/agent/sessions/`. |
-| `/quit` | Aliases `/:q` and `/:wq` only. |
+| `/security` | The same description as the terminal app's; folder trust here decides whether the folder's hooks file loads and the MCP servers its files name start. Sandbox sessions and the screens are refused and name the terminal app. |
+| `/config` | The same description as the terminal app's; `/config set` is refused and names the settings screen (`/config open <key>`). |
 | `/help`, `?` | Open help: every command as a plain title with its slash name, grouped by task, and the keyboard shortcuts as the last group; the same list as `Ctrl+P`. `/help <command>` prints one command's actions and lines. |
 
-Some shared commands are not on the Agent's first screen (the bare `/` list leaves them out; they are found as soon as their name is typed, run when typed, and `/help` lists them): `/effort`, `/config`, `/context`, `/next-error`, `/prev-error`, `/trust`, `/auth`, `/subscription`, `/security`, `/approval`, `/tasks`, `/provider`, `/health`, `/accounts`, `/conversation`, `/qrcode`, `/tts`, `/services`, `/expand`, `/collapse`, `/bookmarks`, `/secrets`, `/image`, `/refresh-models`, `/pin`, `/unpin`, `/knowledge`, and the Agent-only `/bundle`, `/compat`, `/automation`, `/ci`, `/principals`, `/channel-profiles`, `/agent-profile`, `/vibe`, `/personas`, `/routines`, `/channels`, `/delegate`, `/media`.
+Some shared commands are not on the Agent's first screen (the bare `/` list leaves them out; they are found as soon as their name is typed, run when typed, and `/help` lists them): `/config`, `/context`, `/next-error`, `/prev-error`, `/auth`, `/security`, `/approval`, `/tasks`, `/health`, `/accounts`, `/conversation`, `/tts`, `/expand`, `/collapse`, `/bookmarks`, `/secrets`, `/image`, `/pin`, `/unpin`, `/knowledge`, and the Agent-only `/bundle`, `/automation`, `/ci`, `/principals`, `/channel-profiles`, `/agent-profile`, `/vibe`, `/personas`, `/routines`, `/channels`, `/delegate`, `/media`.
 
-Terminal-app slash commands the Agent does not have: `/changes`, `/checkin`, `/checkpoint`, `/cluster`, `/cockpit`, `/codebase`, `/commit-all`, `/communication`, `/compact-history`, `/cost`, `/debug`, `/deeplink`, `/diff`, `/editor`, `/eval`, `/find`, `/forensics`, `/git`, `/graph`, `/guidance`, `/helpers`, `/hooks`, `/host`, `/hosted`, `/imagine`, `/incident`, `/incident-review`, `/install`, `/keep`, `/local-auth`, `/mail`, `/managed`, `/marketplace`, `/note`, `/ops`, `/orchestration`, `/panel`, `/pastes`, `/plan`, `/policy`, `/power`, `/profile`, `/profiles`, `/profile-sync`, `/project-plan`, `/provider-opt`, `/queue`, `/relay`, `/release`, `/remote`, `/replay`, `/review`, `/rewind`, `/sandbox`, `/scan`, `/search`, `/settings-sync`, `/teamwork`, `/template`, `/test`, `/tool`, `/tools`, `/usage`, `/worktree`. Their nearest Agent equivalents: `/media` for `/imagine`, `/email` and `/google` for `/mail`, `/owner-profile` for `/profile`, `/network-scan` for `/scan`, `/work` for `/project-plan`, `goodvibes-agent relay` for `/relay`.
+Terminal-app slash commands the Agent does not have: `/changes`, `/checkin`, `/checkpoint`, `/cluster`, `/codebase`, `/communication`, `/compact-history`, `/cost`, `/deeplink`, `/diff`, `/editor`, `/eval`, `/find`, `/git`, `/graph`, `/guidance`, `/helpers`, `/hooks`, `/hosted`, `/imagine`, `/keep`, `/local-auth`, `/mail`, `/managed`, `/marketplace`, `/note`, `/orchestration`, `/pastes`, `/plan`, `/power`, `/profile`, `/profiles`, `/profile-sync`, `/project-plan`, `/queue`, `/release`, `/remote`, `/replay`, `/review`, `/rewind`, `/scan`, `/search`, `/settings-sync`, `/teamwork`, `/template`, `/test`, `/tool`, `/tools`, `/usage`, `/worktree`. Their nearest Agent equivalents: `/media` for `/imagine`, `/owner-profile` for `/profile`, `/network-scan` for `/scan`, `/work` for `/project-plan`, `goodvibes-agent relay` for the relay actions of `/devices`.
 
 ## The Agent's command line
 
@@ -610,7 +609,7 @@ With no workspace at the default place: `No OpenClaw workspace found at the defa
 ## The Agent workspace
 
 The Agent workspace is a full-screen view of categories, each a list of actions: forms, pickers, read-only reports and confirmed changes.
-It opens with `/agent [category]` (aliases `/home`, `/operator`), `Ctrl+G` or `/welcome`. `/setup` opens one topic's rows of it at a time (below).
+It opens with `/agent [category]` (aliases `/home`, `/operator`) or `Ctrl+G`. `/setup` opens one topic's rows of it at a time (below).
 `Ctrl+]` and `Ctrl+[` move between categories; `/` searches actions by name, category, command or detail; `Ctrl+X` or `Esc` closes it.
 Typing a letter on Home closes the workspace and puts the letter in the composer.
 
@@ -753,8 +752,8 @@ Agent channel delivery sent
 
 ### Support
 
-`/bundle [export [path]|inspect <path>|import <path> [--include-security] --yes]` exports, inspects or imports a redacted support bundle from inside the Agent.
-`/compat [--json]` (alias `/compatibility`) is `goodvibes-agent compat`.
+`/bundle` (Agent only) is described: `export [<file>] [--replace]` ("Save a support bundle": settings and setup with every secret taken out; an existing file is kept unless `--replace`, which asks first), `inspect <file>` (what it holds and which settings loading it would change) and `import <file> [--include-security]` ("Load settings from a support bundle"; a model cannot run it, and loading security settings loosens a protection and asks first).
+`/health compat [--json]` is `goodvibes-agent compat`.
 
 ## The model's tools in the Agent
 

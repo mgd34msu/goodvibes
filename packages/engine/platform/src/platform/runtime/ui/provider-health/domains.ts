@@ -160,7 +160,7 @@ export function buildProviderHealthDomainSummaries(
       ].filter(Boolean)
       : ['syntax diagnostics and symbols come from the built-in parser'],
     nextSteps: intelligenceIssues > 0
-      ? ['/intelligence diagnostics', '/intelligence repair', '/health intelligence']
+      ? ['/intelligence diagnostics', '/intelligence repair', '/health check intelligence']
       : ['/intelligence review'],
   });
 
@@ -199,7 +199,7 @@ export function buildProviderHealthDomainSummaries(
       !continuity.lastSessionPointer ? 'no persisted last-session pointer recorded' : '',
     ].filter(Boolean),
     nextSteps: continuity.recoveryFilePresent
-      ? ['/session list', '/resume <id>', '/health continuity']
+      ? ['/session list', '/resume <id>', '/health check continuity']
       : ['/session list'],
   });
 

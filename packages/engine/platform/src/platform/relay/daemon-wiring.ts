@@ -135,7 +135,7 @@ export function wrapDispatchWithStepUp(
         code: 'relay-code-revoked',
         state: 'this device\'s relay access is revoked or was never issued',
         reason: 'This call arrived over the relay with a relay code this daemon did not issue or has revoked.',
-        next: ['Pair this device with the relay again from the home network: /relay pair in the terminal app, or goodvibes-agent relay pair.'],
+        next: ['Pair this device with the relay again from the home network: /devices pair relay in the terminal app, or goodvibes-agent relay pair.'],
         status: 401,
         retryable: false,
       })), 401);

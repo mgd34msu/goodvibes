@@ -7,12 +7,12 @@
  * the relay and can mint a pairing payload. This terminal is a client, so it
  * asks the daemon through the operator verbs that serve that controller,
  * `relay.reachability.get` and `relay.pairing.mint`, and the per-device relay
- * codes, `relay.codes.list` and `relay.codes.revoke` (one request per `/relay`).
+ * codes, `relay.codes.list` and `relay.codes.revoke` (one request per /devices relay action).
  *
  * `'unavailable'` is kept for exactly one case: the daemon could not be asked
  * (disabled, unreachable, refused). It is deliberately NOT `'disabled'`, which is
  * the daemon's own answer meaning a relay gate is off; the reason the daemon
- * could not be asked travels with it so `/relay` can say it.
+ * could not be asked travels with it so /devices can say it.
  */
 
 import type { RelayRegistrationStatus } from '@goodvibes-jev/engine/daemon-api';
@@ -20,7 +20,7 @@ import { encodeRelayPairingString, type RelayPairingPayload } from '@goodvibes-j
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
 /**
- * What `/relay` can be told: the daemon-side registration states, plus
+ * What /devices relay-status can be told: the daemon-side registration states, plus
  * `'disabled'` for a relay that is off, plus `'unavailable'` when the daemon
  * could not be asked.
  */
@@ -51,7 +51,7 @@ export interface RelayStatusReading {
 export interface RelayPairingMint {
   readonly payload: RelayPairingPayload;
   readonly encoded: string;
-  /** The id and name of the device's relay code, for /relay codes and /relay revoke. */
+  /** The id and name of the device's relay code, for /devices relay-codes and /devices relay-revoke. */
   readonly codeId?: string;
   readonly codeName?: string;
 }

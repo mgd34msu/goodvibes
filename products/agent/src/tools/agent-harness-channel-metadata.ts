@@ -124,10 +124,10 @@ function describeChannel(
           sendTool: 'agent_channel_send',
           notificationTool: 'agent_notify',
           reminderTool: 'agent_reminder_schedule',
-          slashCommandDetail: `/channels show ${channel.id}`,
+          slashCommandDetail: `/channels configured ${channel.id}`,
           readOnlyConnectedRoutes: [
             '/channels accounts',
-            '/channels policies',
+            '/channels rules',
             '/channels status',
             `/channels doctor ${channel.id}`,
             `/channels setup ${channel.id}`,

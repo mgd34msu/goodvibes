@@ -213,7 +213,7 @@ export function evaluateContextualGuidance(
       category: 'operational',
       title: 'Repeated denials suggest a policy mismatch',
       summary: 'Several actions were denied in this session. Review whether a scoped durable rule should be added.',
-      commands: ['/policy', '/security', '/approval'],
+      commands: ['/security', '/approval'],
     });
   }
 

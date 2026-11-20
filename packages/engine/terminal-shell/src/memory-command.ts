@@ -715,7 +715,7 @@ function describeMemory<Ctx extends MemoryCommandContext>(policy: MemoryCommandP
             const registry = ctx.extensions.forensicsRegistry;
             if (!registry) throw commandRefusal('Incident reports are not available in this app.');
             const report = !which || which === 'latest' ? registry.latest() : registry.getById(which);
-            if (!report) throw commandRefusal(`No incident report ${which || 'yet'}.`, '/incident lists them.');
+            if (!report) throw commandRefusal(`No incident report ${which || 'yet'}.`, '/health failure shows the latest.');
             const bundle = registry.buildBundle(report.id);
             if (!bundle) throw commandRefusal(`Incident ${report.id} could not be read.`);
             return `Remembered incident ${report.id} as ${(await spine.add(buildIncidentMemoryAddOptions(bundle))).id}.`;

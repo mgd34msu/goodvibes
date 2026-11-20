@@ -144,12 +144,12 @@ function channelTriageReadiness(channels: readonly AgentWorkspaceChannelStatus[]
       setupState: channel.setupState,
       delivery: channel.delivery,
       nextStep: channel.nextStep,
-      userRoute: `/channels show ${channel.id}`,
+      userRoute: `/channels configured ${channel.id}`,
       modelRoute: `channels action:"channel" channelId:"${channel.id}"`,
     })),
     routes: {
-      readiness: '/channels',
-      attention: '/channels attention',
+      readiness: '/channels readiness',
+      attention: '/channels readiness --show attention',
       guide: '/channels guide',
     },
   };
@@ -421,9 +421,9 @@ export async function buildAgentWorkspaceChannelTriage(
     routes: {
       command: '/channels triage',
       deliveries: '/channels deliveries',
-      readiness: '/channels attention',
+      readiness: '/channels readiness --show attention',
       status: '/channels status',
-      policies: '/channels policies',
+      policies: '/channels rules',
       setupGuide: '/channels guide',
       modelRoute: 'channels action:"triage"',
       deliveryReceipts: 'channels action:"deliveries"',
@@ -517,7 +517,7 @@ export function formatAgentWorkspaceChannelTriage(triage: AgentWorkspaceChannelT
   }
 
   lines.push('', '  Next Routes');
-  lines.push('  /channels attention');
+  lines.push('  /channels readiness --show attention');
   lines.push('  /channels deliveries');
   lines.push('  /channels status');
   lines.push('  channels action:"triage"');

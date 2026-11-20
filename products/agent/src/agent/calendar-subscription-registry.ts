@@ -25,7 +25,7 @@ import type { SecretScope } from '../config/secrets.ts';
  * (SubscriptionStore + expandEvents). This class owns the two things the platform
  * deliberately leaves to the consumer:
  *  - PERSISTENCE. Feed events are cached to a JSON store next to the local
- *    calendar so `/calendar list` merges them with no network call; subscription
+ *    calendar so `/calendar all` merges them with no network call; subscription
  *    metadata (name, cadence, validators, last-status) lives there too.
  *  - SECRET STORAGE. The feed URL is secrets-adjacent (a Google secret address
  *    grants read access to the calendar), so it is stored ONLY through the
@@ -50,7 +50,7 @@ import type { SecretScope } from '../config/secrets.ts';
  *
  * The recording happens in `seeds()` and `occurrencesInWindow()` and NOWHERE
  * ELSE. Those two are the turn reads: they run because the owner typed
- * `/calendar list` or `/calendar upcoming`, and they hand event text straight to
+ * `/calendar all` or `/calendar upcoming`, and they hand event text straight to
  * a caller that is about to display it.
  *
  * `subscribe()` and `refresh()` are ARRIVAL, and must never record. A refresh
@@ -578,7 +578,7 @@ export class CalendarSubscriptionRegistry {
 
   /**
    * One row per cached subscribed event (the seed, unexpanded), the merged
-   * `/calendar list` view. A recurring event is marked so the reader knows more
+   * `/calendar all` view. A recurring event is marked so the reader knows more
    * occurrences exist; `occurrencesInWindow` is the date-windowed expansion.
    */
   public seeds(): readonly SubscribedOccurrence[] {

@@ -41,7 +41,7 @@ function buildContextStatusHint(options: ContextStatusHintOptions): string | nul
 
   switch (level) {
     case 'needs-repair':
-      return `  Context pressure critical (${usagePct ?? '?'}% used); compaction needs attention. Run /compact or /health review.`;
+      return `  Context pressure critical (${usagePct ?? '?'}% used); compaction needs attention. Run /compact or /health check maintenance.`;
 
     case 'suggest-compact':
       if (autoCompactEnabled) {

@@ -7,11 +7,11 @@ import {
 } from '@goodvibes-jev/engine/platform/browser/knowledge';
 import type { BrowserKnowledgeMethodId } from '@goodvibes-jev/engine/platform/browser/knowledge';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
-import { getClientLifetime, invalidateClientLifetime, isClientLifetimeCurrent, tokenStore, WEBUI_TOKEN_STORE_KEY, type ClientLifetime } from './client-lifetime';
+import { getClientLifetime, heldBearerSync, invalidateClientLifetime, isClientLifetimeCurrent, readSignedInIdentity, tokenStore } from './client-lifetime';
 import { clearHeldInputs } from './held-input';
-export { tokenStore, WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
+export { hasSignInSync, tokenStore } from './client-lifetime';
 import { isRuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
-import { routedFetch } from './relay-connection';
+import { getActiveRoute, routedFetch } from './relay-connection';
 import { acceptOwnerApprovalAnswer, type AppliedAnswer } from './owner-approval';
 import { readTelegramCursorPreview, readTelegramCursorMigrationResult, type TelegramCursorPreview } from '@goodvibes-jev/engine/platform/platform/channels/telegram-cursor';
 import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/platform/browser/decision-policy';
@@ -431,12 +431,10 @@ async function requestStream(path: string, body: unknown, signal?: AbortSignal):
 /**
  * hostedSessionDetachBeacon, best-effort detach for a page teardown (pagehide /
  * visibilitychange-to-hidden, see HostedSessionsView.tsx), for when there is no time
- * left to await the ordinary async platform.operator.sessions.hosted.detach round trip. Reads
- * the auth token synchronously straight out of localStorage (the browser token store IS
- * localStorage under an async wrapper, createBrowserTokenStore) and fires one `fetch`
- * with `keepalive: true`, so the browser completes the request after the page itself has
- * gone away, the standard beacon pattern, since `navigator.sendBeacon` cannot carry a
- * bearer-token Authorization header.
+ * left to await the ordinary async platform.operator.sessions.hosted.detach round trip. Fires
+ * one `fetch` with `keepalive: true`, so the browser completes the request after the page
+ * itself has gone away. On the direct route the browser adds the HttpOnly sign-in cookie by
+ * itself; a bearer held in memory (signed in over the relay) is added as the header.
  *
  * SAME-ORIGIN ONLY: this always targets GOODVIBES_BASE_URL directly, never routedFetch's
  * relay path, a relay round trip involves its own encryption/signing handshake that
@@ -450,12 +448,7 @@ async function requestStream(path: string, body: unknown, signal?: AbortSignal):
  */
 export function hostedSessionDetachBeacon(sessionId: string, clientId: string): void {
   if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
-  let token: string | null = null;
-  try {
-    token = window.localStorage.getItem(WEBUI_TOKEN_STORE_KEY);
-  } catch {
-    // localStorage unavailable (private mode, permissions), proceed unauthenticated.
-  }
+  const token = heldBearerSync();
   try {
     void fetch(buildUrl('/api/control-plane/methods/sessions.hosted.detach/invoke'), {
       method: 'POST',
@@ -2101,59 +2094,25 @@ export async function runBrowserJudgment(
 
 export async function getCurrentAuth(): Promise<unknown> {
   // The daemon's control-plane/auth is a STATUS endpoint: it answers 200 even when
-  // the presented token is invalid/expired, carrying the real verdict in the
-  // `authenticated` boolean (authMode 'invalid'/'anonymous'). Verified against both
-  // real daemons AND an isolated bootDaemon. The signed-in gate (App.tsx) and the
-  // health signed-in axis (useDaemonHealth) both key off this call THROWING to detect
-  // "signed out", a resolved call is taken as signed-in. So a corrupt/expired token
-  // used to leave the operator in the full shell while every data endpoint 401'd,
-  // instead of the honest one-shot handoff to sign-in. Reject on `authenticated !==
-  // true` with a 401/authentication error (NOT network/status-0, so it is treated as
-  // unauthorized, sign-in front door, not as a daemon-unreachable outage).
-  const lifetime = getClientLifetime();
+  // the presented credential is invalid/expired, carrying the real verdict in the
+  // `authenticated` boolean (authMode 'invalid'/'anonymous'). The signed-in gate
+  // (App.tsx) and the health signed-in axis (useDaemonHealth) both key off this call
+  // THROWING to detect "signed out", a resolved call is taken as signed-in. Reject on
+  // `authenticated !== true` with a 401/authentication error (NOT network/status-0, so
+  // it is treated as unauthorized, sign-in front door, not as a daemon-unreachable
+  // outage). On the direct route this read also moves the sign-in cookie's end with the
+  // daemon session's, so a session in use stays signed in.
   const snapshot = await client.auth.current();
   const record = asRecord(snapshot);
   // Only an explicit `authenticated: true` is signed in: a reply without the field is a failed read, never a pass.
   if (record.authenticated !== true) {
-    throw Object.assign(new Error('Operator token rejected: the daemon reports the session is not authenticated.'), {
+    throw Object.assign(new Error('Sign-in rejected: the daemon reports this browser is not signed in.'), {
       status: 401,
       category: 'authentication',
       authMode: record.authMode,
     });
   }
-  await adoptSessionExpiry(record.expiresAt, lifetime);
   return snapshot;
-}
-
-/**
- * The daemon extends a sign-in session each time it is used and reports the session's current
- * end on every auth read. The stored end is the one given at sign-in; keeping it would drop a
- * session in use when that time passes. Only a later end for the same stored credential is
- * kept, and a credential stored without an end (a pasted token) stays without one.
- */
-async function adoptSessionExpiry(expiresAt: unknown, readUnder: ClientLifetime): Promise<void> {
-  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return;
-  if (!isClientLifetimeCurrent(readUnder)) return;
-  const stored = await tokenStore.getTokenEntry();
-  if (!stored.token || stored.expiresAt === undefined || expiresAt <= stored.expiresAt) return;
-  if (!isClientLifetimeCurrent(readUnder)) return;
-  await tokenStore.setTokenEntry(stored.token, expiresAt);
-}
-
-/**
- * Synchronous best-effort check for a stored token, used ONLY to pick the optimistic
- * first paint (splash while a stored token is validated vs. the signed-out gate shown
- * immediately when there is no token). The async auth.current query remains
- * authoritative; this never asserts the token is valid, only that one is present.
- */
-export function hasStoredTokenSync(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    const raw = window.localStorage.getItem(WEBUI_TOKEN_STORE_KEY)?.trim();
-    return Boolean(raw && raw !== 'null');
-  } catch {
-    return false;
-  }
 }
 
 interface LoginResponse {
@@ -2186,106 +2145,157 @@ async function readJson(response: Response): Promise<unknown> {
   }
 }
 
-export async function login(username: string, password: string): Promise<unknown> {
-  // The browser's identity generation this sign-in started under. A sign-out, or another sign-in
-  // that stored its credential while this one was in flight, is newer and wins: this reply is then
-  // dropped (and its daemon session ended), never stored over it.
-  const startedUnder = getClientLifetime();
-  const url = buildLoginUrl();
-  // routedFetch so sign-in works when the daemon is only reachable over the relay; on the
-  // direct route this is the plain global fetch.
-  const response = await routedFetch(url, {
-    method: 'POST',
-    credentials: 'omit',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  });
-
-  const body = await readJson(response);
-  if (!response.ok) {
-    throw Object.assign(new Error(`Login failed: ${response.status} ${response.statusText}`.trim()), {
-      status: response.status,
-      url,
-      method: 'POST',
-      body,
-      category: response.status === 401 ? 'authentication' : 'unknown',
-      hint: response.status === 401 ? 'Check the username and password stored in local auth.' : undefined,
-    });
-  }
-
-  if (!isLoginResponse(body)) {
-    throw Object.assign(new Error('Login response did not include a browser session token'), {
-      status: response.status,
-      url,
-      method: 'POST',
-      body,
-      category: 'contract',
-    });
-  }
-
-  const result = body;
-  if (getClientLifetime() !== startedUnder) {
-    void endDaemonSignIn(result.token);
-    throw Object.assign(new Error('This sign-in finished after this browser signed out or signed in another way, so it was not kept. Sign in again if you still want this account.'), {
-      status: 409,
-      url,
-      method: 'POST',
-      category: 'superseded',
-    });
-  }
-  await tokenStore.setTokenEntry(result.token, result.expiresAt);
-  return {
-    authenticated: result.authenticated,
-    username: result.username,
-    expiresAt: result.expiresAt,
-  };
+/**
+ * Sign-ins and sign-outs of this page run one at a time, in the order they were asked
+ * for, so a reply can never land over a newer one: on the direct route the reply itself
+ * sets the cookie, so two sign-ins in flight at once would leave whichever answered last.
+ */
+let credentialQueue: Promise<unknown> = Promise.resolve();
+function inCredentialOrder<T>(work: () => Promise<T>): Promise<T> {
+  const run = credentialQueue.then(work, work);
+  credentialQueue = run.catch(() => undefined);
+  return run;
 }
-
-function isAuthRejection(error: unknown): boolean {
-  const record = asRecord(error);
-  return record.status === 401 || record.category === 'authentication';
-}
-
-/** A pairing link's token applied before the app's first request, and the credential it replaced. */
-let primedAuthToken: { readonly token: string; readonly previous: Awaited<ReturnType<typeof tokenStore.getTokenEntry>> } | null = null;
 
 /**
- * Apply a pairing link's token before anything is sent, so the app's first
- * requests carry it instead of going out with the old credential (or none)
- * and being refused. It is validated by the hand-off's setExplicitAuthToken,
- * which restores the credential it replaced when the daemon refuses it.
+ * Moves at every sign-in asked for and every sign-out. A sign-in whose number moved
+ * before its reply (a sign-out, or another sign-in, was asked for meanwhile) is not
+ * kept: what it set is ended at once.
+ */
+let credentialEpoch = 0;
+
+function supersededSignIn(url: string): Error {
+  return Object.assign(new Error('This sign-in finished after this browser signed out or signed in another way, so it was not kept. Sign in again if you still want this account.'), {
+    status: 409,
+    url,
+    method: 'POST',
+    category: 'superseded',
+  });
+}
+
+/** The sign-in `POST /api/browser-session` or `POST /login` refused, in the shape every request error has. */
+function signInRefusal(response: Response, url: string, body: unknown, label: string): Error {
+  return Object.assign(new Error(`${label}: ${response.status} ${response.statusText}`.trim()), {
+    status: response.status,
+    url,
+    method: 'POST',
+    body,
+    ...daemonErrorFields(response.status, body),
+  });
+}
+
+/**
+ * Direct route: the daemon binds what is presented (a code, a token, or a username and
+ * password) to its HttpOnly, SameSite=Strict cookie and answers who is signed in, never
+ * the credential. One request per sign-in.
+ */
+async function bindBrowserSession(credential: { readonly token: string } | { readonly username: string; readonly password: string }, epoch: number): Promise<Record<string, unknown>> {
+  const url = `${GOODVIBES_BASE_URL.replace(/\/+$/, '')}/api/browser-session`;
+  const response = await globalThis.fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(credential),
+  });
+  const body = await readJson(response);
+  if (!response.ok) throw signInRefusal(response, url, body, 'token' in credential ? 'Sign-in code refused' : 'Login failed');
+  if (credentialEpoch !== epoch) {
+    // A sign-out or another sign-in was asked for while this one was answered: end what it set.
+    await endDaemonSignIn(null);
+    throw supersededSignIn(url);
+  }
+  invalidateClientLifetime();
+  return asRecord(body);
+}
+
+export function login(username: string, password: string): Promise<unknown> {
+  // The sign-in this call is: a sign-out, or another sign-in, asked for while it is in flight is newer and wins.
+  const epoch = ++credentialEpoch;
+  return inCredentialOrder(async () => {
+    const url = buildLoginUrl();
+    if (credentialEpoch !== epoch) throw supersededSignIn(url);
+    if (getActiveRoute() !== 'relay') {
+      const bound = await bindBrowserSession({ username, password }, epoch);
+      return { authenticated: true, username: bound.principalId, expiresAt: bound.expiresAt };
+    }
+    // Relay route: the tunnel builds each request in this page, so the session token is held in memory only.
+    const response = await routedFetch(url, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const body = await readJson(response);
+    if (!response.ok) throw signInRefusal(response, url, body, 'Login failed');
+    if (!isLoginResponse(body)) {
+      throw Object.assign(new Error('Login response did not include a session token'), {
+        status: response.status, url, method: 'POST', body, category: 'contract',
+      });
+    }
+    if (credentialEpoch !== epoch) {
+      void endDaemonSignIn(body.token);
+      throw supersededSignIn(url);
+    }
+    await tokenStore.setTokenEntry(body.token, body.expiresAt);
+    return { authenticated: body.authenticated, username: body.username, expiresAt: body.expiresAt };
+  });
+}
+
+/** A pairing link's sign-in started before the app's first request, by the code it presented. */
+let primedSignIn: { readonly token: string; readonly result: Promise<unknown> } | null = null;
+
+function normalizeSignInCode(rawToken: string): string {
+  return rawToken.replace(/^Bearer\s+/i, '').trim();
+}
+
+/**
+ * Sign in with a pairing link's code before anything is sent, so the app's first
+ * requests carry the new sign-in instead of going out with the old one (or none)
+ * and being refused. The hand-off's setExplicitAuthToken reports its outcome.
  */
 export async function primeAuthToken(rawToken: string): Promise<void> {
-  const token = rawToken.replace(/^Bearer\s+/i, '').trim();
+  const token = normalizeSignInCode(rawToken);
   if (!token) return;
-  primedAuthToken = { token, previous: await tokenStore.getTokenEntry() };
-  await client.auth.setToken(token);
+  const result = signInWithCode(token);
+  primedSignIn = { token, result };
+  await result;
 }
 
-export async function setExplicitAuthToken(rawToken: string): Promise<unknown> {
-  const token = rawToken.replace(/^Bearer\s+/i, '').trim();
-  if (!token) throw new Error('Token is required');
-  // A token primed at start-up already replaced the stored one: the one to restore is what was there before it.
-  const previous = primedAuthToken?.token === token ? primedAuthToken.previous : await tokenStore.getTokenEntry();
-  primedAuthToken = null;
-  await client.auth.setToken(token);
-  const validationLifetime = getClientLifetime();
-  try {
-    return await getCurrentAuth();
-  } catch (error) {
-    if (getClientLifetime() === validationLifetime) {
-      if (isAuthRejection(error) || previous.token === null) await client.auth.clearToken();
-      // Not a verdict on the new token (network, daemon error): the browser keeps the
-      // credential it already had instead of being signed out by a failed switch, and the
-      // error says why the new one was not adopted.
-      else await tokenStore.setTokenEntry(previous.token, previous.expiresAt);
+/**
+ * Sign in with a code (`goodvibes pair`, a scanned QR, or a pasted device or operator
+ * token). Direct route: bound to the daemon's HttpOnly cookie; a refused code changes
+ * nothing, so the sign-in this browser already had stays. Relay route: held in memory
+ * for this page and checked with the auth read; a code that is not accepted puts back
+ * what was held before.
+ */
+export function setExplicitAuthToken(rawToken: string): Promise<unknown> {
+  const token = normalizeSignInCode(rawToken);
+  if (!token) return Promise.reject(new Error('Token is required'));
+  const primed = primedSignIn;
+  primedSignIn = null;
+  if (primed?.token === token) return primed.result;
+  return signInWithCode(token);
+}
+
+function signInWithCode(token: string): Promise<unknown> {
+  const epoch = ++credentialEpoch;
+  return inCredentialOrder(async () => {
+    if (getActiveRoute() !== 'relay') {
+      if (credentialEpoch !== epoch) throw supersededSignIn(`${GOODVIBES_BASE_URL}/api/browser-session`);
+      return await bindBrowserSession({ token }, epoch);
     }
-    throw error;
-  }
-}
-
-export async function clearStoredAuthToken(): Promise<void> {
-  await client.auth.clearToken();
+    const previous = await tokenStore.getTokenEntry();
+    if (credentialEpoch !== epoch) throw supersededSignIn(buildLoginUrl());
+    await tokenStore.setToken(token);
+    const validationLifetime = getClientLifetime();
+    try {
+      return await getCurrentAuth();
+    } catch (error) {
+      if (getClientLifetime() === validationLifetime) await tokenStore.setTokenEntry(previous.token, previous.expiresAt);
+      throw error;
+    }
+  });
 }
 
 /** What a sign-out did: always signed out here; `endedOnDaemon` false when the daemon's session could not be ended. */
@@ -2295,19 +2305,36 @@ export interface SignOutOutcome {
 }
 
 /**
- * The bearer whose daemon session a sign-out could not end, held in memory only (never stored)
- * so the retry can end it. Gone on reload; the daemon session then ends by its own expiry.
+ * What a sign-out could not end, held in memory only (never stored) so the retry can end
+ * it: the relay-route bearer, and `null` for the direct-route sign-in (the browser still
+ * holds its cookie, which only the daemon can clear). Gone on reload.
  */
-let unendedSignIn: string | null = null;
+let unendedSignIns: readonly (string | null)[] = [];
 
-/** `POST /logout` with `token`: ends that sign-in session on the daemon. A credential that is not a sign-in session leaves nothing to end. */
-async function endDaemonSignIn(token: string): Promise<SignOutOutcome> {
+/** Ends each sign-in in turn; the outcome is ended only when every one was, and names the first failure. */
+async function endDaemonSignIns(held: readonly (string | null)[]): Promise<{ readonly outcome: SignOutOutcome; readonly unended: readonly (string | null)[] }> {
+  const unended: (string | null)[] = [];
+  let error: string | undefined;
+  for (const bearer of held) {
+    const ended = await endDaemonSignIn(bearer);
+    if (ended.endedOnDaemon) continue;
+    unended.push(bearer);
+    error ??= ended.error;
+  }
+  return { outcome: unended.length === 0 ? { endedOnDaemon: true } : { endedOnDaemon: false, error }, unended };
+}
+
+/**
+ * `POST /logout`: ends the daemon session `bearer` names, or (null) the one this browser's
+ * HttpOnly cookie holds, and clears that cookie and the identity marker. A credential that
+ * is not a sign-in session (a device or operator token) leaves nothing to end.
+ */
+async function endDaemonSignIn(bearer: string | null): Promise<SignOutOutcome> {
   try {
-    const response = await routedFetch(`${GOODVIBES_BASE_URL.replace(/\/+$/, '')}/logout`, {
-      method: 'POST',
-      credentials: 'omit',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const url = `${GOODVIBES_BASE_URL.replace(/\/+$/, '')}/logout`;
+    const response = bearer
+      ? await routedFetch(url, { method: 'POST', credentials: 'omit', headers: { Authorization: `Bearer ${bearer}` } })
+      : await globalThis.fetch(url, { method: 'POST', credentials: 'include', cache: 'no-store' });
     if (response.ok) return { endedOnDaemon: true };
     const body = asRecord(await readJson(response));
     // A pasted operator or device token is not a sign-in session (and an ended one is already gone): nothing is left to end.
@@ -2316,38 +2343,47 @@ async function endDaemonSignIn(token: string): Promise<SignOutOutcome> {
     return { endedOnDaemon: false, error: `the daemon answered ${response.status}${reason ? ` (${reason})` : ''}` };
   } catch (error) {
     return { endedOnDaemon: false, error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    // The marker cookie moved (or the bearer went): every reply still in flight for the old sign-in is dropped.
+    invalidateClientLifetime();
   }
 }
 
 /**
- * Sign out: the stored credential is cleared first (which starts a new identity generation, so
- * every reply, login or transcript still in flight for the old one is dropped), then the daemon
- * session it held is ended with `POST /logout`, so the old bearer stops working everywhere.
+ * Sign out: a new identity generation first (every reply, login or transcript still in
+ * flight for the old sign-in is dropped), the bearer held in memory is forgotten, then the
+ * daemon session is ended with `POST /logout`, which also clears the direct-route cookie,
+ * so the old credential stops working everywhere.
  */
-export async function signOut(): Promise<SignOutOutcome> {
-  // A new identity generation even when nothing was stored: a sign-in still in flight is older and is dropped.
+export function signOut(): Promise<SignOutOutcome> {
+  ++credentialEpoch;
+  // A new identity generation even when nothing was held: a sign-in still in flight is older and is dropped.
   invalidateClientLifetime();
   // What was typed and not yet accepted belongs to this sign-in: it does not outlive it.
   clearHeldInputs();
-  const token = await tokenStore.getToken();
-  await client.auth.clearToken();
-  const outcome = token ? await endDaemonSignIn(token) : { endedOnDaemon: true };
-  unendedSignIn = outcome.endedOnDaemon ? null : token;
-  return outcome;
+  return inCredentialOrder(async () => {
+    const bearer = await tokenStore.getToken();
+    await tokenStore.clearToken();
+    // The bearer held for the relay route, and the cookie the marker says this browser holds (both, after a route change).
+    const held = [...(bearer ? [bearer] : []), ...(readSignedInIdentity() !== null || !bearer ? [null] : [])];
+    const { outcome, unended } = await endDaemonSignIns(held);
+    unendedSignIns = unended;
+    return outcome;
+  });
 }
 
 /** Try again to end the daemon session a sign-out could not end. */
 export async function retryDaemonSignOut(): Promise<SignOutOutcome> {
-  const token = unendedSignIn;
-  if (!token) return { endedOnDaemon: true };
-  const outcome = await endDaemonSignIn(token);
-  if (outcome.endedOnDaemon && unendedSignIn === token) unendedSignIn = null;
+  const held = unendedSignIns;
+  if (held.length === 0) return { endedOnDaemon: true };
+  const { outcome, unended } = await inCredentialOrder(() => endDaemonSignIns(held));
+  if (unendedSignIns === held) unendedSignIns = unended;
   return outcome;
 }
 
-/** Give up ending the daemon session (it ends by its own expiry); the held bearer is forgotten. */
+/** Give up ending the daemon session (it ends by its own expiry); what was held for the retry is forgotten. */
 export function forgetUnendedSignIn(): void {
-  unendedSignIn = null;
+  unendedSignIns = [];
 }
 
 export function isRuntimeDomain(value: string): value is RuntimeEventDomain {

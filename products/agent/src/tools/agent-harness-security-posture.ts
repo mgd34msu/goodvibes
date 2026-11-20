@@ -68,8 +68,8 @@ const SUPPORT_BUNDLE_ROUTES: readonly SupportBundleRoute[] = [
   {
     bundleType: 'trust',
     defaultPath: 'trust-review-bundle.json',
-    inspectCommand: '/trust bundle inspect <path>',
-    exportCommand: '/trust bundle export <path> --yes',
+    inspectCommand: '/security read-trust <path>',
+    exportCommand: '/security save-trust <path>',
     workspaceActionIds: ['trust-bundle-export', 'trust-bundle-inspect'],
   },
   {
@@ -346,7 +346,7 @@ function buildPluginFindings(securitySnapshot: Record<string, unknown> | null): 
         severity: quarantined ? 'blocker' : 'warn',
         title: `Plugin ${name}`,
         summary: quarantined ? 'Plugin is quarantined.' : 'Plugin is untrusted.',
-        route: '/trust review',
+        route: '/security trust',
         detail: {
           name,
           version: safeText(plugin.version),
@@ -545,7 +545,7 @@ export async function securityPostureSummary(context: CommandContext, args: Agen
       reviewCommand: '/security review',
       tokensCommand: '/security tokens',
       attackPathsCommand: '/security attack-paths',
-      trustReviewCommand: '/trust review',
+      trustReviewCommand: '/security trust',
       authReviewCommand: '/auth review',
       bundleCatalogMode: 'support_bundles',
       singleFindingMode: 'security_finding',

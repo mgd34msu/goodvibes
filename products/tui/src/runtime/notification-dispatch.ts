@@ -135,12 +135,12 @@ export function eventDetail(payload: unknown): string | undefined {
   return undefined;
 }
 
-/** The runbook a health event names, as the command that runs its checks (`/doctor <symptom>`). */
+/** The runbook a health event names, as the command that runs its checks (`/health diagnose <symptom>`). */
 function runbookHint(payload: unknown): string | undefined {
   if (!payload || typeof payload !== 'object') return undefined;
   const playbooks = (payload as Record<string, unknown>)['playbooks'];
   const first = Array.isArray(playbooks) ? playbooks[0] : undefined;
-  return typeof first === 'string' && first ? `Next: /doctor ${first}` : undefined;
+  return typeof first === 'string' && first ? `Next: /health diagnose ${first}` : undefined;
 }
 
 export function createNotificationDispatcher(

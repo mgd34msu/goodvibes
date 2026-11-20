@@ -442,10 +442,10 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     name: 'Policy-as-Code',
     description:
       'Enables the versioned policy bundle registry with promote/rollback semantics. '
-      + 'Before enforcement, /policy simulate shows the rule diff and the calls this installation recorded '
-      + 'that the bundle would decide differently, and /policy promote --yes confirms them. '
-      + 'Exposes /policy load, /policy simulate, /policy diff, /policy promote, '
-      + 'and /policy rollback commands.',
+      + 'Before enforcement, /security simulate-policy shows the rule diff and the calls this installation recorded '
+      + 'that the bundle would decide differently, and /security enforce-policy confirms them. '
+      + 'Exposes /security load-policy, simulate-policy, compare-policy, enforce-policy '
+      + 'and restore-policy.',
     defaultState: 'disabled',
     tier: 5,
     runtimeToggleable: true,

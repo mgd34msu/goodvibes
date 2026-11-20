@@ -14,12 +14,12 @@ The `/tts` command does not replace text output. The normal assistant response s
 /tts stop
 /tts on
 /tts off
-/config tts
-/config tts.provider
-/config tts.voice
-/config tts.llmProvider
-/config tts.llmModel
-/config tts.speed
+/config open tts
+/config open tts.provider
+/config open tts.voice
+/config open tts.llmProvider
+/config open tts.llmModel
+/config open tts.speed
 ```
 
 `/tts <prompt>` submits the prompt through the normal conversation path. It uses the active chat provider/model by default, unless a separate TTS response model override is configured. Assistant deltas are chunked at sentence or phrase boundaries (a minimum of roughly 24 characters before a boundary is accepted, a hard cap around 320 characters, and a fallback flush after about a second of buffering) and sent to streaming TTS in order. Audio failures are reported as non-blocking TUI status messages and do not cancel the text turn.
@@ -51,12 +51,12 @@ The text response shown in the TUI is unaffected; only the audio synthesis input
 Always-speak mode is controlled by the `ui.voiceEnabled` config key (boolean, default `false`). It is visible in both the `ui` and `tts` settings categories. The setting is labeled **Always Speak** in the UI.
 
 ```text
-/config tts
+/config open tts
 ```
 
 The **Always Speak** row appears at the top of the TTS settings tab. Toggle it there or use `/tts on` / `/tts off` or `/voice enable` / `/voice disable`. All four are the same switch writing the same `ui.voiceEnabled` key.
 
-`/config tts` opens the fullscreen configuration workspace at the TTS category. From there users can toggle always-speak mode, choose the streaming TTS provider, choose a voice from that provider, open the fullscreen provider/model workspace for the TTS response model override, clear text fields, or reset selected settings.
+`/config open tts` opens the fullscreen configuration workspace at the TTS category. From there users can toggle always-speak mode, choose the streaming TTS provider, choose a voice from that provider, open the fullscreen provider/model workspace for the TTS response model override, clear text fields, or reset selected settings.
 
 The modal and direct commands write the platform TTS config keys:
 
@@ -77,11 +77,11 @@ Spoken turns stay active until the logical turn reaches `TURN_COMPLETED`, `TURN_
 
 The platform synthesis API (`VoiceSynthesisRequest`) accepts a `speed` field (positive number; 1.0 is normal speed). The TUI reads this from config and passes it through to the synthesis call.
 
-`tts.speed` is visible in `/config tts` and can be adjusted in place with `Shift+Left` / `Shift+Right` (0.1 steps, within the supported range) or typed after `Enter`. The default is `1` (normal speed).
+`tts.speed` is visible in `/config open tts` and can be adjusted in place with `Shift+Left` / `Shift+Right` (0.1 steps, within the supported range) or typed after `Enter`. The default is `1` (normal speed).
 
 The platform defines `tts.speed` in the config schema (default `1`, supported range 0.25–4.0), and both the settings modal and the synthesis call read it from there. The modal renders the schema descriptor like every other key, and a `readOptionalConfigNumber` helper in the platform's spoken-turn controller module (`platform/voice/spoken-turn/controller`) reads the value on every synthesis call and passes it into `VoiceSynthesisRequest.speed`.
 
-- The setting row is visible in `/config tts`; adjusting it takes effect on the next spoken turn.
+- The setting row is visible in `/config open tts`; adjusting it takes effect on the next spoken turn.
 - The TUI synthesis call passes `speed: undefined` when no value is stored, which means provider default.
 - The isDefault diamond shows accurately via deepEqual against the default of `1`.
 
@@ -96,8 +96,8 @@ Live TTS uses voice providers that advertise the `tts-stream` capability. The TU
 Useful setup path:
 
 ```text
-/config tts.provider
-/config tts.voice
+/config open tts.provider
+/config open tts.voice
 ```
 
 In the TUI these rows open selection pickers that set the chosen streaming provider or provider-specific voice.
@@ -113,10 +113,10 @@ export XI_API_KEY=...
 Then set the TTS defaults if desired:
 
 ```text
-/config tts.provider
-/config tts.voice
-/config tts.llmProvider
-/config tts.llmModel
+/config open tts.provider
+/config open tts.voice
+/config open tts.llmProvider
+/config open tts.llmModel
 ```
 
 Leaving `tts.voice` empty lets the provider choose its default voice.

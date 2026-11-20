@@ -1,11 +1,11 @@
 /**
- * /eval command handler: evaluate the product on real work.
+ * `/eval`, described once (command-actions/): evaluate the product on real work.
  *
- *   /eval list [suite-dir]                  , List the tasks in a task suite
- *   /eval run [suite-dir]                   , Run every task, then its verification script
- *   /eval tasks [suite-dir]                 , Same as run
- *   /eval compare [baseline-file]           , Compare the last run against a baseline file
- *   /eval gate [suite-dir] [baseline-file]  , Run the suite and fail on a failed or regressed task
+ *   /eval list [suite-dir]                         List the tasks in a task suite
+ *   /eval run [suite-dir]                          Run every task, then its verification script
+ *   /eval compare [baseline-file]                  Compare the last run against a baseline file
+ *   /eval gate [suite-dir] [--baseline <file>] [--save-baseline]
+ *                                                  Run the suite and fail on a failed or regressed task
  *
  * A task suite is one directory per task, each with a `task.json`
  * (`instruction`, optional `timeoutMs`) and a `verify.sh` that exits 0 when
@@ -18,7 +18,9 @@
 import { cpSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import type { SlashCommand, CommandContext } from '../command-registry.ts';
+import type { CommandContext } from '../command-registry.ts';
+import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { choiceInput, doAction, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 import { EvalRunner, createHeadlessRunExecutor, discoverTasks, formatTaskSuiteResult, runTaskSuite, taskSuiteAsEvalSuite } from '@/runtime/index.ts';
 import type { EvalSuiteResult } from '@/runtime/index.ts';
 import { loadBaseline, captureBaseline, formatBaselineComparison, writeBaseline } from '@/runtime/index.ts';
@@ -31,6 +33,9 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/na
 
 /** Where /eval looks when no suite directory is named, relative to the project. */
 export const DEFAULT_TASK_SUITE_DIR = join('.goodvibes', 'eval', 'tasks');
+
+/** Where the baseline is kept when no file is named, relative to the project. */
+const DEFAULT_BASELINE = '.goodvibes/eval/baseline.json';
 
 /** A task suite on disk: its directory and the name its baseline entries use. */
 interface TaskSuiteLocation {
@@ -101,8 +106,8 @@ async function withEvalRunning<T>(registry: EvalRegistry | undefined, work: () =
 
 // ── /eval list ────────────────────────────────────────────────────────────────
 
-function handleList(args: string[], context: CommandContext): void {
-  const location = locateSuite(args[0], context);
+function handleList(suite: string, context: CommandContext): void {
+  const location = locateSuite(suite || undefined, context);
   if (!location) return;
   let tasks: ReturnType<typeof discoverTasks>;
   try {
@@ -116,14 +121,14 @@ function handleList(args: string[], context: CommandContext): void {
     const instruction = definition.instruction.replace(/\s+/g, ' ').trim();
     lines.push(`  - ${definition.id}: ${instruction.length > 80 ? `${instruction.slice(0, 79)}…` : instruction}`);
   }
-  lines.push('[eval] Usage: /eval run [suite-dir]');
+  lines.push('[eval] Run them: /eval run [suite-dir]');
   context.print(lines.join('\n'));
 }
 
 // ── /eval run ────────────────────────────────────────────────────────────────
 
-async function handleRun(args: string[], context: CommandContext): Promise<void> {
-  const location = locateSuite(args[0], context);
+async function handleRun(suite: string, context: CommandContext): Promise<void> {
+  const location = locateSuite(suite || undefined, context);
   if (!location) return;
   const registry = getRegistry(context);
   await withEvalRunning(registry, async () => {
@@ -134,8 +139,8 @@ async function handleRun(args: string[], context: CommandContext): Promise<void>
 
 // ── /eval compare ─────────────────────────────────────────────────────────────
 
-async function handleCompare(args: string[], context: CommandContext): Promise<void> {
-  const baselineFile = args[0] ?? '.goodvibes/eval/baseline.json';
+async function handleCompare(baselinePath: string, context: CommandContext): Promise<void> {
+  const baselineFile = baselinePath || DEFAULT_BASELINE;
   const registry = getRegistry(context);
   const projectRoot = requireShellPaths(context).workingDirectory;
   const suiteResults = registry?.getSuiteResults() ?? [];
@@ -147,7 +152,7 @@ async function handleCompare(args: string[], context: CommandContext): Promise<v
 
   const baseline = await loadBaseline(baselineFile, projectRoot);
   if (!baseline) {
-    context.print(`[eval] Baseline file not found: ${baselineFile}\n[eval] Tip: run /eval gate [suite-dir] to create a baseline.`);
+    context.print(`[eval] Baseline file not found: ${baselineFile}\n[eval] /eval gate [suite-dir] makes one.`);
     return;
   }
 
@@ -156,13 +161,11 @@ async function handleCompare(args: string[], context: CommandContext): Promise<v
 
 // ── /eval gate ────────────────────────────────────────────────────────────────
 
-async function handleGate(args: string[], context: CommandContext): Promise<void> {
-  const positionals = args.filter(a => !a.startsWith('--'));
-  const baselineFile = positionals[1] ?? '.goodvibes/eval/baseline.json';
-  const saveFlag = args.includes('--save-baseline');
+async function handleGate(suite: string, baselinePath: string, saveFlag: boolean, context: CommandContext): Promise<void> {
+  const baselineFile = baselinePath || DEFAULT_BASELINE;
   const projectRoot = requireShellPaths(context).workingDirectory;
 
-  const location = locateSuite(positionals[0], context);
+  const location = locateSuite(suite || undefined, context);
   if (!location) return;
 
   const registry = getRegistry(context);
@@ -207,49 +210,44 @@ async function handleGate(args: string[], context: CommandContext): Promise<void
   context.print(report.join('\n'));
 }
 
-// ── Top-level command ─────────────────────────────────────────────────────────
+// ── The command ──────────────────────────────────────────────────────────────
 
-export const evalCommand: SlashCommand = {
+const SUITE = textInput({ id: 'suite', label: 'Task suite', help: `A folder with one folder per task (default ${DEFAULT_TASK_SUITE_DIR})`, why: 'a folder in this project', kind: 'path', typed: { position: 1 }, optional: { default: '', means: DEFAULT_TASK_SUITE_DIR } });
+const TERMINAL_ONLY = { terminalOnly: 'It runs the product in this terminal app\'s project.' } as const;
+
+export const evalCommand = defineCommand<CommandContext>({
   name: 'eval',
-  description: 'Evaluate the product on real tasks: run a task suite through goodvibes run, compare baselines, and gate regressions',
-  usage: '<subcommand> [args]',
-  argsHint: 'list [suite-dir]|run [suite-dir]|tasks [suite-dir]|compare <baseline>|gate [suite-dir]',
-  handler: async (args: string[], context: CommandContext): Promise<void> => {
-    const [sub, ...rest] = args;
-
-    switch (sub) {
-      case 'list':
-      case 'ls':
-        handleList(rest, context);
-        break;
-
-      case 'run':
-      case 'tasks':
-        await handleRun(rest, context);
-        break;
-
-      case 'compare':
-      case 'cmp':
-        await handleCompare(rest, context);
-        break;
-
-      case 'gate':
-        await handleGate(rest, context);
-        break;
-
-      default: {
-        const usage = [
-          'Usage: /eval <subcommand>',
-          `  list [suite-dir]                         — List the tasks in a task suite (default ${DEFAULT_TASK_SUITE_DIR})`,
-          '  run [suite-dir]                          — Run each task through goodvibes run, then its verify.sh',
-          '  tasks [suite-dir]                        — Same as run',
-          '  compare [baseline-file]                  — Compare the last run against a baseline',
-          '  gate [suite-dir] [baseline-file]         — Run the suite; fail on a failed task or a regression',
-          '    --save-baseline                        — Save the fresh run as the new baseline',
-        ].join('\n');
-        context.print(usage);
-        break;
-      }
-    }
-  },
-};
+  title: 'Evaluate on real tasks',
+  summary: 'Run a task suite through goodvibes run, compare it with a baseline, and stop on a regression',
+  group: 'Changes',
+  report: 'list',
+  actions: [
+    readAction<CommandContext>({
+      id: 'list', label: 'See the tasks in a suite', word: 'list', inputs: [SUITE],
+      sentence: 'Lists the tasks in the task suite named, each with its instruction.', example: { suite: 'evals/tasks' }, operator: TERMINAL_ONLY,
+      async run(values, ctx) { handleList(values.suite ?? '', ctx); },
+    }),
+    doAction<CommandContext>({
+      id: 'run', label: 'Run a task suite', word: 'run', inputs: [SUITE],
+      sentence: 'Each task of the suite runs as one goodvibes run in a scratch copy, then its verify.sh says pass or fail; the suite itself is never changed.', example: { suite: 'evals/tasks' }, operator: TERMINAL_ONLY,
+      async run(values, ctx) { await handleRun(values.suite ?? '', ctx); },
+    }),
+    readAction<CommandContext>({
+      id: 'compare', label: 'Compare the last run with a baseline', word: 'compare',
+      inputs: [textInput({ id: 'baseline', label: 'Baseline', help: `A baseline file (default ${DEFAULT_BASELINE})`, why: 'a file in this project', kind: 'path', typed: { position: 1 }, optional: { default: '', means: DEFAULT_BASELINE } })],
+      sentence: 'Compares the last suite run of this session with the baseline file, task by task.', example: { baseline: 'evals/baseline.json' }, operator: TERMINAL_ONLY,
+      async run(values, ctx) { await handleCompare(values.baseline ?? '', ctx); },
+    }),
+    {
+      id: 'gate', label: 'Run a suite and stop on a regression', word: 'gate',
+      inputs: [
+        SUITE,
+        textInput({ id: 'baseline', label: 'Baseline', help: `A baseline file (default ${DEFAULT_BASELINE})`, why: 'a file in this project', kind: 'path', typed: { flag: '--baseline' }, optional: { default: '', means: DEFAULT_BASELINE } }),
+        choiceInput({ id: 'save', label: 'Then', help: 'Whether this run becomes the baseline', choices: [{ value: 'no', label: 'Keep the baseline' }, { value: 'yes', label: 'Save this run as the baseline', help: 'The baseline file is written over.' }], typed: { flag: '--save-baseline', switchOn: 'yes' }, optional: { default: 'no', means: 'keep the baseline (one is made when there is none)' } }),
+      ],
+      sentence: 'The suite runs, and the gate fails on a failed task or one worse than the baseline; a missing baseline is made from this run, until you change it.', done: '',
+      touches: 'this-machine', lasts: 'kept', risk: 'none', operator: TERMINAL_ONLY, example: { suite: 'evals/tasks', save: 'yes' },
+      async run(values, ctx) { await handleGate(values.suite ?? '', values.baseline ?? '', values.save === 'yes', ctx); },
+    },
+  ],
+});

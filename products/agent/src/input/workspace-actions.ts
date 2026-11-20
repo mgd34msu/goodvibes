@@ -14,8 +14,12 @@ import { TODO_WORKSPACE_ACTIONS } from './workspace-actions/todo.ts';
 import { SECRETS_WORKSPACE_ACTIONS } from './workspace-actions/secrets.ts';
 import { MEMORY_WORKSPACE_ACTIONS } from './workspace-actions/memory.ts';
 import { SESSION_WORKSPACE_ACTIONS } from './workspace-actions/session.ts';
+import { CHANNELS_WORKSPACE_ACTIONS } from './workspace-actions/channels.ts';
 import { SECURITY_WORKSPACE_ACTIONS } from './workspace-actions/security.ts';
 import { HEALTH_WORKSPACE_ACTIONS } from './workspace-actions/health.ts';
+import { PROVIDER_WORKSPACE_ACTIONS } from './workspace-actions/provider.ts';
+import { EFFORT_WORKSPACE_ACTIONS } from './workspace-actions/effort.ts';
+import { BUNDLE_WORKSPACE_ACTIONS } from './workspace-actions/bundle.ts';
 
 export interface WorkspaceActionTarget {
   /** The described command's name. */
@@ -32,8 +36,12 @@ const TARGETS: ReadonlyMap<string, WorkspaceActionTarget> = new Map(Object.entri
   ...SECRETS_WORKSPACE_ACTIONS,
   ...MEMORY_WORKSPACE_ACTIONS,
   ...SESSION_WORKSPACE_ACTIONS,
+  ...CHANNELS_WORKSPACE_ACTIONS,
   ...SECURITY_WORKSPACE_ACTIONS,
   ...HEALTH_WORKSPACE_ACTIONS,
+  ...PROVIDER_WORKSPACE_ACTIONS,
+  ...EFFORT_WORKSPACE_ACTIONS,
+  ...BUNDLE_WORKSPACE_ACTIONS,
 }));
 
 /** The action a workspace row's form kind now opens, or undefined while the row still opens its form. */

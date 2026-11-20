@@ -33,10 +33,7 @@ export function renderSetupSandboxReview(ctx: CommandContext): string {
     `  mcp servers: ${review.config.mcpIsolation === 'contained' ? (review.host.secureSandboxReady ? 'each in its own boundary' : 'contained requested, not started on this host') : 'host processes'}`,
     ...review.host.warnings.map((warning) => `  warning: ${warning}`),
     '',
-    '  next:',
-    '    /sandbox doctor',
-    '    /sandbox profiles',
-    '    /sandbox session list',
+    '  more: /health check sandbox, /security sandbox-profiles, /security sandbox-sessions',
   ].join('\n');
 }
 

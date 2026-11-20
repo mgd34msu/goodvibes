@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { getContractGateTimeoutMs, projectTestCommandMissing, resolveProjectTestCommand } from '@goodvibes-jev/engine/platform/platform/contract';
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { doAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 
 /**
@@ -169,16 +171,19 @@ function killTestTree(proc: { pid: number; kill: (signal?: number | NodeJS.Signa
 const KILLED_DRAIN_GRACE_MS = 250;
 
 export function registerTestRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
+  registry.register(defineCommand<CommandContext>({
     name: 'test',
-    aliases: [],
-    description: 'Run the project test command (the test gate or the package.json test script) and show pass/fail results; Esc stops it',
-    usage: '[pattern]',
-    argsHint: '[pattern]',
-    async handler(args, ctx) {
-      await runTestCommand(args, ctx);
-    },
-  });
+    title: 'Run the tests',
+    summary: 'Run the project\'s test command and show what passed and failed; Esc stops it',
+    group: 'Changes',
+    actions: [doAction<CommandContext>({
+      id: 'test', label: 'Run the project\'s tests', word: '',
+      inputs: [textInput({ id: 'pattern', label: 'Only', help: 'Words that pick which tests run, passed to the test command', why: 'a test name or file pattern', typed: { tail: true }, optional: { default: '', means: 'every test' } })],
+      sentence: 'The project\'s test command (the test gate, or the package.json test script) runs here and its results are shown; Esc stops it.',
+      operator: { terminalOnly: 'The tests run in the terminal app\'s project.' }, example: { pattern: 'upload' },
+      async run(values, ctx) { await runTestCommand(values.pattern ? values.pattern.split(/\s+/).filter(Boolean) : [], ctx); },
+    })],
+  }));
 }
 
 /**

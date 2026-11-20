@@ -20,8 +20,9 @@ const PROVIDER_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceProvid
     const model = readField('model');
     const command = [
       '/provider',
+      'use',
       quoteSlashCommandArg(readField('provider')),
-      ...(model.length > 0 ? [quoteSlashCommandArg(model)] : []),
+      ...(model.length > 0 ? ['--model', quoteSlashCommandArg(model)] : []),
     ].join(' ');
     return dispatchCommandEditorSubmission(
       command,
@@ -61,8 +62,8 @@ const PROVIDER_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceProvid
     ];
     const redactedParts = [...parts];
     if (key.length > 0) {
-      parts.push(quoteSlashCommandArg(key));
-      redactedParts.push('<redacted-api-key>');
+      parts.push('--key', quoteSlashCommandArg(key));
+      redactedParts.push('--key', '<redacted-api-key>');
     }
     parts.push('--yes');
     redactedParts.push('--yes');

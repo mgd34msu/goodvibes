@@ -278,7 +278,7 @@ export function connectedHostRepairCards(
       state: 'available',
       effect: 'read-only',
       modelRoute: 'host action:"status" includeParameters:true',
-      userRoute: '/compat',
+      userRoute: '/health compat',
       recommendation: statusRecommendation,
       liveEvidence: repairLiveEvidence(probe, probe.status === 'reachable'
         ? 'Runtime endpoint is reachable; use connected-host status when token, compatibility, or Knowledge readiness still needs review.'
@@ -309,7 +309,7 @@ export function connectedHostRepairCards(
       label: 'Read service install/runtime status',
       methodId: 'services.status',
       effect: 'read-only',
-      userRoute: '/compat',
+      userRoute: '/health compat',
       prerequisite: liveHostPrerequisite,
       recommendation: statusRecommendation,
       liveEvidence: repairLiveEvidence(probe, probe.status === 'reachable'

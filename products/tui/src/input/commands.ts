@@ -1,11 +1,10 @@
 import { registerTriggerCommands } from './commands/trigger-supervisor.ts';
-import { registerHostPairingCommands } from './commands/host-pairing.ts';
 import { CommandRegistry } from './command-registry.ts';
 import type { SlashCommand } from './command-registry.ts';
 import { evalCommand } from './commands/eval.ts';
 import { sessionCommand, resumeCommand, saveCommand } from './commands/session.ts';
 import { memoryCommand } from './commands/memory.ts';
-import { knowledgeCommand } from './commands/knowledge.ts';
+import { registerKnowledgeRuntimeCommands } from './commands/knowledge.ts';
 import { registerShellCoreCommands } from './commands/shell-core.ts';
 import { registerConfigCommand } from './commands/config.ts';
 import { registerDiscoveryRuntimeCommands } from './commands/discovery-runtime.ts';
@@ -57,9 +56,7 @@ import { registerAcpRuntimeCommands } from './commands/acp-runtime.ts';
 import { registerProviderAccountsRuntimeCommands } from './commands/provider-accounts-runtime.ts';
 import { registerLocalAuthRuntimeCommands } from './commands/local-auth-runtime.ts';
 import { registerIntelligenceRuntimeCommands } from './commands/intelligence-runtime.ts';
-import { registerQrcodeRuntimeCommands } from './commands/qrcode-runtime.ts';
 import { registerDevicesRuntimeCommands } from './commands/devices-runtime.ts';
-import { registerRelayRuntimeCommands } from './commands/relay-runtime.ts';
 import { registerOnboardingRuntimeCommands } from './commands/onboarding-runtime.ts';
 import { registerTtsRuntimeCommands } from './commands/tts-runtime.ts';
 import { registerCloudflareRuntimeCommands } from './commands/cloudflare-runtime.ts';
@@ -140,10 +137,7 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Provider Accounts', register: registerProviderAccountsRuntimeCommands },
   { category: 'Local Auth', register: registerLocalAuthRuntimeCommands },
   { category: 'Intelligence', register: registerIntelligenceRuntimeCommands },
-  { category: 'QR Codes', register: registerQrcodeRuntimeCommands },
-  { category: 'Security', register: registerDevicesRuntimeCommands },
-  { category: 'Security', register: registerHostPairingCommands },
-  { category: 'Relay', register: registerRelayRuntimeCommands },
+  { category: 'Devices', register: registerDevicesRuntimeCommands },
   { category: 'Onboarding', register: registerOnboardingRuntimeCommands },
   { category: 'Voice & TTS', register: registerTtsRuntimeCommands },
   { category: 'Cloudflare', register: registerCloudflareRuntimeCommands },
@@ -180,7 +174,7 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Sessions & Replay', register: (registry) => registry.register(resumeCommand) },
   { category: 'Sessions & Replay', register: (registry) => registry.register(saveCommand) },
   { category: 'Memory', register: (registry) => registry.register(memoryCommand) },
-  { category: 'Knowledge', register: (registry) => registry.register(knowledgeCommand) },
+  { category: 'Knowledge', register: registerKnowledgeRuntimeCommands },
 ];
 
 /**

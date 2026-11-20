@@ -4,7 +4,9 @@
  * The built web UI (RUNTHROUGH_WEBUI_DIST, built by run.ts with vite) is
  * served by the daemon itself (controlPlane.webui.serve). A Chromium
  * (RUNTHROUGH_CHROMIUM, default /usr/bin/chromium) driven by the repository's
- * Playwright opens it with a pairing link, so it signs in as a paired device.
+ * Playwright opens it with a pairing link, so it signs in as a paired device
+ * (the daemon binds the device token to its HttpOnly cookie; the journey checks
+ * that no storage a page script can read holds it, across a reload).
  * Every view the journey names is opened and must render without a console
  * error; the actions (a chat turn that uses a tool, answering its approval,
  * saving two settings at once) are made through the calls the web UI makes.
@@ -33,7 +35,7 @@ await s.restartDaemon();
 type PageEvent = { type(): string; text(): string; status(): number; url(): string };
 type Element = { innerText(): Promise<string>; click(): Promise<void>; fill(value: string): Promise<void> };
 type Locator = Element & { count(): Promise<number>; first(): Element; nth(index: number): Element };
-type Page = { goto(url: string): Promise<unknown>; waitForTimeout(ms: number): Promise<void>; title(): Promise<string>; locator(selector: string): Locator;
+type Page = { goto(url: string): Promise<unknown>; waitForTimeout(ms: number): Promise<void>; title(): Promise<string>; locator(selector: string): Locator; evaluate(expression: string): Promise<unknown>;
   getByRole(role: string, options: { name: string }): Locator; on(event: string, listener: (value: PageEvent) => void): void; url(): string };
 type Browser = { newPage(): Promise<Page>; close(): Promise<void> };
 const { chromium: playwright } = await import(join(REPO, 'products/webui/node_modules/@playwright/test/index.js')) as { chromium: { launch(options: Record<string, unknown>): Promise<Browser> } };
@@ -60,6 +62,29 @@ try {
   journey.check('the built web UI loads from the daemon and signs in with the pairing link', `chromium ${s.daemon.baseUrl}/#pair=<token>`,
     `title ${JSON.stringify(title)}; token dropped from URL ${signedIn}; console errors ${JSON.stringify(errors.slice(0, 3))}; text ${short(bodyText.replace(/\s+/g, ' '), 160)}`,
     minted.status === 200 && signedIn && errors.length === 0 && bodyText.trim().length > 0);
+
+  // The sign-in lives in the daemon's HttpOnly cookie: nothing a page script can read holds the token, and a reload stays signed in.
+  const readable = async () => String(await page.evaluate(`(async () => {
+    const parts = [document.cookie];
+    for (const store of [localStorage, sessionStorage]) for (let i = 0; i < store.length; i++) parts.push(store.key(i), store.getItem(store.key(i)));
+    for (const info of await indexedDB.databases()) {
+      const db = await new Promise((resolve, reject) => { const open = indexedDB.open(info.name); open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error); });
+      for (const name of db.objectStoreNames) {
+        parts.push(JSON.stringify(await new Promise((resolve) => { const all = db.transaction(name).objectStore(name).getAll(); all.onsuccess = () => resolve(all.result); all.onerror = () => resolve(null); })));
+      }
+      db.close();
+    }
+    return parts.join('\\n');
+  })()`));
+  const afterSignIn = await readable();
+  await page.goto(`${s.daemon.baseUrl}/?view=work&tab=sessions`);
+  await page.waitForTimeout(2_000);
+  const reloadedText = (await page.locator('body').first().innerText()).replace(/\s+/g, ' ');
+  const afterReload = await readable();
+  journey.check('the browser keeps the sign-in where no page script can read it, and stays signed in across a reload',
+    'after the pairing link and after a reload: document.cookie, localStorage, sessionStorage and IndexedDB',
+    `token readable after sign-in ${afterSignIn.includes(device)}; after reload ${afterReload.includes(device)}; marker ${/goodvibes_identity=/.test(afterSignIn)}; signed-in text ${!reloadedText.includes('Sign in to GoodVibes')}`,
+    device.length > 0 && !afterSignIn.includes(device) && !afterReload.includes(device) && /goodvibes_identity=/.test(afterSignIn) && !reloadedText.includes('Sign in to GoodVibes'));
 
   // A chat turn that uses a tool, its approval answered, as the chat view does (companion chat).
   s.model.scriptWrapped('RTJ7CHAT', [

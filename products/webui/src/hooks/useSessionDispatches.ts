@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
 import { isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../lib/client-lifetime';
-import { hasStoredTokenSync, client as platformClient } from '../lib/goodvibes';
+import { hasSignInSync, client as platformClient } from '../lib/goodvibes';
 import { formatError, isDefiniteRefusal, isSessionClosedError, serializeError } from '../lib/errors';
 import { asRecord } from '../lib/object';
 import { heldInputsForThisPage } from '../lib/held-input';
@@ -75,7 +75,7 @@ export function useSessionDispatches(lifetime: ClientLifetime, sessionId: string
   const sequence = useRef(0);
   const owner = useRef(false);
   const flights = useRef(new Set<AbortController>());
-  const current = () => isClientLifetimeCurrent(lifetime) && hasStoredTokenSync();
+  const current = () => isClientLifetimeCurrent(lifetime) && hasSignInSync();
   const owned = () => owner.current && current();
   const key = queryKeys.sessionInputs(lifetime.revision, sessionId);
 

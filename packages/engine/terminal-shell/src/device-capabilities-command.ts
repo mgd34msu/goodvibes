@@ -1,5 +1,5 @@
 /**
- * The paired-phone part of `/devices`, shared by both terminal apps: the phones
+ * The paired-phone actions of `/devices` (devices-command.ts), shared by both terminal apps: the phones
  * paired as device nodes and what each can serve, the durable "always allow"
  * grants with revoke, and the captures the daemon is keeping with delete. Every
  * line goes to the daemon over the `devices.*` verbs (DevicesClient); nothing
@@ -8,43 +8,12 @@
 import type { DevicesClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { RefusalError, readRefusal, refusal } from '@goodvibes-jev/engine/errors';
-import { commandRefusal, type CommandConfirmation } from './command-confirmation.js';
+import { commandRefusal } from './command-confirmation.js';
 
-/** The subcommands this module answers, with their argument hints. */
-export const DEVICE_CAPABILITY_SUBCOMMANDS = {
-  nodes: '',
-  grants: '',
-  'revoke-grant': '<grant-id>',
-  captures: '',
-  'delete-capture': '<capture-id>',
-} as const;
+const DEVICE_CAPABILITY_SUBCOMMANDS = ['nodes', 'grants', 'revoke-grant', 'captures', 'delete-capture'] as const;
 
-export const DEVICE_CAPABILITY_USAGE = 'nodes | grants | revoke-grant <grant-id> | captures | delete-capture <capture-id>';
-
-export function isDeviceCapabilitySubcommand(sub: string): sub is keyof typeof DEVICE_CAPABILITY_SUBCOMMANDS {
-  return Object.hasOwn(DEVICE_CAPABILITY_SUBCOMMANDS, sub);
-}
-
-/** The question a revoke or a delete asks once; undefined for a read or an incomplete line. */
-export function deviceCapabilityConfirmation(args: readonly string[]): CommandConfirmation | undefined {
-  const sub = (args[0] ?? '').toLowerCase();
-  const id = args[1];
-  if (!id) return undefined;
-  if (sub === 'revoke-grant') {
-    return {
-      title: `Revoke device grant ${id}?`,
-      detail: 'The "always allow" answer is removed; the next request for that capability asks you again.',
-      confirmLabel: 'Revoke',
-    };
-  }
-  if (sub === 'delete-capture') {
-    return {
-      title: `Delete capture ${id}?`,
-      detail: 'The photo or screen capture and its record are removed from the daemon host now and cannot be recovered.',
-      confirmLabel: 'Delete',
-    };
-  }
-  return undefined;
+function isDeviceCapabilitySubcommand(sub: string): sub is (typeof DEVICE_CAPABILITY_SUBCOMMANDS)[number] {
+  return (DEVICE_CAPABILITY_SUBCOMMANDS as readonly string[]).includes(sub);
 }
 
 const when = (at: unknown): string => typeof at === 'number' && Number.isFinite(at) ? new Date(at).toISOString().replace('T', ' ').slice(0, 16) : 'n/a';
@@ -53,7 +22,7 @@ const size = (bytes: unknown): string => typeof bytes === 'number' ? (bytes >= 1
 /**
  * Run one paired-phone subcommand. Returns false when `args[0]` is not one of
  * them, so a product's `/devices` can fall through to its own subcommands.
- * A revoke or delete runs only after its confirmation was answered. A line that
+ * A delete runs only after its confirmation was answered. A line that
  * did not happen (no daemon, a missing id, a daemon refusal or failure) throws
  * its refusal, so a modal or the model's command runner sees it failed.
  */
@@ -75,7 +44,7 @@ export async function runDeviceCapabilitySubcommand(
     if (sub === 'nodes') {
       const nodes = await devices.listNodes();
       print(nodes.length === 0
-        ? '[devices] No phone is paired as a device node. Pair one with /pair, then open the GoodVibes page on it.'
+        ? '[devices] No phone is paired as a device node. Pair one with /devices pair device, then open the GoodVibes page on it.'
         : ['[devices] Paired phones:', ...nodes.map((node) =>
           `  ${node.label || node.nodeId}  ${node.platform ?? ''}  id ${node.nodeId}\n    can serve: ${(node.supported ?? []).join(', ') || 'nothing yet'}`)].join('\n'));
       return true;
@@ -86,7 +55,7 @@ export async function runDeviceCapabilitySubcommand(
         ? '[devices] No "always allow" grants: every phone capability asks you first.'
         : ['[devices] Always-allow grants:', ...grants.map((grant) =>
           `  ${grant.grantId}  ${grant.capabilityTitle ?? grant.capabilityId ?? '?'} on ${grant.nodeId ?? '?'}  ${grant.scope ?? ''}  used ${grant.useCount ?? 0}x  expires ${when(grant.expiresAt)}`),
-        '', 'Revoke one with /devices revoke-grant <grant-id>.'].join('\n'));
+        '', 'Revoke one with /devices revoke-grant <grant>.'].join('\n'));
       return true;
     }
     if (sub === 'revoke-grant') {
@@ -103,7 +72,7 @@ export async function runDeviceCapabilitySubcommand(
         : [`[devices] Captures kept on the daemon host (${listed.retained}, each kept ${listed.retentionHours} hour(s)):`,
           ...listed.artifacts.map((artifact) =>
             `  ${artifact.artifactId}  ${String(artifact.capabilityId ?? '?')} from ${String(artifact.nodeId ?? '?')}  ${size(artifact.byteLength)}  taken ${when(artifact['capturedAt'])}  deleted ${when(artifact['expiresAt'])}${typeof artifact['reason'] === 'string' && artifact['reason'] ? `\n    reason: ${artifact['reason']}` : ''}`),
-          '', 'Delete one now with /devices delete-capture <capture-id>.'].join('\n'));
+          '', 'Delete one now with /devices delete-capture <capture>.'].join('\n'));
       return true;
     }
     const artifactId = args[1];

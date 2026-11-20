@@ -1,7 +1,7 @@
 /**
  * handoff-mint.ts, the one place a pairing producer mints a link.
  *
- * Every producer (a `pair` CLI block, a pairing modal's QR, a /qrcode flow)
+ * Every producer (a `pair` CLI block, a pairing modal's QR, a /devices pair flow)
  * routes through mintPairingHandoff, which mints a fresh per-device token and
  * encodes the canonical `#pair=<token>` deep link from pairing-handoff.ts,
  * byte-for-byte the same shape the `pairing.handoff.create` gateway verb's

@@ -892,7 +892,7 @@ Inside `goodvibes` or `goodvibes-agent`, `/update daemon` shows the connected da
 Daemon updates
   running:  3.3.1
   updates:  on, checking every 1h 0m
-  next: /update daemon check runs one check now
+  next: /update daemon --check runs one check now
 ```
 
 Both forms can contain these lines between `updates:` and the end:
@@ -908,7 +908,7 @@ Both forms can contain these lines between `updates:` and the end:
 
 `goodvibes-daemon update` adds `  rollback: an automatic rollback is in force; no fully-started boot has cleared it yet` while a crash-loop rollback has not yet been followed by a complete start, and ends with the receipts.
 
-Run one check now (it never forces an install while work is in flight): `goodvibes-daemon update --check`, or `/update daemon check` in a terminal program. The check adds one line: `  check:    ran now; the lines above are its result`, `  check:    another check was already running, so none was started; the lines above are as of now`, or `  check:    not run, the update loop is off: <reason>`. `/update daemon check` leaves out the `next:` line.
+Run one check now (it never forces an install while work is in flight): `goodvibes-daemon update --check`, or `/update daemon --check` in a terminal program. The check adds one line: `  check:    ran now; the lines above are its result`, `  check:    another check was already running, so none was started; the lines above are as of now`, or `  check:    not run, the update loop is off: <reason>`. `/update daemon check` leaves out the `next:` line.
 
 `goodvibes-daemon update` takes `--json`, and `--host <name>`, `--port <n>`, `--token <t>` to ask another machine's daemon. When the daemon on this machine does not answer, it exits `1` and prints the failure and its fix, an empty line, `what this machine's files say about the daemon:` and lines read from the daemon's local records: `  uptime:   <time>` (or `  uptime:   not recorded yet on this host`, or `  uptime:   the last daemon on this host shut down cleanly; this is a fresh start or none`), `  starts:   <n> consecutive start attempts did not finish starting`, the `rejected:` and `rollback:` lines, and the receipts. With no operator token yet it prints `no operator token was found for this machine` and `  start the daemon once so it creates its operator token, or pass --token`, and exits `1`. When the daemon answers but the update question fails, it prints `the daemon answered, but update.status failed: <error>` (or `update.check`) with its fix and exits `1`.
 
@@ -996,18 +996,18 @@ How to set an update setting for each program:
 
 ### Updating by hand
 
-`/update` works the same in the terminal app and the Agent. `/upgrade` is an alias. `/update apply` and `/update rollback` work whatever the `update.*` settings say; those settings only control the automatic updates. They act on the install directory of the running program.
+`/update` is one guided command in the terminal app and the Agent: bare in the terminal it opens its list of actions; from a model or a script it runs `check`. `/update apply` and `/update rollback` ask nothing more, only the owner can run them (a model is refused), and they work whatever the `update.*` settings say; those settings only control the automatic updates. They act on the install directory of the running program.
 
 | Command | Terminal app | Agent | What it does |
 | --- | --- | --- | --- |
-| `/update` or `/update check` | yes | yes | Asks for the latest release and prints `Already current: running v3.3.1 (latest release is v3.3.1).` or `Update available: v3.3.2 (running v3.3.1). Run /update apply to install it.` or `Could not check for updates: <error>`. When the installed files are damaged or mixed at the current version, prints `Installed suite repair required at v3.3.1. Run /update apply to align the installed products and companions.` |
-| `/update apply` | yes | yes | Downloads, verifies and installs the latest release (or repairs the current one). Prints `Update available: v3.3.2 (running v3.3.1). Downloading and verifying...`, then `Updated GoodVibes 3.3.2: goodvibes, goodvibes-daemon, goodvibes-agent.` with any `updated directory: <path>` lines and `Restart the running GoodVibes programs to use the installed release.` In the terminal app on Linux, when the daemon's systemd service is active, it adds `Daemon restart: systemctl --user restart goodvibes.service`. On failure it prints `Update failed: <reason>`. |
+| `/update check` | yes | yes | Asks for the latest release and prints `Already current: running v3.3.1 (latest release is v3.3.1).` or `Update available: v3.3.2 (running v3.3.1). Install it: /update apply`; a failed read is refused with `Could not check for updates: <error>`. When the installed files are damaged or mixed at the current version, prints `The installed programs need repair at v3.3.1. Align them: /update apply` |
+| `/update apply` | yes | yes | Downloads, verifies and installs the latest release (or repairs the current one). Prints `Update available: v3.3.2 (running v3.3.1). Downloading and verifying...`, then `Updated GoodVibes 3.3.2: goodvibes, goodvibes-daemon, goodvibes-agent.` with any `updated directory: <path>` lines and `Restart the running GoodVibes programs to use the installed release.` In the terminal app on Linux, when the daemon's systemd service is active, it adds `Daemon restart: systemctl --user restart goodvibes.service`. On failure it is refused with `Update failed: <reason>`. |
 | `/update rollback` | yes | yes | Restores the kept previous release (see [Rolling back](#rolling-back)). |
 | `/update daemon` | yes | yes | The connected daemon's own update loop, as `goodvibes-daemon update` prints it. |
-| `/update daemon check` | yes | yes | Runs one daemon check now. |
-| `/update review` | yes | no | Prints the installed version, the latest release, the release channel, the install kind (`binary`, `bun-global-package` or `source`), whether a rollback copy is kept, the subscription providers and the sandbox profile. |
-| `/update bundle export <path> [--yes]` | yes | no | Saves that review as JSON to a file. `--yes` replaces an existing file. It is a record for support, not an update. |
-| `/update bundle inspect <path>` | yes | no | Reads a saved review back. |
+| `/update daemon --check` | yes | yes | Runs one daemon check now. |
+| `/update review` | yes | no | "See this install": the installed version, the latest release, the release channel, the install kind (`binary`, `bun-global-package` or `source`), whether a rollback copy is kept, the subscription providers, the sandbox profile, and how many settings profiles and stored secrets an update keeps. |
+| `/update save-review <file> [--replace]` | yes | no | Saves that review as JSON to a file. An existing file is kept unless `--replace` (which asks first). It is a record for support, not an update. |
+| `/update read-review <file>` | yes | no | Reads a saved review back. |
 
 On an installation that cannot update itself, `/update apply` prints `This install is not a self-updatable binary install (detected: running from source).` (or `bun/npm package install`) and `Update with: curl -fsSL https://goodvibes.sh/install.sh | sh`. A terminal program run from a source checkout prints instead: `This TUI is built from a private Jev workspace. Update the workspace and build the engine, then run bun run --filter @goodvibes-jev/tui build from the workspace root.` (`Agent` and `@goodvibes-jev/agent` for the Agent).
 
@@ -1102,7 +1102,7 @@ After a successful rollback, restart the programs; for the daemon run `goodvibes
 
 Running `/update rollback` a second time, right after a successful one, also succeeds: it exchanges the live and kept copies again, so the newer release is live once more and the older one is the `.previous` copy, and it prints `Restored GoodVibes <newer version>: ...`. The command does not compare versions; each run swaps the two sets, provided they still form one complete release each and the release being made live can read the saved data.
 
-`/update review` in the terminal app shows `rollback copy: kept beside this program; /update rollback restores it` when `<program>.previous` exists beside the running program, and `rollback copy: none kept (an /update apply keeps one)` otherwise.
+`/update review` in the terminal app shows `rollback copy: kept beside this program; /update rollback restores it` when `<program>.previous` exists beside the running program, and `rollback copy: none kept (/update apply keeps one)` otherwise.
 
 After an upgrade with the installer, no complete rollback set is kept. To go back to an earlier release then, install it by tag: `curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.3.0 sh`, subject to the data-reader check above. Then pin it (see [Pinning a release](#pinning-a-release)), or the update loop installs the newest release again within the hour.
 
@@ -1413,7 +1413,7 @@ What each update path then does:
 | Launch update of the terminal app and the Agent | Runs its check. When the latest release is newer than the build, or has the same version (a checkout build lacks the release's reader records, so it always counts as needing repair), it tries to install and stops before downloading any program, because the checkout installer points the web UI at `<prefix>/current/webui`, which is outside the program's own directory. It prints `downloading <tag>…`, then `Update available: <tag> (running v<version>). Downloading and verifying...` or `Repairing the installed GoodVibes suite at <tag>. Downloading and verifying...`, then `auto-update failed: The configured WebUI (<prefix>/current/webui, from controlPlane.webui.bundleDir or web.staticAssetsDir) is separately managed and is not updated with the suite. Update its deployment explicitly, or clear that setting, then update the suite again.; starting the current version v<version>`. Nothing is changed. When the build is newer than the latest release, it does nothing. |
 | The Agent's while-running update | Tries in the same way at each check and fails with the same reason, changing nothing. |
 | `/update apply` | Prints the same reason as `Update failed: The configured WebUI (...) ...`. Nothing is changed. |
-| `/update check` | Works: it reports the latest release, or `Installed suite repair required at <tag>. Run /update apply to align the installed products and companions.` when the versions are equal. |
+| `/update check` | Works: it reports the latest release, or `The installed programs need repair at <tag>. Align them: /update apply` when the versions are equal. |
 | `/update rollback` | `Rollback failed:` with the same web UI reason. |
 
 To keep the terminal app and the Agent from trying at every start, turn their launch updates off: `goodvibes-daemon config set update.autoUpdateAtLaunch false`. With a checkout installation this writes `<data-dir>/.goodvibes/daemon/settings.json`, which both read.

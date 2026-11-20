@@ -16,7 +16,7 @@ The evidence tab keeps the latest 500 caught-up events plus current projected ev
 
 ## Interactive host credential boundary
 
-The live TUI owner may use `/host pair --bootstrap-shared --apply` to review a host-bound administrative credential and answer a fresh exact phrase. This uses the same TUI-owned store, resolver and pairing core as the standalone terminal route. Generic, model, harness and nested command dispatch cannot authorize the mutation. `/pair` still means companion/WebUI pairing. See [host-pairing contract](host-pairing.md) for cancellation, hidden-prompt invalidation, durable uncertainty and saved-but-unverified recovery. Pairing does not establish provider, workspace, Jev, admission or execution readiness.
+The live TUI owner may use `/devices pair host --bootstrap-shared --apply` to review a host-bound administrative credential and answer a fresh exact phrase. This uses the same TUI-owned store, resolver and pairing core as the standalone terminal route. Generic, model, harness and nested command dispatch cannot authorize the mutation. `/pair` still means companion/WebUI pairing. See [host-pairing contract](host-pairing.md) for cancellation, hidden-prompt invalidation, durable uncertainty and saved-but-unverified recovery. Pairing does not establish provider, workspace, Jev, admission or execution readiness.
 
 ## Planning command entry and historical access
 

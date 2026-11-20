@@ -251,7 +251,7 @@ Key commands:
 
 | Command | Does |
 | --- | --- |
-| `/services inspect\|test\|resolve\|auth\|auth-review\|doctor\|export\|import` | Manage API service configurations |
+| `/services list\|show\|check\|test\|check-auth\|trust\|export\|import\|open` | See, check and move your API services, and use one a project defines |
 | `/profiles` | Browse and load config profiles |
 | `/profile-sync` (alias `/profilesync`) | Export, import, and inspect profile sync bundles |
 | `/setup transfer export\|inspect\|import` | Move setup-transfer bundles between environments |

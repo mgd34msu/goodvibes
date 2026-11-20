@@ -176,7 +176,7 @@ const BASIC_OWN_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceBasic
     );
   },
   'subscription-inspect': (_editor, readField) => dispatchCommandEditorSubmission(
-    `/subscription inspect ${quoteSlashCommandArg(readField('provider'))}`,
+    `/provider show ${quoteSlashCommandArg(readField('provider'))}`,
     'Opening provider subscription inspection',
     'The workspace handed a read-only provider subscription inspection command to the shell-owned command router.',
     'read-only',
@@ -186,10 +186,9 @@ const BASIC_OWN_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceBasic
       return unconfirmed(editor, 'Provider subscription login start not confirmed. Type yes, then press Enter.', 'Provider subscription login start not confirmed.');
     }
     const parts = [
-      '/subscription',
-      'login',
+      '/provider',
+      'sign-in',
       quoteSlashCommandArg(readField('provider')),
-      'start',
     ];
     if (!isAffirmative(readField('openBrowser'))) parts.push('--no-browser');
     parts.push('--manual');
@@ -206,7 +205,7 @@ const BASIC_OWN_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceBasic
       return unconfirmed(editor, 'Provider subscription login finish not confirmed. Type yes, then press Enter.', 'Provider subscription login finish not confirmed.');
     }
     return dispatchCommandEditorSubmission(
-      `/subscription login ${quoteSlashCommandArg(readField('provider'))} finish ${quoteSlashCommandArg(readField('code'))} --yes`,
+      `/provider finish ${quoteSlashCommandArg(readField('provider'))} ${quoteSlashCommandArg(readField('code'))} --yes`,
       'Opening provider subscription login finish',
       'The workspace handed a confirmed subscription-login finish command to the shell-owned command router.',
       'safe',
@@ -217,7 +216,7 @@ const BASIC_OWN_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceBasic
       return unconfirmed(editor, 'Provider subscription logout not confirmed. Type yes, then press Enter.', 'Provider subscription logout not confirmed.');
     }
     return dispatchCommandEditorSubmission(
-      `/subscription logout ${quoteSlashCommandArg(readField('provider'))} --yes`,
+      `/provider sign-out ${quoteSlashCommandArg(readField('provider'))} --yes`,
       'Opening provider subscription logout',
       'The workspace handed a confirmed provider subscription logout command to the shell-owned command router.',
       'safe',

@@ -218,7 +218,7 @@ Example (`~/.goodvibes/tui/settings.json`):
 
 These keys are read directly by the TUI's notifier modules rather than by
 the platform schema, so they do not appear in the Key Settings table above.
-They are still editable from `/config behavior`, which injects them into the
+They are still editable from `/config open behavior`, which injects them into the
 behavior group alongside the schema-owned keys.
 
 `behavior.notifyAfterSeconds` gates the long-running-turn notification, and
@@ -265,7 +265,7 @@ The daemon keeps itself current on its own schedule. `/update daemon` shows
 what the connected daemon says about that: whether its update loop is on (and
 why not), checks that keep failing, a release that is downloaded and waiting
 (since when, and behind which work), and a release it rejected after a crash
-loop. `/update daemon check` runs one check now; it never forces an install.
+loop. `/update daemon --check` runs one check now; it never forces an install.
 The same view is in the Agent, in `goodvibes-daemon update`, and in the web
 UI under Settings, General.
 

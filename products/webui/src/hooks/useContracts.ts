@@ -5,7 +5,7 @@ import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';
 import contractSchema from '../lib/generated/contract-inspection-schema.json';
 import summarySchema from '../lib/generated/contract-summary-schema.json';
 import type { ContractRecord, ContractsSummariesResult } from '../lib/contract-bridge-types';
-import { hasStoredTokenSync, client as platformClient } from '../lib/goodvibes';
+import { hasSignInSync, client as platformClient } from '../lib/goodvibes';
 import { queryKeys } from '../lib/queries';
 
 /** A local revision, never a token or user-provided identifier, owns these caches. */
@@ -35,7 +35,7 @@ export async function readInContractScope<T>(
   const unsubscribe = subscribeClientLifetime(cancel);
   signal.addEventListener('abort', cancel, { once: true });
   const check = () => {
-    if (signal.aborted || !isClientLifetimeCurrent(lifetime) || !hasStoredTokenSync()) cancel();
+    if (signal.aborted || !isClientLifetimeCurrent(lifetime) || !hasSignInSync()) cancel();
     abort.signal.throwIfAborted();
   };
   try {
@@ -68,7 +68,7 @@ export function useContractList(lifetime: ClientLifetime, includeTerminal: boole
       assertShape(summarySchema.summaries, result, 'contract list');
       return result;
     }),
-    enabled: enabled && hasStoredTokenSync() && isClientLifetimeCurrent(lifetime),
+    enabled: enabled && hasSignInSync() && isClientLifetimeCurrent(lifetime),
     retry: false,
     gcTime: 0,
     refetchInterval: live ? 60_000 : 15_000,
@@ -108,7 +108,7 @@ export function useContractDetail(lifetime: ClientLifetime, id: string, live: bo
       if (contract.id !== id) throw new Error('The daemon returned a different contract. Refresh to try again.');
       return { contract, revision: status.revision };
     }),
-    enabled: Boolean(id) && hasStoredTokenSync() && isClientLifetimeCurrent(lifetime),
+    enabled: Boolean(id) && hasSignInSync() && isClientLifetimeCurrent(lifetime),
     retry: false,
     gcTime: 0,
     // Retain the safety poll even for terminal snapshots: a lost event must not

@@ -70,6 +70,11 @@ export function hasSignInSync(): boolean {
   return readMarker() !== '' || held !== null;
 }
 
+/** The relay-route bearer held in memory, for a page-teardown request that cannot wait for the async store; null on the direct route. */
+export function heldBearerSync(): string | null {
+  return held?.token ?? null;
+}
+
 /** Who the direct-route marker names, or null; the daemon's auth read stays the authority. */
 export function readSignedInIdentity(): { readonly generation: string; readonly principal: string } | null {
   const marker = readMarker();

@@ -5,7 +5,7 @@ import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairi
 import { isTrustedAncestorDirectory } from '@goodvibes-jev/engine/terminal-shell/host-pairing-store';
 
 /** The daemon's operator token on this machine, read with every ancestor checked: the bootstrap of
- * explicit /host pair, and the credential native work presents to a daemon on this machine when
+ * explicit /devices pair host, and the credential native work presents to a daemon on this machine when
  * the terminal holds no pairing for it (callers keep the read while the file is unchanged).
  * Do not create, chmod, repair or adopt another token/home on read failure.
  * Reads the daemon home this process's daemon uses, so a home relocated with

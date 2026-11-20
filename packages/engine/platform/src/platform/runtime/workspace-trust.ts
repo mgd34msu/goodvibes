@@ -94,7 +94,7 @@ export function trustGatedAsk(
       approved: false,
       reason: `Workspace trust${where} is undecided and the trust question was not answered here, so the workspace stays undecided. `
         + 'Reads keep working; writes, commands and delegation are refused until it is trusted '
-        + '(/trust workspace trusted in the terminal app, or answer the workspace-trust prompt of a run started with --answer-permissions).',
+        + '(/security trust-folder, or answer the workspace-trust prompt of a run started with --answer-permissions).',
     } as const;
     if (options.waitMs === undefined) {
       try {
@@ -165,7 +165,7 @@ export function repositoryFileGate(trust: RepositoryTrust, homeDirectory: string
 }
 
 /** The words every surface uses when what a repository brings is waiting on the owner's trust. */
-export const REPOSITORY_TRUST_NEXT_STEP = 'Run /trust workspace trusted to turn them on, or leave the workspace untrusted to keep them off.';
+export const REPOSITORY_TRUST_NEXT_STEP = 'Run /security trust-folder to turn them on, or leave the workspace untrusted to keep them off.';
 
 /**
  * The one notice a terminal app shows when what the workspace's repository

@@ -160,7 +160,7 @@ export function formatDoctorReport(report: DoctorReport): string[] {
   if (report.playbooks.length === 0) {
     return [
       `Nothing matched "${report.symptom}".`,
-      `Name one of: ${report.available.map((p) => p.id).join(', ')}; for example /doctor stuck turn.`,
+      `Name one of: ${report.available.map((p) => p.id).join(', ')}; for example /health diagnose stuck turn.`,
     ];
   }
   const lines: string[] = [];

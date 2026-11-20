@@ -40,7 +40,8 @@ const CHANNEL_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceChannel
       parts.push('--webhook', quoteSlashCommandArg(webhook));
       display.push('--webhook', quoteSlashCommandArg(redactWebhookForDisplay(webhook)));
     }
-    const tail = ['--message', quoteSlashCommandArg(readField('message')), '--yes'];
+    // The message is the line's last words; the send asks the owner before it goes.
+    const tail = [quoteSlashCommandArg(readField('message'))];
     parts.push(...tail);
     display.push(...tail);
     return dispatchCommandEditorSubmission(
@@ -57,7 +58,7 @@ const CHANNEL_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceChannel
 };
 
 function channelInspection(editor: AgentWorkspaceLocalEditor, readField: AgentWorkspaceFieldReader): AgentWorkspaceCommandEditorSubmission {
-  const subcommand = editor.kind === 'channel-doctor' ? 'doctor' : editor.kind === 'channel-setup' ? 'setup' : 'show';
+  const subcommand = editor.kind === 'channel-doctor' ? 'doctor' : editor.kind === 'channel-setup' ? 'setup' : 'configured';
   const command = `/channels ${subcommand} ${quoteSlashCommandArg(readField('channel'))}`;
   const title = editor.kind === 'channel-doctor'
     ? 'Opening channel doctor'

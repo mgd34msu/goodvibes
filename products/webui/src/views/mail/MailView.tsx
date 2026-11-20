@@ -236,9 +236,14 @@ export function MailView({ tabs }: MailViewProps = {}) {
         if (selectedUid === result.uid) setSelectedUid(null);
         toast({ title: result.action === 'archive' ? 'Archived' : 'Moved to Trash', description: result.movedTo ? `Now in ${result.movedTo}.` : undefined, tone: 'success' });
       }
-      await queryClient.invalidateQueries({ queryKey: ['email', 'inbox'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['email', 'inbox'] }),
+        queryClient.invalidateQueries({ queryKey: ['email', 'message'] }),
+      ]);
     },
     onError: (error) => {
+      // A refusal may mean the mailbox was reset: the open message is read again, so the next try carries the current generation.
+      void queryClient.invalidateQueries({ queryKey: ['email', 'message'] });
       const note = mailRefusalNote(error);
       toast({ title: note?.title ?? 'The message was not changed', description: note?.description ?? formatError(error), tone: 'danger' });
     },
@@ -473,7 +478,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
         Drafts
       </Button>
       <div className="dv-filters__end">
-        <IconButton label="Refresh inbox" icon={<RefreshCw />} onClick={() => { void inbox.refetch(); if (showDrafts) void drafts.refetch(); }} />
+        <IconButton label="Refresh inbox" icon={<RefreshCw />} onClick={() => { void inbox.refetch(); void queryClient.invalidateQueries({ queryKey: ['email', 'message'] }); if (showDrafts) void drafts.refetch(); }} />
       </div>
     </>
   );

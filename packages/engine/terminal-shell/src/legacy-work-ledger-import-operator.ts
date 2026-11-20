@@ -59,7 +59,7 @@ export async function openLegacyImportOperator(options: LegacyImportOperatorOpti
   const plain = (error: unknown): Error => {
     const message = (error instanceof Error ? error.message : String(error)).split(host.token).join('[redacted]');
     if (error instanceof GoodVibesError && error.kind === 'auth')
-      return new Error(`The host at ${host.baseUrl} no longer accepts this terminal's credential (${message}). Pair again with /host pair, then run the command again; a saved import keeps its request id.`);
+      return new Error(`The host at ${host.baseUrl} no longer accepts this terminal's credential (${message}). Pair again with /devices pair host, then run the command again; a saved import keeps its request id.`);
     return new Error(message);
   };
   const safe = async <T>(operation: () => Promise<T> | T): Promise<T> => {

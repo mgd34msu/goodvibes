@@ -1,5 +1,7 @@
 import type { AutomationJob } from '@goodvibes-jev/engine/platform/platform/automation';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { readAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 import { buildAgentWorkspaceRuntimeSnapshot } from '../agent-workspace-snapshot.ts';
 import { WORK_PLAN_TASK_STATUSES as WORK_PLAN_STATUSES, type ProjectWorkPlanTaskStatus as WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/knowledge';
 
@@ -121,7 +123,7 @@ export function formatAgentOperatorBriefing(ctx: CommandContext): string {
       ? 'Review media provider setup from Agent Workspace -> Voice & Media before relying on image or media workflows.'
       : '',
     'Use Agent Workspace -> Knowledge for Agent Knowledge status, search, and explicit ingest forms.',
-    'Use Agent Workspace -> Work & Approvals -> Delegate a build task only for explicit build, fix, implementation, or review handoff to GoodVibes TUI.',
+    'Hand build, fix or review work to the terminal app only when you mean to: /agents hand-off.',
   ].filter((line): line is string => line.length > 0);
 
   return [
@@ -152,15 +154,16 @@ export function formatAgentOperatorBriefing(ctx: CommandContext): string {
 }
 
 export function registerBriefRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
+  registry.register(defineCommand<CommandContext>({
     name: 'brief',
-    effect: 'read-only',
-    aliases: ['briefing'],
-    description: 'Show a concise Agent operator briefing and next actions',
-    usage: '',
-    argsHint: '',
-    handler(_args, ctx) {
-      ctx.print(formatAgentOperatorBriefing(ctx));
-    },
-  });
+    title: 'Briefing',
+    summary: 'A short briefing: how the Agent is set up, what is ready, and what to do next',
+    group: 'Agent',
+    actions: [readAction<CommandContext>({
+      id: 'brief', label: 'See your briefing', word: '',
+      sentence: 'Shows the model in use, what is ready (memory, skills, routines, channels, voice), the work plan and schedules, and what to do next.',
+      operator: { terminalOnly: 'It reads this Agent\'s own state.' },
+      async run(_values, ctx) { return formatAgentOperatorBriefing(ctx); },
+    })],
+  }));
 }

@@ -912,7 +912,7 @@ export class PairingTokenManager {
       reason: 'This request presented a shared operator token that this daemon no longer accepts.',
       next: served
         ? ['Restart the daemon so it writes the replacement token, then retry from this machine.']
-        : ['Pair this device for its own token: open /pair in the GoodVibes terminal on the daemon\'s machine (or goodvibes-daemon pair there), then use the new link.'],
+        : ['Pair this device for its own token: run /devices pair in the GoodVibes terminal on the daemon\'s machine (or goodvibes-daemon pair there), then use the new link.'],
     };
   }
 

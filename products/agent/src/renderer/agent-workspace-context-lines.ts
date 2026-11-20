@@ -47,7 +47,7 @@ function reportLines(workspace: AgentWorkspace, action: AgentWorkspaceAction): C
   const command = reportCommandOf(action);
   const report = command ? workspace.commandReport(command) : undefined;
   if (!report) return [];
-  const lines: ContextLine[] = [{ text: '', fg: PALETTE.muted }, { text: `${report.label} (${report.line})`, fg: PALETTE.title, bold: true }];
+  const lines: ContextLine[] = [{ text: '', fg: PALETTE.muted }, { text: `Now, as ${report.line} shows it:`, fg: PALETTE.title, bold: true }];
   if (report.lines === null) return [...lines, { text: 'Reading…', fg: PALETTE.dim, dim: true }];
   if (report.lines.length === 0) return [...lines, { text: 'Nothing to show.', fg: PALETTE.muted }];
   lines.push(...report.lines.slice(0, REPORT_LINES).map((text): ContextLine => ({ text, fg: PALETTE.info })));

@@ -696,10 +696,15 @@ export function createDaemonFacadeCollaborators(
   // The one admission (work-admission.ts), shared with the schedulers the runtime graph built: closed by the
   // auto-updater for its restart, asked by the router, the WebSocket calls, the agent spawn and every scheduler.
   const workAdmission = runtime.runtimeServices.workAdmission ?? new DaemonWorkAdmission();
+  const delegatedTelegram = composeDelegatedTelegramIntake(runtime, telegramSourceAccounts.reader);
+  // The ingress decision reads which chats are delegated from the intake that records them (Telegram is the one surface with delegated review).
+  runtime.channelPolicy.attachDelegatedReview({
+    isDelegated: async (surface, channelId, threadId) => surface === 'telegram' && await delegatedTelegram.selects(channelId, threadId),
+  });
   const surfaceActionHelper = new DaemonSurfaceActionHelper({
     workAdmission,
     telegramSourceAccounts: telegramSourceAccounts.reader,
-    delegatedTelegram: composeDelegatedTelegramIntake(runtime, telegramSourceAccounts.reader),
+    delegatedTelegram,
     paymentReplies: options.paymentReplies,
     ingressAlarm,
     serviceRegistry: runtime.serviceRegistry,

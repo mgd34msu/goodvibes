@@ -111,6 +111,14 @@ export function isChannelOwner(decision: { readonly policy: Pick<ChannelPolicyRe
  * the owner; a caller that needs to know who pressed or wrote refuses an
  * anonymous sender before it asks.
  */
+/** The reason a message in a chat set up for delegated review is admitted from someone other than the owner. */
+export const DELEGATED_REVIEW_REASON = 'delegated-review';
+
+/** The one record of chats set up for delegated review (the delegated intake), as the ingress decision reads it. */
+export interface ChannelDelegatedReviewSource {
+  isDelegated(surface: ChannelSurface, channelId: string, threadId?: string): Promise<boolean>;
+}
+
 export function channelSenderActor(decision: { readonly policy: Pick<ChannelPolicyRecord, 'ownerId'> }, surface: string, userId: string | undefined): Actor {
   return actorFromChannelSender({ surface, userId, isChannelOwner: isChannelOwner(decision, userId) });
 }
@@ -385,6 +393,8 @@ export class ChannelPolicyManager {
   private pendingClaimReplay: (() => void) | null = null;
   /** Per surface, moved by every change of its policy record; a decision carries the one it was made under. */
   readonly #revisions = new Map<ChannelSurface, number>();
+  /** Where a chat the owner set up for delegated review is recorded; absent, no chat is delegated. */
+  private delegatedReview: ChannelDelegatedReviewSource | null = null;
 
   constructor(
     options: {
@@ -469,6 +479,25 @@ export class ChannelPolicyManager {
    * accepts or declines from any surface that lists the inbox; the sender is
    * answered only after it is accepted. Returns the detach function.
    */
+  /**
+   * The one record of chats the owner set up for delegated review. A message in
+   * such a chat goes to the delegated intake whoever sent it: the sender check
+   * does not decide it, the owner is still recognised as the owner, and nothing
+   * a sender there does raises an owner or allowlist claim or seeds an owner.
+   * Returns the detach function.
+   */
+  attachDelegatedReview(source: ChannelDelegatedReviewSource): () => void {
+    this.delegatedReview = source;
+    return () => { if (this.delegatedReview === source) this.delegatedReview = null; };
+  }
+
+  /** Whether the message is in a chat set up for delegated review. */
+  private async inDelegatedChat(input: ChannelIngressPolicyInput): Promise<boolean> {
+    const source = this.delegatedReview;
+    if (!source || !input.channelId) return false;
+    return await source.isDelegated(input.surface, input.channelId, input.threadId);
+  }
+
   attachOwnerInbox(inbox: ChannelOwnerClaimInbox): () => void {
     this.ownerInboxUnsubscribe?.();
     this.ownerInbox = inbox;
@@ -656,12 +685,12 @@ export class ChannelPolicyManager {
   }
 
   /** A decision the caller already made under the current revision, or a fresh one. */
-  private decisionFor(input: ChannelIngressPolicyInput, decided: ChannelPolicyDecision | undefined): ChannelPolicyDecision {
+  private decisionFor(input: ChannelIngressPolicyInput, decided: ChannelPolicyDecision | undefined, delegated: boolean): ChannelPolicyDecision {
     return decided !== undefined && decided.revision === this.revision(input.surface) && decided.policy.surface === input.surface
-      ? decided : this.decideIngress(input);
+      ? decided : this.decideIngress(input, delegated);
   }
 
-  private decideIngress(input: ChannelIngressPolicyInput): ChannelPolicyDecision {
+  private decideIngress(input: ChannelIngressPolicyInput, delegated: boolean): ChannelPolicyDecision {
     const revision = this.revision(input.surface);
     const policy = this.getPolicy(input.surface);
     const conversationKind = normalizeConversationKind(input);
@@ -697,6 +726,9 @@ export class ChannelPolicyManager {
     if (!policy.enabled) {
       allowed = false;
       reason = 'surface-disabled';
+    } else if (delegated) {
+      // A chat set up for delegated review: its messages are reviewed whoever sent them; the owner stays the owner.
+      reason = isChannelOwner({ policy }, input.userId) ? 'allowed' : DELEGATED_REVIEW_REASON;
     } else if (parentKind === 'direct' && (policy.dmPolicy === 'deny' || !policy.allowDirectMessages)) {
       allowed = false;
       reason = 'direct-messages-disabled';
@@ -745,7 +777,8 @@ export class ChannelPolicyManager {
     readonly decided?: ChannelPolicyDecision;
   } = {}): Promise<ChannelPolicyDecision> {
     await this.start();
-    const decision = this.decisionFor(input, options.decided);
+    const delegated = await this.inDelegatedChat(input);
+    const decision = this.decisionFor(input, options.decided, delegated);
     if (options.admit === false) return decision;
     if (decision.reason === 'owner-claim-pending' || decision.reason === 'user-not-allowlisted') this.raiseOwnerClaim(input, decision);
     // Source-scoped callers may refuse fresh denials without retaining text.
@@ -760,7 +793,7 @@ export class ChannelPolicyManager {
     // status names who and since when. With the inbox attached, decideIngress
     // has already held that sender as a claim.
     let effectivePolicy = policy;
-    if (allowed && !this.ownerInbox && !policy.open && allowlistUserIds.length === 0
+    if (allowed && !delegated && !this.ownerInbox && !policy.open && allowlistUserIds.length === 0
       && allowlistGroupIds.length === 0 && allowlistChannelIds.length === 0 && input.userId) {
       // Publish ownership before awaiting disk so another ingress cannot also
       // seed the empty scope. An explicit group override owns its own seed.
@@ -805,7 +838,7 @@ export class ChannelPolicyManager {
    */
   async recordDeniedIngress(input: ChannelIngressPolicyInput, decided?: ChannelPolicyDecision): Promise<ChannelPolicyDecision> {
     await this.start();
-    const decision = this.decisionFor(input, decided);
+    const decision = this.decisionFor(input, decided, await this.inDelegatedChat(input));
     if (decision.reason === 'owner-claim-pending' || decision.reason === 'user-not-allowlisted') this.raiseOwnerClaim(input, decision);
     if (!decision.allowed) this.recordIngressAudit(input, decision, false);
     return decision;

@@ -43,8 +43,9 @@ import { HEADER_GAP_ROWS, withHeaderGap } from './renderer/header-line.ts';
 import { TranscriptScroll, mainBackToBottom, transcriptEscape } from './shell/transcript-scroll.ts';
 import { buildConversationViewport, centerViewportContent } from './renderer/conversation-layout.ts';
 import { applyConversationOverlays, buildConversationLayers } from './renderer/conversation-overlays.ts';
-import { buildActivityAgentRows, type ActivityView } from './renderer/activity-modal.ts';
-import { ActivityModal } from './input/activity-modal.ts';
+import { WorkBoardModal } from '@goodvibes-jev/engine/terminal-shell/work-board-input';
+import { createVerbSpawnGateway, FleetSpawn } from '@goodvibes-jev/engine/terminal-shell/fleet-spawn';
+import { confirmThrough } from './input/confirm-dialog.ts';
 import { envFlag, logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { emitAgentAwaitingMessage, emitAgentAwaitingTool } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import { bootstrapRuntime } from './runtime/bootstrap.ts';
@@ -94,10 +95,9 @@ import type { NoticeLevel, OrchestratorUserInputOptions } from '@goodvibes-jev/e
 import { allowTerminalWrite, createShellLayout, installFullScreenTerminalOutputGuard } from '@goodvibes-jev/engine/terminal-shell';
 import { buildCommandArgsHint } from './input/command-args-hint.ts';
 import './config/surface.ts';
-import { createAutonomySurfacing, buildCalendarEventsLister, buildSkillDraftProposer } from './shell/autonomy-surfacing.ts';
+import { createAutonomySurfacing, buildSkillDraftProposer } from './shell/autonomy-surfacing.ts';
 import { bindApprovals } from './shell/approvals-binding.ts';
 import { listAutomationRunsSince } from './agent/automation-runs-source.ts';
-import { listUpcomingSchedules } from './agent/automation-schedules-source.ts';
 import { createConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
 import './core/hardware-profile.ts';
 import { readApprovalPostureFromConfig } from './permissions/approval-posture.ts';
@@ -268,44 +268,23 @@ async function main(prepared: PreparedShellCliRuntime) {
   const shellPassthrough = new ShellPassthrough();
   let shellCommandsRunning = 0;
 
-  // Ambient autonomy surfacing: away digest at launch + the Activity modal's Coming up,
-  // both read from the connected host where schedules live and run.
+  // Ambient autonomy surfacing: the away digest at launch, read from the
+  // connected host where schedules live and run.
   const automationHost = createConnectedHost({ configManager, homeDirectory });
   const autonomy = createAutonomySurfacing({
     shellPaths: ctx.services.shellPaths,
-    listUpcomingSchedules: (now, signal) => listUpcomingSchedules(automationHost, now, { signal }),
     listAutomationRunsSince: (since, signal) => listAutomationRunsSince(automationHost, since, { signal }),
     listApprovals: approvalsBinding.listApprovals,
     describeApprovalsUnavailable: approvalsBinding.describeApprovalsUnavailable,
     getTasksSnapshot: () => uiServices.readModels.tasks.getSnapshot().tasks,
     router: {
       high: (message) => systemMessageRouter.high(message),
-      getFeed: () => systemMessageRouter.getFeed(),
+      low: (message) => systemMessageRouter.low(message),
     },
     render: () => render(),
-    listCalendarEvents: buildCalendarEventsLister(ctx.services.shellPaths),
     onAwayDigest: buildSkillDraftProposer(toolRegistry, ctx),
     isIdle: () => !mainTurnBusy() && pendingPermission === null,
   });
-
-  // The Activity modal's view (Ctrl+O, /activity), read live on every paint of it:
-  // the running work, what needs you, what is coming up and the activity feed.
-  const activityView = (): ActivityView => {
-    const sessionSnapshot = uiServices.readModels.session.getSnapshot();
-    const activeAgents = uiServices.readModels.agents.getSnapshot().active;
-    return {
-      now: {
-        busy: mainTurnBusy(),
-        label: remoteConversation.hostedToolPreview() ?? sessionSnapshot.streamToolPreview?.trim() ?? undefined,
-        agents: buildActivityAgentRows(activeAgents, ctx.services.fleetUnion.nodes()),
-        processes: processManager.runningCount(),
-        daemonPartial: ctx.services.fleetUnion.partial() ?? undefined,
-      },
-      needsYou: pendingPermission ? ['Approval needed, answer the prompt on screen.'] : [],
-      comingUp: [...autonomy.comingUpItems()],
-      recent: systemMessageRouter.getFeed()?.latest(200) ?? [],
-    };
-  };
 
   const getPromptContentWidth = () => {
     // Composer text runs from column 5 and wraps at width-9 (composer.ts), leaving the cursor room at width-4.
@@ -778,18 +757,34 @@ async function main(prepared: PreparedShellCliRuntime) {
     },
   });
   commandContext.clearScreen = commandUi.clearScreen;
-  // The Activity modal (Ctrl+O, /activity): what is running and what happened, as a kit modal.
-  commandContext.openActivityModal = () => {
-    input.surfaceModals.push(
-      new ActivityModal({
-        view: () => activityView(),
-        openProcesses: () => {
-          input.processModal.open();
-          render();
-        },
-        openSessionView: (target) => sessionViews.open(target),
-      }),
-    );
+  // Your agents (Ctrl+O, /agents): the work board over this process's fleet and the
+  // connected host's, the same panel as the terminal app's (terminal-shell work-board-input.ts).
+  // Finished work listed is this run's; n hosts a coding agent on the connected host.
+  const sessionStartedAt = Math.floor(performance.timeOrigin);
+  const agentSpawn = new FleetSpawn({
+    resolveGateway: () => createVerbSpawnGateway(ctx.services.daemonVerbs),
+    currentDirectory: () => ctx.services.workingDirectory,
+    notify: (message) => systemMessageRouter.high(message),
+    markDirty: () => render(),
+  });
+  commandContext.openAgents = () => {
+    const open = input.surfaceModals.modals().find((modal) => modal instanceof WorkBoardModal);
+    input.surfaceModals.push(open ?? new WorkBoardModal({
+      sources: { nodes: () => ctx.services.fleetUnion.nodes(), sessionStartedAt },
+      subscribe: (listener) => ctx.services.processRegistry.subscribe(() => listener()),
+      requestRender: () => render(),
+      openSessionView: (target) => {
+        if (sessionViews.open(target)) return true;
+        // A background process this view cannot open is in the process monitor.
+        if (target.kind !== 'process') return false;
+        input.processModal.open();
+        return true;
+      },
+      kill: (id) => ctx.services.processRegistry.kill(id, { cascade: true }),
+      resume: (id) => ctx.services.processRegistry.resume(id),
+      confirm: (options) => confirmThrough(input.surfaceModals, options),
+      spawn: agentSpawn,
+    }));
     render();
   };
   // see shell/terminal-focus-mode.ts
@@ -922,7 +917,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     else if (target === 'notices') commandContext.openNotifications?.();
     else if (target === 'context') commandContext.openContextInspector?.();
     else if (target === 'model') commandContext.openModelPicker?.();
-    else if (target === 'agents') commandContext.openActivityModal?.();
+    else if (target === 'agents') commandContext.openAgents?.();
     else if (target === 'commands') commandContext.openCommandPalette?.();
     render();
   };
@@ -1011,9 +1006,6 @@ async function main(prepared: PreparedShellCliRuntime) {
     );
     setupPairing?.checkPresentation();
     const { width, height } = getTerminalSize(stdout);
-
-    // Fire-and-forget refresh for the Activity modal's 'Coming up' section.
-    autonomy.refreshComingUp();
 
     // Cache the current model for consistent values across the entire render frame
     const currentModel = providerRegistry.getCurrentModel();

@@ -720,8 +720,9 @@ The default table of the terminal app:
 | `open-notifications` | `Ctrl+N` | Open the notifications; the status bar counts the unread ones. |
 | `failure-other-model` | `Alt+O` | On the newest failed turn: choose another model and send the prompt again. |
 | `failure-details` | `Alt+I` | On the newest failed turn: show what the provider said. |
+| `failure-sign-in` | `Alt+S` | On the newest failed turn whose provider refused its key: open the provider sign-ins (`/auth`). |
 
-After a failed turn the footer offers `Alt+R retry`: the failed prompt is sent again in place of the failed turn. The failed turn stays in the transcript, and the offer stays, until the replacement is submitted: when the memory refresh before it fails, or the session or the failed turn changes meanwhile, nothing is taken away and `Alt+R` tries again. When the failed turn had already run tools, the footer says `Alt+R continue` instead: the tool results are kept and the turn continues from them, so their effects are not repeated.
+`Alt+R` on the newest failed turn sends the failed prompt again in place of the failed turn. The failed turn stays in the transcript, and the offer stays, until the replacement is submitted: when the memory refresh before it fails, or the session or the failed turn changes meanwhile, nothing is taken away and `Alt+R` tries again. When the failed turn had already run tools, the tool results are kept and the turn continues from them, so their effects are not repeated. The keys are named on the failed turn's row (see "Turn errors"), not in the footer.
 
 `Shift+Tab` cycles `ask-me` → `jev-decides` → `just-vibes` → `yolo` → `ask-me`.
 Before `yolo` it asks for confirmation (default No); declining skips to the mode after it.
@@ -790,7 +791,19 @@ An action that deletes, uninstalls or clears asks for the same key a second time
 
 ### Turn errors
 
-When a turn fails, the transcript shows `[Error]` with what happened and what to do, and the composer offers `r` (retry the turn) and `m` (open the model picker).
+A failed turn is a row in the transcript under its prompt, which stays as you typed it. No notice is shown over the conversation:
+
+```text
+✕ The model didn't answer.
+  OpenAI returned an error (500) six times. Nothing was changed.
+
+  alt+r try again   alt+o use another model   alt+i details
+
+  Tip: name a backup model once and GoodVibes switches by itself:
+  /model fallback
+```
+
+The second line is worded from the failure's facts: the provider's status (`refused the API key (401)`, `turned the request away for too many requests (429)`, `returned an error (500)`), a connection error (`GoodVibes couldn't reach <provider> (ECONNREFUSED)`), how many requests were made, and what the turn changed before it stopped (`2 files were changed before it stopped. /changes`; `Nothing was changed.`). `alt+r` sends the prompt again, `alt+o` opens the model picker and sends the prompt to the model chosen there, `alt+i` shows the details under the second line (provider, model, status, code, attempts and their times, why the fallback order did not move the turn, the provider's own message) and hides them again. A provider that refused its key offers `alt+s sign in again` (the provider sign-ins, `/auth`) in place of `alt+r`. The tip is shown only while `provider.fallbackModels` is empty. A turn sent with no usable model (no model selected, or its provider not signed in) is refused before any request: `No model is set up yet. Nothing was changed.` with `alt+o choose a model` and `or run /setup`. A newer prompt removes the keys and the tip from the older row; its first two lines stay. While a failing request is retried, the row says so (`Retrying up to 5 times…`) and becomes the failure row when the retries are spent.
 A provider failure may move to another sign-in, another backend of a `synthetic` model, or the next model of your fallback order, as described under "Failover".
 `/retry [modified text]` sends the last prompt again, optionally changed.
 
@@ -1511,9 +1524,9 @@ A failed request never moves to a model the owner did not choose. The same rule 
 
 1. **Another sign-in.** Inside the request, a provider with two sign-ins tries the second when the first fails. Only `openai` has two built in: a request the ChatGPT subscription fails is sent again to the same model with the API key, and the turn says once which sign-in answered and why (in a headless run, one line on standard error and `signIn.movedFrom` in `USAGE`).
 2. **Synthetic backends.** A `synthetic` model moves between the providers that serve it (see "Synthetic failover").
-3. **Retries.** A failure that a wait can clear (a rate limit with a short `Retry-After`, a network error, a 5xx) is retried on the same model, and the stream shows `STREAM_RETRY`.
+3. **Retries.** A failure that a wait can clear (a rate limit with a short `Retry-After`, a network error, a 5xx) is retried on the same model, and the stream shows `STREAM_RETRY`. With nowhere else to go the waits are 5, 10, 20, 40 and 60 seconds. When `provider.fallbackModels` has an entry not yet tried whose provider is signed in, the model gets one retry after 2 seconds and then the turn moves on; a server asking to wait longer than that (`Retry-After`) is not waited for, the turn moves at once.
 4. **The fallback order.** When the model still fails (every sign-in, every synthetic backend and every retry), the turn moves to the first entry of `provider.fallbackModels` not yet tried this turn whose provider is signed in, and sends the failed request again to it; the rest of the turn, tool calls already made included, continues on that model. Entries are registry keys such as `["anthropic:claude-sonnet-5"]`; the provider half is matched by id or display name without regard to case. A worker agent given its own `fallbackModels` uses that order instead, and one whose routing says `providerFailurePolicy: "fail"` uses none.
-5. **Stop.** With no order set, or every entry tried, the turn ends with the error (`provider_error`, or `provider_exhausted` for a spent `synthetic` model) after a line `[Failover] Stopped:` with the reason and the next step.
+5. **Stop.** With no order set, or every entry tried, the turn ends with the error (`provider_error`, or `provider_exhausted` for a spent `synthetic` model). The failed turn's row says so (see "Turn errors"), with the reason nothing else was tried in its details (`alt+i`, the `Fallback` row); a headless run's `TURN_ERROR` carries the same reason as `fallbackNote`.
 
 Each move prints a line naming both models, the position in the fallback order, the error and the price difference when both prices are known, and says which model answers:
 
@@ -1521,7 +1534,7 @@ Each move prints a line naming both models, the position in the fallback order, 
 [Failover] openai:gpt-6.1-sol -> anthropic:claude-sonnet-5, entry 1 of your fallback order (provider.fallbackModels) (Rate limited: ...) [cost/1M: input $2.00→$3.00, output $10.00→$15.00]. claude-sonnet-5 answers the rest of this turn; the next turn starts on openai:gpt-6.1-sol again.
 ```
 
-When prices are unknown the line says `[cost data unavailable]`. In the terminal app a second line names the billing class left and joined, for example `[Failover] billing: API key → Subscription: billing class changed`, and while the move is in force the header and footer name the model answering, with `failover from <selected model>`. In a headless run (`goodvibes run`, `goodvibes-agent run`) the move is one line on standard error, `[Failover] <from> -> <to>, <position>; <to> answers the rest of this turn.`, and the result's `model` and `provider` name the model that answered. Text the failed attempt had already streamed is withdrawn (`DRAFT_WITHDRAWN`) before the next model streams its answer. A companion chat (`companion.chat.*`) moves the same way: the reply's `metadata.failover` holds the moves (`from`, `to`, `because`), `answeredBy` and the `[Failover]` lines, and the `turn.completed` envelope carries the same `metadata`; when nothing is left to try, the `turn.error` text ends with the `[Failover] Stopped:` line. The selection itself never changes: the next turn starts on the selected model again.
+When prices are unknown the line says `[cost data unavailable]`. In the terminal app a second line names the billing class left and joined, for example `[Failover] billing: API key → Subscription: billing class changed`, and while the move is in force the header and footer name the model answering, with `failover from <selected model>`. In a headless run (`goodvibes run`, `goodvibes-agent run`) the move is one line on standard error, `[Failover] <from> -> <to>, <position>; <to> answers the rest of this turn.`, and the result's `model` and `provider` name the model that answered. Text the failed attempt had already streamed is withdrawn (`DRAFT_WITHDRAWN`) before the next model streams its answer. A companion chat (`companion.chat.*`) moves the same way: the reply's `metadata.failover` holds the moves (`from`, `to`, `because`), `answeredBy` and the `[Failover]` lines, and the `turn.completed` envelope carries the same `metadata`; when nothing is left to try, the failed reply's `failureReason` (the failure reading every program draws its row from) holds the reason in its `Fallback` detail, and the `turn.error` text is the reading's headline and cause. The selection itself never changes: the next turn starts on the selected model again.
 
 The same order serves the model calls made outside a turn: context compaction (the summary and the distilled brief), the helper and tool models, the check-in note, native work intake, knowledge enrichment, image understanding and the private verification proposal (which moves with its turn, so the rest of that turn continues on the model it moved to). Each moves only for that one call: the model's other sign-in first, then the first entry of `provider.fallbackModels` not yet tried whose provider is signed in; with no order, or every entry tried, the call fails with the error as before. Image understanding moves only to a model that reads images and stays in its scope (a local-only reading never goes to a cloud model). A call that succeeds the first time sends no other request. Background calls report a move or a stop in the log, not the conversation.
 

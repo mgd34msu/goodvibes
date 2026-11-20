@@ -51,8 +51,7 @@ export const AGENT_WORKSPACE_CATEGORY_IDS = [
 
 export type AgentWorkspaceCategoryId = (typeof AGENT_WORKSPACE_CATEGORY_IDS)[number];
 
-export type AgentWorkspaceActionKind = 'command' | 'guidance' | 'workspace' | 'editor' | 'setting' | 'settings-import' | 'setup-checkpoint' | 'model-picker' | 'settings-modal' | 'local-selection' | 'local-operation' | 'onboarding-complete';
-export type AgentWorkspaceSetupCheckpointOperation = 'show' | 'mark-current' | 'clear';
+export type AgentWorkspaceActionKind = 'command' | 'guidance' | 'workspace' | 'editor' | 'setting' | 'settings-import' | 'model-picker' | 'settings-modal' | 'local-selection' | 'local-operation' | 'onboarding-complete';
 
 // The editor-kind unions grow with every new card, so they live in their own
 // module and are re-exported here, this stays the one place to import them.

@@ -20,7 +20,6 @@ import { applyAgentWorkspaceLocalLibraryOperation } from './agent-workspace-loca
 import { deleteAgentWorkspaceMemoryEditor, submitAgentWorkspaceMemoryEditor } from './agent-workspace-memory-editor.ts';
 import { jumpAgentWorkspaceSelection, moveAgentWorkspaceSelection, selectAgentWorkspaceCategory } from './agent-workspace-navigation.ts';
 import { appendAgentWorkspaceActionSearchText, backspaceAgentWorkspaceActionSearch, beginAgentWorkspaceActionSearch, clearAgentWorkspaceActionSearch, commitAgentWorkspaceActionSearchSelection, searchAgentWorkspaceActions } from './agent-workspace-search.ts';
-import { applyAgentWorkspaceSetupCheckpointAction } from './agent-workspace-setup-checkpoint-action.ts';
 import { agentWorkspaceSettingSchema, agentWorkspaceTuiSettingsImportHasChanges, applyAgentWorkspaceSettingValue, applyAgentWorkspaceTuiSettingsImport, buildAgentWorkspaceSettingActionDisplay, buildAgentWorkspaceSettingActionEffect, createAgentWorkspaceSettingsImportEditor, describeAgentWorkspaceTuiSettingsImportPlan, isAgentWorkspaceActionVisible, planAgentWorkspaceTuiSettingsImport, type AgentWorkspaceSettingActionDisplay, type TuiSettingsImportPlan } from './agent-workspace-settings.ts';
 import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 import { workspaceEditorOwnerToolCall, type WorkspaceEditorToolCall } from './agent-workspace-editor-tool-calls.ts';
@@ -612,23 +611,6 @@ export class AgentWorkspace {
       detail: describeAgentWorkspaceTuiSettingsImportPlan(plan),
       safety: 'safe',
     };
-  }
-
-  applySetupCheckpointAction(action: AgentWorkspaceAction, requestRender?: () => void): void {
-    applyAgentWorkspaceSetupCheckpointAction({
-      context: this.context,
-      runtimeSnapshot: this.runtimeSnapshot,
-      setRuntimeSnapshot: (snapshot) => {
-        this.runtimeSnapshot = snapshot;
-      },
-      setStatus: (status) => {
-        this.status = status;
-      },
-      setLastActionResult: (result) => {
-        this.lastActionResult = result;
-      },
-      clampSelection: () => this.clampSelection(),
-    }, action, requestRender);
   }
 
   private selectedItemForOperation(operation: AgentWorkspaceLocalOperation): AgentWorkspaceLocalLibraryItem | null {

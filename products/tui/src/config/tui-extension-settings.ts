@@ -28,6 +28,7 @@ function readHostSetting(configManager: SettingsReader, setting: HostSetting): b
 
 export const STATUSLINE_COMMAND_SETTING: HostStringSetting = Object.freeze({
   key: 'statusline.command',
+  label: 'Command for your own status line',
   type: 'string',
   default: '',
   description: 'Shell command run at each turn boundary; the first line it prints shows in the status area. Empty turns the status line off. Read only from your own settings file: a project settings file cannot set it.',
@@ -37,6 +38,7 @@ export const STATUSLINE_DEFAULT_TIMEOUT_MS = 2000;
 
 export const STATUSLINE_TIMEOUT_SETTING: HostNumberSetting = Object.freeze({
   key: 'statusline.timeoutMs',
+  label: 'Longest the status line command may run (ms)',
   type: 'number',
   default: STATUSLINE_DEFAULT_TIMEOUT_MS,
   integer: true,
@@ -68,6 +70,7 @@ export function readStatuslineSettings(configManager: SettingsReader): Statuslin
 
 export const SESSION_AUTO_TITLE_SETTING: HostBooleanSetting = Object.freeze({
   key: 'session.autoTitle',
+  label: 'Name new sessions automatically',
   type: 'boolean',
   default: false,
   description: 'Give an untitled session a short title from the helper model after its first turn (one small model request per session). A title you chose is never replaced.',

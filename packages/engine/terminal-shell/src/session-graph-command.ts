@@ -35,9 +35,9 @@ export function createSessionGraphHandler<Context extends { readonly print: (mes
   emptyGraph: string,
   currentSession?: (context: Context) => string | undefined,
 ) {
-  function handleGraph(args: string[], context: Context): void {
-    const requestedSession = flagValue(args, '--session');
-    const format = flagValue(args, '--format') ?? 'text';
+  function handleGraph(input: { readonly session?: string | undefined; readonly format?: string | undefined }, context: Context): void {
+    const requestedSession = input.session || undefined;
+    const format = input.format || 'text';
 
     const orchestration = requireSessionOrchestration(context);
     const snap = orchestration.snapshot();

@@ -25,6 +25,8 @@ export type HostManagedSettingLocks = ManagedSettingLocks;
  */
 export interface HostBooleanSetting {
   readonly key: string;
+  /** The setting's name in plain words (a settings row's primary text). */
+  readonly label: string;
   readonly type: 'boolean';
   readonly default: boolean;
   readonly description: string;
@@ -35,6 +37,8 @@ export interface HostBooleanSetting {
 /** A surface-owned number leaf; `integer`, `min` and `max` bound what is accepted. */
 export interface HostNumberSetting {
   readonly key: string;
+  /** The setting's name in plain words (a settings row's primary text). */
+  readonly label: string;
   readonly type: 'number';
   readonly default: number;
   readonly description: string;
@@ -48,6 +52,8 @@ export interface HostNumberSetting {
 /** A surface-owned string leaf; any string is accepted, the empty string included. */
 export interface HostStringSetting {
   readonly key: string;
+  /** The setting's name in plain words (a settings row's primary text). */
+  readonly label: string;
   readonly type: 'string';
   readonly default: string;
   readonly description: string;
@@ -111,24 +117,27 @@ function valueHint(definition: HostSetting): string {
 }
 
 function freezeDefinition(definition: HostSetting): Readonly<HostSetting> {
-  const { key, description } = definition;
+  const { key, description, label } = definition;
   if (typeof description !== 'string' || !description.trim()) {
     throw new ConfigError(`Host setting ${key} requires a description.`);
+  }
+  if (typeof label !== 'string' || !label.trim()) {
+    throw new ConfigError(`Host setting ${key} requires a label: its name in plain words.`);
   }
   const project = definition.projectSettable === true ? { projectSettable: true } : {};
   switch (definition.type) {
     case 'boolean':
-      if (typeof definition.default === 'boolean') return Object.freeze({ key, type: 'boolean' as const, default: definition.default, description, ...project });
+      if (typeof definition.default === 'boolean') return Object.freeze({ key, label, type: 'boolean' as const, default: definition.default, description, ...project });
       break;
     case 'string':
-      if (typeof definition.default === 'string') return Object.freeze({ key, type: 'string' as const, default: definition.default, description, ...project });
+      if (typeof definition.default === 'string') return Object.freeze({ key, label, type: 'string' as const, default: definition.default, description, ...project });
       break;
     case 'number': {
       const { integer, min, max } = definition;
       const bounds = [min, max].every((bound) => bound === undefined || (typeof bound === 'number' && Number.isFinite(bound)))
         && (min === undefined || max === undefined || min <= max) && (integer === undefined || typeof integer === 'boolean');
       const frozen: HostNumberSetting = Object.freeze({
-        key, type: 'number' as const, default: definition.default, description, ...project,
+        key, label, type: 'number' as const, default: definition.default, description, ...project,
         ...(integer ? { integer } : {}), ...(min !== undefined ? { min } : {}), ...(max !== undefined ? { max } : {}),
       });
       if (bounds && acceptsValue(frozen, definition.default)) return frozen;
@@ -188,7 +197,7 @@ export class HostSettings {
   schema(key: string): Omit<ConfigSetting, 'key'> | undefined {
     const definition = this.byKey.get(key);
     return definition ? {
-      type: definition.type, default: definition.default, description: definition.description,
+      label: definition.label, type: definition.type, default: definition.default, description: definition.description,
       validate: (value: unknown) => acceptsValue(definition, value), validationHint: valueHint(definition),
     } : undefined;
   }

@@ -264,7 +264,7 @@ const COMMANDS: readonly CommandSpec<GoodVibesCliCommand, GoodVibesCliFlagField>
   ['service', ['services']],
   ['status', []],
   ['doctor', []],
-  ['onboarding', ['setup']],
+  ['setup', []],
   ['models', ['model']],
   ['providers', ['provider']],
   ['auth', []],

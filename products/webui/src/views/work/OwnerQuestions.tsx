@@ -1,10 +1,9 @@
 /**
- * Questions agents left the owner (the daemon's owner inbox, `inbox.list`),
- * answered here with `inbox.answer`. The first answer from any surface wins; a
- * question already answered elsewhere says so instead of taking a second one.
- * An answer goes back to the agent or session that asked: the toast says
- * whether it was delivered, waits for that session to be opened again, or
- * cannot reach it and why, and recent answers are listed with that state.
+ * What became of the owner inbox's questions once answered (the daemon's owner
+ * inbox, `inbox.list`): recent answers, each with whether it reached the agent
+ * or session that asked, waits for it to be opened again, or cannot reach it
+ * and why. Open questions are not listed here: they wait for you on the work
+ * board with every other ask, answered from their card (AskCard).
  *
  * Calls Jev decided for the owner at the permission gate (kind `decision`)
  * are listed too, with a button per choice still open: undo restores the
@@ -12,11 +11,10 @@
  * like it, keep leaves it. The app whose gate decided carries the choice out;
  * the toast says what was done, or why it could not be.
  *
- * One `inbox.list` read carries all three lists. It is re-read when an
+ * One `inbox.list` read carries both lists. It is re-read when an
  * `owner-inbox-update` frame arrives on the shared event stream
  * (useRealtimeInvalidation) and polled only while that stream is not live.
  */
-import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
@@ -26,7 +24,6 @@ import { useToast } from '../../lib/toast';
 import { RowGroup } from '../../components/data-view/DataView';
 import { Button } from '../../components/ui/Button';
 import { Chip } from '../../components/ui/Chip';
-import { Input } from '../../components/ui/Field';
 import type { StatusTone } from '../../components/ui/StatusDot';
 
 const INBOX_QUERY_KEY = [...queryKeys.ownerInbox, 'questions-and-decisions'] as const;
@@ -38,7 +35,6 @@ const LIST_LIMIT = 500;
 const FALLBACK_POLL_MS = 30_000;
 
 interface InboxLists {
-  readonly open: OwnerQuestion[];
   readonly answered: AnsweredQuestion[];
   readonly decisions: JevDecision[];
 }
@@ -48,36 +44,15 @@ function itemsOf(value: unknown): unknown[] {
   return Array.isArray(items) ? items : [];
 }
 
-/**
- * Questions and Jev's decisions in one read, newest first, split here. A full
- * page may have left older open items out, so only then the open ones are read
- * on their own: an open question is never hidden behind answered ones.
- */
+/** Answers and Jev's decisions in one read, newest first, split here. */
 async function readInbox(): Promise<InboxLists> {
-  // A report (the answer of a scheduled run or a trigger's turn that named no surface) is shown with the questions, answered `read`.
+  // A report (the answer of a scheduled run or a trigger's turn that named no surface) is answered `read`.
   const kinds = ['question', 'report', 'decision'] as const;
-  const all = itemsOf(await platformClient.operator.invoke('inbox.list', { status: 'all', kinds, limit: LIST_LIMIT }));
-  let items = all;
-  if (all.length >= LIST_LIMIT) {
-    const seen = new Set(all.map((item) => (item as { id?: unknown }).id));
-    const open = itemsOf(await platformClient.operator.invoke('inbox.list', { status: 'open', kinds, limit: LIST_LIMIT }));
-    items = [...all, ...open.filter((item) => !seen.has((item as { id?: unknown }).id))];
-  }
-  const page = { items };
+  const page = { items: itemsOf(await platformClient.operator.invoke('inbox.list', { status: 'all', kinds, limit: LIST_LIMIT })) };
   return {
-    open: readQuestions(page),
     answered: readAnswered(page).slice(0, ANSWERS_SHOWN),
     decisions: readDecisions(page).slice(0, ANSWERS_SHOWN),
   };
-}
-
-interface OwnerQuestion {
-  readonly id: string;
-  readonly title: string;
-  readonly detail?: string;
-  readonly options: readonly string[];
-  readonly askedBy?: string;
-  readonly createdAt: number;
 }
 
 interface AnswerDelivery {
@@ -204,68 +179,7 @@ type DecisionOutcome =
   | { readonly applied: true; readonly item?: { readonly answer?: { readonly text?: string } } }
   | { readonly applied: false; readonly refusal: { readonly reason: string; readonly next?: readonly string[] } };
 
-type AnswerOutcome =
-  | { readonly applied: true; readonly delivery?: unknown }
-  | { readonly applied: false; readonly refusal: { readonly reason: string; readonly next?: readonly string[] } };
-
-function readQuestions(value: unknown): OwnerQuestion[] {
-  const items = (value as { items?: unknown } | null)?.items;
-  if (!Array.isArray(items)) return [];
-  return items.flatMap((raw): OwnerQuestion[] => {
-    const item = raw as Record<string, unknown>;
-    if (typeof item.id !== 'string' || typeof item.title !== 'string' || (item.kind !== 'question' && item.kind !== 'report') || item.status !== 'open') return [];
-    return [{
-      id: item.id,
-      title: item.title,
-      ...(typeof item.detail === 'string' && item.detail ? { detail: item.detail } : {}),
-      options: Array.isArray(item.options) ? item.options.filter((option): option is string => typeof option === 'string') : [],
-      ...(typeof item.askedBy === 'string' && item.askedBy ? { askedBy: item.askedBy } : {}),
-      createdAt: typeof item.createdAt === 'number' ? item.createdAt : 0,
-    }];
-  });
-}
-
-function QuestionRow({ question, onAnswer, busy }: {
-  question: OwnerQuestion;
-  onAnswer: (answer: { option?: string; text?: string }) => void;
-  busy: boolean;
-}) {
-  const [text, setText] = useState('');
-  const asked = question.createdAt ? new Date(question.createdAt).toLocaleString() : '';
-  return (
-    <li className="gv-row work-question">
-      <div className="gv-row__text work-question__body">
-        <div className="gv-row__title">{question.title}</div>
-        <div className="gv-row__meta">{[question.askedBy, asked].filter(Boolean).join(' · ')}</div>
-        {question.detail && <p className="work-question__detail">{question.detail}</p>}
-        <form
-          className="work-question__answer"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (text.trim()) onAnswer({ text: text.trim() });
-          }}
-        >
-          {question.options.map((option) => (
-            <Button key={option} size="sm" disabled={busy} onClick={() => onAnswer({ option })}>{option}</Button>
-          ))}
-          <Input
-            aria-label={`Answer ${question.title}`}
-            placeholder={question.options.length > 0 ? 'Or answer in your own words' : 'Your answer'}
-            value={text}
-            disabled={busy}
-            onChange={(event) => setText(event.target.value)}
-          />
-          <Button size="sm" variant="primary" type="submit" disabled={busy || !text.trim()}>Send</Button>
-        </form>
-      </div>
-    </li>
-  );
-}
-
-/**
- * "Questions for you": open questions from agents, answerable in place, and
- * the recent answers with where each one is. Renders nothing when there are none.
- */
+/** Recent answers with where each one is, and Jev's decisions. Renders nothing when there are none. */
 export function OwnerQuestions({ enabled }: { enabled: boolean }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -290,42 +204,11 @@ export function OwnerQuestions({ enabled }: { enabled: boolean }) {
     onError: (error) => toast({ title: 'The choice was not sent', description: formatError(error), tone: 'danger' }),
     onSettled: () => { void queryClient.invalidateQueries({ queryKey: INBOX_QUERY_KEY }); },
   });
-  const answer = useMutation({
-    mutationFn: async (input: { itemId: string; option?: string; text?: string }) =>
-      (await platformClient.operator.invoke('inbox.answer', input)) as AnswerOutcome,
-    onSuccess: (outcome) => {
-      const delivery = outcome.applied ? readDelivery(outcome.delivery) : undefined;
-      if (!outcome.applied) {
-        toast({ title: 'Not sent', description: [outcome.refusal.reason, outcome.refusal.next?.[0]].filter(Boolean).join(' '), tone: 'warning' });
-      } else if (delivery?.state === 'undeliverable') {
-        toast({ title: 'Answer saved, not deliverable', description: `Not deliverable to ${delivery.to}: ${delivery.reason ?? 'it cannot be opened again.'}`, tone: 'warning' });
-      } else if (delivery?.state === 'waiting') {
-        toast({ title: 'Answer saved', description: delivery.reason ?? `It will be delivered when ${delivery.to} is next opened.`, tone: 'success' });
-      } else {
-        toast({ title: 'Answer sent', description: delivery ? `Sent to ${delivery.to}; it reads it on its next step.` : 'The asker reads it on its next step.', tone: 'success' });
-      }
-    },
-    onError: (error) => toast({ title: 'The answer was not sent', description: formatError(error), tone: 'danger' }),
-    onSettled: () => { void queryClient.invalidateQueries({ queryKey: INBOX_QUERY_KEY }); },
-  });
-  const open = enabled ? inbox.data?.open ?? [] : [];
   const answered = enabled ? inbox.data?.answered ?? [] : [];
   const decided = enabled ? inbox.data?.decisions ?? [] : [];
-  if (open.length === 0 && answered.length === 0 && decided.length === 0) return null;
+  if (answered.length === 0 && decided.length === 0) return null;
   return (
     <>
-      {open.length > 0 && (
-        <RowGroup label="Questions for you" count={open.length}>
-          {open.map((question) => (
-            <QuestionRow
-              key={question.id}
-              question={question}
-              busy={answer.isPending}
-              onAnswer={(input) => answer.mutate({ itemId: question.id, ...input })}
-            />
-          ))}
-        </RowGroup>
-      )}
       {answered.length > 0 && (
         <RowGroup label="Your answers" count={answered.length}>
           {answered.map((question) => <AnsweredRow key={question.id} question={question} />)}

@@ -118,25 +118,26 @@ function inboxStandIn(item: InboxAskItem): AskPresentation {
   });
 }
 
-/** Approvals still waiting that this person may answer, as asks. */
+/** One approval as an ask, whatever its phase (Work's detail shows a decided one too). */
+export function approvalAsk(record: ApprovalRecord): OpenAsk {
+  const worded = wirePresentation(record);
+  const attribution = record.request.attribution;
+  return {
+    key: `approval:${record.id}`,
+    source: 'approval',
+    id: record.id,
+    ...(record.sessionId ? { sessionId: record.sessionId } : {}),
+    ...(attribution?.kind === 'background-agent' ? { agentId: attribution.agentId } : {}),
+    askedAt: record.createdAt,
+    presentation: worded ?? approvalStandIn(record),
+    worded: worded !== undefined,
+    approval: record,
+  };
+}
+
+/** Approvals still waiting, as asks. */
 export function approvalAsks(records: readonly ApprovalRecord[]): OpenAsk[] {
-  return records
-    .filter((record) => approvalReading(record).phase === 'waiting')
-    .map((record): OpenAsk => {
-      const worded = wirePresentation(record);
-      const attribution = record.request.attribution;
-      return {
-        key: `approval:${record.id}`,
-        source: 'approval',
-        id: record.id,
-        ...(record.sessionId ? { sessionId: record.sessionId } : {}),
-        ...(attribution?.kind === 'background-agent' ? { agentId: attribution.agentId } : {}),
-        askedAt: record.createdAt,
-        presentation: worded ?? approvalStandIn(record),
-        worded: worded !== undefined,
-        approval: record,
-      };
-    });
+  return records.filter((record) => approvalReading(record).phase === 'waiting').map(approvalAsk);
 }
 
 /** The open ask items of an `inbox.list` page (approvals come from `approvals.list`). */

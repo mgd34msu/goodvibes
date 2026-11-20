@@ -118,28 +118,6 @@ export async function runWorkspaceAction(
       return error(`Settings import failed after it started and may be partially applied: ${formatHarnessError(err)}. Inspect the settings before retrying; nothing was retried.`);
     }
   }
-  if (action.kind === 'setup-checkpoint') {
-    const operation = action.setupCheckpointOperation ?? 'show';
-    if (operation === 'show') {
-      const checkpoint = await setupCheckpointSummary(deps.commandContext, effectCatalogOptions);
-      request.assertCurrent();
-      return output({
-        status: 'checkpoint_inspected',
-        action: describeWorkspaceAction(category, action, { lookup }),
-        checkpoint,
-      });
-    }
-    const confirmationError = requireConfirmedAction(args, options, operation === 'clear' ? 'Setup wizard checkpoint clear' : 'Setup wizard checkpoint save');
-    if (confirmationError) return error(confirmationError);
-    const result = operation === 'clear'
-      ? clearSetupCheckpoint(deps.commandContext, args, options)
-      : await markSetupCheckpoint(deps.commandContext, args, options);
-    const innerStatus = result.status;
-    const written = result.done === true;
-    return effectOutput({ status: written ? 'checkpoint_action_completed' : typeof innerStatus === 'string' ? innerStatus : 'checkpoint_not_written',
-      done: written, reason: typeof result.reason === 'string' ? result.reason : 'no setup checkpoint was written.',
-      action: describeWorkspaceAction(category, action, { lookup }), result });
-  }
   if (action.kind === 'editor' && action.editorKind) {
     const editorContext = buildWorkspaceEditorContext(deps.commandContext, args);
     // An editor built on the empty fallback context has no selected routine, templates or handoff artifacts to act on.

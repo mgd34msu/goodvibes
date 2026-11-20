@@ -24,7 +24,8 @@ interface ApprovalLike {
 
 interface AutonomyMessageRouter {
   high(message: string): void;
-  getFeed(): { push(text: string, priority?: 'high' | 'low', kind?: string): void } | null;
+  /** A line to look up later: the notices, not the conversation. */
+  low(message: string): void;
 }
 
 export interface AutonomySurfacingOptions {
@@ -126,11 +127,7 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
       const drafted = await propose(lifetime.signal);
       lifetime.signal.throwIfAborted();
       if (drafted > 0) {
-        options.router.getFeed()?.push(
-          `[Status] I drafted ${drafted} skill${drafted !== 1 ? 's' : ''} from recent work, review them under Memory`,
-          'low',
-          'schedule',
-        );
+        options.router.low(`[Status] I drafted ${drafted} skill${drafted !== 1 ? 's' : ''} from recent work, review them under Memory`);
         options.render();
       }
     } catch (err) {

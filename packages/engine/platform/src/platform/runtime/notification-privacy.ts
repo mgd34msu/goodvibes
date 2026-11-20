@@ -6,6 +6,7 @@ export const NOTIFICATIONS_METADATA_ONLY_KEY = 'behavior.notificationsMetadataOn
 
 export const NOTIFICATIONS_METADATA_ONLY_SETTING: HostBooleanSetting = Object.freeze({
   key: NOTIFICATIONS_METADATA_ONLY_KEY,
+  label: 'Keep private details out of notifications',
   type: 'boolean',
   default: true,
   description: 'Keep notifications metadata-only. Only explicit false permits details on supported notification paths.',

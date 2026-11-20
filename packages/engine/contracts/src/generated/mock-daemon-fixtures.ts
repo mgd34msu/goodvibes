@@ -133,6 +133,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
+      "applied": false,
       "approval": {
         "id": "sample",
         "callId": "sample",
@@ -158,7 +159,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "sideEffects": [
               "sample"
             ],
-            "host": "sample"
+            "host": "sample",
+            "riskFamily": "sample",
+            "reading": {
+              "family": "sample",
+              "stakes": "low",
+              "facts": {
+                "mutates": false,
+                "outward": false,
+                "secrets": false,
+                "irreversible": false,
+                "beyondProject": false,
+                "weakensSecurity": false,
+                "obfuscated": false
+              },
+              "uncertain": [
+                "sample"
+              ]
+            }
           },
           "workingDirectory": "sample",
           "attribution": {
@@ -187,9 +205,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "rememberTier": "session",
           "reason": "sample",
           "modifiedArgs": {},
-          "disposition": "approved"
+          "disposition": "approved",
+          "argsDigest": "sample",
+          "relayRequestId": "sample"
         },
         "expiresAt": 0,
+        "revision": 0,
+        "sequence": 0,
+        "homeNode": "sample",
+        "requester": {
+          "kind": "in-process",
+          "holds": [
+            {
+              "id": "sample",
+              "releasedAt": 0
+            }
+          ]
+        },
+        "cause": "requester-left",
         "metadata": {},
         "audit": [
           {
@@ -197,13 +230,83 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "action": "created",
             "actor": "sample",
             "actorSurface": "sample",
+            "actorNode": "sample",
             "createdAt": 0,
             "note": "sample"
           }
         ]
       },
-      "applied": false,
-      "refusal": "sample",
+      "reading": {
+        "ref": {
+          "node": "sample",
+          "id": "sample"
+        },
+        "revision": 0,
+        "sequence": 0,
+        "phase": "waiting",
+        "status": "pending",
+        "reason": "waiting-for-approver",
+        "waitingOn": {
+          "who": "owner",
+          "claimedBy": "sample",
+          "homeNode": "sample",
+          "homeReachable": false
+        },
+        "deadline": {
+          "expiresAt": 0,
+          "remainingMs": 0
+        },
+        "allowedActions": [
+          "claim"
+        ],
+        "refusedActions": [
+          {
+            "action": "claim",
+            "code": "sample",
+            "reason": "sample"
+          }
+        ],
+        "decision": {
+          "disposition": "approved",
+          "by": "sample",
+          "surface": "sample",
+          "node": "sample",
+          "at": 0,
+          "cause": "requester-left"
+        },
+        "receipt": {
+          "state": "delivered",
+          "reason": "sample"
+        },
+        "requester": {
+          "kind": "in-process",
+          "principal": "sample",
+          "surface": "sample",
+          "mine": false
+        },
+        "work": {
+          "state": "not-reported",
+          "callId": "sample",
+          "sessionId": "sample"
+        },
+        "next": [
+          {
+            "move": "wait",
+            "text": "sample"
+          }
+        ]
+      },
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ],
+        "retryable": false,
+        "retryAfterMs": 0,
+        "status": 0
+      },
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -220,6 +323,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
+      "applied": false,
       "approval": {
         "id": "sample",
         "callId": "sample",
@@ -245,7 +349,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "sideEffects": [
               "sample"
             ],
-            "host": "sample"
+            "host": "sample",
+            "riskFamily": "sample",
+            "reading": {
+              "family": "sample",
+              "stakes": "low",
+              "facts": {
+                "mutates": false,
+                "outward": false,
+                "secrets": false,
+                "irreversible": false,
+                "beyondProject": false,
+                "weakensSecurity": false,
+                "obfuscated": false
+              },
+              "uncertain": [
+                "sample"
+              ]
+            }
           },
           "workingDirectory": "sample",
           "attribution": {
@@ -274,9 +395,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "rememberTier": "session",
           "reason": "sample",
           "modifiedArgs": {},
-          "disposition": "approved"
+          "disposition": "approved",
+          "argsDigest": "sample",
+          "relayRequestId": "sample"
         },
         "expiresAt": 0,
+        "revision": 0,
+        "sequence": 0,
+        "homeNode": "sample",
+        "requester": {
+          "kind": "in-process",
+          "holds": [
+            {
+              "id": "sample",
+              "releasedAt": 0
+            }
+          ]
+        },
+        "cause": "requester-left",
         "metadata": {},
         "audit": [
           {
@@ -284,13 +420,83 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "action": "created",
             "actor": "sample",
             "actorSurface": "sample",
+            "actorNode": "sample",
             "createdAt": 0,
             "note": "sample"
           }
         ]
       },
-      "applied": false,
-      "refusal": "sample",
+      "reading": {
+        "ref": {
+          "node": "sample",
+          "id": "sample"
+        },
+        "revision": 0,
+        "sequence": 0,
+        "phase": "waiting",
+        "status": "pending",
+        "reason": "waiting-for-approver",
+        "waitingOn": {
+          "who": "owner",
+          "claimedBy": "sample",
+          "homeNode": "sample",
+          "homeReachable": false
+        },
+        "deadline": {
+          "expiresAt": 0,
+          "remainingMs": 0
+        },
+        "allowedActions": [
+          "claim"
+        ],
+        "refusedActions": [
+          {
+            "action": "claim",
+            "code": "sample",
+            "reason": "sample"
+          }
+        ],
+        "decision": {
+          "disposition": "approved",
+          "by": "sample",
+          "surface": "sample",
+          "node": "sample",
+          "at": 0,
+          "cause": "requester-left"
+        },
+        "receipt": {
+          "state": "delivered",
+          "reason": "sample"
+        },
+        "requester": {
+          "kind": "in-process",
+          "principal": "sample",
+          "surface": "sample",
+          "mine": false
+        },
+        "work": {
+          "state": "not-reported",
+          "callId": "sample",
+          "sessionId": "sample"
+        },
+        "next": [
+          {
+            "move": "wait",
+            "text": "sample"
+          }
+        ]
+      },
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ],
+        "retryable": false,
+        "retryAfterMs": 0,
+        "status": 0
+      },
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -307,6 +513,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
+      "applied": false,
       "approval": {
         "id": "sample",
         "callId": "sample",
@@ -332,7 +539,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "sideEffects": [
               "sample"
             ],
-            "host": "sample"
+            "host": "sample",
+            "riskFamily": "sample",
+            "reading": {
+              "family": "sample",
+              "stakes": "low",
+              "facts": {
+                "mutates": false,
+                "outward": false,
+                "secrets": false,
+                "irreversible": false,
+                "beyondProject": false,
+                "weakensSecurity": false,
+                "obfuscated": false
+              },
+              "uncertain": [
+                "sample"
+              ]
+            }
           },
           "workingDirectory": "sample",
           "attribution": {
@@ -361,9 +585,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "rememberTier": "session",
           "reason": "sample",
           "modifiedArgs": {},
-          "disposition": "approved"
+          "disposition": "approved",
+          "argsDigest": "sample",
+          "relayRequestId": "sample"
         },
         "expiresAt": 0,
+        "revision": 0,
+        "sequence": 0,
+        "homeNode": "sample",
+        "requester": {
+          "kind": "in-process",
+          "holds": [
+            {
+              "id": "sample",
+              "releasedAt": 0
+            }
+          ]
+        },
+        "cause": "requester-left",
         "metadata": {},
         "audit": [
           {
@@ -371,13 +610,83 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "action": "created",
             "actor": "sample",
             "actorSurface": "sample",
+            "actorNode": "sample",
             "createdAt": 0,
             "note": "sample"
           }
         ]
       },
-      "applied": false,
-      "refusal": "sample",
+      "reading": {
+        "ref": {
+          "node": "sample",
+          "id": "sample"
+        },
+        "revision": 0,
+        "sequence": 0,
+        "phase": "waiting",
+        "status": "pending",
+        "reason": "waiting-for-approver",
+        "waitingOn": {
+          "who": "owner",
+          "claimedBy": "sample",
+          "homeNode": "sample",
+          "homeReachable": false
+        },
+        "deadline": {
+          "expiresAt": 0,
+          "remainingMs": 0
+        },
+        "allowedActions": [
+          "claim"
+        ],
+        "refusedActions": [
+          {
+            "action": "claim",
+            "code": "sample",
+            "reason": "sample"
+          }
+        ],
+        "decision": {
+          "disposition": "approved",
+          "by": "sample",
+          "surface": "sample",
+          "node": "sample",
+          "at": 0,
+          "cause": "requester-left"
+        },
+        "receipt": {
+          "state": "delivered",
+          "reason": "sample"
+        },
+        "requester": {
+          "kind": "in-process",
+          "principal": "sample",
+          "surface": "sample",
+          "mine": false
+        },
+        "work": {
+          "state": "not-reported",
+          "callId": "sample",
+          "sessionId": "sample"
+        },
+        "next": [
+          {
+            "move": "wait",
+            "text": "sample"
+          }
+        ]
+      },
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ],
+        "retryable": false,
+        "retryAfterMs": 0,
+        "status": 0
+      },
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -394,6 +703,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
+      "applied": false,
       "approval": {
         "id": "sample",
         "callId": "sample",
@@ -419,7 +729,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "sideEffects": [
               "sample"
             ],
-            "host": "sample"
+            "host": "sample",
+            "riskFamily": "sample",
+            "reading": {
+              "family": "sample",
+              "stakes": "low",
+              "facts": {
+                "mutates": false,
+                "outward": false,
+                "secrets": false,
+                "irreversible": false,
+                "beyondProject": false,
+                "weakensSecurity": false,
+                "obfuscated": false
+              },
+              "uncertain": [
+                "sample"
+              ]
+            }
           },
           "workingDirectory": "sample",
           "attribution": {
@@ -448,9 +775,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "rememberTier": "session",
           "reason": "sample",
           "modifiedArgs": {},
-          "disposition": "approved"
+          "disposition": "approved",
+          "argsDigest": "sample",
+          "relayRequestId": "sample"
         },
         "expiresAt": 0,
+        "revision": 0,
+        "sequence": 0,
+        "homeNode": "sample",
+        "requester": {
+          "kind": "in-process",
+          "holds": [
+            {
+              "id": "sample",
+              "releasedAt": 0
+            }
+          ]
+        },
+        "cause": "requester-left",
         "metadata": {},
         "audit": [
           {
@@ -458,13 +800,83 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "action": "created",
             "actor": "sample",
             "actorSurface": "sample",
+            "actorNode": "sample",
             "createdAt": 0,
             "note": "sample"
           }
         ]
       },
-      "applied": false,
-      "refusal": "sample",
+      "reading": {
+        "ref": {
+          "node": "sample",
+          "id": "sample"
+        },
+        "revision": 0,
+        "sequence": 0,
+        "phase": "waiting",
+        "status": "pending",
+        "reason": "waiting-for-approver",
+        "waitingOn": {
+          "who": "owner",
+          "claimedBy": "sample",
+          "homeNode": "sample",
+          "homeReachable": false
+        },
+        "deadline": {
+          "expiresAt": 0,
+          "remainingMs": 0
+        },
+        "allowedActions": [
+          "claim"
+        ],
+        "refusedActions": [
+          {
+            "action": "claim",
+            "code": "sample",
+            "reason": "sample"
+          }
+        ],
+        "decision": {
+          "disposition": "approved",
+          "by": "sample",
+          "surface": "sample",
+          "node": "sample",
+          "at": 0,
+          "cause": "requester-left"
+        },
+        "receipt": {
+          "state": "delivered",
+          "reason": "sample"
+        },
+        "requester": {
+          "kind": "in-process",
+          "principal": "sample",
+          "surface": "sample",
+          "mine": false
+        },
+        "work": {
+          "state": "not-reported",
+          "callId": "sample",
+          "sessionId": "sample"
+        },
+        "next": [
+          {
+            "move": "wait",
+            "text": "sample"
+          }
+        ]
+      },
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ],
+        "retryable": false,
+        "retryAfterMs": 0,
+        "status": 0
+      },
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -527,7 +939,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "sideEffects": [
                 "sample"
               ],
-              "host": "sample"
+              "host": "sample",
+              "riskFamily": "sample",
+              "reading": {
+                "family": "sample",
+                "stakes": "low",
+                "facts": {
+                  "mutates": false,
+                  "outward": false,
+                  "secrets": false,
+                  "irreversible": false,
+                  "beyondProject": false,
+                  "weakensSecurity": false,
+                  "obfuscated": false
+                },
+                "uncertain": [
+                  "sample"
+                ]
+              }
             },
             "workingDirectory": "sample",
             "attribution": {
@@ -556,9 +985,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "rememberTier": "session",
             "reason": "sample",
             "modifiedArgs": {},
-            "disposition": "approved"
+            "disposition": "approved",
+            "argsDigest": "sample",
+            "relayRequestId": "sample"
           },
           "expiresAt": 0,
+          "revision": 0,
+          "sequence": 0,
+          "homeNode": "sample",
+          "requester": {
+            "kind": "in-process",
+            "holds": [
+              {
+                "id": "sample",
+                "releasedAt": 0
+              }
+            ]
+          },
+          "cause": "requester-left",
           "metadata": {},
           "audit": [
             {
@@ -566,10 +1010,71 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "action": "created",
               "actor": "sample",
               "actorSurface": "sample",
+              "actorNode": "sample",
               "createdAt": 0,
               "note": "sample"
             }
-          ]
+          ],
+          "reading": {
+            "ref": {
+              "node": "sample",
+              "id": "sample"
+            },
+            "revision": 0,
+            "sequence": 0,
+            "phase": "waiting",
+            "status": "pending",
+            "reason": "waiting-for-approver",
+            "waitingOn": {
+              "who": "owner",
+              "claimedBy": "sample",
+              "homeNode": "sample",
+              "homeReachable": false
+            },
+            "deadline": {
+              "expiresAt": 0,
+              "remainingMs": 0
+            },
+            "allowedActions": [
+              "claim"
+            ],
+            "refusedActions": [
+              {
+                "action": "claim",
+                "code": "sample",
+                "reason": "sample"
+              }
+            ],
+            "decision": {
+              "disposition": "approved",
+              "by": "sample",
+              "surface": "sample",
+              "node": "sample",
+              "at": 0,
+              "cause": "requester-left"
+            },
+            "receipt": {
+              "state": "delivered",
+              "reason": "sample"
+            },
+            "requester": {
+              "kind": "in-process",
+              "principal": "sample",
+              "surface": "sample",
+              "mine": false
+            },
+            "work": {
+              "state": "not-reported",
+              "callId": "sample",
+              "sessionId": "sample"
+            },
+            "next": [
+              {
+                "move": "wait",
+                "text": "sample"
+              }
+            ]
+          }
         }
       ]
     }
@@ -579,6 +1084,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "http": null,
     "status": 200,
     "body": {
+      "approvalId": "sample",
       "approval": {
         "id": "sample",
         "callId": "sample",
@@ -604,7 +1110,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "sideEffects": [
               "sample"
             ],
-            "host": "sample"
+            "host": "sample",
+            "riskFamily": "sample",
+            "reading": {
+              "family": "sample",
+              "stakes": "low",
+              "facts": {
+                "mutates": false,
+                "outward": false,
+                "secrets": false,
+                "irreversible": false,
+                "beyondProject": false,
+                "weakensSecurity": false,
+                "obfuscated": false
+              },
+              "uncertain": [
+                "sample"
+              ]
+            }
           },
           "workingDirectory": "sample",
           "attribution": {
@@ -633,9 +1156,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "rememberTier": "session",
           "reason": "sample",
           "modifiedArgs": {},
-          "disposition": "approved"
+          "disposition": "approved",
+          "argsDigest": "sample",
+          "relayRequestId": "sample"
         },
         "expiresAt": 0,
+        "revision": 0,
+        "sequence": 0,
+        "homeNode": "sample",
+        "requester": {
+          "kind": "in-process",
+          "holds": [
+            {
+              "id": "sample",
+              "releasedAt": 0
+            }
+          ]
+        },
+        "cause": "requester-left",
         "metadata": {},
         "audit": [
           {
@@ -643,8 +1181,69 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "action": "created",
             "actor": "sample",
             "actorSurface": "sample",
+            "actorNode": "sample",
             "createdAt": 0,
             "note": "sample"
+          }
+        ]
+      },
+      "reading": {
+        "ref": {
+          "node": "sample",
+          "id": "sample"
+        },
+        "revision": 0,
+        "sequence": 0,
+        "phase": "waiting",
+        "status": "pending",
+        "reason": "waiting-for-approver",
+        "waitingOn": {
+          "who": "owner",
+          "claimedBy": "sample",
+          "homeNode": "sample",
+          "homeReachable": false
+        },
+        "deadline": {
+          "expiresAt": 0,
+          "remainingMs": 0
+        },
+        "allowedActions": [
+          "claim"
+        ],
+        "refusedActions": [
+          {
+            "action": "claim",
+            "code": "sample",
+            "reason": "sample"
+          }
+        ],
+        "decision": {
+          "disposition": "approved",
+          "by": "sample",
+          "surface": "sample",
+          "node": "sample",
+          "at": 0,
+          "cause": "requester-left"
+        },
+        "receipt": {
+          "state": "delivered",
+          "reason": "sample"
+        },
+        "requester": {
+          "kind": "in-process",
+          "principal": "sample",
+          "surface": "sample",
+          "mine": false
+        },
+        "work": {
+          "state": "not-reported",
+          "callId": "sample",
+          "sessionId": "sample"
+        },
+        "next": [
+          {
+            "move": "wait",
+            "text": "sample"
           }
         ]
       },
@@ -688,6 +1287,67 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "state": "delivered",
           "to": "sample",
           "reason": "sample"
+        },
+        "revision": 0,
+        "reading": {
+          "ref": {
+            "node": "sample",
+            "id": "sample"
+          },
+          "revision": 0,
+          "sequence": 0,
+          "phase": "waiting",
+          "status": "pending",
+          "reason": "waiting-for-approver",
+          "waitingOn": {
+            "who": "owner",
+            "claimedBy": "sample",
+            "homeNode": "sample",
+            "homeReachable": false
+          },
+          "deadline": {
+            "expiresAt": 0,
+            "remainingMs": 0
+          },
+          "allowedActions": [
+            "claim"
+          ],
+          "refusedActions": [
+            {
+              "action": "claim",
+              "code": "sample",
+              "reason": "sample"
+            }
+          ],
+          "decision": {
+            "disposition": "approved",
+            "by": "sample",
+            "surface": "sample",
+            "node": "sample",
+            "at": 0,
+            "cause": "requester-left"
+          },
+          "receipt": {
+            "state": "delivered",
+            "reason": "sample"
+          },
+          "requester": {
+            "kind": "in-process",
+            "principal": "sample",
+            "surface": "sample",
+            "mine": false
+          },
+          "work": {
+            "state": "not-reported",
+            "callId": "sample",
+            "sessionId": "sample"
+          },
+          "next": [
+            {
+              "move": "wait",
+              "text": "sample"
+            }
+          ]
         }
       },
       "delivery": {
@@ -743,6 +1403,67 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "state": "delivered",
           "to": "sample",
           "reason": "sample"
+        },
+        "revision": 0,
+        "reading": {
+          "ref": {
+            "node": "sample",
+            "id": "sample"
+          },
+          "revision": 0,
+          "sequence": 0,
+          "phase": "waiting",
+          "status": "pending",
+          "reason": "waiting-for-approver",
+          "waitingOn": {
+            "who": "owner",
+            "claimedBy": "sample",
+            "homeNode": "sample",
+            "homeReachable": false
+          },
+          "deadline": {
+            "expiresAt": 0,
+            "remainingMs": 0
+          },
+          "allowedActions": [
+            "claim"
+          ],
+          "refusedActions": [
+            {
+              "action": "claim",
+              "code": "sample",
+              "reason": "sample"
+            }
+          ],
+          "decision": {
+            "disposition": "approved",
+            "by": "sample",
+            "surface": "sample",
+            "node": "sample",
+            "at": 0,
+            "cause": "requester-left"
+          },
+          "receipt": {
+            "state": "delivered",
+            "reason": "sample"
+          },
+          "requester": {
+            "kind": "in-process",
+            "principal": "sample",
+            "surface": "sample",
+            "mine": false
+          },
+          "work": {
+            "state": "not-reported",
+            "callId": "sample",
+            "sessionId": "sample"
+          },
+          "next": [
+            {
+              "move": "wait",
+              "text": "sample"
+            }
+          ]
         }
       },
       "delivery": {
@@ -798,6 +1519,67 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "state": "delivered",
             "to": "sample",
             "reason": "sample"
+          },
+          "revision": 0,
+          "reading": {
+            "ref": {
+              "node": "sample",
+              "id": "sample"
+            },
+            "revision": 0,
+            "sequence": 0,
+            "phase": "waiting",
+            "status": "pending",
+            "reason": "waiting-for-approver",
+            "waitingOn": {
+              "who": "owner",
+              "claimedBy": "sample",
+              "homeNode": "sample",
+              "homeReachable": false
+            },
+            "deadline": {
+              "expiresAt": 0,
+              "remainingMs": 0
+            },
+            "allowedActions": [
+              "claim"
+            ],
+            "refusedActions": [
+              {
+                "action": "claim",
+                "code": "sample",
+                "reason": "sample"
+              }
+            ],
+            "decision": {
+              "disposition": "approved",
+              "by": "sample",
+              "surface": "sample",
+              "node": "sample",
+              "at": 0,
+              "cause": "requester-left"
+            },
+            "receipt": {
+              "state": "delivered",
+              "reason": "sample"
+            },
+            "requester": {
+              "kind": "in-process",
+              "principal": "sample",
+              "surface": "sample",
+              "mine": false
+            },
+            "work": {
+              "state": "not-reported",
+              "callId": "sample",
+              "sessionId": "sample"
+            },
+            "next": [
+              {
+                "move": "wait",
+                "text": "sample"
+              }
+            ]
           }
         }
       ],
@@ -839,6 +1621,67 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "state": "delivered",
           "to": "sample",
           "reason": "sample"
+        },
+        "revision": 0,
+        "reading": {
+          "ref": {
+            "node": "sample",
+            "id": "sample"
+          },
+          "revision": 0,
+          "sequence": 0,
+          "phase": "waiting",
+          "status": "pending",
+          "reason": "waiting-for-approver",
+          "waitingOn": {
+            "who": "owner",
+            "claimedBy": "sample",
+            "homeNode": "sample",
+            "homeReachable": false
+          },
+          "deadline": {
+            "expiresAt": 0,
+            "remainingMs": 0
+          },
+          "allowedActions": [
+            "claim"
+          ],
+          "refusedActions": [
+            {
+              "action": "claim",
+              "code": "sample",
+              "reason": "sample"
+            }
+          ],
+          "decision": {
+            "disposition": "approved",
+            "by": "sample",
+            "surface": "sample",
+            "node": "sample",
+            "at": 0,
+            "cause": "requester-left"
+          },
+          "receipt": {
+            "state": "delivered",
+            "reason": "sample"
+          },
+          "requester": {
+            "kind": "in-process",
+            "principal": "sample",
+            "surface": "sample",
+            "mine": false
+          },
+          "work": {
+            "state": "not-reported",
+            "callId": "sample",
+            "sessionId": "sample"
+          },
+          "next": [
+            {
+              "move": "wait",
+              "text": "sample"
+            }
+          ]
         }
       }
     }
@@ -878,6 +1721,67 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "state": "delivered",
           "to": "sample",
           "reason": "sample"
+        },
+        "revision": 0,
+        "reading": {
+          "ref": {
+            "node": "sample",
+            "id": "sample"
+          },
+          "revision": 0,
+          "sequence": 0,
+          "phase": "waiting",
+          "status": "pending",
+          "reason": "waiting-for-approver",
+          "waitingOn": {
+            "who": "owner",
+            "claimedBy": "sample",
+            "homeNode": "sample",
+            "homeReachable": false
+          },
+          "deadline": {
+            "expiresAt": 0,
+            "remainingMs": 0
+          },
+          "allowedActions": [
+            "claim"
+          ],
+          "refusedActions": [
+            {
+              "action": "claim",
+              "code": "sample",
+              "reason": "sample"
+            }
+          ],
+          "decision": {
+            "disposition": "approved",
+            "by": "sample",
+            "surface": "sample",
+            "node": "sample",
+            "at": 0,
+            "cause": "requester-left"
+          },
+          "receipt": {
+            "state": "delivered",
+            "reason": "sample"
+          },
+          "requester": {
+            "kind": "in-process",
+            "principal": "sample",
+            "surface": "sample",
+            "mine": false
+          },
+          "work": {
+            "state": "not-reported",
+            "callId": "sample",
+            "sessionId": "sample"
+          },
+          "next": [
+            {
+              "move": "wait",
+              "text": "sample"
+            }
+          ]
         }
       },
       "delivery": {
@@ -1509,6 +2413,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "nextRunAt": 0,
       "lastRunAt": 0,
       "lastRunId": "sample",
+      "lastOutcome": "delivered",
       "runCount": 0,
       "successCount": 0,
       "failureCount": 0,
@@ -1562,6 +2467,133 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
+      "items": [
+        {
+          "id": "sample",
+          "mutationRevision": "sample",
+          "name": "sample",
+          "description": "sample",
+          "labels": [
+            "sample"
+          ],
+          "createdAt": 0,
+          "updatedAt": 0,
+          "status": "enabled",
+          "enabled": false,
+          "schedule": {
+            "kind": "at",
+            "at": 0
+          },
+          "execution": {
+            "prompt": "sample",
+            "template": "sample",
+            "target": {
+              "kind": "isolated",
+              "sessionId": "sample",
+              "routeId": "sample",
+              "threadId": "sample",
+              "channelId": "sample",
+              "surfaceKind": "tui",
+              "pinnedSessionId": "sample",
+              "preserveThread": false,
+              "createIfMissing": false
+            },
+            "modelProvider": "sample",
+            "modelId": "sample",
+            "fallbackModels": [
+              "sample"
+            ],
+            "routing": {
+              "providerSelection": "inherit-current",
+              "providerFailurePolicy": "ordered-fallbacks",
+              "fallbackModels": [
+                "sample"
+              ]
+            },
+            "executionIntent": {
+              "riskClass": "safe",
+              "requiresApproval": false,
+              "networkPolicy": "inherit",
+              "filesystemPolicy": "inherit"
+            },
+            "reasoningEffort": "none",
+            "thinking": "sample",
+            "wakeMode": "next-heartbeat",
+            "timeoutMs": 0,
+            "maxAttempts": 0,
+            "toolAllowlist": [
+              "sample"
+            ],
+            "allowUnsafeExternalContent": false,
+            "externalContentSource": "gmail",
+            "lightContext": false
+          },
+          "delivery": {
+            "mode": "none",
+            "targets": [
+              {
+                "kind": "none",
+                "surfaceKind": "tui",
+                "address": "sample",
+                "routeId": "sample",
+                "label": "sample"
+              }
+            ],
+            "fallbackTargets": [
+              {
+                "kind": "none",
+                "surfaceKind": "tui",
+                "address": "sample",
+                "routeId": "sample",
+                "label": "sample"
+              }
+            ],
+            "includeSummary": false,
+            "includeLinks": false,
+            "replyToRouteId": "sample"
+          },
+          "failure": {
+            "action": "retry",
+            "maxConsecutiveFailures": 0,
+            "cooldownMs": 0,
+            "retryPolicy": {
+              "maxAttempts": 0,
+              "delayMs": 0,
+              "strategy": "fixed",
+              "maxDelayMs": 0,
+              "jitterMs": 0
+            },
+            "deadLetterRouteId": "sample",
+            "disableAfterFailures": false,
+            "notifyRouteId": "sample"
+          },
+          "source": {
+            "id": "sample",
+            "kind": "schedule",
+            "label": "sample",
+            "surfaceKind": "tui",
+            "routeId": "sample",
+            "enabled": false,
+            "createdAt": 0,
+            "updatedAt": 0,
+            "lastSeenAt": 0,
+            "metadata": {}
+          },
+          "nextRunAt": 0,
+          "lastRunAt": 0,
+          "lastRunId": "sample",
+          "lastOutcome": "delivered",
+          "runCount": 0,
+          "successCount": 0,
+          "failureCount": 0,
+          "pausedReason": "sample",
+          "deleteAfterRun": false,
+          "archivedAt": 0,
+          "metadata": {}
+        }
+      ],
+      "hasMore": false,
+      "nextCursor": "sample",
       "jobs": [
         {
           "id": "sample",
@@ -1677,6 +2709,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "nextRunAt": 0,
           "lastRunAt": 0,
           "lastRunId": "sample",
+          "lastOutcome": "delivered",
           "runCount": 0,
           "successCount": 0,
           "failureCount": 0,
@@ -1827,6 +2860,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "nextRunAt": 0,
       "lastRunAt": 0,
       "lastRunId": "sample",
+      "lastOutcome": "delivered",
       "runCount": 0,
       "successCount": 0,
       "failureCount": 0,
@@ -2197,6 +3231,167 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
+      "items": [
+        {
+          "id": "sample",
+          "jobId": "sample",
+          "labels": [
+            "sample"
+          ],
+          "createdAt": 0,
+          "updatedAt": 0,
+          "status": "queued",
+          "agentId": "sample",
+          "triggeredBy": {
+            "id": "sample",
+            "kind": "schedule",
+            "label": "sample",
+            "surfaceKind": "tui",
+            "routeId": "sample",
+            "enabled": false,
+            "createdAt": 0,
+            "updatedAt": 0,
+            "lastSeenAt": 0,
+            "metadata": {}
+          },
+          "target": {
+            "kind": "isolated",
+            "sessionId": "sample",
+            "routeId": "sample",
+            "threadId": "sample",
+            "channelId": "sample",
+            "surfaceKind": "tui",
+            "pinnedSessionId": "sample",
+            "preserveThread": false,
+            "createIfMissing": false
+          },
+          "execution": {
+            "prompt": "sample",
+            "template": "sample",
+            "target": {
+              "kind": "isolated",
+              "sessionId": "sample",
+              "routeId": "sample",
+              "threadId": "sample",
+              "channelId": "sample",
+              "surfaceKind": "tui",
+              "pinnedSessionId": "sample",
+              "preserveThread": false,
+              "createIfMissing": false
+            },
+            "modelProvider": "sample",
+            "modelId": "sample",
+            "fallbackModels": [
+              "sample"
+            ],
+            "routing": {
+              "providerSelection": "inherit-current",
+              "providerFailurePolicy": "ordered-fallbacks",
+              "fallbackModels": [
+                "sample"
+              ]
+            },
+            "executionIntent": {
+              "riskClass": "safe",
+              "requiresApproval": false,
+              "networkPolicy": "inherit",
+              "filesystemPolicy": "inherit"
+            },
+            "reasoningEffort": "none",
+            "thinking": "sample",
+            "wakeMode": "next-heartbeat",
+            "timeoutMs": 0,
+            "maxAttempts": 0,
+            "toolAllowlist": [
+              "sample"
+            ],
+            "allowUnsafeExternalContent": false,
+            "externalContentSource": "gmail",
+            "lightContext": false
+          },
+          "scheduleKind": "at",
+          "queuedAt": 0,
+          "startedAt": 0,
+          "endedAt": 0,
+          "durationMs": 0,
+          "forceRun": false,
+          "dueRun": false,
+          "attempt": 0,
+          "sessionId": "sample",
+          "routeId": "sample",
+          "route": {
+            "id": "sample",
+            "kind": "session",
+            "surfaceKind": "tui",
+            "surfaceId": "sample",
+            "externalId": "sample",
+            "sessionPolicy": "create-or-bind",
+            "threadPolicy": "preserve",
+            "deliveryGuarantee": "best-effort",
+            "threadId": "sample",
+            "channelId": "sample",
+            "sessionId": "sample",
+            "jobId": "sample",
+            "runId": "sample",
+            "title": "sample",
+            "lastSeenAt": 0,
+            "createdAt": 0,
+            "updatedAt": 0,
+            "metadata": {}
+          },
+          "continuationMode": "spawn",
+          "executionIntent": {
+            "mode": "spawn",
+            "targetKind": "isolated"
+          },
+          "deliveryIds": [
+            "sample"
+          ],
+          "deliveryAttempts": [
+            {
+              "id": "sample",
+              "runId": "sample",
+              "jobId": "sample",
+              "target": {
+                "kind": "none",
+                "surfaceKind": "tui",
+                "address": "sample",
+                "routeId": "sample",
+                "label": "sample"
+              },
+              "status": "pending",
+              "startedAt": 0,
+              "endedAt": 0,
+              "error": "sample",
+              "responseId": "sample"
+            }
+          ],
+          "modelId": "sample",
+          "providerId": "sample",
+          "telemetry": {
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "reasoningTokens": 0
+            },
+            "llmCallCount": 0,
+            "toolCallCount": 0,
+            "turnCount": 0,
+            "modelId": "sample",
+            "providerId": "sample",
+            "reasoningSummaryPresent": false,
+            "source": "local-agent"
+          },
+          "result": "sample",
+          "error": "sample",
+          "cancelledReason": "sample",
+          "metadata": {}
+        }
+      ],
+      "hasMore": false,
+      "nextCursor": "sample",
       "runs": [
         {
           "id": "sample",
@@ -2646,6 +3841,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "nextRunAt": 0,
       "lastRunAt": 0,
       "lastRunId": "sample",
+      "lastOutcome": "delivered",
       "runCount": 0,
       "successCount": 0,
       "failureCount": 0,
@@ -2665,30 +3861,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "body": {
       "removed": false,
       "id": "sample"
-    }
-  },
-  "automation.schedules.disable": {
-    "methodId": "automation.schedules.disable",
-    "http": {
-      "method": "POST",
-      "path": "/api/automation/schedules/{scheduleId}/disable"
-    },
-    "status": 200,
-    "body": {
-      "id": "sample",
-      "enabled": false
-    }
-  },
-  "automation.schedules.enable": {
-    "methodId": "automation.schedules.enable",
-    "http": {
-      "method": "POST",
-      "path": "/api/automation/schedules/{scheduleId}/enable"
-    },
-    "status": 200,
-    "body": {
-      "id": "sample",
-      "enabled": false
     }
   },
   "automation.schedules.list": {
@@ -2814,6 +3986,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "nextRunAt": 0,
           "lastRunAt": 0,
           "lastRunId": "sample",
+          "lastOutcome": "delivered",
           "runCount": 0,
           "successCount": 0,
           "failureCount": 0,
@@ -2983,6 +4156,30 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         }
       ],
       "defaultTimezone": "sample"
+    }
+  },
+  "automation.schedules.pause": {
+    "methodId": "automation.schedules.pause",
+    "http": {
+      "method": "POST",
+      "path": "/api/automation/schedules/{scheduleId}/pause"
+    },
+    "status": 200,
+    "body": {
+      "id": "sample",
+      "enabled": false
+    }
+  },
+  "automation.schedules.resume": {
+    "methodId": "automation.schedules.resume",
+    "http": {
+      "method": "POST",
+      "path": "/api/automation/schedules/{scheduleId}/resume"
+    },
+    "status": 200,
+    "body": {
+      "id": "sample",
+      "enabled": false
     }
   },
   "automation.schedules.run": {
@@ -3769,7 +4966,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "attendees": [
         "sample"
       ],
-      "recurrence": "sample"
+      "recurrence": "sample",
+      "revision": "sample"
     }
   },
   "calendar.events.list": {
@@ -3904,7 +5102,16 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "expiresAt": 0,
           "instructions": "sample"
         },
-        "metadata": {}
+        "metadata": {},
+        "refusal": {
+          "code": "sample",
+          "state": "sample",
+          "reason": "sample",
+          "next": [
+            "sample"
+          ],
+          "retryable": false
+        }
       }
     }
   },
@@ -3963,7 +5170,16 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "expiresAt": 0,
           "instructions": "sample"
         },
-        "metadata": {}
+        "metadata": {},
+        "refusal": {
+          "code": "sample",
+          "state": "sample",
+          "reason": "sample",
+          "next": [
+            "sample"
+          ],
+          "retryable": false
+        }
       }
     }
   },
@@ -5340,6 +6556,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "deliveredMessage": "sample",
           "deliveryChannel": "sample",
           "deliveryId": "sample",
+          "partsSent": 0,
+          "partsTotal": 0,
           "error": "sample"
         }
       ]
@@ -5492,7 +6710,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "safetyCheckpointId": "sample",
         "undo": {
           "restoreCheckpointId": "sample"
-        }
+        },
+        "workspaceRoot": "sample"
       },
       "refused": false,
       "refusal": {
@@ -5851,6 +7070,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "revoked": false,
         "reason": "sample"
       },
+      "residual": [
+        "sample"
+      ],
       "apiTokenRef": "sample",
       "generatedToken": "sample",
       "accountId": "sample",
@@ -6002,8 +7224,36 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           ],
           "createdAt": 0,
           "deliveryState": "cancelled",
-          "failureReason": "sample",
-          "inReplyTo": "sample"
+          "failureReason": {
+            "turnId": "sample",
+            "headline": "sample",
+            "cause": "sample",
+            "changed": {
+              "text": "sample",
+              "files": [
+                "sample"
+              ]
+            },
+            "next": [
+              {
+                "action": "retry",
+                "label": "sample"
+              }
+            ],
+            "also": "sample",
+            "tip": {
+              "text": "sample",
+              "command": "sample"
+            },
+            "details": [
+              {
+                "label": "sample",
+                "value": "sample"
+              }
+            ]
+          },
+          "inReplyTo": "sample",
+          "clientMessageId": "sample"
         }
       ],
       "total": 0,
@@ -6209,8 +7459,36 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           ],
           "createdAt": 0,
           "deliveryState": "cancelled",
-          "failureReason": "sample",
-          "inReplyTo": "sample"
+          "failureReason": {
+            "turnId": "sample",
+            "headline": "sample",
+            "cause": "sample",
+            "changed": {
+              "text": "sample",
+              "files": [
+                "sample"
+              ]
+            },
+            "next": [
+              {
+                "action": "retry",
+                "label": "sample"
+              }
+            ],
+            "also": "sample",
+            "tip": {
+              "text": "sample",
+              "command": "sample"
+            },
+            "details": [
+              {
+                "label": "sample",
+                "value": "sample"
+              }
+            ]
+          },
+          "inReplyTo": "sample",
+          "clientMessageId": "sample"
         }
       ]
     }
@@ -11434,6 +12712,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "createdAt": 0,
       "completedAt": 0,
       "updatedAt": 0,
+      "held": {
+        "code": "input-unavailable",
+        "reason": "sample",
+        "at": 0
+      },
       "revision": "sample"
     }
   },
@@ -11483,6 +12766,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "createdAt": 0,
           "completedAt": 0,
           "updatedAt": 0,
+          "held": {
+            "code": "input-unavailable",
+            "reason": "sample",
+            "at": 0
+          },
           "revision": "sample"
         }
       ]
@@ -11688,6 +12976,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "outputSchema": {},
               "pluginId": "sample",
               "dangerous": false,
+              "effects": [
+                "sample"
+              ],
               "effect": "read",
               "ownerOnly": false,
               "irreversible": false,
@@ -11885,6 +13176,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "outputSchema": {},
         "pluginId": "sample",
         "dangerous": false,
+        "effects": [
+          "sample"
+        ],
         "effect": "read",
         "ownerOnly": false,
         "irreversible": false,
@@ -11943,6 +13237,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "outputSchema": {},
           "pluginId": "sample",
           "dangerous": false,
+          "effects": [
+            "sample"
+          ],
           "effect": "read",
           "ownerOnly": false,
           "irreversible": false,
@@ -12350,13 +13647,22 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "results": [
         {
           "id": "sample",
-          "outcome": "delivered"
+          "outcome": "delivered",
+          "reason": "sample",
+          "changes": [
+            {
+              "field": "sample",
+              "was": "sample",
+              "now": "sample"
+            }
+          ]
         }
       ],
       "delivered": 0,
       "retrying": 0,
       "failed": 0,
-      "notFound": 0
+      "notFound": 0,
+      "destinationChanged": 0
     }
   },
   "email.attachment.get": {
@@ -12380,7 +13686,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "body": {
       "draftId": "sample",
       "uid": 0,
+      "uidValidity": 0,
       "mailbox": "sample"
+    }
+  },
+  "email.draft.update": {
+    "methodId": "email.draft.update",
+    "http": null,
+    "status": 200,
+    "body": {
+      "draftId": "sample",
+      "uid": 0,
+      "uidValidity": 0,
+      "mailbox": "sample",
+      "replaced": 0
     }
   },
   "email.drafts.list": {
@@ -12399,7 +13718,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         }
       ],
       "total": 0,
-      "mailbox": "sample"
+      "mailbox": "sample",
+      "uidValidity": 0
     }
   },
   "email.expectation.cancel": {
@@ -12628,7 +13948,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "uid": 0,
           "detail": "sample"
         }
-      ]
+      ],
+      "uidValidity": 0
     }
   },
   "email.inbox.read": {
@@ -12652,7 +13973,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "contentType": "sample",
           "sizeBytes": 0
         }
-      ]
+      ],
+      "uidValidity": 0
     }
   },
   "email.inbox.update": {
@@ -12754,6 +14076,22 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         {
           "id": "sample",
           "kind": "agent",
+          "serves": "you",
+          "progress": {
+            "filesRead": 0,
+            "filesChanged": 0
+          },
+          "schedule": {
+            "cadence": {
+              "kind": "every",
+              "intervalMs": 0
+            },
+            "lastRunAt": 0,
+            "lastOutcome": "delivered",
+            "firedCount": 0,
+            "lastFiredAt": 0,
+            "since": 0
+          },
           "parentId": "sample",
           "label": "sample",
           "task": "sample",
@@ -12933,6 +14271,29 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "loserItemIds": [
         "sample"
       ],
+      "losers": [
+        {
+          "id": "sample",
+          "outcome": {
+            "state": "done",
+            "observed": {
+              "how": "sample",
+              "at": 0
+            },
+            "check": "sample",
+            "since": 0,
+            "refusal": {
+              "code": "sample",
+              "state": "sample",
+              "reason": "sample",
+              "next": [
+                "sample"
+              ],
+              "retryable": false
+            }
+          }
+        }
+      ],
       "auto": false,
       "requiresConfirm": false,
       "group": {
@@ -13101,6 +14462,22 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         {
           "id": "sample",
           "kind": "agent",
+          "serves": "you",
+          "progress": {
+            "filesRead": 0,
+            "filesChanged": 0
+          },
+          "schedule": {
+            "cadence": {
+              "kind": "every",
+              "intervalMs": 0
+            },
+            "lastRunAt": 0,
+            "lastOutcome": "delivered",
+            "firedCount": 0,
+            "lastFiredAt": 0,
+            "since": 0
+          },
           "parentId": "sample",
           "label": "sample",
           "task": "sample",
@@ -13193,7 +14570,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "submitted": false,
       "declined": false,
       "messageId": "sample",
-      "reason": "sample"
+      "reason": "sample",
+      "sent": [
+        "text"
+      ],
+      "failed": "text"
     }
   },
   "fleet.resume": {
@@ -13218,6 +14599,22 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         {
           "id": "sample",
           "kind": "agent",
+          "serves": "you",
+          "progress": {
+            "filesRead": 0,
+            "filesChanged": 0
+          },
+          "schedule": {
+            "cadence": {
+              "kind": "every",
+              "intervalMs": 0
+            },
+            "lastRunAt": 0,
+            "lastOutcome": "delivered",
+            "firedCount": 0,
+            "lastFiredAt": 0,
+            "since": 0
+          },
           "parentId": "sample",
           "label": "sample",
           "task": "sample",
@@ -16358,6 +17755,22 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
+      "items": [
+        {
+          "id": "sample",
+          "severity": "sample",
+          "code": "sample",
+          "message": "sample",
+          "status": "sample",
+          "sourceId": "sample",
+          "nodeId": "sample",
+          "metadata": {},
+          "createdAt": 0,
+          "updatedAt": 0
+        }
+      ],
+      "hasMore": false,
+      "nextCursor": "sample",
       "issues": [
         {
           "id": "sample",
@@ -16780,6 +18193,36 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
+      "items": [
+        {
+          "id": "sample",
+          "kind": "sample",
+          "slug": "sample",
+          "title": "sample",
+          "summary": "sample",
+          "aliases": [
+            "sample"
+          ],
+          "status": "sample",
+          "confidence": 0,
+          "sourceId": "sample",
+          "subject": "sample",
+          "subjectIds": [
+            "sample"
+          ],
+          "targetHints": [
+            {}
+          ],
+          "linkedObjectIds": [
+            "sample"
+          ],
+          "metadata": {},
+          "createdAt": 0,
+          "updatedAt": 0
+        }
+      ],
+      "hasMore": false,
+      "nextCursor": "sample",
       "nodes": [
         {
           "id": "sample",
@@ -17486,6 +18929,33 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
+      "items": [
+        {
+          "id": "sample",
+          "connectorId": "sample",
+          "sourceType": "url",
+          "title": "sample",
+          "sourceUri": "sample",
+          "canonicalUri": "sample",
+          "summary": "sample",
+          "description": "sample",
+          "tags": [
+            "sample"
+          ],
+          "folderPath": "sample",
+          "status": "sample",
+          "artifactId": "sample",
+          "contentHash": "sample",
+          "lastCrawledAt": 0,
+          "crawlError": "sample",
+          "sessionId": "sample",
+          "metadata": {},
+          "createdAt": 0,
+          "updatedAt": 0
+        }
+      ],
+      "hasMore": false,
+      "nextCursor": "sample",
       "sources": [
         {
           "id": "sample",
@@ -19183,8 +20653,54 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       ]
     }
   },
-  "mcp.config.reload": {
-    "methodId": "mcp.config.reload",
+  "mcp.servers.list": {
+    "methodId": "mcp.servers.list",
+    "http": {
+      "method": "GET",
+      "path": "/api/mcp/servers"
+    },
+    "status": 200,
+    "body": {
+      "servers": [
+        {
+          "name": "sample",
+          "connected": false,
+          "transport": "stdio",
+          "protocolVersion": "sample",
+          "protocolEra": "modern",
+          "phase": "idle",
+          "lastError": "sample",
+          "reconnect": {
+            "state": "configured",
+            "attempt": 0,
+            "maxAttempts": 0,
+            "nextAttemptAt": 0,
+            "stoppedReason": "sample"
+          }
+        }
+      ],
+      "security": [
+        {}
+      ],
+      "sandboxBindings": [
+        {}
+      ]
+    }
+  },
+  "mcp.servers.quarantine.accept": {
+    "methodId": "mcp.servers.quarantine.accept",
+    "http": {
+      "method": "POST",
+      "path": "/api/mcp/servers/{serverName}/accept-tools"
+    },
+    "status": 200,
+    "body": {
+      "serverName": "sample",
+      "accepted": false
+    }
+  },
+  "mcp.servers.reload": {
+    "methodId": "mcp.servers.reload",
     "http": {
       "method": "POST",
       "path": "/api/mcp/reload"
@@ -19250,40 +20766,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           }
         ]
       }
-    }
-  },
-  "mcp.servers.list": {
-    "methodId": "mcp.servers.list",
-    "http": {
-      "method": "GET",
-      "path": "/api/mcp/servers"
-    },
-    "status": 200,
-    "body": {
-      "servers": [
-        {
-          "name": "sample",
-          "connected": false,
-          "transport": "stdio",
-          "protocolVersion": "sample",
-          "protocolEra": "modern",
-          "phase": "idle",
-          "lastError": "sample",
-          "reconnect": {
-            "state": "configured",
-            "attempt": 0,
-            "maxAttempts": 0,
-            "nextAttemptAt": 0,
-            "stoppedReason": "sample"
-          }
-        }
-      ],
-      "security": [
-        {}
-      ],
-      "sandboxBindings": [
-        {}
-      ]
     }
   },
   "mcp.servers.remove": {
@@ -19414,17 +20896,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       ]
     }
   },
-  "mcp.servers.tools.allow": {
-    "methodId": "mcp.servers.tools.allow",
+  "mcp.servers.role.set": {
+    "methodId": "mcp.servers.role.set",
     "http": {
       "method": "POST",
-      "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/allow"
+      "path": "/api/mcp/config/servers/{serverName}/role"
     },
     "status": 200,
     "body": {
       "serverName": "sample",
-      "toolName": "sample",
-      "rule": "allow",
       "scope": "project",
       "path": "sample",
       "changed": false,
@@ -19489,17 +20969,17 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       }
     }
   },
-  "mcp.servers.tools.clear": {
-    "methodId": "mcp.servers.tools.clear",
+  "mcp.servers.tools.block": {
+    "methodId": "mcp.servers.tools.block",
     "http": {
-      "method": "DELETE",
-      "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}"
+      "method": "POST",
+      "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/block"
     },
     "status": 200,
     "body": {
       "serverName": "sample",
       "toolName": "sample",
-      "rule": "allow",
+      "rule": "block",
       "scope": "project",
       "path": "sample",
       "changed": false,
@@ -19564,17 +21044,240 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       }
     }
   },
-  "mcp.servers.tools.deny": {
-    "methodId": "mcp.servers.tools.deny",
+  "mcp.servers.tools.exempt": {
+    "methodId": "mcp.servers.tools.exempt",
     "http": {
       "method": "POST",
-      "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/deny"
+      "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/exempt"
     },
     "status": 200,
     "body": {
       "serverName": "sample",
       "toolName": "sample",
-      "rule": "allow",
+      "rule": "block",
+      "scope": "project",
+      "path": "sample",
+      "changed": false,
+      "reload": {
+        "added": 0,
+        "changed": 0,
+        "removed": 0,
+        "unchanged": 0,
+        "servers": [
+          {
+            "name": "sample",
+            "action": "added",
+            "connected": false
+          }
+        ]
+      },
+      "config": {
+        "locations": [
+          {
+            "scope": "sample",
+            "kind": "sample",
+            "path": "sample",
+            "writable": false
+          }
+        ],
+        "servers": [
+          {
+            "name": "sample",
+            "command": "sample",
+            "url": "sample",
+            "args": [
+              "sample"
+            ],
+            "envKeys": [
+              "sample"
+            ],
+            "headerKeys": [
+              "sample"
+            ],
+            "role": "sample",
+            "trustMode": "sample",
+            "allowedPaths": [
+              "sample"
+            ],
+            "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
+              "sample"
+            ],
+            "source": {
+              "scope": "sample",
+              "kind": "sample",
+              "path": "sample",
+              "writable": false
+            }
+          }
+        ]
+      }
+    }
+  },
+  "mcp.servers.tools.unblock": {
+    "methodId": "mcp.servers.tools.unblock",
+    "http": {
+      "method": "POST",
+      "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/unblock"
+    },
+    "status": 200,
+    "body": {
+      "serverName": "sample",
+      "toolName": "sample",
+      "rule": "block",
+      "scope": "project",
+      "path": "sample",
+      "changed": false,
+      "reload": {
+        "added": 0,
+        "changed": 0,
+        "removed": 0,
+        "unchanged": 0,
+        "servers": [
+          {
+            "name": "sample",
+            "action": "added",
+            "connected": false
+          }
+        ]
+      },
+      "config": {
+        "locations": [
+          {
+            "scope": "sample",
+            "kind": "sample",
+            "path": "sample",
+            "writable": false
+          }
+        ],
+        "servers": [
+          {
+            "name": "sample",
+            "command": "sample",
+            "url": "sample",
+            "args": [
+              "sample"
+            ],
+            "envKeys": [
+              "sample"
+            ],
+            "headerKeys": [
+              "sample"
+            ],
+            "role": "sample",
+            "trustMode": "sample",
+            "allowedPaths": [
+              "sample"
+            ],
+            "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
+              "sample"
+            ],
+            "source": {
+              "scope": "sample",
+              "kind": "sample",
+              "path": "sample",
+              "writable": false
+            }
+          }
+        ]
+      }
+    }
+  },
+  "mcp.servers.tools.unexempt": {
+    "methodId": "mcp.servers.tools.unexempt",
+    "http": {
+      "method": "POST",
+      "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/unexempt"
+    },
+    "status": 200,
+    "body": {
+      "serverName": "sample",
+      "toolName": "sample",
+      "rule": "block",
+      "scope": "project",
+      "path": "sample",
+      "changed": false,
+      "reload": {
+        "added": 0,
+        "changed": 0,
+        "removed": 0,
+        "unchanged": 0,
+        "servers": [
+          {
+            "name": "sample",
+            "action": "added",
+            "connected": false
+          }
+        ]
+      },
+      "config": {
+        "locations": [
+          {
+            "scope": "sample",
+            "kind": "sample",
+            "path": "sample",
+            "writable": false
+          }
+        ],
+        "servers": [
+          {
+            "name": "sample",
+            "command": "sample",
+            "url": "sample",
+            "args": [
+              "sample"
+            ],
+            "envKeys": [
+              "sample"
+            ],
+            "headerKeys": [
+              "sample"
+            ],
+            "role": "sample",
+            "trustMode": "sample",
+            "allowedPaths": [
+              "sample"
+            ],
+            "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
+              "sample"
+            ],
+            "source": {
+              "scope": "sample",
+              "kind": "sample",
+              "path": "sample",
+              "writable": false
+            }
+          }
+        ]
+      }
+    }
+  },
+  "mcp.servers.trust.set": {
+    "methodId": "mcp.servers.trust.set",
+    "http": {
+      "method": "POST",
+      "path": "/api/mcp/config/servers/{serverName}/trust"
+    },
+    "status": 200,
+    "body": {
+      "serverName": "sample",
       "scope": "project",
       "path": "sample",
       "changed": false,
@@ -19913,22 +21616,34 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         ]
       },
       "writeback": {
-        "analysisArtifact": {
-          "id": "sample",
-          "kind": "sample",
-          "mimeType": "sample",
-          "filename": "sample",
-          "sizeBytes": 0,
-          "sha256": "sample",
-          "createdAt": 0,
-          "expiresAt": 0,
-          "sourceUri": "sample",
-          "acquisitionMode": "inline-data",
-          "fetchMode": "not-applicable",
+        "state": "done",
+        "value": {
+          "analysisArtifact": {
+            "id": "sample",
+            "kind": "sample",
+            "mimeType": "sample",
+            "filename": "sample",
+            "sizeBytes": 0,
+            "sha256": "sample",
+            "createdAt": 0,
+            "expiresAt": 0,
+            "sourceUri": "sample",
+            "acquisitionMode": "inline-data",
+            "fetchMode": "not-applicable",
+            "metadata": {}
+          },
+          "knowledgeSourceId": "sample",
           "metadata": {}
         },
-        "knowledgeSourceId": "sample",
-        "metadata": {}
+        "refusal": {
+          "code": "sample",
+          "state": "sample",
+          "reason": "sample",
+          "next": [
+            "sample"
+          ],
+          "retryable": false
+        }
       }
     }
   },
@@ -20117,6 +21832,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "indexedRecords": 0,
         "embeddingProviderId": "sample",
         "embeddingProviderLabel": "sample",
+        "embeddingSpace": "sample",
+        "awaitingReembed": 0,
         "error": "sample",
         "platformLimitReason": "sample"
       },
@@ -20164,6 +21881,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "indexedRecords": 0,
         "embeddingProviderId": "sample",
         "embeddingProviderLabel": "sample",
+        "embeddingSpace": "sample",
+        "awaitingReembed": 0,
         "error": "sample",
         "platformLimitReason": "sample"
       },
@@ -20684,6 +22403,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "indexedRecords": 0,
         "embeddingProviderId": "sample",
         "embeddingProviderLabel": "sample",
+        "embeddingSpace": "sample",
+        "awaitingReembed": 0,
         "error": "sample",
         "platformLimitReason": "sample"
       }
@@ -20706,6 +22427,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "indexedRecords": 0,
         "embeddingProviderId": "sample",
         "embeddingProviderLabel": "sample",
+        "embeddingSpace": "sample",
+        "awaitingReembed": 0,
         "error": "sample",
         "platformLimitReason": "sample"
       }
@@ -20768,7 +22491,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "reason": "sample",
       "occasionId": "sample",
       "disclosure": "sample",
-      "droppedRecords": 0
+      "droppedRecords": 0,
+      "removedLine": "sample",
+      "stillDeclaredBy": 0
     }
   },
   "occasions.conflict.resolve": {
@@ -21057,7 +22782,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "reason": "sample",
       "occasionId": "sample",
       "disclosure": "sample",
-      "droppedRecords": 0
+      "droppedRecords": 0,
+      "removedLine": "sample",
+      "stillDeclaredBy": 0
     }
   },
   "occasions.plans.list": {
@@ -21136,7 +22863,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "reason": "sample",
       "occasionId": "sample",
       "disclosure": "sample",
-      "droppedRecords": 0
+      "droppedRecords": 0,
+      "removedLine": "sample",
+      "stillDeclaredBy": 0
     }
   },
   "occasions.plans.update": {
@@ -21193,7 +22922,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "reason": "sample",
       "occasionId": "sample",
       "disclosure": "sample",
-      "droppedRecords": 0
+      "droppedRecords": 0,
+      "removedLine": "sample",
+      "stillDeclaredBy": 0
     }
   },
   "occasions.state": {
@@ -21220,7 +22951,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "droppedInterviews": 0,
         "staleMirrors": 0
       },
-      "reconciledOpenItems": 0,
       "corruption": "sample"
     }
   },
@@ -21517,6 +23247,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "reserved": 0,
         "remaining": 0
       },
+      "earlierSpend": [
+        {
+          "currency": "sample",
+          "item": 0,
+          "overage": 0,
+          "tolerance": 0
+        }
+      ],
       "reservationCount": 0,
       "isPaymentsLeader": false,
       "stopped": {
@@ -21600,6 +23338,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "merchantDomain": "sample",
       "item": "sample",
       "amount": "sample",
+      "currency": "sample",
       "expiresAt": "sample"
     }
   },
@@ -25701,6 +27440,45 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       ]
     }
   },
+  "sessions.hosted.share": {
+    "methodId": "sessions.hosted.share",
+    "http": null,
+    "status": 200,
+    "body": {
+      "session": {
+        "id": "sample",
+        "nativeConversation": true,
+        "workspaceRoot": "sample",
+        "title": "sample",
+        "status": "idle",
+        "detachPolicy": "kill",
+        "effectiveDetachPolicy": "kill",
+        "attachedClients": [
+          "sample"
+        ],
+        "providerId": "sample",
+        "modelId": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "turnCount": 0,
+        "messageCount": 0,
+        "lastTurnAt": 0,
+        "terminatedAt": 0,
+        "terminatedReason": "sample",
+        "restoredFromDisk": false,
+        "originSurface": "sample",
+        "permissionMode": "ask-me",
+        "contractIds": [
+          "sample"
+        ],
+        "saveError": "sample"
+      },
+      "owners": [
+        "sample"
+      ],
+      "added": false
+    }
+  },
   "sessions.hosted.workspaces": {
     "methodId": "sessions.hosted.workspaces",
     "http": null,
@@ -25911,7 +27689,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           },
           "error": "sample"
         }
-      ]
+      ],
+      "more": false,
+      "next": "sample"
     }
   },
   "sessions.integration.snapshot": {
@@ -26092,7 +27872,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "sessionId": "sample",
       "mode": "ask-me",
       "chosenMode": "ask-me",
-      "reason": "sample"
+      "reason": "sample",
+      "words": {
+        "chosen": "sample",
+        "inForce": "sample",
+        "because": "sample",
+        "sentence": "sample",
+        "asksBefore": "sample"
+      }
     }
   },
   "sessions.permissionMode.set": {

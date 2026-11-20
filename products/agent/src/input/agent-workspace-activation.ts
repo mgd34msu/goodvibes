@@ -63,7 +63,6 @@ interface AgentWorkspaceActivationHost {
   applyLocalLibraryOperation(operation: AgentWorkspaceLocalOperation): void;
   applySettingAction(action: AgentWorkspaceCategory['actions'][number], requestRender?: () => void): void;
   importTuiSettings(requestRender?: () => void): void;
-  applySetupCheckpointAction(action: AgentWorkspaceCategory['actions'][number], requestRender?: () => void): void;
   openModelPickerAction(action: AgentWorkspaceCategory['actions'][number], requestRender?: () => void): void;
   openSettingsModalAction(action: AgentWorkspaceCategory['actions'][number], requestRender?: () => void): void;
   completeOnboarding(): void;
@@ -138,10 +137,6 @@ export function activateAgentWorkspaceSelection(
   }
   if (action.kind === 'settings-import') {
     workspace.importTuiSettings(requestRender);
-    return;
-  }
-  if (action.kind === 'setup-checkpoint') {
-    workspace.applySetupCheckpointAction(action, requestRender);
     return;
   }
   if (action.kind === 'model-picker') {

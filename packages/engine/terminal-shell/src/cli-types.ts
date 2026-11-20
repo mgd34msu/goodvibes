@@ -14,7 +14,7 @@ export type GoodVibesCliCommand =
   | 'service'
   | 'status'
   | 'doctor'
-  | 'onboarding'
+  | 'setup'
   | 'models'
   | 'providers'
   | 'auth'

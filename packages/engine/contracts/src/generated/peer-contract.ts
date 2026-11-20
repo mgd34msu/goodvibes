@@ -92,13 +92,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                 {
                   "type": "object",
                   "additionalProperties": {
-                    "$ref": "$.endpoints[0].inputSchema.properties.metadata.additionalProperties"
+                    "$ref": "#/properties/metadata/additionalProperties"
                   }
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "$.endpoints[0].inputSchema.properties.metadata.additionalProperties"
+                    "$ref": "#/properties/metadata/additionalProperties"
                   }
                 }
               ]
@@ -220,13 +220,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                     {
                       "type": "object",
                       "additionalProperties": {
-                        "$ref": "$.endpoints[0].outputSchema.properties.request.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/request/properties/metadata/additionalProperties"
                       }
                     },
                     {
                       "type": "array",
                       "items": {
-                        "$ref": "$.endpoints[0].outputSchema.properties.request.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/request/properties/metadata/additionalProperties"
                       }
                     }
                   ]
@@ -295,13 +295,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                 {
                   "type": "object",
                   "additionalProperties": {
-                    "$ref": "$.endpoints[1].inputSchema.properties.metadata.additionalProperties"
+                    "$ref": "#/properties/metadata/additionalProperties"
                   }
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "$.endpoints[1].inputSchema.properties.metadata.additionalProperties"
+                    "$ref": "#/properties/metadata/additionalProperties"
                   }
                 }
               ]
@@ -459,13 +459,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                     {
                       "type": "object",
                       "additionalProperties": {
-                        "$ref": "$.endpoints[1].outputSchema.properties.peer.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/peer/properties/metadata/additionalProperties"
                       }
                     },
                     {
                       "type": "array",
                       "items": {
-                        "$ref": "$.endpoints[1].outputSchema.properties.peer.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/peer/properties/metadata/additionalProperties"
                       }
                     }
                   ]
@@ -585,13 +585,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                 {
                   "type": "object",
                   "additionalProperties": {
-                    "$ref": "$.endpoints[2].inputSchema.properties.metadata.additionalProperties"
+                    "$ref": "#/properties/metadata/additionalProperties"
                   }
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "$.endpoints[2].inputSchema.properties.metadata.additionalProperties"
+                    "$ref": "#/properties/metadata/additionalProperties"
                   }
                 }
               ]
@@ -745,13 +745,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                     {
                       "type": "object",
                       "additionalProperties": {
-                        "$ref": "$.endpoints[2].outputSchema.properties.peer.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/peer/properties/metadata/additionalProperties"
                       }
                     },
                     {
                       "type": "array",
                       "items": {
-                        "$ref": "$.endpoints[2].outputSchema.properties.peer.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/peer/properties/metadata/additionalProperties"
                       }
                     }
                   ]
@@ -869,13 +869,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                     {
                       "type": "object",
                       "additionalProperties": {
-                        "$ref": "$.endpoints[3].outputSchema.properties.work.items.properties.payload"
+                        "$ref": "#/properties/work/items/properties/payload"
                       }
                     },
                     {
                       "type": "array",
                       "items": {
-                        "$ref": "$.endpoints[3].outputSchema.properties.work.items.properties.payload"
+                        "$ref": "#/properties/work/items/properties/payload"
                       }
                     }
                   ]
@@ -936,13 +936,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                     {
                       "type": "object",
                       "additionalProperties": {
-                        "$ref": "$.endpoints[3].outputSchema.properties.work.items.properties.result"
+                        "$ref": "#/properties/work/items/properties/result"
                       }
                     },
                     {
                       "type": "array",
                       "items": {
-                        "$ref": "$.endpoints[3].outputSchema.properties.work.items.properties.result"
+                        "$ref": "#/properties/work/items/properties/result"
                       }
                     }
                   ]
@@ -1032,13 +1032,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                       {
                         "type": "object",
                         "additionalProperties": {
-                          "$ref": "$.endpoints[3].outputSchema.properties.work.items.properties.metadata.additionalProperties"
+                          "$ref": "#/properties/work/items/properties/metadata/additionalProperties"
                         }
                       },
                       {
                         "type": "array",
                         "items": {
-                          "$ref": "$.endpoints[3].outputSchema.properties.work.items.properties.metadata.additionalProperties"
+                          "$ref": "#/properties/work/items/properties/metadata/additionalProperties"
                         }
                       }
                     ]
@@ -1106,13 +1106,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
               {
                 "type": "object",
                 "additionalProperties": {
-                  "$ref": "$.endpoints[4].inputSchema.properties.result"
+                  "$ref": "#/properties/result"
                 }
               },
               {
                 "type": "array",
                 "items": {
-                  "$ref": "$.endpoints[4].inputSchema.properties.result"
+                  "$ref": "#/properties/result"
                 }
               }
             ]
@@ -1139,13 +1139,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                 {
                   "type": "object",
                   "additionalProperties": {
-                    "$ref": "$.endpoints[4].inputSchema.properties.metadata.additionalProperties"
+                    "$ref": "#/properties/metadata/additionalProperties"
                   }
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "$.endpoints[4].inputSchema.properties.metadata.additionalProperties"
+                    "$ref": "#/properties/metadata/additionalProperties"
                   }
                 }
               ]
@@ -1226,13 +1226,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                   {
                     "type": "object",
                     "additionalProperties": {
-                      "$ref": "$.endpoints[4].outputSchema.properties.work.properties.payload"
+                      "$ref": "#/properties/work/properties/payload"
                     }
                   },
                   {
                     "type": "array",
                     "items": {
-                      "$ref": "$.endpoints[4].outputSchema.properties.work.properties.payload"
+                      "$ref": "#/properties/work/properties/payload"
                     }
                   }
                 ]
@@ -1293,13 +1293,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                   {
                     "type": "object",
                     "additionalProperties": {
-                      "$ref": "$.endpoints[4].outputSchema.properties.work.properties.result"
+                      "$ref": "#/properties/work/properties/result"
                     }
                   },
                   {
                     "type": "array",
                     "items": {
-                      "$ref": "$.endpoints[4].outputSchema.properties.work.properties.result"
+                      "$ref": "#/properties/work/properties/result"
                     }
                   }
                 ]
@@ -1389,13 +1389,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                     {
                       "type": "object",
                       "additionalProperties": {
-                        "$ref": "$.endpoints[4].outputSchema.properties.work.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/work/properties/metadata/additionalProperties"
                       }
                     },
                     {
                       "type": "array",
                       "items": {
-                        "$ref": "$.endpoints[4].outputSchema.properties.work.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/work/properties/metadata/additionalProperties"
                       }
                     }
                   ]
@@ -1807,13 +1807,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                           {
                             "type": "object",
                             "additionalProperties": {
-                              "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.pairRequests.items.properties.metadata.additionalProperties"
+                              "$ref": "#/properties/distributed/properties/pairRequests/items/properties/metadata/additionalProperties"
                             }
                           },
                           {
                             "type": "array",
                             "items": {
-                              "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.pairRequests.items.properties.metadata.additionalProperties"
+                              "$ref": "#/properties/distributed/properties/pairRequests/items/properties/metadata/additionalProperties"
                             }
                           }
                         ]
@@ -1982,13 +1982,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                           {
                             "type": "object",
                             "additionalProperties": {
-                              "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.peers.items.properties.metadata.additionalProperties"
+                              "$ref": "#/properties/distributed/properties/peers/items/properties/metadata/additionalProperties"
                             }
                           },
                           {
                             "type": "array",
                             "items": {
-                              "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.peers.items.properties.metadata.additionalProperties"
+                              "$ref": "#/properties/distributed/properties/peers/items/properties/metadata/additionalProperties"
                             }
                           }
                         ]
@@ -2078,13 +2078,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                         {
                           "type": "object",
                           "additionalProperties": {
-                            "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.work.items.properties.payload"
+                            "$ref": "#/properties/distributed/properties/work/items/properties/payload"
                           }
                         },
                         {
                           "type": "array",
                           "items": {
-                            "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.work.items.properties.payload"
+                            "$ref": "#/properties/distributed/properties/work/items/properties/payload"
                           }
                         }
                       ]
@@ -2145,13 +2145,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                         {
                           "type": "object",
                           "additionalProperties": {
-                            "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.work.items.properties.result"
+                            "$ref": "#/properties/distributed/properties/work/items/properties/result"
                           }
                         },
                         {
                           "type": "array",
                           "items": {
-                            "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.work.items.properties.result"
+                            "$ref": "#/properties/distributed/properties/work/items/properties/result"
                           }
                         }
                       ]
@@ -2241,13 +2241,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                           {
                             "type": "object",
                             "additionalProperties": {
-                              "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.work.items.properties.metadata.additionalProperties"
+                              "$ref": "#/properties/distributed/properties/work/items/properties/metadata/additionalProperties"
                             }
                           },
                           {
                             "type": "array",
                             "items": {
-                              "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.work.items.properties.metadata.additionalProperties"
+                              "$ref": "#/properties/distributed/properties/work/items/properties/metadata/additionalProperties"
                             }
                           }
                         ]
@@ -2335,13 +2335,13 @@ export const PEER_CONTRACT: PeerContractManifest = {
                           {
                             "type": "object",
                             "additionalProperties": {
-                              "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.audit.items.properties.metadata.additionalProperties"
+                              "$ref": "#/properties/distributed/properties/audit/items/properties/metadata/additionalProperties"
                             }
                           },
                           {
                             "type": "array",
                             "items": {
-                              "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.audit.items.properties.metadata.additionalProperties"
+                              "$ref": "#/properties/distributed/properties/audit/items/properties/metadata/additionalProperties"
                             }
                           }
                         ]

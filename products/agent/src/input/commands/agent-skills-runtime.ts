@@ -1,21 +1,16 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { RefusalError, readRefusal } from '@goodvibes-jev/engine/errors';
 import { AgentSkillRegistry, buildAgentSkillRequirements, evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness, formatAgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
 import { type AgentSkillBundleRecord, type AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry-types';
 import { discoverSkills, type SkillRecord } from '../../agent/skill-discovery.ts';
 import { parseSkillStandardMarkdown, skillStandardFilePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-standard';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { parseAgentLocalLibraryArgs, resolveCommandFilePath, type ParsedAgentLocalLibraryArgs } from './agent-local-library-args.ts';
+import { resolveCommandFilePath } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { assertActorMayEnable, assertActorMayMarkReviewed, type RegistryActor } from '@goodvibes-jev/engine/terminal-shell/agent-turn/review-authority';
 import { commandRefusal } from './confirmation.ts';
-
-const SKILL_VALUE_FLAGS = ['name', 'description', 'procedure', 'tags', 'triggers', 'requires-env', 'requires-command', 'requires-commands', 'skills'] as const;
-
-function parseSkillArgs(args: readonly string[]): ParsedAgentLocalLibraryArgs {
-  return parseAgentLocalLibraryArgs(args, { valueFlags: SKILL_VALUE_FLAGS });
-}
+import { defineCommand, defineList, type ActionDescription, type ActionValues, type InputDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 
 function splitList(value: string | undefined): readonly string[] {
   if (!value) return [];
@@ -33,12 +28,6 @@ function actorOf(ctx: CommandContext): RegistryActor {
 
 function registryFromContext(ctx: CommandContext): AgentSkillRegistry {
   return AgentSkillRegistry.fromShellPaths(requireShellPaths(ctx));
-}
-
-function requiredFlag(flags: ReadonlyMap<string, string>, key: string): string {
-  const value = flags.get(key)?.trim();
-  if (!value) throw new Error(`Missing --${key}.`);
-  return value;
 }
 
 function formatSkillReceipt(title: string, record: { readonly id: string; readonly name: string }, extra: readonly string[] = []): string {
@@ -76,7 +65,7 @@ function renderList(title: string, registry: AgentSkillRegistry, skills: readonl
   if (skills.length === 0) {
     return emptyMessage
       ? `${title}\n  ${emptyMessage}`
-      : `${title}\n  No Agent-local skills yet. Create one with /skills create --name <name> --description <summary> --procedure <steps>.`;
+      : `${title}\n  No Agent-local skills yet. Make one with /my-skills create.`;
   }
   return [
     `${title} (${skills.length})`,
@@ -105,7 +94,7 @@ function renderDiscoveredSkills(skills: readonly SkillRecord[]): string {
     `Discovered Agent skill files (${skills.length})`,
     ...skills.map(summarizeDiscoveredSkill),
     '',
-    'Import one with: /skills import-discovered <name>',
+    'Import one with: /my-skills import-discovered <name>',
   ].join('\n');
 }
 
@@ -140,18 +129,10 @@ function frontmatterAnyList(skill: SkillRecord, keys: readonly string[]): readon
   return [];
 }
 
-async function importDiscoveredSkill(args: readonly string[], ctx: CommandContext, skillRegistry: AgentSkillRegistry): Promise<void> {
-  const parsed = parseSkillArgs(args);
-  const name = parsed.rest.join(' ').trim();
-  if (!name) {
-    throw commandRefusal('Usage: /skills import-discovered <name> [--enabled]\n  Note: discovered skills import disabled unless --enabled; review then enable via /skills enable <name>.');
-  }
+async function importDiscoveredSkill(name: string, enable: boolean, ctx: CommandContext, skillRegistry: AgentSkillRegistry): Promise<string> {
   const discovered = findDiscoveredSkill(await discoverSkills(requireShellPaths(ctx)), name);
-  if (!discovered) {
-    throw commandRefusal(`Unknown discovered Agent skill ${name}\nRun /skills discover to inspect available skill files.`);
-  }
-  // "Enable now": the owner may enable what was just imported; nobody has reviewed it, so the model may not.
-  const enable = parsed.flags.get('enabled') === 'true';
+  if (!discovered) throw commandRefusal(`Unknown discovered Agent skill ${name}`, 'Run /my-skills discover to see the skill files found.');
+  // "Switch it on now": the owner may switch on what was just imported; nobody has reviewed it, so the model may not.
   if (enable) assertActorMayEnable(actorOf(ctx), 'skill', discovered.name, 'fresh');
   const skill = skillRegistry.create({
     name: discovered.name,
@@ -167,10 +148,10 @@ async function importDiscoveredSkill(args: readonly string[], ctx: CommandContex
     source: 'imported',
     provenance: `Imported file (${discovered.origin}): ${discovered.path}`,
   });
-  ctx.print(formatSkillReceipt('Imported Agent skill', skill, [
-    enable ? '  enabled yes, enabled on import by the owner' : '  enabled no, imported disabled (review it, then enable it)',
+  return formatSkillReceipt('Imported Agent skill', skill, [
+    enable ? '  enabled yes, switched on at import by the owner' : '  enabled no, imported switched off (review it, then switch it on)',
     '  review pending',
-  ]));
+  ]);
 }
 
 function renderBundleList(title: string, registry: AgentSkillRegistry, bundles: readonly AgentSkillBundleRecord[], emptyMessage?: string): string {
@@ -178,7 +159,7 @@ function renderBundleList(title: string, registry: AgentSkillRegistry, bundles: 
   if (bundles.length === 0) {
     return emptyMessage
       ? `${title}\n  ${emptyMessage}`
-      : `${title}\n  No Agent-local skill bundles yet. Create one with /skills bundle create --name <name> --description <summary> --skills <id,id>.`;
+      : `${title}\n  No Agent-local skill bundles yet. Make one with /my-skills bundle-create.`;
   }
   return [
     `${title} (${bundles.length})`,
@@ -241,352 +222,256 @@ function renderBundle(bundle: AgentSkillBundleRecord, registry: AgentSkillRegist
 }
 
 /** A failed step is the command's failed result: a refusal passes through, anything else is reported as failed. */
-function printError(_ctx: CommandContext, error: unknown): never {
-  if (readRefusal(error)) throw error;
-  throw commandRefusal(`Error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
-}
-
-function runBundleCommand(args: readonly string[], ctx: CommandContext, skillRegistry: AgentSkillRegistry): void {
-  const sub = (args[0] ?? 'list').toLowerCase();
-  if (sub === 'list' || sub === 'open') {
-    ctx.print(renderBundleList('Agent Skill Bundles', skillRegistry, skillRegistry.listBundles()));
-    return;
-  }
-  if (sub === 'enabled') {
-    const snapshot = skillRegistry.snapshot();
-    ctx.print(renderBundleList('Enabled Agent Skill Bundles', skillRegistry, snapshot.enabledBundles));
-    return;
-  }
-  if (sub === 'attention' || sub === 'needs-setup') {
-    const snapshot = skillRegistry.snapshot();
-    const bundles = snapshot.bundles.filter((bundle) => !evaluateAgentSkillBundleReadiness(bundle, snapshot.skills).ready);
-    ctx.print(renderBundleList('Agent Skill Bundles needing setup', skillRegistry, bundles, 'No Agent-local skill bundles need setup.'));
-    return;
-  }
-  if (sub === 'search') {
-    const query = args.slice(1).join(' ').trim();
-    ctx.print(renderBundleList(query ? `Agent Skill Bundles matching "${query}"` : 'Agent Skill Bundles', skillRegistry, skillRegistry.searchBundles(query)));
-    return;
-  }
-  if (sub === 'show') {
-    const id = args[1];
-    if (!id) {
-      throw commandRefusal('Usage: /skills bundle show <id>');
-    }
-    const bundle = skillRegistry.getBundle(id);
-    ctx.print(bundle ? renderBundle(bundle, skillRegistry) : `Unknown Agent skill bundle ${id}`);
-    return;
-  }
-  if (sub === 'create') {
-    const parsed = parseSkillArgs(args.slice(1));
-    if (parsed.flags.get('enabled') === 'true') assertActorMayEnable(actorOf(ctx), 'skill bundle', requiredFlag(parsed.flags, 'name'), 'fresh');
-    const bundle = skillRegistry.createBundle({
-      name: requiredFlag(parsed.flags, 'name'),
-      description: requiredFlag(parsed.flags, 'description'),
-      skillIds: splitList(requiredFlag(parsed.flags, 'skills')),
-      enabled: parsed.flags.get('enabled') === 'true',
-      source: 'user',
-      provenance: 'Command',
-    });
-    ctx.print(formatSkillReceipt('Created Agent skill bundle', bundle));
-    return;
-  }
-  if (sub === 'update') {
-    const id = args[1];
-    if (!id) {
-      throw commandRefusal('Usage: /skills bundle update <id> [--name ...] [--description ...] [--skills id,id]');
-    }
-    const parsed = parseSkillArgs(args.slice(2));
-    const updated = skillRegistry.updateBundle(id, {
-      name: parsed.flags.get('name'),
-      description: parsed.flags.get('description'),
-      skillIds: parsed.flags.has('skills') ? splitList(parsed.flags.get('skills')) : undefined,
-      provenance: 'Command',
-    });
-    ctx.print(formatSkillReceipt('Updated Agent skill bundle', updated));
-    return;
-  }
-  if (sub === 'enable' || sub === 'disable') {
-    const id = args[1];
-    if (!id) {
-      throw commandRefusal(`Usage: /skills bundle ${sub} <id>`);
-    }
-    if (sub === 'enable') assertActorMayEnable(actorOf(ctx), 'skill bundle', id, skillRegistry.getBundle(id)?.reviewState);
-    const bundle = skillRegistry.setBundleEnabled(id, sub === 'enable');
-    ctx.print(formatSkillReceipt(`${sub === 'enable' ? 'Enabled' : 'Disabled'} Agent skill bundle`, bundle));
-    return;
-  }
-  if (sub === 'review') {
-    const id = args[1];
-    if (!id) {
-      throw commandRefusal('Usage: /skills bundle review <id>');
-    }
-    assertActorMayMarkReviewed(actorOf(ctx), 'skill bundle', id);
-    const bundle = skillRegistry.markBundleReviewed(id);
-    ctx.print(formatSkillReceipt('Reviewed Agent skill bundle', bundle));
-    return;
-  }
-  if (sub === 'stale') {
-    const id = args[1];
-    if (!id) {
-      throw commandRefusal('Usage: /skills bundle stale <id> <reason...>');
-    }
-    const bundle = skillRegistry.markBundleStale(id, args.slice(2).join(' '));
-    ctx.print(formatSkillReceipt('Marked Agent skill bundle stale', bundle));
-    return;
-  }
-  if (sub === 'delete' || sub === 'remove') {
-    const parsed = parseSkillArgs(args.slice(1));
-    const id = parsed.rest[0];
-    if (!id) {
-      throw commandRefusal('Usage: /skills bundle delete <id>');
-    }
-    const removed = skillRegistry.deleteBundle(id);
-    ctx.print(formatSkillReceipt('Deleted Agent skill bundle', removed));
-    return;
-  }
-  throw commandRefusal('Usage: /skills bundle [list|enabled|attention|search|show|create|update|enable|disable|review|stale|delete]');
-}
-
-export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx: CommandContext): Promise<void> {
-  const sub = (args[0] ?? 'list').toLowerCase();
-  if (sub === 'local' || sub === 'agent') {
-    await runAgentSkillsRuntimeCommand(args.slice(1), ctx);
-    return;
-  }
-  const skillRegistry = registryFromContext(ctx);
+async function guarded(ctx: CommandContext, run: (registry: AgentSkillRegistry) => string | Promise<string>): Promise<string> {
   try {
-    if (sub === 'bundle' || sub === 'bundles') {
-      runBundleCommand(args.slice(1), ctx, skillRegistry);
-      return;
-    }
-    if (sub === 'discover' || sub === 'discovered') {
-      ctx.print(renderDiscoveredSkills(await discoverSkills(requireShellPaths(ctx))));
-      return;
-    }
-    if (sub === 'import-discovered' || sub === 'import-skill') {
-      await importDiscoveredSkill(args.slice(1), ctx, skillRegistry);
-      return;
-    }
-    // Import adds a new skill, disabled and awaiting review (/skills delete removes
-    // it), so it runs at once; a typed --yes is accepted and dropped.
-    if (sub === 'import-standard') {
-      const parsed = parseSkillArgs(args.slice(1));
-      const filePath = parsed.rest[0];
-      if (!filePath) {
-        throw commandRefusal('Usage: /skills import-standard <path/to/SKILL.md>');
-      }
-      const sourcePath = resolveCommandFilePath(ctx, filePath, 'read');
-      if (sourcePath === null) return;
-      const content = readFileSync(sourcePath, 'utf-8');
-      const parseResult = parseSkillStandardMarkdown(content);
-      if ('error' in parseResult) {
-        ctx.print(`Skill standard import rejected: ${parseResult.error}`);
-        return;
-      }
-      const skill = skillRegistry.importFromStandard(content);
-      ctx.print(formatSkillReceipt('Imported shared skill', skill, [
-        `  source ${sourcePath}`,
-        `  review-state ${skill.reviewState}`,
-        `  disabled until you review it (/skills show ${skill.id}) and enable it (/skills enable ${skill.id}); /skills delete ${skill.id} removes it`,
-      ]));
-      return;
-    }
-    // Export writes a new SKILL.md and refuses an existing one; with --overwrite
-    // over an existing file the registry asks once (confirm below).
-    if (sub === 'export-standard') {
-      const parsed = parseSkillArgs(args.slice(1));
-      const skillId = parsed.rest[0];
-      const destDir = parsed.rest[1];
-      if (!skillId || !destDir) {
-        throw commandRefusal('Usage: /skills export-standard <id> <dest-directory> [--overwrite]');
-      }
-      const skill = skillRegistry.get(skillId);
-      if (!skill) {
-        throw commandRefusal(`Unknown Agent skill ${skillId}\nRun /skills list to see the Agent-local skills.`);
-      }
-      const targetDir = resolveCommandFilePath(ctx, destDir, 'write');
-      if (targetDir === null) return;
-      const overwrite = parsed.flags.get('overwrite') === 'true';
-      const replaced = overwrite && existsSync(skillStandardFilePath(skill.name, targetDir));
-      const written = skillRegistry.exportToStandard(skill.id, targetDir, overwrite);
-      ctx.print(formatSkillReceipt('Exported Agent skill', skill, [`  file ${written}${replaced ? ' (replaced the file that was there)' : ''}`]));
-      return;
-    }
-    if (sub === 'list' || sub === 'open') {
-      ctx.print(renderList('Agent Skills', skillRegistry, skillRegistry.list()));
-      return;
-    }
-    if (sub === 'enabled') {
-      const snapshot = skillRegistry.snapshot();
-      ctx.print(renderList('Enabled Agent Skills', skillRegistry, snapshot.enabledSkills));
-      return;
-    }
-    if (sub === 'attention' || sub === 'needs-setup') {
-      const skills = skillRegistry.list().filter((skill) => !evaluateAgentSkillReadiness(skill).ready);
-      ctx.print(renderList('Agent Skills needing setup', skillRegistry, skills, 'No Agent-local skills need setup.'));
-      return;
-    }
-    if (sub === 'search') {
-      const query = args.slice(1).join(' ').trim();
-      ctx.print(renderList(query ? `Agent Skills matching "${query}"` : 'Agent Skills', skillRegistry, skillRegistry.search(query)));
-      return;
-    }
-    if (sub === 'show') {
-      const id = args[1];
-      if (!id) {
-        throw commandRefusal('Usage: /skills show <id>');
-      }
-      const skill = skillRegistry.get(id);
-      ctx.print(skill ? renderSkill(skill) : `Unknown Agent skill ${id}`);
-      return;
-    }
-    if (sub === 'create') {
-      const parsed = parseSkillArgs(args.slice(1));
-      if (parsed.flags.get('enabled') === 'true') assertActorMayEnable(actorOf(ctx), 'skill', requiredFlag(parsed.flags, 'name'), 'fresh');
-      const procedure = parsed.flags.get('procedure')?.trim() || parsed.rest.join(' ').trim();
-      const skill = skillRegistry.create({
-        name: requiredFlag(parsed.flags, 'name'),
-        description: requiredFlag(parsed.flags, 'description'),
-        procedure,
-        triggers: splitList(parsed.flags.get('triggers')),
-        tags: splitList(parsed.flags.get('tags')),
-        requirements: buildAgentSkillRequirements({
-          env: splitList(parsed.flags.get('requires-env')),
-          commands: splitList(parsed.flags.get('requires-command') ?? parsed.flags.get('requires-commands')),
-        }),
-        enabled: parsed.flags.get('enabled') === 'true',
-        source: 'user',
-        provenance: 'Command',
-      });
-      ctx.print(formatSkillReceipt('Created Agent skill', skill));
-      return;
-    }
-    if (sub === 'update') {
-      const id = args[1];
-      if (!id) {
-        throw commandRefusal('Usage: /skills update <id> [--name ...] [--description ...] [--procedure ...]');
-      }
-      const parsed = parseSkillArgs(args.slice(2));
-      const updated = skillRegistry.update(id, {
-        name: parsed.flags.get('name'),
-        description: parsed.flags.get('description'),
-        procedure: parsed.flags.get('procedure'),
-        triggers: parsed.flags.has('triggers') ? splitList(parsed.flags.get('triggers')) : undefined,
-        tags: parsed.flags.has('tags') ? splitList(parsed.flags.get('tags')) : undefined,
-        // A flag for one kind must not erase the other kind the skill already has.
-        requirements: parsed.flags.has('requires-env') || parsed.flags.has('requires-command') || parsed.flags.has('requires-commands')
-          ? buildAgentSkillRequirements({
-            env: parsed.flags.has('requires-env') ? splitList(parsed.flags.get('requires-env')) : existingRequirementNames(skillRegistry, id, 'env'),
-            commands: parsed.flags.has('requires-command') || parsed.flags.has('requires-commands')
-              ? splitList(parsed.flags.get('requires-command') ?? parsed.flags.get('requires-commands'))
-              : existingRequirementNames(skillRegistry, id, 'command'),
-          })
-          : undefined,
-        provenance: 'Command',
-      });
-      ctx.print(formatSkillReceipt('Updated Agent skill', updated));
-      return;
-    }
-    if (sub === 'enable' || sub === 'disable') {
-      const id = args[1];
-      if (!id) {
-        throw commandRefusal(`Usage: /skills ${sub} <id>`);
-      }
-      if (sub === 'enable') assertActorMayEnable(actorOf(ctx), 'skill', id, skillRegistry.get(id)?.reviewState);
-      const skill = skillRegistry.setEnabled(id, sub === 'enable');
-      ctx.print(formatSkillReceipt(`${sub === 'enable' ? 'Enabled' : 'Disabled'} Agent skill`, skill));
-      return;
-    }
-    if (sub === 'review') {
-      const id = args[1];
-      if (!id) {
-        throw commandRefusal('Usage: /skills review <id>');
-      }
-      assertActorMayMarkReviewed(actorOf(ctx), 'skill', id);
-      const skill = skillRegistry.markReviewed(id);
-      ctx.print(formatSkillReceipt('Reviewed Agent skill', skill));
-      return;
-    }
-    if (sub === 'stale') {
-      const id = args[1];
-      if (!id) {
-        throw commandRefusal('Usage: /skills stale <id> <reason...>');
-      }
-      const skill = skillRegistry.markStale(id, args.slice(2).join(' '));
-      ctx.print(formatSkillReceipt('Marked Agent skill stale', skill));
-      return;
-    }
-    if (sub === 'delete' || sub === 'remove') {
-      const parsed = parseSkillArgs(args.slice(1));
-      const id = parsed.rest[0];
-      if (!id) {
-        throw commandRefusal('Usage: /skills delete <id>');
-      }
-      const removed = skillRegistry.deleteSkill(id);
-      ctx.print(formatSkillReceipt('Deleted Agent skill', removed));
-      return;
-    }
-    throw commandRefusal('Usage: /skills [list|enabled|attention|discover|import-discovered|import-standard|export-standard|search|show|create|update|enable|disable|review|stale|delete|bundle]');
+    return await run(registryFromContext(ctx));
   } catch (error) {
-    // A refusal is the command's result (state, reason, next step), not a printed error.
-    if (error instanceof RefusalError) throw error;
-    printError(ctx, error);
+    if (readRefusalLike(error)) throw error;
+    throw commandRefusal(`Error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
   }
+}
+function readRefusalLike(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'refusal' in error;
 }
 
-/** The ask for `/skills export-standard <id> <dest> --overwrite` when the SKILL.md it would replace exists. */
-function exportOverwriteConfirmation(args: readonly string[], ctx: CommandContext): { title: string; detail: string; confirmLabel: string } | undefined {
-  const parsed = parseSkillArgs(args);
-  const [skillId, destDir] = parsed.rest;
-  if (parsed.flags.get('overwrite') !== 'true' || !skillId || !destDir) return undefined;
-  const skill = registryFromContext(ctx).get(skillId);
-  if (!skill) return undefined;
-  let target: string;
-  try {
-    target = skillStandardFilePath(skill.name, requireShellPaths(ctx).resolveWorkspacePath(destDir));
-  } catch {
-    return undefined;
-  }
-  if (!existsSync(target)) return undefined;
-  return { title: `Replace ${target}?`, detail: `${target} already exists; the exported skill ${skill.id} replaces it, and what it holds now cannot be recovered.`, confirmLabel: 'Replace' };
+const LOCAL = 'Agent-local skills are kept on this machine.';
+
+const SKILLS = defineList<CommandContext>({
+  name: 'my-skills',
+  async read(ctx) {
+    return registryFromContext(ctx).list().map((skill): ListRow => ({ value: skill.id, label: skill.name, detail: skill.description, state: `${skill.enabled ? 'on' : 'off'}, ${formatAgentRecordReviewState(skill.reviewState)}` }));
+  },
+  operator: { terminalOnly: LOCAL },
+});
+const BUNDLES = defineList<CommandContext>({
+  name: 'my-skills.bundles',
+  async read(ctx) {
+    return registryFromContext(ctx).listBundles().map((bundle): ListRow => ({ value: bundle.id, label: bundle.name, detail: bundle.description, state: `${bundle.enabled ? 'on' : 'off'}, ${formatAgentRecordReviewState(bundle.reviewState)}` }));
+  },
+  operator: { terminalOnly: LOCAL },
+});
+const DISCOVERED = defineList<CommandContext>({
+  name: 'my-skills.discovered',
+  async read(ctx) { return (await discoverSkills(requireShellPaths(ctx))).map((skill): ListRow => ({ value: skill.name, label: skill.name, detail: skill.path, state: skill.origin })); },
+  operator: { terminalOnly: LOCAL },
+});
+
+const SKILL: InputDescription = listInput({ id: 'skill', label: 'Skill', help: 'Your Agent-local skills', list: SKILLS });
+const BUNDLE: InputDescription = listInput({ id: 'bundle', label: 'Bundle', help: 'Your skill bundles', list: BUNDLES });
+const text = (id: string, label: string, help: string, typed: InputDescription['typed'], optional?: { default: string; means: string }, kind: InputDescription['kind'] = 'text'): InputDescription =>
+  textInput({ id, label, help, why: 'your own words', typed, kind, ...(optional ? { optional } : {}) });
+const LIST = (id: string, label: string, help: string, flag: `--${string}`, means: string): InputDescription =>
+  textInput({ id, label, help: `${help}, separated by commas`, why: 'names you choose', typed: { flag }, optional: { default: '', means } });
+const SWITCH_ON = (help: string): InputDescription => ({
+  id: 'enabled', label: 'Switch it on now', help, kind: 'yes-no', choices: [{ value: 'no', label: 'No, after a review' }, { value: 'yes', label: 'Yes' }],
+  required: { default: 'no', defaultMeans: 'off until you review it' }, typed: { flag: '--enabled' },
+});
+
+function change(fields: Pick<ActionDescription<CommandContext>, 'id' | 'label' | 'word' | 'sentence' | 'inputs' | 'example'> & Partial<Pick<ActionDescription<CommandContext>, 'risk' | 'undoneBy'>> & { readonly run: (values: ActionValues, ctx: CommandContext, registry: AgentSkillRegistry) => string | Promise<string> }): ActionDescription<CommandContext> {
+  const { run, ...rest } = fields;
+  return { risk: 'none', ...rest, done: '', touches: 'this-machine', lasts: 'kept', operator: { terminalOnly: LOCAL }, run: (values, ctx) => guarded(ctx, (registry) => run(values, ctx, registry)) };
 }
+function show(fields: Pick<ActionDescription<CommandContext>, 'id' | 'label' | 'word' | 'sentence'> & Partial<Pick<ActionDescription<CommandContext>, 'inputs' | 'example'>> & { readonly run: (values: ActionValues, ctx: CommandContext, registry: AgentSkillRegistry) => string | Promise<string> }): ActionDescription<CommandContext> {
+  const { run, ...rest } = fields;
+  return readAction<CommandContext>({ ...rest, run: (values, ctx) => guarded(ctx, (registry) => run(values, ctx, registry)) });
+}
+
+function requirements(values: ActionValues, registry: AgentSkillRegistry, id?: string) {
+  if (!values.env && !values.commands && id) return undefined;
+  return buildAgentSkillRequirements({
+    // A list for one kind must not erase the other kind the skill already has.
+    env: values.env ? splitList(values.env) : id ? existingRequirementNames(registry, id, 'env') : [],
+    commands: values.commands ? splitList(values.commands) : id ? existingRequirementNames(registry, id, 'command') : [],
+  });
+}
+
+const MY_SKILLS = defineCommand<CommandContext>({
+  name: 'my-skills',
+  title: 'My skills',
+  summary: 'Keep the Agent\'s own skills: step-by-step procedures it follows when a task matches',
+  group: 'Extensions',
+  report: 'list',
+  firstScreenRows: [
+    'list', 'show', 'create', 'search',
+    { label: 'Switch a skill on or off, or review it', actions: ['enable', 'disable', 'review', 'stale', 'attention', 'enabled', 'update', 'delete'] },
+    { label: 'Bring skills in or share them', actions: ['discover', 'import-discovered', 'import-standard', 'export-standard'] },
+    { label: 'Skill bundles', actions: ['bundles', 'bundle-show', 'bundle-create', 'bundle-search', 'bundle-enable', 'bundle-disable', 'bundle-review', 'bundle-stale', 'bundle-update', 'bundle-delete', 'bundles-enabled', 'bundles-attention'] },
+  ],
+  actions: [
+    show({ id: 'list', label: 'See your skills', word: 'list', sentence: 'Lists every Agent-local skill with its state, review and readiness.', run: (_v, _c, registry) => renderList('Agent Skills', registry, registry.list()) }),
+    show({ id: 'enabled', label: 'See the skills that are on', word: 'enabled', sentence: 'Lists the skills that are switched on.', run: (_v, _c, registry) => renderList('Enabled Agent Skills', registry, registry.snapshot().enabledSkills) }),
+    show({ id: 'attention', label: 'See skills that need setting up', word: 'attention', sentence: 'Lists skills missing an environment variable or a command they need.', run: (_v, _c, registry) => renderList('Agent Skills needing setup', registry, registry.list().filter((skill) => !evaluateAgentSkillReadiness(skill).ready), 'No Agent-local skills need setup.') }),
+    show({
+      id: 'search', label: 'Search your skills', word: 'search', inputs: [text('query', 'Looking for', 'Words to search for', { tail: true })],
+      sentence: 'Lists skills that match "{query}".', example: { query: 'release' },
+      run: (values, _c, registry) => renderList(`Agent Skills matching "${values.query}"`, registry, registry.search(values.query!)),
+    }),
+    show({
+      id: 'show', label: 'See one skill', word: 'show', inputs: [SKILL], sentence: 'Shows {skill}\'s procedure, requirements, review and origin.', example: { skill: 'sk-release' },
+      run: (values, _c, registry) => { const skill = registry.get(values.skill!); if (!skill) throw commandRefusal(`Unknown Agent skill ${values.skill}`, '/my-skills list shows them.'); return renderSkill(skill); },
+    }),
+    change({
+      id: 'create', label: 'Make a skill', word: 'create',
+      inputs: [
+        text('name', 'Name', 'A short name', { flag: '--name' }),
+        text('description', 'What it is for', 'One line the model matches tasks against', { flag: '--description' }),
+        text('procedure', 'Steps', 'What to do, step by step', { tail: true }, undefined, 'long-text'),
+        LIST('triggers', 'When it applies', 'Words that bring it up', '--triggers', 'only when asked for'),
+        LIST('tags', 'Tags', 'Tags', '--tags', 'none'),
+        LIST('env', 'Environment it needs', 'Environment variable names', '--requires-env', 'none'),
+        LIST('commands', 'Commands it needs', 'Program names', '--requires-command', 'none'),
+        SWITCH_ON('Switch it on at once, or after you review it'),
+      ],
+      sentence: 'A skill {name} ("{description}") is kept until you change it; its steps: {procedure}', undoneBy: 'delete',
+      example: { name: 'release notes', description: 'Write release notes from merged changes', procedure: 'List merged pull requests, then group them.' },
+      run: (values, ctx, registry) => {
+        if (values.enabled === 'yes') assertActorMayEnable(actorOf(ctx), 'skill', values.name!, 'fresh');
+        return formatSkillReceipt('Created Agent skill', registry.create({
+          name: values.name!, description: values.description!, procedure: values.procedure!,
+          triggers: splitList(values.triggers), tags: splitList(values.tags),
+          requirements: requirements(values, registry)!, enabled: values.enabled === 'yes', source: 'user', provenance: 'Command',
+        }));
+      },
+    }),
+    change({
+      id: 'update', label: 'Change a skill', word: 'update',
+      inputs: [
+        SKILL,
+        text('name', 'Name', 'A new name', { flag: '--name' }, { default: '', means: 'unchanged' }),
+        text('description', 'What it is for', 'A new line', { flag: '--description' }, { default: '', means: 'unchanged' }),
+        text('procedure', 'Steps', 'New steps', { flag: '--procedure' }, { default: '', means: 'unchanged' }, 'long-text'),
+        LIST('triggers', 'When it applies', 'Words that bring it up', '--triggers', 'unchanged'),
+        LIST('tags', 'Tags', 'Tags', '--tags', 'unchanged'),
+        LIST('env', 'Environment it needs', 'Environment variable names', '--requires-env', 'unchanged'),
+        LIST('commands', 'Commands it needs', 'Program names', '--requires-command', 'unchanged'),
+      ],
+      sentence: '{skill} is changed to what you gave until you change it.', example: { skill: 'sk-release', description: 'Write release notes for a tag' },
+      run: (values, _c, registry) => formatSkillReceipt('Updated Agent skill', registry.update(values.skill!, {
+        name: values.name || undefined, description: values.description || undefined, procedure: values.procedure || undefined,
+        triggers: values.triggers ? splitList(values.triggers) : undefined, tags: values.tags ? splitList(values.tags) : undefined,
+        requirements: requirements(values, registry, values.skill!), provenance: 'Command',
+      })),
+    }),
+    change({
+      id: 'enable', label: 'Switch a skill on', word: 'enable', inputs: [SKILL], sentence: 'The model may follow {skill} until you change it.', undoneBy: 'disable', example: { skill: 'sk-release' },
+      run: (values, ctx, registry) => { assertActorMayEnable(actorOf(ctx), 'skill', values.skill!, registry.get(values.skill!)?.reviewState); return formatSkillReceipt('Enabled Agent skill', registry.setEnabled(values.skill!, true)); },
+    }),
+    change({
+      id: 'disable', label: 'Switch a skill off', word: 'disable', inputs: [SKILL], sentence: 'The model stops following {skill} until you change it.', undoneBy: 'enable', example: { skill: 'sk-release' },
+      run: (values, _c, registry) => formatSkillReceipt('Disabled Agent skill', registry.setEnabled(values.skill!, false)),
+    }),
+    change({
+      id: 'review', label: 'Mark a skill reviewed', word: 'review', inputs: [SKILL], sentence: '{skill} is marked reviewed by you until you change it, so it may be switched on.', example: { skill: 'sk-release' },
+      run: (values, ctx, registry) => { assertActorMayMarkReviewed(actorOf(ctx), 'skill', values.skill!); return formatSkillReceipt('Reviewed Agent skill', registry.markReviewed(values.skill!)); },
+    }),
+    change({
+      id: 'stale', label: 'Mark a skill out of date', word: 'stale', inputs: [SKILL, text('reason', 'Why', 'What is out of date', { tail: true })],
+      sentence: '{skill} is marked out of date ("{reason}") until you change it.', example: { skill: 'sk-release', reason: 'the release script moved' },
+      run: (values, _c, registry) => formatSkillReceipt('Marked Agent skill stale', registry.markStale(values.skill!, values.reason!)),
+    }),
+    change({
+      id: 'delete', label: 'Delete a skill', word: 'delete', inputs: [SKILL], sentence: '{skill} is removed from the Agent-local registry.', risk: 'cannot-be-undone', example: { skill: 'sk-release' },
+      run: (values, _c, registry) => formatSkillReceipt('Deleted Agent skill', registry.deleteSkill(values.skill!)),
+    }),
+    show({ id: 'discover', label: 'See skill files found on disk', word: 'discover', sentence: 'Lists SKILL.md and .md skill files in the project and global skill folders.', run: async (_v, ctx) => renderDiscoveredSkills(await discoverSkills(requireShellPaths(ctx))) }),
+    change({
+      id: 'import-discovered', label: 'Import a skill file found on disk', word: 'import-discovered',
+      inputs: [listInput({ id: 'file', label: 'Skill file', help: 'Skill files found on disk', list: DISCOVERED }), SWITCH_ON('Switch it on at once, or after you review it')],
+      sentence: '{file} is copied into your Agent-local skills, off until you review it unless you switch it on, until you change it.', undoneBy: 'delete', example: { file: 'release-notes' },
+      run: (values, ctx, registry) => importDiscoveredSkill(values.file!, values.enabled === 'yes', ctx, registry),
+    }),
+    change({
+      id: 'import-standard', label: 'Import a shared SKILL.md', word: 'import-standard',
+      inputs: [textInput({ id: 'path', label: 'SKILL.md file', help: 'A skill in the shared SKILL.md format', why: 'a file path on this machine', kind: 'path', typed: { position: 1 } })],
+      sentence: 'The skill in {path} is added, off until you review it, until you change it.', undoneBy: 'delete', example: { path: 'skills/release-notes/SKILL.md' },
+      run: (values, ctx, registry) => {
+        const sourcePath = resolveCommandFilePath(ctx, values.path!, 'read');
+        if (sourcePath === null) throw commandRefusal(`${values.path} could not be read.`);
+        const content = readFileSync(sourcePath, 'utf-8');
+        const parseResult = parseSkillStandardMarkdown(content);
+        if ('error' in parseResult) throw commandRefusal(`Skill standard import rejected: ${parseResult.error}`);
+        const skill = registry.importFromStandard(content);
+        return formatSkillReceipt('Imported shared skill', skill, [
+          `  source ${sourcePath}`, `  review-state ${skill.reviewState}`,
+          `  off until you review it (/my-skills show ${skill.id}) and switch it on (/my-skills enable ${skill.id}); /my-skills delete ${skill.id} removes it`,
+        ]);
+      },
+    }),
+    {
+      id: 'export-standard', label: 'Save a skill as a shared SKILL.md', word: 'export-standard',
+      inputs: [SKILL, textInput({ id: 'dir', label: 'Folder', help: 'Where to write its SKILL.md', why: 'a folder on this machine', kind: 'path', typed: { position: 2 } }),
+        { id: 'overwrite', label: 'If a SKILL.md is there', help: 'Keep it, or replace it', kind: 'choice', choices: [{ value: 'keep', label: 'Refuse and keep it' }, { value: 'replace', label: 'Replace it', risk: 'cannot-be-undone' }], required: { default: 'keep', defaultMeans: 'refuse and keep it' }, typed: { flag: '--overwrite', switchOn: 'replace' } }],
+      sentence: '{skill} is written as a SKILL.md into {dir}.', done: '',
+      touches: 'this-machine', lasts: 'not-a-change', risk: 'none', operator: { terminalOnly: LOCAL }, example: { skill: 'sk-release', dir: 'skills/release-notes' },
+      run: (values, ctx) => guarded(ctx, (registry) => {
+        const skill = registry.get(values.skill!);
+        if (!skill) throw commandRefusal(`Unknown Agent skill ${values.skill}`, '/my-skills list shows the Agent-local skills.');
+        const targetDir = resolveCommandFilePath(ctx, values.dir!, 'write');
+        if (targetDir === null) throw commandRefusal(`${values.dir} cannot be written.`);
+        const overwrite = values.overwrite === 'replace';
+        const replaced = overwrite && existsSync(skillStandardFilePath(skill.name, targetDir));
+        const written = registry.exportToStandard(skill.id, targetDir, overwrite);
+        return formatSkillReceipt('Exported Agent skill', skill, [`  file ${written}${replaced ? ' (replaced the file that was there)' : ''}`]);
+      }),
+    },
+    show({ id: 'bundles', label: 'See your skill bundles', word: 'bundles', sentence: 'Lists every skill bundle with its state, review and readiness.', run: (_v, _c, registry) => renderBundleList('Agent Skill Bundles', registry, registry.listBundles()) }),
+    show({ id: 'bundles-enabled', label: 'See the bundles that are on', word: 'bundles-enabled', sentence: 'Lists the skill bundles that are switched on.', run: (_v, _c, registry) => renderBundleList('Enabled Agent Skill Bundles', registry, registry.snapshot().enabledBundles) }),
+    show({
+      id: 'bundles-attention', label: 'See bundles that need setting up', word: 'bundles-attention', sentence: 'Lists bundles missing a skill or something a skill needs.',
+      run: (_v, _c, registry) => { const snapshot = registry.snapshot(); return renderBundleList('Agent Skill Bundles needing setup', registry, snapshot.bundles.filter((bundle) => !evaluateAgentSkillBundleReadiness(bundle, snapshot.skills).ready), 'No Agent-local skill bundles need setup.'); },
+    }),
+    show({
+      id: 'bundle-search', label: 'Search your skill bundles', word: 'bundle-search', inputs: [text('query', 'Looking for', 'Words to search for', { tail: true })],
+      sentence: 'Lists skill bundles that match "{query}".', example: { query: 'release' },
+      run: (values, _c, registry) => renderBundleList(`Agent Skill Bundles matching "${values.query}"`, registry, registry.searchBundles(values.query!)),
+    }),
+    show({
+      id: 'bundle-show', label: 'See one skill bundle', word: 'bundle-show', inputs: [BUNDLE], sentence: 'Shows {bundle}\'s skills, readiness and review.', example: { bundle: 'sb-release' },
+      run: (values, _c, registry) => { const bundle = registry.getBundle(values.bundle!); if (!bundle) throw commandRefusal(`Unknown Agent skill bundle ${values.bundle}`); return renderBundle(bundle, registry); },
+    }),
+    change({
+      id: 'bundle-create', label: 'Make a skill bundle', word: 'bundle-create',
+      inputs: [text('name', 'Name', 'A short name', { flag: '--name' }), text('description', 'What it is for', 'One line', { flag: '--description' }),
+        textInput({ id: 'skills', label: 'Skills in it', help: 'Skill ids, separated by commas', why: 'skill ids from /my-skills list', typed: { flag: '--skills' } }), SWITCH_ON('Switch it on at once, or after you review it')],
+      sentence: 'A skill bundle {name} ("{description}") of {skills} is kept until you change it.', undoneBy: 'bundle-delete', example: { name: 'releases', description: 'Everything for a release', skills: 'sk-release,sk-changelog' },
+      run: (values, ctx, registry) => {
+        if (values.enabled === 'yes') assertActorMayEnable(actorOf(ctx), 'skill bundle', values.name!, 'fresh');
+        return formatSkillReceipt('Created Agent skill bundle', registry.createBundle({ name: values.name!, description: values.description!, skillIds: splitList(values.skills), enabled: values.enabled === 'yes', source: 'user', provenance: 'Command' }));
+      },
+    }),
+    change({
+      id: 'bundle-update', label: 'Change a skill bundle', word: 'bundle-update',
+      inputs: [BUNDLE, text('name', 'Name', 'A new name', { flag: '--name' }, { default: '', means: 'unchanged' }), text('description', 'What it is for', 'A new line', { flag: '--description' }, { default: '', means: 'unchanged' }),
+        textInput({ id: 'skills', label: 'Skills in it', help: 'Skill ids, separated by commas', why: 'skill ids from /my-skills list', typed: { flag: '--skills' }, optional: { default: '', means: 'unchanged' } })],
+      sentence: '{bundle} is changed to what you gave until you change it.', example: { bundle: 'sb-release', skills: 'sk-release' },
+      run: (values, _c, registry) => formatSkillReceipt('Updated Agent skill bundle', registry.updateBundle(values.bundle!, {
+        name: values.name || undefined, description: values.description || undefined, skillIds: values.skills ? splitList(values.skills) : undefined, provenance: 'Command',
+      })),
+    }),
+    change({
+      id: 'bundle-enable', label: 'Switch a skill bundle on', word: 'bundle-enable', inputs: [BUNDLE], sentence: 'The skills of {bundle} are in use until you change it.', undoneBy: 'bundle-disable', example: { bundle: 'sb-release' },
+      run: (values, ctx, registry) => { assertActorMayEnable(actorOf(ctx), 'skill bundle', values.bundle!, registry.getBundle(values.bundle!)?.reviewState); return formatSkillReceipt('Enabled Agent skill bundle', registry.setBundleEnabled(values.bundle!, true)); },
+    }),
+    change({
+      id: 'bundle-disable', label: 'Switch a skill bundle off', word: 'bundle-disable', inputs: [BUNDLE], sentence: '{bundle} is out of use until you change it.', undoneBy: 'bundle-enable', example: { bundle: 'sb-release' },
+      run: (values, _c, registry) => formatSkillReceipt('Disabled Agent skill bundle', registry.setBundleEnabled(values.bundle!, false)),
+    }),
+    change({
+      id: 'bundle-review', label: 'Mark a skill bundle reviewed', word: 'bundle-review', inputs: [BUNDLE], sentence: '{bundle} is marked reviewed by you until you change it, so it may be switched on.', example: { bundle: 'sb-release' },
+      run: (values, ctx, registry) => { assertActorMayMarkReviewed(actorOf(ctx), 'skill bundle', values.bundle!); return formatSkillReceipt('Reviewed Agent skill bundle', registry.markBundleReviewed(values.bundle!)); },
+    }),
+    change({
+      id: 'bundle-stale', label: 'Mark a skill bundle out of date', word: 'bundle-stale', inputs: [BUNDLE, text('reason', 'Why', 'What is out of date', { tail: true })],
+      sentence: '{bundle} is marked out of date ("{reason}") until you change it.', example: { bundle: 'sb-release', reason: 'a skill in it was removed' },
+      run: (values, _c, registry) => formatSkillReceipt('Marked Agent skill bundle stale', registry.markBundleStale(values.bundle!, values.reason!)),
+    }),
+    change({
+      id: 'bundle-delete', label: 'Delete a skill bundle', word: 'bundle-delete', inputs: [BUNDLE], sentence: '{bundle} is removed from the Agent-local registry; its skills stay.', risk: 'cannot-be-undone', example: { bundle: 'sb-release' },
+      run: (values, _c, registry) => formatSkillReceipt('Deleted Agent skill bundle', registry.deleteBundle(values.bundle!)),
+    }),
+  ],
+});
 
 export function registerAgentSkillsRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'skills',
-    // Deleting a skill or bundle cannot be undone, and an export with --overwrite
-    // replaces an existing SKILL.md: the registry asks once (command-confirmation.ts).
-    confirm(args, ctx) {
-      let at = 0;
-      while (['local', 'agent'].includes((args[at] ?? '').toLowerCase())) at += 1;
-      const bundle = ['bundle', 'bundles'].includes((args[at] ?? '').toLowerCase());
-      if (bundle) at += 1;
-      const sub = (args[at] ?? '').toLowerCase();
-      if (!bundle && sub === 'export-standard') return exportOverwriteConfirmation(args.slice(at + 1), ctx);
-      const id = args.slice(at + 1).find((word) => !word.startsWith('--'));
-      if ((sub !== 'delete' && sub !== 'remove') || !id) return undefined;
-      return bundle
-        ? { title: `Delete Agent skill bundle ${id}?`, detail: `The skill bundle ${id} is removed from the Agent-local registry and cannot be recovered.`, confirmLabel: 'Delete' }
-        : { title: `Delete Agent skill ${id}?`, detail: `The skill ${id} is removed from the Agent-local registry and cannot be recovered.`, confirmLabel: 'Delete' };
-    },
-    // A search or a stale reason is free text, kept as typed.
-    rawRest: (args) => {
-      let at = 0;
-      while (['local', 'agent'].includes((args[at] ?? '').toLowerCase())) at += 1;
-      const sub = args[at]?.toLowerCase();
-      if (sub === undefined) return undefined;
-      if (sub === 'bundle' || sub === 'bundles') {
-        const verb = args[at + 1]?.toLowerCase();
-        return verb === 'search' ? at + 2 : verb === 'stale' ? at + 3 : undefined;
-      }
-      return sub === 'search' ? at + 1 : sub === 'stale' ? at + 2 : undefined;
-    },
-    effect: 'local-state',
-    aliases: ['skill', 'agent-skills', 'askills', 'local-skills'],
-    description: 'Manage Agent-local skills',
-    firstScreen: false,
-    usage: '[list|enabled|attention|discover|import-discovered <name> [--enabled]|import-standard <path/to/SKILL.md>|export-standard <id> <dest-directory> [--overwrite]|search <query>|show <id>|create --name <name> --description <summary> --procedure <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--procedure ...]|enable <id>|disable <id>|review <id>|stale <id> <reason...>|delete <id>|bundle ...]',
-    handler: runAgentSkillsRuntimeCommand,
-  });
+  registry.register(MY_SKILLS);
 }

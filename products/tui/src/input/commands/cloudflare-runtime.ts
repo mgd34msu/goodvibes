@@ -15,7 +15,7 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
     readSetting: (ctx, key) => ctx.platform.configManager.get(key),
     openSetup: (ctx) => {
       if (!ctx.openOnboardingWizard) return false;
-      ctx.openOnboardingWizard({ mode: 'edit', reset: true });
+      ctx.openOnboardingWizard({ mode: 'edit', reset: true, topic: 'cloudflare' });
       return true;
     },
   }));

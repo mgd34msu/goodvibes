@@ -14,7 +14,8 @@
 
 import { allowTerminalWrite } from '@goodvibes-jev/engine/terminal-shell';
 import { CLEAR_VIEWPORT_HOME } from '../renderer/terminal-escapes.ts';
-import type { PermissionExecutionOptions } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { PermissionExecutionOptions, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { AskCardResolveExtras } from '@goodvibes-jev/engine/terminal-shell/ask-card-input';
 import type { PendingPermissionState } from './blocking-input.ts';
 import { buildHunkSelectionState, isHunkSelectable } from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
 
@@ -26,9 +27,13 @@ export interface PermissionAnswer {
   readonly modifiedArgs?: Record<string, unknown>;
   /** The hunks a multi-edit card applied when not all were (indices into the ask's own edits); the approval broker applies them. */
   readonly selectedHunks?: readonly number[];
+  /** How far a "don't ask again" answer reaches; absent: this call only. */
+  readonly rememberTier?: RememberTier;
+  /** The reason typed with a refusal, told to the model with it. */
+  readonly reason?: string;
 }
 
-type Settle = (approved: boolean, remember: boolean, modifiedArgs?: Record<string, unknown>, selectedHunks?: readonly number[]) => void;
+type Settle = (approved: boolean, remember: boolean, modifiedArgs?: Record<string, unknown>, extras?: AskCardResolveExtras) => void;
 
 export interface CommandContextUiOptions {
   readonly compositor: { resetDiff(): void };
@@ -53,6 +58,8 @@ export interface CommandContextUi {
    * denial.
    */
   requestPermission(request: Omit<PendingPermissionState, 'resolve'>, options?: PermissionExecutionOptions): Promise<PermissionAnswer>;
+  /** Asks waiting behind the card on screen ("1 more waiting"). */
+  waitingCount(): number;
 }
 
 export function createCommandContextUi(options: CommandContextUiOptions): CommandContextUi {
@@ -83,10 +90,10 @@ export function createCommandContextUi(options: CommandContextUiOptions): Comman
       openedAt: Date.now(),
       // A multi-edit `edit` opens with every hunk selected; the owner can leave some out.
       hunkState: isHunkSelectable(request) ? buildHunkSelectionState(request) : undefined,
-      resolve: (approved: boolean, remember = false, modifiedArgs?: Record<string, unknown>, extras?: { readonly selectedHunks?: readonly number[] | undefined }) => {
+      resolve: (approved: boolean, remember = false, modifiedArgs?: Record<string, unknown>, extras?: AskCardResolveExtras) => {
         if (active !== entry) return;
         active = null;
-        for (const settleOne of entry.settle) settleOne(approved, remember, modifiedArgs, extras?.selectedHunks);
+        for (const settleOne of entry.settle) settleOne(approved, remember, modifiedArgs, extras);
         // The shell clears its pending slot right after this call returns, so the
         // next card is placed after that, not into the slot about to be emptied.
         queueMicrotask(showNext);
@@ -100,9 +107,13 @@ export function createCommandContextUi(options: CommandContextUiOptions): Comman
       allowTerminalWrite(() => options.stdout.write(CLEAR_VIEWPORT_HOME));
       options.render();
     },
+    waitingCount: () => waiting.length,
     requestPermission: (request, permissionOptions) => new Promise<PermissionAnswer>((resolve) => {
-      const settle: Settle = (approved, remember, modifiedArgs, selectedHunks) => resolve({ approved, remember,
-        ...(approved && modifiedArgs ? { modifiedArgs } : {}), ...(approved && selectedHunks ? { selectedHunks } : {}) });
+      const settle: Settle = (approved, remember, modifiedArgs, extras) => resolve({ approved, remember,
+        ...(approved && modifiedArgs ? { modifiedArgs } : {}),
+        ...(approved && extras?.selectedHunks ? { selectedHunks: extras.selectedHunks } : {}),
+        ...(approved && extras?.rememberTier ? { rememberTier: extras.rememberTier } : {}),
+        ...(!approved && extras?.reason ? { reason: extras.reason } : {}) });
       const signal = permissionOptions?.signal;
       if (signal?.aborted) {
         settle(false, false);

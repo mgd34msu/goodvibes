@@ -101,7 +101,7 @@ export async function prepareShellCliRuntime(
   // Only prints the first time the rule is actually appended (not on every
   // launch), see ensureGoodvibesGitignore's return-value doc.
   // `status` and `doctor` are diagnostics: they never edit the project's files.
-  const isDiagnostic = cli.command === 'status' || cli.command === 'doctor' || (cli.command === 'onboarding' && cli.commandArgs[0] === 'status');
+  const isDiagnostic = cli.command === 'status' || cli.command === 'doctor' || (cli.command === 'setup' && cli.commandArgs[0] === 'status');
   if (cli.command !== 'run' && !isDiagnostic && ensureGoodvibesGitignore(bootstrapWorkingDir)) {
     startupNoticeWriter(cli, { out: console.log, err: console.error })(
       "[goodvibes] git now ignores '.goodvibes/' in this clone (.git/info/exclude; your .gitignore is unchanged): it holds transient TUI state (logs, session cache, exec output), not project source.",

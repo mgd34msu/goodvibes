@@ -6,7 +6,6 @@ import type {
   McpServerConfig,
   McpToolRule,
 } from '../../mcp/config.js';
-import type { McpServerRole, McpTrustMode } from '../../runtime/mcp/types.js';
 import type { JsonRecord } from '../helpers.js';
 import { jsonErrorResponse } from './error-response.js';
 import { isRecord } from '../../utils/record-coerce.js';
@@ -240,6 +239,8 @@ export const MCP_ROUTES: readonly { readonly method: string; readonly path: stri
   { method: 'POST', path: '/api/mcp/servers/{serverName}/accept-tools' },
 ];
 
+type McpTrustMode = NonNullable<McpServerConfig['trustMode']>;
+type McpServerRole = NonNullable<McpServerConfig['role']>;
 const TRUST_MODES: readonly McpTrustMode[] = ['constrained', 'ask-on-risk', 'blocked', 'allow-all'];
 const ROLES: readonly McpServerRole[] = ['general', 'docs', 'filesystem', 'git', 'database', 'browser', 'automation', 'ops', 'remote'];
 

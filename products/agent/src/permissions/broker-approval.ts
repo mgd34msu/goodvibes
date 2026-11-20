@@ -26,15 +26,15 @@
  * broker-originated write or edit shows its change as a diff too, and a
  * multi-edit `edit` opens with its hunks selectable (the terminal-shell keys
  * the TUI card uses); the answer carries `selectedHunks`, which the broker
- * applies. It is narrower than the TUI's broker-approval-card.ts in two ways:
- * no deny-with-reason mode (it does take a command's typed terminal answer),
- * and no CI fix-session concept (the agent does not own build/fix/review
+ * applies. It is narrower than the TUI's broker-approval-card.ts in one way:
+ * no CI fix-session concept (the agent does not own build/fix/review
  * worktrees, see DisabledAgentWorktreeRegistry in runtime/services.ts).
  */
 
 import type { PendingPermissionState } from '../shell/blocking-input.ts';
 import { buildHunkSelectionState, isHunkSelectable } from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { PermissionPromptRequest, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { AskCardResolveExtras } from '@goodvibes-jev/engine/terminal-shell/ask-card-input';
 
 /** The broker seam this module answers through, a subset of ApprovalBroker. */
 export interface BrokerApprovalBroker {
@@ -45,6 +45,8 @@ export interface BrokerApprovalBroker {
       readonly approved: boolean;
       readonly disposition?: 'approved' | 'denied';
       readonly remember?: boolean;
+      readonly rememberTier?: RememberTier;
+      readonly reason?: string;
       readonly modifiedArgs?: Record<string, unknown>;
       readonly selectedHunks?: readonly number[];
       readonly actor: string;
@@ -110,12 +112,14 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
       ...current.request,
       openedAt: Date.now(),
       hunkState: isHunkSelectable(current.request) ? buildHunkSelectionState(current.request) : undefined,
-      resolve: (approved: boolean, remember = false, modifiedArgs?: Record<string, unknown>, extras?: { readonly selectedHunks?: readonly number[] | undefined }) => {
+      resolve: (approved: boolean, remember = false, modifiedArgs?: Record<string, unknown>, extras?: AskCardResolveExtras) => {
         void broker.resolveApproval(approval.id, {
           approved,
           // The owner answered this card: an explicit decision, which owner-only asks (workspace trust) require.
           disposition: approved ? 'approved' : 'denied',
           remember,
+          ...(approved && extras?.rememberTier ? { rememberTier: extras.rememberTier } : {}),
+          ...(!approved && extras?.reason ? { reason: extras.reason } : {}),
           ...(approved && modifiedArgs ? { modifiedArgs } : {}),
           ...(approved && extras?.selectedHunks ? { selectedHunks: extras.selectedHunks } : {}),
           actor: 'agent',
@@ -132,7 +136,7 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
           // pending with nothing on screen; an ask that is already resolved needs nothing.
           const latest = broker.getApproval(approval.id);
           if (latest && isActiveStatus(latest.status) && !getPending()) {
-            setPending({ ...card, openedAt: Date.now(), lastTypedAt: undefined, addressed: undefined, rememberArmed: undefined });
+            setPending({ ...card, openedAt: Date.now(), lastTypedAt: undefined, addressed: undefined });
             render();
           }
           params.onResolveFailed?.(error);

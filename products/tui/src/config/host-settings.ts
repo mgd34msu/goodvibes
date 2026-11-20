@@ -11,6 +11,7 @@ export const TUI_NOTIFICATIONS_METADATA_ONLY_KEY = NOTIFICATIONS_METADATA_ONLY_K
 // them from the manager's host schema, and a read always resolves to a value.
 const TERMINAL_TURN_END_SETTING: HostBooleanSetting = Object.freeze({
   key: 'behavior.terminalNotifyTurnEnd',
+  label: 'Notify from the terminal when an answer finishes',
   type: 'boolean',
   default: false,
   description: 'Send an in-terminal (OSC 9) desktop notification when a turn finishes. Off by default. Fires only when the terminal window is unfocused.',

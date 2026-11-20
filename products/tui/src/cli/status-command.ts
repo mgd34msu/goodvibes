@@ -100,7 +100,7 @@ export async function runStatusCommand(runtime: StatusCommandRuntime): Promise<n
     relay: relayStatus,
   };
   const snapshot = buildCliStatusSnapshot(statusOptions);
-  console.log(cli.command === 'onboarding' ? renderOnboardingCliStatus(statusOptions) : renderCliStatus(statusOptions));
+  console.log(cli.command === 'setup' ? renderOnboardingCliStatus(statusOptions) : renderCliStatus(statusOptions));
   // Advisory findings are notes on an otherwise-usable install and must
   // never make a healthy install report failure, only a must-fix finding
   // exits non-zero; --strict (for CI) flips advisories to failures too.

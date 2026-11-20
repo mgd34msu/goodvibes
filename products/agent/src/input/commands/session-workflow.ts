@@ -3,7 +3,6 @@ import { createSessionWorkflowCommands } from '@goodvibes-jev/engine/terminal-sh
 import '@goodvibes-jev/engine/terminal-shell/transcript-review';
 
 import '@goodvibes-jev/engine/terminal-shell/transcript-kinds';
-import { resolveSessionTarget } from '@goodvibes-jev/engine/platform/platform/sessions';
 
 import type { CommandContext } from '../command-registry.ts';
 
@@ -82,7 +81,7 @@ function conversationMessageContentText(message: ConversationMessageSnapshot): s
 // src/test/input/session-single-registration.test.ts for the regression
 // guard.
 
-export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkflowCommands<CommandContext>(requireSessionManager, {
+export const sessionWorkflow = createSessionWorkflowCommands<CommandContext>(requireSessionManager, {
   headingSuffix: '',
   detailSeparator: ' ',
   postureSeparator: ' ',
@@ -127,25 +126,17 @@ export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkfl
       '  path ' + path,
       ...(switched ? ['  later turns are saved to ' + sanitized] : []),
     ].join('\n'),
-  saveDescription: 'Save current session to .goodvibes/agent/sessions/ (--switch continues in the saved copy)',
   forked: (id, name, source, title, count) =>
     ['Session forked', '  id ' + id, '  name ' + name, '  from ' + (title || source), '  messages ' + count].join('\n'),
-  async productCommand(args, ctx, sm, sub) {
-    if (sub === 'resume') {
-      const force = args.includes('--force');
-      const target = args.slice(1).filter((arg) => arg !== '--force').join(' ').trim();
-      if (!target) {
-        throw commandRefusal('Usage: /session resume <session-id-or-name> [--force]');
-      }
+});
+
+/** Resume a saved session (`/resume`, `/session resume`): the one load, refused while a turn runs or (unless forced) while another terminal holds it. */
+export async function resumeSavedSession(ctx: CommandContext, input: { readonly target: string; readonly force: boolean }): Promise<void> {
+      sessionWorkflow.refuseWhileGenerating(ctx);
+      const sm = requireSessionManager(ctx);
+      const force = input.force;
       // An exact id reads one meta line; only a title or prefix lists the directory.
-      const candidates = resolveSessionTarget(sm, target);
-      if (candidates.length > 1) {
-        throw commandRefusal(`Ambiguous session: ${target}.`, `Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
-      }
-      const found = candidates[0];
-      if (!found) {
-        throw commandRefusal(`Session not found ${target}`, 'Use /session list to see available sessions.');
-      }
+      const found = sessionWorkflow.findSaved(sm, input.target.trim());
       try {
         // The one load: refuses while a turn runs or while another terminal holds the
         // session (unless --force), moves the session lock and the last-session pointer,
@@ -201,12 +192,14 @@ export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkfl
       } catch (e) {
         throw commandRefusal(formatSessionFailure('resume session', e));
       }
-      return true;
-    }
+}
 
-    if (sub === 'export') {
+/** Print a saved session's redacted transcript here (`/session save-saved`); the Agent writes no file for it. */
+export async function exportSavedSession(ctx: CommandContext, input: { readonly target: string; readonly format: TranscriptFormat; readonly path: string; readonly print: boolean }): Promise<void> {
+      if (!input.print) throw commandRefusal('The Agent prints a saved session here and writes no file.', 'Choose "Print it here", or save this conversation as a file: /session save-file');
+      const sm = requireSessionManager(ctx);
       const request = resolveSessionExportRequest(
-        args,
+        { target: input.target || '.', format: input.format },
         ctx.session.runtime.sessionId,
         () => sm.list(),
       );
@@ -227,8 +220,4 @@ export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkfl
         }
         throw commandRefusal(formatSessionFailure('export session', error));
       }
-      return true;
-    }
-    return false;
-  },
-});
+}

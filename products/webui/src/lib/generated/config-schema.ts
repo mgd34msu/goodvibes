@@ -13,6 +13,8 @@
 
 export interface ConfigSchemaEntry {
   readonly key: string;
+  readonly label: string;
+  readonly appliesWhen?: 'now' | 'next-answer' | 'next-session' | 'restart';
   readonly type: 'boolean' | 'number' | 'string' | 'enum' | 'object';
   readonly default: unknown;
   readonly description: string;
@@ -36,17 +38,25 @@ export interface FeatureSettingMeta {
   readonly settings: readonly string[];
   readonly restartRequired: boolean;
   readonly defaultEnabled: boolean;
+  /** False when the feature cannot work in this build whatever its setting says. */
+  readonly operable: boolean;
+  /** Why it cannot work, when it cannot: shown where the control is. */
+  readonly inoperableDetail: string | null;
 }
 
 export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   {
     "key": "display.stream",
+    "label": "Show answers as they are written",
+    "appliesWhen": "next-answer",
     "type": "boolean",
     "default": true,
     "description": "Stream LLM tokens as they arrive"
   },
   {
     "key": "display.lineNumbers",
+    "label": "Line numbers in answers",
+    "appliesWhen": "now",
     "type": "enum",
     "default": "off",
     "description": "Show line numbers for all assistant output, code blocks only, or not at all",
@@ -58,6 +68,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "display.collapseThreshold",
+    "label": "Fold tool output longer than this many lines",
+    "appliesWhen": "now",
     "type": "number",
     "default": 30,
     "description": "Line count threshold for collapsing tool output",
@@ -65,6 +77,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "display.theme",
+    "label": "Colour theme",
+    "appliesWhen": "now",
     "type": "enum",
     "default": "goodvibes",
     "description": "Color theme name, the color palette (e.g. goodvibes-neon). Independent of display.themeMode, which controls light/dark appearance.",
@@ -85,6 +99,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "display.themeMode",
+    "label": "Light or dark appearance",
     "type": "enum",
     "default": "auto",
     "description": "Light/dark appearance: auto probes the terminal background colour (OSC 11) once at startup and picks light or dark; dark/light force a fixed appearance regardless of terminal background. Independent of display.theme, which picks the color palette.",
@@ -96,6 +111,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "display.treeGlyphs",
+    "label": "Line style for the work tree",
+    "appliesWhen": "now",
     "type": "enum",
     "default": "rounded",
     "description": "Work tree connector style: rounded, square or ASCII. Terminals without Unicode support always use ASCII.",
@@ -107,30 +124,39 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "display.showThinking",
+    "label": "Show the model's thinking",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Show reasoning/thinking content in a dimmed block above assistant responses"
   },
   {
     "key": "display.showReasoningSummary",
+    "label": "Show a summary of the model's reasoning",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Show reasoning summary (Mercury-2) in a dimmed block above assistant responses"
   },
   {
     "key": "display.showTokenSpeed",
+    "label": "Show how fast the answer is arriving",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Show streaming tokens/sec counter during generation"
   },
   {
     "key": "display.showToolPreview",
+    "label": "Show tool calls while the model writes them",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Show partial tool call preview while streaming"
   },
   {
     "key": "provider.decisionRouter",
+    "label": "Which model answers each kind of decision",
     "type": "object",
     "default": {
       "categories": {
@@ -192,6 +218,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "provider.reasoningEffort",
+    "label": "How hard the model thinks",
+    "appliesWhen": "next-answer",
     "type": "string",
     "default": "medium",
     "description": "Reasoning effort level for models that support it",
@@ -199,24 +227,30 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "provider.model",
+    "label": "Model for new conversations",
     "type": "string",
     "default": "openrouter:openrouter/free",
     "description": "Default provider-qualified LLM model registry key"
   },
   {
     "key": "provider.embeddingProvider",
+    "label": "Service that indexes memory for search",
     "type": "string",
     "default": "hashed-local",
     "description": "Default memory embedding provider"
   },
   {
     "key": "provider.systemPromptFile",
+    "label": "File with your own system prompt",
+    "appliesWhen": "next-session",
     "type": "string",
     "default": "",
     "description": "Path to a file containing the system prompt (empty = none)"
   },
   {
     "key": "provider.optimizerMode",
+    "label": "Pick the provider for each request",
+    "appliesWhen": "now",
     "type": "enum",
     "default": "off",
     "description": "Provider routing optimizer: off (optimizer inactive, default), manual (optimizer active but never auto-routes), auto (selects the best capable provider per request via capability contracts), or pinned (force one model, see provider.optimizerPinnedModel). Applies at once from any settings path; /provider-opt commands write this setting.",
@@ -229,18 +263,23 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "provider.optimizerPinnedModel",
+    "label": "Model every request goes to when pinned",
+    "appliesWhen": "now",
     "type": "string",
     "default": "",
     "description": "Provider-qualified model id (e.g. anthropic:claude-sonnet-4) the provider optimizer routes to while provider.optimizerMode is \"pinned\"; a change applies at once. Empty leaves the optimizer unpinned (falls back to manual)."
   },
   {
     "key": "provider.visionFallbackModel",
+    "label": "Model that reads images the current model can't",
+    "appliesWhen": "next-answer",
     "type": "string",
     "default": "",
     "description": "Model (provider-qualified, e.g. openai:gpt-4o, or a unique bare id) that reads an image you attach when the current model cannot accept images. Empty (default): such an image is refused and sent nowhere, and the refusal names the models that can read it. Setting this sends those images to the named model's provider."
   },
   {
     "key": "behavior.autoCompactThreshold",
+    "label": "Shorten the conversation when context is this full (%)",
     "type": "number",
     "default": 80,
     "description": "Compact conversation when context usage exceeds this percentage",
@@ -248,6 +287,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "behavior.compactionStrategy",
+    "label": "How long conversations are shortened",
+    "appliesWhen": "now",
     "type": "enum",
     "default": "structured",
     "description": "Session compaction: off (sessions run uncompacted), structured (in-place summarization with semantic chunking and relevance scoring, default), or distiller (fresh model call producing a continuation brief; falls back to structured below the quality floor and the receipt names any fallback). behavior.autoCompactThreshold sets when compaction triggers.",
@@ -259,24 +300,31 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "behavior.staleContextWarnings",
+    "label": "Warn before the context fills up",
+    "appliesWhen": "next-answer",
     "type": "boolean",
     "default": true,
     "description": "Emit proactive context-pressure warnings before compaction is required"
   },
   {
     "key": "behavior.saveHistory",
+    "label": "Save conversations to disk",
+    "appliesWhen": "restart",
     "type": "boolean",
     "default": true,
     "description": "Persist conversation history to disk"
   },
   {
     "key": "behavior.notifyOnComplete",
+    "label": "Ring and notify when a long answer finishes",
+    "appliesWhen": "next-answer",
     "type": "boolean",
     "default": true,
     "description": "Emit terminal bell and desktop notification when a long turn completes"
   },
   {
     "key": "behavior.returnContextMode",
+    "label": "Summary shown when you come back to a session",
     "type": "enum",
     "default": "off",
     "description": "Resume summary mode: off, local deterministic summary, or helper-assisted summary",
@@ -288,6 +336,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "behavior.guidanceMode",
+    "label": "How much guidance GoodVibes offers",
     "type": "enum",
     "default": "minimal",
     "description": "Operational guidance mode: off, minimal, or guided",
@@ -299,6 +348,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "storage.secretPolicy",
+    "label": "Where passwords and keys may be stored",
     "type": "enum",
     "default": "preferred_secure",
     "description": "Secret persistence policy: plaintext allowed, preferred secure, or require secure",
@@ -310,6 +360,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "storage.artifacts.maxBytes",
+    "label": "Largest file you can upload (bytes)",
     "type": "number",
     "default": 536870912,
     "description": "Maximum stored artifact size for file, URL, multipart, and raw upload ingest in bytes",
@@ -317,54 +368,64 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "storage.secretProviders.onePasswordCli",
+    "label": "1Password command-line program",
     "type": "string",
     "default": "",
     "description": "The 1Password CLI program to run for op:// and 1password references. Empty runs `op` from your PATH."
   },
   {
     "key": "storage.secretProviders.bitwardenCli",
+    "label": "Bitwarden command-line program",
     "type": "string",
     "default": "",
     "description": "The Bitwarden CLI program to run for bitwarden and vaultwarden references. Empty runs `bw` from your PATH."
   },
   {
     "key": "storage.secretProviders.bitwardenAppDataDir",
+    "label": "Bitwarden data folder",
     "type": "string",
     "default": "",
     "description": "The Bitwarden CLI data directory (BITWARDENCLI_APPDATA_DIR) for bitwarden and vaultwarden references, for example a separate login for GoodVibes. Empty uses the CLI's own."
   },
   {
     "key": "storage.secretProviders.bitwardenSessionEnv",
+    "label": "Variable holding your Bitwarden session",
     "type": "string",
     "default": "",
     "description": "The environment variable holding your unlocked Bitwarden session, passed to the CLI as BW_SESSION. Empty passes BW_SESSION through as it is."
   },
   {
     "key": "storage.secretProviders.bwsCli",
+    "label": "Bitwarden Secrets Manager program",
     "type": "string",
     "default": "",
     "description": "The Bitwarden Secrets Manager CLI program to run for bws references. Empty runs `bws` from your PATH."
   },
   {
     "key": "storage.secretProviders.bwsAccessTokenEnv",
+    "label": "Variable holding your Secrets Manager token",
     "type": "string",
     "default": "",
     "description": "The environment variable holding your Bitwarden Secrets Manager access token, passed to the CLI as BWS_ACCESS_TOKEN. Empty passes BWS_ACCESS_TOKEN through as it is."
   },
   {
     "key": "storage.secretProviders.bwsConfigFile",
+    "label": "Bitwarden Secrets Manager config file",
     "type": "string",
     "default": "",
     "description": "The Bitwarden Secrets Manager CLI config file. Empty uses the CLI's own."
   },
   {
     "key": "storage.secretProviders.bwsServerUrl",
+    "label": "Your own Bitwarden Secrets Manager server",
     "type": "string",
     "default": "",
     "description": "The Bitwarden Secrets Manager server the CLI talks to, for a self-hosted server. Empty uses the CLI's own."
   },
   {
     "key": "permissions.mode",
+    "label": "Who decides when GoodVibes should ask",
+    "appliesWhen": "now",
     "type": "enum",
     "default": "jev-decides",
     "description": "Who decides what ordinary work does not settle. ask-me: you are asked about dangerous actions and owner-only decisions. jev-decides (default): Jev, the decision model, decides judgment calls and you are asked only owner-only decisions; with no working decision model it behaves as ask-me, and while it is only the default (not chosen) it also does until a calibration run has measured Jev's decisions on the configured decision model. just-vibes: does as much as it can without interrupting you; Jev decides judgment calls when a decision model works, and anything that needs you is held and listed at the end. yolo: runs every action without safety denials (containment, secret storage and payment limits still apply). plan is a separate read-only planning posture.",
@@ -378,6 +439,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.divergenceThreshold",
+    "label": "Most disagreement allowed before strict rules take over",
     "type": "number",
     "default": 0.05,
     "description": "Maximum permission-evaluator divergence rate (0.0–1.0) the permission-divergence-dashboard enforce gate tolerates before blocking a transition from simulation to enforce mode. Default 0.05 = 5%. A per-simulator divergenceThreshold override still wins.",
@@ -385,6 +447,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.maxDivergenceRecords",
+    "label": "Disagreements kept for the comparison report",
     "type": "number",
     "default": 500,
     "description": "Maximum divergence records the permissions simulator retains for the divergence dashboard/trend history. A per-simulator maxDivergenceRecords override still wins.",
@@ -392,6 +455,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "diagnostics.postEdit",
+    "label": "Check a file for syntax errors after each edit",
     "type": "enum",
     "default": "on",
     "description": "Post-edit diagnostics: after a successful file write/edit, append cheap, in-process syntax diagnostics (errors only) for the touched file to the tool result so the model sees a broken edit immediately. on (default): run the tree-sitter syntax provider when a TS/JS project context is detectable (no process spawn, no type checking). off: never append diagnostics.",
@@ -402,9 +466,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.tools.read",
+    "label": "Permission to read files",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for the read tool only; find and analyze have their own settings below. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for the read tool only; find and analyze have their own settings below. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
     "enumValues": [
       "allow",
       "prompt",
@@ -413,9 +478,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.tools.write",
+    "label": "Permission to write files and change settings",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for file write operations, and for changing settings through the goodvibes_settings tool. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for file write operations, and for changing settings through the goodvibes_settings tool. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
     "enumValues": [
       "allow",
       "prompt",
@@ -424,9 +490,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.tools.edit",
+    "label": "Permission to edit files",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for file edit/patch operations. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for file edit/patch operations. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
     "enumValues": [
       "allow",
       "prompt",
@@ -435,9 +502,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.tools.exec",
+    "label": "Permission to run commands",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for shell command execution. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for shell command execution. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
     "enumValues": [
       "allow",
       "prompt",
@@ -446,9 +514,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.tools.find",
+    "label": "Permission to search for files",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for file/directory search operations. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for file/directory search operations. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
     "enumValues": [
       "allow",
       "prompt",
@@ -457,9 +526,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.tools.fetch",
+    "label": "Permission to fetch from the internet",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for outbound network fetch requests. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for outbound network fetch requests. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
     "enumValues": [
       "allow",
       "prompt",
@@ -468,9 +538,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.tools.analyze",
+    "label": "Permission to analyse code",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for code/project analysis operations. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for code/project analysis operations. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
     "enumValues": [
       "allow",
       "prompt",
@@ -479,9 +550,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.tools.inspect",
+    "label": "Permission to inspect what is running",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for inspecting runtime state and objects. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for inspecting runtime state and objects. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
     "enumValues": [
       "allow",
       "prompt",
@@ -490,9 +562,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.tools.agent",
+    "label": "Permission to start helper agents",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for spawning subagents or delegating tasks. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for spawning subagents or delegating tasks. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
     "enumValues": [
       "allow",
       "prompt",
@@ -501,9 +574,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.tools.state",
+    "label": "Permission to read session state",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for reading runtime/session state. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for reading runtime/session state. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
     "enumValues": [
       "allow",
       "prompt",
@@ -512,9 +586,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.tools.workflow",
+    "label": "Permission to run workflows",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for executing multi-step workflow automation. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for executing multi-step workflow automation. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
     "enumValues": [
       "allow",
       "prompt",
@@ -523,9 +598,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.tools.registry",
+    "label": "Permission to look up tools and skills",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for querying the tool/skill registry. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for querying the tool/skill registry. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
     "enumValues": [
       "allow",
       "prompt",
@@ -534,9 +610,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.tools.mcp",
+    "label": "Permission to use tools from MCP servers",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for MCP tool calls (external server tools). Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for MCP tool calls (external server tools). deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
     "enumValues": [
       "allow",
       "prompt",
@@ -545,9 +622,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.tools.delegate",
+    "label": "Permission to use tools GoodVibes doesn't know",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for unknown or unregistered tools (safe default: prompt). Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for unknown or unregistered tools (safe default: prompt). deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
     "enumValues": [
       "allow",
       "prompt",
@@ -556,12 +634,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "orchestration.recursionEnabled",
+    "label": "Let agents start agents of their own",
     "type": "boolean",
     "default": false,
     "description": "Allow recursive agent orchestration under bounded policy controls"
   },
   {
     "key": "orchestration.maxDepth",
+    "label": "How deep agents may start agents (0 for no limit)",
     "type": "number",
     "default": 0,
     "description": "Optional recursive orchestration depth limit; 0 is unlimited. recursionEnabled controls whether recursion is allowed.",
@@ -569,6 +649,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "planner.decomposition",
+    "label": "How a goal is split into work items",
     "type": "enum",
     "default": "agent",
     "description": "How /workstream decomposes a goal into work items: 'agent' spawns a read-only planning agent (with automatic fallback to the heuristic path on any failure); 'heuristic' forces the deterministic single-item path and never spawns an agent",
@@ -579,6 +660,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "planner.maxTurns",
+    "label": "Most turns a plan may take (0 for no limit)",
     "type": "number",
     "default": 0,
     "description": "Optional planner turn limit; 0 runs until completion or cancellation.",
@@ -586,6 +668,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "planner.tokenCeiling",
+    "label": "Most tokens a plan may use (0 for no limit)",
     "type": "number",
     "default": 0,
     "description": "Optional total planner token limit; 0 imposes no work budget.",
@@ -593,6 +676,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "planner.wallTimeoutMs",
+    "label": "Longest a plan may run (ms, 0 for no limit)",
     "type": "number",
     "default": 0,
     "description": "Optional planner wall-clock limit in milliseconds; 0 runs until completion or cancellation.",
@@ -600,12 +684,15 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "sandbox.enabled",
+    "label": "Run commands in a sandbox",
     "type": "boolean",
     "default": true,
     "description": "Master switch for the per-command exec sandbox (bubblewrap on Linux): the workspace is writable, the rest of the filesystem is read-only, /tmp is isolated, and network is disabled unless a command is on sandbox.egressAllowlist. Default ON where the host probe passes; honestly reported unavailable when bubblewrap is not present, leaving the exec path unchanged. Turning it on takes effect at the next start (the host is probed then); sandbox.egressAllowlist and sandbox.workspaceWritable apply from the next command."
   },
   {
     "key": "sandbox.judgment",
+    "label": "Let Jev weigh in when a command wants out of the sandbox",
+    "appliesWhen": "now",
     "type": "enum",
     "default": "annotate",
     "description": "Model-judgment pass on sandbox escalation asks: off (plain asks), annotate (default, a proposed verdict with stated reasons annotates the ask, the human still decides), or auto-approve (additionally auto-approves looks-safe verdicts; explicit opt-in). Never auto-denies and never touches the frozen catastrophic block; every judgment leaves a receipt.",
@@ -617,6 +704,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "sandbox.mcpIsolation",
+    "label": "Run MCP servers in a sandbox",
     "type": "enum",
     "default": "disabled",
     "description": "How stdio MCP servers start: disabled runs each as a host process; contained runs each inside its own bubblewrap boundary (workspace and sandbox.workspaceWritable writable, system files and the server's own install read-only, $HOME and /tmp private, host network shared). On a host without bubblewrap a contained server is not started and its status says why. Applies when a server next connects.",
@@ -627,12 +715,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "ui.voiceEnabled",
+    "label": "Control GoodVibes by voice",
     "type": "boolean",
     "default": false,
     "description": "Enable the optional local-first voice control surface"
   },
   {
     "key": "ui.systemMessages",
+    "label": "Where system messages appear",
     "type": "enum",
     "default": "panel",
     "description": "Where operational system messages render by default: panel, conversation, or both",
@@ -644,30 +734,35 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "tts.provider",
+    "label": "Voice service for spoken replies",
     "type": "string",
     "default": "elevenlabs",
     "description": "Default TTS provider used by spoken-output clients when no provider is supplied on the request"
   },
   {
     "key": "tts.voice",
+    "label": "Voice for spoken replies",
     "type": "string",
     "default": "",
     "description": "Default TTS voice id used by spoken-output clients when no voice is supplied on the request"
   },
   {
     "key": "tts.llmProvider",
+    "label": "Provider for spoken conversations",
     "type": "string",
     "default": "",
     "description": "Optional LLM provider override for spoken-output turns; empty means use the active chat provider"
   },
   {
     "key": "tts.llmModel",
+    "label": "Model for spoken conversations",
     "type": "string",
     "default": "",
     "description": "Optional LLM model override for spoken-output turns; empty means use the active chat model"
   },
   {
     "key": "tts.speed",
+    "label": "Speaking speed",
     "type": "number",
     "default": 1,
     "description": "Playback speed multiplier for TTS synthesis (0.25–4.0); 1.0 is normal speed",
@@ -675,6 +770,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "ui.operationalMessages",
+    "label": "Where activity messages appear",
     "type": "enum",
     "default": "panel",
     "description": "Where tool, agent, MCP, plugin, and other operational activity messages render by default: panel, conversation, or both",
@@ -686,6 +782,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "ui.contractMessages",
+    "label": "Where contract updates appear",
     "type": "enum",
     "default": "both",
     "description": "Where contract lifecycle updates (status, checks, corrections, owner questions, the outcome) render by default: panel, conversation, or both",
@@ -697,12 +794,15 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "automation.enabled",
+    "label": "Run scheduled routines",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Enable the automation subsystem (durable routines, schedule evaluation, run history). Default on: with no routines defined it idles and surfaces a how-to-create-your-first-routine empty state."
   },
   {
     "key": "automation.maxConcurrentRuns",
+    "label": "Routines that may run at once",
     "type": "number",
     "default": 4,
     "description": "Maximum automation runs that may execute concurrently",
@@ -710,6 +810,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "automation.runHistoryLimit",
+    "label": "Past runs kept for each routine",
     "type": "number",
     "default": 100,
     "description": "Maximum run history entries retained per automation job",
@@ -717,6 +818,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "automation.defaultTimeoutMs",
+    "label": "Longest a routine may run (ms)",
     "type": "number",
     "default": 7200000,
     "description": "How long an automation run without its own timeout may run, in milliseconds (default two hours); a run past it is stopped and recorded as failed. Applies to running runs at once. 0 removes the deadline",
@@ -724,6 +826,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "automation.catchUpWindowMinutes",
+    "label": "Catch up on routines missed this recently (minutes)",
     "type": "number",
     "default": 30,
     "description": "How long after startup the engine should catch up missed runs. The same window (at least 5 minutes) is also how long a running run whose agent has vanished is left before it is failed as \"Agent state lost\", so a large value keeps such a run holding a concurrency slot for as long.",
@@ -731,6 +834,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "automation.failureCooldownMs",
+    "label": "Wait before retrying a failed routine (ms)",
     "type": "number",
     "default": 300000,
     "description": "Cooldown applied after a failed automation run before retrying",
@@ -738,48 +842,57 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "automation.deleteAfterRun",
+    "label": "Delete a one-time routine after it runs",
     "type": "boolean",
     "default": false,
     "description": "Default for the deleteAfterRun flag of newly created one-shot (at) automation jobs: a job with the flag is deleted after its first successful run. Recurring jobs are never deleted by this default. Existing jobs keep the value they were created with."
   },
   {
     "key": "checkin.enabled",
+    "label": "Check in with you on a schedule",
     "type": "boolean",
     "default": false,
     "description": "Enable the proactive check-in: on a cadence, a briefing is judged and the user is contacted only when something warrants it"
   },
   {
     "key": "checkin.cadence",
+    "label": "How often to check in",
     "type": "string",
     "default": "0 */4 * * *",
     "description": "Proactive check-in cadence as a cron expression (default: every 4 hours)"
   },
   {
     "key": "checkin.deliveryChannel",
+    "label": "Where check-ins are sent",
     "type": "string",
     "default": "",
     "description": "Where a proactive check-in message is delivered: \"surfaceKind\" or \"surfaceKind:address\" (e.g. \"slack:C123\"). Empty falls back to the owner profile field contactMe.channel."
   },
   {
     "key": "checkin.quietHours",
+    "label": "Hours when check-ins stay quiet",
     "type": "string",
     "default": "",
     "description": "Proactive check-in quiet hours as \"HH:MM-HH:MM\" local time; no message is sent during this window. Empty falls back to the owner profile field contactMe.quietHours, and disables quiet hours only when the profile has none."
   },
   {
     "key": "controlPlane.enabled",
+    "label": "Let other machines reach this daemon",
     "type": "boolean",
     "default": false,
     "description": "Whether the control plane is served to other machines. Off (default): the daemon listener answers only requests from this machine (loopback or one of its own addresses), whatever controlPlane.hostMode binds, and refuses any other address with CONTROL_PLANE_LOCAL_ONLY naming this setting. On: every address the binding reaches is served (paired devices, the web UI from another device, a reverse proxy). Channel webhooks under /webhook/ are answered either way; each surface's own switch decides them. Takes effect on the next request; the outbound relay has its own switch (relay.enabled). goodvibes-daemon webui enable --lan turns it on with the network binding."
   },
   {
     "key": "controlPlane.gateway",
+    "label": "Serve live updates and remote control",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "The shared gateway/control-plane host serving state snapshots, live streams (SSE/WS), and authenticated control APIs to terminal hosts and remote clients. Default on so a stock daemon can stream companion chat; every streaming endpoint stays auth-gated and the default bind stays loopback. Turn off for a request/response-only daemon."
   },
   {
     "key": "controlPlane.hostMode",
+    "label": "Who the daemon listens to",
     "type": "enum",
     "default": "local",
     "description": "Network binding mode for the control-plane listener: local (127.0.0.1, default port), network (0.0.0.0, default port), custom (the host and port below). This and host decide what the listener binds; whether another machine is then served is controlPlane.enabled.",
@@ -791,12 +904,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "controlPlane.host",
+    "label": "Address the daemon listens on",
     "type": "string",
     "default": "127.0.0.1",
     "description": "Bind host for the control-plane HTTP server, used when controlPlane.hostMode is custom"
   },
   {
     "key": "controlPlane.port",
+    "label": "Port the daemon listens on",
     "type": "number",
     "default": 3421,
     "description": "Bind port for the control-plane HTTP server",
@@ -804,12 +919,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "controlPlane.publicBaseUrl",
+    "label": "The daemon's outside address",
     "type": "string",
     "default": "",
     "description": "Override for a genuinely external control-plane address (tunnel or reverse proxy). Leave empty, the everyday base URL is derived from hostMode/host/port/tls.mode, so it cannot drift. Set this only when an off-box address differs from the bind."
   },
   {
     "key": "controlPlane.streamMode",
+    "label": "Kind of live update stream",
     "type": "enum",
     "default": "sse",
     "description": "Which live update stream the daemon listener serves: sse serves GET /api/control-plane/events only, websocket serves the /api/control-plane/ws upgrade only, both serves both. The other one is refused with STREAM_MODE_NOT_SERVED naming this setting. The terminal apps and the web UI read the Server-Sent Events stream, so websocket alone leaves them without live updates. Takes effect on the next request.",
@@ -821,18 +938,21 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "controlPlane.trustProxy",
+    "label": "Trust a proxy's client addresses",
     "type": "boolean",
     "default": false,
     "description": "Trust proxy forwarding headers such as x-forwarded-for for the control plane"
   },
   {
     "key": "controlPlane.openaiCompatible.enabled",
+    "label": "Offer an OpenAI-compatible API",
     "type": "boolean",
     "default": true,
     "description": "Expose OpenAI-compatible /v1/models and /v1/chat/completions routes on the authenticated daemon"
   },
   {
     "key": "controlPlane.openaiCompatible.pathPrefix",
+    "label": "Path of the OpenAI-compatible API",
     "type": "string",
     "default": "/v1",
     "description": "Path prefix for the daemon OpenAI-compatible routes",
@@ -840,30 +960,35 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "controlPlane.webui.serve",
+    "label": "Serve the web UI from the daemon",
     "type": "boolean",
     "default": false,
     "description": "Serve a built web UI bundle same-origin from the daemon (opt-in; loopback default unchanged). The bundle is public and the app token-authenticates its own API calls."
   },
   {
     "key": "controlPlane.webui.bundleDir",
+    "label": "Folder of the web UI the daemon serves",
     "type": "string",
     "default": "",
     "description": "Directory holding the built web UI bundle (index.html + assets) served when controlPlane.webui.serve is true. Takes precedence over web.staticAssetsDir: this key is the specific answer for this daemon, so when it names a directory that is the one served. Empty falls back to web.staticAssetsDir."
   },
   {
     "key": "controlPlane.cors.enabled",
+    "label": "Let listed websites call the daemon",
     "type": "boolean",
     "default": false,
     "description": "Answer OPTIONS preflight and emit Access-Control-Allow-* headers for allowlisted origins (opt-in; off by default). Never wildcards; credentials are allowlist-gated."
   },
   {
     "key": "controlPlane.cors.allowedOrigins",
+    "label": "Websites allowed to call the daemon",
     "type": "string",
     "default": "",
     "description": "Comma-separated explicit allowlist of browser origins permitted to make cross-origin requests when controlPlane.cors.enabled is true (e.g. http://localhost:5173). Empty refuses every cross-origin request. The WebSocket upgrade origin check reads this list on its own, whether or not controlPlane.cors.enabled is true."
   },
   {
     "key": "controlPlane.tls.mode",
+    "label": "Encryption for the daemon's connections",
     "type": "enum",
     "default": "off",
     "description": "TLS mode for the control-plane HTTP server",
@@ -875,18 +1000,21 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "controlPlane.tls.certFile",
+    "label": "Certificate file for the daemon",
     "type": "string",
     "default": "",
     "description": "Certificate chain PEM path for direct control-plane TLS (empty = certs/fullchain.pem under this surface's settings directory, e.g. ~/.goodvibes/tui/certs/fullchain.pem for the terminal app and the daemon)"
   },
   {
     "key": "controlPlane.tls.keyFile",
+    "label": "Private key file for the daemon",
     "type": "string",
     "default": "",
     "description": "Filesystem pathname of the PEM file used for direct control-plane TLS. This setting stores a path, not the private key contents. Empty uses certs/privkey.pem under this surface's settings directory (e.g. ~/.goodvibes/tui/certs/privkey.pem for the terminal app and the daemon)."
   },
   {
     "key": "httpListener.hostMode",
+    "label": "Who the webhook receiver listens to",
     "type": "enum",
     "default": "local",
     "description": "Network binding mode: local (127.0.0.1, default port), network (0.0.0.0, default port), custom (editable host and port)",
@@ -898,12 +1026,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "httpListener.host",
+    "label": "Address the webhook receiver listens on",
     "type": "string",
     "default": "127.0.0.1",
     "description": "Bind host for the webhook HTTP listener"
   },
   {
     "key": "httpListener.port",
+    "label": "Port the webhook receiver listens on",
     "type": "number",
     "default": 3422,
     "description": "Bind port for the webhook HTTP listener",
@@ -911,18 +1041,21 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "httpListener.trustProxy",
+    "label": "Trust a proxy's client addresses for webhooks",
     "type": "boolean",
     "default": false,
     "description": "Trust proxy forwarding headers such as x-forwarded-for for the webhook listener"
   },
   {
     "key": "httpListener.trustCloudflare",
+    "label": "Trust Cloudflare's client addresses for webhooks",
     "type": "boolean",
     "default": false,
     "description": "Read the real client IP from CF-Connecting-IP, and only when the connecting peer is inside a published Cloudflare range. Requires httpListener.trustProxy: with it off, CF-Connecting-IP is ignored no matter what this says. The range check is the point, without it any peer could send a CF-Connecting-IP header and choose which address the rate limiter and the audit log recorded. Leave off unless this listener genuinely sits behind Cloudflare."
   },
   {
     "key": "httpListener.tls.mode",
+    "label": "Encryption for webhooks",
     "type": "enum",
     "default": "off",
     "description": "TLS mode for the webhook HTTP listener",
@@ -934,24 +1067,29 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "httpListener.tls.certFile",
+    "label": "Certificate file for webhooks",
     "type": "string",
     "default": "",
     "description": "Certificate chain PEM path for direct webhook-listener TLS (empty = certs/fullchain.pem under this surface's settings directory)"
   },
   {
     "key": "httpListener.tls.keyFile",
+    "label": "Private key file for webhooks",
     "type": "string",
     "default": "",
     "description": "Private key PEM path for direct webhook-listener TLS (empty = certs/privkey.pem under this surface's settings directory)"
   },
   {
     "key": "web.enabled",
+    "label": "Mark the web UI as switched on",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Declare the browser-based operator surface as switched on (its channel status and delivery policy). Where the web UI is, and every link to it, does not depend on it. This does not bind a listener: the bundle is served by the control-plane listener when controlPlane.webui.serve is true, so who can reach it follows controlPlane.hostMode and controlPlane.host."
   },
   {
     "key": "web.hostMode",
+    "label": "Who the web UI's development server listens to",
     "type": "enum",
     "default": "local",
     "description": "Where the web UI's development server listens (local, network or custom), with web.host and web.port; the development server reads it through goodvibes-daemon webui status --json. It is never the web UI's address: the bundle the daemon serves, and every link to it, follow controlPlane.hostMode.",
@@ -963,12 +1101,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "web.host",
+    "label": "Address of the web UI's development server",
     "type": "string",
     "default": "127.0.0.1",
     "description": "Host the web UI's development server binds (with web.hostMode custom). Nothing else listens on web.host:web.port, and no link uses it; the served bundle follows controlPlane.host and controlPlane.port."
   },
   {
     "key": "web.port",
+    "label": "Port of the web UI's development server",
     "type": "number",
     "default": 3423,
     "description": "Port the web UI's development server binds. The daemon does not bind it and no link, pairing address, goodvibes web or tailscale serve uses it: the bundle the daemon serves is at the control-plane address (controlPlane.port).",
@@ -976,18 +1116,21 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "web.publicBaseUrl",
+    "label": "Outside address used in web links",
     "type": "string",
     "default": "",
     "description": "Public base URL for web links and notification deep links, for a web app served somewhere the daemon cannot describe (a tunnel or reverse proxy). Empty (the default) means links are derived: the daemon's own reachable address when it serves the web app (controlPlane.webui.serve), otherwise there is no web app and no link; a link only reachable on this machine is left out of messages read on other devices."
   },
   {
     "key": "web.staticAssetsDir",
+    "label": "Fallback folder of web UI files",
     "type": "string",
     "default": "dist/web",
     "description": "Static asset directory for the embedded web surface (index.html + assets), served when controlPlane.webui.serve is true. Used when controlPlane.webui.bundleDir is empty; that more specific key wins when it names a directory."
   },
   {
     "key": "conversationGate.mode",
+    "label": "How messages from chat apps are handled",
     "type": "enum",
     "default": "propose",
     "description": "How inbound channel messages are treated. propose (default): a message gets a conversational reply, and anything that reads as a work request is proposed and waits for your agreement over the same channel. confirm-all: every inbound message is confirmed before any agent runs. off: an inbound message starts work immediately (pre-1.14 behavior). Never applies to goodvibes-tui, and never to already-authorized work such as schedules, triggers, and on-exit chains.",
@@ -999,6 +1142,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "conversationGate.proposalTtlMs",
+    "label": "How long a proposed task waits for your answer (ms)",
     "type": "number",
     "default": 1800000,
     "description": "How long an unanswered work proposal stays answerable, in milliseconds. After this it expires and a late reply is reported as expired rather than starting stale work. Between 1 minute and 24 hours.",
@@ -1006,6 +1150,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "conversationGate.maxPendingProposals",
+    "label": "Most proposed tasks waiting at once",
     "type": "number",
     "default": 20,
     "description": "Maximum work proposals awaiting an answer at once across all channels. The oldest is dropped past this cap. Between 1 and 200.",
@@ -1013,6 +1158,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "hostedSessions.detachPolicy",
+    "label": "What happens to a daemon session when its last window closes",
     "type": "enum",
     "default": "kill",
     "description": "What happens to a daemon-hosted session when its last client detaches. kill (default): the session ends, which is what closing a client has always done. survive: the session stays alive and reattachable, so work continues while nothing is watching and you can pick it up again from any surface. A single session can override this when it is created.",
@@ -1023,6 +1169,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "hostedSessions.maxSessions",
+    "label": "Most daemon sessions at once",
     "type": "number",
     "default": 8,
     "description": "How many daemon-hosted sessions may be live at once. Creating one past this is refused with the count and this setting named, rather than accepted and starved. Terminated sessions do not count.",
@@ -1030,6 +1177,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "hostedSessions.maxMessagesPerSession",
+    "label": "Messages saved per daemon session",
     "type": "number",
     "default": 500,
     "description": "How many of a hosted session's most recent messages are written to disk. The transcript in memory is unaffected; this bounds what a restart can restore, so one long conversation cannot grow its file without limit.",
@@ -1037,6 +1185,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "hostedSessions.terminatedRetentionMs",
+    "label": "Keep ended daemon sessions for (ms)",
     "type": "number",
     "default": 86400000,
     "description": "How long a terminated hosted session's record and transcript are kept before they are retired, in milliseconds. Until then the session is still listable with its termination reason, and its transcript (its reply included) stays readable with sessions.hosted.history by the client that created it, also after a daemon restart.",
@@ -1044,6 +1193,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "hostedSessions.attachmentTtlMs",
+    "label": "How long a silent window stays attached (ms)",
     "type": "number",
     "default": 600000,
     "description": "How long a client stays attached to a daemon-hosted session without renewing, in milliseconds. Attaching again renews it, and a client whose control-plane connection is still open renews automatically. A client that crashed or closed its tab never detaches, so without this its attachment stands forever and a kill-policy session waits for a departure that never comes. When the last attachment lapses the session is treated as detached, and hostedSessions.detachPolicy decides what happens next. Between 30 seconds and a day.",
@@ -1051,24 +1201,28 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "hostedSessions.promoteInboundConversations",
+    "label": "Let the daemon answer chat-app conversations",
     "type": "boolean",
     "default": false,
     "description": "Hand inbound channel conversations to the daemon to host, instead of answering them inside the surface process that received them. Off (default): a message from Telegram, Slack, email or any other channel is answered by that process, and it stops when the process stops. On: the first message of a conversation creates a daemon-hosted session and every later message is steered into it, so the conversation keeps its context and keeps running while no surface is open. What happens when the last client leaves is still hostedSessions.detachPolicy."
   },
   {
     "key": "hostedSessions.routeConversationTurns",
+    "label": "Run the Agent's turns on the daemon",
     "type": "boolean",
     "default": false,
     "description": "Only goodvibes-agent reads this; the terminal product (goodvibes) always runs turns in its own process. Off (the default): the agent's conversation turns run in the agent process, with the agent's own prompt, persona, skills, memory and tools; work that must outlive the terminal goes to the daemon through /work, channels and schedules. On: with a connected daemon reachable, the first message of a conversation creates a daemon-hosted session rooted at this surface's working directory and every later message is steered into it, so the turn survives this process closing; that hosted turn is still an Agent turn, with the agent's operator policy, persona, skills, routines, memory and its profile, occasions, artifact, document, research-run, research-source, review-packet, media, notify and work-plan tools, while the agent tools that run only in this process are named to the model and refused there. With no connected daemon reachable the turn runs locally regardless, and the transcript says so in one line naming the reason."
   },
   {
     "key": "atRest.redactionEnabled",
+    "label": "Hide keys and tokens in saved transcripts",
     "type": "boolean",
     "default": true,
     "description": "When true (default), credential patterns (API keys, bearer tokens, GitHub/GitLab/Slack/AWS credentials) are redacted at WRITE time from the on-disk transcript journal (per-agent <agentId>.jsonl), reusing the same pattern set as the telemetry egress. Home paths are NOT redacted. The local execution ledger gets the same treatment only when the application embedding the platform wires the policy in. Crash reports are always redacted, whatever this setting says. A redacted value shows a [REDACTED_*] marker, a record never pretends the content was absent. Set false ONLY for local debugging where plaintext secrets in the transcript journal are acceptable."
   },
   {
     "key": "atRest.retentionMaxAgeDays",
+    "label": "Delete logs and transcripts older than (days)",
     "type": "number",
     "default": 30,
     "description": "Age cap (days) for the append-only files: per-agent transcript journals, the execution ledger, the activity log, crash logs and crash-recovery snapshots. Files older than this are pruned at start and every six hours (the journal also prunes on each new agent session; the ledger on each export). Saved conversations are never pruned by it. Generous by default; bounded so the files cannot grow without limit.",
@@ -1076,6 +1230,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "atRest.retentionMaxTotalMb",
+    "label": "Most space logs and transcripts may use (MB)",
     "type": "number",
     "default": 512,
     "description": "Total-size cap (MB) for each of the append-only file sets named under atRest.retentionMaxAgeDays (transcript journals, execution ledger, activity log, crash logs, crash-recovery snapshots). When exceeded, the oldest are deleted first (rotated backups before freshly-written active files) until under budget. Saved conversations are never deleted by it.",
@@ -1083,24 +1238,28 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "payments.enabled",
+    "label": "Let GoodVibes make purchases",
     "type": "boolean",
     "default": false,
     "description": "Master switch for the payment capability. Default OFF. While false the daemon will not price, reserve, or charge anything, and the payments operator methods refuse. Turning it on does not by itself allow a purchase, the daily budgets below start at 0, so nothing goes through until you set an amount."
   },
   {
     "key": "payments.confirmEveryPurchase",
+    "label": "Ask before every purchase",
     "type": "boolean",
     "default": false,
     "description": "When true, every purchase needs your approval first, given with /payments approve (or payments.checkout.approve) naming the merchant, the item and the most it may cost, before the agent may start it; the approval lasts five minutes and is used once. Default FALSE: the agent buys on your behalf inside your budgets without asking first, and that standing answer is kept here until you change it. Either way, a purchase over a budget or at a shop nobody vouches for still asks you before it is bought, and an approval you give in advance answers that question for a total up to the amount you named."
   },
   {
     "key": "payments.defaultCardId",
+    "label": "Card used when a purchase names none",
     "type": "string",
     "default": "",
     "description": "A card id from payments.cards.list. A purchase that names no card is paid with this one; with this empty, every purchase must name its card. Deleting that card does not clear this setting, and a purchase that would use a deleted card is refused saying so. The card NUMBER, expiry and CVV live in the daemon secret store and never in config."
   },
   {
     "key": "payments.currency",
+    "label": "Currency of your budgets",
     "type": "string",
     "default": "USD",
     "description": "ISO-4217 code your budgets are denominated in. A checkout priced in any other currency is REFUSED rather than converted, the issuer converts at its own rate on its own date, so any number shown to you before the charge would not be the number you are charged.",
@@ -1108,6 +1267,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "payments.cvvHandling",
+    "label": "Card security code at checkout",
     "type": "enum",
     "default": "stored",
     "description": "How the card verification value is handled at checkout. 'stored' (DEFAULT) keeps it in the daemon secret store beside the card number, encrypted at rest, so a purchase within budget completes while you are away, which is what autonomous action requires. Choosing 'prompt' stores nothing: when a purchase is approved and reaches payment, it stops and asks you to type the code in the terminal app (/payments pending) or the local web UI, waiting as long as an approval window, and nothing is bought if the code is not typed in time. So nothing completes while you are away. Never send the code in a chat; a likely code typed on a remote channel while one is awaited is refused there. Surfaces show CVV_PROMPT_TRADEOFF_WARNING at the moment you select it. Provisioning a virtual card with a hard issuer cap bounds what any leak of stored card material could cost; a real card number does not.",
@@ -1118,6 +1278,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "payments.budget.dailyItem",
+    "label": "Most spent on items each day",
     "type": "number",
     "default": 0,
     "description": "Most that may be spent on ITEM PRICES in one calendar day, written the way you would say it: 100 is a hundred, 19.99 is nineteen ninety-nine, in whatever payments.currency is set to. The item price alone is checked against this; tax, mandatory fees and delivery draw on the separate overage budget below. Resets at midnight in daemon.timezone (UTC when unset), the boundary is real, so 100 at 23:59 and 100 at 00:00 both go through. Default 0: until you set it every purchase asks you first, and the first time one does, your inbox offers to set it. While payments.budget.dailyOverage is also 0, a purchase with any tax, fee or paid delivery is refused, not asked about.",
@@ -1126,6 +1287,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "payments.budget.dailyOverage",
+    "label": "Daily allowance for tax, fees and delivery",
     "type": "number",
     "default": 0,
     "description": "Daily allowance for charges that CANNOT BE AVOIDED on a purchase you already approved: sales tax, mandatory handling or booking fees, and the delivery option actually used. Written the way you would say it, 25 is twenty-five, 7.50 is seven fifty. Discretionary add-ons, expedited shipping beyond what the ladder picks, insurance, gift wrap, extended warranties, are purchase decisions, not delivery costs, and never draw on this. Default 0.",
@@ -1134,12 +1296,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "payments.budget.perPurchaseCeilingEnabled",
+    "label": "Ask before any single large purchase",
     "type": "boolean",
     "default": true,
     "description": "When true (DEFAULT), no single purchase may come to more than payments.budget.perPurchaseCeiling in total (items, tax, fees and delivery) without your explicit approval, no matter how much of the daily budget is left. A separate question from the daily budget: both must pass. Turn it off only if you want one purchase to be able to consume the whole day at once."
   },
   {
     "key": "payments.budget.perPurchaseCeiling",
+    "label": "Most a single purchase may cost",
     "type": "number",
     "default": 0,
     "description": "The most any single purchase may come to in total, items plus tax, fees and delivery, applied when perPurchaseCeilingEnabled is true. A purchase over it asks you first and names the ceiling and by how much. Written the way you would say it, 100 is a hundred, 19.99 is nineteen ninety-nine. Default 0, so with the ceiling on and this unset every purchase needs your explicit approval, the safe direction until you choose a number.",
@@ -1148,12 +1312,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "payments.budget.overageToleranceEnabled",
+    "label": "Allow a little extra when fees run over",
     "type": "boolean",
     "default": false,
     "description": "When true, a purchase whose unavoidable charges cannot fit the overage budget even at the CHEAPEST delivery option may draw the shortfall from the tolerance allowance below instead of being refused. Default FALSE. Enabling it alone changes nothing, the allowance also starts at 0."
   },
   {
     "key": "payments.budget.overageToleranceDailyAllowance",
+    "label": "Daily extra allowed when fees run over",
     "type": "number",
     "default": 0,
     "description": "Daily tolerance allowance, used only when overageToleranceEnabled is true. Written the way you would say it, 5 is five, 2.50 is two fifty. This is a third pool, drawn on only after the shipping ladder has stepped delivery all the way down and the unavoidable charges still do not fit. Every use is recorded in the purchase audit record.",
@@ -1162,6 +1328,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "payments.shipping.preferredTier",
+    "label": "Preferred delivery speed",
     "type": "enum",
     "default": "normal",
     "description": "Preferred delivery tier, ordinal against WHAT THE CHECKOUT ACTUALLY OFFERS rather than delivery-day promises: its options are ranked cheapest-first and this indexes into that ranking. The chosen tier draws on the overage budget; when the budget cannot cover it, delivery steps down ONE tier at a time until it fits, stopping at the cheapest. A step-down needs no approval (it is within budget) but is recorded and shown to you, so you never learn about it from a late package. Default 'normal'.",
@@ -1173,90 +1340,105 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "payments.billingAddress.name",
+    "label": "Billing name",
     "type": "string",
     "default": "",
     "description": "Full name as it appears on the card statement. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.billingAddress.line1",
+    "label": "Billing street address",
     "type": "string",
     "default": "",
     "description": "Street address, first line. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.billingAddress.line2",
+    "label": "Billing address, second line",
     "type": "string",
     "default": "",
     "description": "Second address line (apartment, suite); leave empty when unused. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.billingAddress.city",
+    "label": "Billing city",
     "type": "string",
     "default": "",
     "description": "City or town. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.billingAddress.region",
+    "label": "Billing state or region",
     "type": "string",
     "default": "",
     "description": "State, province or region; leave empty where the country has none (it is required only for countries whose addresses use one, such as US, CA, AU, IN). Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.billingAddress.postalCode",
+    "label": "Billing postal code",
     "type": "string",
     "default": "",
     "description": "Postal or ZIP code. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.billingAddress.country",
+    "label": "Billing country",
     "type": "string",
     "default": "",
     "description": "Country, as the checkout expects it (an ISO two-letter code is safest). Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.shippingAddress.name",
+    "label": "Delivery name",
     "type": "string",
     "default": "",
     "description": "Recipient name. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.shippingAddress.line1",
+    "label": "Delivery street address",
     "type": "string",
     "default": "",
     "description": "Street address, first line. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.shippingAddress.line2",
+    "label": "Delivery address, second line",
     "type": "string",
     "default": "",
     "description": "Second address line (apartment, suite); leave empty when unused. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.shippingAddress.city",
+    "label": "Delivery city",
     "type": "string",
     "default": "",
     "description": "City or town. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.shippingAddress.region",
+    "label": "Delivery state or region",
     "type": "string",
     "default": "",
     "description": "State, province or region; leave empty where the country has none (it is required only for countries whose addresses use one, such as US, CA, AU, IN). Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.shippingAddress.postalCode",
+    "label": "Delivery postal code",
     "type": "string",
     "default": "",
     "description": "Postal or ZIP code. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.shippingAddress.country",
+    "label": "Delivery country",
     "type": "string",
     "default": "",
     "description": "Country, as the checkout expects it (an ISO two-letter code is safest). Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.windows.vetoMinutes",
+    "label": "Time to stop a purchase within budget (minutes)",
     "type": "number",
     "default": 10,
     "description": "How long you get to STOP an in-budget purchase, in minutes, starting once the final total is known and before payment. The notice is always in your owner inbox, and on the channels in payments.notifyChannels. This is a VETO, not an approval: if you say nothing, the purchase GOES AHEAD. One word (stop) cancels it. The window always runs its full length wherever you are, no presence, focus or activity signal shortens it, and an explicit acknowledgement buys immediately.",
@@ -1264,6 +1446,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "payments.windows.approvalMinutes",
+    "label": "Time to approve a purchase over budget (minutes)",
     "type": "number",
     "default": 60,
     "description": "How long an ABOVE-BUDGET purchase waits for your explicit approval, in minutes. This is the opposite of the veto window: if you say nothing, the purchase is DENIED. Denial is the recoverable outcome, ask again and it goes through, so a short window costs friction while a long one leaves a cart holding a price that may drift. Default 60, which survives a meeting or a commute; raise it if you are away for long stretches.",
@@ -1271,6 +1454,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "payments.majorRetailersAdditional",
+    "label": "Shops to add to the trusted list",
     "type": "string",
     "default": "",
     "description": "Comma-separated REGISTRABLE domains (eTLD+1, e.g. 'microcenter.com', not 'www.microcenter.com') to add to the recognised-retailer list. A purchase at a recognised retailer gets the veto window, you are told and it goes ahead unless you object. Everything else asks for your yes. The test is recourse: is there a real path to remedy if it goes wrong. Additions are yours alone, nothing is learned onto this list, inferred from a page, or added by an agent, because a page that could argue itself onto it could buy from itself unattended.",
@@ -1278,6 +1462,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "payments.majorRetailersExcluded",
+    "label": "Shops to remove from the trusted list",
     "type": "string",
     "default": "",
     "description": "Comma-separated registrable domains to REMOVE from the shipped recognised-retailer list, so purchases there ask for your yes instead of proceeding on silence. A domain listed in both this and the additions is excluded (it asks for your yes), because on a spending path the stricter instruction wins.",
@@ -1285,6 +1470,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "payments.ebayMinSellerFeedbackCount",
+    "label": "Fewest seller ratings for an eBay purchase",
     "type": "number",
     "default": 100,
     "description": "Minimum feedback ratings earned AS A SELLER before an eBay Buy It Now listing proceeds on silence. eBay's headline score combines buying and selling, so an account with a large number can have earned all of it buying, only the seller-side figure counts. Below this, or when the figure cannot be read from eBay's own seller widget, the purchase asks for your yes. The listing is read by code from the page the purchase runs on: its purchase controls and eBay's seller card, never the seller's text. Auctions and Best Offer listings are refused outright regardless, because there is no final price to show you before paying.",
@@ -1292,6 +1478,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "payments.ebayMinSellerPositivePercent",
+    "label": "Lowest positive seller rating for an eBay purchase (%)",
     "type": "number",
     "default": 98,
     "description": "Minimum positive feedback percentage AS A SELLER before an eBay Buy It Now listing proceeds on silence. Read from eBay's own feedback widget, never from the seller's listing text, if the figures cannot be attributed to eBay with confidence, the purchase asks for your yes rather than assuming.",
@@ -1299,6 +1486,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "payments.notifyChannels",
+    "label": "Other places purchase questions are sent",
     "type": "string",
     "default": "",
     "description": "Comma-separated, ordered list of channels that ALSO receive approval and veto prompts and may answer them. Every purchase notice, window and confirmation is always posted to your owner inbox (/questions in both terminal apps, and the web UI), where it can be answered, whatever this says; these channels reach you away from them. Today only 'telegram' has a delivery path. EMAIL IS NOT AND WILL NEVER BE ACCEPTED HERE, an inbound email is content anyone can write and cannot authorize spending. An unrecognised name is rejected rather than ignored, because a channel you believe will reach you and does not is worse than none. Empty means the owner inbox only: an in-budget purchase is announced there and waits its veto window, and an above-budget one is asked there.",
@@ -1306,6 +1494,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "daemon.timezone",
+    "label": "Time zone for daily budgets and reminders",
     "type": "string",
     "default": "",
     "description": "IANA timezone name the daemon reckons CALENDAR DAYS in, e.g. 'America/New_York', 'Europe/London'. Empty means UTC. This is the daemon's own location, not a display preference and not a per-schedule zone (schedules keep their own). Anything that resets daily reads it: the payment capability's daily budgets roll over at midnight in this zone. Changing it does not refill a spent budget: each spend keeps the day it was made on and counts until that day is over, and an agent cannot change it in a way that moves today; only the owner can.",
@@ -1313,12 +1502,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "learning.consolidation.enabled",
+    "label": "Tidy memory while idle",
     "type": "boolean",
     "default": true,
     "description": "Master switch for the idle-time memory consolidation pass (dedupe merges, confidence decay of never-referenced records, and review proposals). On by default, the daemon runs it at idle and on a slow schedule; every outcome is reversible or proposal-gated, and false turns the pass off."
   },
   {
     "key": "learning.consolidation.intervalMs",
+    "label": "How often memory is tidied (ms)",
     "type": "number",
     "default": 21600000,
     "description": "Minimum time between consolidation runs, in milliseconds. Doubles as the schedule cadence (default: 6 hours).",
@@ -1326,6 +1517,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "learning.consolidation.minIdleMs",
+    "label": "Idle time needed before tidying memory (ms)",
     "type": "number",
     "default": 0,
     "description": "Minimum continuous idle time required before a consolidation run may start, in milliseconds (default: 0 = no idle requirement).",
@@ -1333,6 +1525,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "learning.consolidation.maxMergesPerRun",
+    "label": "Most duplicates merged per tidy",
     "type": "number",
     "default": 10,
     "description": "Maximum duplicate groups merged in a single consolidation run.",
@@ -1340,6 +1533,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "learning.consolidation.maxDecaysPerRun",
+    "label": "Most memories faded per tidy",
     "type": "number",
     "default": 20,
     "description": "Maximum records decayed or archived in a single consolidation run.",
@@ -1347,6 +1541,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "learning.consolidation.maxProposalsPerRun",
+    "label": "Most suggestions offered per tidy",
     "type": "number",
     "default": 20,
     "description": "Maximum review proposals emitted in a single consolidation run.",
@@ -1354,6 +1549,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "learning.consolidation.decayAgeDays",
+    "label": "Fade memories unused for (days)",
     "type": "number",
     "default": 45,
     "description": "Active records older than this (by updatedAt) become decay candidates, in days.",
@@ -1361,6 +1557,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "learning.consolidation.decayConfidenceStep",
+    "label": "Confidence lost each time an unused memory fades",
     "type": "number",
     "default": 10,
     "description": "Confidence points removed from a never-referenced decaying record per run.",
@@ -1368,6 +1565,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "learning.consolidation.archiveConfidenceFloor",
+    "label": "Archive a fading memory at this confidence",
     "type": "number",
     "default": 40,
     "description": "A decaying record whose confidence would fall to or below this is archived (marked stale).",
@@ -1375,25 +1573,36 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "power.keepAwake",
+    "label": "Keep this computer awake",
     "type": "boolean",
     "default": false,
     "description": "The owner keep-awake toggle: the daemon holds a sleep inhibitor INDEPENDENT of work state, so the host stays reachable after work finishes and after surfaces close. Covers idle + sleep + lid-switch inhibitor classes where the OS grants them; the served state names any refused class honestly. Every attached surface shows an always-visible \"sleep disabled\" chip while this is on, the chip, not a timer, is the safety mechanism."
   },
   {
     "key": "power.inhibitWhileWorking",
+    "label": "Keep this computer awake while work runs",
     "type": "boolean",
     "default": true,
     "description": "Hold an idle/sleep inhibitor automatically while real work runs (a running turn, an active agent, a schedule about to fire), released when work drains. On by default so the host cannot sleep mid-work."
   },
   {
     "key": "power.workInhibitMaxMinutes",
+    "label": "Longest work may keep this computer awake (minutes)",
     "type": "number",
     "default": 180,
     "description": "Hard cap in minutes on the automatic WORK inhibitor (never the keep-awake toggle): a wedged hold releases at the cap and the state reports the expiry honestly.",
     "validationHint": "integer in [1, 1440]"
   },
   {
+    "key": "browser.network.pinned",
+    "label": "Fetch browser pages through the checked address",
+    "type": "boolean",
+    "default": false,
+    "description": "Off (default): the browser checks each host a page asks for (resolved once per browser context) and lets the browser connect itself, which is fastest but lets a name that answers differently a moment later (DNS rebinding) reach an address the check refused. On: every request a page makes is fetched by GoodVibes through the address that was checked, redirects are checked hop by hop, and the answer is handed to the page, so a name that re-resolves to a private or metadata address after the check is never reached. Costs a copy of every response through this process. Turn it on when browsing sites you do not trust from a machine on a private network. Applies to browser sessions started after the change"
+  },
+  {
     "key": "memory.budgetMb",
+    "label": "Memory GoodVibes aims to stay under (MB, 0 for automatic)",
     "type": "number",
     "default": 0,
     "description": "MemoryGovernor budget in MB. The governor sheds caches and pauses background jobs as RSS approaches this budget. 0 means auto: min(25% of system RAM, 4096 MB), resolved at daemon start. Applies after the daemon restarts.",
@@ -1401,6 +1610,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "memory.tier.elevatedPct",
+    "label": "Trim caches at this share of the memory budget (%)",
     "type": "number",
     "default": 60,
     "description": "Elevated tier threshold, as a percent of the budget: at/above this the governor trims registered caches to their floor and runs a gc. Applies after the daemon restarts.",
@@ -1408,6 +1618,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "memory.tier.highPct",
+    "label": "Pause background work at this share of the memory budget (%)",
     "type": "number",
     "default": 80,
     "description": "High tier threshold, as a percent of the budget: at/above this the governor flushes all registered caches and pauses deferrable background jobs. Applies after the daemon restarts.",
@@ -1415,6 +1626,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "memory.tier.criticalPct",
+    "label": "Refuse new heavy work at this share of the memory budget (%)",
     "type": "number",
     "default": 95,
     "description": "Critical tier threshold, as a percent of the budget: at/above this the governor refuses new expensive work with an honest structured outcome and emits an ops attention event. Applies after the daemon restarts.",
@@ -1422,6 +1634,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "memory.tripwire.rateMbPerSec",
+    "label": "Memory growth that suggests a leak (MB per second)",
     "type": "number",
     "default": 25,
     "description": "Leak tripwire rate in MB/s: if RSS keeps growing faster than this AFTER a full cache flush, the flush did not help and a leak is suspected. Applies after the daemon restarts.",
@@ -1429,6 +1642,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "memory.tripwire.sustainSec",
+    "label": "How long growth must last to count as a leak (seconds)",
     "type": "number",
     "default": 60,
     "description": "Leak tripwire sustain window in seconds: the post-flush growth rate must exceed memory.tripwire.rateMbPerSec continuously for this long before the governor writes a receipt and exits for a clean supervisor restart. Applies after the daemon restarts.",
@@ -1436,6 +1650,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "memory.hardLimitPct",
+    "label": "Restart before memory reaches this share of the limit (%)",
     "type": "number",
     "default": 90,
     "description": "Absolute-memory backstop as a percent of the EFFECTIVE KILL CEILING, the daemon's own cgroup memory limit where one applies, else physical RAM. If RSS holds at/above this percent of that ceiling for memory.tripwire.sustainSec, the governor writes a hard-limit receipt and exits so a supervisor restarts clean, catching a leak too slow for memory.tripwire.rateMbPerSec just before the kernel/cgroup OOM killer would strike. Default 90: fire at 90% of the real kill line, leaving a safety margin for the exit itself. Deliberately anchored to the kill ceiling and NOT to memory.budgetMb: the budget caps small by design (25% of RAM, max 4096 MB), and a large-but-stable working set above the budget on a big-RAM host is handled by the critical tier (refuse new expensive work, stay alive), anchoring the exit to the budget would put such a healthy daemon in a permanent restart loop. Applies after the daemon restarts.",
@@ -1443,42 +1658,49 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "profile.enabled",
+    "label": "Keep a profile about you",
     "type": "boolean",
     "default": true,
     "description": "Load and serve the owner profile. On by default because the owner asked for it built, and a feature that ships off ships dark. Turning it off means the file is never opened and every profile verb answers \"your profile is turned off\", a stated state, not an empty profile that would read as \"I know nothing about you\". Applies when the daemon starts."
   },
   {
     "key": "profile.autonomousWrites",
+    "label": "Save what you tell GoodVibes about yourself without asking",
     "type": "boolean",
     "default": true,
     "description": "Let the runtime record facts it learns from things you say directly to it, without asking each time. On by default because that was the owner's explicit choice over propose-first. Off leaves reads and your own hand edits working exactly as before, the honest \"I will curate this myself\" mode, not a disabled feature. Untrusted sources are barred either way."
   },
   {
     "key": "profile.discloseWrites",
+    "label": "Say what was saved to your profile",
     "type": "boolean",
     "default": true,
     "description": "Say in one line what was recorded, e.g. \"Noted, saved your office address to your profile.\" On by default because telling you what it recorded was a condition attached to autonomous learning. Editable because the receipts may read as noisy over time, but turning them off is your decision made knowingly rather than a default that hides writes."
   },
   {
     "key": "profile.injectOpenTier",
+    "label": "Tell the model how you like to be addressed",
     "type": "boolean",
     "default": true,
     "description": "Put the open tier, how you like to be addressed, your pronouns, your city, your timezone, your unit/date/locale preferences and your style notes, into system context as a short block each turn. On by default because otherwise the agent still guesses a metro area for a weather answer, which is the failure that started this. Closed-tier content (addresses, contact details, people, notes) is never bulk-injected regardless of this setting."
   },
   {
     "key": "profile.discloseClosedTierReads",
+    "label": "Say when private profile details are used",
     "type": "boolean",
     "default": true,
     "description": "Announce it in the reply when a closed-tier value is used, e.g. \"Used your shipping address from your profile.\" On by default because using your address on an order should be visible to you at the moment it happens rather than discoverable afterwards in a log."
   },
   {
     "key": "profile.consumerFallback",
+    "label": "Fill unset settings from your profile",
     "type": "boolean",
     "default": true,
     "description": "Let an UNSET consumer setting read its value from the matching profile field, quiet hours, delivery channel, and the commerce fields as their keys arrive. On because a profile nothing reads is a diary. A value you configured explicitly always wins; the profile only fills a gap, and only for a single keyed read, never in a settings listing or export."
   },
   {
     "key": "profile.reloadThrottleMs",
+    "label": "How often to check for edits to your profile (ms)",
     "type": "number",
     "default": 2000,
     "description": "How often, in milliseconds, to check the profile file for a hand edit on hosts where filesystem watching is unavailable. Used only on that fallback path and never on a read, so it costs nothing in the common case. 2000 sits under human edit-then-check latency: you save the file, look at the assistant, and it already knows. Applies when the daemon starts.",
@@ -1486,30 +1708,35 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "profile.path",
+    "label": "Profile file",
     "type": "string",
     "default": "",
     "description": "Absolute path to the profile Markdown file. Empty means the default, owner-profile.md under the daemon home, which already honours GOODVIBES_DAEMON_HOME, so this override is only for keeping the file somewhere else entirely. Applies when the daemon starts."
   },
   {
     "key": "profile.conversationalCapture",
+    "label": "Record what you say about yourself as you talk",
     "type": "boolean",
     "default": true,
     "description": "Let a conversation record what you say about yourself as you say it, a trip and its itinerary, a birthday, a preference, a person. On by default because the alternative is what shipped before it: you paste a flight itinerary, get a warm reply, and nothing is stored. Off leaves conversations working and every profile read unchanged; it only stops the writing, and a turn that would have recorded something says so instead of staying quiet."
   },
   {
     "key": "profile.ownerChannels",
+    "label": "Chat accounts that are you",
     "type": "string",
     "default": "",
     "description": "The channels whose incoming messages are you, comma-separated, each as a surface name or surface:address, the same form as occasions.nudgeChannel. Only these may record to your profile; anything arriving anywhere else is treated as someone else's words and is refused, which is the rule that keeps a forwarded email from editing what the system believes about you. Empty means no channel counts as you on a conversational turn: only a surface you are sitting at (the terminal, the web UI) can record to your profile, and the refusal names this setting. occasions.nudgeChannel is where reminders are sent and is not an owner grant, so the channel that sends you a birthday reminder cannot also record that your flight leaves at nine until you list it here."
   },
   {
     "key": "occasions.enabled",
+    "label": "Remind you of important dates",
     "type": "boolean",
     "default": true,
     "description": "Raise your important dates on their own, before they matter. On by default because a feature that ships off ships dark, and because being told about your wife's birthday in time is the whole point. Turning it off does NOT forget anything: the dates stay in your profile, stay readable, and are still answered when you ask, it only stops the system raising them unprompted."
   },
   {
     "key": "occasions.leadDays",
+    "label": "Start reminding this many days ahead",
     "type": "number",
     "default": 10,
     "description": "How many days ahead an occasion starts being raised. Ten because that is enough runway to order something and have it arrive. An individual entry overrides this by carrying \"lead 21\" on its line, so a date that needs longer does not force everything else earlier.",
@@ -1517,43 +1744,50 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "occasions.activeHours",
+    "label": "Hours when date reminders may arrive",
     "type": "string",
     "default": "08:00-22:00",
     "description": "The hours a nudge may arrive, HH:MM-HH:MM, reckoned in daemon.timezone. 08:00–22:00 because those hours are generally fine and anything outside them probably is not. Outside this window nothing is dropped, it waits. An empty or unreadable value means no restriction rather than permanent silence, so a typo cannot switch the feature off invisibly."
   },
   {
     "key": "occasions.nudgeChannel",
+    "label": "Where date reminders are sent",
     "type": "string",
     "default": "telegram",
     "description": "Where a nudge is delivered: a comma-separated list of channel destinations, each a surface or surface:address, \"telegram\", \"agent\", \"telegram,agent\", \"telegram:12345,agent\". Telegram by default, because an occasion nudge that waits to be asked for has already missed the date it existed to protect, the owner ruled that these push out of the box, to Telegram and to the agent. Naming \"agent\" puts the reminder in the Agent's conversation: the host tells a connected Agent to read it at once (when no turn is running; otherwise when the turn ends), and an Agent that was not connected reads it at its next turn or idle check, because the reminder stays outstanding until you answer it. Naming both means both get it, and a broken credential on one cannot silence the other. Set it to empty to make the feature pull-only instead: nothing is pushed or announced, and a surface picks up what is outstanding at the end of a turn. The TUI is refused as a destination whatever is set here: it is a get-work-done interface, and life admin does not belong in it."
   },
   {
     "key": "occasions.cadenceDays",
+    "label": "Remind about conflicting dates every (days)",
     "type": "number",
     "default": 3,
-    "description": "How often an unresolved CONFLICT in your dates, two different dates recorded for the same thing, is raised again, in days. It no longer governs birthday reminders: those speak twice, when the date enters its runway and on the day itself, and never repeat beyond that. A conflict is a fact about your file that stays wrong until you fix it, so it does keep coming back.",
+    "description": "How often an unresolved CONFLICT in your dates, two lines recorded for the same thing (two different dates, or one date written twice), is raised again, in days. It no longer governs birthday reminders: those speak twice, when the date enters its runway and on the day itself, and never repeat beyond that. A conflict is a fact about your file that stays wrong until you fix it, so it does keep coming back.",
     "validationHint": "integer in [1, 60]"
   },
   {
     "key": "occasions.awayAdjust",
+    "label": "Remind earlier when you will be away",
     "type": "boolean",
     "default": true,
     "description": "Let a plan that has you away from home move a nudge EARLIER, to the day before you leave. On because you cannot have something delivered to a house you are not in, so a reminder that arrives while you are abroad has already missed the window it existed to protect. When you have already left there is nothing earlier to move to and the nudge stands rather than waiting for your return."
   },
   {
     "key": "occasions.calendarMirror",
+    "label": "Copy your dates to your calendar",
     "type": "boolean",
     "default": false,
     "description": "Write your occasions out to the connected calendar as well. Off by default because your profile is the record and the calendar is a copy, calendar entries are single occurrences that do not persist across years, which is exactly why these dates live in the profile instead. Nothing is ever read back the other way, and deleting a calendar entry never removes the occasion."
   },
   {
     "key": "occasions.suppressMirroredNudges",
+    "label": "Stay quiet about dates already in your calendar",
     "type": "boolean",
     "default": true,
     "description": "Stay quiet about an occasion that is already in a calendar, so the calendar's own reminder is the only ping. On by default because two pings for one birthday is how a useful reminder becomes one you mute. Turn it off if you would rather have both, an occasion marked \"mirrored\" on its own line is covered by this too."
   },
   {
     "key": "occasions.interviewQuestions",
+    "label": "Questions asked when choosing a gift",
     "type": "number",
     "default": 3,
     "description": "How many questions are asked after you say yes to sorting a gift. Three, because it is meant to guide you to an idea rather than fill in a form, and a long one is a form. The questions open from what your profile already knows about the person and from what you landed on last time; none of them recommends anything.",
@@ -1561,6 +1795,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "occasions.giftHistoryYears",
+    "label": "Keep past gift choices for (years)",
     "type": "number",
     "default": 10,
     "description": "How long the record of what you landed on is kept, in years. Ten, so year three is not steered by year one. This is the one part of the machine-owned state that deliberately outlives its occasion's answer, the answers expire with their date so next year asks fresh, the history does not.",
@@ -1568,6 +1803,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "occasions.sweepIntervalMinutes",
+    "label": "How often to look for upcoming dates (minutes)",
     "type": "number",
     "default": 60,
     "description": "How often the daemon looks for dates entering their lead window, in minutes. Hourly by default, which is frequent enough that a nudge lands within an hour of the window opening and cheap enough to be invisible, the pass reads memory and touches one small file. It cannot over-nudge whatever this is set to: each occasion carries its own next-due date, so a shorter interval makes the FIRST nudge land sooner and changes nothing about the rhythm after it. Housekeeping runs on every pass, including the ones that are inside quiet hours or that raise nothing.",
@@ -1575,6 +1811,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.local.sttEngine",
+    "label": "Speech recognition on this computer",
     "type": "enum",
     "default": "",
     "description": "Local speech-to-text engine: whisper-cpp (blessed default, CPU-first, realtime-capable) or faster-whisper (NVIDIA-GPU alternative via a wrapper script). Empty means not configured, and the machine says so honestly rather than erroring. Managed setup installs whisper-cpp and fills this in.",
@@ -1586,18 +1823,21 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.local.sttBinary",
+    "label": "Speech recognition program",
     "type": "string",
     "default": "",
     "description": "Absolute path to the local STT engine binary (e.g. whisper.cpp's whisper-cli). Managed setup installs the engine and sets this."
   },
   {
     "key": "voice.local.sttModelPath",
+    "label": "Speech recognition model file",
     "type": "string",
     "default": "",
     "description": "Absolute path to the local STT model file (e.g. ggml-tiny.en.bin). Managed setup downloads the model, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens."
   },
   {
     "key": "voice.local.ttsEngine",
+    "label": "Speech on this computer",
     "type": "enum",
     "default": "",
     "description": "Local text-to-speech engine: piper (blessed default, sub-50ms first-audio class, MIT) or kokoro (quality alternative, Apache 2.0, via a wrapper script). Empty means not configured. Managed setup installs piper and fills this in.",
@@ -1609,24 +1849,29 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.local.ttsBinary",
+    "label": "Speech program",
     "type": "string",
     "default": "",
     "description": "Absolute path to the local TTS engine binary (e.g. piper). Managed setup installs the engine and sets this."
   },
   {
     "key": "voice.local.ttsModelPath",
+    "label": "Voice model file",
     "type": "string",
     "default": "",
     "description": "Absolute path to the local TTS voice model (e.g. en_US-lessac-low.onnx with its .json beside it). Managed setup downloads the voice, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens."
   },
   {
     "key": "voice.wake.enabled",
+    "label": "Listen for the wake word",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Run the wake-word detector, listening continuously for the wake phrase on the configured input device. Turning it on starts a supervised capture process and a persistent listening indicator; turning it off stops it and releases the device immediately. WHERE IT LISTENS depends on the voice.wake.surfaces.* rows: the terminal captures through a recorder subprocess and is on by default, the agent captures the same way and is opted in per surface, and a browser tab captures through getUserMedia and is opted in per origin. Off by default because an always-on microphone must be an explicit act, not something a user discovers after the fact. THE MODEL IS ALREADY THERE: installing goodvibes downloads and checksum-verifies the pinned classifier, and a daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup step at all. Turning it on in the terminal app or Agent (settings, /config, a model's settings call) runs the same setup as /voice wake setup: it turns the wake rows on, fetches any missing wake-word model files and shows the plan; installing a speech-to-text engine is only proposed."
   },
   {
     "key": "voice.wake.models",
+    "label": "Wake words to listen for",
     "type": "string",
     "default": "hey_goodvibes",
     "description": "Comma-separated wake-word models to run concurrently, by id. Default \"hey_goodvibes\" is the model the platform pins, hosts, and verifies by checksum. Additional ids resolve against voice.wake.customModelDir. Each model costs one classifier inference per 80 ms frame, the shared melspectrogram and speech-embedding front end is computed once regardless of how many models are listed, so a second model is far cheaper than a second detector. An empty list disables detection without stopping the service. Ids are letters, digits, dot, underscore and hyphen only, since each becomes a file name.",
@@ -1634,6 +1879,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.threshold",
+    "label": "How sure it must be that it heard the wake word (0 to 1)",
     "type": "number",
     "default": 0.9,
     "description": "Score, 0 to 1, a frame must reach for the wake phrase to count as heard. DELIBERATELY 0.9, NOT openWakeWord's upstream default of 0.5 and not the 0.5 originally accepted for this row: measurement on the shipped hey_goodvibes model showed 0.5 fires on 34.5% of never-trained minimal-pair phrases (\"hey good vibe check\", \"hey goodbye vibes\", ordinary English a user will actually say) at 99.2% recall, while 0.9 cuts that to 24.7% for 96.8% recall. Trading 2.4 points of recall to remove roughly a third of the wrong wakes is the better default for a microphone that is always on. Lower it toward 0.5 if the detector misses you; raise it above 0.9 if it fires when you did not speak to it. Recall figures here are synthetic-only, no human has recorded the phrase.",
@@ -1641,6 +1887,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.patienceFrames",
+    "label": "How long the wake word must be heard (80 ms steps)",
     "type": "number",
     "default": 2,
     "description": "Consecutive 80 ms frames that must all score above voice.wake.threshold before the wake fires. Two frames is about 160 ms of agreement, which removes most single-frame false accepts for one extra frame of latency. Set to 1 for the fastest possible trigger at the cost of more spurious wakes.",
@@ -1648,6 +1895,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.cooldownMs",
+    "label": "Ignore the wake word right after it is heard (ms)",
     "type": "number",
     "default": 2000,
     "description": "Milliseconds after a confirmed wake during which further detections are ignored, so one spoken phrase cannot fire twice as it passes through the detector's rolling window. Applied after patience confirms a hit. 0 disables the cooldown and lets every confirmed frame fire.",
@@ -1655,6 +1903,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.vadThreshold",
+    "label": "How sure it must be that someone is speaking (0 to 1)",
     "type": "number",
     "default": 0,
     "description": "Speech-probability floor, 0 to 1, from the speech gate run ahead of the wake classifier; frames below it are withheld from scoring instead of being classified. The gate is our own speech/non-speech head over the SAME embedding the wake classifier consumes, so it costs one extra inference of 0.025 ms per 80 ms frame, beside the detector's own 3.46 ms, and no extra front end. It provisions with the wake models. Measured on 106,390 held-out frames: at 0.3 it passes 96.0% of speech frames and withholds 95.7% of non-speech ones, which is the recommended value; lower passes more speech and screens less, higher screens more and starts costing wakes. 0 is the shipped default and turns the stage off entirely, it is the configuration that has been exercised longest, and a gate can only ever cost you a detection. A surface that has not loaded the gate REFUSES TO START with any value above 0, rather than running unscreened frames through a stage you have configured.",
@@ -1662,6 +1911,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.noiseSuppression",
+    "label": "Reduce background noise",
     "type": "enum",
     "default": "none",
     "description": "Noise suppression applied to captured audio before anything reads it, the wake classifier scores filtered frames, and the utterance recorded after a wake (and push-to-talk voice input) is filtered audio too. \"speex\" is SpeexDSP's own denoiser, carried in the platform as a WebAssembly module and applied on every surface that has WebAssembly, which is both shipped ones: nothing to install, nothing to download, no per-host library. It attenuates the estimated noise floor by about 15 dB, measured at 13.2 dB against a synthetic tone-plus-white-noise set, for 0.24 ms of work per 80 ms frame beside the detector's own 3.46 ms. \"none\" ships as the default and is a true passthrough: the captured bytes reach the detector exactly as the device produced them. Choose \"speex\" on a noisy input (a fan, an air conditioner, street noise through an open window), and \"none\" on a quiet one, where a denoiser only has speech to work on.",
@@ -1672,12 +1922,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.inputDevice",
+    "label": "Microphone",
     "type": "string",
     "default": "",
     "description": "Capture device to listen on. Empty means the operating system default source. Shared by BOTH microphone consumers: wake detection and push-to-talk voice input open the same device through the same path, so this row moves both rather than only the always-on one. Device identifiers are host-specific, list real ones with `pactl list short sources` or `arecord -L`, or use a navigator.mediaDevices deviceId in a browser tab. Note pw-record takes a PipeWire node serial or node name here, not a PulseAudio device name, and sox cannot target a device at all (it reads AUDIODEV from the environment), which the surface reports rather than silently ignoring."
   },
   {
     "key": "voice.wake.captureCommand",
+    "label": "Recording program",
     "type": "enum",
     "default": "auto",
     "description": "Which recorder feeds capture on a HOST surface, the terminal and the daemon child process. A browser tab ignores this row and uses getUserMedia. Feeds both consumers: wake detection and push-to-talk voice input. \"auto\" probes for pw-record, parecord, arecord, ffmpeg, then sox and uses the first present, mirroring how local audio playback discovers its player. Name one explicitly to pin the choice on a host where the probe picks a device-starved backend; a named recorder that is not installed reports that instead of quietly falling back, because pinning it was the point.",
@@ -1692,30 +1944,35 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.surfaces.tui",
+    "label": "Listen for the wake word in the terminal app",
     "type": "boolean",
     "default": true,
     "description": "Listen for the wake phrase on the terminal, through a recorder subprocess on the host. On by default: once wake detection is enabled the terminal is the primary surface, and a wake that reaches no surface is a detector that appears broken. A confirmed wake plays the activation sound, shows the listening indicator, captures the utterance that follows and sends it to speech-to-text, then places the transcript in the composer, or submits it when voice.wake.autoSubmit is on."
   },
   {
     "key": "voice.wake.surfaces.agent",
+    "label": "Listen for the wake word in the Agent",
     "type": "boolean",
     "default": false,
     "description": "Listen for the wake phrase on the agent surface, through a recorder subprocess on the host, the same capture path the terminal uses. Turning this on with voice.wake.enabled opens the microphone on the agent, and a confirmed wake sends the utterance that follows to speech-to-text and puts the transcript into the agent conversation input, or submits it when voice.wake.autoSubmit is on. Off by default because two surfaces on one machine both acting on a single spoken utterance is a confusing default, not because it does not work: turn it on when the agent is the surface you actually talk to, and consider turning voice.wake.surfaces.tui off when you do."
   },
   {
     "key": "voice.wake.surfaces.webui",
+    "label": "Listen for the wake word in the web UI",
     "type": "boolean",
     "default": false,
-    "description": "Listen for the wake phrase in the web UI, which runs the detector inside the browser tab on a WASM backend and downloads the pinned model through the daemon. Off by default because browser capture is a separate stack with its own per-origin microphone permission prompt, it is opted into per browser, not inherited from the host. While it is off the tab never calls getUserMedia at all, so no permission prompt appears. A plain-http origin cannot capture and says so instead of failing silently."
+    "description": "Listen for the wake phrase in the web UI, which runs the detector inside the browser tab on a WASM backend and downloads the pinned model through the daemon. This daemon's setting: once it is on, every browser that opens this daemon's web UI listens, each only after its own microphone permission prompt is accepted. Off by default because browser capture is a separate stack from the terminal's. While it is off a tab never calls getUserMedia at all, so no permission prompt appears. A plain-http origin cannot capture and says so instead of failing silently."
   },
   {
     "key": "voice.wake.surfaces.app",
+    "label": "Listen for the wake word in the desktop app",
     "type": "boolean",
     "default": false,
     "description": "Listen for the wake phrase in the desktop companion app, which runs the detector inside its embedded webview on a WASM backend, the same runtime and download path the web UI uses. Off by default because webview capture is a separate stack with its own microphone permission prompt, it is opted into per install, not inherited from the host. While it is off the webview never calls getUserMedia at all, so no permission prompt appears."
   },
   {
     "key": "voice.wake.activationSound",
+    "label": "Sound when the wake word is heard",
     "type": "enum",
     "default": "chime",
     "description": "Sound played the moment a wake is confirmed. \"chime\" by default because audible confirmation is how a user knows the microphone acted, a silent wake is the behaviour people distrust. \"custom\" plays voice.wake.activationSoundPath; \"none\" is silent and leaves voice.wake.indicator as the only feedback.",
@@ -1727,12 +1984,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.activationSoundPath",
+    "label": "Your own wake sound file",
     "type": "string",
     "default": "",
     "description": "Absolute path to the audio file played on wake. Read only when voice.wake.activationSound is \"custom\"; ignored otherwise. A host surface plays the file through the same player local voice output uses. A browser tab cannot read a path on your machine, so it plays the built-in chime instead and reports that this row is not in force there, a wake stays audible either way."
   },
   {
     "key": "voice.wake.indicator",
+    "label": "Show when the microphone is listening",
     "type": "enum",
     "default": "statusline",
     "description": "How the surface shows that the microphone is live. \"statusline\" keeps a persistent listening marker for as long as the detector runs, not only at the moment of a wake, so an always-on microphone is never invisible: a footer row in the terminal, a status-strip chip in the web UI. \"banner\" is more prominent; \"off\" removes the marker entirely and is not the default for that reason.",
@@ -1744,6 +2003,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.preRollMs",
+    "label": "Audio kept from just before the wake word (ms)",
     "type": "number",
     "default": 500,
     "description": "Milliseconds of audio kept from BEFORE the wake fired and prepended to the speech-to-text request, so a phrase run straight into the command (\"hey goodvibes, what's—\") is not clipped at the front. 500 ms covers the detector's own confirmation latency plus a fast speaker. 0 starts capture at the moment of detection.",
@@ -1751,6 +2011,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.captureMaxSeconds",
+    "label": "Longest a spoken request may last (seconds)",
     "type": "number",
     "default": 10,
     "description": "Hard ceiling on how long capture runs before it stops on its own. Bounds memory and guarantees a stuck or silent stream cannot hold the microphone open indefinitely. Applies to post-wake capture AND to push-to-talk, where a key-release event that never arrives would otherwise leave the device open. 0 REMOVES THE CEILING: speech-to-text imposes no length limit of its own, so the ceiling is policy rather than a technical bound, and a long dictated thought is a real thing to want. It still defaults to 10 because the ceiling is the backstop for the OTHER stop condition failing. Post-wake capture normally ends about voice.wake.silenceStopMs after you stop talking, which depends on frames reading as silence, with the ceiling off, a stream that goes stuck or a room the silence floor cannot resolve holds the microphone open with nothing left to close it. Turn it off alongside a silence-stop you have seen work in your room; voice.wake.silenceFloorRms is the row that makes that reliable.",
@@ -1758,6 +2019,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.silenceStopMs",
+    "label": "Silence that ends a spoken request (ms)",
     "type": "number",
     "default": 1200,
     "description": "Milliseconds of silence that end post-wake capture, so the request is sent when the user stops talking rather than at the voice.wake.captureMaxSeconds ceiling. Raise it if capture cuts off mid-sentence during natural pauses. Post-wake only: push-to-talk ends when the key is released, because someone holding it through a pause has not finished talking.",
@@ -1765,6 +2027,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.silenceFloorRms",
+    "label": "Sound level that counts as silence",
     "type": "number",
     "default": 0,
     "description": "The audio level at or below which a frame counts as silence, on the int16 magnitude scale the capture path uses (full scale 32768, so 180 is about -45 dBFS). 0, the default, MEASURES IT PER UTTERANCE from the audio captured just before the wake fired, and places the floor 12 dB above the room's own noise. That measurement is what makes voice.wake.silenceStopMs work at all in a room that is not quiet: with a fixed floor, steady background noise above it means no frame is ever silent, silence never accumulates, and every capture runs to the voice.wake.captureMaxSeconds ceiling however long ago you stopped talking. The floor then FOLLOWS the room for the rest of the capture, tracking the quiet moments in the last second and a half, because a headset with automatic gain control raises the input once you stop talking and the room comes back louder than the number measured before it. It is never raised over a third of the speech being heard at the same time, so it cannot end up above your own voice. Set a number to pin the floor instead, which is worth doing if the measurement guesses wrong in your room: raise it if capture keeps running after you stop, lower it if capture cuts off while you are still speaking. A number you set here is used exactly as given AND frozen, it stays where you put it for the whole capture, with no following. The first measured value is never allowed below 180 or above 1440; the following that comes after it may reach 5760.",
@@ -1772,6 +2035,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.speechRetriggerMs",
+    "label": "Sound that counts as talking again (ms)",
     "type": "number",
     "default": 150,
     "description": "How long a run of sound above the silence floor has to last before it counts as you talking again. Shorter runs are counted as part of the silence they interrupted rather than starting the voice.wake.silenceStopMs wait over. This is what a close-worn or in-ear microphone needs: a breath, a lip tick or a chair creak is loud and lasts one or two frames, and treating each one as speech means the wait never completes and capture runs to the voice.wake.captureMaxSeconds ceiling every time however long ago you stopped. 150 ms sits under the shortest syllable anyone ends a sentence on and over the longest of those noises. Raise it if capture still will not end in a room full of short noises; lower it if the first word of a resumed sentence gets clipped. 0 turns it off, so every loud frame resets the wait, the behaviour before this row existed.",
@@ -1779,12 +2043,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.autoSubmit",
+    "label": "Send a spoken request without review",
     "type": "boolean",
     "default": false,
     "description": "Submit the transcribed text as a turn automatically instead of placing it in the input for review. Applies to the utterance captured after a WAKE; push-to-talk always places its transcript in the composer, because a person who pressed a key is already looking at the screen. Off by default, matching the never-auto-send posture of the existing voice input: a misheard transcript must not become a submitted turn without a human seeing it first."
   },
   {
     "key": "voice.wake.retainAudio",
+    "label": "Keep recordings on disk",
     "type": "enum",
     "default": "none",
     "description": "Whether captured audio is written to disk. \"none\" by default, nothing is stored, which is the only setting under which the microphone leaves no recording behind. \"session-temp\" keeps clips in a session-scoped directory that is deleted when the session ends and swept on recovery, and exists to debug a bad transcript, not as a recording feature. A browser tab has no filesystem to retain into: it reports that this row is not in force rather than appearing to store clips it is not storing.",
@@ -1795,12 +2061,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.customModelDir",
+    "label": "Folder of your own wake word models",
     "type": "string",
     "default": "",
     "description": "Directory searched for wake models whose ids are not the pinned default. Empty uses the managed wake model directory under the surface storage root. Set it to keep your own models outside the managed tree; files there are loaded as-is and are not checksum-pinned, unlike the managed download."
   },
   {
     "key": "voice.wake.maxRestarts",
+    "label": "Restarts after the listener crashes",
     "type": "number",
     "default": 3,
     "description": "How many times the supervisor restarts a crashed detector process inside voice.wake.crashWindowSeconds before it stops trying and reports the failure. Matches the restart ceiling used for MCP clients. 0 disables restarts, so any crash is terminal and immediately visible.",
@@ -1808,6 +2076,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.restartBackoffMs",
+    "label": "Wait before restarting the listener (ms)",
     "type": "number",
     "default": 2000,
     "description": "Base delay before restarting a crashed detector, multiplied by the attempt number for linear backoff (2 s, 4 s, 6 s). Stops a process that fails instantly from becoming a restart storm.",
@@ -1815,6 +2084,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.crashWindowSeconds",
+    "label": "Window in which listener crashes are counted (seconds)",
     "type": "number",
     "default": 60,
     "description": "Rolling window in which repeated crashes count toward voice.wake.maxRestarts. Exceeding the ceiling inside this window latches the supervisor off so a detector that cannot stay up stops consuming the device; a clean run past the window resets the count.",
@@ -1822,6 +2092,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "voice.wake.browserBackend",
+    "label": "How the browser runs the wake word listener",
     "type": "enum",
     "default": "wasm",
     "description": "Execution backend for the detector inside a browser tab. \"wasm\" is the default and the measured configuration: the per-frame cost already beats real time by a wide margin, and WebGPU cannot run the front end without splitting the graph across devices, which costs more in transfers than it saves. \"webgpu\" is available for hosts that measure otherwise. Read by the browser tab when it creates its inference sessions; a host surface always runs WASM and ignores this row. BOTH VALUES LOAD THE SAME ENGINE BINARY, the WebGPU-capable build carries the CPU engine too, so switching costs no extra download, and a tab set to \"webgpu\" on a browser without navigator.gpu falls back to the CPU provider inside the binary it already has.",
@@ -1832,6 +2103,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "device.capabilities.mode",
+    "label": "How a paired phone's camera, location and more are used",
+    "appliesWhen": "now",
     "type": "enum",
     "default": "honor-grants",
     "description": "How a paired phone's camera, screen, location, clipboard, and device commands are reached. honor-grants (stock): every capability asks the first time and every time after, unless you chose \"always allow\" for that one capability on that one phone. ask-every-time: the prompt appears on every single request, permissions.mode yolo included, and no durable grant is ever consulted or offered, use it when someone else is holding the phone. off: no capability request reaches any paired device at all.",
@@ -1843,6 +2116,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "device.capabilities.allowAlwaysOffer",
+    "label": "Which phone features may be allowed for good",
     "type": "enum",
     "default": "every-capability",
     "description": "Which capabilities may offer a durable \"always allow\" on their confirmation prompt. every-capability (stock): all of them, front camera, screen capture, precise location, and clipboard included. standard-only: the elevated ones (front camera, screen capture, precise location, clipboard read) still ask every time and never offer a grant, while everyday ones can be granted. never: no durable grant is ever offered anywhere; existing grants stop being honoured.",
@@ -1854,6 +2128,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "device.capabilities.requestTimeoutSeconds",
+    "label": "How long to wait for the phone to answer (seconds)",
     "type": "number",
     "default": 60,
     "description": "How long the agent waits for a phone to answer one capability request before giving up. A phone that is asleep or off the network usually answers within a few seconds of waking; a long timeout keeps a slow wake from failing, a short one keeps the agent from stalling.",
@@ -1861,6 +2136,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "device.location.precision",
+    "label": "How exact the phone's location may be",
     "type": "enum",
     "default": "precise-grantable",
     "description": "How exact a location the phone will report. precise-grantable (stock): both approximate and street-level fixes are available, and either may be granted durably. ask-precise: street-level fixes are available but always ask, permissions.mode yolo included, and neither offer nor honour \"always allow\". coarse-only: street-level fixes are refused entirely; only city-scale approximate location is served.",
@@ -1872,6 +2148,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "device.clipboard.readMode",
+    "label": "Reading the phone's clipboard",
     "type": "enum",
     "default": "grantable",
     "description": "Whether the agent can read what is on the phone's clipboard. grantable (stock): it asks every time and offers \"always allow\", like every other capability. ask-only: it asks every time, permissions.mode yolo included, and neither offers nor honours a durable grant. off: clipboard reads are refused; putting text ON the clipboard is unaffected.",
@@ -1883,6 +2160,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "device.capture.retentionHours",
+    "label": "Keep phone photos and screenshots for (hours)",
     "type": "number",
     "default": 24,
     "description": "How long a picture taken by the phone's camera or screen capture is kept before it is deleted and the deletion recorded. Stock is 24 hours: long enough for the work the picture was taken for, short enough that a photo of your desk is not still on disk next week.",
@@ -1890,6 +2168,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "device.capture.maxArtifacts",
+    "label": "Most phone photos and screenshots kept",
     "type": "number",
     "default": 200,
     "description": "How many captures are kept at once across all paired phones. The count is enforced when housekeeping runs (see device.capture.sweepIntervalMinutes): then the oldest past it are deleted even while inside the retention window. A burst of captures can exceed it until the next sweep.",
@@ -1897,6 +2176,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "device.capture.sweepIntervalMinutes",
+    "label": "How often old phone captures are cleared (minutes)",
     "type": "number",
     "default": 30,
     "description": "How often housekeeping runs over stored captures and grants while the runtime is up. A sweep also runs at every start; this interval is what keeps a long-running daemon from going days without one. Each sweep writes what it removed and why.",
@@ -1904,6 +2184,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "device.grants.expiryDays",
+    "label": "Phone \"always allow\" lasts for (days)",
     "type": "number",
     "default": 90,
     "description": "How long an \"always allow\" grant lasts before it expires and the capability starts asking again. Nothing is granted forever: an expired grant is removed by housekeeping and is never honoured in the meantime.",
@@ -1911,6 +2192,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "device.grants.maxPerNode",
+    "label": "Most \"always allow\" grants per phone",
     "type": "number",
     "default": 64,
     "description": "How many \"always allow\" grants one phone may hold at once. Past this count the oldest grants for that phone are removed, so a paired device cannot accumulate authority indefinitely.",
@@ -1918,6 +2200,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "device.grants.auditRetentionDays",
+    "label": "Keep the record of phone grants for (days)",
     "type": "number",
     "default": 30,
     "description": "How long the grants ledger keeps its record of grants given, used, revoked, and expired. This is what the grants surface shows you when you ask what a phone has been allowed to do and when.",
@@ -1925,6 +2208,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "device.nodes.maxPaired",
+    "label": "Most phones paired at once",
     "type": "number",
     "default": 8,
     "description": "How many phones may be paired as device nodes at once. Each paired phone is a separate identity with its own grants; this bounds how many can be outstanding before an old one has to be unpaired.",
@@ -1932,6 +2216,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "push.vapidSubject",
+    "label": "Contact address push services can reach you at",
     "type": "string",
     "default": "",
     "description": "Who a push service contacts when it has a problem delivering your notifications. Every push the daemon sends is signed with this address in it (the VAPID \"sub\" claim), and it is the only way Apple, Google, or Mozilla can reach you about, say, a malformed payload or a rate limit. Set it to a mailto: address you read, or an https: page with contact details on it. Left empty it falls back to mailto:goodvibes-push@goodvibes.invalid, which is well-formed and accepted but reaches nobody, push still works, you just never hear about a problem. A change takes effect after the daemon restarts.",
@@ -1939,6 +2224,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "push.subscriptions.warnAbovePerPrincipal",
+    "label": "Warn when one person has more push devices than",
     "type": "number",
     "default": 50,
     "description": "How many registered push devices one operator can hold before housekeeping starts saying so. This is a WARNING line, not a limit: passing it logs the count and writes it into the housekeeping disclosure, and every subscription is kept. A working device is NEVER removed to make room for a new one, registering a new phone always succeeds, even when that puts you over this number, because dropping a quiet-but-live device would stop its notifications with nothing to tell you and no way back but resubscribing. Devices leave only when something proves them dead (the push service reports the endpoint gone, or refuses it repeatedly).",
@@ -1946,6 +2232,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "push.subscriptions.failureThreshold",
+    "label": "Failed deliveries before a push device is removed",
     "type": "number",
     "default": 5,
     "description": "How many deliveries in a row a push service must refuse before the daemon treats that endpoint as dead and removes it. A 404 or 410 removes it immediately, that is the push service saying the subscription is gone, so this bound is for the murkier case of an endpoint that only ever errors or times out. Any single success resets the count to zero. Raise it if you have a flaky network and would rather keep retrying; lower it to clear out dead endpoints faster.",
@@ -1953,6 +2240,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "push.subscriptions.sweepIntervalMinutes",
+    "label": "How often push devices are checked (minutes)",
     "type": "number",
     "default": 60,
     "description": "How often housekeeping re-reads the stored push subscriptions while the daemon is up, looking for records that are provably dead, unreadable key material, a torn record, or an endpoint past the refusal threshold. A sweep also runs at every start; this interval is what keeps a daemon that stays up for weeks from going that long without one. Each sweep writes what it removed and the evidence, so a removal is never indistinguishable from data loss. A change to the interval takes effect after the daemon restarts.",
@@ -1960,6 +2248,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "fleet.maxSize",
+    "label": "Most agents at once",
     "type": "number",
     "default": 8,
     "description": "Maximum fleet size, the one ceiling on agents this daemon is responsible for: native spawned agents, ACP-hosted agents, and elastic fix-task agents all count against it. Externally-launched agents merely observed on the host never count. Renamed from orchestration.maxActiveAgents.",
@@ -1967,12 +2256,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "cluster.enabled",
+    "label": "Share chat-app work with your other machines",
     "type": "boolean",
     "default": false,
     "description": "Let this machine share inbound channel work with your OTHER goodvibes machines on this network, so exactly one of them reads each inbox (Telegram polling, ntfy subscriptions, inbox pollers) instead of all of them answering the same message. For a homelab where you run goodvibes on several machines that are all yours and configured with the same surfaces: switch it on everywhere and they sort it out between themselves, including taking over at once when one is shut down normally, and within about 20 seconds when one crashes (cluster.masterTimeoutSeconds, 15 by default, plus a short election). Off by default because switching it on asserts that every goodvibes node on this network belongs to you, on a shared network (an office, a shared house) a stranger's node would join the same coordination and one of you would stop receiving messages with nothing to indicate why. Outbound sends, sessions and the control plane are unaffected either way."
   },
   {
     "key": "cluster.heartbeatSeconds",
+    "label": "How often the lead machine says it is alive (seconds)",
     "type": "number",
     "default": 5,
     "description": "How often the responsible node tells the others it is still alive, in seconds. Lower means slightly faster notice that a node is alive and more network chatter; it does not by itself shorten a crash takeover, which waits for cluster.masterTimeoutSeconds. Applies after the daemon restarts.",
@@ -1980,6 +2271,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "cluster.masterTimeoutSeconds",
+    "label": "Silence before another machine takes the lead (seconds)",
     "type": "number",
     "default": 15,
     "description": "How long a standby node waits without a heartbeat before it decides the responsible node has crashed and holds an election, in seconds. This is the CRASH path only: a node shut down normally hands over immediately, so ordinary restarts never wait this out. Used as at least two heartbeats: a value below that is raised to two heartbeats at runtime. Applies after the daemon restarts.",
@@ -1987,6 +2279,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "cluster.bootProbeSeconds",
+    "label": "Wait for a lead machine at start (seconds)",
     "type": "number",
     "default": 3,
     "description": "How long a starting node listens for an existing responsible node before claiming the role itself, in seconds. Applies after the daemon restarts.",
@@ -1994,6 +2287,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "cluster.port",
+    "label": "Port your machines talk on",
     "type": "number",
     "default": 61860,
     "description": "UDP port used for node-to-node coordination on the local network. Every node that should coordinate must share this port. Change it only to avoid a collision with something else on your network. Applies after the daemon restarts.",
@@ -2001,18 +2295,21 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "cluster.multicastGroup",
+    "label": "Network group your machines talk on",
     "type": "string",
     "default": "239.255.71.86",
     "description": "IPv4 multicast group the nodes coordinate over. The default sits in the administratively-scoped range (239.0.0.0/8), which routers do not forward off the local network. Every node that should coordinate must share this value. Applies after the daemon restarts."
   },
   {
     "key": "cluster.secret",
+    "label": "Shared phrase for machines outside a group",
     "type": "string",
     "default": "",
     "description": "Optional shared phrase for coordinating machines that are not in a group (no `cluster create` or `cluster join`). When set, their coordination messages are signed with it and any message that does not verify is ignored, so only nodes that know the phrase can take the responsible role; every such node must use the same value. When it names a stored secret that cannot be read, this machine sends and takes no coordination messages at all until it can (rather than run unsigned), and `cluster status` says election traffic is unavailable. Inside a group it is not used: the group key signs every coordination message."
   },
   {
     "key": "cluster.keyRotationHours",
+    "label": "How often the group key changes (hours)",
     "type": "number",
     "default": 24,
     "description": "How often the group replaces the internal key it signs coordination messages with, in hours. This is NOT the join key you type when adding a machine, that one is stable and changes only when you change it. This key rotates by itself, is never shown to you, and rotating it limits how long a copy taken off an old disk or a backup would be accepted. Lower means a shorter window and a little more network traffic once per rotation; the changeover never interrupts anything, because both the new key and the previous one are accepted for a few minutes either side of it. Applies after the daemon restarts.",
@@ -2020,6 +2317,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "cluster.keyRotationGraceMinutes",
+    "label": "Old group key still accepted for (minutes)",
     "type": "number",
     "default": 5,
     "description": "How long both the new and the previous internal group key are accepted around a rotation, in minutes. This exists so that machines which have not yet picked up the new key are still heard while they catch up, without it, a rotation would look like every other machine going silent at once, and the group would needlessly hand work around. Raise it if your machines are often asleep or on a flaky link. It does NOT apply when you remove a machine: that rotation takes effect at once, which is the point of it. Applies after the daemon restarts.",
@@ -2027,6 +2325,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "cluster.beaconSeconds",
+    "label": "How often this machine announces its group (seconds)",
     "type": "number",
     "default": 15,
     "description": "How often this machine advertises its group on the local network, in seconds. The advertisement carries the group's id, its name, how many machines are in it and this build's version, and nothing else. It is what lets a new machine running `cluster join` see the group and pick it from a list. Lower means a new machine finds the group faster; higher means slightly less traffic. Applies after the daemon restarts.",
@@ -2034,6 +2333,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "cluster.rosterGossipSeconds",
+    "label": "How often machines compare shared settings (seconds)",
     "type": "number",
     "default": 60,
     "description": "How often this machine tells the others which revision of the group's shared settings and of its record (members, removals, key generations, devices, users) it holds, in seconds. A change is sent to every machine when it is made; this is how a machine that missed one (a lost message, or switched off at the time) notices and takes it. Checked on a 30 second timer, so any value below 30 behaves as 30. Higher means a missed change settles more slowly. Applies after the daemon restarts.",
@@ -2041,6 +2341,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "cluster.revocationRetentionMinutes",
+    "label": "Remember removed items for (minutes)",
     "type": "number",
     "default": 43200,
     "description": "How long a removed or revoked entry (a deleted schedule, a revoked device token, user, grant or peer) is kept on the group's record before it is dropped, in minutes; 43200 (30 days) by default. A machine that has not heard the group for longer than this, or has never synced with the group it is in, takes the group's record as the truth when it returns: what the group no longer holds is dropped on that machine, not brought back, unless that machine made it after it last synced, and `cluster status` lists what was dropped. It must span four gossip rounds: at least 4 x cluster.rosterGossipSeconds (counted as 30 when lower), in minutes rounded up, so 4 with the default gossip; a lower value is refused naming the minimum, and one in a hand-edited file is raised to it. Set the same value on every machine.",
@@ -2048,6 +2349,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "cluster.nodeName",
+    "label": "This machine's name in the group",
     "type": "string",
     "default": "",
     "description": "A name for THIS machine in the group's member list (`cluster nodes` and the web UI), such as \"desktop\" or \"laptop\", so you can tell the machines apart when removing one or reading which machine holds a surface. Up to 48 characters. Empty, the default, shows \"machine\" and the first 8 characters of its node id; the hostname is never used, because the member list replicates and the group is advertised on the network. Kept on this machine only. Other machines record the name this machine had when it created or joined the group. Applies after the daemon restarts.",
@@ -2055,6 +2357,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.hostedInboxScreening",
+    "label": "Screen chat and mail inboxes with a hosted model",
     "type": "enum",
     "default": "disabled",
     "description": "Hosted inbox screening: disabled keeps screening off. abacus-typesafe-provider-managed authorizes sending raw text from configured Discord bot one-to-one DMs and enabled Slack/email inboxes to Abacus route-llm and TypeSafe Jev. Providers manage retention; zero retention is unverified.",
@@ -2065,42 +2368,50 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.slack.enabled",
+    "label": "Connect Slack",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the Slack surface adapter"
   },
   {
     "key": "surfaces.slack.signingSecret",
+    "label": "Slack signing secret",
     "type": "string",
     "default": "",
     "description": "Slack signing secret used to verify inbound requests"
   },
   {
     "key": "surfaces.slack.botToken",
+    "label": "Slack bot token",
     "type": "string",
     "default": "",
     "description": "Slack bot token used for outbound replies and thread updates"
   },
   {
     "key": "surfaces.slack.appToken",
+    "label": "Slack app token",
     "type": "string",
     "default": "",
     "description": "Slack app-level token (xapp-...): with it the daemon connects to Slack over Socket Mode, so Slack needs no public request URL"
   },
   {
     "key": "surfaces.slack.defaultChannel",
+    "label": "Slack channel for messages",
     "type": "string",
     "default": "",
     "description": "Default Slack channel for notifications and replies"
   },
   {
     "key": "surfaces.slack.workspaceId",
+    "label": "Slack workspace",
     "type": "string",
     "default": "",
     "description": "Slack workspace identifier for route binding"
   },
   {
     "key": "surfaces.slack.inboxUserId",
+    "label": "Your Slack user for reading the inbox",
     "type": "string",
     "default": "",
     "description": "Expected Slack user ID for protected inbox reads; configure it explicitly. The token must prove this identity before reading messages. Empty keeps the inbox unconfigured.",
@@ -2108,36 +2419,43 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.slack.inboxTagging",
+    "label": "Label Slack messages with reactions",
     "type": "boolean",
     "default": false,
     "description": "Write triage labels (GoodVibes/Spam, Priority, Normal) back to Slack as reactions on the inbox messages they label. Off: labels stay in GoodVibes and channels.inbox.applyLabels refuses for this account."
   },
   {
     "key": "surfaces.discord.enabled",
+    "label": "Connect Discord",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the Discord surface adapter"
   },
   {
     "key": "surfaces.discord.publicKey",
+    "label": "Discord public key",
     "type": "string",
     "default": "",
     "description": "Discord application public key used to verify interactions"
   },
   {
     "key": "surfaces.discord.botToken",
+    "label": "Discord bot token",
     "type": "string",
     "default": "",
     "description": "Discord bot token used for outbound replies"
   },
   {
     "key": "surfaces.discord.applicationId",
+    "label": "Discord application",
     "type": "string",
     "default": "",
     "description": "Discord application ID used for interaction responses"
   },
   {
     "key": "surfaces.discord.inboxBotUserId",
+    "label": "Discord bot user for reading the inbox",
     "type": "string",
     "default": "",
     "description": "Expected Discord bot user ID for protected inbox reads; the token must prove this identity before any message history is requested",
@@ -2145,6 +2463,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.discord.inboxChannelIds",
+    "label": "Discord direct messages to read",
     "type": "string",
     "default": "",
     "description": "Comma-separated explicit bot-readable one-to-one DM channel IDs for protected inbox reads (1–200 unique IDs); group DMs and inferred historical discovery are unsupported",
@@ -2152,66 +2471,78 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.discord.inboxTagging",
+    "label": "Label Discord messages with reactions",
     "type": "boolean",
     "default": false,
     "description": "Write triage labels (GoodVibes/Spam, Priority, Normal) back to Discord as reactions (or forum tags) on the inbox messages they label. Off: labels stay in GoodVibes and channels.inbox.applyLabels refuses for this account."
   },
   {
     "key": "surfaces.discord.defaultChannelId",
+    "label": "Discord channel for messages",
     "type": "string",
     "default": "",
     "description": "Default Discord channel for notifications and replies"
   },
   {
     "key": "surfaces.discord.guildId",
+    "label": "Discord server",
     "type": "string",
     "default": "",
     "description": "Discord guild identifier for route binding"
   },
   {
     "key": "surfaces.ntfy.enabled",
+    "label": "Send notifications through ntfy",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the ntfy notification surface"
   },
   {
     "key": "surfaces.ntfy.baseUrl",
+    "label": "ntfy server",
     "type": "string",
     "default": "https://ntfy.sh",
     "description": "Base URL for ntfy delivery"
   },
   {
     "key": "surfaces.ntfy.topic",
+    "label": "ntfy topic for notifications",
     "type": "string",
     "default": "",
     "description": "Optional default ntfy topic for outbound notifications; does not override inbound route topics"
   },
   {
     "key": "surfaces.ntfy.chatTopic",
+    "label": "ntfy topic for chatting with the terminal app",
     "type": "string",
     "default": "",
     "description": "ntfy topic routed into the active terminal TUI session as normal chat. Empty (the default) means an unguessable name is generated and saved when the ntfy surface is first switched on: on a public server the topic name is the only thing keeping strangers out. The old shipped name is refused on ntfy.sh."
   },
   {
     "key": "surfaces.ntfy.agentTopic",
+    "label": "ntfy topic for giving the terminal app work",
     "type": "string",
     "default": "",
     "description": "ntfy topic routed to agent work in the active terminal TUI session. Empty (the default) means an unguessable name is generated and saved when the ntfy surface is first switched on: on a public server the topic name is the only thing keeping strangers out. The old shipped name is refused on ntfy.sh."
   },
   {
     "key": "surfaces.ntfy.remoteTopic",
+    "label": "ntfy topic for chatting with the daemon",
     "type": "string",
     "default": "",
     "description": "Name of the ntfy topic whose messages the daemon routes into its own remote chat session. Empty (the default) means an unguessable name is generated and saved when the ntfy surface is first switched on: on a public server the topic name is the only thing keeping strangers out. The old shipped name is refused on ntfy.sh."
   },
   {
     "key": "surfaces.ntfy.token",
+    "label": "ntfy access token",
     "type": "string",
     "default": "",
     "description": "ntfy access token used for authenticated delivery"
   },
   {
     "key": "surfaces.ntfy.defaultPriority",
+    "label": "ntfy priority (1 to 5)",
     "type": "number",
     "default": 3,
     "description": "Default ntfy priority (1-5)",
@@ -2219,18 +2550,22 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.webhook.enabled",
+    "label": "Connect webhooks",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the generic webhook surface"
   },
   {
     "key": "surfaces.webhook.defaultTarget",
+    "label": "Address replies are posted to",
     "type": "string",
     "default": "",
     "description": "URL the webhook surface posts an agent reply to when the inbound message named no callback URL"
   },
   {
     "key": "surfaces.webhook.timeoutMs",
+    "label": "Give up sending a webhook after (ms)",
     "type": "number",
     "default": 10000,
     "description": "Outbound webhook timeout in milliseconds",
@@ -2238,60 +2573,71 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.webhook.secret",
+    "label": "Secret that checks incoming webhooks",
     "type": "string",
     "default": "",
     "description": "Shared secret that verifies inbound webhook payloads. Outbound webhook deliveries are not signed with it."
   },
   {
     "key": "surfaces.homeassistant.enabled",
+    "label": "Connect Home Assistant",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the Home Assistant daemon surface"
   },
   {
     "key": "surfaces.homeassistant.instanceUrl",
+    "label": "Home Assistant address",
     "type": "string",
     "default": "",
     "description": "Home Assistant base URL, for example http://homeassistant.local:8123"
   },
   {
     "key": "surfaces.homeassistant.accessToken",
+    "label": "Home Assistant access token",
     "type": "string",
     "default": "",
     "description": "Home Assistant long-lived access token or goodvibes secret URI"
   },
   {
     "key": "surfaces.homeassistant.webhookSecret",
+    "label": "Secret that checks Home Assistant calls",
     "type": "string",
     "default": "",
     "description": "Shared secret used to verify inbound Home Assistant callbacks"
   },
   {
     "key": "surfaces.homeassistant.defaultConversationId",
+    "label": "Home Assistant conversation",
     "type": "string",
     "default": "goodvibes",
     "description": "Default Home Assistant conversation id used for route binding"
   },
   {
     "key": "surfaces.homeassistant.deviceId",
+    "label": "This daemon's device id in Home Assistant",
     "type": "string",
     "default": "goodvibes-daemon",
     "description": "Stable Home Assistant device identifier for this daemon"
   },
   {
     "key": "surfaces.homeassistant.deviceName",
+    "label": "This daemon's name in Home Assistant",
     "type": "string",
     "default": "GoodVibes Daemon",
     "description": "Home Assistant device display name for this daemon"
   },
   {
     "key": "surfaces.homeassistant.eventType",
+    "label": "Home Assistant event GoodVibes sends",
     "type": "string",
     "default": "goodvibes_message",
     "description": "Home Assistant event type used for daemon-to-Home Assistant deliveries"
   },
   {
     "key": "surfaces.homeassistant.remoteSessionTtlMs",
+    "label": "Close an idle Home Assistant conversation after (ms)",
     "type": "number",
     "default": 1200000,
     "description": "Idle TTL for Home Assistant remote conversation sessions before the daemon closes them",
@@ -2299,42 +2645,50 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.telegram.enabled",
+    "label": "Connect Telegram",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the Telegram surface contract"
   },
   {
     "key": "surfaces.telegram.botToken",
+    "label": "Telegram bot token",
     "type": "string",
     "default": "",
     "description": "Telegram bot token used for bot setup and delivery"
   },
   {
     "key": "surfaces.telegram.webhookSecret",
+    "label": "Telegram webhook secret",
     "type": "string",
     "default": "",
     "description": "Manual Telegram webhook secret for deployments without managed registration. The native daemon automatically manages its own webhook registration credential."
   },
   {
     "key": "surfaces.telegram.defaultChatId",
+    "label": "Telegram chat for messages",
     "type": "string",
     "default": "",
     "description": "Default Telegram chat, group, or channel id for delivery"
   },
   {
     "key": "surfaces.telegram.botUsername",
+    "label": "Telegram bot name",
     "type": "string",
     "default": "",
     "description": "Telegram bot username (@handle) used for mention matching, command stripping, and targeting. Discovered automatically from the bot token via getMe when left blank; setting it explicitly wins over discovery."
   },
   {
     "key": "surfaces.telegram.discoveredBotTokenId",
+    "label": "Bot the Telegram name was found for",
     "type": "string",
     "default": "",
     "description": "Bot id the cached botUsername was discovered for. Managed automatically so a rotated bot token re-resolves its identity instead of running under the previous bot's handle."
   },
   {
     "key": "surfaces.telegram.mode",
+    "label": "How Telegram messages arrive",
     "type": "enum",
     "default": "webhook",
     "description": "Telegram ingress mode: webhook or polling",
@@ -2345,72 +2699,87 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.googleChat.enabled",
+    "label": "Connect Google Chat",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the Google Chat surface contract"
   },
   {
     "key": "surfaces.googleChat.webhookUrl",
+    "label": "Google Chat webhook address",
     "type": "string",
     "default": "",
     "description": "Google Chat outbound webhook or app callback URL; an incoming webhook URL carries its key and token, so anyone holding it can post to the space"
   },
   {
     "key": "surfaces.googleChat.verificationToken",
+    "label": "Google Chat verification token",
     "type": "string",
     "default": "",
     "description": "Google Chat verification token or shared secret"
   },
   {
     "key": "surfaces.googleChat.appId",
+    "label": "Google Chat app",
     "type": "string",
     "default": "",
     "description": "Google Chat app identifier used for setup and diagnostics"
   },
   {
     "key": "surfaces.googleChat.spaceId",
+    "label": "Google Chat space for messages",
     "type": "string",
     "default": "",
     "description": "Default Google Chat space identifier for routing"
   },
   {
     "key": "surfaces.signal.enabled",
+    "label": "Connect Signal",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the Signal bridge surface contract"
   },
   {
     "key": "surfaces.signal.bridgeUrl",
+    "label": "Signal bridge address",
     "type": "string",
     "default": "",
     "description": "Signal bridge base URL used for health checks and delivery"
   },
   {
     "key": "surfaces.signal.account",
+    "label": "Signal account",
     "type": "string",
     "default": "",
     "description": "Signal account or device identifier paired with the bridge"
   },
   {
     "key": "surfaces.signal.token",
+    "label": "Signal bridge token",
     "type": "string",
     "default": "",
     "description": "Signal bridge access token"
   },
   {
     "key": "surfaces.signal.defaultRecipient",
+    "label": "Signal contact or group for messages",
     "type": "string",
     "default": "",
     "description": "Default Signal recipient or group identifier for routing"
   },
   {
     "key": "surfaces.whatsapp.enabled",
+    "label": "Connect WhatsApp",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the WhatsApp surface contract"
   },
   {
     "key": "surfaces.whatsapp.provider",
+    "label": "How WhatsApp is reached",
     "type": "enum",
     "default": "meta-cloud",
     "description": "WhatsApp provider mode: Meta Cloud API or bridge",
@@ -2421,54 +2790,64 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.whatsapp.bridgeUrl",
+    "label": "WhatsApp bridge address",
     "type": "string",
     "default": "",
     "description": "WhatsApp bridge base URL used for delivery when the provider is bridge"
   },
   {
     "key": "surfaces.whatsapp.accessToken",
+    "label": "WhatsApp access token",
     "type": "string",
     "default": "",
     "description": "WhatsApp provider access token"
   },
   {
     "key": "surfaces.whatsapp.verifyToken",
+    "label": "WhatsApp verify token",
     "type": "string",
     "default": "",
     "description": "WhatsApp webhook verify token or shared secret"
   },
   {
     "key": "surfaces.whatsapp.signingSecret",
+    "label": "WhatsApp signing secret",
     "type": "string",
     "default": "",
     "description": "WhatsApp inbound signing secret or bridge bearer token"
   },
   {
     "key": "surfaces.whatsapp.phoneNumberId",
+    "label": "WhatsApp phone number id",
     "type": "string",
     "default": "",
     "description": "WhatsApp phone number id used for provider setup"
   },
   {
     "key": "surfaces.whatsapp.businessAccountId",
+    "label": "WhatsApp business account",
     "type": "string",
     "default": "",
     "description": "WhatsApp business account id used for provider setup"
   },
   {
     "key": "surfaces.whatsapp.defaultRecipient",
+    "label": "WhatsApp contact for messages",
     "type": "string",
     "default": "",
     "description": "Default WhatsApp recipient or chat id for routing"
   },
   {
     "key": "surfaces.telephony.enabled",
+    "label": "Connect text messages and phone calls",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the telephony SMS, voice, or bridge surface contract"
   },
   {
     "key": "surfaces.telephony.provider",
+    "label": "How texts and calls are sent",
     "type": "enum",
     "default": "twilio",
     "description": "Telephony provider mode: direct Twilio API or bridge. Delivery goes through the bridge when either this or the delivery mode below is bridge.",
@@ -2479,6 +2858,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.telephony.mode",
+    "label": "Text, call or bridge",
     "type": "enum",
     "default": "sms",
     "description": "Telephony delivery mode: SMS, voice call, or bridge. Choosing bridge here also sends through the bridge, so set the bridge URL.",
@@ -2490,276 +2870,327 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.telephony.bridgeUrl",
+    "label": "Phone bridge address",
     "type": "string",
     "default": "",
     "description": "Telephony bridge base URL used for health checks, inbound callbacks, and delivery"
   },
   {
     "key": "surfaces.telephony.token",
+    "label": "Phone bridge token",
     "type": "string",
     "default": "",
     "description": "Telephony bridge bearer token"
   },
   {
     "key": "surfaces.telephony.accountSid",
+    "label": "Twilio account",
     "type": "string",
     "default": "",
     "description": "Twilio account SID for provider-direct SMS or voice delivery"
   },
   {
     "key": "surfaces.telephony.authToken",
+    "label": "Twilio auth token",
     "type": "string",
     "default": "",
     "description": "Twilio auth token or goodvibes secret URI for provider-direct delivery"
   },
   {
     "key": "surfaces.telephony.fromNumber",
+    "label": "Phone number texts and calls come from",
     "type": "string",
     "default": "",
     "description": "Default telephony caller or sender phone number"
   },
   {
     "key": "surfaces.telephony.defaultRecipient",
+    "label": "Phone number for messages",
     "type": "string",
     "default": "",
     "description": "Default telephony recipient phone number for routing"
   },
   {
     "key": "surfaces.telephony.webhookSecret",
+    "label": "Secret that checks incoming texts and calls",
     "type": "string",
     "default": "",
     "description": "Shared secret used to verify inbound telephony callbacks"
   },
   {
     "key": "surfaces.telephony.voiceLanguage",
+    "label": "Language for phone calls",
     "type": "string",
     "default": "en-US",
     "description": "BCP-47 language code for provider-direct voice call text-to-speech"
   },
   {
     "key": "surfaces.imessage.enabled",
+    "label": "Connect iMessage",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the iMessage bridge surface contract"
   },
   {
     "key": "surfaces.imessage.bridgeUrl",
+    "label": "iMessage bridge address",
     "type": "string",
     "default": "",
     "description": "iMessage bridge base URL used for health checks and delivery"
   },
   {
     "key": "surfaces.imessage.account",
+    "label": "iMessage account",
     "type": "string",
     "default": "",
     "description": "iMessage account identifier used by the bridge"
   },
   {
     "key": "surfaces.imessage.token",
+    "label": "iMessage bridge token",
     "type": "string",
     "default": "",
     "description": "iMessage bridge access token"
   },
   {
     "key": "surfaces.imessage.defaultChatId",
+    "label": "iMessage chat for messages",
     "type": "string",
     "default": "",
     "description": "Default iMessage chat id for routing"
   },
   {
     "key": "surfaces.msteams.enabled",
+    "label": "Connect Microsoft Teams",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the Microsoft Teams surface contract"
   },
   {
     "key": "surfaces.msteams.appId",
+    "label": "Teams bot app id",
     "type": "string",
     "default": "",
     "description": "Microsoft Teams bot application (client) id"
   },
   {
     "key": "surfaces.msteams.appPassword",
+    "label": "Teams bot password",
     "type": "string",
     "default": "",
     "description": "Microsoft Teams bot application password (client secret)"
   },
   {
     "key": "surfaces.msteams.webhookSecret",
+    "label": "Teams relay secret",
     "type": "string",
     "default": "",
     "description": "Secret for a relay in front of the Microsoft Teams webhook that cannot forward the Bot Framework token. Activities straight from Azure Bot Service need none: their token is verified against surfaces.msteams.appId. The app password is never accepted as an inbound secret."
   },
   {
     "key": "surfaces.msteams.tenantId",
+    "label": "Teams organisation (tenant)",
     "type": "string",
     "default": "",
     "description": "Microsoft Entra tenant id the Teams bot authenticates against"
   },
   {
     "key": "surfaces.msteams.serviceUrl",
+    "label": "Teams service address",
     "type": "string",
     "default": "",
     "description": "Bot Framework service URL for proactive Teams delivery"
   },
   {
     "key": "surfaces.msteams.botId",
+    "label": "Teams bot id",
     "type": "string",
     "default": "",
     "description": "Microsoft Teams bot id used in conversation references"
   },
   {
     "key": "surfaces.msteams.defaultConversationId",
+    "label": "Teams conversation for messages",
     "type": "string",
     "default": "",
     "description": "Default Teams conversation id for routing"
   },
   {
     "key": "surfaces.msteams.defaultChannelId",
+    "label": "Teams channel for messages",
     "type": "string",
     "default": "",
     "description": "Default Teams channel id for routing"
   },
   {
     "key": "surfaces.bluebubbles.enabled",
+    "label": "Connect BlueBubbles",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the BlueBubbles (iMessage server) surface contract"
   },
   {
     "key": "surfaces.bluebubbles.serverUrl",
+    "label": "BlueBubbles server address",
     "type": "string",
     "default": "",
     "description": "BlueBubbles server base URL used for health checks and delivery"
   },
   {
     "key": "surfaces.bluebubbles.password",
+    "label": "BlueBubbles password",
     "type": "string",
     "default": "",
     "description": "BlueBubbles server password"
   },
   {
     "key": "surfaces.bluebubbles.account",
+    "label": "BlueBubbles account",
     "type": "string",
     "default": "",
     "description": "BlueBubbles account identifier"
   },
   {
     "key": "surfaces.bluebubbles.defaultChatGuid",
+    "label": "BlueBubbles chat for messages",
     "type": "string",
     "default": "",
     "description": "Default BlueBubbles chat GUID for routing"
   },
   {
     "key": "surfaces.mattermost.enabled",
+    "label": "Connect Mattermost",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the Mattermost surface contract"
   },
   {
     "key": "surfaces.mattermost.baseUrl",
+    "label": "Mattermost server address",
     "type": "string",
     "default": "",
     "description": "Mattermost server base URL"
   },
   {
     "key": "surfaces.mattermost.botToken",
+    "label": "Mattermost bot token",
     "type": "string",
     "default": "",
     "description": "Mattermost bot access token"
   },
   {
     "key": "surfaces.mattermost.webhookSecret",
+    "label": "Mattermost webhook secret",
     "type": "string",
     "default": "",
     "description": "Mattermost inbound webhook secret, kept apart from the account credential used for delivery. Unset: the account credential is the inbound secret."
   },
   {
     "key": "surfaces.mattermost.teamId",
+    "label": "Mattermost team",
     "type": "string",
     "default": "",
     "description": "Mattermost team id the bot operates in"
   },
   {
     "key": "surfaces.mattermost.defaultChannelId",
+    "label": "Mattermost channel for messages",
     "type": "string",
     "default": "",
     "description": "Default Mattermost channel id for routing"
   },
   {
     "key": "surfaces.matrix.enabled",
+    "label": "Connect Matrix",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the Matrix surface contract"
   },
   {
     "key": "surfaces.matrix.homeserverUrl",
+    "label": "Matrix server address",
     "type": "string",
     "default": "",
     "description": "Matrix homeserver base URL"
   },
   {
     "key": "surfaces.matrix.accessToken",
+    "label": "Matrix access token",
     "type": "string",
     "default": "",
     "description": "Matrix account access token"
   },
   {
     "key": "surfaces.matrix.webhookSecret",
+    "label": "Matrix webhook secret",
     "type": "string",
     "default": "",
     "description": "Matrix inbound webhook secret, kept apart from the account credential used for delivery. Unset: the account credential is the inbound secret."
   },
   {
     "key": "surfaces.matrix.userId",
+    "label": "Matrix user GoodVibes acts as",
     "type": "string",
     "default": "",
     "description": "Matrix user id (@user:server) the adapter acts as"
   },
   {
     "key": "surfaces.matrix.defaultRoomId",
+    "label": "Matrix room for messages",
     "type": "string",
     "default": "",
     "description": "Default Matrix room id for routing"
   },
   {
     "key": "surfaces.email.host",
+    "label": "Mail server",
     "type": "string",
     "default": "",
     "description": "Mail server hostname used for both IMAP and SMTP unless overridden below"
   },
   {
     "key": "surfaces.email.user",
+    "label": "Mail account",
     "type": "string",
     "default": "",
     "description": "Mailbox account name the daemon authenticates as"
   },
   {
     "key": "surfaces.email.from",
+    "label": "Address mail is sent from",
     "type": "string",
     "default": "",
     "description": "From address on mail the daemon sends; defaults to the account name"
   },
   {
     "key": "surfaces.email.password",
+    "label": "Mail password",
     "type": "string",
     "default": "",
     "description": "Mailbox password or app password. Stored in the daemon secret tier, never in config"
   },
   {
     "key": "surfaces.email.inboxTagging",
+    "label": "Label mail with keywords",
     "type": "boolean",
     "default": false,
     "description": "Write triage labels (GoodVibes/Spam, Priority, Normal) back to the mailbox as IMAP keywords on the messages they label. Off: labels stay in GoodVibes and channels.inbox.applyLabels refuses for this account."
   },
   {
     "key": "surfaces.email.imap.host",
+    "label": "Incoming mail server",
     "type": "string",
     "default": "",
     "description": "IMAP hostname (e.g. imap.gmail.com), overriding surfaces.email.host"
   },
   {
     "key": "surfaces.email.imap.port",
+    "label": "Incoming mail port",
     "type": "number",
     "default": 993,
     "description": "IMAP port",
@@ -2767,42 +3198,49 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.imap.user",
+    "label": "Incoming mail account",
     "type": "string",
     "default": "",
     "description": "IMAP account name, overriding surfaces.email.user"
   },
   {
     "key": "surfaces.email.imap.password",
+    "label": "Incoming mail password",
     "type": "string",
     "default": "",
     "description": "IMAP password, overriding surfaces.email.password. Daemon secret tier"
   },
   {
     "key": "surfaces.email.imap.secure",
+    "label": "Encrypt incoming mail connections",
     "type": "boolean",
     "default": true,
     "description": "Connect to IMAP over TLS"
   },
   {
     "key": "surfaces.email.imap.mailbox",
+    "label": "Mail folder GoodVibes reads",
     "type": "string",
     "default": "INBOX",
     "description": "Mailbox the daemon reads"
   },
   {
     "key": "surfaces.email.imap.draftsMailbox",
+    "label": "Folder for drafts",
     "type": "string",
     "default": "",
     "description": "Mailbox drafts are appended to. Empty (the default) means ask the server which folder carries the \\Drafts flag, which is right for providers such as Gmail whose Drafts folder is not literally named \"Drafts\""
   },
   {
     "key": "surfaces.email.smtp.host",
+    "label": "Outgoing mail server",
     "type": "string",
     "default": "",
     "description": "SMTP hostname, overriding surfaces.email.host"
   },
   {
     "key": "surfaces.email.smtp.port",
+    "label": "Outgoing mail port",
     "type": "number",
     "default": 465,
     "description": "SMTP port",
@@ -2810,24 +3248,28 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.smtp.password",
+    "label": "Outgoing mail password",
     "type": "string",
     "default": "",
     "description": "SMTP password when it differs from the IMAP one. Daemon secret tier"
   },
   {
     "key": "surfaces.email.smtp.secure",
+    "label": "Encrypt outgoing mail connections",
     "type": "boolean",
     "default": true,
     "description": "Connect to SMTP over TLS"
   },
   {
     "key": "surfaces.email.inbound.enabled",
+    "label": "Tell you when mail arrives",
     "type": "boolean",
     "default": false,
     "description": "Turns on inbound notices: arriving mail is matched against open verification expectations, recorded and announced, and further accounts below are watched. Off by default. The daemon's own mailbox is read by one reader for the inbox as well whenever it is configured; this switch decides whether that mail is also announced."
   },
   {
     "key": "surfaces.email.inbound.accounts",
+    "label": "Mail accounts to watch",
     "type": "string",
     "default": "[]",
     "description": "JSON array of configured mailbox account identifiers to watch for inbound mail, e.g. [\"primary\"]. The first names the daemon's own mailbox; empty labels it with the mail user. A list rather than a single switch because one address for signups and another for the owner's real mail is the expected shape. The first entry is the daemon's own mailbox (surfaces.email.*, or Gmail when Google is connected); every further entry is watched over IMAP with the connection surfaces.email.inbound.mailboxes gives it, and one without an entry there is reported in inbound mail status rather than watched.",
@@ -2835,6 +3277,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.inbound.mailboxes",
+    "label": "Mail folders for extra accounts",
     "type": "string",
     "default": "{}",
     "description": "JSON object giving each account after the first in surfaces.email.inbound.accounts its own IMAP mailbox, e.g. {\"signups\":{\"host\":\"imap.example.com\",\"user\":\"signups@example.com\"}}. Fields: host and user (required), port (default 993, or 143 when secure is false), secure (default true; false only for a loopback host), mailbox (default INBOX) and passwordRef, a goodvibes://secrets/goodvibes/<KEY> reference whose key contains EMAIL, MAIL or IMAP as a word. Without passwordRef the password is read from the secret GOODVIBES_EMAIL_INBOUND_<ACCOUNT>_PASSWORD (the account name upper-cased, other characters as _). Each mailbox is watched with the same inbound settings as the first, and a change here takes effect without a restart.",
@@ -2842,6 +3285,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.inbound.source",
+    "label": "How new mail is read",
     "type": "enum",
     "default": "auto",
     "description": "Which mechanism reads the mailbox. \"auto\" uses Gmail when Google credentials have been adopted and the configured mail account is a Gmail account, and IMAP otherwise, so connecting Google is the whole of the setup and no IMAP host, username or app password has to be found. \"gmail\" and \"imap\" force one of them. The two are not equivalent and the difference is a real cost: IMAP holds an IDLE connection, which is true push and delivers in under a second, while Gmail has no push available to a daemon on a home machine and is POLLED on a timer, its worst-case delay is the whole poll interval below, never less. Forcing \"gmail\" without adopted Google credentials, or on an account that is not a Gmail account, is refused rather than quietly served over IMAP.",
@@ -2853,6 +3297,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.inbound.gmailPollSecondsExpecting",
+    "label": "Check Gmail while expecting mail every (seconds)",
     "type": "number",
     "default": 5,
     "description": "How often the Gmail source asks Google what changed while something is actually being waited for, a signup mid-flight whose verification mail has not arrived yet. This is polling, not push: mail can sit unnoticed for up to this many seconds, and no setting makes Gmail faster than the interval. Five seconds is the floor worth having for a person watching a signup form; the underlying call costs 2 quota units against a daily budget in the billions, so a shorter interval buys latency rather than saving quota. Ignored entirely when the IMAP source is in use, which pushes instead.",
@@ -2860,6 +3305,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.inbound.gmailPollSecondsIdle",
+    "label": "Check Gmail otherwise every (seconds)",
     "type": "number",
     "default": 60,
     "description": "How often the Gmail source asks Google what changed when nothing is being waited for. Again polling, not push: with nothing pending, mail is noticed up to this many seconds after it arrives. A minute keeps the daemon from asking Google every five seconds all week for mail nobody is waiting on; lowering it narrows that gap at the cost of a request every few seconds around the clock. Ignored entirely when the IMAP source is in use.",
@@ -2867,6 +3313,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.inbound.mode",
+    "label": "How new mail is noticed",
     "type": "enum",
     "default": "auto",
     "description": "How the IMAP source receives new mail: \"idle\" holds a persistent IMAP IDLE connection, \"poll\" checks on a timer, \"auto\" uses IDLE when the server advertises it and falls back to polling when it does not. Leave at auto unless a specific provider needs to be forced one way. Applies only to the IMAP source; the Gmail source has no IDLE to hold and is always polled, on the two intervals above.",
@@ -2878,6 +3325,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.inbound.pollIntervalSeconds",
+    "label": "Check for mail every (seconds)",
     "type": "number",
     "default": 120,
     "description": "How often the fallback poller checks the mailbox when IDLE is unavailable. Lower is more responsive but closer to a provider's rate limit; higher delays notice of new mail by up to this many seconds. Only applies when the connection is not using IDLE.",
@@ -2885,6 +3333,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.inbound.idleReissueMinutes",
+    "label": "Renew the open mail connection every (minutes)",
     "type": "number",
     "default": 27,
     "description": "How often an open IDLE connection is torn down and re-issued. RFC 2177 advises re-issuing at least every 29 minutes, or the server may silently log the connection off; raising this toward 29 trims reconnect churn but leaves less margin against a slow round trip.",
@@ -2892,6 +3341,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.inbound.reconnect.maxBackoffSeconds",
+    "label": "Longest wait before reconnecting to mail (seconds)",
     "type": "number",
     "default": 300,
     "description": "Ceiling on the exponential reconnect backoff after a dropped connection or provider error. Raising it tolerates a longer provider outage without hammering it; lowering it shortens the worst-case silence after a disconnect at the cost of retrying a still-down server more often.",
@@ -2899,12 +3349,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.inbound.notice.route",
+    "label": "Where you hear about new mail",
     "type": "string",
     "default": "default",
-    "description": "Where the owner is told about inbound mail: the literal \"default\" inherits the owner's existing notice route binding; a specific route binding id sends inbound-mail notices somewhere else. A second place to configure \"where to reach me\" is a second place to get it wrong, so most installations should leave this at default."
+    "description": "Where the owner is told about inbound mail: the literal \"default\" uses the owner's most recently used one-to-one conversation with the daemon (never a group or shared channel); a specific route binding id, shared or not, sends inbound-mail notices there instead. A second place to configure \"where to reach me\" is a second place to get it wrong, so most installations should leave this at default."
   },
   {
     "key": "surfaces.email.inbound.notice.mode",
+    "label": "Which new mail you hear about",
     "type": "enum",
     "default": "all",
     "description": "How much inbound mail generates an owner notice: \"all\" announces every message, \"expected-only\" announces only mail matching a registered expectation (quieter for a high-volume mailbox), \"none\" announces nothing. Choosing \"none\" means mail can arrive with no notice at all, a deliberate but silent choice.",
@@ -2916,6 +3368,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.inbound.expectationWindowMinutes",
+    "label": "How long to wait for an expected email (minutes)",
     "type": "number",
     "default": 15,
     "description": "Default lifetime, in minutes, of a verification expectation opened for inbound-mail matching (for example an account signup awaiting its confirmation email). Raising it gives a slower-to-arrive confirmation more time to match; lowering it shrinks how long a stale expectation can be satisfied by a late message. Hard-capped at 60 to match MAX_VERIFICATION_WINDOW_MS. Applies after the daemon restarts.",
@@ -2923,6 +3376,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.inbound.dedupTtlMinutes",
+    "label": "Remember a seen email for (minutes)",
     "type": "number",
     "default": 60,
     "description": "How long an inbound message's identity is remembered, inside the running daemon, so an overlapping poll or a retried pass does not process it twice. This cache lives in memory only: a restart destroys it rather than expiring it, so no value here prevents a duplicate across a restart, the inbound record store does that, by remembering which messages were already announced. Seconds would be enough for what this covers; a larger value only costs a little memory.",
@@ -2930,6 +3384,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.inbound.retentionDays",
+    "label": "Keep records of received mail for (days)",
     "type": "number",
     "default": 30,
     "description": "How many days an inbound mail record (sender, subject, delivery evidence, link verdicts, never the full body) is kept before it is reaped. Longer keeps a longer history to explain \"why did I get that message\"; shorter bounds how much of the owner's mail metadata the daemon retains. Applies after the daemon restarts.",
@@ -2937,6 +3392,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.inbound.maxRecords",
+    "label": "Most records of received mail kept",
     "type": "number",
     "default": 5000,
     "description": "Hard cap on the number of inbound mail records kept regardless of age. Whichever of this and retentionDays is reached first wins, so this bounds worst-case storage even under a burst of mail. Applies after the daemon restarts.",
@@ -2944,6 +3400,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.inbound.capabilityRecheckMinutes",
+    "label": "Recheck a mailbox that lacked access every (minutes)",
     "type": "number",
     "default": 60,
     "description": "How often a mailbox that reported it cannot do what inbound mail requires (for example a Gmail grant that authorizes listing but not reading message bodies, or a mailbox that does not exist) is re-probed. Long enough that a refused account is not hammered in a tight loop; short enough that fixing the underlying scope or account problem is noticed without a daemon restart.",
@@ -2951,6 +3408,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.inbound.onInsufficientCapability",
+    "label": "When a mailbox lacks access",
     "type": "enum",
     "default": "refuse-and-notify",
     "description": "\"refuse-and-notify\" stops the watcher for that account and tells the owner once, naming what is missing and the exact step to fix it, the account is not watched again until the recheck above finds it fixed. \"notice-only\" is a deliberate downgrade: it keeps announcing that mail arrived using envelope fields alone (sender, subject, delivery evidence), stating plainly in every notice that bodies are unavailable, and it can never satisfy a verification expectation while degraded, an account signup or order confirmation will not work under it. \"notice-only\" applies to exactly one condition: a Google grant that authorizes message headers and excludes message bodies (the gmail.metadata scope), which is the only case where mail can be seen arriving without being readable. Every other insufficient condition, no stored password, a refused sign-in, a mailbox that will not open, a lost cursor, a refused or unreadable fetch, leaves no envelope fields to announce, so \"notice-only\" behaves as \"refuse-and-notify\" there and the notice says which one is in force.",
@@ -2961,30 +3419,35 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.calendar.caldavUrl",
+    "label": "Calendar server",
     "type": "string",
     "default": "",
     "description": "CalDAV server URL the daemon reads and writes events through"
   },
   {
     "key": "surfaces.calendar.caldavUser",
+    "label": "Calendar account",
     "type": "string",
     "default": "",
     "description": "CalDAV account name"
   },
   {
     "key": "surfaces.calendar.caldavPassword",
+    "label": "Calendar password",
     "type": "string",
     "default": "",
     "description": "CalDAV password. Stored in the daemon secret tier, never in config"
   },
   {
     "key": "surfaces.calendar.defaultCalendarId",
+    "label": "Calendar used when none is named",
     "type": "string",
     "default": "",
     "description": "Calendar used when a request names none"
   },
   {
     "key": "surfaces.calendar.calendars",
+    "label": "Calendars and their paths",
     "type": "string",
     "default": "",
     "description": "JSON object mapping a calendar id to its collection path, e.g. {\"work\":\"/dav/calendars/work/\"}. Empty means the CalDAV URL is the one calendar",
@@ -2992,20 +3455,23 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.slack.setupVersion",
+    "label": "Slack setup last confirmed (version)",
     "type": "number",
     "default": 0,
-    "description": "Setup version the slack surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "description": "Setup version the Slack surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
     "validationHint": "integer in [0, 1000]"
   },
   {
     "key": "surfaces.discord.setupVersion",
+    "label": "Discord setup last confirmed (version)",
     "type": "number",
     "default": 0,
-    "description": "Setup version the discord surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "description": "Setup version the Discord surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
     "validationHint": "integer in [0, 1000]"
   },
   {
     "key": "surfaces.ntfy.setupVersion",
+    "label": "ntfy setup last confirmed (version)",
     "type": "number",
     "default": 0,
     "description": "Setup version the ntfy surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
@@ -3013,96 +3479,111 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.webhook.setupVersion",
+    "label": "Webhook setup last confirmed (version)",
     "type": "number",
     "default": 0,
-    "description": "Setup version the webhook surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "description": "Setup version the Webhook surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
     "validationHint": "integer in [0, 1000]"
   },
   {
     "key": "surfaces.homeassistant.setupVersion",
+    "label": "Home Assistant setup last confirmed (version)",
     "type": "number",
     "default": 0,
-    "description": "Setup version the homeassistant surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "description": "Setup version the Home Assistant surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
     "validationHint": "integer in [0, 1000]"
   },
   {
     "key": "surfaces.telegram.setupVersion",
+    "label": "Telegram setup last confirmed (version)",
     "type": "number",
     "default": 0,
-    "description": "Setup version the telegram surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "description": "Setup version the Telegram surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
     "validationHint": "integer in [0, 1000]"
   },
   {
     "key": "surfaces.googleChat.setupVersion",
+    "label": "Google Chat setup last confirmed (version)",
     "type": "number",
     "default": 0,
-    "description": "Setup version the googleChat surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "description": "Setup version the Google Chat surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
     "validationHint": "integer in [0, 1000]"
   },
   {
     "key": "surfaces.signal.setupVersion",
+    "label": "Signal setup last confirmed (version)",
     "type": "number",
     "default": 0,
-    "description": "Setup version the signal surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "description": "Setup version the Signal surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
     "validationHint": "integer in [0, 1000]"
   },
   {
     "key": "surfaces.whatsapp.setupVersion",
+    "label": "WhatsApp setup last confirmed (version)",
     "type": "number",
     "default": 0,
-    "description": "Setup version the whatsapp surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "description": "Setup version the WhatsApp surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
     "validationHint": "integer in [0, 1000]"
   },
   {
     "key": "surfaces.telephony.setupVersion",
+    "label": "Phone setup last confirmed (version)",
     "type": "number",
     "default": 0,
-    "description": "Setup version the telephony surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "description": "Setup version the Phone surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
     "validationHint": "integer in [0, 1000]"
   },
   {
     "key": "surfaces.imessage.setupVersion",
+    "label": "iMessage setup last confirmed (version)",
     "type": "number",
     "default": 0,
-    "description": "Setup version the imessage surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "description": "Setup version the iMessage surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
     "validationHint": "integer in [0, 1000]"
   },
   {
     "key": "surfaces.msteams.setupVersion",
+    "label": "Microsoft Teams setup last confirmed (version)",
     "type": "number",
     "default": 0,
-    "description": "Setup version the msteams surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "description": "Setup version the Microsoft Teams surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
     "validationHint": "integer in [0, 1000]"
   },
   {
     "key": "surfaces.bluebubbles.setupVersion",
+    "label": "BlueBubbles setup last confirmed (version)",
     "type": "number",
     "default": 0,
-    "description": "Setup version the bluebubbles surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "description": "Setup version the BlueBubbles surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
     "validationHint": "integer in [0, 1000]"
   },
   {
     "key": "surfaces.mattermost.setupVersion",
+    "label": "Mattermost setup last confirmed (version)",
     "type": "number",
     "default": 0,
-    "description": "Setup version the mattermost surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "description": "Setup version the Mattermost surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
     "validationHint": "integer in [0, 1000]"
   },
   {
     "key": "surfaces.matrix.setupVersion",
+    "label": "Matrix setup last confirmed (version)",
     "type": "number",
     "default": 0,
-    "description": "Setup version the matrix surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
+    "description": "Setup version the Matrix surface last completed (written by setup and by a passing retest; 0 means never confirmed)",
     "validationHint": "integer in [0, 1000]"
   },
   {
     "key": "watchers.enabled",
+    "label": "Watch outside sources",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Enable managed watcher/listener services (checkpointing and recovery for long-running external sources). Default on: with no watchers configured the framework idles."
   },
   {
     "key": "watchers.pollIntervalMs",
+    "label": "How often a new watcher checks (ms)",
     "type": "number",
     "default": 60000,
     "description": "Default polling interval in milliseconds for new watchers registered through the API; existing watchers and other registration paths keep their own interval",
@@ -3110,6 +3591,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.heartbeatIntervalMs",
+    "label": "How often watchers report in (ms)",
     "type": "number",
     "default": 15000,
     "description": "Heartbeat interval for watcher services in milliseconds",
@@ -3117,6 +3599,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.ciPollIntervalMs",
+    "label": "How often CI results are checked (ms)",
     "type": "number",
     "default": 60000,
     "description": "Cadence (ms) for the daemon's recurring CI-watch poll; the poller enforces a 15s floor to respect the status source's rate limits. Read once when the daemon starts: a new value applies after the next restart.",
@@ -3124,6 +3607,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.recoveryWindowMinutes",
+    "label": "Catch up on missed events this recently (minutes)",
     "type": "number",
     "default": 10,
     "description": "Recovery window for watcher restart and missed-event catch-up",
@@ -3131,24 +3615,29 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "service.enabled",
+    "label": "Run the daemon as a service",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Whether this machine runs the daemon as a service. On, a daemon started by hand installs the service at its first idle moment and doctor reports a missing or stopped service; off (the installers' --no-service, or goodvibes-daemon uninstall-service), nothing installs one and doctor does not ask for one. goodvibes-daemon install-service turns it on. A daemon setting: one value every program and installer reads, in the daemon's settings file."
   },
   {
     "key": "service.autostart",
+    "label": "Start the daemon at login",
     "type": "boolean",
     "default": false,
     "description": "Whether the daemon's service starts on its own at login. The daemon applies every change, however it is set (a settings screen, /config set, the Agent's /settings set, goodvibes-daemon config set, the API, or an edit of the daemon's settings file): on installs the service when it is not installed and enables it at login (systemd enable; a LaunchAgent with RunAtLoad); off disables it at login and leaves it installed and running. A value set while no daemon runs is applied when the daemon next starts. goodvibes-daemon install-service turns it on and uninstall-service off. A Windows logon task starts at login while installed whatever its value. A daemon setting, in the daemon's settings file."
   },
   {
     "key": "service.restartOnFailure",
+    "label": "Restart the daemon if it stops",
     "type": "boolean",
     "default": true,
     "description": "Restart the service automatically after failure"
   },
   {
     "key": "service.platform",
+    "label": "Service manager",
     "type": "enum",
     "default": "auto",
     "description": "Target service manager platform",
@@ -3162,18 +3651,21 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "service.serviceName",
+    "label": "Service name",
     "type": "string",
     "default": "",
     "description": "Name of the daemon's service unit, used by the installer, the daemon's and the terminal apps' service commands and onboarding alike. Empty (the default) uses goodvibes (goodvibes.service under systemd) on Linux and Windows, and sh.goodvibes.daemon (the launchd label) on macOS."
   },
   {
     "key": "service.logPath",
+    "label": "Daemon log file",
     "type": "string",
     "default": "",
     "description": "File path for daemon/service logs (empty = platform default under the configured service directory)"
   },
   {
     "key": "network.outboundTls.mode",
+    "label": "Certificates trusted for outgoing connections",
     "type": "enum",
     "default": "bundled",
     "description": "Outbound HTTPS trust mode for Bun fetch-based network calls",
@@ -3185,66 +3677,78 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "network.outboundTls.customCaFile",
+    "label": "Extra certificate file to trust",
     "type": "string",
     "default": "",
     "description": "Additional PEM file to trust for outbound HTTPS when using bundled+custom or custom mode"
   },
   {
     "key": "network.outboundTls.customCaDir",
+    "label": "Folder of extra certificates to trust",
     "type": "string",
     "default": "",
     "description": "Directory of PEM/CRT/CER files to trust for outbound HTTPS when using bundled+custom or custom mode"
   },
   {
     "key": "network.outboundTls.allowInsecureLocalhost",
+    "label": "Accept self-signed certificates on this computer",
     "type": "boolean",
     "default": false,
     "description": "Allow self-signed HTTPS only for localhost/loopback outbound requests"
   },
   {
     "key": "network.remoteFetch.allowPrivateHosts",
+    "label": "Allow fetching from addresses on your own network",
     "type": "boolean",
     "default": false,
     "description": "Allow explicit admin-approved remote fetches from private, localhost, or metadata hosts for artifacts and ingest flows"
   },
   {
     "key": "network.privateDeliveryHosts",
+    "label": "Machines on your network deliveries may reach",
     "type": "string",
     "default": "",
     "description": "Comma-separated hosts on your own network that deliveries you configured may reach: a watcher's target, a notification webhook, the default webhook target (a LAN device 192.168.1.20, a name such as ha.lan, or *.home.lan for every name under it). Such a host may resolve to a private, loopback, link-local, unique-local or shared (CGNAT, Tailscale) address; a cloud metadata address is always refused, and addresses from outside parties never use this list. Your own settings only: a project settings file cannot set it, and adding a host is yours to decide."
   },
   {
     "key": "relay.enabled",
+    "label": "Reach this daemon from outside through a relay",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Connect the daemon OUTBOUND to a zero-knowledge relay for reachability from outside the LAN. Default on, but no connection is ever made without an explicitly configured relay.url, leave the URL empty to keep the daemon LAN-only."
   },
   {
     "key": "relay.url",
+    "label": "Relay address",
     "type": "string",
     "default": "",
     "description": "Relay URL to dial (wss://…); empty disables the outbound relay connection"
   },
   {
     "key": "relay.rendezvousId",
+    "label": "This daemon's relay id",
     "type": "string",
     "default": "",
     "description": "The rendezvous id the daemon registers under on the relay, derived from the daemon's relay identity key and recorded here by the daemon; setting it has no effect"
   },
   {
     "key": "relay.label",
+    "label": "This daemon's name for pairing",
     "type": "string",
     "default": "",
     "description": "Human-facing daemon label carried in relay pairing payloads"
   },
   {
     "key": "relay.requireStepUpForMutations",
+    "label": "Ask for your passkey before changes made through the relay",
     "type": "boolean",
     "default": false,
     "description": "Require a recent WebAuthn step-up assertion on mutating operator calls arriving via relay (checked against a passkey registered through pairing or the step-up verbs)"
   },
   {
     "key": "runtime.companionChat.closedRetentionDays",
+    "label": "Delete closed chats after (days, 0 to keep)",
     "type": "number",
     "default": 0,
     "description": "Days after a companion chat is closed before its saved files are deleted. 0 (the default) keeps closed chats forever. Read on every cleanup pass, so a change applies without a restart.",
@@ -3252,6 +3756,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "runtime.companionChatLimiter.perSessionLimit",
+    "label": "Most chat messages per minute",
     "type": "number",
     "default": 0,
     "description": "Max companion chat messages per 60-second window per session. 0 (the default) means unset: the GOODVIBES_CHAT_LIMITER_THRESHOLD env var (read once at daemon startup) applies, else 10. A positive integer overrides the env var and is read on each check() call.",
@@ -3259,6 +3764,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "runtime.eventBus.maxListeners",
+    "label": "Most listeners per event",
     "type": "number",
     "default": 100,
     "description": "Maximum number of listeners per event channel (per-type and per-domain) before a warning is emitted in production or a RangeError is thrown in development mode. Raise this only if you have verified there is no subscriber leak.",
@@ -3266,6 +3772,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "runtime.maxParallelToolCalls",
+    "label": "Tool calls that run at once",
     "type": "number",
     "default": 8,
     "description": "Most tool calls of one model response that run at the same time. Reads run side by side, and so do writes to files that do not overlap; a command, an action the owner decides and a tool with undeclared effects always run alone, in the order the model asked. 1 runs every call one after another. Applies to the main session, sub-agents and companion chat; read once per response.",
@@ -3273,24 +3780,28 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "telemetry.includeRawPrompts",
+    "label": "Allow reading prompts in telemetry",
     "type": "boolean",
     "default": false,
     "description": "Allow raw telemetry reads from this daemon while enabled. Default false rejects raw reads; safe views always redact content. HTTP raw reads also require read:telemetry and an admin session or read:telemetry-sensitive scope. Active raw streams stop after this opt-in is revoked. Raw prompts may contain private data. Enabling the setting at startup emits a WARN log."
   },
   {
     "key": "telemetry.decisionOtlpEnabled",
+    "label": "Send permission decisions to a tracing collector",
     "type": "boolean",
     "default": false,
     "description": "Export permission/policy decision-log records to an OTLP endpoint (export-only, no ingestion). Requires telemetry.decisionOtlpEndpoint"
   },
   {
     "key": "telemetry.decisionOtlpEndpoint",
+    "label": "Tracing collector for permission decisions",
     "type": "string",
     "default": "",
     "description": "OTLP/HTTP JSON endpoint base for decision-log export (empty = disabled). Spans POST to <base>/v1/traces, logs to <base>/v1/logs"
   },
   {
     "key": "telemetry.decisionOtlpSignal",
+    "label": "Send permission decisions as",
     "type": "enum",
     "default": "span",
     "description": "Which OTLP record shape each decision is emitted as: span, log, or both",
@@ -3302,6 +3813,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "batch.mode",
+    "label": "Send requests in cheaper batches",
     "type": "enum",
     "default": "off",
     "description": "Daemon provider Batch API mode. off: nothing is queued (the batch job API refuses with BATCH_DISABLED). explicit: the batch job API is open, and a non-streaming OpenAI-compatible chat completion is queued when it sends x-goodvibes-execution: batch. eligible-by-default: every non-streaming OpenAI-compatible chat completion whose provider has a Batch API is queued unless it sends x-goodvibes-execution: live (one whose provider cannot batch runs live as usual; batch.fallback applies only to an explicit batch request); a queued one is answered 202 with the job id and read back at <pathPrefix>/chat/completions/<id>. Streaming requests and terminal, companion and web chat always run live.",
@@ -3313,6 +3825,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "batch.fallback",
+    "label": "When a provider can't batch",
     "type": "enum",
     "default": "live",
     "description": "What a batch job does when its provider has no Batch API: live runs the request once, now, as an ordinary request and answers the job already finished; fail refuses the job. A job that asks for a live execution mode is refused either way: the batch API only queues.",
@@ -3323,6 +3836,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "batch.queueBackend",
+    "label": "Where batched requests wait",
     "type": "enum",
     "default": "local",
     "description": "Queue backend for daemon batch signals. local stores jobs under the daemon config directory; cloudflare sends them through the provisioned Worker's queue. /cloudflare provision switches this to cloudflare only after the Worker reaches the daemon.",
@@ -3333,6 +3847,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "batch.tickIntervalMs",
+    "label": "How often batches are sent (ms)",
     "type": "number",
     "default": 60000,
     "description": "Daemon-local batch scheduler tick interval in milliseconds. Read once when the scheduler starts: a new value applies after the next restart.",
@@ -3340,6 +3855,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "batch.maxDelayMs",
+    "label": "Longest a request waits for a batch (ms)",
     "type": "number",
     "default": 300000,
     "description": "Maximum time a queued local batch job should wait before the daemon submits its provider batch",
@@ -3347,6 +3863,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "batch.maxJobsPerProviderBatch",
+    "label": "Most requests per batch",
     "type": "number",
     "default": 100,
     "description": "Maximum platform jobs grouped into a single upstream provider batch submission",
@@ -3354,6 +3871,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "batch.maxQueuePayloadBytes",
+    "label": "Largest batched request (bytes)",
     "type": "number",
     "default": 16384,
     "description": "Maximum Cloudflare queue message payload size in bytes; a larger cloudflare-queue job is refused (HTTP 413). Queue messages should be signals, not full prompt archives",
@@ -3361,6 +3879,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "batch.maxQueueMessagesPerDay",
+    "label": "Most Cloudflare queue messages per day",
     "type": "number",
     "default": 1000,
     "description": "Daily Cloudflare queue message budget, enforced by the provisioned Worker (its Durable Object coordinator counts per UTC day): past it, the Worker answers 429 QUEUE_BUDGET_EXHAUSTED with the use so far and when it resets, and nothing more is queued. 0 means no limit. Takes effect at the next /cloudflare provision.",
@@ -3368,192 +3887,224 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "cloudflare.enabled",
+    "label": "Use Cloudflare",
     "type": "boolean",
     "default": false,
     "description": "Enable optional Cloudflare Worker/Queue integration points. The daemon does not require Cloudflare when this is false."
   },
   {
     "key": "cloudflare.freeTierMode",
+    "label": "Stay within Cloudflare's free plan",
     "type": "boolean",
     "default": true,
     "description": "Keep job bodies out of Cloudflare Queues: the provisioned Worker stores each body in R2 and queues only its key, and refuses a job when R2 is not provisioned (409 QUEUE_PAYLOADS_NEED_R2). Off, a body up to batch.maxQueuePayloadBytes travels in the queue message. Takes effect at the next /cloudflare provision."
   },
   {
     "key": "cloudflare.accountId",
+    "label": "Cloudflare account",
     "type": "string",
     "default": "",
     "description": "Cloudflare account id used by platform-owned Worker/Queue provisioning and by the cloudflare-ai-gateway provider (which falls back to CLOUDFLARE_ACCOUNT_ID when this is empty)."
   },
   {
     "key": "cloudflare.aiGatewayId",
+    "label": "Cloudflare AI Gateway",
     "type": "string",
     "default": "",
     "description": "Cloudflare AI Gateway id the cloudflare-ai-gateway provider sends through (with cloudflare.accountId). If empty, the provider falls back to CLOUDFLARE_AI_GATEWAY_ID. A change to either id takes effect at once."
   },
   {
     "key": "cloudflare.apiTokenRef",
+    "label": "Cloudflare API token",
     "type": "string",
     "default": "",
     "description": "GoodVibes secret reference for the Cloudflare API token. If empty, the platform falls back to CLOUDFLARE_API_TOKEN."
   },
   {
     "key": "cloudflare.zoneId",
+    "label": "Cloudflare domain id",
     "type": "string",
     "default": "",
     "description": "Optional Cloudflare zone id selected for platform-managed DNS and Zero Trust Access hostnames"
   },
   {
     "key": "cloudflare.zoneName",
+    "label": "Cloudflare domain",
     "type": "string",
     "default": "",
     "description": "Optional Cloudflare zone name selected during discovery/onboarding when zone id is not known yet"
   },
   {
     "key": "cloudflare.workerName",
+    "label": "Cloudflare worker name",
     "type": "string",
     "default": "goodvibes-batch-worker",
     "description": "Cloudflare Worker script name managed by GoodVibes provisioning"
   },
   {
     "key": "cloudflare.workerSubdomain",
+    "label": "Cloudflare workers.dev subdomain",
     "type": "string",
     "default": "",
     "description": "Cloudflare account workers.dev subdomain used to infer cloudflare.workerBaseUrl"
   },
   {
     "key": "cloudflare.workerHostname",
+    "label": "Cloudflare worker's own address",
     "type": "string",
     "default": "",
     "description": "Optional custom hostname for the GoodVibes Cloudflare Worker when DNS automation is enabled"
   },
   {
     "key": "cloudflare.workerBaseUrl",
+    "label": "Cloudflare worker address",
     "type": "string",
     "default": "",
     "description": "Optional deployed GoodVibes Cloudflare Worker base URL used by clients that proxy batch signals through Workers"
   },
   {
     "key": "cloudflare.daemonBaseUrl",
+    "label": "Address Cloudflare uses to reach the daemon",
     "type": "string",
     "default": "",
     "description": "Daemon origin URL the Cloudflare Worker or Tunnel uses for Worker-to-daemon batch calls"
   },
   {
     "key": "cloudflare.daemonHostname",
+    "label": "Public address of the daemon through Cloudflare",
     "type": "string",
     "default": "",
     "description": "Optional public daemon hostname managed through Cloudflare DNS, Tunnel, and Access provisioning"
   },
   {
     "key": "cloudflare.workerTokenRef",
+    "label": "Token the worker uses with the daemon",
     "type": "string",
     "default": "",
     "description": "Optional GoodVibes secret reference for the Worker-to-daemon bearer token"
   },
   {
     "key": "cloudflare.workerClientTokenRef",
+    "label": "Token apps use with the worker",
     "type": "string",
     "default": "",
     "description": "Optional GoodVibes secret reference for the bearer token clients use when calling the Cloudflare Worker"
   },
   {
     "key": "cloudflare.workerCron",
+    "label": "Cloudflare worker schedule",
     "type": "string",
     "default": "*/5 * * * *",
     "description": "Cron trigger installed on the GoodVibes Cloudflare Worker for batch scheduler ticks"
   },
   {
     "key": "cloudflare.queueName",
+    "label": "Cloudflare queue",
     "type": "string",
     "default": "goodvibes-batch",
     "description": "Cloudflare Queue binding/name for GoodVibes batch job signals"
   },
   {
     "key": "cloudflare.deadLetterQueueName",
+    "label": "Cloudflare queue for failed jobs",
     "type": "string",
     "default": "goodvibes-batch-dlq",
     "description": "Cloudflare dead-letter queue binding/name for failed GoodVibes batch job signals"
   },
   {
     "key": "cloudflare.tunnelName",
+    "label": "Cloudflare tunnel name",
     "type": "string",
     "default": "goodvibes-daemon",
     "description": "Zero Trust Tunnel name managed by GoodVibes provisioning when tunnel integration is enabled"
   },
   {
     "key": "cloudflare.tunnelId",
+    "label": "Cloudflare tunnel id",
     "type": "string",
     "default": "",
     "description": "Cloudflare Zero Trust Tunnel id selected or created by GoodVibes provisioning"
   },
   {
     "key": "cloudflare.tunnelTokenRef",
+    "label": "Cloudflare tunnel token",
     "type": "string",
     "default": "",
     "description": "GoodVibes secret reference for the cloudflared tunnel token generated by provisioning"
   },
   {
     "key": "cloudflare.accessAppId",
+    "label": "Cloudflare Access app protecting the daemon",
     "type": "string",
     "default": "",
     "description": "Cloudflare Zero Trust Access application id protecting the GoodVibes daemon hostname"
   },
   {
     "key": "cloudflare.accessServiceTokenId",
+    "label": "Cloudflare Access service token id",
     "type": "string",
     "default": "",
     "description": "Id of the Cloudflare Zero Trust Access service token created for GoodVibes daemon access: the public half, sent beside the client secret, which is stored separately under cloudflare.accessServiceTokenRef"
   },
   {
     "key": "cloudflare.accessServiceTokenRef",
+    "label": "Cloudflare Access service token",
     "type": "string",
     "default": "",
     "description": "GoodVibes secret reference storing Access service token client id/secret JSON"
   },
   {
     "key": "cloudflare.kvNamespaceName",
+    "label": "Cloudflare store for job delivery state",
     "type": "string",
     "default": "goodvibes-runtime",
     "description": "Cloudflare KV namespace that records each queued job's delivery state (queued, delivered with the daemon job id, rejected), served by the Worker at /batch/queue/jobs/<id>, so a redelivered message is acknowledged without a second daemon call."
   },
   {
     "key": "cloudflare.kvNamespaceId",
+    "label": "Cloudflare store id",
     "type": "string",
     "default": "",
     "description": "Cloudflare KV namespace id used for the GoodVibes Worker binding"
   },
   {
     "key": "cloudflare.durableObjectNamespaceName",
+    "label": "Cloudflare counter for daily queue use",
     "type": "string",
     "default": "GoodVibesCoordinator",
     "description": "Cloudflare Durable Object class whose coordinator counts queue operations and messages per UTC day for the queue budgets; added automatically when a budget is set."
   },
   {
     "key": "cloudflare.durableObjectNamespaceId",
+    "label": "Cloudflare counter id",
     "type": "string",
     "default": "",
     "description": "Cloudflare Durable Object namespace id, recorded by provisioning after the Worker migration (not an input)."
   },
   {
     "key": "cloudflare.r2BucketName",
+    "label": "Cloudflare bucket for queued jobs",
     "type": "string",
     "default": "goodvibes-artifacts",
     "description": "Cloudflare R2 bucket that holds queued job bodies so queue messages carry only their key; a body is deleted once the daemon has the job."
   },
   {
     "key": "cloudflare.secretsStoreName",
+    "label": "Cloudflare secrets store name",
     "type": "string",
     "default": "goodvibes",
     "description": "Name of the Cloudflare Secrets Store that optional GoodVibes provisioning creates and manages (the store holds the secrets; this is its name)"
   },
   {
     "key": "cloudflare.secretsStoreId",
+    "label": "Cloudflare secrets store id",
     "type": "string",
     "default": "",
     "description": "Cloudflare Secrets Store id selected or created by GoodVibes provisioning"
   },
   {
     "key": "cloudflare.maxQueueOpsPerDay",
+    "label": "Most Cloudflare queue operations per day",
     "type": "number",
     "default": 10000,
     "description": "Daily Cloudflare queue operation budget, enforced by the provisioned Worker (its Durable Object coordinator counts per UTC day): past it, the Worker answers 429 QUEUE_BUDGET_EXHAUSTED with the use so far and when it resets. 0 means no limit. Takes effect at the next /cloudflare provision.",
@@ -3561,12 +4112,15 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.enabled",
+    "label": "Run triggers that watch commands and conditions",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the trigger family: stream watchers over long-lived commands, model-free condition checks, and one-shot on-exit process triggers. Off by default because a trigger launches and supervises real processes on your machine without a person watching, turning it on is a deliberate choice, not a fallback. With it on and no triggers defined, the supervisor idles and consumes nothing."
   },
   {
     "key": "watchers.triggers.backoffLadderMs",
+    "label": "Waits between retries of a failing trigger (ms)",
     "type": "string",
     "default": "30000,60000,300000,900000,3600000",
     "description": "Comma-separated retry ladder in milliseconds, walked one rung per consecutive failure of a trigger check. The default climbs 30s, 60s, 5m, 15m, 60m so a briefly unreachable endpoint recovers fast while a genuinely broken one stops hammering. The last rung repeats until the breaker opens. Read once when the daemon starts; restart to apply a change.",
@@ -3574,6 +4128,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.breakerStrikes",
+    "label": "Failures before a trigger is paused",
     "type": "number",
     "default": 5,
     "description": "Consecutive check failures that open the trigger's breaker. An open breaker parks the trigger in a visible circuit-open state with the last error attached instead of retrying forever; the operator resets it explicitly. Raise it for a flaky-but-recoverable source, lower it to fail fast. Read once when the daemon starts; restart to apply a change.",
@@ -3581,6 +4136,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.defaultCheckIntervalMs",
+    "label": "How often a trigger checks its condition (ms)",
     "type": "number",
     "default": 60000,
     "description": "Cadence used by a condition trigger that does not declare its own interval. This is the steady-state polling rate; the backoff ladder overrides it while a trigger is failing.",
@@ -3588,6 +4144,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.probeTimeoutMs",
+    "label": "Give up on one trigger check after (ms)",
     "type": "number",
     "default": 15000,
     "description": "Ceiling on one probe execution (http request, file read, command run, or platform-tool call) before it is abandoned and counted as a failed check. Keeps a hung endpoint from stalling the whole check queue.",
@@ -3595,6 +4152,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.maxConcurrentChecks",
+    "label": "Trigger checks that run at once",
     "type": "number",
     "default": 4,
     "description": "How many condition checks may execute at the same moment. Checks beyond this wait their turn, so a large trigger set cannot saturate the machine or a rate-limited API.",
@@ -3602,6 +4160,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.observationRingSize",
+    "label": "Readings kept per trigger",
     "type": "number",
     "default": 200,
     "description": "Observations kept per trigger in its persisted ring buffer. Every rule, change, transition, rate-of-change, windowed aggregation, is a pure function over this buffer, so this is the memory depth available to them. Larger windows need a larger ring. Read once when the daemon starts; restart to apply a change.",
@@ -3609,6 +4168,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.runHistoryLimit",
+    "label": "Runs kept per trigger",
     "type": "number",
     "default": 50,
     "description": "Run records kept per trigger (when it ran, what it observed, whether it fired, what the action returned). Bounded on purpose: an append-only history is a disk leak with a nicer name. Read once when the daemon starts; restart to apply a change.",
@@ -3616,6 +4176,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.runHistoryTtlHours",
+    "label": "Keep trigger runs for (hours)",
     "type": "number",
     "default": 168,
     "description": "Age ceiling in hours on retained run history. Records older than this are reaped by the recovery sweep even when the count limit has not been reached, and the sweep reports how many it removed. Read once when the daemon starts; restart to apply a change.",
@@ -3623,6 +4184,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.eventLogLimit",
+    "label": "Events kept for linking triggers",
     "type": "number",
     "default": 500,
     "description": "Entries retained in the shared event log that cross-watcher correlation rules read. This log is the only channel through which one trigger can observe another, and it is bounded so correlation cannot grow without limit. Read once when the daemon starts; restart to apply a change.",
@@ -3630,6 +4192,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.eventLogTtlHours",
+    "label": "Keep events for linking triggers for (hours)",
     "type": "number",
     "default": 24,
     "description": "Age ceiling in hours on the shared correlation event log. Correlation windows longer than this cannot see the older side of the pair, so raise it together with any long correlation window. Read once when the daemon starts; restart to apply a change.",
@@ -3637,6 +4200,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.sweepIntervalMs",
+    "label": "How often old trigger records are cleared (ms)",
     "type": "number",
     "default": 300000,
     "description": "Cadence of the recurring housekeeping sweep: reap records whose owning process or session is gone, retire fired one-shot triggers, enforce the count and age bounds, and re-validate persisted state by content. A daemon that only sweeps at boot never sweeps. Read once when the daemon starts; restart to apply a change.",
@@ -3644,6 +4208,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.supervisionTickMs",
+    "label": "How often watched processes are checked (ms)",
     "type": "number",
     "default": 1000,
     "description": "How often the supervisor checks whether a supervised on-exit child has terminated and whether any condition check is due. This is the floor on how quickly an on-exit trigger notices its process ended; raise it to trade detection latency for less polling on a machine running long builds. Read once when the daemon starts; restart to apply a change.",
@@ -3651,6 +4216,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.streamQueueLimit",
+    "label": "Matched lines a log watcher may hold",
     "type": "number",
     "default": 1000,
     "description": "Matched lines a stream watcher may hold before the oldest are dropped. The queue is bounded so a chatty log cannot exhaust memory; every drop is counted and reported on the trigger record rather than being silent.",
@@ -3658,6 +4224,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.streamBatchLines",
+    "label": "Matched lines sent to an agent at once",
     "type": "number",
     "default": 25,
     "description": "Matched lines gathered into one payload before an agent is invoked. Batching is what keeps a stream watcher from starting one agent turn per log line.",
@@ -3665,6 +4232,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.streamBatchIntervalMs",
+    "label": "Send a partial batch of matched lines after (ms)",
     "type": "number",
     "default": 1000,
     "description": "How long a partially filled stream batch waits before it is flushed anyway, so a slow trickle of matches still reaches an agent promptly instead of waiting for the batch to fill.",
@@ -3672,6 +4240,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.onExitMaxDurationMs",
+    "label": "Longest a watched process may run (ms)",
     "type": "number",
     "default": 21600000,
     "description": "Hard ceiling on a supervised on-exit child. When it is reached the child is terminated and the trigger fires with an explicit timed-out termination state, so a process waiting on a prompt that will never come cannot hang forever. The six-hour default is sized for a long build.",
@@ -3679,6 +4248,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.onExitStdin",
+    "label": "Input given to a watched process",
     "type": "enum",
     "default": "none",
     "description": "Standard input handed to a supervised on-exit child. \"none\" closes stdin so a password-prompting process gets EOF and exits instead of blocking forever; \"empty\" attaches an immediately-closed empty pipe for programs that require a readable stdin handle. There is deliberately no interactive option, nobody is at the keyboard.",
@@ -3689,6 +4259,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "watchers.triggers.outputTailBytes",
+    "label": "Output kept from a watched process (bytes)",
     "type": "number",
     "default": 8192,
     "description": "Bytes of trailing child output carried in an on-exit termination payload. Exit is not success, so the payload always includes this tail for the agent prompt to inspect alongside the exit code and signal.",
@@ -3696,25 +4267,38 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "update.auto",
+    "label": "Update while running",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "While-running self-update of this installation (the daemon, and the Agent): check for a new release hourly, download and checksum-verify it, swap at a no-active-work moment, and restart (the previous binary is kept for one-command rollback). A daemon setting: one value for every program on this machine, kept in the daemon's settings file; a project settings file cannot set it. The release installer's --no-auto-update sets it false"
   },
   {
     "key": "update.autoUpdateAtLaunch",
+    "label": "Update when an app starts",
     "type": "boolean",
     "default": true,
     "description": "The terminal app and the Agent check for and install a newer release at launch. Set false to disable launch updates; the Agent's while-running updates also stop unless update.auto is explicitly set. A daemon setting: one value for every program on this machine, kept in the daemon's settings file; a project settings file cannot set it. The release installer's --no-auto-update sets it false"
   },
   {
     "key": "update.launchCheckTimeoutMs",
+    "label": "Longest the start-up update check may take (ms)",
     "type": "number",
     "default": 2500,
     "description": "Maximum milliseconds spent checking for a terminal update at launch; the installed version starts if the check cannot complete",
     "validationHint": "integer in [250, 30000]"
   },
   {
+    "key": "update.applyTimeoutMs",
+    "label": "Longest the start-up update may take (ms)",
+    "type": "number",
+    "default": 45000,
+    "description": "Maximum milliseconds the terminal app and the Agent spend downloading, verifying and swapping in a new release at launch. Past it, an update that has not started replacing files is cancelled and tried at the next launch; one already replacing files finishes in the background and says so when it is done",
+    "validationHint": "integer in [5000, 300000]"
+  },
+  {
     "key": "update.intervalMinutes",
+    "label": "Check for updates every (minutes)",
     "type": "number",
     "default": 60,
     "description": "Minutes between daemon update checks",
@@ -3722,6 +4306,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "update.firstCheckSeconds",
+    "label": "First update check after start (seconds)",
     "type": "number",
     "default": 30,
     "description": "Seconds after daemon start before the FIRST update check (a boot-settle delay, so a daemon that was down while releases shipped does not stay stale for a whole interval). Capped at one check interval",
@@ -3729,6 +4314,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "update.releasesUrl",
+    "label": "Where updates come from",
     "type": "string",
     "default": "https://github.com/mgd34msu/goodvibes/releases/latest",
     "description": "GitHub releases/latest URL for a complete GoodVibes monorepo suite. Exact historical default feeds migrate to goodvibes. Native suite updates replace installed sibling programs and configured release WebUI/browser support together. Must be a release URL of the GoodVibes repository itself (https://github.com/mgd34msu/goodvibes/releases/...), or an http URL on this machine (loopback address) (empty turns the update loop off): the binaries and checksums are downloaded from this origin and are not signed, so any other repository or remote host would let a config write replace the installed programs",
@@ -3736,6 +4322,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "update.rollbackAfterFailedStarts",
+    "label": "Go back to the previous version after this many failed starts",
     "type": "number",
     "default": 3,
     "description": "Consecutive rapid boots that fail to reach a fully-started daemon before the startup path automatically restores the kept previous binary and restarts onto it. 0 leaves a bad update in place for a hand-run rollback",
@@ -3743,6 +4330,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "update.alertAfterFailedChecks",
+    "label": "Tell you after this many failed update checks",
     "type": "number",
     "default": 3,
     "description": "Consecutive failed update checks before the daemon tells the owner over a channel that still works that it can no longer update itself. Lower is louder; 1 reports the first failure. A repeat is held back for 12 hours so an ongoing outage is one message rather than one an hour",
@@ -3750,24 +4338,28 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "checkpoints.preferGitRoot",
+    "label": "Save checkpoints of the whole git repository",
     "type": "boolean",
     "default": true,
     "description": "Checkpoint the enclosing git repository (its top level) instead of only the working directory"
   },
   {
     "key": "checkpoints.allowBroadRoot",
+    "label": "Allow checkpoints of your home folder or the whole disk",
     "type": "boolean",
     "default": false,
     "description": "Allow checkpoints of a broad directory: the filesystem root, your home directory or ~/.goodvibes. Off, such a directory is not checkpointed"
   },
   {
     "key": "checkpoints.allowLargeFirstSnapshot",
+    "label": "Allow a large first checkpoint",
     "type": "boolean",
     "default": false,
     "description": "Allow the first checkpoint of a workspace to sweep more files than checkpoints.maxFirstSnapshotFiles. Off, that first checkpoint is refused with the file count"
   },
   {
     "key": "checkpoints.maxFirstSnapshotFiles",
+    "label": "Most files in a first checkpoint",
     "type": "number",
     "default": 50000,
     "description": "Most files the first checkpoint of a workspace may sweep before it is refused (unless checkpoints.allowLargeFirstSnapshot is on)",
@@ -3775,12 +4367,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "checkpoints.autoRetention",
+    "label": "Remove old checkpoints automatically",
     "type": "boolean",
     "default": true,
     "description": "Prune old checkpoints automatically after each new one and once at start. Off, old checkpoints are pruned only when asked"
   },
   {
     "key": "checkpoints.unregisteredWorkspaces",
+    "label": "Checkpoints in folders that aren't registered",
     "type": "enum",
     "default": "off",
     "description": "Checkpoints in a workspace that is not registered (Agent and daemon; the terminal app checkpoints any workspace). off: automatic and explicit checkpoints are refused there until it is registered (`goodvibes-agent workspaces register`). guarded: they are taken there too, under the root and size guards above. A project settings file cannot change it",
@@ -3791,18 +4385,21 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "daemon.enabled",
+    "label": "Use the background daemon",
     "type": "boolean",
     "default": true,
     "description": "Whether THIS surface ADOPTS a session daemon of its own, the background service hosting the shared session broker and companion chat, bound to loopback (127.0.0.1). On (the default), the surface looks for one and adopts it. Off, it makes no adoption attempt and probes no port. It does not control the daemon process itself: a daemon started on its own runs regardless of this setting, which is a per-surface choice about adopting one. It is also NOT the switch for talking to a daemon this surface is already connected to, that is daemon.connectedHost.enabled, and the two were one key until they were split apart."
   },
   {
     "key": "daemon.connectedHost.enabled",
+    "label": "Let this app reach its connected daemon",
     "type": "boolean",
     "default": true,
     "description": "Whether this surface may DIAL the daemon it is connected to. On (the default), the features that reach a connected host work: the session-inputs poll that delivers inbound messages, conversation rewind registration, the live approvals stream, daemon-routed conversation turns, and the operator verbs. Off, each of those refuses plainly rather than failing at a connection. This is separate from daemon.enabled on purpose: adopting a daemon of your own and talking to one that is already there are different decisions, and while they shared a single key, turning adoption off silently stopped the inputs poll, the approvals stream and rewind registration on machines whose connected host was live and answering, the session and memory spines kept dialing the same host perfectly well, which is how the split showed itself."
   },
   {
     "key": "daemon.connectedHost.url",
+    "label": "Address of the daemon to connect to",
     "type": "string",
     "default": "",
     "description": "Where the terminal (goodvibes) dials its daemon, as an origin such as http://10.0.0.7:3421. Empty (the default) means the daemon on this machine, at the address derived from controlPlane.hostMode, controlPlane.host and controlPlane.port; those settings describe only how a local daemon listens. Setup's \"Connect to an existing daemon\" writes this, so finishing setup or changing the local bind does not move the terminal off the daemon it connected to. Clear it to go back to the daemon on this machine.",
@@ -3810,36 +4407,42 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "danger.httpListener",
+    "label": "Receive webhooks",
     "type": "boolean",
     "default": false,
     "description": "Enable HTTP webhook listener for receiving external events"
   },
   {
     "key": "tools.llmEnabled",
+    "label": "Use a separate model for tool work",
     "type": "boolean",
     "default": false,
     "description": "Enable dedicated tool LLM for internal operations (off = tools use the main conversation model only when needed)"
   },
   {
     "key": "tools.llmProvider",
+    "label": "Provider for tool work",
     "type": "string",
     "default": "",
     "description": "Provider for tool LLM calls (empty = use currently selected provider)"
   },
   {
     "key": "tools.llmModel",
+    "label": "Model for tool work",
     "type": "string",
     "default": "",
     "description": "Model for tool LLM calls (empty = fastest available for the provider)"
   },
   {
     "key": "tools.autoHeal",
+    "label": "Repair a failed edit automatically",
     "type": "boolean",
     "default": false,
-    "description": "When a write or edit fails validation, try the project's own formatter, then its linter fix, then a model repair, each from the content as written; a repair is kept only when it fixes the errors and changes nothing else"
+    "description": "When a write or edit fails validation, try the project's own formatter, then its linter fix, then a model repair, each from the content as written; a repair is kept only when it fixes the errors and changes nothing else. The formatter and linter run inside a bubblewrap boundary with no network and nothing writable but their own copy of the file; where none can be built they are skipped with a warning"
   },
   {
     "key": "tools.defaultTokenBudget",
+    "label": "Most tokens a precise read returns (0 for all)",
     "type": "number",
     "default": 0,
     "description": "Optional token budget for precision read operations; 0 includes the complete result",
@@ -3847,36 +4450,43 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "tools.hooksFile",
+    "label": "Hooks file",
     "type": "string",
     "default": "hooks.json",
     "description": "Hook configuration file name, relative to the project working directory (so the default is <project>/hooks.json, not a file under .goodvibes)"
   },
   {
     "key": "tools.validators.typecheck",
+    "label": "Type check command",
     "type": "string",
     "default": "",
     "description": "Command the write and edit tools run for validate \"typecheck\" in a project that declares no typecheck command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. \"pnpm -r typecheck\" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool's own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare."
   },
   {
     "key": "tools.validators.lint",
+    "label": "Lint command",
     "type": "string",
     "default": "",
     "description": "Command the write and edit tools run for validate \"lint\" in a project that declares no lint command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. \"pnpm -r lint\" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool's own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare."
   },
   {
     "key": "tools.validators.test",
+    "label": "Test command",
     "type": "string",
     "default": "",
     "description": "Command the write and edit tools run for validate \"test\" in a project that declares no test command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. \"pnpm -r test\" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool's own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare."
   },
   {
     "key": "tools.validators.build",
+    "label": "Build command",
     "type": "string",
     "default": "",
     "description": "Command the write and edit tools run for validate \"build\" in a project that declares no build command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. \"pnpm -r build\" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool's own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare."
   },
   {
     "key": "tools.overflowSpillBackend",
+    "label": "Where long tool output is kept",
+    "appliesWhen": "restart",
     "type": "enum",
     "default": "file",
     "description": "Where large tool-output overflow content spills: file (on-disk .overflow, default), ledger (execution ledger), or diagnostics. An injected custom backend still takes precedence.",
@@ -3888,12 +4498,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "cache.enabled",
+    "label": "Cache prompts to cut cost",
     "type": "boolean",
     "default": true,
     "description": "Enable prompt caching for eligible providers (Anthropic)"
   },
   {
     "key": "cache.stableTtl",
+    "label": "How long cached prompts last",
     "type": "enum",
     "default": "1h",
     "description": "Cache TTL for stable content (system prompt + tools): 5m or 1h. On Anthropic a 1h write is billed at 2x the input rate (5m: 1.25x) and session cost prices it that way; 1h pays off when a session pauses more than five minutes between requests.",
@@ -3904,12 +4516,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "cache.monitorHitRate",
+    "label": "Warn when the cache is rarely used",
     "type": "boolean",
     "default": true,
     "description": "Monitor cache hit rate and warn when below threshold"
   },
   {
     "key": "cache.hitRateWarningThreshold",
+    "label": "Warn below this cache hit rate (0 to 1)",
     "type": "number",
     "default": 0.3,
     "description": "Warn when cache hit rate falls below this fraction (0.0–1.0)",
@@ -3917,24 +4531,29 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "helper.enabled",
+    "label": "Send small jobs to a helper model",
     "type": "boolean",
     "default": false,
     "description": "Send supporting work (compaction and resume summaries, session titles) to the helper route below; off, it stays on the main model (titles on the tool LLM)"
   },
   {
     "key": "helper.globalProvider",
+    "label": "Provider for the helper model",
     "type": "string",
     "default": "",
     "description": "Provider for the global helper model (empty = the tool LLM when enabled, else the main model)"
   },
   {
     "key": "helper.globalModel",
+    "label": "Helper model",
     "type": "string",
     "default": "",
     "description": "Model ID for the global helper model (empty = the tool LLM when enabled, else the main model)"
   },
   {
     "key": "behavior.hitlMode",
+    "label": "How much GoodVibes tells you",
+    "appliesWhen": "now",
     "type": "enum",
     "default": "balanced",
     "description": "Notification verbosity mode applied to the notification router at startup and on change: off (baseline delivery policy, mode changes rejected), quiet (minimal verbosity, long batch windows), balanced (default), or operator (verbose, short batch windows)",
@@ -3947,12 +4566,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.autoCommit",
+    "label": "Commit a finished contract's work",
     "type": "boolean",
     "default": true,
     "description": "Commit the deliverable when a contract passes: worktree mode merges the contract branch, shared mode commits the paths the contract touched"
   },
   {
     "key": "contract.commitScope",
+    "label": "What a finished contract commits",
     "type": "enum",
     "default": "scoped",
     "description": "What a passing contract commits: off (never commit; the work is left as uncommitted changes), scoped (only the contract's own changes, default), all (the whole working tree in shared mode)",
@@ -3964,6 +4585,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.gateTimeoutMs",
+    "label": "Longest a quality check may run (ms)",
     "type": "number",
     "default": 900000,
     "description": "Timeout in ms for each quality gate command and for a /test run (default 15 minutes); a gate past it is stopped and reported unverified; 0 runs until completion or cancellation",
@@ -3971,6 +4593,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.acceptanceStakes",
+    "label": "How strict a contract's checks are",
     "type": "enum",
     "default": "high",
     "description": "How strong a reading must be before a criterion counts as met: high (default) or critical (the strictest declared pass band)",
@@ -3981,12 +4604,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.midRunChecks",
+    "label": "Check work after every turn that changes files",
     "type": "boolean",
     "default": true,
     "description": "Check a unit's work at the end of each turn that changed files, not only when the unit agent tries to finish"
   },
   {
     "key": "contract.evidenceNudgeLimit",
+    "label": "Unconvincing checks before you are asked (0 for no limit)",
     "type": "number",
     "default": 0,
     "description": "Consecutive checks where the work does not show a criterion is met before the owner is asked to confirm; 0 disables this limit",
@@ -3994,6 +4619,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.stallLimit",
+    "label": "Checks without progress before work counts as stalled (0 for no limit)",
     "type": "number",
     "default": 3,
     "description": "Consecutive checks without progress that mark a unit as stalled and hand it to correction; 0 disables this limit",
@@ -4001,6 +4627,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.maxNudgesPerUnit",
+    "label": "Most corrections per unit (0 for no limit)",
     "type": "number",
     "default": 0,
     "description": "The most corrections one unit receives before it is treated as stalled; 0 disables this limit",
@@ -4008,6 +4635,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.maxFixRounds",
+    "label": "Most fix rounds before you decide (0 for no limit)",
     "type": "number",
     "default": 3,
     "description": "Planned-fix rounds plus fresh agents for one unit, group or deliverable before the owner decides; 0 disables this limit",
@@ -4015,6 +4643,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.planRepairLimit",
+    "label": "Most plan repairs before you decide (0 for no limit)",
     "type": "number",
     "default": 3,
     "description": "Times the planner is asked to repair a plan that fails its checks before the owner decides; 0 disables this limit (planning then stops only when the same problem comes back)",
@@ -4022,6 +4651,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.maxUnits",
+    "label": "Most units in a plan (0 for no limit)",
     "type": "number",
     "default": 0,
     "description": "The most units one contract plan may hold; 0 disables this limit",
@@ -4029,6 +4659,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.judgmentCallBudget",
+    "label": "Decision-model calls per contract",
     "type": "number",
     "default": 400,
     "description": "Decision-model calls one contract may spend on its checks, plans and corrections; once spent, the next correction goes to the owner with what was spent and what is still unmet instead of another fix round. 0 disables this budget",
@@ -4036,6 +4667,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.defaultAttempts",
+    "label": "Attempts per unit",
     "type": "number",
     "default": 1,
     "description": "Independent attempts per unit when the request does not ask for several; above 1, the best passing attempt is selected",
@@ -4043,6 +4675,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.maxActiveContracts",
+    "label": "Contracts that run at once",
     "type": "number",
     "default": 6,
     "description": "Contracts that may run at once; further contracts wait in a queue",
@@ -4050,6 +4683,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.maxParallelUnits",
+    "label": "Units that run at once",
     "type": "number",
     "default": 64,
     "description": "Units of one group that may run at once in worktree mode (shared mode always runs one)",
@@ -4057,6 +4691,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.isolation",
+    "label": "Where contract work runs",
     "type": "enum",
     "default": "auto",
     "description": "Where contract work runs: auto (a git worktree when the project is a git repository with a commit, otherwise the shared tree), worktree, or shared",
@@ -4068,6 +4703,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.heartbeatTimeoutMs",
+    "label": "Restart a silent unit after (ms)",
     "type": "number",
     "default": 600000,
     "description": "Silence in ms after which a running unit agent is restarted once, then failed. An exec command within its own timeout_ms, or without one, is not silence. 0 = off.",
@@ -4075,6 +4711,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.transportRetryLimit",
+    "label": "Retries after a connection error",
     "type": "number",
     "default": 3,
     "description": "How many times a unit whose agent failed on a transient error (a 5xx, 408 or 429 answer, a connection error, or a failure nothing could classify while the decision model is unavailable) is restarted with a fresh agent before the contract fails. 0 disables the retry.",
@@ -4082,6 +4719,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.transportRetryDelayMs",
+    "label": "Wait before retrying after a connection error (ms)",
     "type": "number",
     "default": 5000,
     "description": "Wait in ms before the first restart of a unit after a transient failure; it doubles for each further restart (at most 60000). A Retry-After the provider sent is used instead.",
@@ -4089,6 +4727,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.nudgeTtlMs",
+    "label": "Drop an unread correction after (ms)",
     "type": "number",
     "default": 300000,
     "description": "How long in ms a correction sent to a running unit agent waits to be read before it expires",
@@ -4096,6 +4735,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "judgment.volumeMonitor",
+    "label": "Alerts when decisions are used heavily",
     "type": "object",
     "default": {
       "budgets": [],
@@ -4109,6 +4749,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "judgment.policy",
+    "label": "When the decision model is missing or fails",
     "type": "enum",
     "default": "Hybrid",
     "description": "Hybrid (default) uses the set decision model and, when none is set or it fails, continues without it: decisions take their fallbacks and a failure is shown once with the model, what failed and the next step. Decision Model Only stops the operation and reports when the set decision model fails. No Decision Model makes no decision-model calls. With no decision model set, every policy continues without one.",
@@ -4120,13 +4761,15 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "judgment.endpoint",
+    "label": "Decision model server",
     "type": "string",
     "default": "",
-    "description": "Address of the decision model server the engine asks for judgments (a server that answers the decision API, POST /v1/systemone, as the hosted Jev does); empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model. Choose credential references explicitly when changing destinations; embedded credentials, query strings and fragments are refused",
+    "description": "Address of the decision model server the engine asks for judgments (a server that answers the decision API, POST /v1/systemone, as the hosted Jev does); empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model. While judgment.keySource is not none, change or reset it only together with judgment.keySource or judgment.keyName in one update (keep or clear the credential), or it is refused; embedded credentials, query strings and fragments are refused",
     "validationHint": "empty, or an http(s) URL without embedded credentials, query or fragment"
   },
   {
     "key": "judgment.keySource",
+    "label": "Where the decision model key comes from",
     "type": "enum",
     "default": "env",
     "description": "Select where to resolve judgment.keyName: the literal enum env reads a process environment variable, secret reads a secret-store entry, and none disables authentication. This setting stores only one of those three words, never a credential or a credential reference",
@@ -4138,6 +4781,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "judgment.keyName",
+    "label": "Decision model key name",
     "type": "string",
     "default": "TYPESAFE_API_KEY",
     "description": "Primary decision credential reference, such as TYPESAFE_API_KEY or CLOUDFLARE_API_TOKEN; never an inline key value. Ignored when keySource is none",
@@ -4145,12 +4789,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "judgment.model",
+    "label": "Decision model",
     "type": "string",
     "default": "",
     "description": "Judgment model or alias; empty uses TYPESAFE_DEFAULT_MODEL, then jev-latest"
   },
   {
     "key": "judgment.backend",
+    "label": "Decision model server type and limits",
     "type": "object",
     "default": {},
     "description": "Optional adapter (system-one, cloudflare-workers-ai or laya), maxInputBytes, maxQuestions and responseModels for the primary deployment. Limits apply to the complete request; evidence is never silently shortened. Cloudflare run URLs select their adapter automatically",
@@ -4158,6 +4804,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "judgment.fallbacks",
+    "label": "Backup decision models",
     "type": "object",
     "default": [],
     "description": "Ordered decision targets with endpoint, model, keySource, keyName and optional backend capabilities. Each target may use a different decision model or adapter. keySource is env, secret or none; none requires an empty keyName. Credentials are privately resolved from references, never inline values. An empty array disables inherited fallbacks. Each target is attempted with a finite timeout; when the chain is exhausted, a decision that has a fallback takes it and any other decision stops",
@@ -4165,6 +4812,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "judgment.timeoutMs",
+    "label": "Give up on the decision model after (ms)",
     "type": "number",
     "default": 30000,
     "description": "Finite timeout per judgment target in milliseconds; legacy 0 uses the default 30000 ms. Cancellation may stop the operation sooner",
@@ -4172,6 +4820,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "judgment.decisionDeadlineMs",
+    "label": "Longest a waiting decision may take (ms)",
     "type": "number",
     "default": 1500,
     "description": "How long a decision that a person or a tool call waits on may take, in milliseconds, before it takes its fallback (for example asking you, or the safe default). A decision target that misses this deadline three times in a row is skipped for a minute, so the next decisions take their fallback at once",
@@ -4179,6 +4828,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "fetch.sanitizeMode",
+    "label": "Clean up fetched pages",
+    "appliesWhen": "now",
     "type": "enum",
     "default": "safe-text",
     "description": "Default response sanitization mode applied by the fetch tool when the per-call sanitize_mode is omitted: none (no content sanitization), safe-text (strip active/script content, default), or strict (aggressive text-only reduction). A per-call sanitize_mode always overrides this default. Private-IP and cloud-metadata host blocking applies regardless of mode.",
@@ -4190,36 +4841,43 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "fetch.allowLocalhost",
+    "label": "Let fetch reach servers on this computer",
     "type": "boolean",
     "default": false,
     "description": "Allow the fetch tool to reach localhost/loopback dev servers (e.g. http://localhost:3000) in every project. Set by approving the localhost fetch ask and saved in your own settings, so it never re-asks; a project settings file cannot turn it on. Private-IP blocking is governed by fetch.allowedPrivateHosts; cloud-metadata blocking is absolute."
   },
   {
     "key": "fetch.allowedPrivateHosts",
+    "label": "Machines on your network fetch may reach",
     "type": "string",
     "default": "",
-    "description": "Comma-separated private-network hosts the fetch tool may reach when a call names them: a LAN device (192.168.1.20), a container (172.17.0.2), a VPN peer (100.101.102.103), or a name that resolves to one (nas.lan). Patterns match as in fetch.trustedHosts. Applies only to the host a call writes, never to a redirect target; cloud-metadata, link-local, loopback (see fetch.allowLocalhost) and other reserved addresses stay refused. A call in YOLO mode, or one the owner admitted, may also reach a private address written as an IP without this list. Your own settings only: a project settings file cannot set it."
+    "description": "Comma-separated private-network hosts the fetch tool and the browser may reach: a LAN device (192.168.1.20), a container (172.17.0.2), a VPN peer (100.101.102.103), or a name that resolves to one (nas.lan). Patterns match as in fetch.trustedHosts. For the fetch tool it applies only to the host a call writes, never to a redirect target; the browser holds every request a page makes (navigation, redirect, frame, subresource, WebSocket) to it, and asks the owner before opening any other private or loopback address for a page. Cloud-metadata, link-local, loopback (see fetch.allowLocalhost) and other reserved addresses stay refused. A call in YOLO mode, or one the owner admitted, may also reach a private address written as an IP without this list. Your own settings only: a project settings file cannot set it."
   },
   {
     "key": "fetch.trustedHosts",
+    "label": "Websites fetch trusts",
     "type": "string",
     "default": "",
     "description": "Comma-separated trusted hosts for fetch sanitization/trust-tier classification (e.g. docs.example.com, *.internal.example.com). Trusted hosts relax sanitization. This list is the only source of trust: a fetch call cannot add to it. Empty means no host is trusted. In a pattern * matches one name label and ** matches across dots; an entry that is only * or ** matches every host. Hosts are compared lower-case, without a trailing dot, in their ASCII (punycode) form."
   },
   {
     "key": "fetch.blockedHosts",
+    "label": "Websites fetch refuses",
     "type": "string",
     "default": "",
     "description": "Comma-separated default blocked hosts for fetch trust-tier classification. Blocked hosts are always refused regardless of sanitize mode or permission mode. Per-call blocked_hosts are added on top of this default. Patterns match as in fetch.trustedHosts (* one label, ** across dots, * or ** alone every host), and a.example.com. is the same host as a.example.com. The built-in SSRF-risk block (private, link-local, metadata and other non-public addresses, and encoded IP forms) applies independently of this list, in every mode."
   },
   {
     "key": "security.tokenAudit.enabled",
+    "label": "Check access tokens for broad access and age",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Audit API tokens for minimum-scope violations and overdue rotation, surfacing age, scope, and rotation warnings in diagnostics with typed security events. Default on in advisory mode: tokens are reported, never blocked, unless security.tokenAudit.managed is also true."
   },
   {
     "key": "security.tokenAudit.rotationCadenceDays",
+    "label": "Replace access tokens every (days)",
     "type": "number",
     "default": 90,
     "description": "Default rotation cadence (days) for the token audit: a token older than this is reported overdue. Per-policy rotationCadenceMs overrides this default. Only enforced (blocking) when security.tokenAudit.managed is also true.",
@@ -4227,6 +4885,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "security.tokenAudit.rotationWarningDays",
+    "label": "Warn this many days before a token is due",
     "type": "number",
     "default": 14,
     "description": "Default lead time (days) before the rotation-cadence due date at which a token is reported as a rotation warning. Per-policy rotationWarningThresholdMs overrides this default.",
@@ -4234,24 +4893,30 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "security.tokenAudit.managed",
+    "label": "Block tokens that fail the check",
     "type": "boolean",
     "default": false,
     "description": "When true (and security.tokenAudit.enabled is on), tokens with excess scopes or overdue rotation are BLOCKED from use rather than only reported. Default false = advisory reporting only."
   },
   {
     "key": "integrations.routeBinding",
+    "label": "Remember where to reply in each chat app",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Durably bind and resolve external conversation routes, thread contexts, and reply targets across channel surfaces. Default on; it is inert until a channel surface is configured."
   },
   {
     "key": "integrations.deliveryTracking",
+    "label": "Track deliveries to chat apps",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Track integration deliveries first-class: retries, dead letters, and per-surface delivery outcomes. Default on; it is inert until a channel surface is configured."
   },
   {
     "key": "integrations.delivery.maxRetries",
+    "label": "Retries for a failed delivery",
     "type": "number",
     "default": 3,
     "description": "Maximum retry attempts for a retryable integration delivery (Slack/Discord/webhook) before it moves to the dead-letter queue. A per-queue maxRetries option overrides this default.",
@@ -4259,6 +4924,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "integrations.delivery.initialDelayMs",
+    "label": "First wait before retrying a delivery (ms)",
     "type": "number",
     "default": 1000,
     "description": "Initial exponential-backoff delay (ms) between integration delivery retries. Delay grows as initialDelayMs * 2^(attempt-1) with jitter, capped at integrations.delivery.maxDelayMs.",
@@ -4266,6 +4932,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "integrations.delivery.maxDelayMs",
+    "label": "Longest wait between delivery retries (ms)",
     "type": "number",
     "default": 30000,
     "description": "Upper cap (ms) on the exponential-backoff delay between integration delivery retries.",
@@ -4273,6 +4940,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "integrations.delivery.maxDlqSize",
+    "label": "Failed deliveries kept",
     "type": "number",
     "default": 500,
     "description": "Maximum entries retained in the integration delivery dead-letter queue; oldest entries are evicted first past this size.",
@@ -4280,24 +4948,31 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "integrations.delivery.sloEnforced",
+    "label": "Hold chat-app deliveries to their delivery targets",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Enforce delivery service-level objectives for channel integrations: failures are classified retryable/terminal, retried with exponential backoff, and dead-letter events are logged at error level and surfaced in integration diagnostics; failed webhook notifications are listed with /notify failed and sent again with /notify resend <id|all>. When false, dead letters are warn-level only. An explicit per-queue sloEnforced option still overrides this default."
   },
   {
     "key": "policy.registryEnabled",
+    "label": "Load versioned policy bundles",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enable the versioned policy bundle registry with promote/rollback semantics and the /policy load, simulate, diff, promote, and rollback commands. Enforcement requires passing divergence-gate evidence first; default off until that evidence exists."
   },
   {
     "key": "policy.requireSignedBundles",
+    "label": "Accept only signed policy bundles",
+    "appliesWhen": "restart",
     "type": "boolean",
     "default": false,
     "description": "Require a valid HMAC-SHA256 signature on every policy bundle: a bundle that is unsigned, altered or signed with another key is refused, and so is every bundle when no signing key is set. The key is read from the GOODVIBES_POLICY_SIGNING_KEY environment variable (hex, at least 16 bytes). Restart to apply. Default off until divergence evidence clears the governance gate."
   },
   {
     "key": "policy.bundleSource",
+    "label": "Where the starting policy bundle comes from",
     "type": "enum",
     "default": "none",
     "description": "Where the policy bundle registry loads its initial bundle from at startup: none (no bundle loaded; bundles supplied programmatically or via commands), or file (load policy.bundlePath). Only consulted when policy.registryEnabled is true.",
@@ -4308,24 +4983,30 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "policy.bundlePath",
+    "label": "Policy bundle file",
     "type": "string",
     "default": "",
     "description": "Filesystem path to the policy bundle JSON loaded at startup when policy.bundleSource is \"file\" and policy.registryEnabled is true. Empty disables file loading. The loaded bundle enters the registry as a candidate (subject to the divergence gate before promotion); once promoted, the same unchanged bundle is enforced again at every start."
   },
   {
     "key": "agents.passiveInjection.knowledge",
+    "label": "Bring in relevant project knowledge each turn",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Re-retrieve project-memory knowledge each turn against the evolving conversation (steers, new sub-topics), under the hard token budget with a visible per-turn injection record on the agent record and session transcript. Default on: the block is hard-budgeted and every turn is honestly recorded. Turn off to revert to spawn-time-only injection."
   },
   {
     "key": "agents.passiveInjection.code",
+    "label": "Bring in relevant code each turn",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Additionally inject similarity-ranked chunks from the repo source-code index each turn as untrusted reference pointers, sharing the knowledge-injection budget and relevance floor, each with an honest match label on the turn record. Default off: code chunks carry no review provenance, so this is deliberately opt-in. Also respects storage.codeIndexEnabled."
   },
   {
     "key": "agents.passiveInjection.budgetTokens",
+    "label": "Most tokens brought in each turn",
     "type": "number",
     "default": 800,
     "description": "Default hard token budget for per-turn passive knowledge/code injection. The effective budget is min(this value, 3% of the model context window). Set 0 to disable injection. A per-run passiveKnowledgeInjectionBudgetTokens override still wins.",
@@ -4333,6 +5014,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "agents.passiveInjection.relevanceFloor",
+    "label": "How relevant brought-in material must be",
     "type": "number",
     "default": 95,
     "description": "Minimum relevance score (higher = stricter) a knowledge/code candidate must clear to be eligible for per-turn passive injection. Filters filler before the token budget is applied. A per-run passiveKnowledgeInjectionRelevanceFloor override still wins.",
@@ -4340,6 +5022,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "agents.passiveInjection.codeLimit",
+    "label": "Most code pieces brought in each turn",
     "type": "number",
     "default": 3,
     "description": "Maximum number of source-code chunks injected per turn by passive code injection (chunks share the passive-injection token budget and relevance floor).",
@@ -4347,12 +5030,15 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "agents.contextWindowGuard",
+    "label": "Shorten a helper agent's conversation before it overflows",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Before each sub-agent provider call, estimate total token count (system prompt + messages + tool definitions) and compact the conversation past agents.contextCompactThreshold, with layered system-prompt assembly for small windows and a single compaction retry on context-size errors. Turn off to revert to unchecked provider calls."
   },
   {
     "key": "agents.contextCompactThreshold",
+    "label": "Shorten a helper agent's conversation when this full (0 to 1)",
     "type": "number",
     "default": 0.85,
     "description": "Fraction of the model context window at which the agent context-window guard triggers sub-agent conversation compaction (estimated system + messages + tool tokens above this fraction compacts). Distinct from behavior.autoCompactThreshold, which governs main-session conversation compaction.",
@@ -4360,6 +5046,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "agents.maxTurns",
+    "label": "Turns an agent may take (0 for no limit)",
     "type": "number",
     "default": 0,
     "description": "Per-agent turn budget. Zero (default) continues until completion, cancellation, or a call that keeps returning the same result (8 identical calls with identical results end the run as repeated_call). A positive value stops the run with a max-turns outcome. A positive agents.maxTurnsCap remains an owner-controlled ceiling.",
@@ -4367,6 +5054,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "agents.maxTurnsCap",
+    "label": "Most turns any agent may be given (0 for no limit)",
     "type": "number",
     "default": 0,
     "description": "Owner-controlled ceiling on per-spawn turn budgets. Zero (default) disables this ceiling; a positive value cannot be raised by a spawn override.",
@@ -4374,6 +5062,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.engine",
+    "label": "Which permission rules apply",
+    "appliesWhen": "restart",
     "type": "enum",
     "default": "baseline",
     "description": "Permission evaluator: baseline (default) or policy-engine (the redesigned layered model with granular tool-level, path-level, and parameter-level rules). Restart to apply. Default baseline until divergence evidence from the shadow simulation clears the gate.",
@@ -4384,18 +5074,24 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.simulation",
+    "label": "Compare the new permission rules without applying them",
+    "appliesWhen": "restart",
     "type": "boolean",
     "default": true,
     "description": "Run the candidate permission evaluator beside the active one, recording divergence without changing enforcement. Default on so divergence evidence accumulates before stricter enforcement is considered; it never blocks tool execution by itself. Restart to apply."
   },
   {
     "key": "permissions.divergenceDashboard",
+    "label": "Report where the permission rules disagree",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Aggregate permission-evaluator divergence by tool/prefix/mode, expose trend history in diagnostics, and block enforce-mode transitions while the divergence rate exceeds permissions.divergenceThreshold. Turn off to fall back to warn mode (no gate enforcement)."
   },
   {
     "key": "permissions.commandParser",
+    "label": "Check a command's parts before running it",
+    "appliesWhen": "now",
     "type": "enum",
     "default": "ast",
     "description": "Shell parse before an exec command runs: ast (default) parses the command into segments and refuses one in which a segment has nothing to run, naming it; a command the parser cannot read runs as the permission gate decided. flat skips the parse. The permission gate decides risk, including the catastrophic-command block, identically in both modes.",
@@ -4406,6 +5102,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "behavior.toolResultReconciliation",
+    "label": "When a tool call is left unanswered",
+    "appliesWhen": "now",
     "type": "enum",
     "default": "reconcile",
     "description": "What happens to dangling tool-call state at turn end: reconcile (default, synthetic error results are injected and a reconciliation event emitted, preventing silent conversation corruption) or warn-only (log a warning without injecting results).",
@@ -4416,24 +5114,31 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "provider.localContextIngestion",
+    "label": "Use the context size local models report",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Ingest max_context_length from local/custom provider /v1/models endpoints so local models use the provider-reported context window for token budgeting and compaction thresholds. Turn off to use only explicitly configured or static limits."
   },
   {
     "key": "planner.adaptive",
+    "label": "Choose how each turn is carried out (not used yet)",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Reserved for choosing an execution strategy (single/cohort/background/remote) on every conversation turn. No turn reads a strategy yet, so this setting changes nothing today. The planner that /project-plan mode, override, explain and status work with is consulted when /workstream drafts a plan, whatever this setting says."
   },
   {
     "key": "tools.outputSchemaFingerprints",
+    "label": "Mark tool results with their shape",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Append _meta.outputSchemaFingerprint (exact sorted result key names) and _meta.schemaShapeId to results from the find, analyze, and inspect tools, enabling schema drift detection. Default off."
   },
   {
     "key": "telemetry.otelMode",
+    "label": "Record traces of what GoodVibes does",
     "type": "enum",
     "default": "off",
     "description": "OpenTelemetry instrumentation: off (default, no OTel SDK initialization; a daemon left at the default records spans in-process so its telemetry traces list answers, and setting off explicitly turns that off too), in-process (spans for LLM calls, turns, tool calls, agents, tasks, plugins, MCP servers, transport, permission checks, sessions, compaction and health cascades, recorded and exported in-process only; a turn span records the prompt length, not its text), or remote-export (additionally export spans as OTLP/HTTP JSON to the collector named by OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, or OTEL_EXPORTER_OTLP_ENDPOINT with /v1/traces appended). Switching away from off requires a restart; in-process <-> remote-export applies live.",
@@ -4445,30 +5150,39 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "runtime.unifiedTasks",
+    "label": "Track tasks in one list",
+    "appliesWhen": "restart",
     "type": "boolean",
     "default": true,
     "description": "The unified RuntimeTask interface used for task tracking across all subsystems (exec, agent, acp, scheduler, daemon, mcp, plugin, integration), including the /tasks command and operator interventions (cancel/pause/resume/retry). Restart to apply. Default on. Set false to turn the runtime task manager off."
   },
   {
     "key": "runtime.pluginLifecycle",
+    "label": "Report plugin status",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Publishes each plugin's lifecycle (loading, loaded, active, error, unloading, disabled, with the reason) as plugin events: the runtime store's plugin view, automation triggers on plugin loaded or failed, and tracing read them. Read at each event, so a change applies at once. Off: plugins load, run and unload the same, and nothing is reported. Default on."
   },
   {
     "key": "runtime.mcpLifecycle",
+    "label": "Reconnect MCP servers automatically",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Reconnect an MCP server automatically when its connect fails or its process exits: exponential back-off from 1 s to 30 s, at most 5 attempts, then the server stays disconnected and a call to it says why and to run /mcp reload. Each server's state (connecting, connected, degraded, reconnecting, disconnected) shows in /mcp servers, the MCP workspace, the mcp tool and the health view. Read each time a server drops, so a change applies to the next drop. Default on. Off: a server that drops stays disconnected until /mcp reload."
   },
   {
     "key": "runtime.toolBudget.enforced",
+    "label": "Limit each tool call's time, tokens and cost",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Enforce per-call budgets on tool execution: wall-clock, token, and cost limits (runtime.toolBudget.maxMs/maxTokens/maxCostUsd). The wall-clock limit stops a call when it is reached and tells the model what it was stopped by. A call that finishes anyway, or finishes over its token or cost limit (known only when the tool returns), is reported to the model as succeeded, with its output and a note naming the limit it went over; token and cost apply only to tools that report tokenCount or costUsd."
   },
   {
     "key": "runtime.toolBudget.maxMs",
+    "label": "Longest a tool call may run (ms, 0 for no limit)",
     "type": "number",
     "default": 0,
     "description": "Wall-clock budget (ms) for one tool call when runtime.toolBudget.enforced is true: the call is stopped when it is reached. 0 = unlimited.",
@@ -4476,6 +5190,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "runtime.toolBudget.maxTokens",
+    "label": "Most tokens a tool call may use (0 for no limit)",
     "type": "number",
     "default": 0,
     "description": "Token budget for one tool call when runtime.toolBudget.enforced is true, checked when the tool returns against the tokenCount the result reports. 0 = unlimited.",
@@ -4483,6 +5198,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "runtime.toolBudget.maxCostUsd",
+    "label": "Most a tool call may cost (USD, 0 for no limit)",
     "type": "number",
     "default": 0,
     "description": "Cost budget (USD) for one tool call when runtime.toolBudget.enforced is true, checked when the tool returns against the costUsd the result reports. 0 = unlimited.",
@@ -4490,12 +5206,15 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "notifications.adaptiveSuppression",
+    "label": "Quiet repeated notifications",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": true,
     "description": "Adaptive notification suppression: past notifications.burstThreshold notifications of one kind (same domain, level and title) in one collapse window, the rest are counted into that kind's notification-history entry without a toast. Critical, milestone, and alert notifications are always exempt. Turn off to let every one toast as its level and the print level allow. Read when the app starts."
   },
   {
     "key": "notifications.burstThreshold",
+    "label": "Repeats shown before notifications go quiet",
     "type": "number",
     "default": 3,
     "description": "How many notifications with the same domain, level and title toast within one collapse window while notifications.adaptiveSuppression is on; later ones in that window are counted into the same notification-history entry without a toast. The window follows the print level (behavior.hitlMode: 5 s quiet, 2 s balanced, 0.5 s operator) and runs from the first notification, so a steady trickle cannot keep one open. Critical, milestone and alert notifications never collapse. Read when the app starts.",
@@ -4503,24 +5222,28 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "notifications.pushApproval",
+    "label": "Notify your devices when something needs approval",
     "type": "boolean",
     "default": true,
     "description": "Device-push fan-out for the approval class: a pending approval pushes to every paired push target. On by default, the toggle exists to silence the class, never as a prerequisite for it to work. Read live per event."
   },
   {
     "key": "notifications.pushNeedsInput",
+    "label": "Notify your devices when an agent needs you",
     "type": "boolean",
     "default": true,
     "description": "Device-push fan-out for the needs-input class: a fleet node blocked on the operator pushes to every paired push target (presence-suppressed when a surface is attached). On by default; the toggle only silences. Read live per event."
   },
   {
     "key": "notifications.pushCompletion",
+    "label": "Notify your devices when work finishes",
     "type": "boolean",
     "default": true,
     "description": "Device-push fan-out for the completion class: a tracked run reaching a terminal state (done/failed/killed) pushes to every paired push target. On by default with zero setup; the toggle only silences. Read live per event."
   },
   {
     "key": "notifications.blockedEscalationGraceMs",
+    "label": "Notify your devices when an agent has waited this long (ms)",
     "type": "number",
     "default": 300000,
     "description": "How long a fleet node blocked on the operator may wait for a HUMAN response before a device push is sent REGARDLESS of an attached surface. Presence (an open TUI, a heartbeat) suppresses only the immediate push, never this escalation, a process being attended is not a human answer. A real interaction that clears the block cancels the escalation. Read live when a block is first tracked.",
@@ -4528,6 +5251,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "notifications.blockedEscalationFollowUpMs",
+    "label": "Remind again every (ms)",
     "type": "number",
     "default": 300000,
     "description": "Interval between the bounded follow-up reminders that fire after the first blocked-too-long escalation, while the block remains unanswered. Read live per reminder.",
@@ -4535,6 +5259,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "notifications.blockedEscalationMaxFollowUps",
+    "label": "Most reminders (0 for none)",
     "type": "number",
     "default": 2,
     "description": "Upper bound on follow-up reminders after the first blocked-too-long escalation (0 = escalate exactly once, no reminders). Keeps a long-unanswered block from becoming an unbounded stream of pushes.",
@@ -4542,6 +5267,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "pricing.modelPrices",
+    "label": "Your own model prices",
     "type": "object",
     "default": {},
     "description": "Manual model prices, keyed provider:model (e.g. \"openrouter:deepseek/deepseek-chat\"). Each entry: { input, output, cacheRead?, cacheWrite? } in USD per 1M tokens. A manual price always wins over provider-served and catalog pricing and applies live (no restart). Set one when registering a custom provider/model, or to pin a negotiated rate for any model.",
@@ -4549,48 +5275,57 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "calendar.google.clientId",
+    "label": "Google Calendar app id",
     "type": "string",
     "default": "",
     "description": "The OAuth client id for a Google Calendar app registered by whoever set up this environment. Client ids are not secrets (RFC 8252) and are stored in plain config."
   },
   {
     "key": "calendar.google.clientSecretRef",
+    "label": "Google Calendar app secret",
     "type": "string",
     "default": "",
     "description": "A reference into the secret store naming the Google OAuth client secret, needed only for a confidential (Web-app) client registration, a Desktop-app client using PKCE needs none. Any non-empty value marks the secret as stored; it is always read from the name derived from this setting's key, not from where the reference text points. The secret itself is stored in the daemon secret tier, never in config."
   },
   {
     "key": "calendar.google.icsUrl",
+    "label": "Private Google Calendar address",
     "type": "string",
     "default": "",
     "description": "A reference into the secret store naming the private calendar feed address (the \"secret address in iCal format\" from Google Calendar's Integrate Calendar settings). It is a URL rather than a password, but it grants read access to the operator's calendar to anyone holding it, so it is treated as a credential: the address itself is stored in the daemon secret tier, never in config. This is the read-only, credential-free route used when an app password is the mail connection, Google refuses Basic authentication on its CalDAV endpoint, so an app password cannot reach Calendar that way. Calendar writes require the OAuth path (calendar.google.clientId and the refresh token below)."
   },
   {
     "key": "calendar.microsoft.clientId",
+    "label": "Outlook calendar app id",
     "type": "string",
     "default": "",
     "description": "The OAuth client id for a Microsoft Entra app registration, for connecting an Outlook calendar. Client ids are not secrets and are stored in plain config."
   },
   {
     "key": "calendar.microsoft.clientSecretRef",
+    "label": "Outlook calendar app secret",
     "type": "string",
     "default": "",
     "description": "A reference into the secret store naming the Microsoft OAuth client secret, needed only for a confidential registration, a public client with \"Allow public client flows\" enabled needs none. Any non-empty value marks the secret as stored; it is always read from the name derived from this setting's key, not from where the reference text points. The secret itself is stored in the daemon secret tier, never in config."
   },
   {
     "key": "google.oauth.projectId",
+    "label": "Google Cloud project",
     "type": "string",
     "default": "",
     "description": "The Google Cloud project id the OAuth calendar client and its enabled APIs belong to, recorded so a re-run reuses the same project instead of creating another one."
   },
   {
     "key": "google.oauth.publishingStatus",
+    "label": "Google sign-in screen status",
     "type": "string",
     "default": "",
     "description": "The OAuth consent screen's last-known publishing status (\"testing\" or \"in-production\"), cached after being read from the Cloud Console since it cannot be probed any other way. An app left in \"Testing\" is issued refresh tokens that expire after seven days; moving it to \"In production\" (self-certified, no Google review needed) removes that expiry. Empty until a setup or verification run has read it."
   },
   {
     "key": "provider.fallbackModels",
+    "label": "Backup models, in order",
+    "appliesWhen": "next-answer",
     "type": "object",
     "default": [],
     "description": "Your fallback order: the models a turn moves to, in order, when the selected model fails on every sign-in of its provider (OpenAI tries the same model through the API key after the subscription first). Empty (default): the turn stops and says so; no other model is chosen for you. Applies from the next failure, in every program that runs a turn: the terminal app, `goodvibes run`, the Agent, the daemon's hosted sessions and its agents. The model that answers instead is named in a [Failover] line, and the next turn starts on the selected model again. A provider may be named by its id or display name.",
@@ -4598,6 +5333,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "cluster.peers",
+    "label": "Machines to contact directly",
     "type": "object",
     "default": [],
     "description": "Static list of cluster peers (host or host:port) contacted directly as well as over multicast. Set it on a network that drops multicast, so the nodes still find each other",
@@ -4605,6 +5341,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "conversationGate.gatedSurfaces",
+    "label": "Chat apps whose messages are screened",
     "type": "object",
     "default": [
       "ntfy",
@@ -4627,6 +5364,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "contract.gates",
+    "label": "Quality checks before work counts as done",
     "type": "object",
     "default": [
       {
@@ -4650,13 +5388,15 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "notifications.webhookUrls",
+    "label": "Webhooks that receive notifications",
     "type": "object",
     "default": [],
-    "description": "Webhook URLs that receive the notifications this machine sends (turn ends, approvals waiting, budget alerts). Each URL carries its own key, so the list is shown masked. Applies at the next start",
-    "validationHint": "list of http(s) URLs, for example [\"https://hooks.example.com/abc\"]"
+    "description": "Webhook URLs that receive the notifications this machine sends (turn ends, approvals waiting, budget alerts). Each URL carries its own key, so it is kept in the secret store and this list holds a goodvibes://secrets/ reference to each; add one with /notify add <url>. Screens show only each URL's host. Applies at the next start",
+    "validationHint": "list of goodvibes://secrets/ references to stored webhook URLs; add a URL with /notify add <url>"
   },
   {
     "key": "sandbox.egressAllowlist",
+    "label": "Commands allowed on the network in the sandbox",
     "type": "object",
     "default": [],
     "description": "Commands the exec sandbox lets reach the network, by base name; every other sandboxed command runs with the network off. The entry * lets every command reach the network. Applies from the next command",
@@ -4664,6 +5404,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "sandbox.workspaceWritable",
+    "label": "Extra folders commands may write in the sandbox",
     "type": "object",
     "default": [],
     "description": "Extra absolute paths the exec sandbox lets commands write besides the workspace. Applies from the next command",
@@ -4671,6 +5412,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "surfaces.email.imap.authservIds",
+    "label": "Your mail server's names in sender checks",
     "type": "object",
     "default": [],
     "description": "Authserv-ids the mailbox's own receiving server writes in Authentication-Results, for a provider whose id is not built in (Gmail, Fastmail, Zoho, Yahoo and AOL are). Only a top-most header naming one of these is read as a sender verdict; with none, senders on such a mailbox read as unverified. An entry starting with \".\" matches the hosts under that domain",
@@ -4678,6 +5420,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "worktree.setup.commands",
+    "label": "Commands run in a new worktree",
     "type": "object",
     "default": [],
     "description": "Commands run in a new worktree before an isolated agent starts in it. auto (the default, an empty list) runs the install command each lockfile in the repository names (bun install, npm ci, pnpm, yarn, uv sync, cargo fetch, go mod download; pip install -r requirements.txt only inside an active virtual environment). none runs nothing. A list runs exactly those commands, in order; one that exits non-zero marks the worktree setup failed",
@@ -4685,6 +5428,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "worktree.setup.carryOverGlobs",
+    "label": "Files copied into a new worktree",
     "type": "object",
     "default": [],
     "description": "Untracked files copied from the main checkout into a new worktree, as glob patterns. auto (the default, an empty list) copies .env and .env.* when the repository root has them. none copies nothing. A list copies exactly the files those patterns match. Copies stay in the worktree until it is removed",
@@ -4724,7 +5468,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "permissions.tools.mcp"
     ],
     "restartRequired": true,
-    "defaultEnabled": false
+    "defaultEnabled": false,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "permissions-simulation",
@@ -4739,7 +5485,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "permissions.simulation"
     ],
     "restartRequired": true,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "hitl-ux-modes",
@@ -4759,7 +5507,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "behavior.hitlMode"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "unified-runtime-task",
@@ -4774,7 +5524,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "runtime.unifiedTasks"
     ],
     "restartRequired": true,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "watcher-triggers",
@@ -4807,7 +5559,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "watchers.triggers.outputTailBytes"
     ],
     "restartRequired": false,
-    "defaultEnabled": false
+    "defaultEnabled": false,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "plugin-lifecycle",
@@ -4822,7 +5576,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "runtime.pluginLifecycle"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "mcp-lifecycle",
@@ -4837,7 +5593,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "runtime.mcpLifecycle"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "otel-foundation",
@@ -4856,7 +5614,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "telemetry.otelMode"
     ],
     "restartRequired": true,
-    "defaultEnabled": false
+    "defaultEnabled": false,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "otel-remote-export",
@@ -4877,7 +5637,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "telemetry.decisionOtlpSignal"
     ],
     "restartRequired": false,
-    "defaultEnabled": false
+    "defaultEnabled": false,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "tool-result-reconciliation",
@@ -4895,7 +5657,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "behavior.toolResultReconciliation"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "policy-signing",
@@ -4910,7 +5674,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "policy.requireSignedBundles"
     ],
     "restartRequired": true,
-    "defaultEnabled": false
+    "defaultEnabled": false,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "session-compaction",
@@ -4931,7 +5697,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "behavior.staleContextWarnings"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "compaction-distiller-strategy",
@@ -4949,7 +5717,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "behavior.compactionStrategy"
     ],
     "restartRequired": false,
-    "defaultEnabled": false
+    "defaultEnabled": false,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "fetch-sanitization",
@@ -4968,7 +5738,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "fetch.allowedPrivateHosts"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "runtime-tools-budget-enforcement",
@@ -4986,7 +5758,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "runtime.toolBudget.maxCostUsd"
     ],
     "restartRequired": false,
-    "defaultEnabled": false
+    "defaultEnabled": false,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "overflow-spill-backends",
@@ -5005,7 +5779,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "tools.overflowSpillBackend"
     ],
     "restartRequired": true,
-    "defaultEnabled": false
+    "defaultEnabled": false,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "permission-divergence-dashboard",
@@ -5022,7 +5798,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "permissions.maxDivergenceRecords"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "shell-ast-normalization",
@@ -5040,7 +5818,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "permissions.commandParser"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "local-provider-context-ingestion",
@@ -5055,7 +5835,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "provider.localContextIngestion"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "agent-context-window-awareness",
@@ -5071,7 +5853,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "agents.contextCompactThreshold"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "agent-passive-knowledge-injection",
@@ -5088,7 +5872,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "agents.passiveInjection.relevanceFloor"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "agent-passive-code-injection",
@@ -5106,7 +5892,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "agents.passiveInjection.relevanceFloor"
     ],
     "restartRequired": false,
-    "defaultEnabled": false
+    "defaultEnabled": false,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "output-schema-fingerprint",
@@ -5121,7 +5909,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "tools.outputSchemaFingerprints"
     ],
     "restartRequired": false,
-    "defaultEnabled": false
+    "defaultEnabled": false,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "policy-as-code",
@@ -5138,7 +5928,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "policy.bundlePath"
     ],
     "restartRequired": false,
-    "defaultEnabled": false
+    "defaultEnabled": false,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "adaptive-execution-planner",
@@ -5153,7 +5945,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "planner.adaptive"
     ],
     "restartRequired": false,
-    "defaultEnabled": false
+    "defaultEnabled": false,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "provider-optimizer",
@@ -5174,7 +5968,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "provider.optimizerPinnedModel"
     ],
     "restartRequired": false,
-    "defaultEnabled": false
+    "defaultEnabled": false,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "integration-delivery-slo",
@@ -5193,7 +5989,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "integrations.delivery.maxDlqSize"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "adaptive-notification-suppression",
@@ -5209,7 +6007,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "notifications.burstThreshold"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "token-scope-rotation-audit",
@@ -5227,7 +6027,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "security.tokenAudit.managed"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "automation-domain",
@@ -5248,7 +6050,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "automation.deleteAfterRun"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "control-plane-gateway",
@@ -5279,7 +6083,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "controlPlane.tls.keyFile"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "route-binding",
@@ -5294,7 +6100,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "integrations.routeBinding"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "delivery-engine",
@@ -5309,7 +6117,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "integrations.deliveryTracking"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "slack-surface",
@@ -5331,7 +6141,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.slack.inboxTagging"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "discord-surface",
@@ -5352,7 +6164,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.discord.inboxTagging"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "ntfy-surface",
@@ -5374,7 +6188,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.ntfy.defaultPriority"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "webhook-surface",
@@ -5392,7 +6208,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.webhook.secret"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "homeassistant-surface",
@@ -5415,7 +6233,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.homeassistant.remoteSessionTtlMs"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "telegram-surface",
@@ -5435,7 +6255,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.telegram.webhookSecret"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "whatsapp-surface",
@@ -5458,7 +6280,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.whatsapp.verifyToken"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "signal-surface",
@@ -5477,7 +6301,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.signal.defaultRecipient"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "msteams-surface",
@@ -5500,7 +6326,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.msteams.defaultConversationId"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "matrix-surface",
@@ -5520,7 +6348,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.matrix.defaultRoomId"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "mattermost-surface",
@@ -5540,7 +6370,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.mattermost.defaultChannelId"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "imessage-surface",
@@ -5559,7 +6391,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.imessage.defaultChatId"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "bluebubbles-surface",
@@ -5578,7 +6412,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.bluebubbles.defaultChatGuid"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "google-chat-surface",
@@ -5597,7 +6433,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.googleChat.webhookUrl"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "telephony-surface",
@@ -5622,7 +6460,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.telephony.webhookSecret"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "web-surface",
@@ -5642,7 +6482,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "web.staticAssetsDir"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "watcher-framework",
@@ -5660,7 +6502,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "watchers.recoveryWindowMinutes"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "service-management",
@@ -5680,7 +6524,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "service.logPath"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "daemon-auto-update",
@@ -5697,7 +6543,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "update.releasesUrl"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "exec-sandbox",
@@ -5713,7 +6561,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "sandbox.mcpIsolation"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "sandbox-model-judgment",
@@ -5732,7 +6582,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "sandbox.judgment"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "relay-connect",
@@ -5751,7 +6603,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "relay.requireStepUpForMutations"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "paired-device-capabilities",
@@ -5781,7 +6635,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "device.nodes.maxPaired"
     ],
     "restartRequired": false,
-    "defaultEnabled": true
+    "defaultEnabled": true,
+    "operable": true,
+    "inoperableDetail": null
   },
   {
     "id": "wake-word-detection",
@@ -5823,6 +6679,8 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "voice.wake.browserBackend"
     ],
     "restartRequired": false,
-    "defaultEnabled": false
+    "defaultEnabled": false,
+    "operable": true,
+    "inoperableDetail": null
   }
 ] as const;

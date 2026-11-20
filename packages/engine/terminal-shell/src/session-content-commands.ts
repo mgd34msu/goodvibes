@@ -5,8 +5,9 @@ import type { ExportMessage } from '@goodvibes-jev/engine/platform/platform/expo
 import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalSlashCommand } from './command-registry.js';
-import { commandRefusal, stripYesFlag, type ConfirmableCommand } from './command-confirmation.js';
-import { formatTranscript, parseTranscriptFormat, type TranscriptFormat } from './session-export-format.js';
+import { commandRefusal } from './command-confirmation.js';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { formatTranscript, type TranscriptFormat } from './session-export-format.js';
 interface ContentContext {
   readonly session: {
     readonly runtime: { readonly model: string; readonly provider: string; readonly sessionId: string };
@@ -43,67 +44,40 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
    */
   readonly redact?: ((text: string, context: Context) => Promise<string>) | undefined;
 }) {
-  /** The file an export line writes: the named path, or a new timestamped one. */
-  const exportTarget = (rest: readonly string[]): { readonly format: TranscriptFormat; readonly outPath: string | undefined } => {
-    let format: TranscriptFormat = 'markdown',
-      outPath: string | undefined;
-    for (const arg of rest) {
-      const named = parseTranscriptFormat(arg);
-      if (named) format = named;
-      else outPath = arg;
+  /**
+   * Write this conversation to a file inside the working directory, redacted
+   * like every export (a failed redaction writes nothing). With no path, a new
+   * timestamped file. The command asks first when the file is already there.
+   */
+  async function exportConversation(ctx: Context, input: { readonly format: TranscriptFormat; readonly path: string }): Promise<string> {
+    const shellPaths = policy.paths(ctx);
+    const format = input.format;
+    const outPath = input.path || './conversation-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + (format === 'markdown' ? '.md' : '.txt');
+    const resolvedPath = shellPaths.resolveWorkspacePath(outPath);
+    if (!shellPaths.isWithinWorkingDirectory(resolvedPath)) throw commandRefusal(policy.invalidPath);
+    try {
+      const messages = policy.capture(ctx);
+      let fileContent = formatTranscript(messages, format, policy, {
+        model: ctx.session.runtime.model,
+        provider: ctx.session.runtime.provider,
+        sessionId: ctx.session.runtime.sessionId,
+        title: ctx.session.conversationManager.title || undefined,
+      });
+      fileContent = await (policy.redact ? policy.redact(fileContent, ctx) : redactSensitiveDataAsync(fileContent, { purpose: 'export' }));
+      const dir = dirname(resolvedPath);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      await writeFile(resolvedPath, fileContent, 'utf-8');
+      return policy.exported(messages.length, resolvedPath);
+    } catch (error) {
+      if (readRefusal(error)) throw error;
+      throw commandRefusal(policy.failed('export conversation', error));
     }
-    return { format, outPath };
-  };
-  const exportCommand: TerminalSlashCommand<Context> & Pick<ConfirmableCommand<Context>, 'confirm'> = {
-    name: 'export',
-    effect: 'local-state',
-    description: 'Export conversation to a Markdown file',
-    usage: '[format] [path]',
-    argsHint: '[markdown] [path]',
-    // Writing a new file runs at once; replacing a file that is already there
-    // cannot be undone, so the registry asks once (--yes answers in advance).
-    confirm(args, ctx) {
-      const { outPath } = exportTarget(args);
-      if (!outPath) return undefined;
-      const resolvedPath = policy.paths(ctx).resolveWorkspacePath(outPath);
-      try { if (!statSync(resolvedPath).isFile()) return undefined; } catch { return undefined; }
-      return { title: `Replace ${resolvedPath}?`, detail: `${resolvedPath} already exists; the exported conversation replaces its contents, which cannot be recovered.`, confirmLabel: 'Replace' };
-    },
-    async handler(args, ctx) {
-      const shellPaths = policy.paths(ctx);
-      const { rest } = stripYesFlag(args);
-      const target = exportTarget(rest);
-      const format = target.format;
-      let outPath = target.outPath;
-      if (!outPath) {
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        outPath = './conversation-' + timestamp + (format === 'markdown' ? '.md' : '.txt');
-      }
-      const resolvedPath = shellPaths.resolveWorkspacePath(outPath);
-      if (!shellPaths.isWithinWorkingDirectory(resolvedPath)) {
-        ctx.print(policy.invalidPath);
-        return;
-      }
-      try {
-        const messages = policy.capture(ctx);
-        let fileContent = formatTranscript(messages, format, policy, {
-          model: ctx.session.runtime.model,
-          provider: ctx.session.runtime.provider,
-          sessionId: ctx.session.runtime.sessionId,
-          title: ctx.session.conversationManager.title || undefined,
-        });
-        // The file is the durable copy of a transcript, so it is redacted like
-        // the printed `/session export`. A failed redaction writes nothing.
-        fileContent = await (policy.redact ? policy.redact(fileContent, ctx) : redactSensitiveDataAsync(fileContent, { purpose: 'export' }));
-        const dir = dirname(resolvedPath);
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-        await writeFile(resolvedPath, fileContent, 'utf-8');
-        ctx.print(policy.exported(messages.length, resolvedPath));
-      } catch (error) {
-        throw commandRefusal(policy.failed('export conversation', error));
-      }
-    },
-  };
+  }
+  /** Whether an export to `path` would replace a file that is there. */
+  function exportReplaces(ctx: Context, path: string): boolean {
+    if (!path) return false;
+    try { return statSync(policy.paths(ctx).resolveWorkspacePath(path)).isFile(); } catch { return false; }
+  }
   const titleCommand: TerminalSlashCommand<Context> = {
     name: 'title',
     effect: 'session-lifecycle',
@@ -147,61 +121,5 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
       ctx.submitTurn(args.length ? args.join(' ') : last);
     },
   };
-  return { exportCommand, titleCommand, retryCommand };
-}
-
-export function createSessionListCommand<
-  Context extends ContentContext & {
-    readonly openSelection?: import('./selection-modal.js').OpenSelection | undefined;
-  },
->(policy: {
-  readonly manager: (context: Context) => import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager;
-  readonly forward: (args: string[], context: Context) => void | Promise<void>;
-  readonly emptyDetail: string;
-  readonly actions: string;
-  readonly options: Parameters<import('./selection-modal.js').OpenSelection>[2];
-  readonly selected: (
-    context: Context,
-    manager: import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager,
-    sessions: ReturnType<import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager['list']>,
-    result: import('./selection-modal.js').SelectionResult,
-  ) => void;
-  readonly heading: string;
-}): TerminalSlashCommand<Context> {
-  return {
-    name: 'sessions',
-    effect: 'session-lifecycle',
-    description: 'List saved sessions',
-    usage: '[resume <id|name>]',
-    argsHint: '[resume <id|name>]',
-    async handler(args, ctx) {
-      if (args.length) {
-        await policy.forward(args, ctx);
-        return;
-      }
-      const manager = policy.manager(ctx);
-      const sessions = manager.list();
-      if (ctx.openSelection) {
-        const items =
-          sessions.length === 0
-            ? [{ id: '_empty', label: 'No saved sessions', detail: policy.emptyDetail }]
-            : sessions.map((session) => ({
-                id: session.name,
-                label: session.name,
-                detail: session.title || '(untitled)',
-                actions: policy.actions,
-              }));
-        ctx.openSelection('Sessions', items, policy.options, (result) => {
-          if (result && result.item.id !== '_empty') policy.selected(ctx, manager, sessions, result);
-        });
-        return;
-      }
-      const lines = [policy.heading, ''];
-      for (const session of sessions)
-        lines.push(
-          `  ${session.name.padEnd(30)} ${(session.title || '(untitled)').padEnd(24)} ${new Date(session.timestamp).toLocaleString()}  (${session.messageCount} msgs)`,
-        );
-      ctx.print(lines.join('\n'));
-    },
-  };
+  return { exportConversation, exportReplaces, titleCommand, retryCommand };
 }

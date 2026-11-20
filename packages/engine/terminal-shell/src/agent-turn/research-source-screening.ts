@@ -15,6 +15,7 @@ export const AGENT_HOSTED_RESEARCH_SCREENING_KEY = 'tools.hostedResearchScreenin
 /** The consent as a host setting; registered on every manager that reads the Agent's settings. */
 export const AGENT_HOSTED_RESEARCH_SCREENING_SETTING: HostBooleanSetting = Object.freeze({
   key: AGENT_HOSTED_RESEARCH_SCREENING_KEY,
+  label: 'Let hosted models screen research sources',
   type: 'boolean',
   default: false,
   description: 'Explicitly allow raw research report text and source URLs to be screened by Abacus route-llm and TypeSafe Jev. Providers manage retention; zero retention is unverified. Requires native ABACUSAI_API_KEY and TYPESAFE_API_KEY credentials. Covers research report preview, save, and the research editor only.',

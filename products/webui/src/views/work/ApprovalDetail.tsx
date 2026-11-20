@@ -1,312 +1,126 @@
 /**
- * One approval in the Work view's detail pane (design doc "Data views", the
- * Work mockup's "Waiting for approval" pane): the command in a code frame, who
- * asked and the risk as facts, a kit Select for "Remember", Approve as the one
- * primary button and Deny as the secondary, the deny reason and the "why" as
- * disclosures.
+ * One ask in Work's detail pane (ux A2.5): who asked and when, then the same
+ * card the chat shows inline (AskCard: the question, what it acts on, what it
+ * will do, the choices, "Why am I asked?" and "Details"), and for an approval
+ * the state its reading gives ("Waiting for you", "Decided by Sam on the
+ * phone", "Ended: the asking session closed").
  *
- * Everything the old approval card did is here: per-hunk edit selection (an
- * index array only; the daemon computes the modified edit), remember tiers
- * rendered verbatim from the ask, the exec-prompt answer path, claim and cancel
- * for a pending ask, the decision trail and the fix session an accepted CI
- * offer started. A claim is advisory: the broker lets any participant still
- * approve, deny or withdraw a claimed ask, so it stays actionable here (with
- * the claimant shown); a resolved one is history.
+ * Everything the old pane showed as primary text (the arguments as JSON, who
+ * requested it, the category, the session, the model judgment, the decision
+ * trail) is inside Details. Claim is "I'll handle this", offered only when the
+ * reading allows it and more than one person can answer; withdraw is "Cancel
+ * this request", offered only to the person who asked (the reading's
+ * `requester.mine` and allowed actions). Every action names the revision of
+ * the record shown here (useApprovalActions).
  */
-import { useMemo, useState } from 'react';
-import type { ApprovalRecord } from '../../lib/goodvibes';
+import { useQuery } from '@tanstack/react-query';
+import { client as platformClient } from '../../lib/goodvibes';
 import {
   attributionLabel,
   auditEntryLabel,
   auditTrail,
-  hunkSummary,
-  isActionableApproval,
-  isDurableRememberTier,
-  isTerminalApproval,
   judgmentLabel,
   judgmentVerdict,
   partialApprovalLabel,
-  readApprovalEditHunks,
-  readExecPromptAsk,
-  readRememberOptions,
-  statusLabel,
 } from '../../lib/approvals';
-import { compactJson } from '../../lib/object';
-import { CodeFrame, DetailPane, DetailSection, Disclosure, Facts } from '../../components/data-view/DataView';
+import { askReading, readingStateLine, type OpenAsk } from '../../lib/asks';
+import { queryKeys } from '../../lib/queries';
+import { DetailPane } from '../../components/data-view/DataView';
 import { Button } from '../../components/ui/Button';
-import { Checkbox } from '../../components/ui/Checkbox';
-import { Field, Input } from '../../components/ui/Field';
-import { Select } from '../../components/ui/Select';
 import { StatusDot } from '../../components/ui/StatusDot';
+import { AskCard, askedWhen, countdownWords, originWords } from './AskCard';
 import type { ApprovalActions } from './useApprovalActions';
-import { approvalRequester, approvalTitle, sentenceCase, whenLabel } from './work-items';
-
-/** The command-like text an ask is about, for the code frame. */
-export function approvalCommandText(record: ApprovalRecord): { label: string; text: string } {
-  const args = record.request.args;
-  const pick = (key: string): string => (typeof args[key] === 'string' ? (args[key] as string) : '');
-  const command = pick('command') || pick('cmd') || pick('script');
-  if (command) return { label: 'Command', text: command };
-  const hunks = readApprovalEditHunks(record);
-  if (hunks) {
-    const files = [...new Set(hunks.map((h) => h.path))];
-    return { label: files.length === 1 ? 'File' : 'Files', text: files.join('\n') };
-  }
-  const list = args.commands;
-  if (Array.isArray(list) && list.length > 0 && list.every((c) => typeof c === 'string')) {
-    return { label: list.length === 1 ? 'Command' : 'Commands', text: (list as string[]).join('\n') };
-  }
-  const path = pick('path') || pick('file_path') || pick('filePath') || pick('url');
-  if (path) return { label: record.request.tool, text: path };
-  const json = compactJson(args);
-  return { label: 'Arguments', text: json === '{}' ? record.request.tool : json };
-}
-
-const RISK_WORDS: Record<string, string> = {
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-  critical: 'Critical',
-};
+import type { AskActions } from './useAskActions';
 
 export interface ApprovalDetailProps {
-  record: ApprovalRecord;
-  actions: ApprovalActions;
+  ask: OpenAsk;
+  approvalActions: ApprovalActions;
+  askActions: AskActions;
+  now: number;
   onClose?: () => void;
 }
 
-export function ApprovalDetail({ record, actions, onClose }: ApprovalDetailProps) {
-  const hunks = useMemo(() => readApprovalEditHunks(record), [record]);
-  const claimed = record.status === 'claimed';
-  // What this person may do and whether it still waits come from the daemon's reading, not from the status.
-  const actionable = isActionableApproval(record);
-  const terminal = isTerminalApproval(record);
-  const partialLabel = useMemo(() => partialApprovalLabel(record), [record]);
-  const auditEntries = useMemo(() => auditTrail(record), [record]);
-  const attribution = useMemo(() => attributionLabel(record.request.attribution), [record]);
-  const verdict = useMemo(() => judgmentVerdict(record), [record]);
-  const rememberOptions = useMemo(() => readRememberOptions(record), [record]);
-  const execPrompt = useMemo(() => readExecPromptAsk(record), [record]);
-  const command = useMemo(() => approvalCommandText(record), [record]);
-
-  const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
-  const [rememberTier, setRememberTier] = useState('');
-  const [denyReason, setDenyReason] = useState('');
-  const [execAnswer, setExecAnswer] = useState('');
-
-  const approving = actions.approve.isPending && actions.approve.variables?.id === record.id;
-  const denying = actions.deny.isPending && actions.deny.variables?.id === record.id;
-  const claiming = actions.claim.isPending && actions.claim.variables === record.id;
-  const cancelling = actions.cancel.isPending && actions.cancel.variables === record.id;
-  const busy = approving || denying || claiming || cancelling;
-
-  const tool = record.request.tool;
-  const risk = record.request.analysis.riskLevel;
-  const approveExtras = rememberTier ? { rememberTier } : {};
-  // Every action names the revision of the record shown here; a stale one is refused and the refetch shows it again.
-  const approve = (extra?: { selectedHunks?: readonly number[]; answer?: string }) => actions.approve.mutate({
-    id: record.id,
-    expectedRevision: record.revision,
-    ...approveExtras,
-    ...extra,
-    ...(hunks ? { totalHunks: hunks.length } : {}),
+/** More than one person can answer here: claiming then tells the others someone is on it. */
+function useSeveralAnswerers(enabled: boolean): boolean {
+  const principals = useQuery({
+    queryKey: queryKeys.principals,
+    queryFn: () => platformClient.operator.principals.list(),
+    enabled,
+    retry: false,
   });
-  const deny = () => actions.deny.mutate({ id: record.id, expectedRevision: record.revision, ...(denyReason.trim() ? { reason: denyReason.trim() } : {}) });
+  const list = (principals.data as { principals?: unknown } | undefined)?.principals;
+  return Array.isArray(list) && list.length > 1;
+}
 
-  const toggleHunk = (index: number) => setSelected((current) => {
-    const next = new Set(current);
-    if (next.has(index)) next.delete(index);
-    else next.add(index);
-    return next;
-  });
+export function ApprovalDetail({ ask, approvalActions, askActions, now, onClose }: ApprovalDetailProps) {
+  const record = ask.approval;
+  const reading = askReading(ask);
+  const mayClaim = Boolean(reading?.allowedActions.includes('claim')) && reading?.phase === 'waiting' && reading.reason !== 'claimed-by-you';
+  const severalAnswerers = useSeveralAnswerers(mayClaim);
+  const mayCancel = Boolean(reading?.allowedActions.includes('cancel') && reading.requester.mine);
+  const busy = askActions.busy;
 
-  const statusWord = terminal ? sentenceCase(statusLabel(record.status)) : record.status === 'claimed' ? 'Claimed' : execPrompt ? 'Waiting for your answer' : 'Waiting for approval';
+  const stateLine = reading ? readingStateLine(reading) : 'Waiting for you';
+  const tone = !reading || reading.phase === 'waiting' ? 'warn' : reading.decision?.disposition === 'denied' ? 'bad' : reading.phase === 'decided' ? 'ok' : 'idle';
+  const lead = [originWords(ask), askedWhen(ask, now), ask.presentation.kind === 'purchase' ? countdownWords(ask, now) : undefined].filter(Boolean).join(' · ');
 
-  const footer = actionable ? (
-    execPrompt ? (
-      <>
-        <Button variant="primary" disabled={busy || execAnswer.length === 0} onClick={() => approve({ answer: execAnswer })}>
-          {approving ? 'Sending…' : 'Send answer'}
-        </Button>
-        <Button disabled={busy} onClick={deny}>{denying ? 'Stopping…' : 'Stop command'}</Button>
-        <span className="work-footer__spacer" />
-        {!claimed && (
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.claim.mutate({ id: record.id, expectedRevision: record.revision })} title="Mark this approval as yours; others can still answer it">
-            {claiming ? 'Claiming…' : 'Claim'}
+  const extraDetails: { label: string; value: string }[] = [];
+  if (record) {
+    const attribution = attributionLabel(record.request.attribution);
+    if (attribution) extraDetails.push({ label: 'Requested by', value: attribution });
+    if (record.request.category) extraDetails.push({ label: 'Category', value: record.request.category });
+    if (record.sessionId) extraDetails.push({ label: 'Session', value: record.sessionId });
+    const verdict = judgmentVerdict(record);
+    if (verdict) extraDetails.push({ label: 'Model judgment', value: judgmentLabel(verdict) });
+    const partial = partialApprovalLabel(record);
+    if (partial) extraDetails.push({ label: 'Applied', value: partial });
+    if (record.decision?.reason) extraDetails.push({ label: 'Reason', value: record.decision.reason });
+    for (const entry of auditTrail(record)) extraDetails.push({ label: 'Trail', value: `${auditEntryLabel(entry)} · ${new Date(entry.createdAt).toLocaleString()}` });
+    extraDetails.push({ label: 'Request', value: record.id });
+  } else if (ask.item) {
+    extraDetails.push({ label: 'Request', value: ask.item.id });
+  }
+
+  const footer = record && (mayClaim && severalAnswerers || mayCancel) ? (
+    <>
+      {mayClaim && severalAnswerers && (
+        <span className="work-claim">
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => approvalActions.claim.mutate({ id: record.id, expectedRevision: record.revision })}>
+            I&apos;ll handle this
           </Button>
-        )}
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.cancel.mutate({ id: record.id, expectedRevision: record.revision })} title="Withdraw without a decision">
-          {cancelling ? 'Cancelling…' : 'Withdraw'}
+          <span className="work-claim__why">Marks it as yours so others see someone is on it.</span>
+        </span>
+      )}
+      <span className="work-footer__spacer" />
+      {mayCancel && (
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => approvalActions.cancel.mutate({ id: record.id, expectedRevision: record.revision })}>
+          Cancel this request
         </Button>
-      </>
-    ) : (
-      <>
-        <Button variant="primary" disabled={busy} onClick={() => approve()}>
-          {approving ? 'Approving…' : hunks ? 'Approve all' : 'Approve'}
-        </Button>
-        {hunks && (
-          <Button
-            disabled={selected.size === 0 || busy}
-            onClick={() => approve({ selectedHunks: [...selected].sort((a, b) => a - b) })}
-            title="Approve only the checked hunks: the daemon computes the modified edit"
-          >
-            Approve selected ({selected.size})
-          </Button>
-        )}
-        <Button disabled={busy} onClick={deny}>{denying ? 'Denying…' : 'Deny'}</Button>
-        <span className="work-footer__spacer" />
-        {!claimed && (
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.claim.mutate({ id: record.id, expectedRevision: record.revision })} title="Mark this approval as yours; others can still answer it">
-            {claiming ? 'Claiming…' : 'Claim'}
-          </Button>
-        )}
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.cancel.mutate({ id: record.id, expectedRevision: record.revision })} title="Withdraw without a decision">
-          {cancelling ? 'Cancelling…' : 'Withdraw'}
-        </Button>
-      </>
-    )
+      )}
+    </>
   ) : undefined;
 
   return (
     <DetailPane
-      title={approvalTitle(record)}
+      title={ask.presentation.title}
       status={(
         <span className="work-status">
-          <StatusDot tone={terminal ? (record.status === 'approved' ? 'ok' : record.status === 'denied' ? 'bad' : 'idle') : record.status === 'claimed' ? 'info' : 'warn'} />
-          {statusWord}
+          <StatusDot tone={tone} />
+          {stateLine}
         </span>
       )}
-      meta={whenLabel(record.createdAt)}
       onClose={onClose}
-      closeLabel="Close approval"
+      closeLabel="Close"
       footer={footer}
     >
-      {execPrompt ? (
-        <>
-          <CodeFrame label="Command">{execPrompt.command || '(command unknown)'}</CodeFrame>
-          <DetailSection title="Waiting on">
-            <p className="work-prose">{execPrompt.prompt || '(prompt text unavailable)'}</p>
-          </DetailSection>
-          {execPrompt.recentOutput && <CodeFrame label="Recent output">{execPrompt.recentOutput}</CodeFrame>}
-          {actionable && (
-            <Field label="Your answer" help="It feeds the waiting command.">
-              <Input
-                aria-label={`Answer for ${execPrompt.command || tool}`}
-                placeholder="Type the reply the command is waiting for"
-                value={execAnswer}
-                disabled={busy}
-                onChange={(e) => setExecAnswer(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && execAnswer.length > 0) approve({ answer: execAnswer });
-                }}
-              />
-            </Field>
-          )}
-        </>
-      ) : (
-        <CodeFrame label={command.label}>{command.text}</CodeFrame>
-      )}
-
-      {record.request.analysis.summary && !execPrompt && (
-        <p className="work-prose">{record.request.analysis.summary}</p>
-      )}
-
-      <Facts
-        items={[
-          { label: 'Requested by', value: attribution ?? approvalRequester(record) },
-          { label: 'Risk', value: risk ? (RISK_WORDS[risk] ?? risk) : '' },
-          { label: 'Category', value: record.request.category },
-          { label: 'Working directory', value: record.request.workingDirectory ?? '' },
-          {
-            label: 'Model judgment',
-            value: verdict ? <span title="Proposed by the sandbox model-judgment tier: annotate-only, you still decide">{judgmentLabel(verdict)}</span> : '',
-          },
-          { label: 'Session', value: record.sessionId ?? '' },
-        ]}
+      <AskCard
+        key={`${ask.key}:${record?.revision ?? 0}`}
+        ask={ask}
+        actions={askActions}
+        variant="detail"
+        lead={lead ? <p className="ask-card__lead">{lead}</p> : undefined}
+        extraDetails={extraDetails}
       />
-
-      {record.status === 'claimed' && (
-        <p className="dv-notice" role="note">Claimed by {record.claimedBy ?? 'another surface'}. A claim is advisory, so you can still answer it here.</p>
-      )}
-
-      {terminal && (
-        <p className="dv-notice" role="note">
-          {sentenceCase(statusLabel(record.status))}
-          {whenLabel(record.resolvedAt) ? ` ${whenLabel(record.resolvedAt)}` : ''}
-          {record.resolvedBy ? ` by ${record.resolvedBy}` : ''}
-          {partialLabel ? `, ${partialLabel}` : ''}
-          {record.decision?.reason ? `, reason: ${record.decision.reason}` : ''}
-        </p>
-      )}
-
-      {actionable && !execPrompt && hunks && (
-        <DetailSection title={`Edits (${hunks.length})`}>
-          <ul className="work-hunks" aria-label="Edit hunks">
-            {hunks.map((hunk, index) => (
-              <li key={hunk.id ?? index} className="work-hunks__row">
-                <Checkbox checked={selected.has(index)} onChange={() => toggleHunk(index)}>
-                  <span className="work-hunks__summary">{hunkSummary(hunk)}</span>
-                </Checkbox>
-              </li>
-            ))}
-          </ul>
-        </DetailSection>
-      )}
-
-      {actionable && !execPrompt && rememberOptions.length > 0 && (
-        <Field
-          label="Remember"
-          help={rememberTier ? rememberOptions.find((o) => o.tier === rememberTier)?.detail : 'Ask again next time.'}
-        >
-          <Select
-            aria-label={`Remember scope for ${tool}`}
-            value={rememberTier}
-            disabled={busy}
-            onChange={setRememberTier}
-            options={[
-              { value: '', label: 'Just this once' },
-              ...rememberOptions.map((option) => ({
-                value: option.tier,
-                label: `${option.label}${isDurableRememberTier(option.tier) ? ' (saved as a rule)' : ''}`,
-              })),
-            ]}
-          />
-        </Field>
-      )}
-
-      {actionable && (
-        <Disclosure summary="Add a reason for denying">
-          <Input
-            aria-label={`Deny reason for ${tool}`}
-            placeholder="Optional: why not. The agent reads it with the denial."
-            value={denyReason}
-            disabled={busy}
-            onChange={(e) => setDenyReason(e.target.value)}
-          />
-        </Disclosure>
-      )}
-
-      {record.request.analysis.reasons.length > 0 && (
-        <Disclosure summary="Why is this asked?">
-          <ul className="work-list">
-            {record.request.analysis.reasons.map((reason, i) => <li key={i}>{reason}</li>)}
-          </ul>
-        </Disclosure>
-      )}
-
-      {terminal && (
-        <Disclosure summary="Decision trail">
-          {auditEntries.length > 0 ? (
-            <ul className="work-list">
-              {auditEntries.map((entry) => (
-                <li key={entry.id}>{auditEntryLabel(entry)}: {whenLabel(entry.createdAt)}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="work-prose">No decision trail recorded.</p>
-          )}
-        </Disclosure>
-      )}
     </DetailPane>
   );
 }

@@ -55,21 +55,13 @@ export function exportMessageFromRecord(message: Readonly<Record<string, unknown
   };
 }
 
-const SESSION_EXPORT_USAGE = 'Usage: /session export <session-id> [markdown|text]';
-const SESSION_EXPORT_NEXT = 'Use /session export . to export the current session.';
-
+/** The saved session a file is written for (`.` is this session), resolved against the saved list. */
 export function resolveSessionExportRequest<Session extends { readonly name: string; readonly title: string }>(
-  args: readonly string[],
+  request: { readonly target: string; readonly format: TranscriptFormat },
   currentId: string,
   list: () => readonly Session[],
 ) {
-  const target = args[1];
-  if (!target) throw commandRefusal(SESSION_EXPORT_USAGE, SESSION_EXPORT_NEXT);
-  const formatWord = args[2] ?? 'markdown';
-  const format = parseTranscriptFormat(formatWord);
-  if (format === undefined || args.length > 3) {
-    throw commandRefusal(`Nothing was exported: ${args.length > 3 ? `"${args.slice(3).join(' ')}" is not part of the command` : `"${formatWord}" is not a format (markdown or text)`}.`, SESSION_EXPORT_USAGE);
-  }
+  const { target, format } = request;
   const sessionId = target === '.' ? currentId : target;
   // The current session is matched by its exact id only: a prefix or title
   // match could pick another session's transcript for `.`.

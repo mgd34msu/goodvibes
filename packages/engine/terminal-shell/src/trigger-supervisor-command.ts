@@ -21,9 +21,7 @@ import type { ActionValues, CommandActionContext, CommandDescription, FixedChoic
 
 const display = (value: unknown) => stripDangerousAnsi(String(value ?? '')).replace(/\x1b\[[0-9;]*m/g, '').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
 
-export interface TriggerCommandContext extends CommandActionContext, PaymentWindowCommandContext {
-  readonly renderRequest: () => void;
-}
+export type TriggerCommandContext = CommandActionContext & PaymentWindowCommandContext & { readonly renderRequest: () => void };
 
 let installedPolicy: PaymentWindowCommandPolicy<TriggerCommandContext> | undefined;
 function policyOf(): PaymentWindowCommandPolicy<TriggerCommandContext> {

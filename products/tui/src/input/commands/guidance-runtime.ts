@@ -161,13 +161,13 @@ export function wireGuidanceNotices(
 }
 
 const welcomeCommand = createWelcomeCommand<CommandContext>({
-  description: 'Open the product entry point for the onboarding wizard, security, marketplace, remote, and operator workflows',
+  description: 'Open /setup: the topics for models, sign-in, keys, access, chat apps and features',
   open(ctx) {
-    if (ctx.openOnboardingWizard) {
-      ctx.openOnboardingWizard({ mode: 'edit' });
+    if (ctx.executeCommand) {
+      void ctx.executeCommand('setup', []);
       return;
     }
-    ctx.print('Use /onboarding to open the setup wizard.');
+    ctx.print('Use /setup to set GoodVibes up, one topic at a time.');
     return;
   },
   lines: [

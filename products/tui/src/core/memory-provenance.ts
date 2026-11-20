@@ -23,6 +23,7 @@ export const MEMORY_SHOW_PROVENANCE_DEFAULT = false;
  */
 export const MEMORY_SHOW_PROVENANCE_SETTING: HostBooleanSetting = Object.freeze({
   key: MEMORY_SHOW_PROVENANCE_CONFIG_KEY,
+  label: 'Show which memories an answer used',
   type: 'boolean',
   default: MEMORY_SHOW_PROVENANCE_DEFAULT,
   description: 'Show a "used N memories" chip on turns that drew on your standing memories, with a drill-in '

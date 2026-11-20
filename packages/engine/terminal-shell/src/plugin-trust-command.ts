@@ -71,7 +71,7 @@ export async function trustPlugin(manager: PluginTrustControls, name: string, ti
   return `Plugin '${name}' trust tier set to '${tier}'${note && tier === 'trusted' ? ' (signature not verified; recorded in the trust note)' : ''}: ${effect}\n${await restartLine(result.restarting)}`;
 }
 
-export function savePluginPublisherKey(manager: PluginTrustControls, name: string, keyPath: string): string {
+export function savePluginPublisherKey(manager: PluginTrustControls, name: string, keyPath: string, command = 'plugin'): string {
   let pem: string;
   try { pem = readFileSync(resolve(keyPath), 'utf-8'); } catch (error) {
     throw commandRefusal(`could not read ${keyPath}: ${error instanceof Error ? error.message : String(error)}`, "Give the path of the publisher's Ed25519 public key file.");
@@ -80,21 +80,21 @@ export function savePluginPublisherKey(manager: PluginTrustControls, name: strin
   if (!saved.ok) throw commandRefusal(saved.error ?? `the publisher key for '${name}' was not saved`);
   const check = manager.verify(name);
   return `Publisher key saved for '${name}'. ${check.valid
-    ? `Its manifest signature verifies with it; /plugin trust ${name} trusted now records the signed grant.`
+    ? `Its manifest signature verifies with it; /${command} trust ${name} trusted now records the signed grant.`
     : `Its manifest signature does not verify with it (${check.reason ?? 'unknown reason'}); the tier is unchanged.`}`;
 }
 
-export function verifyPlugin(manager: PluginTrustControls, name: string): string {
+export function verifyPlugin(manager: PluginTrustControls, name: string, command = 'plugin'): string {
   const result = manager.verify(name);
-  if (!result.ok && result.reason?.includes('not found')) throw commandRefusal(result.reason ?? `Plugin '${name}' not found.`, '/plugin list shows the installed plugins.');
+  if (!result.ok && result.reason?.includes('not found')) throw commandRefusal(result.reason ?? `Plugin '${name}' not found.`, `/${command} list shows the installed plugins.`);
   return result.valid
     ? `Plugin '${name}' manifest signature is VALID.${result.fingerprint ? `\nFingerprint: ${result.fingerprint}` : ''}`
     : `Plugin '${name}' manifest signature is INVALID.\nReason: ${result.reason ?? 'Unknown'}`;
 }
 
-export function pluginCapabilitiesText(manager: PluginTrustControls, name: string): string {
+export function pluginCapabilitiesText(manager: PluginTrustControls, name: string, command = 'plugin'): string {
   const info = manager.capabilities(name);
-  if (!info) throw commandRefusal(`Plugin '${name}' not found.`, '/plugin list shows the installed plugins.');
+  if (!info) throw commandRefusal(`Plugin '${name}' not found.`, `/${command} list shows the installed plugins.`);
   const lines: string[] = [`Plugin: ${name}`, `Trust tier: ${info.tier} (${PLUGIN_TIER_EFFECT[info.tier]})`, '', `Declared capabilities (${info.requested.length}):`];
   if (info.requested.length === 0) {
     lines.push(info.tier === 'untrusted'
@@ -110,24 +110,24 @@ export function pluginCapabilitiesText(manager: PluginTrustControls, name: strin
   }
   const withheldHighRisk = info.blocked.filter((cap) => info.highRisk.includes(cap));
   if (withheldHighRisk.length > 0) {
-    lines.push('', `It declares ${withheldHighRisk.join(', ')}, which needs the trusted tier, so it does not start.`, `Use /plugin trust ${name} trusted to allow it, or remove the capability from its manifest.`);
+    lines.push('', `It declares ${withheldHighRisk.join(', ')}, which needs the trusted tier, so it does not start.`, `Use /${command} trust ${name} trusted to allow it, or remove the capability from its manifest.`);
   } else if (info.blocked.length > 0) {
-    lines.push('', `Its registrations of ${info.blocked.join(', ')} are refused at this tier; /plugin trust ${name} limited allows them.`);
+    lines.push('', `Its registrations of ${info.blocked.join(', ')} are refused at this tier; /${command} trust ${name} limited allows them.`);
   }
   return lines.join('\n');
 }
 
-export async function reloadPlugins(manager: PluginLifecycleControls): Promise<string> {
+export async function reloadPlugins(manager: PluginLifecycleControls, command = 'plugin'): Promise<string> {
   const summary = await manager.reload();
   const lines = [`Done. ${summary.reloaded} plugin(s) reloaded${summary.failed > 0 ? `, ${summary.failed} failed` : ''}.`];
   for (const { name: failed, reason } of summary.loadFailed ?? []) lines.push(`  ${failed}: did not start, ${reason}`);
-  for (const busy of summary.notDrained) lines.push(`  ${busy}: not reloaded, calls into it were still running; it keeps its current version. Run /plugin reload again once they finish.`);
-  for (const held of summary.quarantined ?? []) lines.push(`  ${held}: not loaded, it is quarantined. Run /plugin lift ${held}, then /plugin reload.`);
+  for (const busy of summary.notDrained) lines.push(`  ${busy}: not reloaded, calls into it were still running; it keeps its current version. Run /${command} reload again once they finish.`);
+  for (const held of summary.quarantined ?? []) lines.push(`  ${held}: not loaded, it is quarantined. Run /${command} lift ${held}, then /${command} reload.`);
   for (const stuck of summary.cleanupFailed ?? []) lines.push(`  ${stuck}: stopping its earlier copy reported an error; restart to clear anything that copy left behind.`);
   return lines.join('\n');
 }
 
-export async function quarantinePlugin(manager: PluginLifecycleControls, name: string, reason: string): Promise<string> {
+export async function quarantinePlugin(manager: PluginLifecycleControls, name: string, reason: string, command = 'plugin'): Promise<string> {
   const result = manager.quarantine(name, reason);
   if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${name}' was not quarantined.`, undefined, 'NOT_DONE');
   try {
@@ -140,7 +140,7 @@ export async function quarantinePlugin(manager: PluginLifecycleControls, name: s
       next: ['Restart to clear anything the running instance left behind'],
     }));
   }
-  return `Plugin '${name}' quarantined and stopped.\nReason: ${reason}\nIt will not load until you run /plugin lift ${name} and then /plugin reload.`;
+  return `Plugin '${name}' quarantined and stopped.\nReason: ${reason}\nIt will not load until you run /${command} lift ${name} and then /${command} reload.`;
 }
 
 /**
@@ -255,14 +255,14 @@ export function pluginActions<Ctx extends CommandActionContext>(manager: PluginM
     doAction<Ctx>({
       id: 'reload', label: 'Load the plugins again', word: 'reload',
       sentence: 'Every switched-on plugin is stopped and started again from its files.', operator: TERMINAL_ONLY,
-      async run(_values, ctx) { ctx.print('Reloading plugins...'); return reloadPlugins(controlsOf(manager, ctx)); },
+      async run(_values, ctx) { ctx.print('Reloading plugins...'); return reloadPlugins(controlsOf(manager, ctx), command); },
     }),
     {
       id: 'quarantine', label: 'Quarantine a plugin', word: 'quarantine',
       inputs: [PLUGIN, textInput({ id: 'reason', label: 'Why', help: 'A note you will see when you look at it', why: 'your own words', typed: { tail: true }, optional: { default: 'quarantined by operator', means: 'no note' } })],
       sentence: '{plugin} is stopped and blocked from loading until you change it (lift the quarantine).', done: '',
       touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'lift', operator: TERMINAL_ONLY, example: { plugin: 'jira', reason: 'it changed unexpectedly' },
-      async run(values, ctx) { return quarantinePlugin(controlsOf(manager, ctx), values.plugin!, values.reason || 'quarantined by operator'); },
+      async run(values, ctx) { return quarantinePlugin(controlsOf(manager, ctx), values.plugin!, values.reason || 'quarantined by operator', command); },
     },
     {
       id: 'lift', label: 'Lift a plugin\'s quarantine', word: 'lift', inputs: [PLUGIN],
@@ -289,17 +289,17 @@ export function pluginActions<Ctx extends CommandActionContext>(manager: PluginM
       inputs: [PLUGIN, textInput({ id: 'key', label: 'Key file', help: 'The publisher\'s Ed25519 public key (.pem)', why: 'a file path on this machine', kind: 'path', typed: { position: 2 } })],
       sentence: 'The key in {key} is saved as {plugin}\'s publisher key, until you change it, so its signature can be checked.', done: '',
       touches: 'credential', lasts: 'kept', risk: 'none', operator: TERMINAL_ONLY, example: { plugin: 'jira', key: 'keys/acme.pem' },
-      async run(values, ctx) { return savePluginPublisherKey(controlsOf(manager, ctx), values.plugin!, values.key!); },
+      async run(values, ctx) { return savePluginPublisherKey(controlsOf(manager, ctx), values.plugin!, values.key!, command); },
     },
     readAction<Ctx>({
       id: 'verify', label: 'Check a plugin\'s signature', word: 'verify', inputs: [PLUGIN],
       sentence: 'Checks {plugin}\'s manifest signature against its publisher key.', example: { plugin: 'jira' },
-      async run(values, ctx) { return verifyPlugin(controlsOf(manager, ctx), values.plugin!); },
+      async run(values, ctx) { return verifyPlugin(controlsOf(manager, ctx), values.plugin!, command); },
     }),
     readAction<Ctx>({
       id: 'capabilities', label: 'See what a plugin asks to do', word: 'capabilities', inputs: [PLUGIN],
       sentence: 'Shows the capabilities {plugin} declares and which its tier grants or withholds.', example: { plugin: 'jira' },
-      async run(values, ctx) { return pluginCapabilitiesText(controlsOf(manager, ctx), values.plugin!); },
+      async run(values, ctx) { return pluginCapabilitiesText(controlsOf(manager, ctx), values.plugin!, command); },
     }),
   ];
 }

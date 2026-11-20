@@ -10,7 +10,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * call sites) hand-written on top of these generated primitives.
  *
  * Contract product version: 3.3.1
- * Methods: 640 total, 530 REST-routed, 110 ws-only invoke.
+ * Methods: 646 total, 534 REST-routed, 112 ws-only invoke.
  */
 
 export type WebuiHttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -172,17 +172,17 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
     "method": "DELETE",
     "path": "/api/automation/schedules/{scheduleId}"
   },
-  "automation.schedules.disable": {
-    "method": "POST",
-    "path": "/api/automation/schedules/{scheduleId}/disable"
-  },
-  "automation.schedules.enable": {
-    "method": "POST",
-    "path": "/api/automation/schedules/{scheduleId}/enable"
-  },
   "automation.schedules.list": {
     "method": "GET",
     "path": "/api/automation/schedules"
+  },
+  "automation.schedules.pause": {
+    "method": "POST",
+    "path": "/api/automation/schedules/{scheduleId}/pause"
+  },
+  "automation.schedules.resume": {
+    "method": "POST",
+    "path": "/api/automation/schedules/{scheduleId}/resume"
   },
   "automation.schedules.run": {
     "method": "POST",
@@ -1232,13 +1232,17 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
     "method": "GET",
     "path": "/api/mcp/config"
   },
-  "mcp.config.reload": {
-    "method": "POST",
-    "path": "/api/mcp/reload"
-  },
   "mcp.servers.list": {
     "method": "GET",
     "path": "/api/mcp/servers"
+  },
+  "mcp.servers.quarantine.accept": {
+    "method": "POST",
+    "path": "/api/mcp/servers/{serverName}/accept-tools"
+  },
+  "mcp.servers.reload": {
+    "method": "POST",
+    "path": "/api/mcp/reload"
   },
   "mcp.servers.remove": {
     "method": "DELETE",
@@ -1248,17 +1252,29 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
     "method": "GET",
     "path": "/api/mcp/servers/reveal"
   },
-  "mcp.servers.tools.allow": {
+  "mcp.servers.role.set": {
     "method": "POST",
-    "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/allow"
+    "path": "/api/mcp/config/servers/{serverName}/role"
   },
-  "mcp.servers.tools.clear": {
-    "method": "DELETE",
-    "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}"
-  },
-  "mcp.servers.tools.deny": {
+  "mcp.servers.tools.block": {
     "method": "POST",
-    "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/deny"
+    "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/block"
+  },
+  "mcp.servers.tools.exempt": {
+    "method": "POST",
+    "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/exempt"
+  },
+  "mcp.servers.tools.unblock": {
+    "method": "POST",
+    "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/unblock"
+  },
+  "mcp.servers.tools.unexempt": {
+    "method": "POST",
+    "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/unexempt"
+  },
+  "mcp.servers.trust.set": {
+    "method": "POST",
+    "path": "/api/mcp/config/servers/{serverName}/trust"
   },
   "mcp.servers.upsert": {
     "method": "POST",
@@ -2198,6 +2214,7 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "notifications.deadLetters.list",
   "notifications.deadLetters.replay",
   "email.attachment.get",
+  "email.draft.update",
   "email.drafts.list",
   "email.expectation.cancel",
   "email.expectation.list",
@@ -2262,6 +2279,7 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "sessions.hosted.history",
   "sessions.hosted.kill",
   "sessions.hosted.list",
+  "sessions.hosted.share",
   "sessions.hosted.workspaces",
   "sessions.search",
   "watchers.triggers.cancel",
@@ -2320,9 +2338,9 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "automation.runs.retry": "rest",
   "automation.schedules.create": "rest",
   "automation.schedules.delete": "rest",
-  "automation.schedules.disable": "rest",
-  "automation.schedules.enable": "rest",
   "automation.schedules.list": "rest",
+  "automation.schedules.pause": "rest",
+  "automation.schedules.resume": "rest",
   "automation.schedules.run": "rest",
   "batch.jobs.cancel": "rest",
   "batch.jobs.create": "rest",
@@ -2497,6 +2515,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "notifications.deadLetters.replay": "ws-invoke",
   "email.attachment.get": "ws-invoke",
   "email.draft.create": "rest",
+  "email.draft.update": "ws-invoke",
   "email.drafts.list": "ws-invoke",
   "email.expectation.cancel": "ws-invoke",
   "email.expectation.list": "ws-invoke",
@@ -2637,13 +2656,17 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "projectPlanning.workPlan.tasks.list": "rest",
   "projectPlanning.workPlan.tasks.reorder": "rest",
   "mcp.config.get": "rest",
-  "mcp.config.reload": "rest",
   "mcp.servers.list": "rest",
+  "mcp.servers.quarantine.accept": "rest",
+  "mcp.servers.reload": "rest",
   "mcp.servers.remove": "rest",
   "mcp.servers.reveal": "rest",
-  "mcp.servers.tools.allow": "rest",
-  "mcp.servers.tools.clear": "rest",
-  "mcp.servers.tools.deny": "rest",
+  "mcp.servers.role.set": "rest",
+  "mcp.servers.tools.block": "rest",
+  "mcp.servers.tools.exempt": "rest",
+  "mcp.servers.tools.unblock": "rest",
+  "mcp.servers.tools.unexempt": "rest",
+  "mcp.servers.trust.set": "rest",
   "mcp.servers.upsert": "rest",
   "mcp.tools.list": "rest",
   "media.analyze": "rest",
@@ -2825,6 +2848,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "sessions.hosted.history": "ws-invoke",
   "sessions.hosted.kill": "ws-invoke",
   "sessions.hosted.list": "ws-invoke",
+  "sessions.hosted.share": "ws-invoke",
   "sessions.hosted.workspaces": "ws-invoke",
   "sessions.inputs.cancel": "rest",
   "sessions.inputs.deliver": "rest",
@@ -3041,6 +3065,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "approvals.approve": {
     "input": {
       "approvalId": "sample",
+      "expectedRevision": 0,
       "disposition": "approved",
       "note": "sample",
       "remember": false,
@@ -3052,6 +3077,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "modifiedArgs": {}
     },
     "output": {
+      "applied": false,
       "approval": {
         "id": "sample",
         "callId": "sample",
@@ -3077,7 +3103,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "sideEffects": [
               "sample"
             ],
-            "host": "sample"
+            "host": "sample",
+            "riskFamily": "sample",
+            "reading": {
+              "family": "sample",
+              "stakes": "low",
+              "facts": {
+                "mutates": false,
+                "outward": false,
+                "secrets": false,
+                "irreversible": false,
+                "beyondProject": false,
+                "weakensSecurity": false,
+                "obfuscated": false
+              },
+              "uncertain": [
+                "sample"
+              ]
+            }
           },
           "workingDirectory": "sample",
           "attribution": {
@@ -3106,9 +3149,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "rememberTier": "session",
           "reason": "sample",
           "modifiedArgs": {},
-          "disposition": "approved"
+          "disposition": "approved",
+          "argsDigest": "sample",
+          "relayRequestId": "sample"
         },
         "expiresAt": 0,
+        "revision": 0,
+        "sequence": 0,
+        "homeNode": "sample",
+        "requester": {
+          "kind": "in-process",
+          "holds": [
+            {
+              "id": "sample",
+              "releasedAt": 0
+            }
+          ]
+        },
+        "cause": "requester-left",
         "metadata": {},
         "audit": [
           {
@@ -3116,13 +3174,83 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "action": "created",
             "actor": "sample",
             "actorSurface": "sample",
+            "actorNode": "sample",
             "createdAt": 0,
             "note": "sample"
           }
         ]
       },
-      "applied": false,
-      "refusal": "sample",
+      "reading": {
+        "ref": {
+          "node": "sample",
+          "id": "sample"
+        },
+        "revision": 0,
+        "sequence": 0,
+        "phase": "waiting",
+        "status": "pending",
+        "reason": "waiting-for-approver",
+        "waitingOn": {
+          "who": "owner",
+          "claimedBy": "sample",
+          "homeNode": "sample",
+          "homeReachable": false
+        },
+        "deadline": {
+          "expiresAt": 0,
+          "remainingMs": 0
+        },
+        "allowedActions": [
+          "claim"
+        ],
+        "refusedActions": [
+          {
+            "action": "claim",
+            "code": "sample",
+            "reason": "sample"
+          }
+        ],
+        "decision": {
+          "disposition": "approved",
+          "by": "sample",
+          "surface": "sample",
+          "node": "sample",
+          "at": 0,
+          "cause": "requester-left"
+        },
+        "receipt": {
+          "state": "delivered",
+          "reason": "sample"
+        },
+        "requester": {
+          "kind": "in-process",
+          "principal": "sample",
+          "surface": "sample",
+          "mine": false
+        },
+        "work": {
+          "state": "not-reported",
+          "callId": "sample",
+          "sessionId": "sample"
+        },
+        "next": [
+          {
+            "move": "wait",
+            "text": "sample"
+          }
+        ]
+      },
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ],
+        "retryable": false,
+        "retryAfterMs": 0,
+        "status": 0
+      },
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -3134,12 +3262,14 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "approvals.cancel": {
     "input": {
       "approvalId": "sample",
+      "expectedRevision": 0,
       "note": "sample",
       "remember": false,
       "release": false,
       "holdId": "sample"
     },
     "output": {
+      "applied": false,
       "approval": {
         "id": "sample",
         "callId": "sample",
@@ -3165,7 +3295,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "sideEffects": [
               "sample"
             ],
-            "host": "sample"
+            "host": "sample",
+            "riskFamily": "sample",
+            "reading": {
+              "family": "sample",
+              "stakes": "low",
+              "facts": {
+                "mutates": false,
+                "outward": false,
+                "secrets": false,
+                "irreversible": false,
+                "beyondProject": false,
+                "weakensSecurity": false,
+                "obfuscated": false
+              },
+              "uncertain": [
+                "sample"
+              ]
+            }
           },
           "workingDirectory": "sample",
           "attribution": {
@@ -3194,9 +3341,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "rememberTier": "session",
           "reason": "sample",
           "modifiedArgs": {},
-          "disposition": "approved"
+          "disposition": "approved",
+          "argsDigest": "sample",
+          "relayRequestId": "sample"
         },
         "expiresAt": 0,
+        "revision": 0,
+        "sequence": 0,
+        "homeNode": "sample",
+        "requester": {
+          "kind": "in-process",
+          "holds": [
+            {
+              "id": "sample",
+              "releasedAt": 0
+            }
+          ]
+        },
+        "cause": "requester-left",
         "metadata": {},
         "audit": [
           {
@@ -3204,13 +3366,83 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "action": "created",
             "actor": "sample",
             "actorSurface": "sample",
+            "actorNode": "sample",
             "createdAt": 0,
             "note": "sample"
           }
         ]
       },
-      "applied": false,
-      "refusal": "sample",
+      "reading": {
+        "ref": {
+          "node": "sample",
+          "id": "sample"
+        },
+        "revision": 0,
+        "sequence": 0,
+        "phase": "waiting",
+        "status": "pending",
+        "reason": "waiting-for-approver",
+        "waitingOn": {
+          "who": "owner",
+          "claimedBy": "sample",
+          "homeNode": "sample",
+          "homeReachable": false
+        },
+        "deadline": {
+          "expiresAt": 0,
+          "remainingMs": 0
+        },
+        "allowedActions": [
+          "claim"
+        ],
+        "refusedActions": [
+          {
+            "action": "claim",
+            "code": "sample",
+            "reason": "sample"
+          }
+        ],
+        "decision": {
+          "disposition": "approved",
+          "by": "sample",
+          "surface": "sample",
+          "node": "sample",
+          "at": 0,
+          "cause": "requester-left"
+        },
+        "receipt": {
+          "state": "delivered",
+          "reason": "sample"
+        },
+        "requester": {
+          "kind": "in-process",
+          "principal": "sample",
+          "surface": "sample",
+          "mine": false
+        },
+        "work": {
+          "state": "not-reported",
+          "callId": "sample",
+          "sessionId": "sample"
+        },
+        "next": [
+          {
+            "move": "wait",
+            "text": "sample"
+          }
+        ]
+      },
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ],
+        "retryable": false,
+        "retryAfterMs": 0,
+        "status": 0
+      },
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -3221,9 +3453,13 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "approvals.claim": {
     "input": {
-      "approvalId": "sample"
+      "approvalId": "sample",
+      "expectedRevision": 0,
+      "note": "sample",
+      "remember": false
     },
     "output": {
+      "applied": false,
       "approval": {
         "id": "sample",
         "callId": "sample",
@@ -3249,7 +3485,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "sideEffects": [
               "sample"
             ],
-            "host": "sample"
+            "host": "sample",
+            "riskFamily": "sample",
+            "reading": {
+              "family": "sample",
+              "stakes": "low",
+              "facts": {
+                "mutates": false,
+                "outward": false,
+                "secrets": false,
+                "irreversible": false,
+                "beyondProject": false,
+                "weakensSecurity": false,
+                "obfuscated": false
+              },
+              "uncertain": [
+                "sample"
+              ]
+            }
           },
           "workingDirectory": "sample",
           "attribution": {
@@ -3278,9 +3531,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "rememberTier": "session",
           "reason": "sample",
           "modifiedArgs": {},
-          "disposition": "approved"
+          "disposition": "approved",
+          "argsDigest": "sample",
+          "relayRequestId": "sample"
         },
         "expiresAt": 0,
+        "revision": 0,
+        "sequence": 0,
+        "homeNode": "sample",
+        "requester": {
+          "kind": "in-process",
+          "holds": [
+            {
+              "id": "sample",
+              "releasedAt": 0
+            }
+          ]
+        },
+        "cause": "requester-left",
         "metadata": {},
         "audit": [
           {
@@ -3288,13 +3556,83 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "action": "created",
             "actor": "sample",
             "actorSurface": "sample",
+            "actorNode": "sample",
             "createdAt": 0,
             "note": "sample"
           }
         ]
       },
-      "applied": false,
-      "refusal": "sample",
+      "reading": {
+        "ref": {
+          "node": "sample",
+          "id": "sample"
+        },
+        "revision": 0,
+        "sequence": 0,
+        "phase": "waiting",
+        "status": "pending",
+        "reason": "waiting-for-approver",
+        "waitingOn": {
+          "who": "owner",
+          "claimedBy": "sample",
+          "homeNode": "sample",
+          "homeReachable": false
+        },
+        "deadline": {
+          "expiresAt": 0,
+          "remainingMs": 0
+        },
+        "allowedActions": [
+          "claim"
+        ],
+        "refusedActions": [
+          {
+            "action": "claim",
+            "code": "sample",
+            "reason": "sample"
+          }
+        ],
+        "decision": {
+          "disposition": "approved",
+          "by": "sample",
+          "surface": "sample",
+          "node": "sample",
+          "at": 0,
+          "cause": "requester-left"
+        },
+        "receipt": {
+          "state": "delivered",
+          "reason": "sample"
+        },
+        "requester": {
+          "kind": "in-process",
+          "principal": "sample",
+          "surface": "sample",
+          "mine": false
+        },
+        "work": {
+          "state": "not-reported",
+          "callId": "sample",
+          "sessionId": "sample"
+        },
+        "next": [
+          {
+            "move": "wait",
+            "text": "sample"
+          }
+        ]
+      },
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ],
+        "retryable": false,
+        "retryAfterMs": 0,
+        "status": 0
+      },
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -3306,6 +3644,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "approvals.deny": {
     "input": {
       "approvalId": "sample",
+      "expectedRevision": 0,
       "disposition": "denied",
       "note": "sample",
       "remember": false,
@@ -3313,6 +3652,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "reason": "sample"
     },
     "output": {
+      "applied": false,
       "approval": {
         "id": "sample",
         "callId": "sample",
@@ -3338,7 +3678,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "sideEffects": [
               "sample"
             ],
-            "host": "sample"
+            "host": "sample",
+            "riskFamily": "sample",
+            "reading": {
+              "family": "sample",
+              "stakes": "low",
+              "facts": {
+                "mutates": false,
+                "outward": false,
+                "secrets": false,
+                "irreversible": false,
+                "beyondProject": false,
+                "weakensSecurity": false,
+                "obfuscated": false
+              },
+              "uncertain": [
+                "sample"
+              ]
+            }
           },
           "workingDirectory": "sample",
           "attribution": {
@@ -3367,9 +3724,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "rememberTier": "session",
           "reason": "sample",
           "modifiedArgs": {},
-          "disposition": "approved"
+          "disposition": "approved",
+          "argsDigest": "sample",
+          "relayRequestId": "sample"
         },
         "expiresAt": 0,
+        "revision": 0,
+        "sequence": 0,
+        "homeNode": "sample",
+        "requester": {
+          "kind": "in-process",
+          "holds": [
+            {
+              "id": "sample",
+              "releasedAt": 0
+            }
+          ]
+        },
+        "cause": "requester-left",
         "metadata": {},
         "audit": [
           {
@@ -3377,13 +3749,83 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "action": "created",
             "actor": "sample",
             "actorSurface": "sample",
+            "actorNode": "sample",
             "createdAt": 0,
             "note": "sample"
           }
         ]
       },
-      "applied": false,
-      "refusal": "sample",
+      "reading": {
+        "ref": {
+          "node": "sample",
+          "id": "sample"
+        },
+        "revision": 0,
+        "sequence": 0,
+        "phase": "waiting",
+        "status": "pending",
+        "reason": "waiting-for-approver",
+        "waitingOn": {
+          "who": "owner",
+          "claimedBy": "sample",
+          "homeNode": "sample",
+          "homeReachable": false
+        },
+        "deadline": {
+          "expiresAt": 0,
+          "remainingMs": 0
+        },
+        "allowedActions": [
+          "claim"
+        ],
+        "refusedActions": [
+          {
+            "action": "claim",
+            "code": "sample",
+            "reason": "sample"
+          }
+        ],
+        "decision": {
+          "disposition": "approved",
+          "by": "sample",
+          "surface": "sample",
+          "node": "sample",
+          "at": 0,
+          "cause": "requester-left"
+        },
+        "receipt": {
+          "state": "delivered",
+          "reason": "sample"
+        },
+        "requester": {
+          "kind": "in-process",
+          "principal": "sample",
+          "surface": "sample",
+          "mine": false
+        },
+        "work": {
+          "state": "not-reported",
+          "callId": "sample",
+          "sessionId": "sample"
+        },
+        "next": [
+          {
+            "move": "wait",
+            "text": "sample"
+          }
+        ]
+      },
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ],
+        "retryable": false,
+        "retryAfterMs": 0,
+        "status": 0
+      },
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -3443,7 +3885,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "sideEffects": [
                 "sample"
               ],
-              "host": "sample"
+              "host": "sample",
+              "riskFamily": "sample",
+              "reading": {
+                "family": "sample",
+                "stakes": "low",
+                "facts": {
+                  "mutates": false,
+                  "outward": false,
+                  "secrets": false,
+                  "irreversible": false,
+                  "beyondProject": false,
+                  "weakensSecurity": false,
+                  "obfuscated": false
+                },
+                "uncertain": [
+                  "sample"
+                ]
+              }
             },
             "workingDirectory": "sample",
             "attribution": {
@@ -3472,9 +3931,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "rememberTier": "session",
             "reason": "sample",
             "modifiedArgs": {},
-            "disposition": "approved"
+            "disposition": "approved",
+            "argsDigest": "sample",
+            "relayRequestId": "sample"
           },
           "expiresAt": 0,
+          "revision": 0,
+          "sequence": 0,
+          "homeNode": "sample",
+          "requester": {
+            "kind": "in-process",
+            "holds": [
+              {
+                "id": "sample",
+                "releasedAt": 0
+              }
+            ]
+          },
+          "cause": "requester-left",
           "metadata": {},
           "audit": [
             {
@@ -3482,10 +3956,71 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "action": "created",
               "actor": "sample",
               "actorSurface": "sample",
+              "actorNode": "sample",
               "createdAt": 0,
               "note": "sample"
             }
-          ]
+          ],
+          "reading": {
+            "ref": {
+              "node": "sample",
+              "id": "sample"
+            },
+            "revision": 0,
+            "sequence": 0,
+            "phase": "waiting",
+            "status": "pending",
+            "reason": "waiting-for-approver",
+            "waitingOn": {
+              "who": "owner",
+              "claimedBy": "sample",
+              "homeNode": "sample",
+              "homeReachable": false
+            },
+            "deadline": {
+              "expiresAt": 0,
+              "remainingMs": 0
+            },
+            "allowedActions": [
+              "claim"
+            ],
+            "refusedActions": [
+              {
+                "action": "claim",
+                "code": "sample",
+                "reason": "sample"
+              }
+            ],
+            "decision": {
+              "disposition": "approved",
+              "by": "sample",
+              "surface": "sample",
+              "node": "sample",
+              "at": 0,
+              "cause": "requester-left"
+            },
+            "receipt": {
+              "state": "delivered",
+              "reason": "sample"
+            },
+            "requester": {
+              "kind": "in-process",
+              "principal": "sample",
+              "surface": "sample",
+              "mine": false
+            },
+            "work": {
+              "state": "not-reported",
+              "callId": "sample",
+              "sessionId": "sample"
+            },
+            "next": [
+              {
+                "move": "wait",
+                "text": "sample"
+              }
+            ]
+          }
         }
       ]
     }
@@ -3511,7 +4046,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "sideEffects": [
             "sample"
           ],
-          "host": "sample"
+          "host": "sample",
+          "riskFamily": "sample",
+          "reading": {
+            "family": "sample",
+            "stakes": "low",
+            "facts": {
+              "mutates": false,
+              "outward": false,
+              "secrets": false,
+              "irreversible": false,
+              "beyondProject": false,
+              "weakensSecurity": false,
+              "obfuscated": false
+            },
+            "uncertain": [
+              "sample"
+            ]
+          }
         },
         "workingDirectory": "sample",
         "attribution": {
@@ -3535,6 +4087,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "waitMs": 0
     },
     "output": {
+      "approvalId": "sample",
       "approval": {
         "id": "sample",
         "callId": "sample",
@@ -3560,7 +4113,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "sideEffects": [
               "sample"
             ],
-            "host": "sample"
+            "host": "sample",
+            "riskFamily": "sample",
+            "reading": {
+              "family": "sample",
+              "stakes": "low",
+              "facts": {
+                "mutates": false,
+                "outward": false,
+                "secrets": false,
+                "irreversible": false,
+                "beyondProject": false,
+                "weakensSecurity": false,
+                "obfuscated": false
+              },
+              "uncertain": [
+                "sample"
+              ]
+            }
           },
           "workingDirectory": "sample",
           "attribution": {
@@ -3589,9 +4159,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "rememberTier": "session",
           "reason": "sample",
           "modifiedArgs": {},
-          "disposition": "approved"
+          "disposition": "approved",
+          "argsDigest": "sample",
+          "relayRequestId": "sample"
         },
         "expiresAt": 0,
+        "revision": 0,
+        "sequence": 0,
+        "homeNode": "sample",
+        "requester": {
+          "kind": "in-process",
+          "holds": [
+            {
+              "id": "sample",
+              "releasedAt": 0
+            }
+          ]
+        },
+        "cause": "requester-left",
         "metadata": {},
         "audit": [
           {
@@ -3599,8 +4184,69 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "action": "created",
             "actor": "sample",
             "actorSurface": "sample",
+            "actorNode": "sample",
             "createdAt": 0,
             "note": "sample"
+          }
+        ]
+      },
+      "reading": {
+        "ref": {
+          "node": "sample",
+          "id": "sample"
+        },
+        "revision": 0,
+        "sequence": 0,
+        "phase": "waiting",
+        "status": "pending",
+        "reason": "waiting-for-approver",
+        "waitingOn": {
+          "who": "owner",
+          "claimedBy": "sample",
+          "homeNode": "sample",
+          "homeReachable": false
+        },
+        "deadline": {
+          "expiresAt": 0,
+          "remainingMs": 0
+        },
+        "allowedActions": [
+          "claim"
+        ],
+        "refusedActions": [
+          {
+            "action": "claim",
+            "code": "sample",
+            "reason": "sample"
+          }
+        ],
+        "decision": {
+          "disposition": "approved",
+          "by": "sample",
+          "surface": "sample",
+          "node": "sample",
+          "at": 0,
+          "cause": "requester-left"
+        },
+        "receipt": {
+          "state": "delivered",
+          "reason": "sample"
+        },
+        "requester": {
+          "kind": "in-process",
+          "principal": "sample",
+          "surface": "sample",
+          "mine": false
+        },
+        "work": {
+          "state": "not-reported",
+          "callId": "sample",
+          "sessionId": "sample"
+        },
+        "next": [
+          {
+            "move": "wait",
+            "text": "sample"
           }
         ]
       },
@@ -3613,7 +4259,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "input": {
       "itemId": "sample",
       "option": "sample",
-      "text": "sample"
+      "text": "sample",
+      "expectedRevision": 0
     },
     "output": {
       "applied": false,
@@ -3646,6 +4293,67 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "state": "delivered",
           "to": "sample",
           "reason": "sample"
+        },
+        "revision": 0,
+        "reading": {
+          "ref": {
+            "node": "sample",
+            "id": "sample"
+          },
+          "revision": 0,
+          "sequence": 0,
+          "phase": "waiting",
+          "status": "pending",
+          "reason": "waiting-for-approver",
+          "waitingOn": {
+            "who": "owner",
+            "claimedBy": "sample",
+            "homeNode": "sample",
+            "homeReachable": false
+          },
+          "deadline": {
+            "expiresAt": 0,
+            "remainingMs": 0
+          },
+          "allowedActions": [
+            "claim"
+          ],
+          "refusedActions": [
+            {
+              "action": "claim",
+              "code": "sample",
+              "reason": "sample"
+            }
+          ],
+          "decision": {
+            "disposition": "approved",
+            "by": "sample",
+            "surface": "sample",
+            "node": "sample",
+            "at": 0,
+            "cause": "requester-left"
+          },
+          "receipt": {
+            "state": "delivered",
+            "reason": "sample"
+          },
+          "requester": {
+            "kind": "in-process",
+            "principal": "sample",
+            "surface": "sample",
+            "mine": false
+          },
+          "work": {
+            "state": "not-reported",
+            "callId": "sample",
+            "sessionId": "sample"
+          },
+          "next": [
+            {
+              "move": "wait",
+              "text": "sample"
+            }
+          ]
         }
       },
       "delivery": {
@@ -3703,6 +4411,67 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "state": "delivered",
           "to": "sample",
           "reason": "sample"
+        },
+        "revision": 0,
+        "reading": {
+          "ref": {
+            "node": "sample",
+            "id": "sample"
+          },
+          "revision": 0,
+          "sequence": 0,
+          "phase": "waiting",
+          "status": "pending",
+          "reason": "waiting-for-approver",
+          "waitingOn": {
+            "who": "owner",
+            "claimedBy": "sample",
+            "homeNode": "sample",
+            "homeReachable": false
+          },
+          "deadline": {
+            "expiresAt": 0,
+            "remainingMs": 0
+          },
+          "allowedActions": [
+            "claim"
+          ],
+          "refusedActions": [
+            {
+              "action": "claim",
+              "code": "sample",
+              "reason": "sample"
+            }
+          ],
+          "decision": {
+            "disposition": "approved",
+            "by": "sample",
+            "surface": "sample",
+            "node": "sample",
+            "at": 0,
+            "cause": "requester-left"
+          },
+          "receipt": {
+            "state": "delivered",
+            "reason": "sample"
+          },
+          "requester": {
+            "kind": "in-process",
+            "principal": "sample",
+            "surface": "sample",
+            "mine": false
+          },
+          "work": {
+            "state": "not-reported",
+            "callId": "sample",
+            "sessionId": "sample"
+          },
+          "next": [
+            {
+              "move": "wait",
+              "text": "sample"
+            }
+          ]
         }
       },
       "delivery": {
@@ -3764,6 +4533,67 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "state": "delivered",
             "to": "sample",
             "reason": "sample"
+          },
+          "revision": 0,
+          "reading": {
+            "ref": {
+              "node": "sample",
+              "id": "sample"
+            },
+            "revision": 0,
+            "sequence": 0,
+            "phase": "waiting",
+            "status": "pending",
+            "reason": "waiting-for-approver",
+            "waitingOn": {
+              "who": "owner",
+              "claimedBy": "sample",
+              "homeNode": "sample",
+              "homeReachable": false
+            },
+            "deadline": {
+              "expiresAt": 0,
+              "remainingMs": 0
+            },
+            "allowedActions": [
+              "claim"
+            ],
+            "refusedActions": [
+              {
+                "action": "claim",
+                "code": "sample",
+                "reason": "sample"
+              }
+            ],
+            "decision": {
+              "disposition": "approved",
+              "by": "sample",
+              "surface": "sample",
+              "node": "sample",
+              "at": 0,
+              "cause": "requester-left"
+            },
+            "receipt": {
+              "state": "delivered",
+              "reason": "sample"
+            },
+            "requester": {
+              "kind": "in-process",
+              "principal": "sample",
+              "surface": "sample",
+              "mine": false
+            },
+            "work": {
+              "state": "not-reported",
+              "callId": "sample",
+              "sessionId": "sample"
+            },
+            "next": [
+              {
+                "move": "wait",
+                "text": "sample"
+              }
+            ]
           }
         }
       ],
@@ -3815,6 +4645,67 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "state": "delivered",
           "to": "sample",
           "reason": "sample"
+        },
+        "revision": 0,
+        "reading": {
+          "ref": {
+            "node": "sample",
+            "id": "sample"
+          },
+          "revision": 0,
+          "sequence": 0,
+          "phase": "waiting",
+          "status": "pending",
+          "reason": "waiting-for-approver",
+          "waitingOn": {
+            "who": "owner",
+            "claimedBy": "sample",
+            "homeNode": "sample",
+            "homeReachable": false
+          },
+          "deadline": {
+            "expiresAt": 0,
+            "remainingMs": 0
+          },
+          "allowedActions": [
+            "claim"
+          ],
+          "refusedActions": [
+            {
+              "action": "claim",
+              "code": "sample",
+              "reason": "sample"
+            }
+          ],
+          "decision": {
+            "disposition": "approved",
+            "by": "sample",
+            "surface": "sample",
+            "node": "sample",
+            "at": 0,
+            "cause": "requester-left"
+          },
+          "receipt": {
+            "state": "delivered",
+            "reason": "sample"
+          },
+          "requester": {
+            "kind": "in-process",
+            "principal": "sample",
+            "surface": "sample",
+            "mine": false
+          },
+          "work": {
+            "state": "not-reported",
+            "callId": "sample",
+            "sessionId": "sample"
+          },
+          "next": [
+            {
+              "move": "wait",
+              "text": "sample"
+            }
+          ]
         }
       }
     }
@@ -3855,6 +4746,67 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "state": "delivered",
           "to": "sample",
           "reason": "sample"
+        },
+        "revision": 0,
+        "reading": {
+          "ref": {
+            "node": "sample",
+            "id": "sample"
+          },
+          "revision": 0,
+          "sequence": 0,
+          "phase": "waiting",
+          "status": "pending",
+          "reason": "waiting-for-approver",
+          "waitingOn": {
+            "who": "owner",
+            "claimedBy": "sample",
+            "homeNode": "sample",
+            "homeReachable": false
+          },
+          "deadline": {
+            "expiresAt": 0,
+            "remainingMs": 0
+          },
+          "allowedActions": [
+            "claim"
+          ],
+          "refusedActions": [
+            {
+              "action": "claim",
+              "code": "sample",
+              "reason": "sample"
+            }
+          ],
+          "decision": {
+            "disposition": "approved",
+            "by": "sample",
+            "surface": "sample",
+            "node": "sample",
+            "at": 0,
+            "cause": "requester-left"
+          },
+          "receipt": {
+            "state": "delivered",
+            "reason": "sample"
+          },
+          "requester": {
+            "kind": "in-process",
+            "principal": "sample",
+            "surface": "sample",
+            "mine": false
+          },
+          "work": {
+            "state": "not-reported",
+            "callId": "sample",
+            "sessionId": "sample"
+          },
+          "next": [
+            {
+              "move": "wait",
+              "text": "sample"
+            }
+          ]
         }
       },
       "delivery": {
@@ -4439,6 +5391,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "nextRunAt": 0,
       "lastRunAt": 0,
       "lastRunId": "sample",
+      "lastOutcome": "delivered",
       "runCount": 0,
       "successCount": 0,
       "failureCount": 0,
@@ -4484,6 +5437,133 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "cursor": "sample"
     },
     "output": {
+      "items": [
+        {
+          "id": "sample",
+          "mutationRevision": "sample",
+          "name": "sample",
+          "description": "sample",
+          "labels": [
+            "sample"
+          ],
+          "createdAt": 0,
+          "updatedAt": 0,
+          "status": "enabled",
+          "enabled": false,
+          "schedule": {
+            "kind": "at",
+            "at": 0
+          },
+          "execution": {
+            "prompt": "sample",
+            "template": "sample",
+            "target": {
+              "kind": "isolated",
+              "sessionId": "sample",
+              "routeId": "sample",
+              "threadId": "sample",
+              "channelId": "sample",
+              "surfaceKind": "tui",
+              "pinnedSessionId": "sample",
+              "preserveThread": false,
+              "createIfMissing": false
+            },
+            "modelProvider": "sample",
+            "modelId": "sample",
+            "fallbackModels": [
+              "sample"
+            ],
+            "routing": {
+              "providerSelection": "inherit-current",
+              "providerFailurePolicy": "ordered-fallbacks",
+              "fallbackModels": [
+                "sample"
+              ]
+            },
+            "executionIntent": {
+              "riskClass": "safe",
+              "requiresApproval": false,
+              "networkPolicy": "inherit",
+              "filesystemPolicy": "inherit"
+            },
+            "reasoningEffort": "none",
+            "thinking": "sample",
+            "wakeMode": "next-heartbeat",
+            "timeoutMs": 0,
+            "maxAttempts": 0,
+            "toolAllowlist": [
+              "sample"
+            ],
+            "allowUnsafeExternalContent": false,
+            "externalContentSource": "gmail",
+            "lightContext": false
+          },
+          "delivery": {
+            "mode": "none",
+            "targets": [
+              {
+                "kind": "none",
+                "surfaceKind": "tui",
+                "address": "sample",
+                "routeId": "sample",
+                "label": "sample"
+              }
+            ],
+            "fallbackTargets": [
+              {
+                "kind": "none",
+                "surfaceKind": "tui",
+                "address": "sample",
+                "routeId": "sample",
+                "label": "sample"
+              }
+            ],
+            "includeSummary": false,
+            "includeLinks": false,
+            "replyToRouteId": "sample"
+          },
+          "failure": {
+            "action": "retry",
+            "maxConsecutiveFailures": 0,
+            "cooldownMs": 0,
+            "retryPolicy": {
+              "maxAttempts": 0,
+              "delayMs": 0,
+              "strategy": "fixed",
+              "maxDelayMs": 0,
+              "jitterMs": 0
+            },
+            "deadLetterRouteId": "sample",
+            "disableAfterFailures": false,
+            "notifyRouteId": "sample"
+          },
+          "source": {
+            "id": "sample",
+            "kind": "schedule",
+            "label": "sample",
+            "surfaceKind": "tui",
+            "routeId": "sample",
+            "enabled": false,
+            "createdAt": 0,
+            "updatedAt": 0,
+            "lastSeenAt": 0,
+            "metadata": {}
+          },
+          "nextRunAt": 0,
+          "lastRunAt": 0,
+          "lastRunId": "sample",
+          "lastOutcome": "delivered",
+          "runCount": 0,
+          "successCount": 0,
+          "failureCount": 0,
+          "pausedReason": "sample",
+          "deleteAfterRun": false,
+          "archivedAt": 0,
+          "metadata": {}
+        }
+      ],
+      "hasMore": false,
+      "nextCursor": "sample",
       "jobs": [
         {
           "id": "sample",
@@ -4599,6 +5679,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "nextRunAt": 0,
           "lastRunAt": 0,
           "lastRunId": "sample",
+          "lastOutcome": "delivered",
           "runCount": 0,
           "successCount": 0,
           "failureCount": 0,
@@ -4826,6 +5907,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "nextRunAt": 0,
       "lastRunAt": 0,
       "lastRunId": "sample",
+      "lastOutcome": "delivered",
       "runCount": 0,
       "successCount": 0,
       "failureCount": 0,
@@ -5189,6 +6271,167 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "since": 0
     },
     "output": {
+      "items": [
+        {
+          "id": "sample",
+          "jobId": "sample",
+          "labels": [
+            "sample"
+          ],
+          "createdAt": 0,
+          "updatedAt": 0,
+          "status": "queued",
+          "agentId": "sample",
+          "triggeredBy": {
+            "id": "sample",
+            "kind": "schedule",
+            "label": "sample",
+            "surfaceKind": "tui",
+            "routeId": "sample",
+            "enabled": false,
+            "createdAt": 0,
+            "updatedAt": 0,
+            "lastSeenAt": 0,
+            "metadata": {}
+          },
+          "target": {
+            "kind": "isolated",
+            "sessionId": "sample",
+            "routeId": "sample",
+            "threadId": "sample",
+            "channelId": "sample",
+            "surfaceKind": "tui",
+            "pinnedSessionId": "sample",
+            "preserveThread": false,
+            "createIfMissing": false
+          },
+          "execution": {
+            "prompt": "sample",
+            "template": "sample",
+            "target": {
+              "kind": "isolated",
+              "sessionId": "sample",
+              "routeId": "sample",
+              "threadId": "sample",
+              "channelId": "sample",
+              "surfaceKind": "tui",
+              "pinnedSessionId": "sample",
+              "preserveThread": false,
+              "createIfMissing": false
+            },
+            "modelProvider": "sample",
+            "modelId": "sample",
+            "fallbackModels": [
+              "sample"
+            ],
+            "routing": {
+              "providerSelection": "inherit-current",
+              "providerFailurePolicy": "ordered-fallbacks",
+              "fallbackModels": [
+                "sample"
+              ]
+            },
+            "executionIntent": {
+              "riskClass": "safe",
+              "requiresApproval": false,
+              "networkPolicy": "inherit",
+              "filesystemPolicy": "inherit"
+            },
+            "reasoningEffort": "none",
+            "thinking": "sample",
+            "wakeMode": "next-heartbeat",
+            "timeoutMs": 0,
+            "maxAttempts": 0,
+            "toolAllowlist": [
+              "sample"
+            ],
+            "allowUnsafeExternalContent": false,
+            "externalContentSource": "gmail",
+            "lightContext": false
+          },
+          "scheduleKind": "at",
+          "queuedAt": 0,
+          "startedAt": 0,
+          "endedAt": 0,
+          "durationMs": 0,
+          "forceRun": false,
+          "dueRun": false,
+          "attempt": 0,
+          "sessionId": "sample",
+          "routeId": "sample",
+          "route": {
+            "id": "sample",
+            "kind": "session",
+            "surfaceKind": "tui",
+            "surfaceId": "sample",
+            "externalId": "sample",
+            "sessionPolicy": "create-or-bind",
+            "threadPolicy": "preserve",
+            "deliveryGuarantee": "best-effort",
+            "threadId": "sample",
+            "channelId": "sample",
+            "sessionId": "sample",
+            "jobId": "sample",
+            "runId": "sample",
+            "title": "sample",
+            "lastSeenAt": 0,
+            "createdAt": 0,
+            "updatedAt": 0,
+            "metadata": {}
+          },
+          "continuationMode": "spawn",
+          "executionIntent": {
+            "mode": "spawn",
+            "targetKind": "isolated"
+          },
+          "deliveryIds": [
+            "sample"
+          ],
+          "deliveryAttempts": [
+            {
+              "id": "sample",
+              "runId": "sample",
+              "jobId": "sample",
+              "target": {
+                "kind": "none",
+                "surfaceKind": "tui",
+                "address": "sample",
+                "routeId": "sample",
+                "label": "sample"
+              },
+              "status": "pending",
+              "startedAt": 0,
+              "endedAt": 0,
+              "error": "sample",
+              "responseId": "sample"
+            }
+          ],
+          "modelId": "sample",
+          "providerId": "sample",
+          "telemetry": {
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "reasoningTokens": 0
+            },
+            "llmCallCount": 0,
+            "toolCallCount": 0,
+            "turnCount": 0,
+            "modelId": "sample",
+            "providerId": "sample",
+            "reasoningSummaryPresent": false,
+            "source": "local-agent"
+          },
+          "result": "sample",
+          "error": "sample",
+          "cancelledReason": "sample",
+          "metadata": {}
+        }
+      ],
+      "hasMore": false,
+      "nextCursor": "sample",
       "runs": [
         {
           "id": "sample",
@@ -5633,6 +6876,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "nextRunAt": 0,
       "lastRunAt": 0,
       "lastRunId": "sample",
+      "lastOutcome": "delivered",
       "runCount": 0,
       "successCount": 0,
       "failureCount": 0,
@@ -5650,26 +6894,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "output": {
       "removed": false,
       "id": "sample"
-    }
-  },
-  "automation.schedules.disable": {
-    "input": {
-      "scheduleId": "sample",
-      "expectedMutationRevision": "sample"
-    },
-    "output": {
-      "id": "sample",
-      "enabled": false
-    }
-  },
-  "automation.schedules.enable": {
-    "input": {
-      "scheduleId": "sample",
-      "expectedMutationRevision": "sample"
-    },
-    "output": {
-      "id": "sample",
-      "enabled": false
     }
   },
   "automation.schedules.list": {
@@ -5790,6 +7014,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "nextRunAt": 0,
           "lastRunAt": 0,
           "lastRunId": "sample",
+          "lastOutcome": "delivered",
           "runCount": 0,
           "successCount": 0,
           "failureCount": 0,
@@ -5959,6 +7184,26 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         }
       ],
       "defaultTimezone": "sample"
+    }
+  },
+  "automation.schedules.pause": {
+    "input": {
+      "scheduleId": "sample",
+      "expectedMutationRevision": "sample"
+    },
+    "output": {
+      "id": "sample",
+      "enabled": false
+    }
+  },
+  "automation.schedules.resume": {
+    "input": {
+      "scheduleId": "sample",
+      "expectedMutationRevision": "sample"
+    },
+    "output": {
+      "id": "sample",
+      "enabled": false
     }
   },
   "automation.schedules.run": {
@@ -6727,7 +7972,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "attendees": [
         "sample"
       ],
-      "recurrence": "sample"
+      "recurrence": "sample",
+      "revision": "sample"
     }
   },
   "calendar.events.list": {
@@ -6767,6 +8013,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       ],
       "location": "sample",
       "calendarId": "sample",
+      "expectedRevision": "sample",
       "confirm": false
     },
     "output": {
@@ -6869,7 +8116,16 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "expiresAt": 0,
           "instructions": "sample"
         },
-        "metadata": {}
+        "metadata": {},
+        "refusal": {
+          "code": "sample",
+          "state": "sample",
+          "reason": "sample",
+          "next": [
+            "sample"
+          ],
+          "retryable": false
+        }
       }
     }
   },
@@ -6928,7 +8184,16 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "expiresAt": 0,
           "instructions": "sample"
         },
-        "metadata": {}
+        "metadata": {},
+        "refusal": {
+          "code": "sample",
+          "state": "sample",
+          "reason": "sample",
+          "next": [
+            "sample"
+          ],
+          "retryable": false
+        }
       }
     }
   },
@@ -8295,6 +9560,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "deliveredMessage": "sample",
           "deliveryChannel": "sample",
           "deliveryId": "sample",
+          "partsSent": 0,
+          "partsTotal": 0,
           "error": "sample"
         }
       ]
@@ -8464,7 +9731,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "safetyCheckpointId": "sample",
         "undo": {
           "restoreCheckpointId": "sample"
-        }
+        },
+        "workspaceRoot": "sample"
       },
       "refused": false,
       "refusal": {
@@ -8890,6 +10158,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "revoked": false,
         "reason": "sample"
       },
+      "residual": [
+        "sample"
+      ],
       "apiTokenRef": "sample",
       "generatedToken": "sample",
       "accountId": "sample",
@@ -9038,8 +10309,36 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           ],
           "createdAt": 0,
           "deliveryState": "cancelled",
-          "failureReason": "sample",
-          "inReplyTo": "sample"
+          "failureReason": {
+            "turnId": "sample",
+            "headline": "sample",
+            "cause": "sample",
+            "changed": {
+              "text": "sample",
+              "files": [
+                "sample"
+              ]
+            },
+            "next": [
+              {
+                "action": "retry",
+                "label": "sample"
+              }
+            ],
+            "also": "sample",
+            "tip": {
+              "text": "sample",
+              "command": "sample"
+            },
+            "details": [
+              {
+                "label": "sample",
+                "value": "sample"
+              }
+            ]
+          },
+          "inReplyTo": "sample",
+          "clientMessageId": "sample"
         }
       ],
       "total": 0,
@@ -9226,8 +10525,36 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           ],
           "createdAt": 0,
           "deliveryState": "cancelled",
-          "failureReason": "sample",
-          "inReplyTo": "sample"
+          "failureReason": {
+            "turnId": "sample",
+            "headline": "sample",
+            "cause": "sample",
+            "changed": {
+              "text": "sample",
+              "files": [
+                "sample"
+              ]
+            },
+            "next": [
+              {
+                "action": "retry",
+                "label": "sample"
+              }
+            ],
+            "also": "sample",
+            "tip": {
+              "text": "sample",
+              "command": "sample"
+            },
+            "details": [
+              {
+                "label": "sample",
+                "value": "sample"
+              }
+            ]
+          },
+          "inReplyTo": "sample",
+          "clientMessageId": "sample"
         }
       ]
     }
@@ -14426,6 +15753,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "createdAt": 0,
       "completedAt": 0,
       "updatedAt": 0,
+      "held": {
+        "code": "input-unavailable",
+        "reason": "sample",
+        "at": 0
+      },
       "revision": "sample"
     }
   },
@@ -14476,6 +15808,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "createdAt": 0,
           "completedAt": 0,
           "updatedAt": 0,
+          "held": {
+            "code": "input-unavailable",
+            "reason": "sample",
+            "at": 0
+          },
           "revision": "sample"
         }
       ]
@@ -14659,6 +15996,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "outputSchema": {},
               "pluginId": "sample",
               "dangerous": false,
+              "effects": [
+                "sample"
+              ],
               "effect": "read",
               "ownerOnly": false,
               "irreversible": false,
@@ -14843,6 +16183,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "outputSchema": {},
         "pluginId": "sample",
         "dangerous": false,
+        "effects": [
+          "sample"
+        ],
         "effect": "read",
         "ownerOnly": false,
         "irreversible": false,
@@ -14899,6 +16242,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "outputSchema": {},
           "pluginId": "sample",
           "dangerous": false,
+          "effects": [
+            "sample"
+          ],
           "effect": "read",
           "ownerOnly": false,
           "irreversible": false,
@@ -15278,19 +16624,29 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "input": {
       "ids": [
         "sample"
-      ]
+      ],
+      "toCurrent": false
     },
     "output": {
       "results": [
         {
           "id": "sample",
-          "outcome": "delivered"
+          "outcome": "delivered",
+          "reason": "sample",
+          "changes": [
+            {
+              "field": "sample",
+              "was": "sample",
+              "now": "sample"
+            }
+          ]
         }
       ],
       "delivered": 0,
       "retrying": 0,
       "failed": 0,
-      "notFound": 0
+      "notFound": 0,
+      "destinationChanged": 0
     }
   },
   "email.attachment.get": {
@@ -15316,7 +16672,26 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "output": {
       "draftId": "sample",
       "uid": 0,
+      "uidValidity": 0,
       "mailbox": "sample"
+    }
+  },
+  "email.draft.update": {
+    "input": {
+      "uid": 0,
+      "uidValidity": 0,
+      "to": "sample",
+      "subject": "sample",
+      "body": "sample",
+      "inReplyTo": "sample",
+      "references": "sample"
+    },
+    "output": {
+      "draftId": "sample",
+      "uid": 0,
+      "uidValidity": 0,
+      "mailbox": "sample",
+      "replaced": 0
     }
   },
   "email.drafts.list": {
@@ -15335,7 +16710,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         }
       ],
       "total": 0,
-      "mailbox": "sample"
+      "mailbox": "sample",
+      "uidValidity": 0
     }
   },
   "email.expectation.cancel": {
@@ -15565,7 +16941,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "uid": 0,
           "detail": "sample"
         }
-      ]
+      ],
+      "uidValidity": 0
     }
   },
   "email.inbox.read": {
@@ -15586,7 +16963,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "contentType": "sample",
           "sizeBytes": 0
         }
-      ]
+      ],
+      "uidValidity": 0
     }
   },
   "email.inbox.update": {
@@ -15686,6 +17064,22 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         {
           "id": "sample",
           "kind": "agent",
+          "serves": "you",
+          "progress": {
+            "filesRead": 0,
+            "filesChanged": 0
+          },
+          "schedule": {
+            "cadence": {
+              "kind": "every",
+              "intervalMs": 0
+            },
+            "lastRunAt": 0,
+            "lastOutcome": "delivered",
+            "firedCount": 0,
+            "lastFiredAt": 0,
+            "since": 0
+          },
           "parentId": "sample",
           "label": "sample",
           "task": "sample",
@@ -15865,6 +17259,29 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "loserItemIds": [
         "sample"
       ],
+      "losers": [
+        {
+          "id": "sample",
+          "outcome": {
+            "state": "done",
+            "observed": {
+              "how": "sample",
+              "at": 0
+            },
+            "check": "sample",
+            "since": 0,
+            "refusal": {
+              "code": "sample",
+              "state": "sample",
+              "reason": "sample",
+              "next": [
+                "sample"
+              ],
+              "retryable": false
+            }
+          }
+        }
+      ],
       "auto": false,
       "requiresConfirm": false,
       "group": {
@@ -16038,6 +17455,22 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         {
           "id": "sample",
           "kind": "agent",
+          "serves": "you",
+          "progress": {
+            "filesRead": 0,
+            "filesChanged": 0
+          },
+          "schedule": {
+            "cadence": {
+              "kind": "every",
+              "intervalMs": 0
+            },
+            "lastRunAt": 0,
+            "lastOutcome": "delivered",
+            "firedCount": 0,
+            "lastFiredAt": 0,
+            "since": 0
+          },
           "parentId": "sample",
           "label": "sample",
           "task": "sample",
@@ -16132,7 +17565,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "submitted": false,
       "declined": false,
       "messageId": "sample",
-      "reason": "sample"
+      "reason": "sample",
+      "sent": [
+        "text"
+      ],
+      "failed": "text"
     }
   },
   "fleet.resume": {
@@ -16156,6 +17593,22 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         {
           "id": "sample",
           "kind": "agent",
+          "serves": "you",
+          "progress": {
+            "filesRead": 0,
+            "filesChanged": 0
+          },
+          "schedule": {
+            "cadence": {
+              "kind": "every",
+              "intervalMs": 0
+            },
+            "lastRunAt": 0,
+            "lastOutcome": "delivered",
+            "firedCount": 0,
+            "lastFiredAt": 0,
+            "since": 0
+          },
           "parentId": "sample",
           "label": "sample",
           "task": "sample",
@@ -19425,10 +20878,27 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "knowledge.issues.list": {
     "input": {
       "limit": 0,
+      "cursor": "sample",
       "knowledgeSpaceId": "sample",
       "includeAllSpaces": false
     },
     "output": {
+      "items": [
+        {
+          "id": "sample",
+          "severity": "sample",
+          "code": "sample",
+          "message": "sample",
+          "status": "sample",
+          "sourceId": "sample",
+          "nodeId": "sample",
+          "metadata": {},
+          "createdAt": 0,
+          "updatedAt": 0
+        }
+      ],
+      "hasMore": false,
+      "nextCursor": "sample",
       "issues": [
         {
           "id": "sample",
@@ -19875,6 +21345,36 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "includeAllSpaces": false
     },
     "output": {
+      "items": [
+        {
+          "id": "sample",
+          "kind": "sample",
+          "slug": "sample",
+          "title": "sample",
+          "summary": "sample",
+          "aliases": [
+            "sample"
+          ],
+          "status": "sample",
+          "confidence": 0,
+          "sourceId": "sample",
+          "subject": "sample",
+          "subjectIds": [
+            "sample"
+          ],
+          "targetHints": [
+            {}
+          ],
+          "linkedObjectIds": [
+            "sample"
+          ],
+          "metadata": {},
+          "createdAt": 0,
+          "updatedAt": 0
+        }
+      ],
+      "hasMore": false,
+      "nextCursor": "sample",
       "nodes": [
         {
           "id": "sample",
@@ -20565,6 +22065,33 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "includeAllSpaces": false
     },
     "output": {
+      "items": [
+        {
+          "id": "sample",
+          "connectorId": "sample",
+          "sourceType": "url",
+          "title": "sample",
+          "sourceUri": "sample",
+          "canonicalUri": "sample",
+          "summary": "sample",
+          "description": "sample",
+          "tags": [
+            "sample"
+          ],
+          "folderPath": "sample",
+          "status": "sample",
+          "artifactId": "sample",
+          "contentHash": "sample",
+          "lastCrawledAt": 0,
+          "crawlError": "sample",
+          "sessionId": "sample",
+          "metadata": {},
+          "createdAt": 0,
+          "updatedAt": 0
+        }
+      ],
+      "hasMore": false,
+      "nextCursor": "sample",
       "sources": [
         {
           "id": "sample",
@@ -22308,7 +23835,45 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       ]
     }
   },
-  "mcp.config.reload": {
+  "mcp.servers.list": {
+    "input": {},
+    "output": {
+      "servers": [
+        {
+          "name": "sample",
+          "connected": false,
+          "transport": "stdio",
+          "protocolVersion": "sample",
+          "protocolEra": "modern",
+          "phase": "idle",
+          "lastError": "sample",
+          "reconnect": {
+            "state": "configured",
+            "attempt": 0,
+            "maxAttempts": 0,
+            "nextAttemptAt": 0,
+            "stoppedReason": "sample"
+          }
+        }
+      ],
+      "security": [
+        {}
+      ],
+      "sandboxBindings": [
+        {}
+      ]
+    }
+  },
+  "mcp.servers.quarantine.accept": {
+    "input": {
+      "serverName": "sample"
+    },
+    "output": {
+      "serverName": "sample",
+      "accepted": false
+    }
+  },
+  "mcp.servers.reload": {
     "input": {},
     "output": {
       "reload": {
@@ -22370,35 +23935,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           }
         ]
       }
-    }
-  },
-  "mcp.servers.list": {
-    "input": {},
-    "output": {
-      "servers": [
-        {
-          "name": "sample",
-          "connected": false,
-          "transport": "stdio",
-          "protocolVersion": "sample",
-          "protocolEra": "modern",
-          "phase": "idle",
-          "lastError": "sample",
-          "reconnect": {
-            "state": "configured",
-            "attempt": 0,
-            "maxAttempts": 0,
-            "nextAttemptAt": 0,
-            "stoppedReason": "sample"
-          }
-        }
-      ],
-      "security": [
-        {}
-      ],
-      "sandboxBindings": [
-        {}
-      ]
     }
   },
   "mcp.servers.remove": {
@@ -22522,15 +24058,13 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       ]
     }
   },
-  "mcp.servers.tools.allow": {
+  "mcp.servers.role.set": {
     "input": {
       "serverName": "sample",
-      "toolName": "sample"
+      "role": "general"
     },
     "output": {
       "serverName": "sample",
-      "toolName": "sample",
-      "rule": "allow",
       "scope": "project",
       "path": "sample",
       "changed": false,
@@ -22595,7 +24129,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       }
     }
   },
-  "mcp.servers.tools.clear": {
+  "mcp.servers.tools.block": {
     "input": {
       "serverName": "sample",
       "toolName": "sample"
@@ -22603,7 +24137,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "output": {
       "serverName": "sample",
       "toolName": "sample",
-      "rule": "allow",
+      "rule": "block",
       "scope": "project",
       "path": "sample",
       "changed": false,
@@ -22668,7 +24202,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       }
     }
   },
-  "mcp.servers.tools.deny": {
+  "mcp.servers.tools.exempt": {
     "input": {
       "serverName": "sample",
       "toolName": "sample"
@@ -22676,7 +24210,224 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "output": {
       "serverName": "sample",
       "toolName": "sample",
-      "rule": "allow",
+      "rule": "block",
+      "scope": "project",
+      "path": "sample",
+      "changed": false,
+      "reload": {
+        "added": 0,
+        "changed": 0,
+        "removed": 0,
+        "unchanged": 0,
+        "servers": [
+          {
+            "name": "sample",
+            "action": "added",
+            "connected": false
+          }
+        ]
+      },
+      "config": {
+        "locations": [
+          {
+            "scope": "sample",
+            "kind": "sample",
+            "path": "sample",
+            "writable": false
+          }
+        ],
+        "servers": [
+          {
+            "name": "sample",
+            "command": "sample",
+            "url": "sample",
+            "args": [
+              "sample"
+            ],
+            "envKeys": [
+              "sample"
+            ],
+            "headerKeys": [
+              "sample"
+            ],
+            "role": "sample",
+            "trustMode": "sample",
+            "allowedPaths": [
+              "sample"
+            ],
+            "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
+              "sample"
+            ],
+            "source": {
+              "scope": "sample",
+              "kind": "sample",
+              "path": "sample",
+              "writable": false
+            }
+          }
+        ]
+      }
+    }
+  },
+  "mcp.servers.tools.unblock": {
+    "input": {
+      "serverName": "sample",
+      "toolName": "sample"
+    },
+    "output": {
+      "serverName": "sample",
+      "toolName": "sample",
+      "rule": "block",
+      "scope": "project",
+      "path": "sample",
+      "changed": false,
+      "reload": {
+        "added": 0,
+        "changed": 0,
+        "removed": 0,
+        "unchanged": 0,
+        "servers": [
+          {
+            "name": "sample",
+            "action": "added",
+            "connected": false
+          }
+        ]
+      },
+      "config": {
+        "locations": [
+          {
+            "scope": "sample",
+            "kind": "sample",
+            "path": "sample",
+            "writable": false
+          }
+        ],
+        "servers": [
+          {
+            "name": "sample",
+            "command": "sample",
+            "url": "sample",
+            "args": [
+              "sample"
+            ],
+            "envKeys": [
+              "sample"
+            ],
+            "headerKeys": [
+              "sample"
+            ],
+            "role": "sample",
+            "trustMode": "sample",
+            "allowedPaths": [
+              "sample"
+            ],
+            "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
+              "sample"
+            ],
+            "source": {
+              "scope": "sample",
+              "kind": "sample",
+              "path": "sample",
+              "writable": false
+            }
+          }
+        ]
+      }
+    }
+  },
+  "mcp.servers.tools.unexempt": {
+    "input": {
+      "serverName": "sample",
+      "toolName": "sample"
+    },
+    "output": {
+      "serverName": "sample",
+      "toolName": "sample",
+      "rule": "block",
+      "scope": "project",
+      "path": "sample",
+      "changed": false,
+      "reload": {
+        "added": 0,
+        "changed": 0,
+        "removed": 0,
+        "unchanged": 0,
+        "servers": [
+          {
+            "name": "sample",
+            "action": "added",
+            "connected": false
+          }
+        ]
+      },
+      "config": {
+        "locations": [
+          {
+            "scope": "sample",
+            "kind": "sample",
+            "path": "sample",
+            "writable": false
+          }
+        ],
+        "servers": [
+          {
+            "name": "sample",
+            "command": "sample",
+            "url": "sample",
+            "args": [
+              "sample"
+            ],
+            "envKeys": [
+              "sample"
+            ],
+            "headerKeys": [
+              "sample"
+            ],
+            "role": "sample",
+            "trustMode": "sample",
+            "allowedPaths": [
+              "sample"
+            ],
+            "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
+              "sample"
+            ],
+            "source": {
+              "scope": "sample",
+              "kind": "sample",
+              "path": "sample",
+              "writable": false
+            }
+          }
+        ]
+      }
+    }
+  },
+  "mcp.servers.trust.set": {
+    "input": {
+      "serverName": "sample",
+      "trustMode": "constrained"
+    },
+    "output": {
+      "serverName": "sample",
       "scope": "project",
       "path": "sample",
       "changed": false,
@@ -23031,22 +24782,34 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         ]
       },
       "writeback": {
-        "analysisArtifact": {
-          "id": "sample",
-          "kind": "sample",
-          "mimeType": "sample",
-          "filename": "sample",
-          "sizeBytes": 0,
-          "sha256": "sample",
-          "createdAt": 0,
-          "expiresAt": 0,
-          "sourceUri": "sample",
-          "acquisitionMode": "inline-data",
-          "fetchMode": "not-applicable",
+        "state": "done",
+        "value": {
+          "analysisArtifact": {
+            "id": "sample",
+            "kind": "sample",
+            "mimeType": "sample",
+            "filename": "sample",
+            "sizeBytes": 0,
+            "sha256": "sample",
+            "createdAt": 0,
+            "expiresAt": 0,
+            "sourceUri": "sample",
+            "acquisitionMode": "inline-data",
+            "fetchMode": "not-applicable",
+            "metadata": {}
+          },
+          "knowledgeSourceId": "sample",
           "metadata": {}
         },
-        "knowledgeSourceId": "sample",
-        "metadata": {}
+        "refusal": {
+          "code": "sample",
+          "state": "sample",
+          "reason": "sample",
+          "next": [
+            "sample"
+          ],
+          "retryable": false
+        }
       }
     }
   },
@@ -23299,6 +25062,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "indexedRecords": 0,
         "embeddingProviderId": "sample",
         "embeddingProviderLabel": "sample",
+        "embeddingSpace": "sample",
+        "awaitingReembed": 0,
         "error": "sample",
         "platformLimitReason": "sample"
       },
@@ -23343,6 +25108,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "indexedRecords": 0,
         "embeddingProviderId": "sample",
         "embeddingProviderLabel": "sample",
+        "embeddingSpace": "sample",
+        "awaitingReembed": 0,
         "error": "sample",
         "platformLimitReason": "sample"
       },
@@ -23944,6 +25711,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "indexedRecords": 0,
         "embeddingProviderId": "sample",
         "embeddingProviderLabel": "sample",
+        "embeddingSpace": "sample",
+        "awaitingReembed": 0,
         "error": "sample",
         "platformLimitReason": "sample"
       }
@@ -23961,6 +25730,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "indexedRecords": 0,
         "embeddingProviderId": "sample",
         "embeddingProviderLabel": "sample",
+        "embeddingSpace": "sample",
+        "awaitingReembed": 0,
         "error": "sample",
         "platformLimitReason": "sample"
       }
@@ -24027,7 +25798,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "reason": "sample",
       "occasionId": "sample",
       "disclosure": "sample",
-      "droppedRecords": 0
+      "droppedRecords": 0,
+      "removedLine": "sample",
+      "stillDeclaredBy": 0
     }
   },
   "occasions.conflict.resolve": {
@@ -24303,7 +26076,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "reason": "sample",
       "occasionId": "sample",
       "disclosure": "sample",
-      "droppedRecords": 0
+      "droppedRecords": 0,
+      "removedLine": "sample",
+      "stillDeclaredBy": 0
     }
   },
   "occasions.plans.list": {
@@ -24381,7 +26156,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "reason": "sample",
       "occasionId": "sample",
       "disclosure": "sample",
-      "droppedRecords": 0
+      "droppedRecords": 0,
+      "removedLine": "sample",
+      "stillDeclaredBy": 0
     }
   },
   "occasions.plans.update": {
@@ -24450,7 +26227,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "reason": "sample",
       "occasionId": "sample",
       "disclosure": "sample",
-      "droppedRecords": 0
+      "droppedRecords": 0,
+      "removedLine": "sample",
+      "stillDeclaredBy": 0
     }
   },
   "occasions.state": {
@@ -24472,7 +26251,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "droppedInterviews": 0,
         "staleMirrors": 0
       },
-      "reconciledOpenItems": 0,
       "corruption": "sample"
     }
   },
@@ -24783,6 +26561,14 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "reserved": 0,
         "remaining": 0
       },
+      "earlierSpend": [
+        {
+          "currency": "sample",
+          "item": 0,
+          "overage": 0,
+          "tolerance": 0
+        }
+      ],
       "reservationCount": 0,
       "isPaymentsLeader": false,
       "stopped": {
@@ -24862,6 +26648,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "merchantDomain": "sample",
       "item": "sample",
       "amount": "sample",
+      "currency": "sample",
       "expiresAt": "sample"
     }
   },
@@ -27347,6 +29134,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "requestId": "sample",
       "messagesToDrop": 0,
       "messagesRemaining": 0,
+      "revision": "sample",
       "droppedMessages": 0,
       "undoSnapshotId": "sample",
       "undoExpiresAfter": "sample",
@@ -28928,6 +30716,46 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       ]
     }
   },
+  "sessions.hosted.share": {
+    "input": {
+      "sessionId": "sample",
+      "principalId": "sample"
+    },
+    "output": {
+      "session": {
+        "id": "sample",
+        "nativeConversation": true,
+        "workspaceRoot": "sample",
+        "title": "sample",
+        "status": "idle",
+        "detachPolicy": "kill",
+        "effectiveDetachPolicy": "kill",
+        "attachedClients": [
+          "sample"
+        ],
+        "providerId": "sample",
+        "modelId": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "turnCount": 0,
+        "messageCount": 0,
+        "lastTurnAt": 0,
+        "terminatedAt": 0,
+        "terminatedReason": "sample",
+        "restoredFromDisk": false,
+        "originSurface": "sample",
+        "permissionMode": "ask-me",
+        "contractIds": [
+          "sample"
+        ],
+        "saveError": "sample"
+      },
+      "owners": [
+        "sample"
+      ],
+      "added": false
+    }
+  },
   "sessions.hosted.workspaces": {
     "input": {},
     "output": {
@@ -28997,7 +30825,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "surfaceInstance": "sample",
       "answer": "sample",
       "status": "sample",
-      "claim": false
+      "claim": false,
+      "claimEpoch": 0
     },
     "output": {
       "input": {
@@ -29138,7 +30967,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           },
           "error": "sample"
         }
-      ]
+      ],
+      "more": false,
+      "next": "sample"
     }
   },
   "sessions.integration.snapshot": {
@@ -29331,7 +31162,14 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "sessionId": "sample",
       "mode": "ask-me",
       "chosenMode": "ask-me",
-      "reason": "sample"
+      "reason": "sample",
+      "words": {
+        "chosen": "sample",
+        "inForce": "sample",
+        "because": "sample",
+        "sentence": "sample",
+        "asksBefore": "sample"
+      }
     }
   },
   "sessions.permissionMode.set": {

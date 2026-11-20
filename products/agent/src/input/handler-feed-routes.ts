@@ -6,6 +6,7 @@ import {
   type MouseRouteState as SharedMouseState,
 } from '@goodvibes-jev/engine/terminal-shell/feed-token-routes';
 import type { CommandContext } from './command-registry.ts';
+import type { FooterTarget } from '../renderer/footer-targets.ts';
 
 /**
  * The process monitor opened from the footer indicator goes on the modal stack
@@ -15,13 +16,13 @@ import type { CommandContext } from './command-registry.ts';
 export type IndicatorFocusRouteState = SharedIndicatorState & { processModal: { open: () => void }; syncModals: () => void };
 export type TextRouteState = SharedTextState<CommandContext>;
 export type KeyRouteState = SharedKeyState<CommandContext> & { processModal: { open: () => void }; syncModals: () => void };
-export type MouseRouteState = SharedMouseState<string>;
+export type MouseRouteState = SharedMouseState<FooterTarget>;
 export const { handleIndicatorFocusToken, handlePromptTextToken, handlePromptKeyToken, handleMouseToken } = createFeedTokenRoutes<
   CommandContext,
   IndicatorFocusRouteState,
   TextRouteState,
   KeyRouteState,
-  string,
+  FooterTarget,
   MouseRouteState
 >({
   openIndicator(state) {

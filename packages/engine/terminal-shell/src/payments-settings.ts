@@ -25,6 +25,7 @@ export function buildPaymentsCardsRow(): PaymentsSettingEntry {
   return {
     setting: {
       key: PAYMENTS_CARDS_ROW_KEY,
+      label: 'Cards on file',
       type: 'string',
       default: '',
       description: 'Cards purchases can use. Enter closes Settings, lists the cards on the daemon, and starts "Add a card" (Esc stops it); /payments remove-card deletes one. Settings never takes a card number.',

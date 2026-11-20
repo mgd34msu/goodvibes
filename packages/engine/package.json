@@ -3543,6 +3543,16 @@
       "types": "./terminal-shell/dist/permission-prompt-facts.d.ts",
       "import": "./terminal-shell/dist/permission-prompt-facts.js"
     },
+    "./terminal-shell/ask-card-input": {
+      "bun": "./terminal-shell/src/ask-card-input.ts",
+      "types": "./terminal-shell/dist/ask-card-input.d.ts",
+      "import": "./terminal-shell/dist/ask-card-input.js"
+    },
+    "./terminal-shell/renderer/ask-card": {
+      "bun": "./terminal-shell/src/renderer/ask-card.ts",
+      "types": "./terminal-shell/dist/renderer/ask-card.d.ts",
+      "import": "./terminal-shell/dist/renderer/ask-card.js"
+    },
     "./terminal-shell/command-arguments": {
       "bun": "./terminal-shell/src/command-arguments.ts",
       "types": "./terminal-shell/dist/command-arguments.d.ts",

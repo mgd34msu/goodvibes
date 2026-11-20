@@ -131,10 +131,10 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     summary: 'Start the app and open the view a goodvibes:// link names (selecting its target in a process view). A link that does not parse exits with the usage error.',
     examples: ['open goodvibes://open/security', 'open "goodvibes://open/agents?target=contract-123:contract"'],
   },
-  onboarding: {
-    usage: ['onboarding', 'setup', 'onboarding status'],
-    summary: 'Open the setup wizard, or inspect whether onboarding has already been shown for this user.',
-    examples: ['onboarding', 'onboarding status'],
+  setup: {
+    usage: ['setup', 'setup status'],
+    summary: 'Open /setup: models, sign-in, keys, access, chat apps and features, one topic at a time; or say whether first run has been done for this user.',
+    examples: ['setup', 'setup status'],
   },
   status: {
     usage: ['status', 'status --json'],
@@ -291,7 +291,6 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
 const HELP_ALIASES: Record<string, string> = {
   app: 'tui',
   exec: 'run',
-  setup: 'onboarding',
   provider: 'providers',
   model: 'models',
   subscriptions: 'subscription',

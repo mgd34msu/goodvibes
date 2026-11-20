@@ -1,6 +1,5 @@
 import { exportMessageFromRecord, formatTranscript, resolveSessionExportRequest, type TranscriptFormat } from '@goodvibes-jev/engine/terminal-shell/session-export-format';
 import { createSessionWorkflowCommands } from '@goodvibes-jev/engine/terminal-shell/session-workflow-commands';
-import { resolveSessionTarget } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -90,25 +89,6 @@ async function exportSessionTranscript(
   ctx.print(`Exported session ${sessionId} (${messages.length} messages, redacted) to ${target}`);
 }
 
-/** `--print` and `--out <path>` of `/session export`, with the remaining words. */
-function readExportOutput(args: readonly string[]): { readonly rest: string[]; readonly printOnly: boolean; readonly path: string | undefined } | string {
-  const rest: string[] = [];
-  let printOnly = false;
-  let path: string | undefined;
-  for (let i = 0; i < args.length; i++) {
-    const token = args[i]!;
-    if (token === '--print') printOnly = true;
-    else if (token === '--out') {
-      path = args[i + 1];
-      if (!path || path.startsWith('--')) return 'Usage: /session export <session-id|.> [markdown|text] [--out <path>] [--print]';
-      i++;
-    } else if (token.startsWith('--')) return `Unknown option ${token}. Options: --out <path>, --print. Nothing was exported.`;
-    else rest.push(token);
-  }
-  if (printOnly && path) return 'Choose one of --out and --print. Nothing was exported.';
-  return { rest, printOnly, path };
-}
-
 // session-mgmt / smgmt was removed in TASK-032.
 // All session lifecycle operations are now first-class subcommands of /session.
 // Use /session list, /session resume, /session save, etc.
@@ -123,7 +103,7 @@ interface SessionExportData {
   readonly returnContext?: SessionReturnContextSummary;
 }
 
-export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkflowCommands<CommandContext>(requireSessionManager, {
+export const sessionWorkflow = createSessionWorkflowCommands<CommandContext>(requireSessionManager, {
   headingSuffix: ':',
   detailSeparator: ': ',
   postureSeparator: '=',
@@ -166,32 +146,31 @@ export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkfl
     + (records > 0 ? ' [' + records + ' agent records]' : '')
     + '\n  → ' + path
     + (switched ? '\n  Later turns are saved to ' + sanitized + '.' : ''),
-  saveDescription: 'Save current session to .goodvibes/tui/sessions/ (--switch continues in the saved copy)',
   // Agent records go with the session when this runtime has an agent manager.
   records: (ctx) => ctx.ops.agentManager?.exportState(),
   forked: (id, name, source, title, count) =>
     'Session forked:\n  New ID: ' + id + '\n  Name:   ' + name + '\n  From:   ' + (title || source) + '\n  Messages: ' + count,
-  async productCommand(args, ctx, sm, sub) {
-    if (sub === 'resume') {
-      // '--force' bypasses the multi-instance liveness confirm below, never a
-      // session-id/name token itself (session ids never start with '--').
-      const rawArgs = args.slice(1);
-      const force = rawArgs.includes('--force');
-      const target = rawArgs
-        .filter((a) => a !== '--force')
-        .join(' ')
-        .trim();
-      if (!target) {
-        throw commandRefusal('Usage: /session resume <session-id-or-name> [--force]');
-      }
+});
+
+/**
+ * Resume a saved session (`/resume`, `/session resume`): the terminal's one
+ * resume routine, with the session's saved agent records, refused while a turn
+ * runs or (unless forced) while another terminal holds it open.
+ */
+export async function resumeSavedSession(ctx: CommandContext, input: { readonly target: string; readonly force: boolean }): Promise<void> {
+      sessionWorkflow.refuseWhileGenerating(ctx);
+      const sm = requireSessionManager(ctx);
+      const force = input.force;
       // An exact id reads one meta line; only a title or prefix lists the directory.
-      const candidates = resolveSessionTarget(sm, target);
-      if (candidates.length > 1) {
-        throw commandRefusal(`Ambiguous session: ${target}`, `Use an exact session ID: ${candidates.map((session) => session.name).join(', ')}`);
-      }
-      const found = candidates[0];
-      if (!found) {
-        throw commandRefusal(`Session not found: ${target}`, 'Use /session list to see available sessions.');
+      const found = sessionWorkflow.findSaved(sm, input.target.trim());
+      // The session's saved agent records replace the live list, so a running agent of this session would lose its record.
+      const agentManager = ctx.ops.agentManager;
+      const active = agentManager?.listActive?.() ?? [];
+      if (active.length > 0) {
+        throw commandRefusal(
+          `Not resumed: ${active.length} agent${active.length === 1 ? ' is' : 's are'} still running in this session, and resuming would drop ${active.length === 1 ? 'its record' : 'their records'}.`,
+          'Wait for them to finish, or stop them in /agents, then resume again.',
+        );
       }
 
       // Multi-instance safety: refuse (and require --force) when another
@@ -199,11 +178,10 @@ export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkfl
       // would fork its live state out from under that terminal. This process's
       // own hold (re-resuming the session already active here) never blocks.
       if (!force && isSessionOpenElsewhere(requireSurface(ctx), found.name)) {
-        ctx.print(
-          `Session is open in another running terminal: resuming will fork its live state.\n` +
-            `Close it there, or re-run \`/session resume ${found.name} --force\` to proceed anyway.`,
+        throw commandRefusal(
+          'The session is open in another running terminal: resuming it here would fork its live state.',
+          `Close it there, or run /resume ${found.name} --force to go ahead anyway.`,
         );
-        return true;
       }
 
       try {
@@ -213,7 +191,7 @@ export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkfl
         // command keeps only its own lines. A context without the routine
         // (a test harness) runs the shared restore alone.
         const outcome = ctx.resumeSession
-          ? await ctx.resumeSession(found.name, { quiet: true, liveChecked: true })
+          ? await ctx.resumeSession(found.name, { quiet: true, liveChecked: true, ...(agentManager ? { agents: agentManager } : {}) })
           : await (() => {
             ctx.cancelSessionWork?.();
             return resumeSessionCore(found.name, {
@@ -226,7 +204,7 @@ export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkfl
               canResume: () => !ctx.isGenerating?.(),
             });
           })();
-        if (!outcome) return true;
+        if (!outcome) return;
         const { meta, restoredAnchorCount, resumedMessageCount } = outcome;
 
         ctx.renderRequest();
@@ -271,14 +249,14 @@ export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkfl
       } catch (e) {
         throw commandRefusal(`Failed to resume session: ${summarizeError(e)}`);
       }
-      return true;
-    }
+}
 
-    if (sub === 'export') {
-      const output = readExportOutput(args);
-      if (typeof output === 'string') throw commandRefusal(output);
+/** Write a saved session's redacted transcript to a file, or print it (`/session save-saved`). */
+export async function exportSavedSession(ctx: CommandContext, input: { readonly target: string; readonly format: TranscriptFormat; readonly path: string; readonly print: boolean }): Promise<void> {
+      const sm = requireSessionManager(ctx);
+      const output = { printOnly: input.print, path: input.path || undefined };
       const request = resolveSessionExportRequest(
-        output.rest,
+        { target: input.target || '.', format: input.format },
         ctx.session.runtime.sessionId,
         () => sm.list(),
       );
@@ -295,7 +273,7 @@ export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkfl
         } catch (e) {
           throw commandRefusal(`Failed to export session: ${summarizeError(e)}`);
         }
-        return true;
+        return;
       }
       const loadName = found ? found.name : sessionId;
       try {
@@ -304,8 +282,4 @@ export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkfl
       } catch (e) {
         throw commandRefusal(`Failed to export session: ${summarizeError(e)}`);
       }
-      return true;
-    }
-    return false;
-  },
-});
+}

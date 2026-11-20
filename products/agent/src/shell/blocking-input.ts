@@ -1,35 +1,28 @@
-import { enterAnswer, handleSimplePermissionInput, routeCardInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
+import { routeCardInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
+import { handleAskCardKey, type AskCardResolveExtras } from '@goodvibes-jev/engine/terminal-shell/ask-card-input';
+import type { AskCardState } from '@goodvibes-jev/engine/terminal-shell/renderer/ask-card';
 import type { PermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { applyHunkKey, hunkSelectionAnswer, type HunkSelectionState } from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
+import type { HunkSelectionState } from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
 import { describeCrashRecovery, type CrashRecoveryReport } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
-import { remembersAllow } from '../permissions/prompt.ts';
 
-export type PendingPermissionState = PermissionRequest & {
+export type PendingPermissionState = PermissionRequest & AskCardState & {
   /**
    * `modifiedArgs.answer` carries the text typed into a command's terminal prompt (an `exec:prompt` ask);
-   * for a multi-edit `edit` with only some hunks applied, `modifiedArgs` holds those edits and
-   * `extras.selectedHunks` their indices, which the approval broker applies.
+   * for a multi-edit `edit` with only some changes applied, `modifiedArgs` holds those edits and
+   * `extras.selectedHunks` their indices, which the approval broker applies. `extras.rememberTier` is
+   * the "don't ask again" choice; `extras.reason` the reason typed with a refusal.
    */
-  resolve: (approved: boolean, remember?: boolean, modifiedArgs?: Record<string, unknown>, extras?: { readonly selectedHunks?: readonly number[] | undefined }) => void;
-  /** Present when the ask is a multi-edit `edit` (isHunkSelectable): which hunks are applied, and the cursor. */
+  resolve: (approved: boolean, remember?: boolean, modifiedArgs?: Record<string, unknown>, extras?: AskCardResolveExtras) => void;
+  /** Present when the ask is a multi-edit `edit` (isHunkSelectable): which changes are applied, and the cursor. */
   hunkState?: HunkSelectionState | undefined;
-  /** The answer being typed into a command's terminal prompt; shown masked on the card. */
-  replyBuffer?: string | undefined;
   /** When the card was put on screen; keys typed within the settle time or as one burst go to the composer. */
   openedAt?: number;
   /** The last key that was passed to the composer as typing. */
   lastTypedAt?: number | undefined;
   /** The person has addressed the card (a key after a pause, or Tab). */
   addressed?: boolean | undefined;
-  /** `a` was pressed: Enter now allows for the session, any other key goes back. */
-  rememberArmed?: boolean | undefined;
 };
-
-/** An ask to type the answer a running command is waiting for on its terminal. */
-export function isExecPromptAsk(request: PermissionRequest): boolean {
-  return request.attribution?.kind === 'exec-prompt';
-}
 
 export type BlockingInputHandlerOptions = {
   data: string;
@@ -99,108 +92,11 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       };
     }
     const req: PendingPermissionState = routed.card.addressed ? { ...pendingPermission, addressed: true } : pendingPermission;
-    // A command waiting on its terminal: every printable key types the answer (a prompt
-    // that wants a literal 'y' must not have it taken as a card key). Enter sends it,
-    // Esc clears the draft and then declines, Ctrl+C declines and stops the turn.
-    if (isExecPromptAsk(req)) {
-      const buffer = req.replyBuffer ?? '';
-      if (data === '\x03') {
-        req.resolve(false, false);
-        abortTurn();
-        render();
-        return { handled: true, pendingPermission: null, recoveryPending };
-      }
-      if (data === '\r' || data === '\n') {
-        req.resolve(true, false, { answer: buffer });
-        render();
-        return { handled: true, pendingPermission: null, recoveryPending };
-      }
-      if (data === '\x1b') {
-        if (buffer.length > 0) {
-          render();
-          return { handled: true, pendingPermission: { ...req, replyBuffer: '' }, recoveryPending };
-        }
-        req.resolve(false, false);
-        render();
-        return { handled: true, pendingPermission: null, recoveryPending };
-      }
-      if (data === '\x7f' || data === '\b') {
-        render();
-        return { handled: true, pendingPermission: { ...req, replyBuffer: [...buffer].slice(0, -1).join('') }, recoveryPending };
-      }
-      if (data.length >= 1 && !data.startsWith('\x1b') && data >= ' ') {
-        render();
-        return { handled: true, pendingPermission: { ...req, replyBuffer: buffer + data }, recoveryPending };
-      }
-      render();
-      return { handled: true, pendingPermission: req, recoveryPending };
-    }
-    // A multi-edit `edit`: each hunk is applied or left out, with the keys the TUI
-    // card uses (terminal-shell hunk-selection.ts). A hunk card offers no "for session".
-    if (req.hunkState) {
-      const { state, commit } = applyHunkKey(req.hunkState, data);
-      if (commit === 'apply') {
-        const answer = hunkSelectionAnswer(req, state);
-        // Every hunk is the request as asked, approved whole; fewer ride as the broker's
-        // selection and, for a resolver that forwards only arguments, as reduced edits.
-        if (answer.selectedHunks.length === state.hunks.length) req.resolve(true, false);
-        else req.resolve(true, false, answer.modifiedArgs, { selectedHunks: answer.selectedHunks });
-        render();
-        return { handled: true, pendingPermission: null, recoveryPending };
-      }
-      if (commit === 'cancel') {
-        // Deny tells the model the change was refused, as on the plain card; Ctrl+C stops the turn.
-        req.resolve(false, false);
-        if (data === '\x03') abortTurn();
-        render();
-        return { handled: true, pendingPermission: null, recoveryPending };
-      }
-      render();
-      return { handled: true, pendingPermission: { ...req, hunkState: state }, recoveryPending };
-    }
-    // "For session" is not offered for an ask whose answer is not remembered.
-    const canRemember = remembersAllow(req);
-    if (req.rememberArmed) {
-      if (data === '\r' || data === '\n') {
-        req.resolve(true, true);
-        render();
-        return { handled: true, pendingPermission: null, recoveryPending };
-      }
-      // Back to the card's own choices, which the card shows again.
-      render();
-      return { handled: true, pendingPermission: { ...req, rememberArmed: undefined }, recoveryPending };
-    }
-    if (canRemember && data.toLowerCase().trim() === 'a') {
-      // Remembering is never one bare key: Enter confirms it. The card shows the armed choice and its keys.
-      render();
-      return { handled: true, pendingPermission: { ...req, rememberArmed: true }, recoveryPending };
-    }
-    // A bare Enter is never the broadest answer: it allows this one call, or denies what cannot be undone.
-    if (data === '\r' || data === '\n') {
-      req.resolve(enterAnswer(req) === 'allow-once', false);
-      render();
-      return { handled: true, pendingPermission: null, recoveryPending };
-    }
-    // A denial is the call's answer: the model is told it was refused and the turn goes on (Ctrl+C stops the turn).
-    if (data === '\x03') {
-      req.resolve(false, false);
-      abortTurn();
-      render();
-      return { handled: true, pendingPermission: null, recoveryPending };
-    }
-    if (
-      handleSimplePermissionInput(data, {
-        escapeDenies: true,
-        abortOnDeny: false,
-        resolve: (approved) => req.resolve(approved, false),
-        abort: abortTurn,
-        render,
-      })
-    )
-      return { handled: true, pendingPermission: null, recoveryPending };
-
-    render();
-    return { handled: true, pendingPermission: req, recoveryPending };
+    // The card's own keys (terminal-shell ask-card-input.ts): the terminal app's scheme. Enter
+    // presses the selected button, which opens on "Yes, once", or "No" for what cannot be undone.
+    const result = handleAskCardKey(req, data);
+    if (result.handled) render();
+    return { handled: result.handled, pendingPermission: result.pending, recoveryPending };
   }
 
   if (recoveryPending) {

@@ -137,11 +137,6 @@ function localActionRouteHint(action: AgentWorkspaceAction): string {
 
 function workspaceActionRouteHint(action: AgentWorkspaceAction): string {
   if (action.kind === 'settings-import') return 'settings action:"import"';
-  if (action.kind === 'setup-checkpoint') {
-    if (action.setupCheckpointOperation === 'mark-current') return 'agent_harness mode:"mark_setup_checkpoint"';
-    if (action.setupCheckpointOperation === 'clear') return 'agent_harness mode:"clear_setup_checkpoint"';
-    return 'agent_harness mode:"setup_checkpoint"';
-  }
   if (action.id === 'account-local-server-health') return 'models action:"smoke"';
   if (action.id === 'account-run-local-model-benchmark') return 'agent_model_compare';
   if (action.id === 'assistant-browser-cockpit') return 'computer action:"open_browser"';
@@ -258,19 +253,6 @@ export function describeWorkspaceAction(
         admission: 'current recorded effect admission',
         preview: 'read-only',
         note: 'Imports only Agent-owned shared GoodVibes settings and provider subscription state through current recorded settings admission.',
-      },
-    } : {}),
-    ...(action.kind === 'setup-checkpoint' ? {
-      setupCheckpointOperation: action.setupCheckpointOperation ?? 'show',
-      modelExecution: {
-        route: action.setupCheckpointOperation === 'mark-current'
-          ? 'mark_setup_checkpoint'
-          : action.setupCheckpointOperation === 'clear'
-            ? 'clear_setup_checkpoint'
-            : 'setup_checkpoint',
-        dispatcher: 'agent_harness',
-        admission: action.setupCheckpointOperation === 'show' ? 'read-only' : 'current recorded effect admission',
-        note: 'Setup wizard checkpoints persist only the visible current setup step in Agent-owned state so first-run setup can resume across restarts.',
       },
     } : {}),
     ...(action.id === 'assistant-browser-cockpit' ? {

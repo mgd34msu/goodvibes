@@ -124,9 +124,9 @@ export const COMPLETION_COMMANDS: readonly CompletionCommand[] = [
     subcommands: ['explain', 'routing', 'hooks'],
   },
   {
-    name: 'onboarding',
-    aliases: ['onboarding', 'setup'],
-    description: 'Open onboarding in the TUI, or print onboarding status',
+    name: 'setup',
+    aliases: ['setup'],
+    description: 'Open /setup in the terminal app, or print whether first run has been done',
     subcommands: ['status'],
   },
   {

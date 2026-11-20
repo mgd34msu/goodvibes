@@ -25,9 +25,7 @@ import { stripDangerousAnsi } from './ansi-sanitize.js';
 import type { PaymentWindowCommandContext, PaymentWindowCommandPolicy } from './payment-window-command.js';
 import { PAYMENTS_ADDRESS_FIELD_SUFFIXES, type PaymentsAddressKind } from './payments-settings.js';
 
-export interface PaymentsCommandContext extends CommandActionContext, PaymentWindowCommandContext {
-  readonly renderRequest: () => void;
-}
+export type PaymentsCommandContext = CommandActionContext & PaymentWindowCommandContext & { readonly renderRequest: () => void };
 
 /** What one terminal app supplies: where the daemon is, how card fields are asked, and where an address is written. */
 export interface PaymentsHost<Ctx extends PaymentsCommandContext> {

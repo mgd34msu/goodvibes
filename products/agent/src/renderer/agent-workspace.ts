@@ -128,7 +128,6 @@ function actionCommand(action: AgentWorkspaceAction): string {
   if (action.kind === 'editor') return action.editorKind ? `edit ${action.editorKind}` : 'edit form';
   if (action.kind === 'setting') return action.settingKey ? `setting ${action.settingKey}` : 'setting';
   if (action.kind === 'settings-import') return 'import GoodVibes settings';
-  if (action.kind === 'setup-checkpoint') return action.setupCheckpointOperation ? `setup checkpoint ${action.setupCheckpointOperation}` : 'setup checkpoint';
   if (action.kind === 'model-picker') return action.modelPickerFlow === 'model' ? 'model picker' : 'provider/model picker';
   if (action.kind === 'settings-modal') return action.settingsTarget ? `settings ${action.settingsTarget}` : 'settings';
   if (action.kind === 'local-selection') return action.selectionDelta && action.selectionDelta < 0 ? 'select previous' : 'select next';
@@ -383,12 +382,6 @@ function localOperationLabel(localOperation: string): string {
 
 function onboardingActionLabel(workspace: AgentWorkspace, action: AgentWorkspaceAction): string {
   if (action.kind === 'settings-import') return 'Import GoodVibes preferences';
-  if (action.kind === 'setup-checkpoint') {
-    if (action.setupCheckpointOperation === 'show') return 'Review saved progress';
-    if (action.setupCheckpointOperation === 'mark-current') return 'Save progress';
-    if (action.setupCheckpointOperation === 'clear') return 'Clear saved progress';
-    return 'Review setup progress';
-  }
   if (action.kind === 'model-picker') return action.modelPickerFlow === 'model' ? 'Choose model' : 'Choose provider and model';
   if (action.kind === 'settings-modal') return 'Open settings';
   if (action.kind === 'workspace') {

@@ -163,7 +163,7 @@ Besides the backend rotation inside a single synthetic model described above, a 
 
 1. The same model on another sign-in of the same provider comes first, inside the request: OpenAI asks the API key after the subscription fails. The turn says once which sign-in answered and why.
 2. Only when every sign-in of the provider has failed, and the request's retries are spent, does the turn move to another model, and then only by your own fallback order, `provider.fallbackModels` (a list of provider-qualified ids, for example `["anthropic:claude-sonnet-5"]`; the provider half matches by id or display name, any case): the first entry not yet tried this turn whose provider is signed in. The engine's turn loop sends the failed request again to it, and the rest of the turn, tool calls already made included, continues there; nothing is resubmitted and no tool runs twice. The same rule runs in the TUI, `goodvibes run`, the Agent, the daemon's hosted sessions and its agents.
-3. With no fallback order set, or every entry tried, the turn stops and says so: `[Failover] Stopped:` with why nothing else was tried and what to do next. No model is picked by list position, tier or age.
+3. With no fallback order set, or every entry tried, the turn stops and its failure row in the transcript says so, with `alt+r try again` and `alt+o use another model`; why nothing else was tried is in the row's details (`alt+i`), and while no fallback order is set the row's tip names `/model fallback`. No model is picked by list position, tier or age.
 
 Each move adds a line naming both models, the position in your order and the error, with the cost delta when the catalog prices both models per 1M tokens, and the model that answers:
 

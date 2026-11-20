@@ -137,7 +137,7 @@ export function createCloudflareCommand<Context extends { print(text: string): v
       const subcommand = (args[0] ?? 'status').toLowerCase();
       if (subcommand === 'setup' || subcommand === 'onboarding') {
         if (policy.openSetup?.(ctx)) {
-          ctx.print('Opening onboarding wizard. Select the Cloudflare batch capability to configure Cloudflare.');
+          ctx.print('Opening /setup → Use Cloudflare.');
         } else {
           ctx.print('This app has no guided Cloudflare setup. Run /cloudflare requirements, then /cloudflare create-token and /cloudflare provision.');
         }

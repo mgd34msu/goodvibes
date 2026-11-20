@@ -435,7 +435,7 @@ async function handleMediaAnalyze(context: DaemonMediaRouteContext, req: Request
   if (admin) return admin;
   const body = await context.parseJsonBody(req);
   if (body instanceof Response) return body;
-  const provider = context.mediaProviders.findProvider('understand', typeof body.providerId === 'string' ? body.providerId : undefined);
+  const provider = await context.mediaProviders.resolveProvider('understand', typeof body.providerId === 'string' ? body.providerId : undefined);
   if (!provider?.analyze) return jsonErrorResponse({ error: 'No media analysis provider is registered' }, { status: 404 });
   let artifact: MediaArtifact | null = null;
   if (typeof body.artifact === 'object' && body.artifact !== null) {
@@ -567,7 +567,7 @@ async function handleMediaTransform(context: DaemonMediaRouteContext, req: Reque
   if (admin) return admin;
   const body = await context.parseJsonBody(req);
   if (body instanceof Response) return body;
-  const provider = context.mediaProviders.findProvider('transform', typeof body.providerId === 'string' ? body.providerId : undefined);
+  const provider = await context.mediaProviders.resolveProvider('transform', typeof body.providerId === 'string' ? body.providerId : undefined);
   if (!provider?.transform) return jsonErrorResponse({ error: 'No media transform provider is registered' }, { status: 404 });
   if (typeof body.artifact !== 'object' || body.artifact === null) {
     return jsonErrorResponse({ error: 'Missing media artifact' }, { status: 400 });

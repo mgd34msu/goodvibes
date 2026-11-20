@@ -1729,11 +1729,11 @@ The first time `goodvibes` starts for a user (the marker `~/.goodvibes/tui/onboa
 | --- | --- | --- |
 | `Use <provider>` | A key for some other provider is set and the default model is not ready. Detail: `Switch to <provider:model>, from the provider whose key is set`. | Switches the main model to that provider's first model. When that model is ready, writes the marker and prints `Ready: <model>. Run /onboarding anytime for full setup.`; otherwise prints `<model> is not ready yet. Pick a model with /model, or run /onboarding for full setup.` |
 | `Start now` | The default model is ready or needs no key. | Writes the marker and starts a session on the default model. |
-| `Add an API key to start` | The default model's provider needs a key. Detail: `The default model (openrouter:openrouter/free) uses openrouter, which requires an API key (set OPENROUTER_API_KEY)`. | Writes the marker, starts a session, and prints the detail followed by `Add a provider key anytime with /provider, or run /onboarding for full setup.` A turn sent before a key is added fails with the provider's authentication error. |
+| `Add an API key to start` | The default model's provider needs a key. Detail: `The default model (openrouter:openrouter/free) uses openrouter, which requires an API key (set OPENROUTER_API_KEY)`. | Writes the marker, starts a session and asks for the key at once: `[secrets] Enter value for <VAR> (input is masked; press Enter to store, Esc to cancel).` The key is typed masked and stored for this user in every project (the same entry as `/secrets set --user <VAR>`), then `[secrets] Stored: <VAR> (user, secure)`. Esc stores nothing; a turn sent before a key is added fails with the provider's authentication error. |
 | `Choose a model to start` | The configured default model is unknown. | As above, with the reason printed. |
 | `Full guided setup` | Always. Detail: `Choose provider, model, channels, and more`. | Opens the setup wizard (below). |
 
-Pressing Esc on the menu writes the marker and starts a session on the current default model, as `Start now` or `Add an API key to start` does; it does not switch to another provider. `/onboarding` opens the wizard at any time, and `goodvibes onboarding` (or `goodvibes setup`) starts the terminal app with the wizard open.
+Pressing Esc on the menu writes the marker and starts a session on the current default model, as `Start now` does, and prints the row's detail followed by `Add a provider key anytime with /provider, or run /onboarding for full setup.`; it asks for no key and does not switch to another provider. `/onboarding` opens the wizard at any time, and `goodvibes onboarding` (or `goodvibes setup`) starts the terminal app with the wizard open.
 
 When the terminal app cannot tell whether a provider is configured, it opens the wizard directly.
 
@@ -1804,7 +1804,7 @@ When a network-reachable surface has TLS off, the screen shows `TLS off: <surfac
 | Field | Effect |
 | --- | --- |
 | Local auth admin username | Required (with a password) before any service, browser surface or listener is exposed when no local user exists yet or a bootstrap credential is still present. Otherwise optional: an existing name rotates its password, a new name adds another admin. |
-| Local auth admin password, Confirm local auth admin password | Nothing is created or changed until both match. Rotating a password signs that account out everywhere. Replacing a bootstrap credential deletes the bootstrap file. |
+| Local auth admin password, Confirm local auth admin password | Shown as dots only, never any of the characters typed. Nothing is created or changed until both match; while they differ the confirmation field says `Access: Confirm local auth admin password does not match the password; type it again.` and does not count as complete. Rotating a password signs that account out everywhere. Replacing a bootstrap credential deletes the bootstrap file. |
 | Confirm stored subscription state, Confirm local auth posture | Acknowledgements, required when reopening the wizard over existing state that needs review. |
 | Local auth readiness, Local auth store path | Read-only status rows. |
 
@@ -1851,7 +1851,7 @@ Each starts with **Auto-start this surface**: **Yes** saves `surfaces.<surface>.
 | Field | Effect |
 | --- | --- |
 | Subscription status rows | One per provider that supports subscription sign-in, saying whether a session is active or pending. |
-| Provider API keys | How many key-accepting providers already have a key. |
+| Provider API keys | How many of the providers that accept an API key (every registered provider that declares a key variable) already have one. |
 | One masked key field per provider that accepts an API key | A key typed here is stored in the secret store (in the daemon's tier, so every program uses it) and the provider becomes usable at once. |
 | Start OpenAI subscription sign-in (Restart when pending) | Opens the ChatGPT subscription sign-in in the browser and records a pending sign-in. Subscription sign-ins are kept in `~/.goodvibes/shared/subscriptions.json`, which the daemon, the terminal app and the Agent all read, so a sign-in made here also serves the Agent (on a checkout installation the Agent's tree differs, so it does not). |
 | OpenAI authorization URL | Shown while pending, for when the browser did not open. |
@@ -1894,7 +1894,7 @@ Seven screens list optional features, each as a checkbox that starts at its curr
 
 The last screen lists every change Apply will make, one row per setting as `<key>: <current> -> <new>` (at most 40 rows, then `and <n> more`). Credentials appear as `credential <key>` without their values, and an admin account as `local admin <name>`. Only settings whose value differs from what the wizard read are written.
 
-**Apply settings and verify** saves everything, then reads each value back. On success the wizard closes, records the first-run marker, and prints a summary of the checks. When some checks fail it says `Setup saved your settings, but <n> check(s) of them failed; ...` and lists them. When the save itself fails, the wizard stays open on this screen with **Apply did not complete** and the reasons; fix them and apply again.
+While any screen has a required field missing, a value the wizard refuses (a confirmation that does not match, a bad port) or a required acknowledgement unticked, **Apply settings and verify** shows `[Blocked]` instead of `[Ready]`, its detail lists what to finish, and the summary says how many items are left. **Apply settings and verify** saves everything, then reads each value back. A daemon-owned setting is sent to the running daemon; when no daemon is listening on its address, it is written to the daemon's settings file for the next daemon start, so a first setup on a machine with no daemon running applies. On success the wizard closes, records the first-run marker, and prints a summary of the checks. When some checks fail it says `Setup saved your settings, but <n> check(s) of them failed; ...` and lists them. When the save itself fails, the wizard stays open on this screen with **Apply did not complete** and the reasons; fix them and apply again.
 
 ### The Agent's first run
 

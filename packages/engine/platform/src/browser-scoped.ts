@@ -243,7 +243,8 @@ function createScopedOperatorClient<TMethodId extends OperatorTypedMethodId>(
       const url = pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')
         ? pathOrUrl
         : buildUrl(baseUrl, pathOrUrl);
-      return await openRawServerSentEventStream(fetchImpl, url, handlers, {
+      // The transport's default headers, getHeaders and middleware apply to the stream as to every call.
+      return await openRawServerSentEventStream(transport.streamFetch, url, handlers, {
         signal: streamOptions.signal,
         headers: streamOptions.headers,
         reconnect: streamOptions.reconnect,

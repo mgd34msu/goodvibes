@@ -505,7 +505,8 @@ export class MultimodalService {
     signal?: AbortSignal,
   ): Promise<MultimodalAnalysisResult> {
     assertJudgmentInput({ metadata: descriptor.metadata, filename: descriptor.filename, prompt: request.prompt, requestMetadata: request.metadata });
-    const provider = this.mediaProviders.findProvider('understand', request.imageProviderId);
+    // The same selection as generate: a key saved in the secret store counts on the first request after start-up.
+    const provider = await this.mediaProviders.resolveProvider('understand', request.imageProviderId);
     if (!provider?.analyze) {
       throw new Error('No image-understanding provider is registered.');
     }

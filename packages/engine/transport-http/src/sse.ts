@@ -14,7 +14,8 @@ export async function openServerSentEventStream(
   const url = /^https?:\/\//i.test(pathOrUrl)
     ? assertSameOriginAbsoluteUrl(pathOrUrl, transport.buildUrl('/'))
     : transport.buildUrl(pathOrUrl);
-  return await openRawServerSentEventStream(transport.fetchImpl, url, handlers, {
+  // Through the transport's headers and middleware, as every JSON call goes.
+  return await openRawServerSentEventStream(transport.streamFetch, url, handlers, {
     ...options,
     authToken: transport.authToken,
     getAuthToken: transport.getAuthToken.bind(transport),

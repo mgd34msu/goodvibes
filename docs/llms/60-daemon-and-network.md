@@ -738,7 +738,7 @@ The web UI shows "Sign in to GoodVibes" until it has a credential. Four ways in:
 3. Paste a token into "Operator token" and press "Sign in with token".
 4. Sign in with a username and password ("Username", "Password"), which creates a 12-hour sign-in.
 
-A rejected pairing token shows "The pairing link was rejected" and asks for a fresh QR code. A relay pairing code (`gvrelay1.…`, see "The relay") can also be pasted there, but it only provides a route to the daemon; a token is still needed to sign in.
+A rejected pairing token shows "The pairing link was rejected" and asks for a fresh QR code. A pasted token the daemon refuses stays in the field to correct, with "The daemon did not accept that token". The page reaches the daemon whatever the browser says about its own network: with no network beyond the machine (no interface but loopback), a daemon on loopback is still used, and "Can't reach the daemon" means the daemon itself did not answer. A relay pairing code (`gvrelay1.…`, see "The relay") can also be pasted there, but it only provides a route to the daemon; a token is still needed to sign in.
 
 ### Views
 
@@ -746,7 +746,7 @@ The web UI has five destinations, chosen in the sidebar and reflected in the add
 
 | View | `?view=` | Tabs (`&tab=`) | What it shows |
 | --- | --- | --- | --- |
-| Chat | `chat` | none; `&session=<id>` opens one session | Conversations with the model: messages, tool activity, artifacts, queued messages, search, a composer with attachments and voice. |
+| Chat | `chat` | none; `&session=<id>` opens one session | Conversations with the model: messages, tool activity (kept with each reply, so it shows after a reload), artifacts, queued messages (listed once, above the composer, until they are sent), search, a composer with attachments and voice. An approval the chat's own turn is waiting on is shown above the composer with Approve and Deny (one that needs an answer or a choice of edits opens in Work). The model menu lists the providers that are set up. |
 | Work | `work` | `all`, `sessions`, `agents`, `processes`, `checkpoints`, `plan` | Everything running or finished: hosted and shared sessions, agents, contracts and their units, approvals, owner questions, tasks, CI watches, background processes, checkpoints and rewind, the work plan, and steering of a running session. |
 | Library | `library` | `memory`, `knowledge`, `review` | Memory records, the knowledge base and its map, and items waiting for review. |
 | Personal | `personal` | `calendar`, `mail`, `occasions` | Calendar, mail and dates the owner cares about. |
@@ -1516,7 +1516,7 @@ End a session with `goodvibes-daemon sessions kill <id>` or `sessions.hosted.kil
 
 The fleet is every agent and process the daemon is responsible for: spawned agents, Agent Client Protocol agents it hosts, contract units, workflows, triggers, schedules, watchers and background processes. `fleet.maxSize` (default 8) is the ceiling on agents this daemon runs at once; agents launched outside GoodVibes and only observed do not count.
 
-The web UI shows the fleet in Work. The API methods (all through the invoke route; see the next part) are:
+The web UI shows the fleet in Work. Its line "N running" counts only what is doing something now (an agent's turn, a running task or hosted turn, a contract in progress); an idle watcher, a schedule between runs, an open chat between turns and an idle code index are listed under "Running and idle" but not counted. The account menu's activity line gives the same count. Questions an agent left the owner (the owner inbox) are listed at the top of Work as "Questions for you", answerable there. The API methods (all through the invoke route; see the next part) are:
 
 | Method | Does |
 | --- | --- |

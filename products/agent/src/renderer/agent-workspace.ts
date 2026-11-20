@@ -8,7 +8,7 @@ import type {
 import type { AgentWorkspaceEditorKind } from '../input/agent-workspace-types.ts';
 import type { AgentWorkspaceSetupChecklistItem } from '../input/agent-workspace-setup.ts';
 import type { SurfaceLayer } from './surface-kit.ts';
-import { wrapText } from '../utils/terminal-width.ts';
+import { getDisplayWidth, wrapText } from '../utils/terminal-width.ts';
 import { GLYPHS } from './ui-primitives.ts';
 import {
   getFullscreenWorkspaceMetrics,
@@ -545,13 +545,18 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
   const settingTable = !workspace.actionSearchActive
     && shouldRenderOnboardingSettingsTable(workspace.actions);
   const rows: WorkspaceRow[] = [];
+  // The Default and Current columns are as wide as their widest value (never cut), up to
+  // what leaves the label column 18 cells; a label longer than its column wraps onto more rows.
+  const columnsByAction = settingTable ? workspace.actions.map((action) => onboardingActionColumns(workspace, action)) : [];
+  const widestValue = columnsByAction.reduce((most, columns) => Math.max(most, getDisplayWidth(columns.defaultValue), getDisplayWidth(columns.currentValue)), getDisplayWidth('Current'));
   const valueWidth = settingTable
-    ? Math.min(22, Math.max(10, Math.floor(width * 0.18)))
+    ? Math.max(1, Math.min(widestValue, Math.floor((width - 6 - 18) / 2)))
     : 0;
   const labelWidth = settingTable
-    ? Math.max(18, width - (valueWidth * 2) - 6)
+    ? Math.max(1, width - (valueWidth * 2) - 6)
     : Math.min(34, Math.max(18, Math.floor(width * 0.38)));
   const commandWidth = Math.max(10, width - labelWidth - 6);
+  const labelRows = (label: string): string[] => (getDisplayWidth(label) <= labelWidth ? [label] : wrapText(label, labelWidth));
   if (workspace.actionSearchActive) {
     rows.push({
       text: `  Search: ${workspace.actionSearchQuery || '(type to filter actions)'}`,
@@ -594,10 +599,26 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
   const reservedForResult = reserveForResult(resultRows.length, usableRows);
   const resultScroll = settleResultScroll(workspace, workspace.lastActionResult, resultRows.length, reservedForResult);
 
-  const visible = reservedForResult > 0
+  const visibleRows = reservedForResult > 0
     ? Math.max(1, height - ACTION_CHROME_ROWS - reservedForResult)
     : Math.max(1, height - chromeRows);
-  const window = stableWindow(allActions.length, workspace.selectedActionIndex, visible);
+  // A wrapped label takes more than one row: the window holds as many actions as their rows allow.
+  const actionLabel = (index: number): string => {
+    const action = allActions[index]!;
+    const searchResult = workspace.actionSearchActive ? workspace.actionSearchResults[index] : null;
+    return settingTable ? (columnsByAction[index]?.setting ?? action.label) : searchResult ? `${searchResult.category.label} / ${action.label}` : action.label;
+  };
+  const rowsOf = (span: { start: number; end: number }): number => {
+    let used = 0;
+    for (let index = span.start; index < span.end; index += 1) used += labelRows(actionLabel(index)).length;
+    return used;
+  };
+  let visible = visibleRows;
+  let window = stableWindow(allActions.length, workspace.selectedActionIndex, visible);
+  while (visible > 1 && rowsOf(window) > visibleRows) {
+    visible -= 1;
+    window = stableWindow(allActions.length, workspace.selectedActionIndex, visible);
+  }
   if (window.start > 0) rows.push({ text: `${GLYPHS.navigation.moreAbove} ${window.start} more action(s) above`, kind: 'more', fg: PALETTE.dim, dim: true });
 
   for (let index = window.start; index < window.end; index += 1) {
@@ -641,18 +662,18 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
         kind: 'item',
       });
     } else {
-      const text = settingTable
-        ? (() => {
-          const columns = onboardingActionColumns(workspace, action);
-          return `${marker} ${padDisplay(columns.setting, labelWidth)}  ${padDisplay(columns.defaultValue, valueWidth)}  ${padDisplay(columns.currentValue, valueWidth)}`;
-        })()
-        : `${marker} ${padDisplay(label, labelWidth)}  ${padDisplay(actionCommand(action), commandWidth)}`;
-      rows.push({
-        text,
+      const columns = settingTable ? columnsByAction[index]! : null;
+      const [first = '', ...rest] = labelRows(columns ? columns.setting : label);
+      const text = columns
+        ? `${marker} ${padDisplay(first, labelWidth)}  ${padDisplay(columns.defaultValue, valueWidth)}  ${padDisplay(columns.currentValue, valueWidth)}`
+        : `${marker} ${padDisplay(first, labelWidth)}  ${padDisplay(actionCommand(action), commandWidth)}`;
+      const style = {
         selected: selected && workspace.focusPane === 'actions',
         fg: action.safety === 'blocked' ? PALETTE.warn : selected ? PALETTE.text : PALETTE.info,
         bold: selected,
-      });
+      };
+      rows.push({ text, ...style });
+      for (const more of rest) rows.push({ text: `  ${padDisplay(more, labelWidth)}`, ...style });
     }
   }
 

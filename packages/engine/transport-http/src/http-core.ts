@@ -123,6 +123,12 @@ export interface HttpJsonTransport {
   getAuthToken(): Promise<string | null>;
   requestJson<T>(pathOrUrl: string, options?: HttpJsonRequestOptions): Promise<T>;
   resolveContractRequest(method: string, path: string, input?: Record<string, unknown>): ResolvedContractRequest;
+  /**
+   * The fetch a stream opens with: the transport's default headers and
+   * `getHeaders` under the call's own, and the middleware chain around it, as
+   * every JSON call gets them. The response body is left unread for the stream.
+   */
+  readonly streamFetch: FetchLike;
   /** Append a middleware to the transport's middleware chain. */
   use(middleware: TransportMiddleware): void;
 }
@@ -667,10 +673,38 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
     };
   };
 
+  // A stream (server-sent events) goes through the same headers and middleware as a JSON call.
+  const streamFetch: FetchLike = async (input, init = {}) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const headers = mergeHeaderRecord(
+      (await resolveHeaders(defaultHeaders, options.getHeaders)) ?? {},
+      (init.headers ?? {}) as HeadersInit,
+    );
+    const method = (init.method ?? 'GET').toUpperCase();
+    const signal = init.signal ?? undefined;
+    const ctx: TransportContext = { method, url, headers, body: undefined, options: { ...(signal ? { signal } : {}) }, signal };
+    const innerFetch = async (c: TransportContext): Promise<void> => {
+      c.response = await fetchImpl(c.url, { ...init, method: c.method, headers: c.headers, ...(c.signal ? { signal: c.signal } : {}) });
+    };
+    if (middlewareChain.length === 0) {
+      await innerFetch(ctx);
+    } else {
+      await composeMiddleware(middlewareChain, innerFetch)(ctx);
+      if (ctx.error) throw ctx.error;
+    }
+    if (!ctx.response) {
+      throw new GoodVibesError('HTTP middleware chain completed without producing a stream response.', {
+        category: 'protocol', source: 'transport', recoverable: false, url, method,
+      });
+    }
+    return ctx.response;
+  };
+
   return {
     baseUrl: paths.baseUrl,
     authToken,
     fetchImpl,
+    streamFetch,
     paths,
     buildUrl(path: string): string {
       return buildUrl(baseUrl, path);

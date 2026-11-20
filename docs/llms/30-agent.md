@@ -428,7 +428,7 @@ Agent memory uses the durable memory store (`~/.goodvibes/shared/memory.sqlite`)
 | `memory list [class] [--scope session|project|team] [--limit <n>]` | Records. |
 | `memory search <query> [--semantic] [--cls <class>] [--scope <scope>] [--limit <n>]` | Search. |
 | `memory add <class> <summary> [--scope <scope>] [--detail <text>] [--tags a,b] [--confidence <0-100>] [--review-state <fresh\|reviewed\|stale\|contradicted>] [--session <id>] [--turn <id>] [--task <id>] [--file <path>] [--label <text>]` | Add one. `--review-state` sets its review state at once (`reviewed` makes it eligible for the prompt). `--session`, `--turn`, `--task` and `--file` record where the fact came from (its provenance); `--label` names that link and is the one option not shown in the program's help. |
-| `memory show <id>`, `memory queue [limit]` | One record; the review queue. |
+| `memory show <id>`, `memory queue [limit]` | One record; the review queue (records not yet reviewed, flagged ones first). |
 | `memory review <id> <fresh|reviewed|stale|contradicted> [--confidence <0-100>] [--by <name>] [--reason <text>]`, `memory stale <id> <reason>`, `memory contradict <id> <reason>` | Review. |
 | `memory edit <id> [--summary <text>] [--detail <text>] [--tags a,b] [--scope <scope>] --yes` | Correct a record in place. |
 | `memory promote <id> <session|project|team> --yes`, `memory link <fromId> <toId> <relation> --yes`, `memory delete <id> --yes` | Change. |

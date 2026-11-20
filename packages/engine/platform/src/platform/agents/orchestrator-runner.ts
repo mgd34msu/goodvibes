@@ -728,6 +728,8 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
         }
         if (msg.kind === 'steer') awaitingDelivery.steers.push(msg.id);
         else awaitingDelivery.others.push(msg.id);
+        // Drained into the request about to go out: its receipt is consumed (or none), never blocked by expiry.
+        context.messageBus.markTaken?.(msg.id, msg);
       }
 
       contextWindowAwarenessEnabled = context.featureFlagManager?.isEnabled('agent-context-window-awareness') ?? true;

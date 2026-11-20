@@ -281,7 +281,7 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
   readonly channelDeliveryRouter?: Pick<ChannelDeliveryRouter, 'deliver'> | undefined;
   readonly providerRegistry?: ProviderRegistry | undefined;
   readonly automationManager?:
-    | Pick<AutomationManager, 'listJobs' | 'createJob' | 'updateJob' | 'setEnabled' | 'attachCheckinEvaluator' | 'listRuns' | 'runNow'>
+    | Pick<AutomationManager, 'start' | 'listJobs' | 'createJob' | 'updateJob' | 'setEnabled' | 'attachCheckinEvaluator' | 'listRuns' | 'runNow'>
     | undefined;
   /** A read-only session lister for the check-in briefing (the full SharedSessionBroker satisfies it). */
   readonly sessionLister?: { listSessions(limit?: number): readonly CheckinSessionView[] } | undefined;

@@ -154,6 +154,9 @@ export function readHeadline(node: FleetProcessNode): ProcessHeadline | null {
   const candidate = value as Record<string, unknown>;
   if (typeof candidate.text !== 'string' || candidate.text.length === 0) return null;
   if (typeof candidate.updatedAt !== 'number') return null;
+  // A headline that only repeats the node's label ("Code index: not built yet" under
+  // the same title) says nothing new, so there is none to show.
+  if (candidate.text.trim() === (node.label ?? '').trim()) return null;
   return { text: candidate.text, updatedAt: candidate.updatedAt };
 }
 

@@ -78,7 +78,7 @@ export interface CheckinServiceDeps {
   readonly deliverer: CheckinDeliverer;
   readonly receipts: CheckinReceiptStore;
   /** The automation manager the scheduled check-in job is synced onto (optional in tests). */
-  readonly automation?: Pick<AutomationManager, 'listJobs' | 'createJob' | 'updateJob' | 'attachCheckinEvaluator'> | undefined;
+  readonly automation?: Pick<AutomationManager, 'start' | 'listJobs' | 'createJob' | 'updateJob' | 'attachCheckinEvaluator'> | undefined;
   /**
    * False when another machine in this group runs the scheduled check-in (it
    * holds the group's check-in role, cluster/roles.ts). Every machine holds
@@ -318,6 +318,10 @@ export class CheckinService {
     if (!automation) return this.schedule = { state: 'not-needed', reason: 'no scheduler is attached' };
     try {
       const config = this.getConfig();
+      // The job list is read from disk when the scheduler starts; read before that it is
+      // empty, and a check-in job saved by an earlier run would be created again at
+      // every daemon start. createJob starts it the same way.
+      await automation.start();
       const job = automation.listJobs().find((j) => j.kind === 'checkin');
       if (!job) {
         if (!config.enabled) return this.schedule = { state: 'not-needed' };

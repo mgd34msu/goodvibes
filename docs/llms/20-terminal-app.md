@@ -108,14 +108,16 @@ $ goodvibes status --timeout 5
 --timeout, --max-turns, --omit-accumulated and --answer-permissions apply only to the run command.
 ```
 
-- A lone first word of five or more letters that is one letter away from a command is refused as a typo, with exit code `2`:
+- A lone first argument that is one bare word (letters, digits and hyphens) and not a command is refused as an unknown command, with exit code `2`; the error names the nearest command when one is close:
 
 ```text
 $ goodvibes staus
 Unknown command: staus. Did you mean `goodvibes status`? To start with "staus" as the first prompt instead, run: goodvibes -- staus
+$ goodvibes frobnicate
+Unknown command: frobnicate. Run `goodvibes --help` for the commands. To start with "frobnicate" as the first prompt instead, run: goodvibes -- frobnicate
 ```
 
-- A shorter word, or a word two letters away, starts the app with that word as the first prompt and prints a warning naming the near command.
+- A first prompt is a quoted line (`goodvibes "review this repo"`) or words after `--`. A lone argument that is not a bare word (`goodvibes "staus?"`) is taken as the first prompt; when it is close to a command a warning names that command.
 
 ### Environment variables the terminal app reads
 
@@ -720,7 +722,7 @@ The default table of the terminal app:
 `Shift+Tab` cycles `ask-me` → `jev-decides` → `just-vibes` → `yolo` → `ask-me`.
 Before `yolo` it asks for confirmation (default No); declining skips to the mode after it.
 The change lasts for the session only. The saved default is changed in `/settings` (or `/config set permissions.mode <mode>`); `/permissions` shows it but does not change it.
-Plan mode is outside the cycle; `/plan` turns it on and off.
+Plan mode is outside the cycle; `/plan` turns it on and off for this session, also without changing the saved default.
 The line `[Permissions] Mode for this session: just-vibes (the saved default is set in /settings; /permissions shows it)` confirms each change; when `yolo` was declined it begins `[Permissions] yolo skipped. Mode for this session: ask-me ...`. When the mode chosen is not the one in force (`jev-decides` with no working decision model runs as `ask-me`), the line names the mode in force, as the status pill does, and why: `[Permissions] Mode for this session: ask-me (jev-decides chosen, but judgment.policy is No Decision Model, so Jev cannot decide and every call it would decide asks you) ...`.
 A managed lock on `permissions.mode` stops the change: `[Permissions] Mode stays <mode>: <reason>`.
 
@@ -1122,14 +1124,14 @@ An untrusted workspace does not load its hooks file or its project MCP servers.
 Outside a repository: `Not a git repository: <dir>. Nothing was changed. Run /git init to create one.`
 `/git init` inside one: `<dir> is already inside a git repository; nothing was changed.`
 
-`/diff [session|head|working|staged]` (alias `/d`) opens Changes on this session's file changes (the default), everything against `HEAD`, the working tree or the staged set.
+`/diff [session|head|working|staged]` (alias `/d`) opens Changes on this session's file changes (the default), everything against `HEAD`, the working tree or the staged set. The session view holds only files this session's tools wrote; before the first one it is empty (`this session · no files changed yet`), and `v` switches to the other views.
 `/changes [session|working|staged|head]` opens the same view.
 `/review` opens this session's diff hunk by hunk to comment for the model or revert a hunk.
 
 `/commit-all [--yes]` without `--yes` shows the repository root and file counts; with `--yes` it commits the whole working tree (a set already staged by hand is committed as it is).
 A clean tree prints `[commit-all] <root>: nothing to commit, the working tree is clean.`; a commit prints `[commit-all] Committed N files in <root>: <hash> <message>`.
 
-`/test [pattern]` runs the project's test command (the configured test gate, else the `package.json` `test` script) and shows pass and fail results; `Esc` stops it.
+`/test [pattern]` runs the project's test command (the configured test gate, else the `package.json` `test` script) and shows pass and fail results; `Esc` stops it. The script runs with the project's package manager: the `packageManager` field, else the one lockfile present; with neither, the manager the script itself calls (`bun test` runs with bun), else the first of npm, bun, pnpm and yarn that is installed.
 It prints `Running: <command> (<source>, limit Ns; Esc stops it)` first.
 A run past the limit is killed: `Test run timed out after Ns and was killed. Raise contract.gateTimeoutMs (0 for no limit) or pass a pattern to run fewer tests.` (`contract.gateTimeoutMs` defaults to 900000 ms.)
 A second `/test` while one runs prints `A test run is already going; Esc stops it, then run /test again.`
@@ -1398,7 +1400,7 @@ When a saved model's provider is no longer registered (the server was scanned aw
 A dedicated adapter knows the server's tool calling and streaming; Ollama, LM Studio and llama.cpp also get the `instant`, `low`, `medium`, `high` reasoning levels.
 An Ollama server that answers only `/api/tags` and not `/v1/models` cannot be used as an OpenAI-compatible provider and is reported as skipped.
 To add one server by hand, run `/provider add <name> <baseURL>`, for example `/provider add box http://192.168.1.50:11434/v1`; it probes `<baseURL>/models`.
-`sglang` (port 30000), `litellm` (port 4000) and `copilot-proxy` (port 3000) are built-in self-hosted providers that need no scan.
+`sglang` (port 30000), `litellm` (port 4000) and `copilot-proxy` (port 3000) are built-in self-hosted providers that need no scan. Without a key they count as set up only once a server at that address has answered with its models; until then their status reads `No server has answered at <address> with any models yet. Start it, or set its address.` and model pickers leave them out.
 
 ### Custom providers
 
@@ -1423,7 +1425,7 @@ Any OpenAI-compatible API can be added as a JSON file in `~/.goodvibes/tui/provi
 ```
 
 Files in that directory are read again when they change; no restart is needed.
-`contextWindow` is optional. Without it the window shows as unknown (`context 29.9k / unknown`) and no compaction is driven by a guess.
+`contextWindow` is optional. Without it the window shows as unknown (`context 29.9k / unknown`) and no compaction is driven by a guess. The variable `apiKeyEnv` names is the provider's key route: its status (and the web UI's Models and providers) reads `set up via env` while that variable is set.
 
 ### Routing roles
 
@@ -1812,7 +1814,7 @@ Records that match a turn can be added to the model's context; `/recall explain 
 | `get <id>` | One record with provenance and links. |
 | `edit <id> [--summary <text>] [--detail <text>] [--tags <t,t>] [--scope <session\|project\|team>]` | Correct a record in place: each option given replaces that field, the rest (class, provenance, links, review state) stay. `[recall] Edited <id> (summary, tags): <summary>`; an unknown id: `[recall] Record not found: <id>. Nothing was changed.` |
 | `link <fromId> <toId> <relation>` | Link two records. |
-| `queue [limit]` | The review queue. |
+| `queue [limit]` | The review queue: records not yet reviewed, contradicted and stale ones first; a record you reviewed leaves it. |
 | `review <id> <fresh\|reviewed\|stale\|contradicted> [--confidence <0-100>] [--by <name>] [--reason <text>]` | Review a record. |
 | `stale <id> [reason...]`, `contradict <id> [reason...]` | Mark a record stale or contradicted. |
 | `promote <id> <session\|project\|team>` | Move a record to a wider scope. |

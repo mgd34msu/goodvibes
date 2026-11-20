@@ -96,7 +96,7 @@ export function dependencyStatus(workstream: Workstream, item: WorkItem): Depend
  *     recoverable block for the dependent, mirroring a failed ordinary dep).
  *   - 'not-a-group', no sibling references this id; it is not a best-of-N group.
  */
-function attemptGroupDependencyStatus(
+export function attemptGroupDependencyStatus(
   workstream: Workstream,
   sourceId: string,
 ): 'satisfied' | 'waiting' | 'failed' | 'not-a-group' {

@@ -64,6 +64,8 @@ export class AgentMessageBus {
   private runtimeBus: RuntimeEventBus | null = null;
   /** Direct messages the recipient took into a turn; a discarded message not in here was never delivered. */
   private delivered = new Set<string>();
+  /** Messages a recipient drained into a request it sent: their receipt is consumed, never blocked (see markTaken). */
+  private readonly taken = new Map<string, AgentMessage>();
 
   setRuntimeBus(runtimeBus: RuntimeEventBus | null): void {
     this.runtimeBus = runtimeBus;
@@ -274,7 +276,9 @@ export class AgentMessageBus {
    * message was queued: a message waiting for a long turn to end has been sent, not delivered.
    */
   markDelivered(agentId: string, messageId: string): void {
-    const message = [...(this.messages.get(agentId) ?? []), ...(this.messages.get('*') ?? [])].find((candidate) => candidate.id === messageId);
+    const message = [...(this.messages.get(agentId) ?? []), ...(this.messages.get('*') ?? [])].find((candidate) => candidate.id === messageId)
+      ?? this.taken.get(messageId);
+    this.taken.delete(messageId);
     if (!message) return;
     if (message.scope === 'direct') this.delivered.add(message.id);
     this.emitDelivered(message);
@@ -355,6 +359,17 @@ export class AgentMessageBus {
     };
   }
 
+  /**
+   * The recipient drained a stored message into a request it is about to send:
+   * from here the message's one receipt is `consumed` (or nothing, when the
+   * request fails for good), never `blocked`. Expiry passes over it, so a long
+   * request cannot leave both a blocked and a consumed receipt for one message.
+   */
+  markTaken(messageId: string, message?: AgentMessage): void {
+    const found = message ?? [...this.messages.values()].flat().find((candidate) => candidate.id === messageId);
+    if (found) this.taken.set(messageId, found);
+  }
+
   cleanup(): void {
     const now = Date.now();
     for (const [key, messages] of this.messages) {
@@ -377,6 +392,8 @@ export class AgentMessageBus {
     for (const message of messages) {
       if (message.scope !== 'direct') continue;
       if (this.delivered.delete(message.id)) continue;
+      // Taken into a request already: its receipt is consumed, not blocked.
+      if (this.taken.has(message.id)) continue;
       this.emitBlocked(message.id, message.from, message.to, message.content,
         { ttlMs: message.ttlMs, kind: message.kind, scope: message.scope, cohort: message.cohort, contractId: message.contractId, parentAgentId: message.parentAgentId },
         reason, this.identities.get(message.from), this.identities.get(message.to));

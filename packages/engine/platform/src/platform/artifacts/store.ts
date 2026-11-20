@@ -155,13 +155,16 @@ function resolveArtifactIntent(input: ArtifactCreateInput): {
   fetchMode: ArtifactFetchMode;
   allowPrivateHosts: boolean;
 } {
-  const hasRemoteUri = typeof input.uri === 'string' && input.uri.trim().length > 0;
+  // The same order resolveInput reads the input in (inline data, then text, then a path,
+  // then a remote address), so the recorded mode names the source actually used.
+  const hasInline = typeof input.dataBase64 === 'string' || typeof input.text === 'string';
   const hasLocalPath = typeof input.path === 'string' && input.path.trim().length > 0;
-  const derivedAcquisitionMode: ArtifactAcquisitionMode = hasRemoteUri
-    ? 'remote-fetch'
+  const hasRemoteUri = typeof input.uri === 'string' && input.uri.trim().length > 0;
+  const derivedAcquisitionMode: ArtifactAcquisitionMode = hasInline
+    ? 'inline-data'
     : hasLocalPath
       ? 'local-path'
-      : 'inline-data';
+      : hasRemoteUri ? 'remote-fetch' : 'inline-data';
   const acquisitionMode = input.acquisitionMode ?? derivedAcquisitionMode;
   if (acquisitionMode !== 'unknown' && acquisitionMode !== derivedAcquisitionMode) {
     throw Object.assign(new Error(`Artifact acquisitionMode "${acquisitionMode}" does not match the provided artifact input.`), { status: 400 });
@@ -747,7 +750,8 @@ export class ArtifactStore {
       readonly includeBase64IfSmallerThan?: number | undefined;
     } = {},
   ): Promise<ArtifactAttachment> {
-    const record = this.records.get(reference.artifactId);
+    // An expired artifact reads as absent here as everywhere else.
+    const record = this.liveRecord(reference.artifactId);
     if (!record) throw new Error(`Unknown artifact: ${reference.artifactId}`);
     const relativeContentPath = `/api/artifacts/${encodeURIComponent(record.id)}/content`;
     const attachment: ArtifactAttachment = {

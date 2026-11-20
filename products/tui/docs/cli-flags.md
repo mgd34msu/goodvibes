@@ -222,7 +222,7 @@ Parser limits to know about:
 - Unquoted words in a prompt that equal a command name or alias (`doctor`, `auth`, `task`) are read as that command. Quote the whole prompt.
 - The `secrets` and `cluster` helpers read the word after any `--flag` as its value, so put flags after the positional arguments.
 - After any command word an option the command does not take (`run --max-turn 3`, `run --timout=5m`, `secrets set K v --plaintxt`) is refused with exit `2` instead of being ignored, and the error lists the options that command accepts. Commands with options of their own (`secrets`, `auth`, `pair` and the like) declare them in the one command table and receive them unchanged.
-- A lone first word of five or more letters one letter away from a command (`goodvibes staus`) is refused as a mistyped command and the error names the command it is close to. To start with that word as the first prompt, put `--` before it: `goodvibes -- staus`. A shorter word, or one two letters away (`goodvibes hello`, `goodvibes look`), starts the app with it as the first prompt and a warning names the near command.
+- A lone first argument that is one bare word (letters, digits and hyphens) and not a command (`goodvibes staus`, `goodvibes frobnicate`) is refused as an unknown command, exit code `2`; the error names the nearest command when one is close. To start with that word as the first prompt, put `--` before it: `goodvibes -- staus`. A quoted line (`goodvibes "review this repo"`) is a prompt.
 
 ## Meta
 

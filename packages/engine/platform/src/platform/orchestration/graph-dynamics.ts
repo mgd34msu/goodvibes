@@ -13,7 +13,7 @@
  * - the graph snapshot surfaces render (nodes, edges, states, pool state,
  *   stalled tells).
  */
-import { firstPhase } from './scheduler.js';
+import { attemptGroupDependencyStatus, firstPhase } from './scheduler.js';
 import type { OrchestrationEvent, WorkItem, Workstream } from './types.js';
 
 /** Fields shared by every edge-add outcome. */
@@ -185,10 +185,24 @@ export function detectOrphans(
     if (hardFailedCache.has(item.id)) return hardFailedCache.get(item.id)!;
     if (seen.has(item.id)) return null;
     seen.add(item.id);
-    for (const dep of edgeTargets(workstream, item)) {
-      if (isHardFailed(dep)) { hardFailedCache.set(item.id, dep); return dep; }
-      const transitive = findHardFailedBlocker(dep, seen);
-      if (transitive) { hardFailedCache.set(item.id, transitive); return transitive; }
+    /** A dependency's hard-failed blocker: itself, or one it waits on. */
+    const blockerOf = (dep: WorkItem): WorkItem | null => isHardFailed(dep) ? dep : findHardFailedBlocker(dep, seen);
+    for (const depId of item.dependsOn) {
+      const dep = workstream.items.find((candidate) => candidate.id === depId);
+      if (dep) {
+        const blocker = blockerOf(dep);
+        if (blocker) { hardFailedCache.set(item.id, blocker); return blocker; }
+        continue;
+      }
+      // A best-of-N group: the dependent waits on the group's outcome, as the scheduler reads it
+      // (attemptGroupDependencyStatus), not on each attempt. One failed attempt does not block it
+      // while another can still win; only a group whose every attempt is blocked for good does.
+      const status = attemptGroupDependencyStatus(workstream, depId);
+      if (status === 'satisfied' || status === 'not-a-group') continue;
+      const siblings = workstream.items.filter((candidate) => candidate.attemptSourceId === depId);
+      const winner = siblings.find((sibling) => sibling.attemptWinner === true);
+      const blockers = (winner ? [winner] : siblings).map(blockerOf);
+      if (blockers.every((blocker) => blocker !== null)) { hardFailedCache.set(item.id, blockers[0]!); return blockers[0]!; }
     }
     hardFailedCache.set(item.id, null);
     return null;

@@ -279,7 +279,20 @@ export function createConversationRenderer(presentation: ConversationPresentatio
         });
     }
     function logConversationText(context: Pick<ConversationRenderContext, 'history'>, width: number, text: string, style: Partial<Cell> = {}, indent = ' '.repeat(LAYOUT.LEFT_MARGIN)): void {
-        const lines = text.split('\n').map((line) => stringToLine(indent + line, width, style));
+        // Each line is wrapped at the current width (and rewrapped on every rebuild), never cut at the edge.
+        // A line's own leading spaces hang under it, so an indented row keeps its place.
+        const room = Math.max(1, width - getDisplayWidth(indent));
+        const lines = text.split('\n').flatMap((source) => {
+            if (getDisplayWidth(source) <= room)
+                return [stringToLine(indent + source, width, style)];
+            const lead = /^\s*/.exec(source)?.[0] ?? '';
+            return wrapTextRows(source.slice(lead.length), Math.max(1, room - getDisplayWidth(lead))).map(({ text: row, join }) => {
+                const line = stringToLine(indent + lead + row, width, style);
+                if (join !== undefined && line.length > 0)
+                    line[0] = { ...line[0]!, wrapJoin: join };
+                return line;
+            });
+        });
         context.history.addLines(lines);
     }
     /**

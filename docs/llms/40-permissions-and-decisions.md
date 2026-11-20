@@ -131,7 +131,7 @@ What the reports show: every report shows the mode in force, read by the same ru
 | `--just-vibes` | This launch only | `goodvibes --just-vibes` |
 | `--yolo` (alias `--no-worries-just-vibes`) | This launch only | `goodvibes-agent --yolo` |
 | Shift+Tab in the terminal app | This session only | Cycles `ask-me` → `jev-decides` → `just-vibes` → `yolo` → `ask-me`. |
-| `/plan on`, `/plan off`, `/plan` | Saved | See "Plan mode". |
+| `/plan on`, `/plan off`, `/plan` | This session only | See "Plan mode". |
 | Channel profile `--permission-mode` | Sessions started from that channel | See "Per-channel and per-session modes". |
 
 Shift+Tab details (terminal app `goodvibes` only; the Agent has no mode cycle key):
@@ -480,7 +480,7 @@ Plan mode is a separate read-only posture. Reads run; every write, command, netw
 /plan off      leave plan mode and restore the mode you were in
 ```
 
-- `/plan on` saves `permissions.mode` as `plan` in your settings, and remembers the mode you were in. `/plan off` saves that mode back.
+- `/plan on` sets plan mode for this session only, as Shift+Tab does, and remembers the mode you were in; `/plan off` restores that mode. Neither changes the saved `permissions.mode` in your settings file, and plan mode ends with the session.
 - Leaving plan mode another way (Shift+Tab, which moves from `plan` to `ask-me`) forgets the remembered mode.
 - Plan mode entered another way (for example `/config set permissions.mode plan`, or a channel profile) has no remembered mode; `/plan off` then returns to `ask-me`.
 - Outputs: `[Permissions] Plan mode ON; read-only: writes, commands, and network calls are blocked until you exit (/plan off or Shift+Tab).` and `[Permissions] Plan mode OFF; mode: <mode>.`
@@ -625,7 +625,7 @@ Two limits apply, to different requests:
 - The conversation says so once when none is set or `No Decision Model` is chosen, once when a set model starts failing, and once when it answers again. A failure is not repeated every turn.
 - `goodvibes status` and `goodvibes-agent status` print the policy and a `Decision model` line.
 - A headless run prints the line on stderr and adds `diagnostics.decisionModel` to its JSON result without changing the exit code.
-- The web UI shows it in a bar under the header.
+- The web UI shows it as a chip in the header: "No decision model", or "Decision model failing" when a set one is failing. Opening the chip shows the same sentence `goodvibes status` prints and a link to the decision-model settings; on a phone the chip shows its icon only.
 - Results that no decision model checked say so instead of claiming model verification.
 
 Without a decision model, conversation, tools, editing, commands, tests and session recovery work as usual. Work that needs one says so when none is in use: autonomous contract execution, independent semantic knowledge verification, merchant and checkout interpretation, and semantic recommendations or grading.

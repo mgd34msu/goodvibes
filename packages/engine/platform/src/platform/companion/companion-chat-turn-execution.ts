@@ -86,10 +86,11 @@ export async function executeCompanionToolCalls(
 
   let results: ToolResult[];
   const settled = new Map<string, ToolResult>();
+  const permissionManager = deps.permissionManager;
   try {
     results = await companionToolSession.run(sessionId, () => executeOrchestratorToolCalls({
       toolRegistry,
-      permissionManager: deps.permissionManager,
+      permissionManager,
       hookDispatcher: deps.hookDispatcher,
       runtimeBus: deps.runtimeBus,
       sessionId,

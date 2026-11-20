@@ -112,8 +112,9 @@ export async function openContractRouteStream(
   options: ContractStreamOptions,
 ): Promise<() => void> {
   const resolved = transport.resolveContractRequest(route.method, route.path, input);
+  // The transport's default headers, getHeaders and middleware apply to a stream as to a JSON call.
   return await openRawServerSentEventStream(
-    transport.fetchImpl,
+    transport.streamFetch,
     resolved.url,
     options.handlers,
     {

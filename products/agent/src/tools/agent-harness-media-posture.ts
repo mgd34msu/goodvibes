@@ -123,8 +123,8 @@ async function buildVoiceInteractionWorkflows(
   // reports the same resolution the capture host itself consults, including which
   // rows refuse to start it, instead of re-deriving it from raw config reads.
   //
-  // The speech gate's disk state comes from the same voiceSetup service /voice wake
-  // status reads. A context without that service (a fixture) resolves as gate-absent,
+  // The speech gate's disk state comes from the same voiceSetup service /voice
+  // wake-status reads. A context without that service (a fixture) resolves as gate-absent,
   // which is the truthful answer for it rather than an assumed capability.
   let vadReady = false;
   try {
@@ -224,7 +224,7 @@ async function buildVoiceInteractionWorkflows(
             ? 'Spoken-turn runtime and provider are ready, but the exact voice is not configured.'
             : 'Spoken responses need a ready selected TTS provider and runtime spoken-turn route.',
       nextStep: spokenReady
-        ? 'Use /tts only when the user asks for spoken output.'
+        ? 'Use /voice speak only when the user asks for spoken output.'
         : spokenAttention && ttsKeyInAgentOnly
           ? `Tell the user the provider key must be stored where the host reads it: they type /secrets set ${selectedTtsKeys[0] ?? '<KEY>'} and enter the value (a credential is theirs to enter), which files it where the host reads it.`
           : spokenAttention
@@ -232,7 +232,7 @@ async function buildVoiceInteractionWorkflows(
             : 'Choose a ready TTS provider and voice, then verify the runtime exposes submitSpokenInput.',
       capabilities: ['tts', 'spoken answer', 'stop spoken output'],
       modelRoute: 'agent_harness mode:"media_posture" query:"spoken responses" includeParameters:true',
-      userRoute: '/tts <prompt>',
+      userRoute: '/voice speak <message>',
       setupRoutes: [
         'agent_harness mode:"open_ui_surface" surfaceId:"tts-provider-picker" explicitUserRequest:"<the user request, in their own words>"',
         'agent_harness mode:"open_ui_surface" surfaceId:"tts-voice-picker" explicitUserRequest:"<the user request, in their own words>"',
@@ -270,13 +270,13 @@ async function buildVoiceInteractionWorkflows(
       nextStep: wake.blockers.length > 0
         ? `Tell the user which row refuses to start wake capture: ${wake.blockers[0]?.key ?? 'the blocking row'}. Its written reason is in blockedRowDetails; changing that setting is their decision.`
         : wake.active
-          ? 'Wake capture is live; run agent_harness mode:"run_command" command:"/voice wake status" to confirm the pinned models verify on disk, and report its result rather than asking anyone to check.'
-          : 'Ask the user whether to turn wake capture on; it keeps the microphone listening. Only on their request set voice.wake.enabled (the first setupRoutes entry; the surface row moves with it). Turning it on runs the voice setup: missing wake models are fetched and verified, and the setup plan is shown, proposing speech-to-text when it is missing (agent_harness mode:"run_command" command:"/voice wake setup --yes yes" installs it). agent_harness mode:"run_command" command:"/voice wake status" then reports what is on disk.',
+          ? 'Wake capture is live; run agent_harness mode:"run_command" command:"/voice wake-status" to confirm the pinned models verify on disk, and report its result rather than asking anyone to check.'
+          : 'Ask the user whether to turn wake capture on; it keeps the microphone listening. Only on their request set voice.wake.enabled (the first setupRoutes entry; the surface row moves with it). Turning it on runs the voice setup: missing wake models are fetched and verified, and the setup plan is shown, proposing speech-to-text when it is missing (agent_harness mode:"run_command" command:"/voice wake-setup --with-speech-to-text" installs it). agent_harness mode:"run_command" command:"/voice wake-status" then reports what is on disk.',
       capabilities: ['wake word', 'always listening', 'permission repair'],
       modelRoute: 'agent_harness mode:"media_posture" query:"wake word" includeParameters:true',
       setupRoutes: [
         'settings action:"set" key:"voice.wake.enabled" value:"true" explicitUserRequest:"<the user request, in their own words>"',
-        'agent_harness mode:"run_command" command:"/voice wake status"',
+        'agent_harness mode:"run_command" command:"/voice wake-status"',
         'agent_harness mode:"media_posture" query:"push to talk" includeParameters:true',
         'agent_harness mode:"pairing_posture" query:"device" includeParameters:true',
       ],
@@ -482,7 +482,7 @@ export async function mediaPostureSummary(context: CommandContext, rawArgs: Agen
           ttsProviderPicker: 'agent_harness mode:"open_ui_surface" surfaceId:"tts-provider-picker" explicitUserRequest:"<the user request, in their own words>"',
           ttsVoicePicker: 'agent_harness mode:"open_ui_surface" surfaceId:"tts-voice-picker" explicitUserRequest:"<the user request, in their own words>"',
           voiceWorkflowPosture: 'agent_harness mode:"media_posture" query:"push to talk" includeParameters:true',
-          commands: ['/media providers', '/voice review', '/tts <prompt>', '/image <path>'],
+          commands: ['/media providers', '/voice review', '/voice speak <message>', '/image <path>'],
         } } : {}),
       };
       current.assertCurrent?.();

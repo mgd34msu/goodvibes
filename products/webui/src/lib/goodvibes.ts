@@ -1749,7 +1749,9 @@ export const client = {
       messages: {
         create: (sessionId: string, input: WithoutSessionId<OperatorMethodInput<'sessions.messages.create'>>) =>
           invokeOperator('sessions.messages.create', { sessionId, ...input }),
-        list: (sessionId: string) => invokeOperator('sessions.messages.list', { sessionId }),
+        // One page, newest first by offset: `offset` counts back from the newest message; the answer's nextOffset reads the page before.
+        list: (sessionId: string, page?: { readonly limit?: number; readonly offset?: number }) =>
+          invokeOperator('sessions.messages.list', { sessionId, ...(page?.limit !== undefined ? { limit: page.limit } : {}), ...(page?.offset !== undefined ? { offset: page.offset } : {}) }),
       },
       inputs: {
         list: (sessionId: string, signal?: AbortSignal) => invokeOperator('sessions.inputs.list', { sessionId }, signal),

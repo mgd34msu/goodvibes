@@ -10,7 +10,7 @@
  * (platform/runtime/compaction/quality-score.ts) directly and out-of-band,
  * fed by the before/after message sets and token estimates
  * `compactConversation()` already holds, so quality scoring reaches `/compact`
- * and `/compact-history`.
+ * and `/session compactions`.
  *
  * Honesty note: the `strategy` value passed to `computeQualityScore()` is a
  * BORROWED rubric label describing what `compactConversation()`'s structured
@@ -89,7 +89,7 @@ export async function scoreCompactionRun(input: ScoreCompactionRunInput): Promis
   return computeQualityScore(strategyInput, strategyOutput);
 }
 
-/** One-line grade summary for the /compact after-notice and /compact-history entries. */
+/** One-line grade summary for the /compact after-notice and /session compactions entries. */
 export function formatQualityScoreLine(score: CompactionQualityScore): string {
   return `Quality: ${describeScore(score)} (rubric applied out-of-band; no strategy escalation ran)`;
 }

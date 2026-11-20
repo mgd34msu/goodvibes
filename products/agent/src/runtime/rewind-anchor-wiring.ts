@@ -49,11 +49,11 @@ export function recordCompletedTurnAnchor(input: {
     recordTurnAnchor(input.sessionId, captureTurnAnchor(input.turnId, input.conversation));
     // persistTurnAnchors logs its own cause; false means the sidecar was not written.
     if (!persistTurnAnchors(input.sessionId, input.surface)) {
-      tellOnceThatAnchorWasNotSaved(input, 'the session sidecar could not be written', '/rewind will not offer this turn after the session is resumed');
+      tellOnceThatAnchorWasNotSaved(input, 'the session sidecar could not be written', '/checkpoint rewind will not offer this turn after the session is resumed');
     }
   } catch (error) {
     logger.warn('rewind turn-anchor recording failed', { sessionId: input.sessionId, error: summarizeError(error) });
-    tellOnceThatAnchorWasNotSaved(input, summarizeError(error), '/rewind will not offer this turn');
+    tellOnceThatAnchorWasNotSaved(input, summarizeError(error), '/checkpoint rewind will not offer this turn');
   }
 }
 

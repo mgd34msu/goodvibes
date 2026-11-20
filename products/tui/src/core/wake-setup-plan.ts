@@ -2,7 +2,7 @@
  * wake-setup-plan.ts, this app's wake-word setup through the platform's one
  * voice setup (VoiceSetupService.setup): the plan is decided from this host's
  * facts, the wake rows are set and missing wake models fetched, and
- * speech-to-text is proposed. `/voice wake setup` and turning
+ * speech-to-text is proposed. `/voice wake-setup` and turning
  * `voice.wake.enabled` on anywhere (settings, /settings, a model's settings
  * call) both go through here, so they print the same plan.
  */

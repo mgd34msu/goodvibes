@@ -247,7 +247,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       actRow('document-browse-artifacts', 'artifacts list'),
       actRow('document-show-artifact', 'artifacts show'),
       actRow('document-promote-artifact', 'knowledge ingest-artifact'),
-      actRow('document-generate-media', 'media generate'),
+      actRow('document-generate-media', 'media make'),
       { id: 'document-model-routing', label: 'Models', detail: 'Choose the model the assistant answers with.', targetCategoryId: 'account-model', kind: 'workspace', safety: 'safe' },
       actRow('document-run-compare', 'compare run'),
       actRow('document-review-compare', 'compare review'),
@@ -281,7 +281,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       actRow('conversation-events', 'session events'),
       actRow('conversation-groups', 'session groups'),
       actRow('conversation-image', 'image'),
-      actRow('conversation-tts', 'tts'),
+      actRow('conversation-tts', 'voice speak'),
     ],
   },
   {

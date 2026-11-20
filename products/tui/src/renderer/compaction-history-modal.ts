@@ -51,7 +51,7 @@ function fmtN(n: number): string {
 
 /**
  * Build a plain-text compaction history summary suitable for ctx.print().
- * Useful as the output of /compact-history when not in overlay mode.
+ * Useful as the output of /session compactions when not in overlay mode.
  */
 export function buildCompactionHistoryText(): string {
   const events = getCompactionEvents();

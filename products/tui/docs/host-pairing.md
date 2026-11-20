@@ -6,7 +6,7 @@ No native path reads the Agent's private store or an environment credential. For
 
 ## Explicit owner-terminal migration
 
-The existing `goodvibes pair` and `/pair` still create companion/WebUI handoffs. This separate TUI flow is:
+The existing `goodvibes pair` and `/devices pair device` still create companion/WebUI handoffs. This separate TUI flow is:
 
 1. Run `goodvibes host pair` to inspect the current host. An existing saved credential is live-verified without being replaced.
 2. If no TUI credential exists, explicitly select the legacy bootstrap: `goodvibes host pair --bootstrap-shared`. This reads the existing owned mode-0600 `.goodvibes/daemon/operator-tokens.json` file. It never creates or repairs that file. It discloses the bootstrap before making an authenticated read to the selected host.
@@ -17,7 +17,7 @@ The existing `goodvibes pair` and `/pair` still create companion/WebUI handoffs.
 
 Inside the live TUI, the owner can instead type `/devices pair host` to inspect the selected host, `/devices pair host --bootstrap-shared` for the explicit migration preview, or `/devices pair host --bootstrap-shared --apply` to review and enter a fresh phrase. Interactive `--name <device-name>` accepts one non-whitespace token; use the standalone quoted argument for labels containing spaces. The interactive route uses the configured host and does not accept `--url`.
 
-Only the direct terminal-input dispatch has the private, one-dispatch owner mark. Generic registry calls, model/harness contexts, copied or forged contexts and nested commands cannot apply, even when a generic confirmation callback returns true. Their no-apply route remains passive local inspection and cannot authenticate a bootstrap. `--yes`, inline phrases and other unsupported arguments are rejected. `/pair` retains companion/WebUI meaning. Concealed adoption and replacement remain outside this increment; TUI and Agent credentials stay separate.
+Only the direct terminal-input dispatch has the private, one-dispatch owner mark. Generic registry calls, model/harness contexts, copied or forged contexts and nested commands cannot apply, even when a generic confirmation callback returns true. Their no-apply route remains passive local inspection and cannot authenticate a bootstrap. `--yes`, inline phrases and other unsupported arguments are rejected. `/devices pair device` is companion/WebUI pairing. Concealed adoption and replacement remain outside this increment; TUI and Agent credentials stay separate.
 
 The interactive shell owns input from before preview through revalidation, migration, durable save and verification. Escape, Ctrl-C, Ctrl-D, EOF, shutdown and an explicit replacement slash command abort that lifetime. Input queued during preview, including a pasted command plus answer, cannot answer the subsequently displayed fresh phrase. Multiline pasted answers cannot confirm. An opened modal, blocking prompt, concealed input or voice/composer takeover invalidates hidden confirmation immediately. The abandoned line is quarantined through Enter, Escape, Ctrl-C or Ctrl-D before the new prompt can consume input. Late responses cannot restore hidden input ownership or print stale success.
 

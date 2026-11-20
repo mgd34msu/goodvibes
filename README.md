@@ -80,7 +80,7 @@ goodvibes
    chose. If GoodVibes already finds a provider key in your environment, it
    skips this: the welcome menu offers that provider, or, with
    `OPENROUTER_API_KEY` (the default model is OpenRouter's free one), you start
-   at once. `/onboarding` reopens the setup at any time, `/model` switches
+   at once. `/setup` reopens the setup at any time, `/model` switches
    models and `/scan` finds model servers on your machine and network.
 2. **Ask about the project.** Type `What does this project do, and how do I run
    its tests?` and press Enter. It reads the files it needs and answers.

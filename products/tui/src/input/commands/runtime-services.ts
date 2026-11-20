@@ -204,7 +204,7 @@ export async function compactConversation(context: CommandContext): Promise<Comp
   const eventAfter = getLastCompactionEvent(sessionId);
   if (eventAfter !== null && eventAfter !== eventBefore) {
     // The compaction scored itself before it was applied; the receipt carries
-    // that score, kept by this event's timestamp for /compact-history.
+    // that score, kept by this event's timestamp for /session compactions.
     const qualityScore = receipt?.quality ?? null;
     if (qualityScore) recordCompactionQualityScore(eventAfter.timestamp, qualityScore);
     return { kind: 'summarised', event: eventAfter, qualityScore };

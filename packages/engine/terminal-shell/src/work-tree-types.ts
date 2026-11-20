@@ -23,7 +23,7 @@ export type BlockMeta = Omit<PlatformBlockMeta, 'type'> & {
     /**
      * Absolute message indexes of every tool result hanging under an
      * 'assistant_turn' header. A row hidden by a collapsed turn pushes no
-     * BlockMeta of its own, so this list is what lets /expand reopen each
+     * BlockMeta of its own, so this list is what lets /session expand reopen each
      * result's own collapse key in the same pass, and what lets search reach
      * content that is currently hidden.
      */
@@ -45,7 +45,7 @@ export type BlockMeta = Omit<PlatformBlockMeta, 'type'> & {
     /**
      * The collapse key that reveals each entry of groupMemberIndexes (same
      * order): the bead body the result sits behind (work-tree-model.ts
-     * beadKeyOf). /expand opens them in the same pass that unfolds the turn,
+     * beadKeyOf). /session expand opens them in the same pass that unfolds the turn,
      * and search reveals a hit by opening exactly its bead.
      */
     groupMemberKeys?: readonly string[] | undefined;

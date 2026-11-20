@@ -46,7 +46,7 @@ Opening and refreshing are passive reads. The modal does not call readiness eval
 
 Closing, reopening, refreshing or repeatedly pressing former action keys cannot write historical state or dispatch native work.
 
-## `/project-plan`
+## Native work and saved plans (`/work`)
 
 | Command | Does |
 | --- | --- |
@@ -58,7 +58,7 @@ Closing, reopening, refreshing or repeatedly pressing former action keys cannot 
 
 Saved planning records are read only; nothing answers or approves them.
 
-`/project-plan` is unrelated to `/plan`, which toggles the session's existing read-only permission plan mode. `/plan` never touches project-planning state; `Shift+Tab` cycles that same permission mode. These retained compatibility controls do not claim that other legacy permission/runtime consumers have already completed their autonomous migration.
+`/work` is unrelated to `/plan`, which toggles the session's existing read-only permission plan mode. `/plan` never touches project-planning state; `Shift+Tab` cycles that same permission mode. These retained compatibility controls do not claim that other legacy permission/runtime consumers have already completed their autonomous migration.
 
 ## Work Plan
 

@@ -49,6 +49,8 @@ export interface SidebarProps {
   /** True while a new chat draft is open (New chat reads as current). */
   draftChat: boolean;
   recentChats: readonly RecentChat[];
+  /** Older chats are on the daemon: the list ends in a row that reads the next page. */
+  olderChats?: { readonly loading: boolean; readonly failed: boolean; readonly onShow: () => void } | undefined;
   deletingChatId: string | null;
   workAttention: number;
   /** What Work counts as running right now (the account menu's activity line). */
@@ -106,6 +108,7 @@ export function SidebarContent({
   activeChatId,
   draftChat,
   recentChats,
+  olderChats,
   deletingChatId,
   workAttention,
   runningNow,
@@ -242,6 +245,18 @@ export function SidebarContent({
                   </li>
                 );
               })}
+              {olderChats && (
+                <li className="shell-recent__row">
+                  <button
+                    type="button"
+                    className="shell-nav-item shell-recent__open"
+                    disabled={olderChats.loading}
+                    onClick={olderChats.onShow}
+                  >
+                    <span className="shell-nav-item__label">{olderChats.loading ? 'Loading…' : olderChats.failed ? 'Could not load; show older chats' : 'Show older chats'}</span>
+                  </button>
+                </li>
+              )}
             </ul>
           )}
         </section>

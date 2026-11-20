@@ -19,7 +19,7 @@ import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'nod
 import { join } from 'node:path';
 import { sanitizeSessionName } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
-import { MAX_TURN_OUTCOMES, isWorkTreeFoldKey, type TurnOutcomeRecord } from './work-tree-focus.js';
+import { isWorkTreeFoldKey, type TurnOutcomeRecord } from './work-tree-focus.js';
 
 export { isWorkTreeFoldKey };
 
@@ -44,7 +44,7 @@ export function boundFoldState(entries: Iterable<readonly [string, unknown]>): A
   return out.length > MAX_FOLD_KEYS ? out.slice(out.length - MAX_FOLD_KEYS) : out;
 }
 
-/** Keep only well-formed failed/cancelled turn endings, the most recent MAX_TURN_OUTCOMES. */
+/** Keep only well-formed failed/cancelled turn endings: every one, a turn that failed never reads as completed. */
 export function boundTurnOutcomes(records: Iterable<unknown>): TurnOutcomeRecord[] {
   const out: TurnOutcomeRecord[] = [];
   for (const record of records) {
@@ -55,7 +55,7 @@ export function boundTurnOutcomes(records: Iterable<unknown>): TurnOutcomeRecord
     if (r.outcome !== 'failed' && r.outcome !== 'cancelled') continue;
     out.push({ index: r.index, fingerprint: r.fingerprint, outcome: r.outcome });
   }
-  return out.length > MAX_TURN_OUTCOMES ? out.slice(out.length - MAX_TURN_OUTCOMES) : out;
+  return out;
 }
 
 /**

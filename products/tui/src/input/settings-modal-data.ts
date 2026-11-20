@@ -307,7 +307,7 @@ export function buildSettingGroups(
 
   // Synthetic behavior.budgetAlertUsd (TUI-local): no schema surface previously,
   // never in /settings; /settings-sync show rejects any key not
-  // in CONFIG_KEYS. The Usage modal's 'b' key and /cost budget <usd> remain
+  // in CONFIG_KEYS. The Usage modal's 'b' key and /usage alert <dollars> remain
   // the primary way to change it; this entry makes the current effective
   // value (and whether it's still the "no budget configured" default)
   // visible from /settings open behavior too, same rationale as notifyAfterSeconds.
@@ -481,7 +481,7 @@ export const BUDGET_ALERT_USD_SYNTHETIC_SETTING: ConfigSetting = {
   label: 'Session budget for alerts (USD)',
   type: 'number',
   default: BUDGET_ALERT_USD_DEFAULT,
-  description: 'Session cost-budget alert threshold in USD (0 = no budget configured). Set via the Usage modal\'s "b" key or /cost budget <usd>; this entry only displays the current effective value.',
+  description: 'Session cost-budget alert threshold in USD (0 = no budget configured). Set via the Usage modal\'s "b" key or /usage alert <dollars>; this entry only displays the current effective value.',
 };
 
 /**

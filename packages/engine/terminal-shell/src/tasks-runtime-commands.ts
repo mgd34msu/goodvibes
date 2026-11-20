@@ -25,9 +25,6 @@ import { defineList, type ListRow } from './command-actions/lists.js';
 import type { ActionDescription, CommandActionContext, CommandDescription, FixedChoice, InputDescription } from './command-actions/types.js';
 import { choiceInput, doAction, listInput, readAction, textInput } from './described-command-kit.js';
 
-/** Rows the list prints; the header total and a trailing line say how many more exist. */
-const TASK_LIST_ROWS = 20;
-
 /** Where one app reads its tasks and what it may do to them. */
 export interface TasksPolicy<Context> {
   readonly listTitle: string;
@@ -189,12 +186,10 @@ export const TASKS_COMMAND: CommandDescription<CommandActionContext> = {
         // The daemon note rides beside what was found: the local half is real work.
         const daemonNote = daemonUnavailable ? [`  (the daemon's tasks are not included: ${daemonUnavailable})`] : [];
         if (filtered.length === 0) return [values.status || values.kind ? 'No tasks match.' : 'No tasks recorded yet.', ...daemonNote].join('\n');
-        const shown = filtered.slice(0, TASK_LIST_ROWS);
-        const hidden = filtered.length - shown.length;
+        // Every task read is printed: the transcript scrolls back through them all.
         return [
           `${policy.listTitle} (${filtered.length})`,
-          ...shown.map(policy.row),
-          ...(hidden > 0 ? [`  ... and ${hidden} more (narrow it: /tasks list --status running)`] : []),
+          ...filtered.map(policy.row),
           ...daemonNote,
         ].join('\n');
       },

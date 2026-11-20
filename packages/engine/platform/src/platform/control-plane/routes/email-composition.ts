@@ -311,9 +311,9 @@ export function createServiceBackedGateway(service: EmailService): EmailGatewayS
       return guard(async () => service.readAttachment(uid, index));
     },
 
-    async listDrafts(limit: number): Promise<EmailGatewayDraftList> {
+    async listDrafts(limit: number, before?: number): Promise<EmailGatewayDraftList> {
       return guard(async () => {
-        const result = await service.listDrafts(limit);
+        const result = await service.listDrafts(limit, before);
         return {
           drafts: result.drafts.map((draft) => ({ ...draft })),
           total: result.total,
@@ -426,9 +426,9 @@ export function instrumentEmailGateway(
     }),
 
     ...(backend.listDrafts === undefined ? {} : {
-      async listDrafts(limit: number): Promise<EmailGatewayDraftList> {
+      async listDrafts(limit: number, before?: number): Promise<EmailGatewayDraftList> {
         await ready();
-        const result = await backend.listDrafts!(limit);
+        const result = await backend.listDrafts!(limit, before);
         log('email.drafts.list', { count: result.drafts.length, total: result.total });
         return result;
       },

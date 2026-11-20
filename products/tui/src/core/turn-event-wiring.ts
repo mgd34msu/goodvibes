@@ -429,12 +429,12 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
       // Record this turn's rewind anchor: pair the turnId (shared with the
       // workspace checkpoint the turn engine snapshots for this same turn) with
       // the live conversation message count and a key of the turn's last
-      // message, so a later message-anchored /rewind cuts the conversation at
+      // message, so a later message-anchored /checkpoint rewind cuts the conversation at
       // exactly this boundary, or says the turn was compacted away, never at an
       // unrelated message (see platform/rewind/turn-anchors.ts).
       try {
         recordTurnAnchor(runtime.sessionId, captureTurnAnchor(evt.turnId, conversation, _clock()));
-        // Mirror the anchors to the session's sidecar so message-anchored /rewind
+        // Mirror the anchors to the session's sidecar so message-anchored /checkpoint rewind
         // survives a resume (the in-memory registry alone is process-local).
         persistTurnAnchors(runtime.sessionId, surface);
       } catch {

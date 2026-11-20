@@ -1,5 +1,5 @@
 /**
- * changes-modal.ts, the Changes modal (/changes, /diff, /git diff, /review,
+ * changes-modal.ts, the Changes modal (/changes, /git diff, /review,
  * ctrl+p "changes"). Holds the Git, Diff and Review views.
  *
  * Two modes:

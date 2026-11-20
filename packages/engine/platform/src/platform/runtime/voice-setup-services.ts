@@ -37,7 +37,7 @@ export type { VoiceSetupService };
  * The recovery act this surface names when a boot provision degrades.
  *
  * Phrased as something the PLATFORM does. It used to be the literal string
- * `/voice wake setup`, a command handed to the user for work the daemon
+ * `/voice wake-setup`, a command handed to the user for work the daemon
  * already retries on its own at every start. Naming a chore that the product
  * performs unprompted is how a self-healing system reads as a broken one.
  */

@@ -160,11 +160,13 @@ export async function findImapDraftByMessageId(session: ImapSession, mailbox: st
   return uid === undefined ? null : { uid, uidValidity: examined.uidValidity };
 }
 
-export async function listImapDrafts(session: ImapSession, mailbox: string, limit: number): Promise<{ drafts: ImapDraftSummary[]; total: number; uidValidity: number | null }> {
+export async function listImapDrafts(session: ImapSession, mailbox: string, limit: number, before?: number): Promise<{ drafts: ImapDraftSummary[]; total: number; uidValidity: number | null }> {
   const examined = parseMailboxStatus(await session.command(`EXAMINE ${formatMailboxName(mailbox)}`));
   const uidValidity = examined.uidValidity;
   const uids = parseSearchNumbers(await session.command('UID SEARCH ALL'));
-  const page = uids.slice(-Math.max(1, Math.min(limit, 100)));
+  // `before`: the page of drafts older than that UID, so every draft in the folder is reachable a page at a time.
+  const older = before === undefined ? uids : uids.filter((uid) => uid < before);
+  const page = older.slice(-Math.max(1, Math.min(limit, 100)));
   if (page.length === 0) return { drafts: [], total: uids.length, uidValidity };
   const headers = await session.commandFrames(`UID FETCH ${page.join(',')} (UID BODY.PEEK[HEADER.FIELDS (TO SUBJECT DATE IN-REPLY-TO MESSAGE-ID FROM CONTENT-TYPE CONTENT-TRANSFER-ENCODING)])`);
   const batch = readEnvelopeBatch(headers, mailbox, page);

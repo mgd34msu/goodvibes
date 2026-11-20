@@ -28,11 +28,16 @@ const terminal = new Set<LocalDispatch['state']>(['completed', 'failed', 'cancel
 const ATTEMPT_DEADLINE_MS = 30_000;
 const RETRY_DELAYS_MS = [1_000, 3_000] as const;
 
-/** Settled dispatches kept on screen; one not yet answered (sending or unsent) is never cut. */
-const SHOWN_SETTLED = 20;
+/**
+ * Completed dispatches kept on screen. Only a completed one is cut: its text is in
+ * the session's transcript. One still on its way, or one that never reached the
+ * session (failed, rejected, cancelled, unsent), is never cut: this row is the
+ * only place its text and its fate are shown.
+ */
+const SHOWN_COMPLETED = 20;
 function keepShown(list: LocalDispatch[]): LocalDispatch[] {
-  let settled = 0;
-  return list.filter((entry) => entry.state === 'sending' || entry.state === 'unsent' || ++settled <= SHOWN_SETTLED);
+  let completed = 0;
+  return list.filter((entry) => entry.state !== 'completed' || ++completed <= SHOWN_COMPLETED);
 }
 
 const states = new Set<InputReceipt['state']>(['queued', 'delivered', 'spawned', 'completed', 'cancelled', 'failed', 'rejected']);

@@ -72,7 +72,7 @@ export type CreateBootstrapCommandContextOptions = {
   voiceService?: VoiceService;
   voiceSetup?: import('@goodvibes-jev/engine/platform/platform/runtime/voice-setup').VoiceSetupService;
   runtimeStore?: { getState(): object };
-  /** Direct-command consumers (`/search`, `/image`) of already-constructed RuntimeServices. */
+  /** Direct-command consumers (`/web-search`, `/media`) of already-constructed RuntimeServices. */
   webSearchService?: import('@goodvibes-jev/engine/platform/platform/web-search').WebSearchService;
   mediaProviders?: import('@goodvibes-jev/engine/platform/platform/media').MediaProviderRegistry;
   artifactStore?: import('@goodvibes-jev/engine/platform/platform/artifacts').ArtifactStore;

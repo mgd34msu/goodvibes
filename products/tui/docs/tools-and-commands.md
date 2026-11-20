@@ -200,9 +200,9 @@ In-process subagent management. See [Agent system](#agent-system) below for arch
 Session state, persistent memory, telemetry, hooks, and the print level, all in one tool.
 
 - KV state: session-scoped key-value store with atomic persistence
-- Memory by key (`mode: "memory"`): get, set, list and delete project memories; each is one record in the project memory store, the record prompts retrieve, read and written through the daemon while it serves memory (the full durable-memory workflow lives under `/recall` and the knowledge modals)
+- Memory by key (`mode: "memory"`): get, set, list and delete project memories; each is one record in the project memory store, the record prompts retrieve, read and written through the daemon while it serves memory (the full durable-memory workflow lives under `/memory` and the knowledge modals)
 - Hook management: list, enable, disable, add, and remove hooks at runtime
-- Print level: read or set how much the app prints (`quiet`, `balanced`, `operator`), the same setting as `/mode` (`behavior.hitlMode`)
+- Print level: read or set how much the app prints (`quiet`, `balanced`, `operator`), the same setting as `/verbosity set` (`behavior.hitlMode`)
 - Analytics: every tool call this process ran (name, status, duration, result size; never arguments or results), queried by filter, exported as JSON/CSV, or summarized; kept in memory, the newest 10,000
 - Budget and context: the session's measured token usage and turns, and its context window (last request size, window size, compaction), with how many files this product has read or written in the workspace
 
@@ -221,12 +221,12 @@ Workflow state machines, hook actions, and scheduled commands. See [Automation a
 Structured execution and coordination beyond a single conversation turn.
 
 - `task`: create, inspect, block, cancel, depend, and hand off tasks across sessions
-- `work_plan`: the project work plan `/work-plan` shows: add items, set their status, owner and notes, remove them, clear finished ones; spawned agents keep the same plan
+- `work_plan`: the project work plan `/todo` shows: add items, set their status, owner and notes, remove them, clear finished ones; spawned agents keep the same plan
 - Teams are `agent` cohorts: spawn the members with one `cohort` name, each with its template as its role and its `communicationLane`; brief each with `context` and `successCriteria`; `cohort-status` and `cohort-report` read the team back, and the fleet view shows the cohort beside each agent
 
 ### query
 
-- `query`: leave the owner a question and carry on working. `ask` posts it to the owner inbox and returns its id at once; the owner sees it in `/questions` in either terminal app and, when push is on, as a notification on his phone, and answers it there. The question is recorded as asked by the session. When the owner answers, the answer is passed to the asker on its next model request: a spawned agent while it runs, otherwise the conversation that asked or spawned it. If that session is not open when he answers, he is told the answer is saved and will be delivered when the session is next opened, and it is put into the conversation once when the session is resumed (`/session resume`, `/load`, the session picker, `--continue`/`--resume`, headless runs included). Deleting the session withdraws its open questions and marks its waiting answers not deliverable. `/questions all` and `/decisions` show each answer as delivered, waiting for its session to be opened, or not deliverable with the reason (a deleted session, an agent that can never run again); the answer stays on the question in every case. `show` and `list` read it back at any time; `withdraw` takes back a question that no longer matters. A `key` makes a repeated ask return the first open question instead of posting a second one. There is one owner inbox per home (`~/.goodvibes/shared/owner-inbox.sqlite`), shared by the daemon, this app, the Agent and every other terminal at once: a question asked in one shows in `/questions` in all of them, and an answer given in any of them reaches the asking session on its next model request, with no restart. While the daemon is reachable the inbox is read through it (so its permission asks are listed too and the phone is pushed)
+- `query`: leave the owner a question and carry on working. `ask` posts it to the owner inbox and returns its id at once; the owner sees it in `/questions` in either terminal app and, when push is on, as a notification on his phone, and answers it there. The question is recorded as asked by the session. When the owner answers, the answer is passed to the asker on its next model request: a spawned agent while it runs, otherwise the conversation that asked or spawned it. If that session is not open when he answers, he is told the answer is saved and will be delivered when the session is next opened, and it is put into the conversation once when the session is resumed (`/session resume`, `/resume`, the session picker, `--continue`/`--resume`, headless runs included). Deleting the session withdraws its open questions and marks its waiting answers not deliverable. `/questions all` and `/decisions` show each answer as delivered, waiting for its session to be opened, or not deliverable with the reason (a deleted session, an agent that can never run again); the answer stays on the question in every case. `show` and `list` read it back at any time; `withdraw` takes back a question that no longer matters. A `key` makes a repeated ask return the first open question instead of posting a second one. There is one owner inbox per home (`~/.goodvibes/shared/owner-inbox.sqlite`), shared by the daemon, this app, the Agent and every other terminal at once: a question asked in one shows in `/questions` in all of them, and an answer given in any of them reaches the asking session on its next model request, with no restart. While the daemon is reachable the inbox is read through it (so its permission asks are listed too and the phone is pushed)
 
 ### mcp / remote / control
 
@@ -272,20 +272,20 @@ Representative slash-command families, with a one-line summary of each:
 | `/session` | Sessions: resume, save, copy, export as a file or upload for a link, branches and cross-session tasks |
 | `/schedule` | Manage automation jobs and scheduled runs |
 | `/voice` | Toggle always-speak mode and provision the managed local voice runtime and wake-word models |
-| `/tts` | Submit a prompt for live TTS playback, or control always-speak mode |
+| `/voice` | Hear an answer spoken (`speak`), speak every answer (`on`, `off`), stop playback, and set up the local voice runtime and the wake word |
 | `/cloudflare` | Inspect and manage optional Cloudflare batch and control-plane integration |
 | `/mcp` | Manage MCP servers and their tools |
 | `/health` | Is everything working: the short status, one area in detail, a problem described, this session's failure reports (see, save, keep in memory), stopping an agent, the runtime store |
 | `/replay` | Deterministic replay: load, step, seek, diff, and export recorded runs |
 | `/eval` | Evaluate the product on real tasks: run a task suite through goodvibes run, compare baselines, and gate regressions |
 | `/session` | Session lifecycle and orchestration: list, resume, fork, save, export, and cross-session task handoff |
-| `/work-plan` | Track a persistent, workspace-scoped work plan |
-| `/search` | Provider-backed web search with ranked results and source labels |
-| `/imagine` | Generate an image from a prompt through a configured provider that makes images, or collect a job still running |
+| `/todo` | Track a persistent, workspace-scoped work plan |
+| `/web-search` | Provider-backed web search with ranked results and source labels |
+| `/media` | Make an image or a video through a configured provider (`make`), collect a job still running (`collect`), see the providers |
 | `/codebase` | Build, inspect, and search the repo source-tree code index |
 | `/workstream` | Start work, or propose a plan, review and edit it, then approve and launch it; inspect, stop, retry a unit, raise the budget, or answer a running workstream |
 | `/checkpoint` | Create a manual workspace checkpoint for forensic retention |
-| `/checkpoints` | List workspace checkpoints, newest first; `/checkpoints restore <n\|id>` previews and restores the files of one |
+| `/checkpoint` | Workspace checkpoints: list them, make one, put the files back to one (`restore <n\|id>`, previewed), or go back to an earlier turn (`rewind`, previewed) |
 | `/editor` | Edit the current composer draft in your `$EDITOR`, then resume with the result |
 
 `/editor` opens the current composer draft in your `$VISUAL`/`$EDITOR`, suspends the TUI while the editor runs, and loads the edited text back into the composer when you save and quit. Set `$EDITOR` (e.g. `export EDITOR=nvim`) for it to work.
@@ -296,9 +296,9 @@ A typed line that starts with `!` runs the rest as a shell command in the workin
 
 `/schedule add --when "<natural language>" <what it does...>` (or "Describe it" in the guided form) accepts natural-language times, for example `every weekday at 9am`, `daily at 6pm`, `every 30 minutes`, `every monday at 08:00`, or `in 2 hours`. The command always echoes back the concrete interpretation (`Read as: <schedule>`) before the schedule is kept, so you can see exactly what was understood.
 
-`/search <query> [--limit <n>]` runs a provider-backed web search directly (bypassing the agent-tool JSON wrapper) and renders ranked results, an instant answer, and the source label into the transcript; it degrades honestly using the web-search service's own status note.
+`/web-search <words> [--limit <n>]` runs a provider-backed web search directly (bypassing the agent-tool JSON wrapper) and renders ranked results, an instant answer, and the source label into the transcript; it degrades honestly using the web-search service's own status note.
 
-`/imagine <prompt>` generates an image through the first configured provider that makes images; a provider that only makes video is never sent the request. Each image is written to a file, `generated/<prompt words>-<time>.<ext>` under the working directory or the path given with `--out <path>` (a file already there is never replaced), the path is printed, and the system image viewer opens it where there is a desktop. The artifact store keeps a second copy, so the image stays available after the provider's own link expires. When no configured provider makes images, it prints each generation provider's status, what it makes, and the key it needs. A job the provider accepted but had not finished when the wait ended is reported with the command that collects it later: `/imagine --collect <provider> <task-id> [key=value ...]`. (`/image` is a different command; it attaches a local image file to the next message for multimodal analysis.)
+`/media make <prompt>` generates an image through the first configured provider that makes images; a provider that only makes video is never sent the request. Each image is written to a file, `generated/<prompt words>-<time>.<ext>` under the working directory or the path given with `--out <path>` (a file already there is never replaced), the path is printed, and the system image viewer opens it where there is a desktop. The artifact store keeps a second copy, so the image stays available after the provider's own link expires. When no configured provider makes images, it prints each generation provider's status, what it makes, and the key it needs. A job the provider accepted but had not finished when the wait ended is reported with the command that collects it later: `/media collect <provider> <task-id> [key=value ...]`. (`/image` is a different command; it attaches a local image file to the next message for multimodal analysis.)
 
 `/session` is the single front-door for all session work, split across two domains. The lifecycle subcommands operate on sessions themselves:
 
@@ -326,19 +326,19 @@ The orchestration subcommands manage a cross-session task DAG with cycle detecti
 | `graph [--session <sid>] [--format text\|json]` | Render the task graph |
 | `cancel <taskId> [--scope task\|subtree\|session]` | Cancel a task, its subtree, or the session's tasks |
 
-Alias: `/sess`. Run `/session` with no arguments to see current session info.
+Run `/session` with no arguments to open its list of actions; a model or a script gets this session's details.
 
 `/model` opens the fullscreen provider/model workspace. The left rail chooses the target route (`Main Chat`, `Helper Model`, `Tool LLM`, `TTS LLM`, or `Embeddings`), and the main table filters large model catalogs by search, price tier, capability, availability, benchmark sort, and grouping. `/provider` opens the same workspace in provider-first mode so users can choose a provider and then a model for the active target.
 
 `/work open` opens native work and recovery. `/work request <goal>` submits the exact original terminal request through native conversation intake, with no historical planning fallback. `/work history` opens saved historical records without readiness evaluation, suggested answers, approval controls, or a planning interview; they are read only. The active plan is the project work plan (`/todo`). The planner is `/work planner`, `planner-explain`, `planner-mode`, `planner-override` and `planner-reset`.
 
-`/paste` (`/clip`) explicitly reads the system clipboard and inserts supported text or image data into the prompt. Use this when terminal paste does not deliver image clipboard contents to the TUI; the command uses the clipboard helper path instead of relying on the terminal paste stream.
+`/paste clipboard` explicitly reads the system clipboard and inserts supported text or image data into the prompt. Use this when terminal paste does not deliver image clipboard contents to the TUI; the command uses the clipboard helper path instead of relying on the terminal paste stream.
 
 `/mcp` opens its list of actions (See your servers, Add a server, Choose what a server may do…, Check a server that isn't working…); `/mcp open` opens the full-screen MCP screen. `/mcp add <name> -- <command> [args...] [--scope project|global]` writes a project server to `.goodvibes/mcp.json` or a global server to `~/.config/mcp/mcp.json`, then reloads the live MCP runtime without restarting. `/mcp remove <server> [--scope project|global]`, `/mcp reload`, `/mcp files` and `/mcp tools [<server>]` do the same from the command line; a line with a blank missing opens the guided step for it. See [MCP integration](#mcp-integration) below for the config file shape and connection model.
 
 ## Keyboard shortcuts
 
-Most shortcuts are customizable via `~/.goodvibes/tui/keybindings.json`. Use `/keybindings` to view current bindings.
+Most shortcuts are customizable via `~/.goodvibes/tui/keybindings.json`. Use `/help keys` to view current bindings.
 
 Four keys are fixed and are not in the rebindable table: `F2` (open or close Agents), `Esc` (exit the current mode), `?` (help/command picker on an empty prompt), and `@` (file picker). `Shift+Tab` is `cycle-permission-mode` in the table. Everything else below resolves through the keybindings table and can be reassigned.
 
@@ -427,7 +427,7 @@ The recovery offer, session picker, profile picker, and config rows are all pick
 
 In a searchable modal, `/` focuses the filter, and any keystroke that no row hotkey claims also arms the filter and starts the query with that character.
 
-The config modals (`/memory`, `/work-plan`, `/marketplace`, `/plugin`, `/services open`, `/provider open` and the others built on the config-modal host) have an always-live search row: every typed character goes into the search and never fires an action. An action fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from `Ctrl+G` followed by its key (the hint bar shows `^G c` for the keys a terminal cannot send as a Ctrl chord: `c`, `h`, `i`, `j`, `m`, digits and capitals). An action that deletes, uninstalls or clears asks for the same keys a second time; `Esc` cancels it.
+The config modals (`/memory`, `/todo`, `/marketplace`, `/plugin`, `/services open`, `/provider open` and the others built on the config-modal host) have an always-live search row: every typed character goes into the search and never fires an action. An action fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from `Ctrl+G` followed by its key (the hint bar shows `^G c` for the keys a terminal cannot send as a Ctrl chord: `c`, `h`, `i`, `j`, `m`, digits and capitals). An action that deletes, uninstalls or clears asks for the same keys a second time; `Esc` cancels it.
 
 ### System
 
@@ -625,7 +625,7 @@ Beyond individual hook definitions, GoodVibes treats hook points, workflow runs,
 - Workflow state machines (`fix_loop`, `test_then_fix`, `review_only`) drive validated transitions for multi-step review/fix cycles. See [Tool reference: workflow](#workflow) above
 - Cron-like scheduled agent tasks support timezone-aware schedules, missed-run tracking, run history, and manual trigger support, managed via `/schedule`
 
-Project planning and the persistent `/work-plan` checklist are a related but separate surface. See [Project planning](#project-planning) below and [Project planning](project-planning.md).
+Project planning and the persistent `/todo` checklist are a related but separate surface. See [Project planning](#project-planning) below and [Project planning](project-planning.md).
 
 ## MCP integration
 
@@ -776,9 +776,9 @@ Project planning is TUI-owned. When a normal chat turn clearly asks for an imple
 
 Planning artifacts are stored in a project knowledge space named `project:<projectId>`, where the project id is derived from the workspace path. The platform supplies passive daemon routes and operator methods, but daemon/non-TUI surfaces do not enter planning loops.
 
-See [Project planning](project-planning.md) for the modal layout, `/project-plan` behavior, and route/method list.
+See [Project planning](project-planning.md) for the modal layout, `/work` behavior, and route/method list.
 
-`/work-plan` is the separate persistent checklist surface. Use it when the work already has concrete tasks and you want durable status tracking rather than another planning interview.
+`/todo` is the separate persistent checklist surface. Use it when the work already has concrete tasks and you want durable status tracking rather than another planning interview.
 
 ## Context maintenance
 
@@ -796,9 +796,9 @@ The TUI displays the platform-returned answer text, sources, facts, linked objec
 
 ## Live TTS commands
 
-`/tts <prompt>` submits a normal chat turn and adds live spoken output for that one turn. Text still renders normally in the transcript. Assistant deltas are chunked at sentence or phrase boundaries and streamed through the configured TTS provider.
+`/voice speak <message>` submits a normal chat turn and adds live spoken output for that one turn. Text still renders normally in the transcript. Assistant deltas are chunked at sentence or phrase boundaries and streamed through the configured TTS provider.
 
-`/tts stop` cancels active playback and pending TTS requests without deleting the text response.
+`/voice stop` cancels active playback and pending TTS requests without deleting the text response.
 
 `/settings open tts` opens the TTS category in the fullscreen configuration workspace. It manages the defaults used by spoken-output clients:
 
@@ -806,9 +806,9 @@ The TUI displays the platform-returned answer text, sources, facts, linked objec
 | --- | --- |
 | `tts.provider` | Choose a provider with streaming TTS support |
 | `tts.voice` | Choose a voice from that provider |
-| `tts.llmProvider` / `tts.llmModel` | Choose an optional `/tts` response model override through the fullscreen provider/model workspace |
+| `tts.llmProvider` / `tts.llmModel` | Choose an optional `/voice speak` response model override through the fullscreen provider/model workspace |
 
-Without that override, `/tts` uses the current chat provider/model. Live local playback requires `mpv` or `ffplay` on `PATH`.
+Without that override, `/voice speak` uses the current chat provider/model. Live local playback requires `mpv` or `ffplay` on `PATH`.
 
 ## Cloudflare batch commands
 
@@ -863,7 +863,7 @@ See [CLI flags reference](cli-flags.md) for full syntax, inline-value forms, and
 
 - [Getting started](getting-started.md)
 - [CLI flags reference](cli-flags.md)
-- [/share: session export](share-command.md)
+- [/session upload: share a session](share-command.md)
 - [Deployment and services](deployment-and-services.md)
 - [Channels, remote runtime, and API](channels-remote-and-api.md)
 - [Providers and routing](providers-and-routing.md)

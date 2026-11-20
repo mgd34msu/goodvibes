@@ -307,8 +307,12 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
             recordActivity(event.agentId, { state: 'queued' });
             break;
           case 'AGENT_RUNNING':
-          case 'AGENT_AWAITING_MESSAGE':
             recordActivity(event.agentId, { state: 'thinking', activity: prior?.activity });
+            break;
+          // Emitted by a terminal while a background agent's ask card waits for
+          // the person: the agent waits for you until the answer (then AWAITING_TOOL).
+          case 'AGENT_AWAITING_MESSAGE':
+            recordActivity(event.agentId, { state: 'awaiting-approval', activity: prior?.activity });
             break;
           case 'AGENT_AWAITING_TOOL':
             recordActivity(event.agentId, {

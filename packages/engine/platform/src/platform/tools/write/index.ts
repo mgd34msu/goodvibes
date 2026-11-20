@@ -980,7 +980,7 @@ export function createWriteTool(options?: {
               bytes: byteSize,
               mode: outcome.result.mode_applied,
             });
-            // Track for /diff session change view
+            // Track for /changes session change view
             if (options?.changeTracker) {
               try {
                 options.changeTracker.recordChange(outcome.result.resolved_path);

@@ -82,8 +82,8 @@ const SUPPORT_BUNDLE_ROUTES: readonly SupportBundleRoute[] = [
   {
     bundleType: 'voice',
     defaultPath: 'voice-bundle.json',
-    inspectCommand: '/voice bundle inspect <path>',
-    exportCommand: '/voice bundle export <path> --yes',
+    inspectCommand: '/voice inspect <file>',
+    exportCommand: '/voice export <file>',
     workspaceActionIds: ['voice-bundle-export', 'voice-bundle-inspect'],
   },
 ];

@@ -129,7 +129,7 @@ export interface TurnModel {
     readonly live: boolean;
     readonly toolCount: number;
     readonly agentCount: number;
-    /** Collapse keys of every bead in the turn (search and /expand reach them). */
+    /** Collapse keys of every bead in the turn (search and /session expand reach them). */
     readonly beadKeys: readonly string[];
     /**
      * System notices that arrived while the turn ran ([Contracts] …, [Agents] …,

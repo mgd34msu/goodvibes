@@ -29,7 +29,7 @@ import type { VoiceAudioChunk } from '../types.js';
  *    bug this contract exists to prevent.
  *
  * 3. **Abort cuts immediately.** When `options.signal` aborts (a deliberate
- *    interrupt, new turn, Ctrl+C, /tts stop, turn cancel), `play()` stops
+ *    interrupt, new turn, Ctrl+C, /voice stop, turn cancel), `play()` stops
  *    emitting sound and resolves promptly; it must NOT wait on a graceful
  *    drain. `stop()` is the same instant cut driven imperatively rather than by
  *    a signal.

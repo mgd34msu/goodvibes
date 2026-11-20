@@ -4,7 +4,7 @@ import { isDaemonOwnedConfigKey, isProtectedConfigValue } from '@goodvibes-jev/e
  * A portable copy of this machine's voice settings: always-speak
  * (`ui.voiceEnabled`), speech output (`tts.*`) and wake-word listening
  * (`voice.wake.*`). Credentials and daemon-owned keys (`voice.local.*`) are
- * never carried; `/voice bundle import` applies the rest as one update.
+ * never carried; `/voice import` applies the rest as one update.
  */
 export interface VoiceBundle {
   readonly version: 2;

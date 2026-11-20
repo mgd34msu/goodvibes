@@ -449,12 +449,12 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     id: 'email.drafts.list',
     title: 'List Email Drafts',
     description:
-      'Return the newest drafts (default 25, at most 100) in the account\'s Drafts folder, newest first, each with its recipient, subject, date, the Message-ID it replies to and up to 64 KB of body text, so a draft can be reopened in a composer; `uidValidity` is the Drafts folder generation the UIDs belong to, which email.draft.update needs to replace one. Read-only.',
+      'Return the newest drafts (default 25, at most 100) in the account\'s Drafts folder, newest first, each with its recipient, subject, date, the Message-ID it replies to and up to 64 KB of body text, so a draft can be reopened in a composer; `uidValidity` is the Drafts folder generation the UIDs belong to, which email.draft.update needs to replace one. `before` (a UID) reads the page of drafts older than it: pass the smallest UID of a page to read the one before, until `total` drafts are read. Read-only.',
     category: 'email',
     effects: ['email.inspect'],
     // Served through the control-plane invoke endpoint, like checkpoints.* and rewind.*.
     transport: ['ws'],
-    inputSchema: objectSchema({ limit: NUMBER_SCHEMA }),
+    inputSchema: objectSchema({ limit: NUMBER_SCHEMA, before: NUMBER_SCHEMA }),
     outputSchema: objectSchema({
       drafts: arraySchema(EMAIL_DRAFT_SUMMARY_SCHEMA),
       total: NUMBER_SCHEMA,

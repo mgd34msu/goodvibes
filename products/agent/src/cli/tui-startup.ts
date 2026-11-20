@@ -162,8 +162,7 @@ export function applyInitialTuiCliState(options: {
   installSplashAdditions({
     workingDirectory: shellPaths.workingDirectory,
     configManager: commandContext.platform.configManager,
-    // /setup once it is registered; until then the setup screens open with /onboarding.
-    setupCommand: commandRegistry.get('setup') ? '/setup' : '/onboarding',
+    setupCommand: '/setup',
     fillComposer: (text) => {
       if (input.prompt !== '') return;
       input.prompt = text;
@@ -175,7 +174,7 @@ export function applyInitialTuiCliState(options: {
   });
   // First run: when the model this session will use is not ready, choose a
   // provider, sign in, and land in the conversation (first-run-flow.ts). The
-  // workspace's setup screens stay one key away (and /onboarding).
+  // workspace's setup screens stay one key away (and /setup).
   const runFirstRun = (): void => {
     void startFirstRun(firstRunDeps(commandContext, shellPaths, render, onboardingDone, () => { input.conversationManager?.invalidateRenderedLines(); })).catch((error: unknown) => {
       logger.warn('First run could not start', { error: summarizeError(error) });

@@ -326,7 +326,7 @@ function drawEntry(f: ModalFrame, view: UsageModalView, y: number): void {
   if (entry.kind === 'budget') {
     yy = drawTextBlock(f.canvas, f.l, yy, width, [
       { text: 'Budget alert', style: { fg: t.accent, bold: true } },
-      { text: 'Type a USD amount. You are alerted when this session costs more; 0 turns the alert off. The same setting as /cost budget <usd>.', style: { fg: t.textMuted } },
+      { text: 'Type a USD amount. You are alerted when this session costs more; 0 turns the alert off. The same setting as /usage alert <dollars>.', style: { fg: t.textMuted } },
     ], f.bottom);
     yy++;
     const end = f.canvas.put(f.l, yy, `$${entry.draft}`, { fg: t.text });

@@ -132,7 +132,7 @@ function routeCandidates(context: CommandContext): readonly RouteCandidate[] {
       detail: 'Local model favorites used by the model picker.',
       currentValue: 'see model entries where pinned is true',
       settingKeys: [],
-      commands: ['/pin', '/unpin'],
+      commands: ['/pin', '/pin remove'],
       uiSurfaces: ['model-picker'],
     },
     {
@@ -276,7 +276,7 @@ async function describeModel(model: ModelCandidate, options: { readonly context:
         selectModelCommand: `/model use ${model.registryKey}`,
         selectProviderCommand: `/provider use ${model.providerId}`,
         pinCommand: `/pin ${model.registryKey}`,
-        unpinCommand: `/unpin ${model.registryKey}`,
+        unpinCommand: `/pin remove ${model.registryKey}`,
         setMainModel: `settings action:"set" key:"provider.model" value:"${model.registryKey}" explicitUserRequest:"..."`,
       },
     } : {}),

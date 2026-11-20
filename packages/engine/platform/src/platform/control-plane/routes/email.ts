@@ -234,8 +234,8 @@ export interface EmailGatewayService {
   updateMessage?(input: EmailGatewayMessageUpdate): Promise<EmailGatewayMessageUpdateResult>;
   /** One attachment's bytes by its position in the read's attachment list; null when the message is gone. */
   readAttachment?(uid: number, index: number): Promise<EmailGatewayAttachmentContent | null>;
-  /** The newest drafts in the Drafts folder, each with its body. */
-  listDrafts?(limit: number): Promise<EmailGatewayDraftList>;
+  /** The newest drafts in the Drafts folder (older than UID `before` when given), each with its body. */
+  listDrafts?(limit: number, before?: number): Promise<EmailGatewayDraftList>;
   /** Replace one saved draft with an edited one; absent on a backend that cannot. */
   updateDraft?(input: EmailGatewayDraftUpdateInput): Promise<EmailGatewayDraftUpdateResult>;
 }
@@ -409,7 +409,7 @@ export function createEmailDraftsListHandler(service: EmailGatewayService): Gate
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     if (!service.listDrafts) return unsupported('listing drafts');
-    return service.listDrafts(Math.min(100, readOptionalCount(params.limit) ?? 25));
+    return service.listDrafts(Math.min(100, readOptionalCount(params.limit) ?? 25), params.before === undefined ? undefined : readUid(params.before));
   };
 }
 

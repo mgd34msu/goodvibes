@@ -286,7 +286,7 @@ The health read model (`createObservabilityReadModels(runtimeServices).health`, 
 
 Metrics are computed as p95 over a rolling 200-sample window.
 
-Every process that answers `/doctor <symptom>` (both terminal apps) or `ops.doctor` (the daemon) builds one collector with its check context. The stuck-turn runbook reports time to first output and time to stop after cancel; the permission-deadlock runbook reports time to a permission decision. Each reads `ok` within the budget in `DEFAULT_BUDGETS`, a warning above it, and "no measurement yet" before the first sample.
+Every process that answers `/health diagnose <symptom>` (both terminal apps) or `ops.doctor` (the daemon) builds one collector with its check context. The stuck-turn runbook reports time to first output and time to stop after cancel; the permission-deadlock runbook reports time to a permission decision. Each reads `ok` within the budget in `DEFAULT_BUDGETS`, a warning above it, and "no measurement yet" before the first sample.
 
 ```ts
 const collector = new SloCollector(eventBus);
@@ -444,7 +444,7 @@ What failed and what can be done about it are served by the live owners, through
 | Retry or cancel a task | `tasks.retry`, `tasks.cancel` (the ops control plane) |
 | Agents and their work | `fleet.snapshot`, `fleet.list` |
 
-Each health domain's status comes from its own entities, as their owners announce them: each MCP server, each transport (degraded while it reconnects), each session's last turn, last compaction and recovery, each agent, and each tool's last call. A domain is `failed` when every entity it tracks is failing, `degraded` when some are, and its failure reason names them; one entity failing does not make unrelated work look failed. A cascade rule (`runtime/health/cascade-rules.ts`) reports what a failing domain affects as a `CASCADE_APPLIED` event with `enforced: false` and the remediation playbooks for that failure mode; it does not cancel, block or change another domain's status. Two rules also publish a typed event: `SESSION_UNRECOVERABLE` (session domain) when every tracked session failed to recover, and `TOOL_DISPATCH_ERROR` (tools domain) when every tracked tool is failing; each carries the failure reason and its playbooks, and the terminal app shows it as a notification with the `/doctor <playbook>` to run.
+Each health domain's status comes from its own entities, as their owners announce them: each MCP server, each transport (degraded while it reconnects), each session's last turn, last compaction and recovery, each agent, and each tool's last call. A domain is `failed` when every entity it tracks is failing, `degraded` when some are, and its failure reason names them; one entity failing does not make unrelated work look failed. A cascade rule (`runtime/health/cascade-rules.ts`) reports what a failing domain affects as a `CASCADE_APPLIED` event with `enforced: false` and the remediation playbooks for that failure mode; it does not cancel, block or change another domain's status. Two rules also publish a typed event: `SESSION_UNRECOVERABLE` (session domain) when every tracked session failed to recover, and `TOOL_DISPATCH_ERROR` (tools domain) when every tracked tool is failing; each carries the failure reason and its playbooks, and the terminal app shows it as a notification with the `/health diagnose <playbook>` to run.
 
 ### Panels built by live owners
 
@@ -458,7 +458,7 @@ A panel follows one pattern: construct it with its data sources, read `getSnapsh
 
 Runtime state is read from the runtime store itself: `getState()` returns every domain with its `revision` and `lastUpdatedAt`, the UI read models (`createUiReadModels`) present it to the terminal apps and the web UI, and the runtime event stream carries each transition as it happens.
 
-To debug it, `runtime.state.get` (operator method, admin, `read:health`; `GET /api/runtime/state?domains=session,agents`) returns the daemon's store by domain, and `/state [domain...]` prints the terminal app's or the Agent's own store. Both go through `snapshotRuntimeState` (`runtime/state-snapshot.ts`): dates are ISO text, errors `{ name, message }`, bigints decimal text, binary data `"<N bytes>"`; credential fields read `[REDACTED]`, owner-profile fields `[REDACTED_PROFILE]` and credential-shaped text is masked; nesting stops at 8 levels and a snapshot at 20,000 values, each cut reading `"[Truncated]"` with `truncated: true`. Nothing is computed until a snapshot is asked for.
+To debug it, `runtime.state.get` (operator method, admin, `read:health`; `GET /api/runtime/state?domains=session,agents`) returns the daemon's store by domain, and `/health state [domain...]` prints the terminal app's or the Agent's own store. Both go through `snapshotRuntimeState` (`runtime/state-snapshot.ts`): dates are ISO text, errors `{ name, message }`, bigints decimal text, binary data `"<N bytes>"`; credential fields read `[REDACTED]`, owner-profile fields `[REDACTED_PROFILE]` and credential-shaped text is masked; nesting stops at 8 levels and a snapshot at 20,000 values, each cut reading `"[Truncated]"` with `truncated: true`. Nothing is computed until a snapshot is asked for.
 
 ### Provider health
 

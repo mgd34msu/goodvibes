@@ -423,8 +423,8 @@ What you can see, and for which period:
 
 | What | Where | Period |
 | --- | --- | --- |
-| Gate calls Jev decided in `jev-decides` and `just-vibes` (allowed or refused, with Jev's reason) | `/decisions` in either app, the web UI | Each item is open for 24 hours; the newest 200 per running app are kept; items of an app that exits are withdrawn. `/decisions list --when today`, `yesterday`, `<YYYY-MM-DD>` and `"since <day or 30m/2h/3d/1w>"` show only that period (an open item by when it was decided, an answered one by when it was answered), looking through the newest 500 of each list. |
-| Answered owner-inbox items (permission asks, questions, claims, purchase windows), by whom and from where | `/decisions` (the "Decided" list), `/questions all` | As long as the inbox keeps them. |
+| Gate calls Jev decided in `jev-decides` and `just-vibes` (allowed or refused, with Jev's reason) | `/decisions` in either app, the web UI | Each item is open for 24 hours; the newest 200 per running app are kept; items of an app that exits are withdrawn. `/decisions list --when today`, `yesterday`, `<YYYY-MM-DD>` and `"since <day or 30m/2h/3d/1w>"` show only that period (an open item by when it was decided, an answered one by when it was answered), looking through the whole inbox; `--count <n>` shows the latest n, however many. |
+| Answered owner-inbox items (permission asks, questions, claims, purchase windows), by whom and from where | `/decisions` (the "Decided" list), `/questions all`, the web UI's Work page ("Show older") | For good: an answered item is never dropped. |
 | Calls `just-vibes` held | `/held` | Until answered; at most 64. |
 
 What cannot be seen from any product command:

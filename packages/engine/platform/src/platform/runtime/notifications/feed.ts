@@ -98,12 +98,7 @@ export function groupTitle(domain: string): string {
     const words = domain.replace(/[_-]+/g, ' ').trim();
     return words ? `${words[0]!.toUpperCase()}${words.slice(1)} updates` : 'Updates';
 }
-/**
- * Entries kept before the oldest leave. System notices share this bound, so a
- * long session's full notice history stays reachable in the modal.
- */
-const MAX_ENTRIES = 2000;
-/** Rotate collapsed groups so retained occurrence identities are bounded by 2000 × 100. */
+/** Rotate collapsed groups so one entry folds at most this many occurrences. */
 const MAX_GROUP_OCCURRENCES = 100;
 /** The toast field a routed notification's entry takes from its decision. */
 function toastOf(notification: Notification, decision: RoutingDecision): NotificationFeedEntry['toast'] {
@@ -297,17 +292,12 @@ export class NotificationFeed {
         return next;
     }
     private store(key: string, entry: NotificationFeedEntry): void {
-        if (!this.entries.has(key)) {
+        // Every entry stays for the life of the terminal, so a long session's whole
+        // notice history is reachable in the modal: a burst folds into one group entry
+        // (at most MAX_GROUP_OCCURRENCES per entry), so entries grow with distinct
+        // notices, not with events.
+        if (!this.entries.has(key))
             this.order.push(key);
-            if (this.order.length > MAX_ENTRIES) {
-                const evicted = this.order.shift();
-                if (evicted !== undefined) {
-                    this.entries.delete(evicted);
-                    this.groupTitles.delete(evicted);
-                    this.forgetEvents(evicted);
-                }
-            }
-        }
         this.entries.set(key, entry);
         this.emitChange();
     }

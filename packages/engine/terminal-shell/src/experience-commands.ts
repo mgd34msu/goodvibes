@@ -10,10 +10,6 @@ import { readRefusal } from '@goodvibes-jev/engine/errors';
 import { commandRefusal } from './command-confirmation.js';
 import { switchAlwaysSpeak } from './tts-runtime-commands.js';
 import { inspectVoiceBundle, isVoiceBundleKey, readVoiceBundle, type VoiceBundle } from './voice-settings-review.js';
-interface ExperienceContext {
-  print(message: string): void;
-  readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic' | 'setMany' | 'getSchema'>; readonly voiceService?: unknown };
-}
 /** What each kind of approval asks about, the same words in both terminal apps. */
 const APPROVAL_KINDS: readonly FixedChoice[] = [
   { value: 'shell', label: 'Running a command', help: 'What the command changes, and whether it reads a credential.' },
@@ -67,7 +63,7 @@ export function createApprovalCommand<Context extends CommandActionContext>(host
     ],
   });
 }
-interface VoiceContext extends ExperienceContext, CommandActionContext {
+interface VoiceContext extends CommandActionContext {
   readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic' | 'setMany' | 'getSchema'>; readonly voiceService?: unknown };
   /** Returns whether anything was playing; a port that returns nothing is treated as having stopped playback. */
   readonly stopSpokenOutput?: (() => boolean | void) | undefined;

@@ -3,17 +3,17 @@
 GoodVibes has two separate voice paths:
 
 - daemon/API voice routes for provider discovery, TTS, STT, realtime sessions, and streamed TTS
-- TUI live spoken output through `/tts`, which runs a normal chat turn and plays the assistant response locally as it streams
+- TUI live spoken output through `/voice speak`, which runs a normal chat turn and plays the assistant response locally as it streams
 
-The `/tts` command does not replace text output. The normal assistant response still appears in the TUI. `/tts` only marks that turn for additional live audio playback.
+The `/voice speak` command does not replace text output. The normal assistant response still appears in the TUI. `/voice speak` only marks that turn for additional live audio playback.
 
 ## TUI commands
 
 ```text
-/tts <prompt>
-/tts stop
-/tts on
-/tts off
+/voice speak <message>
+/voice stop
+/voice on
+/voice off
 /settings open tts
 /settings open tts.provider
 /settings open tts.voice
@@ -22,7 +22,7 @@ The `/tts` command does not replace text output. The normal assistant response s
 /settings open tts.speed
 ```
 
-`/tts <prompt>` submits the prompt through the normal conversation path. It uses the active chat provider/model by default, unless a separate TTS response model override is configured. Assistant deltas are chunked at sentence or phrase boundaries (a minimum of roughly 24 characters before a boundary is accepted, a hard cap around 320 characters, and a fallback flush after about a second of buffering) and sent to streaming TTS in order. Audio failures are reported as non-blocking TUI status messages and do not cancel the text turn.
+`/voice speak <message>` submits the prompt through the normal conversation path. It uses the active chat provider/model by default, unless a separate TTS response model override is configured. Assistant deltas are chunked at sentence or phrase boundaries (a minimum of roughly 24 characters before a boundary is accepted, a hard cap around 320 characters, and a fallback flush after about a second of buffering) and sent to streaming TTS in order. Audio failures are reported as non-blocking TUI status messages and do not cancel the text turn.
 
 Before a chunk reaches the synthesizer, markdown formatting is stripped so the voice does not read punctuation aloud. Each construct has its own spoken form:
 
@@ -40,11 +40,11 @@ Before a chunk reaches the synthesizer, markdown formatting is stripped so the v
 
 The text response shown in the TUI is unaffected; only the audio synthesis input is cleaned up this way.
 
-`/tts stop` cancels pending TTS requests, kills active playback, and clears the queued audio chunks.
+`/voice stop` cancels pending TTS requests, kills active playback, and clears the queued audio chunks.
 
-`/tts on` enables always-speak mode. Every turn submitted to the conversation, including turns not prefixed with `/tts`, is automatically marked for live spoken output. The setting is persisted via `ui.voiceEnabled` in the TUI config. The player availability check still gates gracefully: if no player is found the turn text continues normally with a status message.
+`/voice on` enables always-speak mode. Every turn submitted to the conversation, including turns not prefixed with `/voice speak`, is automatically marked for live spoken output. The setting is persisted via `ui.voiceEnabled` in the TUI config. The player availability check still gates gracefully: if no player is found the turn text continues normally with a status message.
 
-`/tts off` disables always-speak mode. After running `/tts off`, only prompts submitted with `/tts <prompt>` are spoken.
+`/voice off` disables always-speak mode. After running `/voice off`, only prompts submitted with `/voice speak <message>` are spoken.
 
 ### Always-speak mode
 
@@ -54,7 +54,7 @@ Always-speak mode is controlled by the `ui.voiceEnabled` config key (boolean, de
 /settings open tts
 ```
 
-The **Always Speak** row appears at the top of the TTS settings tab. Toggle it there or use `/tts on` / `/tts off` or `/voice enable` / `/voice disable`. All four are the same switch writing the same `ui.voiceEnabled` key.
+The **Always Speak** row appears at the top of the TTS settings tab. Toggle it there or use `/voice on` / `/voice off`. Both are the same switch writing the same `ui.voiceEnabled` key.
 
 `/settings open tts` opens the fullscreen configuration workspace at the TTS category. From there users can toggle always-speak mode, choose the streaming TTS provider, choose a voice from that provider, open the fullscreen provider/model workspace for the TTS response model override, clear text fields, or reset selected settings.
 
@@ -69,9 +69,9 @@ The modal and direct commands write the platform TTS config keys:
 | `tts.llmModel` | Model override for the spoken-turn response model; empty uses the active chat model |
 | `tts.speed` | The playback speed multiplier (see the Speed section below) |
 
-By default, `/tts` uses the active chat provider/model for text generation. If `tts.llmProvider` and `tts.llmModel` are set through `/settings`, `/tts` uses that configured spoken-turn model for `/tts` turns without changing the main chat model. Selecting either TTS LLM row opens the same fullscreen provider/model workspace used by the main model/provider commands, with the target route set to `TTS LLM`.
+By default, `/voice speak` uses the active chat provider/model for text generation. If `tts.llmProvider` and `tts.llmModel` are set through `/settings`, `/voice speak` uses that configured spoken-turn model for `/voice speak` turns without changing the main chat model. Selecting either TTS LLM row opens the same fullscreen provider/model workspace used by the main model/provider commands, with the target route set to `TTS LLM`.
 
-Spoken turns stay active until the logical turn reaches `TURN_COMPLETED`, `TURN_ERROR`, `TURN_CANCEL`, or `PREFLIGHT_FAIL`. platform `STREAM_END` is provider-stream scoped and non-terminal, so tool-using or multi-step `/tts` turns must not stop audio collection just because one provider stream iteration ended.
+Spoken turns stay active until the logical turn reaches `TURN_COMPLETED`, `TURN_ERROR`, `TURN_CANCEL`, or `PREFLIGHT_FAIL`. platform `STREAM_END` is provider-stream scoped and non-terminal, so tool-using or multi-step `/voice speak` turns must not stop audio collection just because one provider stream iteration ended.
 
 ## Speed
 
@@ -87,7 +87,7 @@ The platform defines `tts.speed` in the config schema (default `1`, supported ra
 
 ## Playback requirements
 
-Live TTS playback streams audio bytes to a local player over stdin. Install `mpv`, which is checked first and preferred for its read-ahead pipe buffering, or `ffplay`, which is used as the fallback when `mpv` is not found. If neither player is on `PATH`, `/tts` still submits and renders the normal text response, but live audio is skipped with a non-blocking status message.
+Live TTS playback streams audio bytes to a local player over stdin. Install `mpv`, which is checked first and preferred for its read-ahead pipe buffering, or `ffplay`, which is used as the fallback when `mpv` is not found. If neither player is on `PATH`, `/voice speak` still submits and renders the normal text response, but live audio is skipped with a non-blocking status message.
 
 ## Providers and voices
 

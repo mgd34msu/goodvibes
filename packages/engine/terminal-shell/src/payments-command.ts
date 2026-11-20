@@ -85,7 +85,7 @@ async function onDaemon<T>(
   try {
     const auth = await connection.run((operator, signal) => operator.control.auth.current({}, { signal }));
     if (!isPairedOperatorPrincipal(auth, ['read:payments', scope], connection.expectedPrincipalId)) {
-      throw commandRefusal(`${attempt} was not done: the selected daemon does not give this terminal the owner's paired payments credential.`, 'Check the selected host and its pairing (/host).');
+      throw commandRefusal(`${attempt} was not done: the selected daemon does not give this terminal the owner's paired payments credential.`, 'Check the selected host and its pairing (/devices host-status).');
     }
     return await connection.run(work);
   } catch (error) {

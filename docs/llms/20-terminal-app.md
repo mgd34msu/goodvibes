@@ -890,7 +890,7 @@ The app also compacts on its own when context use reaches `behavior.autoCompactT
 
 `/paste clipboard` puts the clipboard's text or image into the composer. Use it when the terminal's own paste does not carry images. With nothing usable: `The clipboard holds no text or image this app can paste.`
 `/paste list [pN]` (what `/paste` alone gives a model or script) shows what each `[TEXT: pN, M lines]` fold holds. With no folds: `No paste is folded in the prompt (a paste over 8 lines folds to [TEXT: pN, M lines]).`
-`/image <file> [message]` sends an image file (PNG, JPEG, WebP, GIF, up to 20 MB, inside the project) to the model with the message at once (`Attached image: <name>` when no message is given). Bare `/image` opens a form for the file and the message.
+`/image <file> [message]` sends an image file (PNG, JPEG, WebP, GIF, up to 20 MB, inside the project) to the model with the message at once (`Attached image: <name>` when no message is given). Bare `/image` opens a form for the file and the message, showing the line it will run.
 `/editor` opens the composer draft in `$VISUAL` or `$EDITOR`, suspends the interface while the editor runs, and puts the saved text back in the composer. Set `export EDITOR=nvim` first.
 
 `/template` manages prompt templates: `list` (the report; picking one sends it, Del deletes, Ctrl+E edits), `use <template> [name=value ...]`, `save <name>` (your last message), `show <template>`, `edit <template>` and `delete <template> [--everywhere]` (asks first; `--everywhere` deletes the one every project shares).
@@ -997,7 +997,7 @@ Refusals: `No checkpoint #9. Run /checkpoint list to list checkpoints (1–N).`,
 
 ### Undoing file changes and turns
 
-`/undo [turn|file|set-aside|rewind]` and `/redo [turn|file|set-aside|rewind]` take back, or bring back, one step of the kind chosen; bare, they open the choice, and the last turn is the default:
+`/undo [turn|file|set-aside|rewind]` and `/redo [turn|file|set-aside|rewind]` take back, or bring back, one step of the kind named; bare, they act on the last turn:
 
 | Form | Effect | Output |
 | --- | --- | --- |

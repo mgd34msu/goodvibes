@@ -19,7 +19,7 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 
-export type OwnerInboxGatewayService = Pick<OwnerInbox, 'listNow' | 'get' | 'answer' | 'postNow' | 'withdraw' | 'reportDelivery' | 'postedBy' | 'revision' | 'subscribe' | 'viewerOf'>;
+export type OwnerInboxGatewayService = Pick<OwnerInbox, 'listNow' | 'listPageNow' | 'get' | 'answer' | 'postNow' | 'withdraw' | 'reportDelivery' | 'postedBy' | 'revision' | 'subscribe' | 'viewerOf'>;
 
 const LIST_STATUSES = new Set(['open', 'closed', 'all']);
 /** Every kind the list can filter by, decision included (the schema's enum). */
@@ -82,15 +82,26 @@ export function createOwnerInboxListHandler(inbox: OwnerInboxGatewayService): Ga
       throw new GatewayVerbError('Invalid limit: expected a positive number', 'INVALID_ARGUMENT', 400, 'limit');
     }
     const sessionId = optionalString(params['sessionId'], 'sessionId');
-    return {
-      items: inbox.listNow({
+    const cursor = optionalString(params['cursor'], 'cursor');
+    let page: ReturnType<OwnerInboxGatewayService['listPageNow']>;
+    try {
+      page = inbox.listPageNow({
         ...(status !== undefined ? { status: status as 'open' | 'closed' | 'all' } : {}),
         ...(rawKinds !== undefined ? { kinds: rawKinds as OwnerItemKind[] } : {}),
         ...(sessionId !== undefined ? { sessionId } : {}),
         ...(typeof limit === 'number' ? { limit } : {}),
+        ...(cursor !== undefined ? { cursor } : {}),
         viewer,
-      }),
+      });
+    } catch (error) {
+      if (error instanceof OwnerInboxInputError) throw new GatewayVerbError(error.message, 'INVALID_CURSOR', 400, error.field);
+      throw error;
+    }
+    return {
+      items: page.items,
       revision: inbox.revision(),
+      hasMore: page.nextCursor !== undefined,
+      ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}),
     };
   };
 }

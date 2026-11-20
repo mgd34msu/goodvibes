@@ -11,7 +11,7 @@ The answer is a QR code (or a tappable deep link) displayed by the host surface 
 There are two token shapes in play, and both authenticate the same way at the network level:
 
 - **Per-device pairing tokens** (current). Every pairing mints its own named,
-  individually-revocable token. This is what a fresh `/qrcode` scan, or a `pairing.handoff.create`
+  individually-revocable token. This is what a fresh `/devices pair device` scan, or a `pairing.handoff.create`
   call, gives you today.
 - **The legacy shared token.** One bearer token every companion held before per-device
   pairing existed. It still authenticates until an operator explicitly turns it off, and
@@ -522,13 +522,13 @@ model:
 
 ## Integration examples
 
-### TUI `/qrcode` command
+### TUI `/devices pair device`
 
-The TUI exposes a `/qrcode` command (aliases `/qr`, `/pair`) that opens the device-pairing modal:
+In the TUI, `/devices pair device` (the "Pair something" action of `/devices`) opens the device-pairing modal:
 a QR of the `#pair=<token>` deep link plus the offer set.
 
 ```
-/qrcode
+/devices pair device
 ```
 
 The token the modal shows is an offer: no device is added until one uses it, and an unused
@@ -564,7 +564,7 @@ it states the plan and asks for confirmation before acting (`-y`/`--yes` for the
 answer); an unreachable daemon, a rejected token, or a daemon too old to serve the mint verb are
 each refused by name.
 
-> **platform vs host wiring:** The `/qrcode` TUI command and the `goodvibes-daemon pair` subcommand
+> **platform vs host wiring:** The TUI's `/devices pair device` and the `goodvibes-daemon pair` subcommand
 > are host-application wrappers, not platform exports. The primitives they compose,
 > `mintPairingHandoff`, `pairingQrContent`, `generateQrMatrix`, `renderQrToString`, and
 > `getOrCreateCompanionToken`, are all

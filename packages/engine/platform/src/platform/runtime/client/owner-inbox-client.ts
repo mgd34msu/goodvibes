@@ -74,6 +74,7 @@ export function createOwnerInboxClient(verbs: Pick<DaemonVerbCaller, 'probe' | '
         ...(filter.kinds !== undefined ? { kinds: [...filter.kinds] } : {}),
         ...(filter.sessionId !== undefined ? { sessionId: filter.sessionId } : {}),
         ...(filter.limit !== undefined ? { limit: filter.limit } : {}),
+        ...(filter.cursor !== undefined ? { cursor: filter.cursor } : {}),
       }));
     },
     async find(id: string) {

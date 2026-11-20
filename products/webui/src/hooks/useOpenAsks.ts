@@ -10,6 +10,7 @@
  */
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import type { OperatorMethodInput } from '@goodvibes-jev/engine/contracts';
 import { client as platformClient } from '../lib/goodvibes';
 import { useEventStreamState } from '../lib/event-stream';
 import { queryKeys } from '../lib/queries';
@@ -21,6 +22,25 @@ export const OPEN_INBOX_ASKS_KEY = [...queryKeys.ownerInbox, 'open-asks'] as con
 const LIST_LIMIT = 500;
 const FALLBACK_POLL_MS = 15_000;
 
+/**
+ * Every open ask in the inbox: one page in practice; past the largest page the
+ * next is read with its cursor, so no ask waiting on the person is out of reach.
+ */
+async function readOpenInboxAsks(): Promise<ReturnType<typeof readInboxAskItems>> {
+  const items: unknown[] = [];
+  let cursor = '';
+  do {
+    // `cursor` is on inbox.list's schema; the generated input type gains it when the contract is regenerated.
+    const input: OperatorMethodInput<'inbox.list'> & { readonly cursor?: string } = {
+      status: 'open', kinds: INBOX_ASK_KINDS, limit: LIST_LIMIT, ...(cursor ? { cursor } : {}),
+    };
+    const page = await platformClient.operator.invoke('inbox.list', input) as { items?: unknown; nextCursor?: unknown };
+    if (Array.isArray(page?.items)) items.push(...(page.items as unknown[]));
+    cursor = typeof page?.nextCursor === 'string' ? page.nextCursor : '';
+  } while (cursor);
+  return readInboxAskItems({ items });
+}
+
 export function useOpenAsks(enabled = true): { asks: OpenAsk[]; isPending: boolean } {
   const streamLive = useEventStreamState('app').status === 'live';
   const approvals = useQuery({
@@ -31,7 +51,7 @@ export function useOpenAsks(enabled = true): { asks: OpenAsk[]; isPending: boole
   });
   const inbox = useQuery({
     queryKey: OPEN_INBOX_ASKS_KEY,
-    queryFn: async () => readInboxAskItems(await platformClient.operator.invoke('inbox.list', { status: 'open', kinds: INBOX_ASK_KINDS, limit: LIST_LIMIT })),
+    queryFn: readOpenInboxAsks,
     enabled,
     refetchInterval: streamLive ? false : FALLBACK_POLL_MS,
     retry: false,

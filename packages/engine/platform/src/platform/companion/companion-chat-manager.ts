@@ -152,6 +152,18 @@ const DEFAULT_MESSAGE_PAGE = 100;
 const MAX_MESSAGE_PAGE = 1_000;
 
 /**
+ * A chat list cursor (`<updatedAt>:<id>`, the last chat of the page before):
+ * undefined when absent, null when it is not one this list wrote.
+ */
+export function parseSessionListCursor(cursor: string | undefined): { readonly updatedAt: number; readonly id: string } | undefined | null {
+  if (cursor === undefined || cursor === '') return undefined;
+  const colon = cursor.indexOf(':');
+  const updatedAt = colon > 0 ? Number(cursor.slice(0, colon)) : Number.NaN;
+  const id = colon > 0 ? cursor.slice(colon + 1) : '';
+  return Number.isFinite(updatedAt) && id ? { updatedAt, id } : null;
+}
+
+/**
  * Most model/tool rounds one reply may take. A model that keeps asking for
  * tools would otherwise spend provider budget forever and leave the chat
  * "replying"; past this the model is asked, once more and without tools, to
@@ -489,9 +501,17 @@ export class CompanionChatManager {
     return this.sessions.get(sessionId)?.meta ?? null;
   }
 
-  listSessions(input: { readonly includeClosed?: boolean | undefined; readonly limit?: number | undefined } = {}): {
+  /**
+   * Chats newest first (by `updatedAt`, then id), one page of `limit` (default 100).
+   * `cursor` is a `nextCursor` this list returned: the page starts after that chat,
+   * so every chat is reachable however many there are. A chat updated between two
+   * reads moves to the top and is read there, not twice in the older pages.
+   */
+  listSessions(input: { readonly includeClosed?: boolean | undefined; readonly limit?: number | undefined; readonly cursor?: string | undefined } = {}): {
     readonly sessions: readonly CompanionChatSession[];
     readonly totals: { readonly sessions: number; readonly active: number; readonly closed: number };
+    readonly hasMore: boolean;
+    readonly nextCursor?: string | undefined;
   } {
     const all = [...this.sessions.values()].map((session) => session.meta);
     const active = all.filter((session) => session.status === 'active').length;
@@ -499,10 +519,15 @@ export class CompanionChatManager {
     const limit = typeof input.limit === 'number' && Number.isFinite(input.limit)
       ? Math.max(0, Math.floor(input.limit))
       : 100;
-    const sessions = all
+    const after = parseSessionListCursor(input.cursor);
+    if (after === null) throw new Error(`"${input.cursor}" is not a chat list cursor; pass back a nextCursor this list returned.`);
+    const ordered = all
       .filter((session) => input.includeClosed || session.status !== 'closed')
-      .sort((left, right) => right.updatedAt - left.updatedAt)
-      .slice(0, limit);
+      .filter((session) => !after || session.updatedAt < after.updatedAt || (session.updatedAt === after.updatedAt && session.id > after.id))
+      .sort((left, right) => right.updatedAt - left.updatedAt || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+    const sessions = ordered.slice(0, limit);
+    const last = sessions[sessions.length - 1];
+    const hasMore = ordered.length > sessions.length && last !== undefined;
     return {
       sessions,
       totals: {
@@ -510,6 +535,8 @@ export class CompanionChatManager {
         active,
         closed,
       },
+      hasMore,
+      ...(hasMore ? { nextCursor: `${last.updatedAt}:${last.id}` } : {}),
     };
   }
 

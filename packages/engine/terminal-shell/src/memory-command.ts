@@ -114,7 +114,7 @@ function recordLine(record: MemoryRecord): string {
 const MEMORY_RECORDS = defineList<MemoryCommandContext>({
   name: 'memory.records',
   async read(ctx) {
-    return (await spineOf(ctx).list({ limit: 200 })).map((record): ListRow => ({
+    return (await spineOf(ctx).list({})).map((record): ListRow => ({
       value: record.id, label: record.summary, detail: record.id, state: `${record.scope} ${record.cls}`,
     }));
   },
@@ -295,13 +295,16 @@ function describeMemory<Ctx extends MemoryCommandContext>(policy: MemoryCommandP
         touches: 'reads', lasts: 'not-a-change', risk: 'none',
         operator: { method: 'memory.records.list', fields: { cls: 'class', scope: 'scope' } }, example: { class: 'decision' },
         async run(values, ctx) {
-          const filter: MemorySearchFilter = { limit: LIST_LIMIT, ...(values.class ? { cls: values.class as MemoryClass } : {}), ...(values.scope ? { scope: values.scope as MemoryScope } : {}) };
+          // Every record the filter matches: the transcript scrolls back through them all.
+          const filter: MemorySearchFilter = { ...(values.class ? { cls: values.class as MemoryClass } : {}), ...(values.scope ? { scope: values.scope as MemoryScope } : {}) };
           const records = await spineOf(ctx).list(filter);
           if (records.length === 0) return 'No memory records yet. Remember something with /memory, "Remember something".';
           const grouped = new Map<string, MemoryRecord[]>();
-          for (const record of records) grouped.set(record.cls, [...(grouped.get(record.cls) ?? []), record]);
+          for (const record of records) {
+            const group = grouped.get(record.cls);
+            if (group) group.push(record); else grouped.set(record.cls, [record]);
+          }
           return [
-            ...(records.length >= LIST_LIMIT ? [`Showing ${records.length} records; there may be more. Choose a kind or where it applies, or search.`] : []),
             ...[...grouped].flatMap(([cls, group]) => [`${CLASS_LABELS[cls as MemoryClass] ?? cls} (${group.length})`, ...group.map(recordLine)]),
           ].join('\n');
         },

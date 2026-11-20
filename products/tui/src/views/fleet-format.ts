@@ -142,7 +142,7 @@ export function renderFleetDetailLines(
   const factLines: Line[] = [];
   if (blocked || stopping) factLines.push(buildViewLine(width, [[' ', C.dim], [stateLabel, color]]));
   if (node.model) factLines.push(fact('model', node.model, C.info));
-  factLines.push(fact('time', formatElapsed(node.elapsedMs)));
+  if (node.elapsedMs > 0) factLines.push(fact('time', formatElapsed(node.elapsedMs)));
   if (node.progress && (node.progress.filesRead > 0 || node.progress.filesChanged > 0)) {
     factLines.push(fact('files', `${node.progress.filesRead} read · ${node.progress.filesChanged} changed`));
   }

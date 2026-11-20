@@ -20,7 +20,7 @@ This directory contains the current product documentation for `goodvibes-tui`.
   Native providers, compatible/gateway providers, local discovery, synthetic failover, search providers, voice providers, and media providers.
 
 - [Voice and live TTS](voice-and-live-tts.md)
-  Live `/tts` playback, TTS provider/voice configuration, local player requirements, and streaming voice API behavior.
+  Live spoken answers (`/voice`), TTS provider/voice configuration, local player requirements, and streaming voice API behavior.
 
 - [Cloudflare batch and control plane](cloudflare-batch.md)
   Optional Workers/Queues batch setup, bootstrap-token flow, daemon routes, onboarding fields, and `/cloudflare` commands.

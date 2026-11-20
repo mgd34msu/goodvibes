@@ -9,7 +9,7 @@ import { isConversationUsageAvailable } from '../core/conversation-usage.ts';
  *
  * Budget: the alert threshold lives in the behavior.budgetAlertUsd setting,
  * the same key the background budget-breach notifier reads, so the modal, the
- * `/cost budget <usd>` command and the notifier never disagree.
+ * `/usage alert <dollars>` command and the notifier never disagree.
  */
 
 import type { AgentRecord } from '@goodvibes-jev/engine/platform/platform/tools';

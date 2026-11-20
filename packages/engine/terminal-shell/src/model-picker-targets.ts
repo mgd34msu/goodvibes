@@ -46,7 +46,7 @@ export function buildConversationModelPickerTargets(
     {
       target: 'tts',
       label: 'TTS LLM',
-      description: 'Optional LLM override for /tts response generation. Empty values use the current chat model.',
+      description: 'Optional LLM override for /voice speak response generation. Empty values use the current chat model.',
       provider: ttsProvider || mainProvider,
       model: ttsModel || mainModel,
       enabled: true,

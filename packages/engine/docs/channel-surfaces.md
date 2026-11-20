@@ -278,7 +278,7 @@ the sender. Accepting it puts that sender on the user list and records the
 policy's `ownerId` and `ownerSince`; declining it is remembered, so the same
 sender is not asked about again. At most three claims per surface are open at
 once. For a shared channel, set the surface policy `open: true`
-(`/channel policy set <surface> --open on`, or `open` on
+(`/channels set-rules <surface>`, or `open` on
 `channels.policies.update`): every sender is admitted while the lists are
 empty and no claim is raised, and every sender talks as a guest. The daemon always
 raises claims; only an embedding host without an owner inbox makes the first

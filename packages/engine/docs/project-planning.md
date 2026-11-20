@@ -319,9 +319,9 @@ decision records, and the work-plan methods manage the live task checklist.
 ## Terminal integration
 
 The terminal apps show saved planning state records as read-only history
-(`/project-plan history` and the planning modal) and drive real work through
-the work plan and `/workstream`. `/project-plan approve` and `answer` are
-retired: they change nothing and say so.
+(`/work history` and the planning modal) and drive real work through
+the work plan and `/workstream`; nothing answers or approves a saved
+planning record.
 
 ## Next reads
 

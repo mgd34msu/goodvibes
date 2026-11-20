@@ -1,13 +1,13 @@
 // ---------------------------------------------------------------------------
-// wake-provision-runner.ts, what `/voice wake status` prints.
+// wake-provision-runner.ts, what `/voice wake-status` prints.
 //
 // The installer and the npm postinstall provision the wake model, and a daemon
 // retries at boot whatever the install could not fetch (the platform's
-// voice/wake/install-provision.ts owns that policy). `/voice wake setup` and
+// voice/wake/install-provision.ts owns that policy). `/voice wake-setup` and
 // turning `voice.wake.enabled` on go through the platform's voice setup
 // (core/wake-setup-plan.ts), which fetches missing models as one of its steps.
 //
-// `/voice wake status` only reads what is on disk, verifying by content, never
+// `/voice wake-status` only reads what is on disk, verifying by content, never
 // by existence. The read is injectable so a wire test drives it with no files.
 // ---------------------------------------------------------------------------
 

@@ -1,5 +1,5 @@
 /**
- * usage-modal.ts, the Usage modal (/usage, /cost, ctrl+p "usage").
+ * usage-modal.ts, the Usage modal (/usage, ctrl+p "usage").
  *
  * Reads the session's UsageTracker (runtime/usage-tracker.ts), which has been
  * collecting since startup, so opening this late loses nothing.

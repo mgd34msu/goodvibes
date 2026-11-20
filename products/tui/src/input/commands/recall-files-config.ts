@@ -23,7 +23,7 @@ export const MEMORY_PROJECTION_DIR_SYNTHETIC_SETTING: ConfigSetting = {
   label: 'Folder memories are written to as files',
   type: 'string',
   default: MEMORY_PROJECTION_DIR_DEFAULT,
-  description: '/recall files sync writes one markdown file per standing (project/team-scope) memory record here, and commits the directory when it sits inside a git repository. Relative paths resolve against the project working directory. /recall files review reads user edits back from this directory as proposals; a file edit or deletion never mutates the store directly.',
+  description: '/memory sync-files writes one markdown file per standing (project/team-scope) memory record here, and commits the directory when it sits inside a git repository. Relative paths resolve against the project working directory. /recall files review reads user edits back from this directory as proposals; a file edit or deletion never mutates the store directly.',
 };
 
 /** Read the configured projection directory, falling back to the default for an absent/malformed value. */

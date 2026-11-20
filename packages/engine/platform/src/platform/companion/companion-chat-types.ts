@@ -183,6 +183,8 @@ export interface CreateCompanionChatSessionInput {
 export interface ListCompanionChatSessionsInput {
   readonly includeClosed?: boolean | undefined;
   readonly limit?: number | undefined;
+  /** A `nextCursor` the list returned: the page of chats older than that one. */
+  readonly cursor?: string | undefined;
 }
 
 export interface UpdateCompanionChatSessionInput {

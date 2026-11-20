@@ -75,7 +75,7 @@ export interface CommandUiActions extends TerminalCommandUiActions<import('./mod
   /**
    * Read-only view of pending `[TEXT: pN, M lines]` fold markers currently
    * sitting in the composer (registerPaste in handler-content-actions.ts),
-   * backs /pastes, which previews a folded paste's actual content before the
+   * backs /paste list, which previews a folded paste's actual content before the
    * user submits it. A paste over the fold threshold is otherwise invisible
    * until the LLM sees it.
    */
@@ -149,7 +149,7 @@ export interface CommandUiActions extends TerminalCommandUiActions<import('./mod
 export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<import('./model-picker.ts').ModelPickerTarget> {
   openOnboardingWizard?: (modeOrOptions?: OnboardingWizardMode | OpenOnboardingWizardOptions) => void;
 
-  /** Toggle the transcript search overlay (same action as Ctrl+F), backs /find. */
+  /** Toggle the transcript search overlay (same action as Ctrl+F), backs /session find. */
   openTranscriptSearch?: () => void;
 
   /**
@@ -324,14 +324,14 @@ export interface CommandPlatformConfigServices extends TerminalCommandPlatformCo
   readonly devices?: import('@goodvibes-jev/engine/platform/platform/runtime/client').DevicesClient;
   /** Capability gate runtime, feature states derive from domain settings keys; surfaces read live/pending state here. */
   readonly featureFlagManager?: FeatureFlagManager;
-  /** The platform's voice setup (`/voice wake setup`, the wake switch): one owner of the plan and its facts. */
+  /** The platform's voice setup (`/voice wake-setup`, the wake switch): one owner of the plan and its facts. */
   readonly voiceSetup?: import('@goodvibes-jev/engine/platform/platform/runtime/voice-setup').VoiceSetupService;
   /** This app's runtime store, read by `/state`. */
   readonly runtimeStore?: { getState(): object };
 
-  /** Direct-command consumer (`/search`) alongside the existing agent-tool consumer. */
+  /** Direct-command consumer (`/web-search`) alongside the existing agent-tool consumer. */
   readonly webSearchService?: import('@goodvibes-jev/engine/platform/platform/web-search').WebSearchService;
-  /** Direct-command consumer (`/image`), first production caller of `.generate()`. */
+  /** Direct-command consumer (`/media`), first production caller of `.generate()`. */
   readonly mediaProviders?: import('@goodvibes-jev/engine/platform/platform/media').MediaProviderRegistry;
   readonly artifactStore?: import('@goodvibes-jev/engine/platform/platform/artifacts').ArtifactStore;
   /** Background daemon/HTTP-listener/relay controller. Mutable: main.ts patches it in post-bootstrap (see bootstrap-command-parts.ts ordering note). */

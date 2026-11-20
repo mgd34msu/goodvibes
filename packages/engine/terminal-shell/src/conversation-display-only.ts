@@ -9,9 +9,6 @@
  * the turn sit below the streamed text and are drawn again after each delta.
  */
 
-/** Display-only draws kept for redraw; the oldest leave first. */
-const MAX_DISPLAY_ONLY_ENTRIES = 500;
-
 interface DisplayOnlyEntry {
   readonly seq: number;
   /** Messages that existed when it was drawn: it goes right after the unit holding message `anchor - 1`. */
@@ -52,11 +49,16 @@ export class DisplayOnlyOutput {
     this.entries = this.entries.filter((entry) => entry.seq !== seq);
   }
 
-  /** Keep a draw; `anchor` is the message count when it was printed. */
+  /**
+   * Keep a draw; `anchor` is the message count when it was printed. Every draw is
+   * kept until the conversation is cleared: a command's output is something the
+   * person was told, and a rebuild (a resize) that dropped the oldest would take
+   * it out of the scrollback for good. One entry per printed output, so the list
+   * grows with what was printed, never faster.
+   */
   keep(anchor: number, draw: (width: number) => void): number {
     const seq = ++this.seq;
     this.entries.push({ seq, anchor, draw });
-    if (this.entries.length > MAX_DISPLAY_ONLY_ENTRIES) this.entries.splice(0, this.entries.length - MAX_DISPLAY_ONLY_ENTRIES);
     return seq;
   }
 

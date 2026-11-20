@@ -147,8 +147,30 @@ export interface OwnerInboxListFilter {
   readonly kinds?: readonly OwnerItemKind[] | undefined;
   readonly sessionId?: string | undefined;
   readonly limit?: number | undefined;
+  /** A `nextCursor` an earlier page returned: this page starts after that item. */
+  readonly cursor?: string | undefined;
   /** Who is reading, for an approval's reading; the owner when absent. */
   readonly viewer?: ApprovalViewer | undefined;
+}
+
+/** One page of the inbox and, while more follow, the cursor of the next. */
+export interface OwnerInboxPage {
+  readonly items: readonly OwnerItem[];
+  readonly nextCursor?: string | undefined;
+}
+
+/** The time an item sorts by: when it closed, else when it was posted. */
+function sortTime(item: OwnerItem): number {
+  return item.closedAt ?? item.createdAt;
+}
+
+/** A list cursor (`<time>:<id>`, the last item of the page before): undefined when absent, null when it is not one the list wrote. */
+export function parseOwnerInboxCursor(cursor: string | undefined): { readonly time: number; readonly id: string } | undefined | null {
+  if (cursor === undefined || cursor === '') return undefined;
+  const colon = cursor.indexOf(':');
+  const time = colon > 0 ? Number(cursor.slice(0, colon)) : Number.NaN;
+  const id = colon > 0 ? cursor.slice(colon + 1) : '';
+  return Number.isFinite(time) && id ? { time, id } : null;
 }
 
 /**
@@ -326,6 +348,32 @@ export interface OwnerInboxPort {
   /** One item by id, open or closed. */
   find(id: string, viewer?: ApprovalViewer): Promise<OwnerItem | undefined>;
   answer(id: string, answer: OwnerAnswer): Promise<OwnerAnswerOutcome>;
+}
+
+/** The cursor that reads the items after `item` in the inbox's order (newest first). */
+export function ownerInboxCursorOf(item: Pick<OwnerItem, 'id' | 'createdAt' | 'closedAt'>): string {
+  return `${item.closedAt ?? item.createdAt}:${item.id}`;
+}
+
+/**
+ * Every item the filter matches, newest first, read a page at a time with the
+ * list's cursor, so no page size puts one out of reach. For a command the
+ * person runs; it stops when a page comes back short or the cursor does not
+ * move (a store that does not read `cursor` answers its first page again).
+ */
+export async function listEveryOwnerItem(port: Pick<OwnerInboxPort, 'list'>, filter: Omit<OwnerInboxListFilter, 'limit' | 'cursor'> = {}): Promise<OwnerItem[]> {
+  const items: OwnerItem[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await port.list({ ...filter, limit: MAX_LIST_LIMIT, ...(cursor !== undefined ? { cursor } : {}) });
+    for (const item of page) if (!seen.has(item.id)) { seen.add(item.id); items.push(item); }
+    const last = page[page.length - 1];
+    if (page.length < MAX_LIST_LIMIT || last === undefined) return items;
+    const next = ownerInboxCursorOf(last);
+    if (next === cursor) return items;
+    cursor = next;
+  }
 }
 
 export const OWNER_ITEM_KINDS: readonly OwnerItemKind[] = ['approval', 'question', 'claim', 'purchase', 'queued-action', 'decision', 'report'];
@@ -630,7 +678,7 @@ function matchesFilter(item: OwnerItem, filter: OwnerInboxListFilter, kinds: Rea
 }
 
 function newestFirst(a: OwnerItem, b: OwnerItem): number {
-  return (b.closedAt ?? b.createdAt) - (a.closedAt ?? a.createdAt) || a.id.localeCompare(b.id);
+  return sortTime(b) - sortTime(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
 export interface OwnerInboxOptions {
@@ -810,6 +858,18 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
 
   /** The same list, for an in-process caller that cannot await. */
   listNow(filter: OwnerInboxListFilter = {}): readonly OwnerItem[] {
+    return this.listPageNow(filter).items;
+  }
+
+  /**
+   * One page of the list, newest first, and the cursor of the page after it:
+   * passing `nextCursor` back as `cursor` reads on until the oldest item, so no
+   * page size puts an item out of reach. An item that closes between two reads
+   * sorts by its closing time and is read at the top, not twice.
+   */
+  listPageNow(filter: OwnerInboxListFilter = {}): OwnerInboxPage {
+    const after = parseOwnerInboxCursor(filter.cursor);
+    if (after === null) throw new OwnerInboxInputError(`"${filter.cursor}" is not an inbox list cursor; pass back a nextCursor the list returned.`, 'cursor');
     const now = this.#now();
     const kinds = filter.kinds && filter.kinds.length > 0 ? new Set(filter.kinds) : null;
     const limit = Math.min(MAX_LIST_LIMIT, Math.max(1, Math.trunc(filter.limit ?? DEFAULT_LIST_LIMIT)));
@@ -825,7 +885,13 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       if (matchesFilter(item, filter, kinds)) items.push(item);
     }
     items.sort(newestFirst);
-    return (items.length > limit ? items.slice(0, limit) : items).map((item) => this.#present(item));
+    const from = after ? items.filter((item) => sortTime(item) < after.time || (sortTime(item) === after.time && item.id > after.id)) : items;
+    const page = from.length > limit ? from.slice(0, limit) : from;
+    const last = page[page.length - 1];
+    return {
+      items: page.map((item) => this.#present(item)),
+      ...(from.length > page.length && last ? { nextCursor: `${sortTime(last)}:${last.id}` } : {}),
+    };
   }
 
   /**

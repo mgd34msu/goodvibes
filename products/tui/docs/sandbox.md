@@ -29,4 +29,4 @@ The `repl` tool is registered only where the exec sandbox is available, and each
 
 On native Windows there is no boundary; run GoodVibes inside WSL 2 with bubblewrap installed to contain commands and MCP servers.
 
-The QEMU backend was retired, and with it the settings that chose a VM: on load, `sandbox.qemu*`, `sandbox.vmBackend`, `sandbox.replIsolation` and `sandbox.windowsMode` are removed from a settings file, and a VM `sandbox.mcpIsolation` mode (`shared-vm`, `hybrid`, `per-server-vm`) becomes `contained`, with one receipt. The `/sandbox qemu` family answers that it has been retired.
+The QEMU backend was retired, and with it the settings that chose a VM: on load, `sandbox.qemu*`, `sandbox.vmBackend`, `sandbox.replIsolation` and `sandbox.windowsMode` are removed from a settings file, and a VM `sandbox.mcpIsolation` mode (`shared-vm`, `hybrid`, `per-server-vm`) becomes `contained`, with one receipt. Nothing in `/security` offers it.

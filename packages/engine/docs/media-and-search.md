@@ -120,8 +120,8 @@ brief poll failures such as a 429 or 5xx are retried) comes back with
 `pending: { providerId, taskId, resume }`; passing that task to `media.collect`
 (the registry's `collect`) finishes it later without submitting, or paying for,
 a new job. The Agent collects with `agent_media_generate` given `taskId`,
-`providerId` and `resume`, or `/media generate collect <provider> <task-id>
-[key=value ...]`; the TUI with `/imagine --collect`.
+`providerId` and `resume`, or `/media collect <provider> <task-id>
+[key=value ...]`; the TUI with `/media collect`.
 
 | Method | What it does |
 | --- | --- |

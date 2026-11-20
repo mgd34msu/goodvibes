@@ -190,7 +190,7 @@ export class SpokenTurnController {
    * Exit-path teardown: drops everything not yet audible (buffered text,
    * queued chunks) but lets the audio the user is already hearing finish
    * naturally, capped at `drainTimeoutMs`, before the hard stop. Deliberate
-   * interrupts (Ctrl+C, /tts stop, turn cancel) keep their instant path
+   * interrupts (Ctrl+C, /voice stop, turn cancel) keep their instant path
    * through stop(); this is only for exiting the app while the final audio of
    * a completed response is still draining.
    */

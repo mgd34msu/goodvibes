@@ -7,7 +7,7 @@
  * Everything needed to run the detector was already here, a pinned classifier,
  * a front end computed in code, a verified download, recovery housekeeping, and
  * a fresh machine had none of it. Provisioning was reachable only by typing
- * `/voice wake setup` or calling `voice.wake.provision`, so the ordinary
+ * `/voice wake-setup` or calling `voice.wake.provision`, so the ordinary
  * outcome of installing goodvibes was a wake-word feature that could not start,
  * with a model most people would never go and fetch. The model ships with the
  * installation now. This module is the policy that makes that safe.
@@ -74,7 +74,7 @@ export const WAKE_INSTALL_SKIP_ENV = 'GOODVIBES_SKIP_WAKE_MODEL_DOWNLOAD';
 /**
  * The recovery act named in a degraded message when the caller does not supply a
  * surface-specific one. The control-plane verb, because it is the same on every
- * surface; a terminal passes `/voice wake setup` instead.
+ * surface; a terminal passes `/voice wake-setup` instead.
  */
 /**
  * What a degraded install names as the thing that will fix it.

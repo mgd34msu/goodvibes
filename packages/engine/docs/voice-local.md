@@ -97,7 +97,7 @@ lists each step as done, proposed (`acceptProposals: true` does it) or asked
 started, not waited for: `installStarted` names the run, and
 `voice.local.status` serves its progress and receipt. `rendered` is the plan as
 one reply to print as-is. The terminal app and the Agent run the same service
-in-process for `/voice wake setup` and when wake is switched on; the web UI's
+in-process for `/voice wake-setup` and when wake is switched on; the web UI's
 wake switch calls `voice.setup`.
 
 ## Managed install

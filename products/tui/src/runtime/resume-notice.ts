@@ -20,7 +20,7 @@
  *     (`/resume`) and keeps the direct, exact-id form (`/session resume
  *     <id>`) as a secondary hint, for the case of already knowing which
  *     session to reach for.
- *   - `/checkpoints` works with zero arguments and behaves correctly at any
+ *   - `/checkpoint list` works with zero arguments and behaves correctly at any
  *     checkpoint count (including zero), advertised whenever the checkpoint
  *     manager is available in this session.
  *   - `/memory` is only advertised when the memory API is actually
@@ -108,7 +108,7 @@ export function buildResumeNotice(facts: ResumeNoticeFacts): string | null {
   // Lead with the zero-typing picker (/resume), keep the direct exact-id
   // form as a secondary hint, see the header doc for why both are honest.
   if (hasSession) hints.push(`/resume to continue (or /session resume ${facts.lastSessionId} directly)`);
-  if (hasCheckpoints) hints.push('/checkpoints to browse');
+  if (hasCheckpoints) hints.push('/checkpoint list to browse');
   if (facts.memoryAvailable) hints.push('/memory for memory');
   if (hints.length > 0) notice += `: ${hints.join(' · ')}`;
 

@@ -11,7 +11,7 @@ GoodVibes has a layered provider system. Each layer registers providers in a dif
 | Synthetic failover groups | The `synthetic` provider, which groups one model across every backend that serves it and fails over between them |
 | Local discovered providers | Inference servers on your machine or LAN that `/scan` finds and registers as OpenAI-compatible providers |
 | Search providers | Web-search backends behind the single `web_search` tool surface |
-| Voice providers | Text-to-speech, speech-to-text, and realtime audio backends used by `/tts` and voice input |
+| Voice providers | Text-to-speech, speech-to-text, and realtime audio backends used by `/voice speak` and voice input |
 | Media and multimodal providers | Image-understanding and media-generation backends |
 
 All of these flow into the same runtime routing, picker, metadata, and health surfaces.
@@ -215,7 +215,7 @@ Models that only expose reasoning as an on/off toggle treat any level above `non
 | `main` | Main Chat | `provider.provider` + `provider.model` | Default provider and model for normal chat turns. |
 | `helper` | Helper Model | `helper.globalProvider` + `helper.globalModel` (+ `helper.enabled`) | Optional route for supporting work; empty values inherit Main Chat. |
 | `tool` | Tool LLM | `tools.llmProvider` + `tools.llmModel` (+ `tools.llmEnabled`) | Optional route for tool-specific reasoning; selecting a model enables it. |
-| `tts` | TTS LLM | `tts.llmProvider` + `tts.llmModel` | Optional override for `/tts` response generation; empty values use the current chat model. |
+| `tts` | TTS LLM | `tts.llmProvider` + `tts.llmModel` | Optional override for `/voice speak` response generation; empty values use the current chat model. |
 | `embeddings` | Embeddings | `provider.embeddingProvider` | Not an LLM route: an embedding provider id only, no model concept, used for memory search and the code index. |
 
 The embeddings target has no model to pick, only a provider, so it opens a dedicated embedding-provider list instead of the model list the other four targets share.
@@ -301,7 +301,7 @@ Seven voice providers are built in. Each declares which directions it supports: 
 
 The `local` provider runs free, offline engines: whisper.cpp or faster-whisper for STT, and Piper or Kokoro for TTS. Pointing `voice.local.*` at engine and model paths you installed yourself never downloads anything; it reports `unconfigured` until all three keys for a direction (engine, binary, model path) are set. Running `/voice setup` instead performs a managed one-act install that fetches the Piper TTS engine and a default voice automatically, and the whisper STT engine and model where a bundle is hosted for your platform. See [voice-and-live-tts.md](voice-and-live-tts.md).
 
-The TUI `/tts` command uses providers that advertise `tts-stream` for live local playback. Configure defaults through `/settings open tts`: `tts.provider` chooses the streaming provider, `tts.voice` chooses a provider voice, and `tts.llmProvider` / `tts.llmModel` optionally override the response model. `/tts` uses the active chat model by default when the TTS LLM override is empty. See [Voice and live TTS](voice-and-live-tts.md) for command usage and playback requirements.
+The TUI `/voice speak` command uses providers that advertise `tts-stream` for live local playback. Configure defaults through `/settings open tts`: `tts.provider` chooses the streaming provider, `tts.voice` chooses a provider voice, and `tts.llmProvider` / `tts.llmModel` optionally override the response model. `/voice speak` uses the active chat model by default when the TTS LLM override is empty. See [Voice and live TTS](voice-and-live-tts.md) for command usage and playback requirements.
 
 ## Media and multimodal providers
 

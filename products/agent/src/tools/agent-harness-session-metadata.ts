@@ -191,7 +191,7 @@ function bookmarkSummary(context: CommandContext, includeParameters = false): Re
     ...(includeParameters ? {
       modelRoutes: {
         visibleBookmarkPicker: 'agent_harness mode:"open_ui_surface" surfaceId:"bookmarks" explicitUserRequest:"..."',
-        command: '/bookmarks',
+        command: '/session bookmarks',
         importIntoKnowledge: 'agent_knowledge_ingest sourceKind:"bookmarks_file"',
       },
     } : {}),

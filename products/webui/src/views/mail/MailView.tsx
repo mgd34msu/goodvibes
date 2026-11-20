@@ -27,7 +27,7 @@
  * all, so nothing invites an action that cannot land.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, AlertTriangle, Archive, FileText, Inbox, Mail, MailOpen, Pencil, RefreshCw, Reply, Trash2 } from 'lucide-react';
 import { client as platformClient } from '../../lib/goodvibes';
 import type { EmailDraftCreateInput, EmailSendInput, EmailUnreadableMessage } from '../../lib/goodvibes';
@@ -217,11 +217,27 @@ export function MailView({ tabs }: MailViewProps = {}) {
     return byUid;
   }, [inbox.data]);
   const detail = useMailMessage(selectedUid);
-  const drafts = useQuery({
+  // Drafts a page at a time, newest first: "Load older drafts" reads the page before the
+  // oldest shown (by UID), so every draft in the folder is reachable here.
+  const drafts = useInfiniteQuery({
     queryKey: ['email', 'drafts'] as const,
-    queryFn: () => platformClient.operator.email.drafts.list({ limit: 50 }),
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam }) => {
+      // `before` is on email.drafts.list's schema; the generated input type gains it when the contract is regenerated.
+      const input: NonNullable<Parameters<typeof platformClient.operator.email.drafts.list>[0]> & { readonly before?: number } = {
+        limit: 50, ...(pageParam === undefined ? {} : { before: pageParam }),
+      };
+      return platformClient.operator.email.drafts.list(input);
+    },
+    getNextPageParam: (last, pages) => {
+      const loaded = pages.reduce((count, page) => count + page.drafts.length, 0);
+      if (last.drafts.length === 0 || loaded >= (pages[0]?.total ?? 0)) return undefined;
+      return Math.min(...last.drafts.map((draft) => draft.uid));
+    },
     enabled: showDrafts,
   });
+  const draftPages = drafts.data?.pages ?? [];
+  const draftRows = draftPages.flatMap((page) => page.drafts.map((draft) => ({ draft, uidValidity: (page as { readonly uidValidity?: number }).uidValidity })));
 
   const update = useMutation({
     // The mailbox generation the message was read under goes with its uid: a reset mailbox refuses instead of changing another message.
@@ -508,23 +524,28 @@ export function MailView({ tabs }: MailViewProps = {}) {
           action={<Button variant="outline" onClick={() => void drafts.refetch()}>Try again</Button>}>
           {mailRefusalNote(drafts.error)?.description ?? formatError(drafts.error)}
         </EmptyState>
-      ) : (drafts.data?.drafts.length ?? 0) === 0 ? (
+      ) : draftRows.length === 0 ? (
         <EmptyState icon={<FileText />} title="No drafts">Drafts saved to the account appear here and open in the composer.</EmptyState>
       ) : (
         <div data-testid="mail-drafts">
-          <p className="mail-count">Showing {drafts.data?.drafts.length} of {drafts.data?.total} drafts in {drafts.data?.mailbox}.</p>
+          <p className="mail-count">Showing {draftRows.length} of {draftPages[0]?.total} drafts in {draftPages[0]?.mailbox}.</p>
           <RowList aria-label="Drafts">
-            {drafts.data?.drafts.map((draft) => (
+            {draftRows.map(({ draft, uidValidity }) => (
               <Row
                 key={draft.uid}
                 className="mail-row"
                 title={draft.subject || '(no subject)'}
                 meta={`${draft.to || '(no recipient)'} · ${draft.body.slice(0, 120)}`}
-                onSelect={() => void openDraft(draft, (drafts.data as { readonly uidValidity?: number } | undefined)?.uidValidity)}
+                onSelect={() => void openDraft(draft, uidValidity)}
                 trailing={<span className="mail-row__date">{formatShort(draft.date)}</span>}
               />
             ))}
           </RowList>
+          {drafts.hasNextPage ? (
+            <Button variant="outline" size="sm" onClick={() => void drafts.fetchNextPage()} disabled={drafts.isFetchingNextPage}>
+              {drafts.isFetchingNextPage ? 'Loading…' : 'Load older drafts'}
+            </Button>
+          ) : null}
         </div>
       );
   } else if (inbox.isPending) {

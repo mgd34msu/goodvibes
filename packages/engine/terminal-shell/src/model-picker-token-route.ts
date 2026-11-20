@@ -83,7 +83,7 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
     const requested = readRequestedEffort(state) ?? 'medium';
     return servingEffortForLevel(requested, toEffortModel(model as never)).effective ?? requested;
   }
-  // /pin and /unpin each read the stored favorites first, so they must run in
+  // /pin add and /pin remove each read the stored favorites first, so they must run in
   // the order the keys were pressed; one chain per picker keeps them ordered.
   const pinChains = new WeakMap<object, Promise<void>>();
   function togglePin(state: State): void {

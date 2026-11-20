@@ -705,14 +705,14 @@ export class EmailService {
       (client) => client.fetchAttachment(uid, index), { maxLiteralBytes: IMAP_ATTACHMENT_LITERAL_BYTES });
   }
 
-  /** The newest drafts in the account's Drafts folder, newest first, each with its body. */
-  async listDrafts(limit = 25): Promise<{ readonly drafts: readonly ImapDraftSummary[]; readonly total: number; readonly mailbox: string; readonly uidValidity: number | null }> {
+  /** The newest drafts in the account's Drafts folder (older than UID `before` when given), newest first, each with its body. */
+  async listDrafts(limit = 25, before?: number): Promise<{ readonly drafts: readonly ImapDraftSummary[]; readonly total: number; readonly mailbox: string; readonly uidValidity: number | null }> {
     const config = this.getValidatedConfig('read');
     const account = draftsAccountKey(config);
     const chosen = config.draftsMailbox.length > 0 ? config.draftsMailbox : this.#draftsMailboxes.get(account);
     const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
     const result = await withEmailReadConnection(this.deps, config, sourceRead, undefined,
-      (client) => client.listDrafts(limit, chosen));
+      (client) => client.listDrafts(limit, chosen, before));
     // A draft is the owner's own text, written to be sent, so it is not recorded as an
     // untrusted ingest: recording it would refuse sending the very draft that was opened.
     if (config.draftsMailbox.length === 0) this.#draftsMailboxes.set(account, result.mailbox);

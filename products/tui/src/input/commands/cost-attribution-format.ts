@@ -1,5 +1,5 @@
 /**
- * cost-attribution-format.ts, pure rendering helpers for /cost attribution.
+ * cost-attribution-format.ts, pure rendering helpers for /usage by-source.
  *
  * cost.attribution.get (platform 1.6.1) is honest-unpriced by design: an unknown
  * model contributes to unpricedRecordCount with a null cost rather than a

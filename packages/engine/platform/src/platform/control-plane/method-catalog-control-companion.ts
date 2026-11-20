@@ -105,13 +105,14 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   methodDescriptor({
     id: 'companion.chat.sessions.list',
     title: 'List Companion Chat Sessions',
-    description: 'List active companion-chat sessions. Pass `includeClosed` to include recently closed sessions. Each record carries its title and system prompt, so it needs read:transcripts.',
+    description: 'List active companion-chat sessions, newest first, one page of `limit` (default 100). Pass `includeClosed` to include closed sessions. While `hasMore` is true, pass `nextCursor` back as `cursor` for the page of older chats; a cursor this list did not return is 400 INVALID_CURSOR. Each record carries its title and system prompt, so it needs read:transcripts.',
     category: 'companion',
     effects: ['transcripts.read'],
     http: { method: 'GET', path: '/api/companion/chat/sessions' },
     inputSchema: objectSchema({
       includeClosed: BOOLEAN_SCHEMA,
       limit: NUMBER_SCHEMA,
+      cursor: STRING_SCHEMA,
     }, []),
     outputSchema: COMPANION_CHAT_SESSIONS_LIST_SCHEMA,
   }),

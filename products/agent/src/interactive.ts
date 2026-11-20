@@ -973,13 +973,13 @@ async function main(prepared: PreparedShellCliRuntime) {
     render: () => render(),
   });
   // Turning wake detection on from anywhere (settings, /settings, a model's settings
-  // call) runs the same voice setup as /voice wake setup and shows its plan.
+  // call) runs the same voice setup as /voice wake-setup and shows its plan.
   unsubs.push(configManager.subscribe('voice.wake.enabled', (enabled) => {
     if (enabled !== true || wakeSetupRunning()) return;
     void runWakeSetupPlan(ctx.services.voiceSetup).then(
       (outcome) => {
         systemMessageRouter.userAction(['Wake-Word Setup', outcome.rendered,
-          ...(proposesSpeechToText(outcome) ? ['(yes: /voice wake setup --yes yes installs it now)'] : [])].join('\n'));
+          ...(proposesSpeechToText(outcome) ? ['(/voice wake-setup --with-speech-to-text installs it now)'] : [])].join('\n'));
         render();
       },
       (error: unknown) => {

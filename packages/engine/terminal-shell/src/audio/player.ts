@@ -55,7 +55,7 @@ export interface LocalStreamingAudioPlayerOptions {
 
 /**
  * The terminal's one audio output. Speech and the wake chime share it so that
- * `/tts stop` and quitting cut every sound it started, not only the last one.
+ * `/voice stop` and quitting cut every sound it started, not only the last one.
  */
 export class LocalStreamingAudioPlayer implements StreamingAudioPlayer {
   readonly command: StreamingAudioPlayerCommand | null;
@@ -80,7 +80,7 @@ export class LocalStreamingAudioPlayer implements StreamingAudioPlayer {
 
   async play(chunks: AsyncIterable<VoiceAudioChunk>, options: StreamingAudioPlaybackOptions = {}): Promise<void> {
     if (!this.command) {
-      throw new Error('No streaming audio player found. Install mpv or ffplay to use /tts live playback.');
+      throw new Error('No streaming audio player found. Install mpv or ffplay to hear answers spoken (/voice).');
     }
     if (options.signal?.aborted) return;
 
@@ -131,7 +131,7 @@ export class LocalStreamingAudioPlayer implements StreamingAudioPlayer {
         }
       }
 
-      // An intentional interrupt (turn cancel / quit chord / /tts stop) has
+      // An intentional interrupt (turn cancel / quit chord / /voice stop) has
       // already torn the process down and must cut immediately, do not wait
       // on a graceful drain. A natural end-of-speech, by contrast, closes
       // stdin and waits for the sink to play out every buffered sample so the

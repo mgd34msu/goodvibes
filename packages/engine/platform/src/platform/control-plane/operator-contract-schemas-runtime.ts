@@ -228,6 +228,8 @@ export const COMPANION_CHAT_SESSIONS_LIST_SCHEMA = objectSchema({
     active: NUMBER_SCHEMA,
     closed: NUMBER_SCHEMA,
   }, ['sessions', 'active', 'closed']),
+  hasMore: BOOLEAN_SCHEMA,
+  nextCursor: STRING_SCHEMA,
 }, ['sessions', 'totals']);
 
 export const COMPANION_CHAT_MESSAGES_LIST_SCHEMA = objectSchema({

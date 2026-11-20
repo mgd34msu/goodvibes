@@ -31,7 +31,7 @@ export interface WireSpokenTurnRuntimeOptions {
  * wireSpokenTurnRuntime, wires the spoken-turn pipeline against the runtime
  * event bus.
  *
- * A turn is spoken when its own origin asks for speech (a /tts prompt or a
+ * A turn is spoken when its own origin asks for speech (a /voice speak prompt or a
  * spoken prompt), or, in always-speak mode (`ui.voiceEnabled`), every turn.
  * The availability check inside SpokenTurnController still gates gracefully
  * when no player is found.

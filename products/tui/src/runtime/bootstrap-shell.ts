@@ -162,7 +162,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   });
 
   // initial cost-budget alert threshold (USD; 0/unset = disabled).
-  // Once the session starts, the Usage modal's 'b' key and /cost budget <usd>
+  // Once the session starts, the Usage modal's 'b' key and /usage alert <dollars>
   // both write the behavior.budgetAlertUsd config key (runtime/usage-tracker.ts),
   // the same key the background budget-breach notifier reads. The env var
   // remains a first-run convenience only: it seeds the key when nothing was ever

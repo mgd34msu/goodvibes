@@ -25,6 +25,7 @@ import type { ApprovalActionInput, ApprovalBroker, ApprovalRelayPort, SharedAppr
 import type { ResolveSharedApprovalInput } from './approval-broker-owner.js';
 import {
   approvalRefusal,
+  isOpenApprovalStatus,
   parseApprovalRef,
   readApproval,
   type ApprovalReading,
@@ -131,11 +132,13 @@ export function localApprovalActions(broker: ApprovalActionsBroker, now: () => n
     get homeNode() { return broker.homeNode; },
     viewerOf: (actor) => approvalViewerOfActor(actor, broker.homeNode),
     list: (viewer, limit = 50) => {
-      const rows = broker.listApprovals(limit).map((record) => row(record, viewer));
+      // The newest `limit`, and every ask still open however many settled since: a waiting ask is never out of reach.
+      const shown = (record: SharedApprovalRecord, index: number): boolean => index < limit || isOpenApprovalStatus(record.status);
+      const rows = broker.listApprovals(Number.MAX_SAFE_INTEGER).filter(shown).map((record) => row(record, viewer));
       const relay = broker.relay;
       if (!relay) return rows;
       // This node's own first, then the group's, newest first within each.
-      return [...rows, ...relay.remote().slice(0, limit).map((record) => remoteRow(record, viewer, relay))];
+      return [...rows, ...relay.remote().filter(shown).map((record) => remoteRow(record, viewer, relay))];
     },
     get: (ref, viewer) => {
       const parsed = parse(ref);

@@ -1,5 +1,5 @@
 /**
- * renderBookmarkModal, the /bookmarks modal drawn with the modal surface kit.
+ * renderBookmarkModal, the /session bookmarks modal drawn with the modal surface kit.
  *
  * Title with the selected position, the always-live search row (filters by
  * key and label), one kit row per bookmark (label, the block key muted after

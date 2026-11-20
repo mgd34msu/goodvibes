@@ -3,7 +3,7 @@
  * GOODVIBES_COST_BUDGET_USD environment variable into the budget alert config
  * key.
  *
- * Once a session starts, the Usage modal and `/cost budget <usd>` write
+ * Once a session starts, the Usage modal and `/usage alert <dollars>` write
  * `behavior.budgetAlertUsd` themselves, and 0 there is a deliberate "alert off".
  * The variable therefore seeds the key only when nothing was ever stored for it;
  * a stored 0 is the owner's choice and stays.

@@ -15,22 +15,25 @@
  * `owner-inbox-update` frame arrives on the shared event stream
  * (useRealtimeInvalidation) and polled only while that stream is not live.
  */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { OperatorMethodInput } from '@goodvibes-jev/engine/contracts';
 import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { useEventStreamState } from '../../lib/event-stream';
 import { queryKeys } from '../../lib/queries';
 import { useToast } from '../../lib/toast';
 import { RowGroup } from '../../components/data-view/DataView';
+import { Row } from '../../components/ui/Row';
 import { Button } from '../../components/ui/Button';
 import { Chip } from '../../components/ui/Chip';
 import type { StatusTone } from '../../components/ui/StatusDot';
 
 const INBOX_QUERY_KEY = [...queryKeys.ownerInbox, 'questions-and-decisions'] as const;
-/** Recent answers shown with where they are; older ones are in /decisions. */
+/** Answers (and decisions) shown at first, and how many more each "Show older" adds. */
 const ANSWERS_SHOWN = 20;
-/** The daemon's largest inbox.list page. */
-const LIST_LIMIT = 500;
+/** One inbox.list page; "Show older" reads the next one with its cursor once the read ones are shown. */
+const LIST_LIMIT = 100;
 /** Poll cadence while the event stream is not live; while it is, frames refresh the list. */
 const FALLBACK_POLL_MS = 30_000;
 
@@ -44,14 +47,26 @@ function itemsOf(value: unknown): unknown[] {
   return Array.isArray(items) ? items : [];
 }
 
-/** Answers and Jev's decisions in one read, newest first, split here. */
-async function readInbox(): Promise<InboxLists> {
+interface InboxPage extends InboxLists {
+  /** The cursor of the next (older) page, when there is one. */
+  readonly nextCursor?: string;
+}
+
+/** One page of answers and Jev's decisions, newest first, split here. */
+async function readInboxPage(cursor: string): Promise<InboxPage> {
   // A report (the answer of a scheduled run or a trigger's turn that named no surface) is answered `read`.
   const kinds = ['question', 'report', 'decision'] as const;
-  const page = { items: itemsOf(await platformClient.operator.invoke('inbox.list', { status: 'all', kinds, limit: LIST_LIMIT })) };
+  // `cursor` is on inbox.list's schema; the generated input type gains it when the contract is regenerated.
+  const input: OperatorMethodInput<'inbox.list'> & { readonly cursor?: string } = {
+    status: 'all', kinds, limit: LIST_LIMIT, ...(cursor ? { cursor } : {}),
+  };
+  const answer = await platformClient.operator.invoke('inbox.list', input);
+  const page = { items: itemsOf(answer) };
+  const next = (answer as { nextCursor?: unknown } | null)?.nextCursor;
   return {
-    answered: readAnswered(page).slice(0, ANSWERS_SHOWN),
-    decisions: readDecisions(page).slice(0, ANSWERS_SHOWN),
+    answered: readAnswered(page),
+    decisions: readDecisions(page),
+    ...(typeof next === 'string' && next ? { nextCursor: next } : {}),
   };
 }
 
@@ -184,13 +199,17 @@ export function OwnerQuestions({ enabled }: { enabled: boolean }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const streamLive = useEventStreamState('app').status === 'live';
-  const inbox = useQuery({
+  const inbox = useInfiniteQuery({
     queryKey: INBOX_QUERY_KEY,
-    queryFn: readInbox,
+    initialPageParam: '',
+    queryFn: ({ pageParam }) => readInboxPage(pageParam),
+    getNextPageParam: (last) => last.nextCursor,
     enabled,
     refetchInterval: streamLive ? false : FALLBACK_POLL_MS,
     retry: false,
   });
+  // How many of each list are shown; "Show older" adds a screenful and reads the next page when the read ones run out.
+  const [shown, setShown] = useState(ANSWERS_SHOWN);
   const choose = useMutation({
     mutationFn: async (input: { itemId: string; option: string }) =>
       (await platformClient.operator.invoke('inbox.answer', input)) as DecisionOutcome,
@@ -204,19 +223,33 @@ export function OwnerQuestions({ enabled }: { enabled: boolean }) {
     onError: (error) => toast({ title: 'The choice was not sent', description: formatError(error), tone: 'danger' }),
     onSettled: () => { void queryClient.invalidateQueries({ queryKey: INBOX_QUERY_KEY }); },
   });
-  const answered = enabled ? inbox.data?.answered ?? [] : [];
-  const decided = enabled ? inbox.data?.decisions ?? [] : [];
+  const pages = enabled ? inbox.data?.pages ?? [] : [];
+  const answered = pages.flatMap((page) => page.answered);
+  const decided = pages.flatMap((page) => page.decisions);
   if (answered.length === 0 && decided.length === 0) return null;
+  const more = Boolean(inbox.hasNextPage);
+  const showOlder = (): void => {
+    setShown((count) => count + ANSWERS_SHOWN);
+    if (more && !inbox.isFetchingNextPage) void inbox.fetchNextPage();
+  };
+  const olderRow = (label: string, hidden: number) => (hidden > 0 || more) && (
+    <Row
+      title={inbox.isFetchingNextPage ? 'Loading…' : `Show older ${label}`}
+      meta={hidden > 0 ? `${hidden}${more ? '+' : ''} more` : undefined}
+      onSelect={inbox.isFetchingNextPage ? undefined : showOlder}
+    />
+  );
   return (
     <>
       {answered.length > 0 && (
         <RowGroup label="Your answers" count={answered.length}>
-          {answered.map((question) => <AnsweredRow key={question.id} question={question} />)}
+          {answered.slice(0, shown).map((question) => <AnsweredRow key={question.id} question={question} />)}
+          {olderRow('answers', answered.length - Math.min(shown, answered.length))}
         </RowGroup>
       )}
       {decided.length > 0 && (
         <RowGroup label="Decided for you by Jev" count={decided.length}>
-          {decided.map((decision) => (
+          {decided.slice(0, shown).map((decision) => (
             <DecisionRow
               key={decision.id}
               decision={decision}
@@ -224,6 +257,7 @@ export function OwnerQuestions({ enabled }: { enabled: boolean }) {
               onChoose={(option) => choose.mutate({ itemId: decision.id, option })}
             />
           ))}
+          {olderRow('decisions', decided.length - Math.min(shown, decided.length))}
         </RowGroup>
       )}
     </>

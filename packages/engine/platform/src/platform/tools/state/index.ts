@@ -541,7 +541,7 @@ function runMode(
       return { success: false, error: `mode action "set" needs modeName quiet, balanced or operator${name ? ` (got "${name}")` : ''}. Nothing was changed.` };
     }
     if (!setPrintLevel) {
-      return { success: false, error: 'This host cannot save the print level from a tool. Nothing was changed. The person can run /mode ' + name + ' in the terminal app.' };
+      return { success: false, error: 'This host cannot save the print level from a tool. Nothing was changed. The person can run /verbosity set ' + name + ' in the terminal app.' };
     }
     try {
       setPrintLevel(name as HITLMode);

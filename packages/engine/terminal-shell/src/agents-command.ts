@@ -270,8 +270,7 @@ export const AGENTS_COMMAND: CommandDescription<CommandActionContext> = {
         if (all.length === 0) return 'No work handed off yet. Hand some on: /agents hand-off <the work>.';
         return [
           `Work handed off (${all.length}, newest first)`,
-          ...all.slice(0, 10).map((entry) => `  ${entry.sessionId}  ${entry.createdAt.slice(0, 16).replace('T', ' ')}  ${entry.task.replace(/\s+/g, ' ').slice(0, 72)}`),
-          ...(all.length > 10 ? [`  ... and ${all.length - 10} older`] : []),
+          ...all.map((entry) => `  ${entry.sessionId}  ${entry.createdAt.slice(0, 16).replace('T', ' ')}  ${entry.task.replace(/\s+/g, ' ').slice(0, 72)}`),
           '  /agents handed-off <session> shows one hand-off\'s progress and answer.',
         ].join('\n');
       },

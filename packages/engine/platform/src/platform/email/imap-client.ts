@@ -795,11 +795,11 @@ export class ImapClient {
   }
 
   /** The newest drafts in the Drafts folder (discovered as `appendDraft` does), newest first. */
-  async listDrafts(limit: number, override?: string): Promise<{ readonly drafts: readonly ImapDraftSummary[]; readonly total: number; readonly mailbox: string; readonly uidValidity: number | null }> {
+  async listDrafts(limit: number, override?: string, before?: number): Promise<{ readonly drafts: readonly ImapDraftSummary[]; readonly total: number; readonly mailbox: string; readonly uidValidity: number | null }> {
     const session = this.requireSession();
     const selection = await this.resolveDraftsMailbox(session, override);
     selection.assertCurrent();
-    const result = await listImapDrafts(session, selection.value, limit);
+    const result = await listImapDrafts(session, selection.value, limit, before);
     return { ...result, mailbox: selection.value };
   }
 

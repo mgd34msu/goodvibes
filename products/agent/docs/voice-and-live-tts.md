@@ -5,8 +5,8 @@ GoodVibes Agent supports spoken turns as an Agent TUI feature. Text output remai
 ## Commands
 
 ```text
-/tts <prompt>
-/tts stop
+/voice speak <message>
+/voice stop
 /settings open tts
 /settings open tts.provider
 /settings open tts.voice
@@ -14,11 +14,11 @@ GoodVibes Agent supports spoken turns as an Agent TUI feature. Text output remai
 /settings open tts.llmModel
 ```
 
-`/tts <prompt>` submits the prompt through the normal Agent conversation path. It uses the active chat provider/model unless a separate spoken-turn model override is configured.
+`/voice speak <message>` submits the prompt through the normal Agent conversation path. It uses the active chat provider/model unless a separate spoken-turn model override is configured.
 
-`/tts stop` cancels queued spoken output and active playback without cancelling the text transcript.
+`/voice stop` cancels queued spoken output and active playback without cancelling the text transcript.
 
-`ui.voiceEnabled` (shown in settings as "Always speak replies", switched with `/voice enable` and `/voice disable`; turning it on needs live TTS in this runtime) makes every submitted turn spoken aloud through live TTS. It does not open a microphone; listening is the wake-word capture described below. The setting is saved to Agent configuration, so it stays on across restarts until you turn it off. `/voice bundle export <path> --yes` writes the voice settings you changed (always-speak, `tts.*`, `voice.wake.*`) to a file, `/voice bundle inspect <path>` lists them, and `/voice bundle import <path> --yes` applies them as one update.
+`ui.voiceEnabled` (shown in settings as "Always speak replies", switched with `/voice on` and `/voice off`; turning it on needs live TTS in this runtime) makes every submitted turn spoken aloud through live TTS. It does not open a microphone; listening is the wake-word capture described below. The setting is saved to Agent configuration, so it stays on across restarts until you turn it off. `/voice export <file>` writes the voice settings you changed (always-speak, `tts.*`, `voice.wake.*`) to a file, `/voice inspect <file>` lists them, and `/voice import <file> --yes` applies them as one update.
 
 `/settings open tts` opens the fullscreen configuration workspace for streaming provider, voice, and spoken-turn model routing.
 
@@ -39,7 +39,7 @@ two terminal surfaces both acting on one spoken utterance is a confusing default
 Nothing about this is implicit. A configuration that is off never opens a device and
 never produces a microphone permission prompt. Switching `voice.wake.enabled` on (in
 settings, with `/settings`, or through the model's settings call) runs the same setup as
-`/voice wake setup --yes`: this surface's row is set, missing wake models are fetched,
+`/voice wake-setup`: this surface's row is set, missing wake models are fetched,
 and the plan is shown, proposing speech-to-text when it is missing.
 
 Capture uses an external recorder command. `voice.wake.captureCommand` names one,
@@ -61,12 +61,12 @@ What happens when both enablement rows are on:
    onnxruntime-web on its WASM backend. When the models are missing, turning both
    rows on makes Agent say so ("fetching and verifying them now") and download
    them, checksum-verified, before the detector starts; that is the one network
-   fetch wake detection makes. Run `/voice wake status` to see what is on disk
+   fetch wake detection makes. Run `/voice wake-status` to see what is on disk
    (verified by content, so a truncated file reads as corrupt rather than present)
-   and `/voice wake setup --yes` to set the wake word up for this surface: it turns
+   and `/voice wake-setup` to set the wake word up for this surface: it turns
    wake detection and this surface's row on, fetches any missing models, and,
    when speech-to-text is not installed, says so and offers to install it (a wake
-   word is only useful if what follows it becomes text); `/voice wake setup --yes yes`
+   word is only useful if what follows it becomes text); `/voice wake-setup --with-speech-to-text`
    accepts and installs it. The same provision also fetches the speech gate
    `voice.wake.vadThreshold` uses, reported separately because the detector runs
    without it. If the download fails, the detector says so instead of
@@ -97,15 +97,15 @@ bytes reach every consumer unmodified.
 `voice.wake.vadThreshold` above 0 screens frames through a speech gate before the
 wake classifier sees them, so non-speech costs no classifier inference. The gate is a
 pinned head that runs over the SAME embedding the classifier consumes, and it
-provisions with the wake models. `/voice wake status` reports it separately from the
+provisions with the wake models. `/voice wake-status` reports it separately from the
 classifier, because the detector is fully operational without it (the default is 0).
-Its threshold table is measured rather than guessed, and `/voice wake status` prints
+Its threshold table is measured rather than guessed, and `/voice wake-status` prints
 what the configured value passes and stops.
 
 One refusal is deliberate. `voice.wake.vadThreshold` above 0 on a host that does not
 have the gate on disk refuses to start the detector, because frames reaching the
 classifier unscreened while the row says they were screened is exactly what the
-refusal exists to prevent. Run `/voice wake setup --yes` and the detector starts.
+refusal exists to prevent. Run `/voice wake-setup` and the detector starts.
 
 A runtime with no WebAssembly at all refuses `speex` for the same class of reason,
 in the platform's own wording, so it reads identically on every surface.

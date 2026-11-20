@@ -16,7 +16,7 @@ import { archetypeDisplayName } from '../../../agents/archetypes.js';
  * runtime-bus 'agents' channel emitters (no new event contract).
  */
 export interface AgentActivityEntry {
-  readonly state: Extract<ProcessState, 'thinking' | 'executing-tool' | 'streaming' | 'retrying' | 'queued' | 'done' | 'failed'>;
+  readonly state: Extract<ProcessState, 'thinking' | 'executing-tool' | 'streaming' | 'retrying' | 'queued' | 'awaiting-approval' | 'done' | 'failed'>;
   readonly activity?: ProcessActivity | undefined;
   /** Epoch ms of the last observed bus event for this agent. */
   readonly at: number;
@@ -141,7 +141,8 @@ function deriveAgentState(
   // misread as silence and falsely flip a working agent to 'stalled'. A progress
   // line also reads as 'executing-tool' but says nothing about a tool running,
   // so silence after one may stall.
-  if (ctx.liveness && !entry?.toolInFlight) {
+  // Waiting for the person's answer is not silence either.
+  if (ctx.liveness && !entry?.toolInFlight && entry?.state !== 'awaiting-approval') {
     const lastActivityAt = entry?.at ?? record.startedAt;
     if (ctx.now - lastActivityAt > ctx.stalledThresholdMs) return 'stalled';
   }

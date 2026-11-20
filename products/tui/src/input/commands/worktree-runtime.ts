@@ -84,7 +84,7 @@ const WORKTREES = defineList<CommandContext>({
 
 const WORKTREE = listInput({ id: 'worktree', label: 'Worktree', help: 'The worktrees of this project', list: WORKTREES, other: 'a worktree path that is not tracked' });
 const ATTACHED_KIND = { id: 'kind', label: 'Attached to', help: 'A session or a task', kind: 'choice', choices: [{ value: 'session', label: 'A session' }, { value: 'task', label: 'A task' }], required: true, typed: { position: 1 } } as const;
-const ATTACHED_ID = textInput({ id: 'id', label: 'Its id', help: 'The session\'s or task\'s id', why: 'an id from /sessions or /tasks', typed: { position: 2 } });
+const ATTACHED_ID = textInput({ id: 'id', label: 'Its id', help: 'The session\'s or task\'s id', why: 'an id from /session list or /tasks', typed: { position: 2 } });
 
 function stateAction(id: 'pause' | 'resume' | 'keep', label: string, next: 'paused' | 'active' | 'kept', sentence: string): ActionDescription<CommandContext> {
   return {

@@ -151,7 +151,7 @@ export function buildHunkRevertReceiptBlock(receipt: HunkRevertReceiptInput): st
     `[Revert] Receipt: reverted one hunk in ${receipt.path} (${receipt.hunkHeader}).`,
     `  Restored ${plural(receipt.removedLinesRestored, 'deleted line')}, removed ${plural(receipt.addedLinesRemoved, 'added line')}.`,
     receipt.safetyCheckpointId
-      ? `  Reversible: a pre-revert checkpoint was taken; /checkpoints restore ${receipt.safetyCheckpointId} undoes it.`
+      ? `  Reversible: a pre-revert checkpoint was taken; /checkpoint restore ${receipt.safetyCheckpointId} undoes it.`
       : '  Reversible: the working tree already matched the latest checkpoint (nothing extra to snapshot).',
   ];
   return lines.join('\n');

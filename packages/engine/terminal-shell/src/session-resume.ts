@@ -156,7 +156,7 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
     }
   };
   // Restore this session's message-anchored rewind anchors from its sidecar
-  // so /rewind works identically before and after the resume, the in-memory
+  // so /checkpoint rewind works identically before and after the resume, the in-memory
   // registry is process-local, so a fresh process starts with none for the
   // loaded session.
   const surface = deps.surface;

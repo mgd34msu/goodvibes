@@ -123,8 +123,7 @@ export function applyInitialTuiCliState(options: {
   installSplashAdditions({
     workingDirectory: shellPaths.workingDirectory,
     configManager: commandContext.platform.configManager,
-    // /setup once it is registered; until then the setup screens open with /onboarding.
-    setupCommand: commandRegistry.get('setup') ? '/setup' : '/onboarding',
+    setupCommand: '/setup',
     fillComposer: (text) => {
       if (input.prompt !== '') return;
       input.prompt = text;

@@ -14,7 +14,7 @@
  * collapsed content, only navigating TO a match hidden inside it does, and
  * that expansion is undone when search closes UNLESS the user separately
  * touched the block (toggled, copied, bookmarked, saved, or bulk-expanded
- * via /expand) while it sat auto-expanded. An explicit user action always
+ * via /session expand) while it sat auto-expanded. An explicit user action always
  * wins over search's own bookkeeping, regardless of which happened first.
  */
 

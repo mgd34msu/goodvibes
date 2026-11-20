@@ -76,10 +76,13 @@ export const OWNER_INBOX_LIST_INPUT_SCHEMA = objectSchema({
   kinds: arraySchema(OWNER_ITEM_KIND_SCHEMA),
   sessionId: STRING_SCHEMA,
   limit: NUMBER_SCHEMA,
+  cursor: STRING_SCHEMA,
 });
 export const OWNER_INBOX_LIST_OUTPUT_SCHEMA = objectSchema({
   items: arraySchema(OWNER_ITEM_SCHEMA),
   revision: NUMBER_SCHEMA,
+  hasMore: BOOLEAN_SCHEMA,
+  nextCursor: STRING_SCHEMA,
 }, ['items', 'revision']);
 
 export const OWNER_INBOX_ANSWER_INPUT_SCHEMA = objectSchema({

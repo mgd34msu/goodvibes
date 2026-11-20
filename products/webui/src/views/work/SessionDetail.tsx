@@ -16,7 +16,7 @@
  */
 import { OwnerApprovalPendingError } from '../../lib/owner-approval';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, MoreHorizontal } from 'lucide-react';
 import { client as platformClient } from '../../lib/goodvibes';
 import type { FleetProcessNode } from '../../lib/goodvibes';
@@ -66,6 +66,9 @@ const SESSION_TABS: readonly { value: SessionTab; label: string }[] = [
 ];
 
 type DeleteCapability = 'available' | 'unavailable' | 'uncertain' | 'checking';
+
+/** Messages per transcript page: the daemon's default page, read newest first. */
+const TRANSCRIPT_PAGE = 100;
 
 /** Kinds whose sessions the Chat view can open. */
 const CHAT_KINDS = new Set(['companion-chat']);
@@ -211,16 +214,34 @@ export function SessionDetail({ record, agents, tab, onTabChange, streamPaused, 
   // session record only mirrors that the chat exists, so its count reads 0. The
   // read is the one the chat view makes, under the same key.
   const companionChat = record.kind === 'companion-chat';
-  const messages = useQuery({
-    queryKey: companionChat ? ['companion-chat', record.id, 'messages'] : queryKeys.sessionMessages(record.id),
-    queryFn: (): Promise<unknown> => companionChat
-      ? platformClient.chat.messages.list(record.id)
-      : platformClient.operator.sessions.messages.list(record.id),
-    enabled: Boolean(record.id) && tab === 'transcript',
+  const chatMessages = useQuery({
+    queryKey: ['companion-chat', record.id, 'messages'],
+    queryFn: (): Promise<unknown> => platformClient.chat.messages.list(record.id),
+    enabled: companionChat && Boolean(record.id) && tab === 'transcript',
   });
-  const items = useMemo(() => companionMessagesFromListResponse(messages.data), [messages.data]);
+  // A shared session's messages come a page at a time, newest first: "Show older
+  // messages" reads the page before with the daemon's offset, so the whole retained
+  // history is reachable here; nothing past the newest page is read unless asked.
+  const sharedMessages = useInfiniteQuery({
+    queryKey: [...queryKeys.sessionMessages(record.id), 'pages'],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }): Promise<unknown> => platformClient.operator.sessions.messages.list(record.id, { limit: TRANSCRIPT_PAGE, offset: pageParam }),
+    getNextPageParam: (last) => {
+      const page = asRecord(last);
+      return page.hasMore === true && typeof page.nextOffset === 'number' ? page.nextOffset : undefined;
+    },
+    enabled: !companionChat && Boolean(record.id) && tab === 'transcript',
+  });
+  const messages = companionChat ? chatMessages : sharedMessages;
+  const items = useMemo(
+    () => companionChat
+      ? companionMessagesFromListResponse(chatMessages.data)
+      // Pages are newest first; each page is oldest first within itself.
+      : [...(sharedMessages.data?.pages ?? [])].reverse().flatMap((page) => companionMessagesFromListResponse(page)),
+    [companionChat, chatMessages.data, sharedMessages.data],
+  );
   const messageTotal = companionChat
-    ? (typeof asRecord(messages.data).total === 'number' ? asRecord(messages.data).total as number : items.length)
+    ? (typeof asRecord(chatMessages.data).total === 'number' ? asRecord(chatMessages.data).total as number : items.length)
     : record.messageCount;
 
   // Whether this daemon has a real hard delete (sessions.delete). A 404
@@ -361,6 +382,13 @@ export function SessionDetail({ record, agents, tab, onTabChange, streamPaused, 
             )}
             {(items.length > 0 || compaction.receipts.length > 0) && (
               <ol className="work-transcript" aria-label="Transcript">
+                {!companionChat && sharedMessages.hasNextPage && (
+                  <li className="work-transcript__message">
+                    <Button size="sm" variant="ghost" disabled={sharedMessages.isFetchingNextPage} onClick={() => void sharedMessages.fetchNextPage()}>
+                      {sharedMessages.isFetchingNextPage ? 'Loading…' : 'Show older messages'}
+                    </Button>
+                  </li>
+                )}
                 {items.map((message, index) => (
                   <li key={firstString(message, ['id', 'messageId']) || String(index)} className="work-transcript__message">
                     <span className="work-transcript__role">{firstString(message, ['role', 'author', 'kind']) || 'message'}</span>

@@ -3,8 +3,8 @@
  * you keep beside your work. The Agent keeps them in its home, with a review
  * state, and can make a memory record, a persona, a skill or a routine from
  * one, or add its web page to Agent Knowledge. The terminal app keeps them for
- * this session and the model keeps seeing them after a compaction (the old
- * `/keep` and `/note`); it can keep one as a memory record. What each app does
+ * this session and the model keeps seeing them after a compaction (a message
+ * that starts with `!#` writes one too); it can keep one as a memory record. What each app does
  * is its policy; an act an app does not have is refused with the reason.
  */
 import { commandRefusal } from './command-confirmation.js';

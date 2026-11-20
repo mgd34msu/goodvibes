@@ -16,9 +16,6 @@ import { useEffect, useState } from 'react';
 import { parseCompactionCheck, parseCompactionReceipt, type CompactionCheck, type CompactionReceipt } from '../lib/compaction';
 import { subscribeEvents, useEventStreamState } from '../lib/event-stream';
 
-/** Cap retained receipts per session, an honest live log, not an unbounded leak. */
-const MAX_RECEIPTS = 20;
-
 export interface CompactionReceiptsState {
   receipts: CompactionReceipt[];
   latestCheck: CompactionCheck | null;
@@ -49,7 +46,9 @@ export function useCompactionReceipts(sessionId: string, enabled: boolean): Comp
       onEvent: (_name, payload) => {
         const receipt = parseCompactionReceipt(payload);
         if (receipt) {
-          if (receipt.sessionId === sessionId) setReceipts((current) => [...current, receipt].slice(-MAX_RECEIPTS));
+          // Every receipt is kept while the pane is open: the frame is its only copy, and one
+          // arrives per compaction, so the log grows with the session's compactions, never faster.
+          if (receipt.sessionId === sessionId) setReceipts((current) => [...current, receipt]);
           return;
         }
         const check = parseCompactionCheck(payload);

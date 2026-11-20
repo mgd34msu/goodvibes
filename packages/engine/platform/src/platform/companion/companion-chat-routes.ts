@@ -41,6 +41,7 @@ import type {
   UpdateCompanionChatSessionInput,
 } from './companion-chat-types.js';
 import type { CompanionChatRouteContext } from './companion-chat-route-types.js';
+import { parseSessionListCursor } from './companion-chat-manager.js';
 
 // ---------------------------------------------------------------------------
 // Route dispatch, called from DaemonHttpRouter.dispatchApiRoutes
@@ -353,9 +354,14 @@ function handleListSessions(
   url: URL,
   context: CompanionChatRouteContext,
 ): Response {
+  const cursor = url.searchParams.get('cursor') ?? undefined;
+  if (parseSessionListCursor(cursor) === null) {
+    return Response.json({ error: 'cursor is not one this list returned', code: 'INVALID_CURSOR' }, { status: 400 });
+  }
   const input: ListCompanionChatSessionsInput = {
     includeClosed: readBooleanQuery(url, 'includeClosed'),
     limit: readLimitQuery(url),
+    cursor,
   };
   return Response.json(context.chatManager.listSessions(input));
 }

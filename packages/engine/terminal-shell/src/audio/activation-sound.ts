@@ -16,7 +16,7 @@
  * Playback uses the process's one streaming player, the same instance spoken
  * turns use (player.ts), so a host with mpv or ffplay needs nothing extra, a
  * host with neither degrades to silence with a reported reason rather than an
- * exception in the middle of a capture, and `/tts stop` or quitting cuts the
+ * exception in the middle of a capture, and `/voice stop` or quitting cuts the
  * chime too. A player that exits with an error is reported with its exit code
  * and last error line.
  */

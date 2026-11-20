@@ -242,7 +242,7 @@ function promptCardFields(ctx: CommandContext, fields: readonly CardField[], ind
   if (index === 0) {
     const daemon = selectedCardDaemon(ctx);
     if (!daemon) {
-      ctx.print('[payments] No paired daemon is selected, or its credential cannot be read. Check the selected host and pairing (/host), then choose "Add a card" in /payments again. Nothing was asked or sent.');
+      ctx.print('[payments] No paired daemon is selected, or its credential cannot be read. Check the selected host and pairing (/devices host-status), then choose "Add a card" in /payments again. Nothing was asked or sent.');
       return;
     }
     cardEntryDaemons.set(ctx, daemon);

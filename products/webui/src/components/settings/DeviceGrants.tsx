@@ -54,10 +54,15 @@ function formatWhen(value: number | null | undefined): string {
 
 const TITLE = 'Phone capability grants';
 
+/** Grant activity rows drawn at first, and how many more each "Show older" adds. */
+const AUDIT_PAGE = 25;
+
 export function DeviceGrants() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const [sweep, setSweep] = useState<HousekeepingResult | null>(null);
+  // Grant activity rows drawn; "Show older" draws the next ones from the list already read.
+  const [auditShown, setAuditShown] = useState(AUDIT_PAGE);
 
   const grants = useQuery<GrantsResult>({
     queryKey: deviceGrantsQueryKey,
@@ -291,7 +296,7 @@ export function DeviceGrants() {
       {audit.length > 0 ? (
         <Disclosure summary={`Recent grant activity (${audit.length})`}>
           <RowList aria-label="Recent grant activity">
-            {audit.slice(-25).reverse().map((entry) => (
+            {audit.slice(-auditShown).reverse().map((entry) => (
               <Row
                 key={entry.id}
                 title={`${entry.action} · ${entry.capabilityId}`}
@@ -299,6 +304,13 @@ export function DeviceGrants() {
                 trailing={<span className="device-panel__when">{whenLabel(entry.at)}</span>}
               />
             ))}
+            {audit.length > auditShown && (
+              <Row
+                title="Show older"
+                meta={`${audit.length - auditShown} more`}
+                onSelect={() => setAuditShown((shown) => shown + AUDIT_PAGE)}
+              />
+            )}
           </RowList>
         </Disclosure>
       ) : null}

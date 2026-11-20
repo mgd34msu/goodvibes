@@ -62,6 +62,9 @@ type ProposalsStatus =
 const NOT_CONFIGURED_TITLE = 'Memory registry not configured for this session.';
 const NOT_CONFIGURED_BODY = 'This runtime was not wired with a project memory registry at bootstrap, so no memory data is available.';
 
+/** Records per page of the All Records tab. */
+const RECORD_PAGE = 100;
+
 function fmtTime(ts: number): string {
   return new Date(ts).toISOString().slice(0, 16).replace('T', ' ');
 }
@@ -70,6 +73,8 @@ class MemoryModalSurface implements ConfigModalSurface {
   readonly name = 'memory-modal';
   readonly title = 'Memory';
   private allRecords: readonly MemoryRecord[] = [];
+  /** Records the All Records tab reads; "l show older" adds a page, so every record is reachable here. */
+  private recordLimit = RECORD_PAGE;
   private reviewRecords: readonly MemoryRecord[] = [];
   /** Honest note on the last read: a wire failure (client mode) or the index-unavailable fallback reason, never silently dropped. */
   private loadNote: string | null = null;
@@ -91,6 +96,7 @@ class MemoryModalSurface implements ConfigModalSurface {
     // /memory remove asks in its own dialog, naming the record; a second press here would ask twice.
     { key: 'd', id: 'remove', label: 'delete', enabledFor: (row: ConfigModalRow | null) => row !== null },
     { key: 'r', id: 'refresh', label: 'refresh' },
+    { key: 'l', id: 'showOlder', label: 'show older', enabledFor: (_row: ConfigModalRow | null, tabId: string) => tabId === 'all' && this.mayHaveOlder() },
     // Jump from a selected proposal to one of its affected records in the
     // Review Queue tab. A DISTINCT key from 'enter' (not shared with
     // markReviewed): ConfigModal.resolveAction matches the FIRST action bound
@@ -119,7 +125,7 @@ class MemoryModalSurface implements ConfigModalSurface {
     if (!this.deps.memoryRegistry) { this.allRecords = []; this.reviewRecords = []; this.loadNote = null; return; }
     try {
       const [result, reviewRecords] = await Promise.all([
-        this.deps.memoryRegistry.honestSearch({ limit: 100 }),
+        this.deps.memoryRegistry.honestSearch({ limit: this.recordLimit }),
         this.deps.memoryRegistry.reviewQueue(24),
       ]);
       if (generation !== this.refreshGeneration) return;
@@ -170,6 +176,11 @@ class MemoryModalSurface implements ConfigModalSurface {
     }
   }
 
+  /** A full page came back: there may be older records past it. */
+  private mayHaveOlder(): boolean {
+    return this.allRecords.length >= this.recordLimit;
+  }
+
   private recordFrom(id: string): MemoryRecord | undefined {
     return this.allRecords.find((r) => r.id === id) ?? this.reviewRecords.find((r) => r.id === id);
   }
@@ -192,10 +203,10 @@ class MemoryModalSurface implements ConfigModalSurface {
     return {
       id: 'all',
       label: 'All Records',
-      header: [`records ${this.allRecords.length}  review queue ${this.reviewRecords.length}`],
+      header: [`records ${this.allRecords.length}${this.mayHaveOlder() ? '+' : ''}  review queue ${this.reviewRecords.length}`],
       rows,
       emptyText: 'No memory records.',
-      hints: ['d delete'],
+      hints: this.mayHaveOlder() ? ['d delete', 'l show older'] : ['d delete'],
     };
   }
 
@@ -280,6 +291,7 @@ class MemoryModalSurface implements ConfigModalSurface {
 
   onAction(id: string, ctx: ConfigModalActionContext): void {
     if (id === 'refresh') { void this.refresh(); ctx.setStatus('Reloading memory records...'); return; }
+    if (id === 'showOlder') { this.recordLimit += RECORD_PAGE; void this.refresh(); ctx.setStatus('Reading older memory records...'); return; }
     if (id === 'jumpToReviewQueue') { this.handleJumpToReviewQueue(ctx); return; }
     const record = ctx.row ? this.recordFrom(ctx.row.id) : undefined;
     if (!record) return;

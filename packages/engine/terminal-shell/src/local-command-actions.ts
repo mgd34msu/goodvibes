@@ -61,7 +61,7 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
     for (const [i, block] of blockRegistry.entries()) {
       // A merged assistant turn (type 'assistant_turn', see
       // conversation-turn-structure.ts) owns the whole tool subtree beneath its
-      // header, so '/expand tool'/'collapse tool' treats it the same as a plain
+      // header, so '/session expand tool'/'collapse tool' treats it the same as a plain
       // 'tool' block, toggling the header's collapse key shows or hides every
       // tool row underneath it.
       const matchesType =
@@ -76,15 +76,15 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
         // Expanding a turn also expands each result's own collapse key in the
         // same pass. A result hidden by a collapsed turn pushes no BlockMeta of
         // its own, so it never surfaces from this loop to be toggled
-        // individually, without this, '/expand tool' would only open the turn
+        // individually, without this, '/session expand tool' would only open the turn
         // header and each result would still render at its own default collapse
-        // state, needing a second pass. '/collapse tool' needs no matching step:
+        // state, needing a second pass. '/session collapse tool' needs no matching step:
         // collapsing the turn hides every result regardless of its own key.
         if (!collapsed && block.type === 'assistant_turn' && block.groupMemberIndexes) {
           for (const [k, memberIdx] of block.groupMemberIndexes.entries()) {
             const memberKey = block.groupMemberKeys?.[k] ?? `msg_${memberIdx}`;
             ctx.session.conversationManager.setCollapsed(memberKey, false);
-            // An explicit /expand is a deliberate user action on this key, same
+            // An explicit /session expand is a deliberate user action on this key, same
             // as Tab/Ctrl+Y/Ctrl+B, exempts it from search's close-time
             // auto-re-collapse (see ConversationManager.noteUserTouch).
             policy.noteTouch(ctx.session.conversationManager, memberKey);

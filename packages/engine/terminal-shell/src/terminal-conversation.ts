@@ -687,7 +687,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
         draw(this._getWidth());
         this.displayOnly.noteDrawn(seq, this.history.getLineCount() - before, this.streamingStartLine >= 0);
     }
-    /** Display-only draws kept for redraw (bounded; for memory-hygiene assertions). */
+    /** Display-only draws kept for redraw (all of them until the conversation is cleared). */
     public getDisplayOnlyCount(): number { return this.displayOnly.count; }
     /**
      * flushHistory - Incremental update. Appends only newly added messages.

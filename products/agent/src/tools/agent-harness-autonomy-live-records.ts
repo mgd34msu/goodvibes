@@ -466,7 +466,7 @@ function taskLiveRecords(snapshot: UiTasksSnapshot | null): readonly AutonomyQue
         commandRoute(`/tasks output ${task.id}`),
         ...(canCancel ? [cancelRoute] : []),
         ...(canRetry ? [retryRoute] : []),
-        'Use /workplan for Agent-owned visible task changes; host task mutation requires current recorded admission on the exact owning daemon method.',
+        'Use /todo for Agent-owned visible task changes; host task mutation requires current recorded admission on the exact owning daemon method.',
       ],
       sourceIds: [
         task.parentTaskId,

@@ -12,6 +12,7 @@ import { Button } from './components/ui/Button';
 import { useUrlState } from './hooks/useUrlState';
 import type { ViewId } from './lib/router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { OperatorMethodInput } from '@goodvibes-jev/engine/contracts';
 import { useDaemonHealth } from './hooks/useDaemonHealth';
 import { usePairingHandoff } from './hooks/usePairingHandoff';
 import { usePreloadErrorReload } from './hooks/usePreloadErrorReload';
@@ -199,9 +200,44 @@ export default function App() {
     enabled: auth.isSuccess,
   });
 
+  // Older chats: the list above is the newest page; "Show older chats" reads the page
+  // after it with the daemon's cursor, one request per press and none otherwise, so
+  // every chat stays reachable from the sidebar however many there are.
+  const [olderChats, setOlderChats] = useState<{
+    readonly started: boolean;
+    readonly sessions: readonly unknown[];
+    readonly cursor: string;
+    readonly loading: boolean;
+    readonly failed: boolean;
+  }>({ started: false, sessions: [], cursor: '', loading: false, failed: false });
+  const firstPageCursor = typeof asRecord(chatSessions.data).nextCursor === 'string' ? asRecord(chatSessions.data).nextCursor as string : '';
+  const olderCursor = olderChats.started ? olderChats.cursor : firstPageCursor;
+  const showOlderChats = useCallback(() => {
+    if (!olderCursor || olderChats.loading) return;
+    setOlderChats((current) => ({ ...current, loading: true, failed: false }));
+    // `cursor` is on the method's schema; the generated input type gains it when the contract is regenerated.
+    const input: OperatorMethodInput<'companion.chat.sessions.list'> & { readonly cursor: string } = { limit: 100, cursor: olderCursor };
+    platformClient.chat.sessions.list(input).then((page) => {
+      const next = asRecord(page).nextCursor;
+      setOlderChats((current) => ({
+        started: true,
+        sessions: [...current.sessions, ...companionSessionsFromListResponse(page)],
+        cursor: typeof next === 'string' ? next : '',
+        loading: false,
+        failed: false,
+      }));
+    }, () => {
+      setOlderChats((current) => ({ ...current, loading: false, failed: true }));
+    });
+  }, [olderCursor, olderChats.loading]);
+
   const fetchedChatSessions = useMemo(() => {
-    return companionSessionsFromListResponse(chatSessions.data);
-  }, [chatSessions.data]);
+    const newest = companionSessionsFromListResponse(chatSessions.data);
+    if (olderChats.sessions.length === 0) return newest;
+    // A chat updated since its older page was read is in the newest page now: listed once, there.
+    const listed = new Set(newest.map((session) => bestId(session)));
+    return [...newest, ...olderChats.sessions.filter((session) => !listed.has(bestId(session)))];
+  }, [chatSessions.data, olderChats.sessions]);
   const chatSessionItems = useMemo(
     () => selectVisibleSessions(chatSessionsState, {
       serverSessions: fetchedChatSessions,
@@ -661,6 +697,7 @@ export default function App() {
       activeChatId={activeChatSessionId}
       draftChat={draftChatRequested || !activeChatSessionId}
       recentChats={recentChats}
+      olderChats={olderCursor ? { loading: olderChats.loading, failed: olderChats.failed, onShow: showOlderChats } : undefined}
       deletingChatId={deleteChat.isPending ? (deleteChat.variables ?? null) : null}
       workAttention={fleetAttentionCount}
       runningNow={runningWork}

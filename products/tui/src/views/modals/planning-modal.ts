@@ -198,7 +198,7 @@ class PlanningModalSurface implements ConfigModalSurface {
 
     if (!state) {
       line({ content: 'No historical planning state has been saved for this workspace.' });
-      line({ content: 'Start native work with /project-plan <goal>; /project-plan opens the native work ledger.', fg: undefined });
+      line({ content: 'Start native work with /work request <goal>; /work opens the native work ledger.', fg: undefined });
       for (const l of buildDecisionsLines(null, decisions)) line(l);
       for (const l of buildLanguageLines(language)) line(l);
       return { title: HISTORICAL_TITLE, bindingIdentity, scrollInformationalLines: true, tabs: [{ id: 'planning', label: 'History', header, rows, emptyText: '' }], hints: ['r refresh'] };
@@ -212,7 +212,7 @@ class PlanningModalSurface implements ConfigModalSurface {
     for (const l of buildDecisionsLines(state, decisions)) line(l);
     for (const l of buildLanguageLines(language)) line(l);
     if (state.metadata) line({ content: `Saved metadata (including artifact/link and approval provenance): ${JSON.stringify(state.metadata)}` });
-    line({ content: 'Read-only history. New work and recovery: /project-plan. Import remains a separate explicit operation.', fg: MODAL_TONES.dim });
+    line({ content: 'Read-only history. New work and recovery: /work. Import remains a separate explicit operation.', fg: MODAL_TONES.dim });
 
     return {
       title: HISTORICAL_TITLE,

@@ -212,7 +212,7 @@ export async function resumeSavedSession(ctx: CommandContext, input: { readonly 
           `Resumed session: ${found.name}\n  Name: ${meta.title || '(untitled)'}\n  Messages: ${resumedMessageCount}\n  Model: ${ctx.session.runtime.model || meta.model}`,
         );
         if (restoredAnchorCount > 0) {
-          ctx.print(`  Rewind: restored ${restoredAnchorCount} turn anchor(s); /rewind is available for this resumed session.`);
+          ctx.print(`  Rewind: restored ${restoredAnchorCount} turn anchor(s); /checkpoint rewind is available for this resumed session.`);
         }
         for (const line of outcome.notices) ctx.print(`  ${line}`);
         for (const warning of outcome.warnings ?? []) ctx.print(`  [Resume] ${warning}; the resumed conversation stands.`);

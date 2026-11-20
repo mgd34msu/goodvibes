@@ -50,6 +50,7 @@ export interface KnowledgeModalDeps {
 type BrowseKind = 'node' | 'source' | 'issue';
 interface BrowseRow { readonly kind: BrowseKind; readonly id: string; readonly title: string; readonly tag: string; readonly detail: string; readonly extra: string; }
 
+/** Rows of each kind read at first, and how many more "l show older" adds. */
 const LIST_LIMIT = 60;
 
 function cleanInline(value: string | undefined): string { return (value ?? '').replace(/\s+/g, ' ').trim(); }
@@ -79,8 +80,10 @@ class KnowledgeModalSurface implements KnowledgeModalReadSurface {
   private issueCount = 0;
   /** How many open issues the store holds, which can exceed the Review rows loaded. */
   private openIssueCount = 0;
-  /** Rows actually loaded per kind (each read is capped at LIST_LIMIT), so the header can say when it shows only part. */
+  /** Rows actually loaded per kind (each read takes listLimit), so the header can say when it shows only part. */
   private shownCounts = { sources: 0, nodes: 0, issues: 0 };
+  /** Rows of each kind read now; grows by LIST_LIMIT with each "l show older", so every source, node and issue is reachable here. */
+  private listLimit = LIST_LIMIT;
   private schedules: readonly KnowledgeScheduleLike[] = [];
   private loadError: string | null = null;
 
@@ -100,7 +103,16 @@ class KnowledgeModalSurface implements KnowledgeModalReadSurface {
     { key: 'o', id: 'reopen', label: 'reopen', enabledFor: this.issueGate },
     { key: 'm', id: 'openMemory', label: 'memory' },
     { key: 'r', id: 'refresh', label: 'refresh' },
+    { key: 'l', id: 'showOlder', label: 'show older', enabledFor: (_row: ConfigModalRow | null, tabId: string) => this.mayHaveOlder(tabId) },
   ];
+
+  /** Some kind on this tab came back as a full page: more may be past it. */
+  private mayHaveOlder(tabId: string): boolean {
+    if (tabId === 'review') return this.openIssueCount > this.reviewRows.length;
+    const { sources, nodes, issues } = this.shownCounts;
+    return this.sourceCount > sources || this.nodeCount > nodes || this.issueCount > issues
+      || sources >= this.listLimit || nodes >= this.listLimit || issues >= this.listLimit;
+  }
 
   onOpen(requestRender: () => void): void {
     this.requestRender = requestRender;
@@ -135,11 +147,11 @@ class KnowledgeModalSurface implements KnowledgeModalReadSurface {
     try {
       const api = this.deps.knowledgeApi;
       const [nodes, sources, issues, status, openIssues] = await Promise.all([
-        api.graph.nodes.list(LIST_LIMIT, options),
-        api.sources.list(LIST_LIMIT, options),
-        api.graph.issues.list(LIST_LIMIT, options),
+        api.graph.nodes.list(this.listLimit, options),
+        api.sources.list(this.listLimit, options),
+        api.graph.issues.list(this.listLimit, options),
         api.status?.get({}, options),
-        api.graph.issues.query?.({ status: 'open', limit: LIST_LIMIT }, options),
+        api.graph.issues.query?.({ status: 'open', limit: this.listLimit }, options),
       ]);
       assertCurrent();
       const schedules = await this.deps.knowledgeApi.jobs.schedules.list(20);
@@ -182,12 +194,12 @@ class KnowledgeModalSurface implements KnowledgeModalReadSurface {
       rows.push(headerRow('sched:title', 'Schedules'));
       this.schedules.slice(0, 4).forEach((s, i) => rows.push(infoRow(`sched:${i}`, `${s.enabled ? 'on ' : 'off'}  ${s.label}`, s.enabled ? undefined : { fg: MODAL_TONES.dim })));
     }
-    return { id: 'browse', label: 'Browse', header, rows, emptyText: 'No ingested knowledge yet.', hints: ['m memory'] };
+    return { id: 'browse', label: 'Browse', header, rows, emptyText: 'No ingested knowledge yet.', hints: this.mayHaveOlder('browse') ? ['m memory', 'l show older'] : ['m memory'] };
   }
 
   private reviewTab(): ConfigModalTab {
     const header = this.openIssueCount > this.reviewRows.length ? [`open issues ${this.openIssueCount} (listing ${this.reviewRows.length})`] : undefined;
-    return { id: 'review', label: 'Review', ...(header ? { header } : {}), rows: this.reviewRows.map((row) => this.rowFor(row)), emptyText: 'No issues waiting for review.', hints: ['a accept', 'x reject', 's resolve', 'o reopen'] };
+    return { id: 'review', label: 'Review', ...(header ? { header } : {}), rows: this.reviewRows.map((row) => this.rowFor(row)), emptyText: 'No issues waiting for review.', hints: this.mayHaveOlder('review') ? ['a accept', 'x reject', 's resolve', 'o reopen', 'l show older'] : ['a accept', 'x reject', 's resolve', 'o reopen'] };
   }
 
   buildView(): ConfigModalView {
@@ -199,6 +211,7 @@ class KnowledgeModalSurface implements KnowledgeModalReadSurface {
   onAction(id: string, ctx: ConfigModalActionContext): void {
     if (id === 'refresh') { this.refresh(); ctx.setStatus('Reloading knowledge graph…'); return; }
     if (id === 'openMemory') { ctx.openModal?.('memory-modal'); return; }
+    if (id === 'showOlder') { this.listLimit += LIST_LIMIT; this.refresh(); ctx.setStatus('Reading older knowledge…'); return; }
     const action = id === 'accept' ? 'accept' : id === 'reject' ? 'reject' : id === 'resolve' ? 'resolve' : id === 'reopen' ? 'reopen' : null;
     if (!action) return;
     const issueId = ctx.row?.id.startsWith('issue:') ? ctx.row.id.slice('issue:'.length) : null;

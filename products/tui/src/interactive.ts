@@ -472,13 +472,13 @@ async function main(prepared: PreparedShellCliRuntime) {
   });
   unsubs.push(ownerQuestionCard.start());
   // Turning wake detection on from anywhere (settings, /settings, a model's settings
-  // call) runs the same voice setup as /voice wake setup and shows its plan.
+  // call) runs the same voice setup as /voice wake-setup and shows its plan.
   unsubs.push(configManager.subscribe('voice.wake.enabled', (enabled) => {
     if (enabled !== true || wakeSetupRunning()) return;
     void runWakeSetupPlan(ctx.services.voiceSetup).then(
       (outcome) => {
         systemMessageRouter.userAction(['Wake-Word Setup', outcome.rendered,
-          ...(proposesSpeechToText(outcome) ? ['(yes: /voice wake setup yes installs it now)'] : [])].join('\n'));
+          ...(proposesSpeechToText(outcome) ? ['(/voice wake-setup --with-speech-to-text installs it now)'] : [])].join('\n'));
         render();
       },
       (error: unknown) => {
@@ -706,7 +706,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       () => input.handlePaste(),
     ),
   );
-  // Read-only view of pending [TEXT: pN, M lines] fold markers, so /pastes
+  // Read-only view of pending [TEXT: pN, M lines] fold markers, so /paste list
   // can preview a folded paste's actual content before the user submits it.
   commandContext.getPendingPastes = () => input.pasteRegistry;
   commandContext.executeCommand = (name, args) => commandRegistry.execute(name, args, commandContext);
@@ -1606,7 +1606,7 @@ async function main(prepared: PreparedShellCliRuntime) {
 
   // State restores happen ONLY when the user explicitly asks, a CLI flag
   // (--continue/--resume/--fork), a slash command (/session resume,
-  // /checkpoints, /rewind), or the startup recovery offer's modal. There is
+  // /checkpoint list, /checkpoint rewind), or the startup recovery offer's modal. There is
   // deliberately no unconditional auto-restore here: a bare launch never
   // loads a saved conversation on its own (owner ruling).
 

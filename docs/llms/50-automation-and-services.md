@@ -475,7 +475,7 @@ The daemon can watch mailboxes and tell the owner when mail arrives. Arrival is 
 - `surfaces.email.imap.authservIds` names the authserv-ids your receiving server writes in `Authentication-Results`, for a provider that is not built in (Gmail, Fastmail, Zoho, Yahoo and AOL are). Without it, senders on such a mailbox read as unverified.
 - `surfaces.email.inboxTagging` (default off) lets the inbox write its spam, priority and normal labels back to the mailbox as IMAP keywords.
 - Operator methods: `email.inbound.status`, `email.inbox.list`, `email.inbox.read`, `email.inbox.update`, `email.send`, `email.draft.create`, `email.draft.update`, `email.drafts.list`, `email.attachment.get`, `email.expectation.open`, `email.expectation.wait`, `email.expectation.list`, `email.expectation.cancel`.
-- A message UID names a message only within its mailbox generation: `email.inbox.list` and `email.inbox.read` return `uidValidity`, and `email.inbox.update` requires it, so a mailbox the server reset refuses the change instead of changing whichever message now holds the number. In the same way `email.drafts.list` and `email.draft.create` return the Drafts folder's `uidValidity`, and `email.draft.update` replaces a saved draft (by `uid` and `uidValidity`) so the folder keeps one copy instead of two.
+- A message UID names a message only within its mailbox generation: `email.inbox.list` and `email.inbox.read` return `uidValidity`, and `email.inbox.update` requires it, so a mailbox the server reset refuses the change instead of changing whichever message now holds the number. In the same way `email.drafts.list` and `email.draft.create` return the Drafts folder's `uidValidity`, and `email.draft.update` replaces a saved draft (by `uid` and `uidValidity`) so the folder keeps one copy instead of two. `email.drafts.list` reads the newest drafts; `before` (a UID) reads the page older than it, so every draft in the folder can be listed (the web UI's "Load older drafts").
 - A draft is saved with a `Message-ID` of its own. A change to the mailbox (a saved or replaced draft, a message marked, archived or moved) is reported done once the server confirmed it, even when signing out afterwards fails. A save whose answer the server never gave is reported as one that may have been saved; creating the same draft again in the same daemon run looks for it under that `Message-ID` first and returns it instead of saving a second copy.
 
 ## Calendar
@@ -633,7 +633,7 @@ A channel is a chat surface the daemon sits behind: Slack, Discord, Telegram, nt
 ### General setup procedure
 
 1. Get the credentials from the provider (each surface below says which).
-2. In the terminal app, run `/devices pair channel <surface>`. It lists the surface's declared fields, asks for every missing required value (and offers the optional ones), stores secret values in the daemon's secret store with a reference in the setting, and switches the surface on once every required field is set. `/channel pair` alone lists every surface and how many required values are set. A surface whose schema marks no field required (Slack, ntfy, the generic webhook, Google Chat) is switched on even when you skip every value, so enter its tokens before you finish, or set them with `/settings set` as below.
+2. In the terminal app, run `/devices pair channel <surface>`. It lists the surface's declared fields, asks for every missing required value (and offers the optional ones), stores secret values in the daemon's secret store with a reference in the setting, and switches the surface on once every required field is set. `/devices pair channel` alone lists every surface and how many required values are set. A surface whose schema marks no field required (Slack, ntfy, the generic webhook, Google Chat) is switched on even when you skip every value, so enter its tokens before you finish, or set them with `/settings set` as below.
    - Alternatively set each key with `/settings set surfaces.<surface>.<field> <value>` and switch it on with `/settings set surfaces.<surface>.enabled true` or `goodvibes surfaces enable <surface>`.
    - In the Agent: `/channels setup <id>`, `/channels doctor <id>`, `/channels guide <id>`.
 3. Prove it end to end: `/channels test <surface>` sends a real test message through the daemon and reports the delivered or error outcome.
@@ -934,25 +934,26 @@ When a request names no provider, a configured `local` provider is used first, t
 /settings set tts.provider openai
 /settings set tts.voice <voice-id>
 /settings set tts.speed 1.1
-/tts <prompt>          speak the answer to a prompt
-/tts stop
-/tts on                speak every answer (always-speak)
-/tts off
+/voice speak <message> speak the answer to a message
+/voice stop
+/voice on              speak every answer
+/voice off
 ```
 
 ### `/voice`
 
 ```text
-/voice                 review (same as /voice review)
+/voice                 the list of voice actions (a model or script gets /voice review)
+/voice review
 /voice status
 /voice setup
-/voice enable          speak every answer
-/voice disable
-/voice wake status
-/voice wake setup [yes]
-/voice bundle export <path>
-/voice bundle inspect <path>
-/voice bundle import <path>
+/voice on              speak every answer
+/voice off
+/voice wake-status
+/voice wake-setup [--with-speech-to-text]
+/voice export <file>
+/voice inspect <file>
+/voice import <file>
 ```
 
 `ui.voiceEnabled` turns the voice control surface on. The `voice-input` key action (Alt+V by default) starts and stops recording in the terminal app.
@@ -981,20 +982,20 @@ Wake-word detection listens continuously on the microphone for the phrase "hey g
 
 What it needs:
 
-- The wake models: a classifier for "hey goodvibes" and a speech-embedding front end (about 6 MB in all), checksum-pinned and downloaded into `~/.goodvibes/voice/wake`. Installing GoodVibes downloads them, and a daemon retries at start if the install had no network. If they are still missing, turning `voice.wake.enabled` on in the terminal app or the Agent runs the wake setup plan, which downloads them (see below); `/voice wake setup` and `goodvibes-daemon provision-wake-model` also fetch them.
+- The wake models: a classifier for "hey goodvibes" and a speech-embedding front end (about 6 MB in all), checksum-pinned and downloaded into `~/.goodvibes/voice/wake`. Installing GoodVibes downloads them, and a daemon retries at start if the install had no network. If they are still missing, turning `voice.wake.enabled` on in the terminal app or the Agent runs the wake setup plan, which downloads them (see below); `/voice wake-setup` and `goodvibes-daemon provision-wake-model` also fetch them.
 - A recorder program on the host for the terminal apps: `pw-record`, `parecord`, `arecord`, `ffmpeg` or `sox` (`voice.wake.captureCommand` `auto` uses the first one found in that order).
 - Speech to text: a configured speech-to-text provider (the managed local whisper, or a cloud provider from the table above). Without it a wake has nothing to transcribe.
 
 Turning it on from nothing (terminal app):
 
 ```text
-/voice wake status          what is installed and what blocks wake
-/voice wake setup           fetch missing wake models, turn on the wake rows for this terminal, and propose speech to text
-/voice wake setup yes       the same, and install the proposed local speech to text through the daemon
+/voice wake-status          what is installed and what blocks wake
+/voice wake-setup           fetch missing wake models, turn on the wake rows for this terminal, and propose speech to text
+/voice wake-setup --with-speech-to-text       the same, and install the proposed local speech to text through the daemon
 /settings set voice.wake.enabled true
 ```
 
-In both the terminal app and the Agent, turning on `voice.wake.enabled` from anywhere (the settings workspace, `/settings set`, a model's settings call) runs the same setup plan as `/voice wake setup`: it fetches missing wake models and prints the plan. In the Agent the same write also turns on `voice.wake.surfaces.agent` (off by default) and says so, because the switch alone would open no microphone there; the terminal app's row `voice.wake.surfaces.tui` is on by default. The Agent's follow-up line is `(yes: /voice wake setup --yes yes installs it now)`. While wake runs, the terminal footer shows the listening marker (`voice.wake.indicator`). `ui.voiceEnabled` (always-speak) is not needed for wake. The `voice.wake.*` settings belong to each app, not the daemon: the Agent keeps its own `voice.wake.enabled`, set with `/settings set voice.wake.enabled true` there.
+In both the terminal app and the Agent, turning on `voice.wake.enabled` from anywhere (the settings workspace, `/settings set`, a model's settings call) runs the same setup plan as `/voice wake-setup`: it fetches missing wake models and prints the plan. In the Agent the same write also turns on `voice.wake.surfaces.agent` (off by default) and says so, because the switch alone would open no microphone there; the terminal app's row `voice.wake.surfaces.tui` is on by default. The Agent's follow-up line is `(yes: /voice wake-setup --with-speech-to-text installs it now)`. While wake runs, the terminal footer shows the listening marker (`voice.wake.indicator`). `ui.voiceEnabled` (always-speak) is not needed for wake. The `voice.wake.*` settings belong to each app, not the daemon: the Agent keeps its own `voice.wake.enabled`, set with `/settings set voice.wake.enabled true` there.
 
 The `voice.wake.*` settings, by group:
 
@@ -1015,10 +1016,10 @@ Failures:
 
 | Symptom | Fix |
 | --- | --- |
-| Wake models reported missing or failing verification | `/voice wake setup` (re-run to resume). |
+| Wake models reported missing or failing verification | `/voice wake-setup` (re-run to resume). |
 | No recorder found, or a named `captureCommand` is not installed | Install one of `pw-record`, `parecord`, `arecord`, `ffmpeg`, `sox`, or set `captureCommand` to `auto`. |
-| A surface refuses to start with `vadThreshold` above 0 | The speech gate artifact is not installed there: run `/voice wake setup`, or set `vadThreshold` to 0. |
-| Wakes but nothing is transcribed | No speech-to-text provider: `/voice wake setup yes`, or configure a cloud speech-to-text key. |
+| A surface refuses to start with `vadThreshold` above 0 | The speech gate artifact is not installed there: run `/voice wake-setup`, or set `vadThreshold` to 0. |
+| Wakes but nothing is transcribed | No speech-to-text provider: `/voice wake-setup --with-speech-to-text`, or configure a cloud speech-to-text key. |
 | Detector stops after repeated crashes | It latched off after `maxRestarts`; fix the device or recorder, then restart the app. |
 | Fires on ordinary speech | Raise `threshold`, set `vadThreshold` 0.3, or raise `patienceFrames`. |
 

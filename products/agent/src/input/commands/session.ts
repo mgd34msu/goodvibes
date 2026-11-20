@@ -62,7 +62,7 @@ const commands = createSessionCommands<CommandContext>({
     bookmarks: (ctx) => handleBookmarks(ctx, () => requireBookmarkManager(ctx)),
     compactions: undefined,
   },
-  graphReadOnly: 'The Agent reads the cross-session task graph but does not change it; hand work over with /delegate <task>.',
+  graphReadOnly: 'The Agent reads the cross-session task graph but does not change it; hand work over with /agents hand-off <the work>.',
   graph(ctx, input) {
     handleGraph(input, ctx);
   },

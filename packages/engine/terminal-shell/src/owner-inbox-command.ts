@@ -15,6 +15,7 @@
  * answers it: the owner's answer is the owner's.
  */
 import { formatRefusal } from '@goodvibes-jev/engine/errors';
+import { listEveryOwnerItem } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { OwnerAnswerDelivery, OwnerInboxPort, OwnerItem } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import type { TerminalCommandRegistry } from './command-registry.js';
@@ -40,7 +41,6 @@ export interface OwnerInboxCommandPolicy<Context> {
 }
 
 const SHORT_ID_CHARS = 14;
-const LIST_LIMIT = 50;
 const DECISIONS_LIMIT = 30;
 
 /** Display-only: strip terminal control sequences from text an agent or a channel wrote. */
@@ -189,7 +189,7 @@ const TERMINAL_ONLY = { terminalOnly: 'The web UI answers the inbox on its own I
 const OPEN_QUESTIONS = defineList<unknown>({
   name: 'inbox.open',
   async read(ctx) {
-    return (await inboxOf(ctx).list({ status: 'open', limit: LIST_LIMIT })).map((item): ListRow => ({
+    return (await listEveryOwnerItem(inboxOf(ctx), { status: 'open' })).map((item): ListRow => ({
       value: shortId(item.id), label: text(item.title), state: item.kind,
       detail: item.options.length > 0 ? `answers: ${item.options.join(', ')}` : 'a written answer',
     }));
@@ -199,13 +199,13 @@ const OPEN_QUESTIONS = defineList<unknown>({
 const ALL_ITEMS = defineList<unknown>({
   name: 'inbox.all',
   async read(ctx) {
-    return (await inboxOf(ctx).list({ status: 'all', limit: LIST_LIMIT })).map((item): ListRow => ({ value: shortId(item.id), label: text(item.title), state: item.status }));
+    return (await listEveryOwnerItem(inboxOf(ctx), { status: 'all' })).map((item): ListRow => ({ value: shortId(item.id), label: text(item.title), state: item.status }));
   },
   operator: { method: 'inbox.list', input: { status: 'all' }, rows: { from: 'items', value: 'id', label: 'title', state: 'status' } },
 });
 /** Open requests for approval the reading says this viewer raised and may still withdraw. */
 async function withdrawable(ctx: unknown): Promise<readonly OwnerItem[]> {
-  return (await inboxOf(ctx).list({ status: 'open', kinds: ['approval'], limit: LIST_LIMIT }))
+  return (await listEveryOwnerItem(inboxOf(ctx), { status: 'open', kinds: ['approval'] }))
     .filter((item) => item.reading?.requester.mine === true && item.reading.allowedActions.includes('cancel'));
 }
 const MY_REQUESTS = defineList<unknown>({
@@ -219,7 +219,7 @@ const MY_REQUESTS = defineList<unknown>({
 const OPEN_DECISIONS = defineList<unknown>({
   name: 'inbox.decisions',
   async read(ctx) {
-    return (await inboxOf(ctx).list({ status: 'open', kinds: ['decision'], limit: LIST_LIMIT })).map((item): ListRow => ({ value: shortId(item.id), label: text(item.title), detail: when(item.createdAt) }));
+    return (await listEveryOwnerItem(inboxOf(ctx), { status: 'open', kinds: ['decision'] })).map((item): ListRow => ({ value: shortId(item.id), label: text(item.title), detail: when(item.createdAt) }));
   },
   operator: { method: 'inbox.list', input: { status: 'open', kinds: 'decision' }, rows: { from: 'items', value: 'id', label: 'title' } },
 });
@@ -227,7 +227,7 @@ const OPEN_DECISIONS = defineList<unknown>({
 async function findItem(inbox: OwnerInboxPort, raw: string, status: 'open' | 'all'): Promise<OwnerItem> {
   const direct = await inbox.find(raw);
   if (direct) return direct;
-  const resolved = resolveId(raw, await inbox.list({ status, limit: 500 }));
+  const resolved = resolveId(raw, await listEveryOwnerItem(inbox, { status }));
   if ('error' in resolved) throw commandRefusal(resolved.error);
   const item = await inbox.find(resolved.id);
   if (!item) throw commandRefusal(`${resolved.id} is no longer in the inbox.`);
@@ -267,10 +267,10 @@ export function registerOwnerInboxCommands<Context extends OwnerInboxCommandCont
       readAction<Context>({
         id: 'list', label: 'See what waits on you', word: 'list',
         sentence: 'Lists every open question, ask, claim and purchase window, with its answers.',
-        async rowValue(ctx) { try { const open = await inboxOf(ctx).list({ status: 'open', limit: LIST_LIMIT }); return open.length === 0 ? 'nothing waiting' : `${open.length} waiting`; } catch { return ''; } },
+        async rowValue(ctx) { try { const open = await listEveryOwnerItem(inboxOf(ctx), { status: 'open' }); return open.length === 0 ? 'nothing waiting' : `${open.length} waiting`; } catch { return ''; } },
         async run(_values, ctx) {
           let items: readonly OwnerItem[];
-          try { items = await inboxOf(ctx).list({ status: 'open', limit: LIST_LIMIT }); } catch (error) { return failed('read the inbox', error); }
+          try { items = await listEveryOwnerItem(inboxOf(ctx), { status: 'open' }); } catch (error) { return failed('read the inbox', error); }
           if (items.length === 0) return 'Nothing is waiting on you.';
           return [`Waiting on you (${items.length}):`, ...items.map((item) => `  ${formatOwnerItemLine(item)}`), '', 'Show one: /questions show <id>   Answer: /questions answer <id> <choice|text>'].join('\n');
         },
@@ -280,7 +280,7 @@ export function registerOwnerInboxCommands<Context extends OwnerInboxCommandCont
         sentence: 'Lists every inbox item, open or answered, newest first, with who answered and where the answer went.',
         async run(_values, ctx) {
           let items: readonly OwnerItem[];
-          try { items = await inboxOf(ctx).list({ status: 'all', limit: LIST_LIMIT }); } catch (error) { return failed('read the inbox', error); }
+          try { items = await listEveryOwnerItem(inboxOf(ctx), { status: 'all' }); } catch (error) { return failed('read the inbox', error); }
           if (items.length === 0) return 'Nothing has been asked of you yet.';
           return [`Owner inbox (${items.length}, newest first):`, ...items.map((item) => `  ${formatOwnerItemLine(item)}`)].join('\n');
         },
@@ -366,11 +366,14 @@ export function registerOwnerInboxCommands<Context extends OwnerInboxCommandCont
           if (typeof window === 'string') throw commandRefusal(window.replace('/decisions since', '--when "since'));
           if (values.when && window === undefined) throw commandRefusal(`"${values.when}" is not a period: today, yesterday, a day (2026-11-19), or since a day or 30m, 2h, 3d, 1w.`);
           const count = Number(values.count);
-          const limit = window !== undefined ? 500 : Number.isInteger(count) && count > 0 ? Math.min(count, 500) : DECISIONS_LIMIT;
+          // A period reads the whole inbox, a page at a time; a count reads as many as it asks, however far back.
+          const limit = window !== undefined ? Number.POSITIVE_INFINITY : Number.isInteger(count) && count > 0 ? count : DECISIONS_LIMIT;
           const inbox = inboxOf(ctx);
+          const read = async (filter: { readonly status: 'open' | 'closed'; readonly kinds?: readonly ['decision'] }): Promise<readonly OwnerItem[]> =>
+            limit <= DECISIONS_LIMIT ? inbox.list({ ...filter, limit }) : (await listEveryOwnerItem(inbox, filter)).slice(0, limit);
           let allOpen: readonly OwnerItem[], allClosed: readonly OwnerItem[];
           try {
-            [allOpen, allClosed] = await Promise.all([inbox.list({ status: 'open', kinds: ['decision'], limit }), inbox.list({ status: 'closed', limit })]);
+            [allOpen, allClosed] = await Promise.all([read({ status: 'open', kinds: ['decision'] }), read({ status: 'closed' })]);
           } catch (error) { return failed('read the decisions', error); }
           const inWindow = (at: number): boolean => window === undefined || (at >= window.from && at < window.to);
           const open = allOpen.filter((item) => inWindow(item.createdAt));
@@ -402,7 +405,7 @@ export function registerOwnerInboxCommands<Context extends OwnerInboxCommandCont
           const raw = values.decision!;
           let resolvedId: string;
           try {
-            const resolved = resolveId(raw, await inbox.list({ status: 'open', kinds: ['decision'], limit: 500 }));
+            const resolved = resolveId(raw, await listEveryOwnerItem(inbox, { status: 'open', kinds: ['decision'] }));
             if ('error' in resolved) {
               const closed = await inbox.find(raw);
               throw commandRefusal(closed?.kind === 'decision'

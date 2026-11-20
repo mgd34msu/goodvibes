@@ -3,7 +3,7 @@ import { createWakeProvisionPresentation } from '@goodvibes-jev/engine/terminal-
 // wake-provision-status.ts, the surface-facing projection of wake-word
 // provisioning and of the `voice.wake.*` rows that are or are not in force.
 //
-// The wake artifacts are checksum-pinned and provisioned by /voice wake setup, or
+// The wake artifacts are checksum-pinned and provisioned by /voice wake-setup, or
 // fetched automatically when wake detection is turned on for this surface. This module is the read-only projection those surfaces
 // render from: per-artifact present / verified / corrupt / bytes taken straight
 // from the platform's wakeProvisionStatus, which verifies by CONTENT rather than by
@@ -53,7 +53,7 @@ export function formatWakeBytes(bytes: number): string {
  * reported rather than faked.
  *
  * Lives here, beside the status projection and away from the inference runtime,
- * so `/voice wake status` can resolve settings without pulling onnxruntime into a
+ * so `/voice wake-status` can resolve settings without pulling onnxruntime into a
  * status call.
  */
 export function agentWakeCapabilities(options: { readonly vadReady: boolean }): WakeSurfaceCapabilities {

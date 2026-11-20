@@ -167,8 +167,8 @@ function createDisabledAgentWorktreeRegistry(workingDirectory: string): Worktree
 
 /**
  * Managed voice provisioning: the surface this Agent exposes both to its own
- * slash commands (/voice status, /voice setup, /voice wake status, /voice wake
- * setup) and to the voice.local.* and voice.wake.* gateway verbs.
+ * slash commands (/voice status, /voice setup, /voice wake-status, /voice
+ * wake-setup) and to the voice.local.* and voice.wake.* gateway verbs.
  *
  * An alias for the platform's own service type rather than a locally-declared shape.
  * It was declared locally while the platform's composition was internal; now that

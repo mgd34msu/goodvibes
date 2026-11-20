@@ -130,7 +130,7 @@ function isStoredSnapshot(value: unknown): value is StoredSnapshot {
 
 /**
  * Build a conversation rewind port. `resolveConversation` maps an anchor's
- * sessionId to the live ConversationManager, for the single-session /rewind
+ * sessionId to the live ConversationManager, for the single-session /checkpoint rewind
  * command it returns the one bound conversation; for the daemon it looks the
  * session up in the live registry. A null resolution means no live conversation
  * for that session, reported as "nothing to drop" rather than a fabricated count.
@@ -321,7 +321,7 @@ export function createConversationRewindPort(
 // Live per-session conversation registry.
 //
 // This process's conversations, by session id. Two readers now: the local
-// /rewind command, and the host loop that answers the DAEMON's questions about
+// /checkpoint rewind command, and the host loop that answers the DAEMON's questions about
 // a session this surface is running (the platform's client/conversation-rewind-host.ts),
 // which is what makes conversation rewind work from any surface again, since
 // only the process holding the messages can count or drop them.
@@ -364,7 +364,7 @@ function onSessionConversationChange(listener: () => void): () => void {
  * Whether this process is actually holding a session's conversation right now.
  *
  * The port below answers "nothing to drop" for a session it cannot resolve,
- * which is the right degrade for a LOCAL /rewind (there is nothing to truncate
+ * which is the right degrade for a LOCAL /checkpoint rewind (there is nothing to truncate
  * here). It is the wrong answer for a rewind driven from another surface: a
  * confident zero is indistinguishable from a real zero, and that is exactly the
  * failure the surface-hosted rewind contract exists to end. The host loop
@@ -377,7 +377,7 @@ function hasSessionConversation(sessionId: string): boolean {
 
 /**
  * The port that answers for whichever of this process's conversations an anchor
- * names. Used by the local /rewind command and, through the host loop, by the
+ * names. Used by the local /checkpoint rewind command and, through the host loop, by the
  * daemon when a rewind driven from anywhere touches a session running here.
  */
 function createSessionConversationRewindPort(options: ConversationRewindPortOptions = {}): ConversationRewindPort {

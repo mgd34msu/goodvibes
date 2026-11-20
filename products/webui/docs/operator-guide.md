@@ -222,7 +222,7 @@ Show, Archive, which is view-only: this page has no unarchive control yet.
 Workspace checkpoints opens the workspace's snapshots.
 
 Work plan (also `?tab=plan`) opens the project's work plan: the checklist the
-terminal app's `/work-plan`, the Agent's todo list and the model's `work_plan`
+terminal app's `/todo`, the Agent's todo list and the model's `work_plan`
 tool keep, one plan per project in every app. It lists the items in order with
 their status and the plan's counts. Add an item with the field at the top;
 change an item's status with its status select; move it up or down; edit its

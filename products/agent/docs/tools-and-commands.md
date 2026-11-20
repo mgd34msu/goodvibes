@@ -34,7 +34,7 @@ High-signal TUI routes:
 | `/memory`, `/notes`, `/personas` (VIBE.md too), `/my-skills`, `/routines` | Manage VIBE.md personality and Agent-local behavior libraries. |
 | `/approval`, `/questions`, `/schedule` | What each approval asks about, answer one, and run, pause, stop or retry schedules and their runs. |
 | `/channels`, `/notify`, `/devices` | Pair companions, inspect channel readiness, review delivery receipts, and send confirmed messages. |
-| `/media`, `/voice`, `/tts` | Inspect media/voice readiness, generate media, and run spoken turns. |
+| `/media`, `/voice` | Inspect media/voice readiness, make media, and hear answers spoken (`/voice speak`). |
 | `/mcp`, `/secrets`, `/settings` | Inspect or update Agent-local configuration. |
 | `/agents hand-off` | Hand explicit build/fix/review work to the terminal app with a handoff brief. Each hand-off is recorded in the Agent home; `/agents handed-off` lists them and `/agents handed-off <session>` shows the session's input state and latest answer. A hand-off whose task could not be delivered removes the empty session it created. |
 
@@ -229,7 +229,7 @@ The connected browser cockpit/PWA is `surfaceId:"connected-browser-cockpit"`; it
 Execution routes:
 
 - GoodVibes settings import previews changed setting/subscription counts without mutation; confirmed execution imports only Agent-owned settings and provider subscription state, redacts secret values, stores raw secret-backed values through the secret manager, and does not mutate source package stores. A project settings file travels with a repository, so it is not trusted for permission, approval, provider, tool, surface, automation or helper settings: the preview lists those keys as skipped with a reason, and only the user settings file can change them.
-- VIBE.md personality files are discovered from project/global locations, secret-scanned, surfaced in setup and the learning curator when blocked or truncated, and applied to the serial Agent prompt. Use `vibe action:"status|show"` for direct read-only inspection, `vibe action:"init|import_persona" confirm:true explicitUserRequest:"..."` for confirmed changes, or `/vibe` and the Personas workspace for the visible command surface. Unconfirmed init/import previews return model and CLI `confirmationRoutes` so users can approve the exact same personality action without reconstructing syntax.
+- VIBE.md personality files are discovered from project/global locations, secret-scanned, surfaced in setup and the learning curator when blocked or truncated, and applied to the serial Agent prompt. Use `vibe action:"status|show"` for direct read-only inspection, `vibe action:"init|import_persona" confirm:true explicitUserRequest:"..."` for confirmed changes, or `/personas vibe` and the Personas workspace for the visible command surface. Unconfirmed init/import previews return model and CLI `confirmationRoutes` so users can approve the exact same personality action without reconstructing syntax.
 - Project context files are discovered from the sources tabled in [getting-started.md](getting-started.md), secret-scanned, bounded, target-aware for subdirectory work, and inspectable through `context action:"files"` and `context action:"file"`.
 - Local memory posture, provider inspection, curator review, search, and lookup prefer `memory`. Confirmed memory record create/update/review/stale/delete actions on `memory` forward to the local registry's confirmation gates; notes, personas, skills, routines, bundles, and detailed local record mutations dispatch through `agent_local_registry`.
 - Runtime prompt context applies safe VIBE.md files, safe project context files, and only reviewed, high-confidence memory plus reviewed setup-ready behavior. Blocked or truncated VIBE.md/context files and enabled but unreviewed, stale, low-confidence, or setup-blocked local behavior are surfaced as suppressed review work.
@@ -388,49 +388,49 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | Command | Purpose |
 | --- | --- |
 | `/accounts` | Review provider auth routes, subscription windows, and billing-path safety. |
-| `/activity` | Show running work, what needs you, what is coming up, and recent activity (also Ctrl+O). Routine system and tool lines stay here; a notice you must see or act on (an error, an offer, a setting ignored or read under a new name, an update result) also shows on the main screen once. Setting `ui.systemMessages` or `ui.operationalMessages` to `panel` yourself keeps those here too, except errors, warnings and anything waiting for your answer. |
+| `/agents open` | Show running work, what needs you, what is coming up, and recent activity (also Ctrl+O). |
 | `/agent` | Open the GoodVibes Agent operator workspace. |
 | `/agents` | Your agents: open the live view, and hand build, fix or review work to the terminal app (`hand-off`, with reason, success criteria, workspace hint, priority and review intent) and follow it (`handed-off`). |
 | `/agent-home` | Separate Agent homes and the starters they are made from, including opt-in VIBE.md starter export/import with `--include-vibe`. |
 | `/approval` | What each kind of approval asks about, and the approvals waiting on you; answer one with `/questions answer`. |
 | `/artifacts` | The saved artifacts (uploads, exports, media, reports, comparisons): list, look at one, copy one to a file, or several into a folder or ZIP. |
 | `/auth` | Review provider auth posture and export redacted auth review bundles. |
-| `/bookmarks` | List bookmarked transcript blocks. |
+| `/session bookmarks` | List bookmarked transcript blocks. |
 | `/brief` | Show a concise Agent operator briefing and next actions. |
 | `/bundle` | Save this Agent's settings and setup to a redacted file, check one, or load settings back from one. |
 | `/calendar` | The terminal app's command on the Agent's own events, its calendar feeds and calendar accounts: what is coming up, every event, add or remove one, import or export .ics files, subscribe to feeds, sign in or out of Google or Outlook. Removing asks first. |
-| `/checkpoints` | List the workspace checkpoints, newest first; `/checkpoints restore <n\|id>` shows the files that would change, asks, and restores them (files only; a safety checkpoint of the current files is kept first). |
-| `/channels` | The terminal app's command with the connected host's channels: status, setup, repairs, who may reach the assistant, per-channel profiles (formerly `/channel-profiles`), a test message; and the Agent's own readiness, setup guide, inbox, confirmed sends and delivery receipts. |
+| `/checkpoint` | The workspace checkpoints: `list` (newest first), `restore <n\|id>` (shows the files that would change, asks, and restores them; files only). `make` and `rewind` are refused: the Agent takes checkpoints by itself in a registered workspace and does not go back to a turn. |
+| `/channels` | The terminal app's command with the connected host's channels: status, setup, repairs, who may reach the assistant, per-channel profiles (`/channels profiles`), a test message; and the Agent's own readiness, setup guide, inbox, confirmed sends and delivery receipts. |
 | `/ci` | Check a repo or PR's CI with per-job conclusions and manage standing CI watches with channel delivery; removing a watch asks first. |
-| `/clear` | Start a fresh conversation; the current one is saved as its own session first. Also `/cls` and `/reset`. |
-| `/collapse` | Collapse rendered blocks by type. |
+| `/clear` | Start a fresh conversation; the current one is saved as its own session first. |
+| `/session collapse` | Collapse rendered blocks by type. |
 | `/compact` | Summarize the conversation to free context window. |
 | `/compare` | Blind model comparisons: send one prompt to two to four models with their names hidden (asks first: it spends money), benchmark the local models, judge, switch to the winner or record keeping the model, and save a report, handoff or ZIP. |
 | `/context` | Inspect context-window usage and token breakdown; `/context window [<size>\|clear]` shows where the current model's window came from, or sets or clears a custom window. |
-| `/conversation` | Review conversation structure, transcript hotspots, and composer posture. |
+| `/session events` | Review the conversation's record entry by entry; `/session groups`, `/session hotspots` and `/session composer` show its turns, where it spent most, and what the composer waits on. |
 | `/devices` | The terminal app's command: device tokens on the connected host (`list`, `rename`, `revoke`, which asks first), "Pair something" (`pair device` mints a named, separately revocable device token and shows its link and QR), and the paired phones: `nodes`, `grants`, `revoke-grant`, `captures`, `delete-capture` (asks first). |
 | `/documents` | Your Markdown drafts: write, revise, comment, take or leave a suggested change, put or attach an artifact, export, and the review packet (readiness, steps, presets, sending it). |
 | `/effort` | See or choose how hard the model thinks (`/effort set <level>`). |
 | `/cloudflare` | The connected host's optional Cloudflare integration: `status`, `requirements`, `discover`, `validate`, `verify`, and (typed by the owner only) `create-token [--new]`, `provision` and `disable`. Flags are the terminal app's; see its Cloudflare guide. |
-| `/expand` | Expand rendered blocks by type. |
+| `/session expand` | Expand rendered blocks by type. |
 | `/session` | Sessions: resume, save, copy, save the conversation as a Markdown or text file, read the cross-session task graph. |
 | `/google` | Connect the Google account behind mail and calendar: adopt credentials already on this machine, or run the setup flow. |
 | `/health` | Opens its list; from a model or script prints the short status (`✓ Everything is working.`, or each problem with `Fix:` and its line). Actions: See what needs attention (`report`), Check one area (`check <area>`), Describe a problem (`diagnose <symptom>`), See the runtime store (`state`), Check the connected host's compatibility (`compat [--json]`, Agent Knowledge route readiness). |
 | `/help` | Show available commands and keyboard shortcuts. |
 | `/image` | Attach an image file to the next message. |
-| `/keybindings` | List keyboard bindings and the config file path. |
+| `/help keys` | List keyboard bindings and the file that changes them. |
 | `/knowledge` | Use isolated Agent Knowledge. |
 | `/research` | Research a question or look at a page in the conversation; keep a research run, add a source to the queue, save a sourced report. |
 | `/resume` | Resume a saved Agent session. |
 | `/mail` | The terminal app's command over the Agent's own mail service: whether mail is connected, the unread inbox, read one message, save a draft, send one (asks first), and the mailbox settings and password. |
 | `/mcp` | Manage MCP servers, trust posture, and tool inventory. |
-| `/media` | Inspect media providers or generate media through configured providers; `/media generate collect <provider> <task-id> [key=value ...]` collects a job that was still running when the wait ended. |
-| `/memory` | Add, search, review, stale, or delete Agent-local memory records. `/memory files sync` writes standing records as markdown files and commits them in their own repository; `files review` shows what editing those files would change; `files apply <id>...` applies the proposals you name. A command run by the model may sync and review but not apply. `/memory snapshots` lists the copies of memory (daily, before an upgrade, before a restore) with their record counts; `/memory restore <name|latest|date>` replaces all memory with one copy after one confirmation, copies the records it replaces first and names that copy so the restore can be undone. |
-| `/mode` | Manage Agent interaction mode and per-domain verbosity. |
+| `/media` | See the media providers (`providers`), make an image or video (`make`, asks first: it may charge), and collect a job that was still being made (`collect <provider> <job> [key=value ...]`). |
+| `/memory` | Add, search, review, stale, or delete Agent-local memory records. `/memory sync-files` writes standing records as markdown files and commits them in their own repository; `files review` shows what editing those files would change; `files apply <id>...` applies the proposals you name. A command run by the model may sync and review but not apply. `/memory snapshots` lists the copies of memory (daily, before an upgrade, before a restore) with their record counts; `/memory restore <name|latest|date>` replaces all memory with one copy after one confirmation, copies the records it replaces first and names that copy so the restore can be undone. |
+| `/verbosity` | Set how much the Agent prints (`/verbosity set quiet\|balanced\|operator`) and each kind of notification's level. |
 | `/model` | Choose the model your conversations use and its backups (`use`, `backup`, `drop-backup`), and read the list of models again (`refresh`). |
 | `/network-scan` | Turn local-network scanning for model servers on or off, or check its status. Model servers on this computer and providers whose API key is in the environment are registered at every start; the network is scanned only after `/network-scan on`, which scans at once and then at each start. |
-| `/next-error` | Jump to the next error message in the conversation. |
-| `/notes` | Your scratchpad notes: list, read, find, write, change, mark reviewed or out of date, delete (asks first), and make a memory record, persona, skill or routine from one, or add its web page to Agent Knowledge. |
+| `/session next error` | Jump to the next error message in the conversation. |
+| `/notes` | Your scratchpad notes: list, read, find, write, change, mark reviewed or out of date, delete (asks first), and make a memory record, persona, skill or routine from one, or add its web page to Agent Knowledge. The same description as the terminal app's `/notes`. |
 | `/notifications` | Show every notice and notification in full, newest first (each notice also shows briefly as a toast). |
 | `/notify` | Manage and send configured Agent webhook notifications. |
 | `/paste` | Insert clipboard text or image into the prompt. |
@@ -439,7 +439,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/personas` | Manage Agent-local personas and VIBE.md personality files. |
 | `/pin` | Pin a model to the favorites list. |
 | `/plugin` | List plugins with their trust tier, enable, disable, reload or quarantine one (`/plugin enable <name>`, `/plugin disable <name>`, `/plugin reload`, `/plugin quarantine <name> [add\|lift]`), and set what each one may register: `/plugin trust <name> <untrusted\|limited\|trusted>`, `/plugin capabilities <name>`, `/plugin verify <name>`, `/plugin trust-key <name> <key.pem>`. An untrusted plugin gets panels, commands and file reads only; `limited` adds the tools, providers and hooks its manifest declares and gateway methods, channels and delivery strategies; `trusted` adds its high-risk capabilities. The tier is shared with the terminal app and the daemon. Marking a plugin trusted when its signature does not verify needs `--yes`. |
-| `/prev-error` | Jump to the previous error message in the conversation. |
+| `/session prev error` | Jump to the previous error message in the conversation. |
 | `/principals` | Manage the connected host's cross-channel principal identity registry; unmapped senders show as "unknown principal" in session attribution. |
 | `/provider` | Where your models come from: switch provider, add your own, sign in with a subscription, and choose how requests are routed. |
 | `/quit` | Close this program (a model cannot run it). |
@@ -453,16 +453,14 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/session` | Inspect session continuity and cross-session graph state. |
 | `/settings` | Open, inspect, set, or reset Agent settings. |
 | `/setup` | Open the Agent workspace; on a fresh Agent home the workspace opens into setup first. |
-| `/shortcuts` | Show keyboard shortcuts. |
 | `/skills` | Manage Agent-local skills and skill bundles. |
 | `/status` | Shows the current model and its context window, with where the window came from (its catalog provider, the consensus of catalog providers, a family default, or a user override). |
 | `/tasks` | Read runtime tasks here and on the connected host; changes are refused with the reason. |
 | `/title` | Show or set the conversation title. |
-| `/tts` | Submit a normal prompt and play the assistant response through live TTS. |
+| `/voice` | Hear answers spoken (`speak <message>`, `stop`, `on`, `off`), the local voice runtime (`status`, `setup`), the wake word (`wake-status`, `wake-setup`) and the voice settings as a file (`export`, `inspect`, `import`). |
 | `/undo` | Undo the last conversation turn; `/undo file` reverts every file the last write/edit call changed. |
-| `/unpin` | Unpin a model from the favorites list. |
+| `/pin remove` | Unpin a model from the favorites list (`/pin add` pins one, `/pin list` lists them). |
 | `/update` | Opens its list: see whether a newer release is out (`check`), install it (`apply`), go back to the version before (`rollback`), see the daemon's updates (`daemon [--check]`). |
-| `/voice` | Review voice posture, provision the managed local-voice runtime and the wake-word models (`/voice wake status`, `/voice wake setup --yes`), and export portable voice metadata. |
 
 ## Related docs
 

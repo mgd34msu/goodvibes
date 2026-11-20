@@ -97,7 +97,7 @@ export interface BootstrapCommandSectionOptions {
   readonly voiceService?: VoiceService;
   readonly voiceSetup?: import('@goodvibes-jev/engine/platform/platform/runtime/voice-setup').VoiceSetupService;
   readonly runtimeStore?: { getState(): object };
-  /** Direct-command consumers (`/search`, `/image`) of already-constructed RuntimeServices. */
+  /** Direct-command consumers (`/web-search`, `/media`) of already-constructed RuntimeServices. */
   readonly webSearchService?: import('@goodvibes-jev/engine/platform/platform/web-search').WebSearchService;
   readonly mediaProviders?: import('@goodvibes-jev/engine/platform/platform/media').MediaProviderRegistry;
   readonly artifactStore?: import('@goodvibes-jev/engine/platform/platform/artifacts').ArtifactStore;

@@ -152,7 +152,11 @@ export function ownerInboxStorePath(shellPaths: { resolveUserPath(...segments: s
   return shellPaths.resolveUserPath('shared', 'owner-inbox.sqlite');
 }
 
-/** Closed items kept for the history view; open items and answers still waiting for their asker are never dropped. */
+/**
+ * Unanswered closed items (withdrawn or expired) kept for the history view. An
+ * answered item is never dropped: the answer is the owner's own (a typed answer,
+ * a choice, a purchase approved) or what he was told (a report he read).
+ */
 const MAX_CLOSED_ENTRIES = 500;
 const STORED_KINDS: ReadonlySet<string> = new Set<StoredOwnerItemKind>(['question', 'claim', 'purchase', 'queued-action', 'decision', 'report']);
 
@@ -676,8 +680,8 @@ export class QuestionStore implements RevisionSource {
   }
 
   /**
-   * Keep every open item, every answer still waiting for its asker, and the
-   * newest closed ones. Runs once per process, when the store is first opened;
+   * Keep every open item, every answered item, and the newest unanswered
+   * closed ones. Runs once per process, when the store is first opened;
    * it writes only when there is more than that to drop. An item that expired
    * unanswered is closed at its expiry first (it reads as expired as before),
    * so it is history like any other closed item and is dropped by the same rule.
@@ -690,15 +694,14 @@ export class QuestionStore implements RevisionSource {
           WHERE closed_at IS NULL AND answer IS NULL AND withdrawn_reason IS NULL AND applying_token IS NULL
           AND json_extract(item, '$.expiresAt') < ?`,
       ).run(now, now);
-      const closed = file.db.query<{ n: number }, []>('SELECT count(*) AS n FROM owner_items WHERE closed_at IS NOT NULL').get()?.n ?? 0;
+      const closed = file.db.query<{ n: number }, []>('SELECT count(*) AS n FROM owner_items WHERE closed_at IS NOT NULL AND answer IS NULL').get()?.n ?? 0;
       if (closed <= MAX_CLOSED_ENTRIES) return;
       file.db.query<never, [number]>(
-        `DELETE FROM owner_items WHERE closed_at IS NOT NULL
-          AND NOT (answer IS NOT NULL AND (delivery_state IS NULL OR delivery_state = 'taken') AND (answer_session IS NOT NULL OR answer_agent IS NOT NULL))
-          AND id NOT IN (SELECT id FROM owner_items WHERE closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT ?)`,
+        `DELETE FROM owner_items WHERE closed_at IS NOT NULL AND answer IS NULL
+          AND id NOT IN (SELECT id FROM owner_items WHERE closed_at IS NOT NULL AND answer IS NULL ORDER BY closed_at DESC LIMIT ?)`,
       ).run(MAX_CLOSED_ENTRIES);
     } catch (error) {
-      logger.warn('[owner-inbox] could not drop old answered items; the store keeps them until the next start', {
+      logger.warn('[owner-inbox] could not drop old unanswered closed items; the store keeps them until the next start', {
         path: this.#path,
         error: error instanceof Error ? error.message : String(error),
       });

@@ -4,7 +4,7 @@
  * Lays the turn's lanes out (lane-graph/layout.ts), paints every row
  * (lane-graph/paint.ts), opens bodies under their beads, and reports what the
  * rest of the transcript needs: the block registry entries (so copy, save,
- * bookmark, Tab and /expand work on beads), the line each message landed on,
+ * bookmark, Tab and /session expand work on beads), the line each message landed on,
  * the focusable rows, and the gutter a still-streaming answer continues with.
  *
  * Line numbers in the result are relative to the turn's first line.

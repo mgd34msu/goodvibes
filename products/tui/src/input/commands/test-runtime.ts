@@ -332,7 +332,7 @@ async function runResolvedTest(
     // strictly from conversationManager.getMessageSnapshot()), the very next
     // dirty render silently wipes it back to how the transcript looked before
     // /test ran. addNotice persists the same content as a real message
-    // (same durable pattern as /rewind's confirm notice in
+    // (same durable pattern as /checkpoint rewind's confirm notice in
     // checkpoint-runtime.ts) so the timeout outcome survives like any other
     // command's output. The streamed output during the run is allowed to stay
     // transient, only this final state needs to persist.

@@ -5,7 +5,7 @@ import { createWakeProvisionPresentation } from '@goodvibes-jev/engine/terminal-
 //
 // The wake models are checksum-pinned and arrive WITH THE INSTALLATION: the
 // installer and the npm postinstall provision them, and a daemon retries at boot
-// whatever the install could not fetch. `/voice wake setup` is the recovery act
+// whatever the install could not fetch. `/voice wake-setup` is the recovery act
 // for the case where that did not land, not the normal way in, so the lines
 // below name it where it helps and do not imply it is a required step.
 //
@@ -28,7 +28,7 @@ import { formatVoiceBytes } from './voice-provision-status.ts';
  * What a terminal can actually do, so a `voice.wake.*` row is refused or reported
  * rather than faked. Lives here, beside the status projection and away from the
  * inference runtime, so the command layer can resolve settings without pulling
- * onnxruntime into a `/voice wake status` call.
+ * onnxruntime into a `/voice wake-status` call.
  */
 export function terminalWakeCapabilities(status?: Pick<WakeProvisionStatus, 'vadReady'>): WakeSurfaceCapabilities {
   return {
@@ -59,9 +59,9 @@ export function terminalWakeCapabilities(status?: Pick<WakeProvisionStatus, 'vad
 
 /** Limitations: the detector runs, with one row not in force, and says which. */
 
-/** The `/voice wake status` block. */
+/** The `/voice wake-status` block. */
 
-/** The `/voice wake setup` receipt. */
+/** The `/voice wake-setup` receipt. */
 
 /** The one-line announcement printed before a (multi-megabyte) provision runs. */
 export const WAKE_SETUP_ANNOUNCEMENT = [
@@ -76,7 +76,7 @@ export const { wakeArtifactLine, describeWakeBlockers, describeWakeLimitations, 
     surface: 'tui',
     noun: 'terminal',
     formatBytes: formatVoiceBytes,
-    corruptSuffix: '; torn, truncated, or the wrong asset; /voice wake setup replaces it',
+    corruptSuffix: '; torn, truncated, or the wrong asset; /voice wake-setup replaces it',
     artifacts: (status, line) => [
       line('classifier', status.classifier),
       line('speech-embedding front end', status.embedding),
@@ -89,7 +89,7 @@ export const { wakeArtifactLine, describeWakeBlockers, describeWakeLimitations, 
     ],
     download: (status) => [
       `  a fresh provision would download ${formatVoiceBytes(status.downloadBytes)}. Installing goodvibes normally does this,`,
-      '  and a running daemon retries at every boot; /voice wake setup fetches it now and turns the wake word on (nothing downloads otherwise).',
+      '  and a running daemon retries at every boot; /voice wake-setup fetches it now and turns the wake word on (nothing downloads otherwise).',
     ],
     extraSettings: () => [],
     receiptHeader: (result) => [

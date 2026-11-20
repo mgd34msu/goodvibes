@@ -27,9 +27,6 @@ export interface TurnOutcomeRecord {
   readonly outcome: TurnOutcome;
 }
 
-/** Most turn endings kept per session. */
-export const MAX_TURN_OUTCOMES = 500;
-
 export type NavBlock = BlockMeta & { readonly workTree: NonNullable<BlockMeta['workTree']> };
 
 export interface FocusChange {
@@ -189,12 +186,8 @@ export class WorkTreeController {
   recordTurnOutcome(record: TurnOutcomeRecord): boolean {
     const had = this.outcomes.delete(record.index);
     if (record.outcome === 'completed') return had;
+    // Every failed or cancelled ending is kept (one per such turn): an older one dropped would draw that turn as completed.
     this.outcomes.set(record.index, record);
-    while (this.outcomes.size > MAX_TURN_OUTCOMES) {
-      const oldest = this.outcomes.keys().next();
-      if (oldest.done) break;
-      this.outcomes.delete(oldest.value);
-    }
     this.deps.markDirty();
     return true;
   }

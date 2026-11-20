@@ -583,7 +583,7 @@ export async function initializeBootstrapCore(
   };
   runtimeSessionIdRef.value = runtime.sessionId;
   services.liveSessionIdRef.value = runtime.sessionId; // the session an ask raised on the daemon belongs to
-  // The live conversation, for this process's own /rewind AND for the daemon's
+  // The live conversation, for this process's own /checkpoint rewind AND for the daemon's
   // questions about it, only the process holding the messages can count or
   // drop them (conversation-rewind-port.ts, the platform's client/conversation-rewind-host.ts).
   registerSessionConversation(runtime.sessionId, conversation);

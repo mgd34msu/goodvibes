@@ -264,6 +264,12 @@ async function undoLastRewindNow(ctx: CommandContext): Promise<RewindReversalRes
           : BUSY_MESSAGE('undoing the rewind'),
       };
     }
+    // The question took time: a message added meanwhile is checked again before anything changes.
+    const sinceConfirm = receipt.undo.conversation ? state.convPort.messagesSinceRewind(receipt.undo.conversation.undoSnapshotId) : 0;
+    if (sinceConfirm !== null && sinceConfirm !== 0) {
+      state.undo.push(receipt);
+      return { handled: true, message: `Undo rewind refused: the conversation changed while you were asked (${sinceConfirm > 0 ? `${sinceConfirm} newer message${sinceConfirm === 1 ? '' : 's'}` : 'an edit'}). Nothing was changed.` };
+    }
   }
   const parts: string[] = [];
   let conversationFailed = false;
@@ -280,9 +286,12 @@ async function undoLastRewindNow(ctx: CommandContext): Promise<RewindReversalRes
       }
     }
     if (receipt.undo.conversation) {
-      if (state.convPort.restoreBefore(receipt.undo.conversation.undoSnapshotId)) {
+      const restored = await state.convPort.restoreBeforeSaved(receipt.undo.conversation.undoSnapshotId);
+      if (restored.restored) {
         state.service.anchorsRestored(receipt.undo.conversation.undoSnapshotId);
-        parts.push('conversation restored to pre-rewind state');
+        parts.push(restored.notSaved === undefined
+          ? 'conversation restored to pre-rewind state'
+          : `conversation restored to pre-rewind state but not saved (${restored.notSaved}); a restart brings back the rewound one`);
       }
       else conversationFailed = true;
     }
@@ -329,6 +338,16 @@ async function redoLastRewindNow(ctx: CommandContext): Promise<RewindReversalRes
   const receipt = state.redo.pop();
   if (!receipt) return { handled: false, message: 'No undone rewind to redo. (Bare /redo restores the last conversation turn.)' };
 
+  // Re-applying the rewind replaces the whole conversation with the rewound copy, so it is
+  // only safe while nothing was added since the undo, as /undo rewind requires of the rewind.
+  const sinceUndo = (): number | null => receipt.undo.conversation ? state.convPort.messagesSinceUndo(receipt.undo.conversation.undoSnapshotId) : 0;
+  const refusedSince = (since: number): RewindReversalResult => {
+    state.redo.push(receipt);
+    return { handled: true, message: `Redo rewind refused: the conversation has ${since > 0 ? `${since} newer message${since === 1 ? '' : 's'}` : 'changed'} since the rewind was undone, and re-applying it would discard ${since > 0 ? 'them' : 'that change'}. Nothing was changed. Use /session fork to keep this conversation, then rewind again.` };
+  };
+  const before = sinceUndo();
+  if (before !== null && before !== 0) return refusedSince(before);
+
   const mgr = ctx.workspace.workspaceCheckpointManager;
   if (receipt.files?.checkpointId && mgr) {
     const answer = await confirmFileRestore(ctx, mgr, receipt.files.checkpointId, 'Redo the rewind: restore the files to the rewound turn again?');
@@ -341,6 +360,8 @@ async function redoLastRewindNow(ctx: CommandContext): Promise<RewindReversalRes
           : BUSY_MESSAGE('re-applying the rewind'),
       };
     }
+    const afterConfirm = sinceUndo();
+    if (afterConfirm !== null && afterConfirm !== 0) return refusedSince(afterConfirm);
   }
   const parts: string[] = [];
   let conversationFailed = false;
@@ -357,9 +378,12 @@ async function redoLastRewindNow(ctx: CommandContext): Promise<RewindReversalRes
       }
     }
     if (receipt.undo.conversation) {
-      if (state.convPort.restoreAfter(receipt.undo.conversation.undoSnapshotId)) {
+      const restored = await state.convPort.restoreAfterSaved(receipt.undo.conversation.undoSnapshotId);
+      if (restored.restored) {
         state.service.anchorsDropped(receipt.undo.conversation.undoSnapshotId);
-        parts.push('conversation re-applied');
+        parts.push(restored.notSaved === undefined
+          ? 'conversation re-applied'
+          : `conversation re-applied but not saved (${restored.notSaved}); a restart brings back the one before`);
       }
       else conversationFailed = true;
     }

@@ -41,6 +41,7 @@ import { publishedSequenceBound, type InboxCursorStore, type InboxPosition } fro
 import type { InboundPoller, ProviderStatus } from './poller.js';
 import type { InboundChannelItem, MailboxHistoryStatus, SkippedMailMessage } from './provider-adapter.js';
 import { GatewayVerbError as HandlerError } from '../control-plane/routes/gateway-verb-error.js';
+import { EMAIL_OWNER_PROVIDER_ID, emailItemId } from './email-item-id.js';
 
 export const DEFAULT_LIMIT = 50;
 export const MAX_LIMIT = 500;
@@ -228,17 +229,17 @@ function readUids(raw: unknown): number[] | undefined {
 }
 
 /**
- * The mirror ids of these UIDs in each pushed mail provider's live mailbox:
- * `<provider>:<account scope>:<uidvalidity>:<uid>`. A provider that has not
- * reported its account and generation names none, so nothing from an older
- * mailbox generation is matched.
+ * The mirror ids of these UIDs in the owner's mailbox, built by the same
+ * function the email-owner provider names its rows with (email-item-id.ts). A
+ * provider that has not reported its account and generation names none, so
+ * nothing from an older mailbox generation is matched.
  */
 function mailRowIds(poller: InboxAggregatorSources['poller'], providers: readonly string[], uids: readonly number[]): string[] {
   const ids: string[] = [];
   for (const status of poller.snapshotStatuses(providers)) {
     const generation = status.mailboxProgress?.uidValidity ?? status.mailboxHistory?.uidValidity;
-    if (!status.mailboxScope || typeof generation !== 'number') continue;
-    for (const uid of uids) ids.push(`${status.id}:${status.mailboxScope}:${generation}:${uid}`);
+    if (status.id !== EMAIL_OWNER_PROVIDER_ID || !status.mailboxScope || typeof generation !== 'number') continue;
+    for (const uid of uids) ids.push(emailItemId(status.mailboxScope, generation, uid));
   }
   return ids;
 }

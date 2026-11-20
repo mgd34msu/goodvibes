@@ -391,7 +391,7 @@ async function attachArtifactToDocument(
     mimeType: loaded.descriptor.mimeType,
     kind: loaded.descriptor.kind,
     sizeBytes: loaded.descriptor.sizeBytes,
-  }, { ...(expectedRevision === undefined ? {} : { expectedRevision }) });
+  }, { ...(expectedRevision === undefined ? {} : { expectedRevision }), expectedIncarnation: document.incarnation });
   const attachment = updated.attachments.find((entry) => entry.artifactId === loaded.descriptor.id);
   return [
     'Attached artifact to Agent document',
@@ -430,7 +430,7 @@ async function insertArtifactIntoDocument(
   const updated = registry.update(document.id, {
     body: insertBlock(document.body, rendered.text, placement),
     summary: readString(args.changeSummary) || `Inserted artifact ${artifactId}.`,
-  }, { ...(expectedRevision === undefined ? {} : { expectedRevision }) });
+  }, { ...(expectedRevision === undefined ? {} : { expectedRevision }), expectedIncarnation: document.incarnation });
   return [
     'Inserted artifact into Agent document',
     `  document ${updated.id}`,

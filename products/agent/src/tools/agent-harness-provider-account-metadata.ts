@@ -1,3 +1,4 @@
+import { Secret } from '@goodvibes-jev/engine/platform/platform/security';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogSnapshot } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
 import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
@@ -36,7 +37,7 @@ function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 500);
 }
 
-const noStoredKeys = { get: async (_key: string): Promise<string | null> => null };
+const noStoredKeys = { get: async (_key: string): Promise<Secret | null> => null };
 
 async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnType<typeof captureCatalogReadRequest<AgentHarnessProviderAccountArgs>>): Promise<ProviderAccountSnapshot> {
   if (!request) {
@@ -143,13 +144,13 @@ async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnTyp
       get(id) { current(); const value = get.call(subscriptions, id); current(); return value; },
       getPending(id) { current(); const value = getPending.call(subscriptions, id); current(); return value; },
     },
-    // Only presence leaves this reader: a stored key reads as an empty string, never its value.
+    // Only presence leaves this reader: a stored key reads as an empty secret, never its value.
     secretsManager: { async get(key) {
       current();
       const known = storedPresence.get(key);
-      if (known !== undefined) return known ? '' : null;
+      if (known !== undefined) return known ? Secret.of('', key) : null;
       if (!secretStore) return null;
-      try { return (await secretStore.get(key)) !== null ? '' : null; } catch { return null; }
+      try { return (await secretStore.get(key)) !== null ? Secret.of('', key) : null; } catch { return null; }
     } },
   });
   const saved = captureCatalogSnapshot(snapshot);

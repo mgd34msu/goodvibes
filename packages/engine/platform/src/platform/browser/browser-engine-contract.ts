@@ -128,50 +128,6 @@ function cancelledError(action: string): BrowserSessionError {
  */
 const ALLOWED_URL_SCHEMES = new Set(['http:', 'https:', 'file:', 'about:']);
 
-/** How far a URL reaches beyond the public web. */
-export type NavigationReach = 'public' | 'local' | 'link-local';
-
-function reachOfIpv4(octets: readonly number[]): NavigationReach {
-  const [a = 0, b = 0] = octets;
-  if (a === 169 && b === 254) return 'link-local';
-  if (a === 0 || a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127)) return 'local';
-  return 'public';
-}
-
-/**
- * Whether opening this URL would read from the machine or its private network
- * instead of the public web. A page the agent navigates to is read back into
- * the conversation, so `file:` and private hosts are a way to read files and
- * internal services that the read tool's own filters never see.
- *
- * 'link-local' covers the cloud metadata addresses, which are never a page the
- * owner wants. The URL parser has already turned decimal, hex and octal IPv4
- * spellings into dotted form. A name that only resolves to a private address
- * through DNS is not detected here. Redirects and frames are: the engine
- * classifies the address the page ended on and every frame it reads, not only
- * the one requested.
- */
-export function classifyNavigationTarget(url: string): NavigationReach {
-  let parsed: URL;
-  try { parsed = new URL(url); } catch { return 'public'; }
-  if (parsed.protocol === 'file:') return 'local';
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return 'public';
-  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
-  if (host === 'metadata.google.internal') return 'link-local';
-  if (host === 'localhost' || host.endsWith('.localhost')) return 'local';
-  const dotted = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (dotted) return reachOfIpv4(dotted.slice(1).map(Number));
-  if (!host.includes(':')) return 'public';
-  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
-  if (mapped) {
-    const high = Number.parseInt(mapped[1]!, 16), low = Number.parseInt(mapped[2]!, 16);
-    return reachOfIpv4([high >> 8, high & 255, low >> 8, low & 255]);
-  }
-  if (/^fe[89ab][0-9a-f]:/.test(host) || host.startsWith('fd00:ec2:')) return 'link-local';
-  if (host === '::1' || host === '::' || /^f[cd][0-9a-f]{2}:/.test(host)) return 'local';
-  return 'public';
-}
-
 export interface BrowserTarget {
   readonly sessionId?: string | undefined;
   readonly pageId?: string | undefined;
@@ -209,6 +165,13 @@ export interface BrowserEngineOptions {
    * used to pay for something cannot be made to run without one.
    */
   readonly cardFieldGuard?: CardFieldGuard | undefined;
+  /**
+   * The settings the destination rule reads: `fetch.allowedPrivateHosts`, the
+   * owner's list of private hosts the browser (like the fetch tool) may reach
+   * without asking. Absent, no host is listed, so a private one needs the
+   * owner's approval for the page.
+   */
+  readonly destinationConfig?: { get(key: string): unknown } | undefined;
 }
 
 /** Fields the extraction contract can ask for. Nothing here can invoke anything. */

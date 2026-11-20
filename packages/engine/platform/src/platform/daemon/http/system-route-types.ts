@@ -1,5 +1,5 @@
 export type {
-  ApprovalBrokerLike,
+  ApprovalActionsLike,
   DaemonApiClientKind,
   DaemonSystemConfigManagerLike as ConfigManagerLike,
   DaemonSystemRouteContext,

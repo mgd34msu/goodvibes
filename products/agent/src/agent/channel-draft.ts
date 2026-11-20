@@ -29,6 +29,7 @@
  * Persistence: JSON file at {agentRoot}/channels/drafts.json via ShellPathService.
  */
 
+import type { Secret } from '@goodvibes-jev/engine/platform/platform/security';
 import { channelDraftWireReference, createChannelDraftWireReference, historicalChannelDraftWireReference, isNativeDraftWireReference, matchesHistoricalDraftWireReference } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { prepareJsonStoreWrite, readJsonStore, runStoreFileUpdateSync, writeStoreFile, type JsonStoreContents, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
@@ -124,7 +125,7 @@ export interface ChannelDraft {
 
 /** The secret store a draft's webhook URL lives in; the shell's SecretsManager satisfies it. */
 export interface ChannelDraftWebhookSecrets {
-  readonly get: (key: string) => Promise<string | null>;
+  readonly get: (key: string) => Promise<Secret | null>;
   readonly set: (key: string, value: string) => Promise<void>;
   readonly delete?: (key: string) => Promise<void>;
 }
@@ -857,9 +858,11 @@ async function promoteDraftToQueued(
   options: ChannelDraftStoreOptions,
   admit: ((deliveryInput: AgentChannelDeliveryInput) => Promise<void>) | undefined,
 ): Promise<ChannelDraftQueueResult> {
-  let webhook = draft.webhook;
+  // A webhook URL read from the store stays a Secret on its way to the delivery (it is the credential).
+  let webhook: string | Secret | undefined = draft.webhook;
   if (!webhook && draft.webhookSecretKey) {
-    webhook = (await options.webhookSecrets?.get(draft.webhookSecretKey)) ?? undefined;
+    const stored = await options.webhookSecrets?.get(draft.webhookSecretKey);
+    webhook = stored && !stored.empty ? stored : undefined;
     if (!webhook) {
       throw new Error(`Draft ${draftId} sends to a webhook whose URL is kept in the secret store (${draft.webhookSecretKey}) and it could not be read, so nothing was sent. Save the draft again with its webhook to restore it.`);
     }

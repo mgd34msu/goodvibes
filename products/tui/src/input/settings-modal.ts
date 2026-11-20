@@ -489,7 +489,9 @@ export class SettingsModal extends TerminalSettingsModalState<
   activateSelected(): void {
     this._refreshPolicyAvailability();
     _activateSelected({
-      currentCategory: this.currentCategory,
+      // While a search is shown the highlighted row is a search result (a setting): the
+      // category the search started from never decides what Enter acts on.
+      currentCategory: this.searchFocused ? 'search' : this.currentCategory,
       configManager: this.configManager,
       getSelectedMcp: () => this.getSelectedMcp(),
       getSelectedSubscription: () => this.getSelectedSubscription(),

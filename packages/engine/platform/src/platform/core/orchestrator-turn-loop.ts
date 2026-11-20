@@ -413,6 +413,10 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   // host channel after the history, re-checked before each request, and never
   // written into the system prompt.
   let turnKnowledgeBlock: string | null = null;
+  /** The injection record of the turn's knowledge block, until a request carrying the block was dispatched. */
+  let pendingKnowledgeRecord: TurnInjectionRecord | undefined;
+  /** What the next dispatched request carries that must be reported once it went out (contract nudges). */
+  const afterDispatch: Array<() => void> = [];
   let assertCodeInjectionCurrent: (() => Promise<void>) | undefined;
   // While the block carries code hits: its memory part and record, so the code can be withdrawn on its own.
   let turnCodeInjection: { readonly memoryBlock: string | null; readonly record: TurnInjectionRecord } | undefined;
@@ -422,7 +426,12 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     turnKnowledgeBlock = injected?.memoryBlock ?? null;
     assertCodeInjectionCurrent = undefined;
     turnCodeInjection = undefined;
-    if (injected) context.recordTurnKnowledgeInjection(withdrawCodeFromInjectionRecord(injected.record, injected.memoryBlock, why));
+    if (injected) {
+      const withdrawnRecord = withdrawCodeFromInjectionRecord(injected.record, injected.memoryBlock, why);
+      // Not yet sent: the record that goes on file once a request carries the block is the one without the code.
+      if (pendingKnowledgeRecord === injected.record) pendingKnowledgeRecord = withdrawnRecord;
+      else context.recordTurnKnowledgeInjection(withdrawnRecord);
+    }
     logger.info('Injected code context withdrawn for the rest of the turn', { reason: why });
   };
   const nativeTurn = isNativeConversationTurn();
@@ -523,7 +532,11 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     // the same private channel as a held draft's revision instructions.
     if (contractSession) {
       const nudges = takeSessionNudges({ runtimeBus: context.runtimeBus, emitterContext: (id) => context.emitterContext(id), turnId: context.turnId }, contractSession);
-      if (nudges.length > 0) hostInstructions.set('correction', nudges.map(message => '[Contract check] ' + message).join('\n\n'), { once: true, append: true });
+      if (nudges.messages.length > 0) {
+        hostInstructions.set('correction', nudges.messages.map(message => '[Contract check] ' + message).join('\n\n'), { once: true, append: true });
+        // Reported consumed once the request carrying them was dispatched (below).
+        afterDispatch.push(nudges.reportConsumed);
+      }
     }
 
     const preflightResult = await context.checkContextWindowPreflight(context.turnId, model);
@@ -659,15 +672,9 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         turnKnowledgeBlock = injection?.block ?? null;
         assertCodeInjectionCurrent = injection?.assertCodeCurrent;
         turnCodeInjection = injection?.assertCodeCurrent ? { memoryBlock: injection.memoryBlock ?? null, record: injection.record } : undefined;
-        if (injection) {
-          const turnInjectionRecord = injection.record;
-          if (turnInjectionRecord.injectedIds.length > 0) {
-            context.addInjectedKnowledgeIds(turnInjectionRecord.injectedIds);
-            // Memory provenance: only 'memory'-sourced ids reach the wire chip.
-            for (const id of memoryRecordIdsOf(turnInjectionRecord)) turnMemoryRecordIds.add(id);
-          }
-          context.recordTurnKnowledgeInjection(turnInjectionRecord);
-        }
+        // Recorded as injected (excluded from later turns, shown on the wire chip) only once the block
+        // survived the fit check and the request carrying it was dispatched, see below.
+        pendingKnowledgeRecord = injection?.record;
       } else {
         // Hard no-op: no budget headroom for this request. Never call into retrieval for a
         // budget already known to be zero, and never keep claiming a stale block from an
@@ -697,8 +704,10 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       const liveTokens = estimateConversationTokens(context.conversation.getMessagesForLLM()) + estimateTokens(systemPromptForCall) + estimateTokens(block);
       return liveTokens <= Math.floor(knowledgeContextWindow * contextCompactThreshold);
     };
-    if (turnKnowledgeBlock && knowledgeFits(turnKnowledgeBlock)) hostInstructions.set('knowledge', turnKnowledgeBlock);
+    const knowledgePlaced = turnKnowledgeBlock !== null && knowledgeFits(turnKnowledgeBlock);
+    if (knowledgePlaced) hostInstructions.set('knowledge', turnKnowledgeBlock!);
     else hostInstructions.clear('knowledge');
+    const placedKnowledgeRecord = knowledgePlaced ? pendingKnowledgeRecord : undefined;
 
     assertActiveTurn();
     let response: Awaited<ReturnType<typeof provider.chat>>;
@@ -777,6 +786,17 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       });
       assertActiveTurn();
       hostInstructions.delivered();
+      // The request went out: what it carried is now consumed.
+      if (placedKnowledgeRecord !== undefined && pendingKnowledgeRecord === placedKnowledgeRecord) {
+        pendingKnowledgeRecord = undefined;
+        if (placedKnowledgeRecord.injectedIds.length > 0) {
+          context.addInjectedKnowledgeIds(placedKnowledgeRecord.injectedIds);
+          // Memory provenance: only 'memory'-sourced ids reach the wire chip.
+          for (const id of memoryRecordIdsOf(placedKnowledgeRecord)) turnMemoryRecordIds.add(id);
+        }
+        context.recordTurnKnowledgeInjection(placedKnowledgeRecord);
+      }
+      for (const report of afterDispatch.splice(0)) report();
       const signIn = response.signInRoute;
       if (signIn?.movedFrom && !announcedSignInMoves.has(`${signIn.movedFrom.route}>${signIn.route}`)) {
         announcedSignInMoves.add(`${signIn.movedFrom.route}>${signIn.route}`);

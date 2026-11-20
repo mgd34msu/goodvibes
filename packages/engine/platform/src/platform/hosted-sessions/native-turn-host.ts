@@ -395,19 +395,18 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
           }
           throw error;
         }
-        // A cancel or close that arrives after the turn finished and was saved did not stop it: record the completion.
-        if (owned.interrupted) {
-          const terminal = await deps.broker.settleNativeTurnInput(session.id, input.id, permit, 'cancelled');
-          if (terminal.state !== 'cancelled') throw new NativeHostedTurnError('recovery-required');
-          const record = await journal.read(identity);
-          if (record && !isTerminalNativeHostedTurnState(record.state)) await journal.transition(identity, record.state, { ...dispatch, state: 'cancelled' });
-          return;
-        }
+        // The turn ran to its end: a cancel or close that arrived after the
+        // runtime delivered it did not stop it, so it is recorded completed like
+        // any other (owned.interrupted changes nothing here).
         const current = deps.broker.getInputsSince(session.id).find(item => item.id === input.id);
         if (!current || current.state !== 'delivered' || current.body !== source.text || current.correlationId !== input.correlationId) throw new NativeHostedTurnError('recovery-required');
+        // Journal first, then the broker: a stop between the two leaves the
+        // journal saying completed with the broker row still delivered (the
+        // turn is known to have run), never the broker saying completed while
+        // the journal still says dispatching (which recovery reads as unknown).
+        await journal.transition(identity, 'dispatching', { ...dispatch, state: 'completed' });
         const terminal = await deps.broker.settleNativeTurnInput(session.id, input.id, permit, 'completed');
         if (terminal.state !== 'completed') throw new NativeHostedTurnError('recovery-required');
-        await journal.transition(identity, 'dispatching', { ...dispatch, state: 'completed' });
       }).catch(async (error: unknown) => {
         logger.warn('[hosted-sessions] native hosted turn ended without completing', {
           inputId: identity.inputId, sessionId: session.id, cancelled: owned.cancelled,
@@ -417,8 +416,10 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
         // A strict settlement failure may leave visible in-memory terminal
         // state. Reconfirm it through the exact-owned durable operation; merely
         // reading that state must not turn a failed fsync into cancellation.
+        // A turn the journal already records completed (its broker settle failed after) is completed.
+        const journaled = brokerState === 'delivered' ? (await journal.read(identity).catch(() => null))?.state : undefined;
         const expected = brokerState === 'completed' || brokerState === 'failed' || brokerState === 'cancelled'
-          ? brokerState : owned.cancelled ? 'cancelled' : 'failed';
+          ? brokerState : journaled === 'completed' ? 'completed' : owned.cancelled ? 'cancelled' : 'failed';
         const terminal = await deps.broker.settleNativeTurnInput(session.id, input.id, permit, expected);
         if (terminal.state !== expected) throw new NativeHostedTurnError('recovery-required');
         const record = await journal.read(identity);

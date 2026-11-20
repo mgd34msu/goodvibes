@@ -106,6 +106,13 @@ const SESSION_TREE_HOLDER = 'session';
 /** How long a disposed runner waits for its runs to drain before releasing their claims and naming them still running. */
 const DISPOSE_DRAIN_LIMIT_MS = 5_000;
 const EMPTY_CLOSE_REPORT: CloseReport = Object.freeze({ stopped: Object.freeze([]), killed: Object.freeze([]), stillRunning: Object.freeze([]) });
+/**
+ * Claims a disposed runner in this process still holds while its run drains, by project root and contract id: a
+ * runner rebuilt here waits for that claim before taking the contract up, instead of reading it as another
+ * process's. Each entry ends when the claim is released (drained, or named still running at the deadline).
+ */
+const drainingClaims = new Map<string, Promise<void>>();
+const drainingKey = (projectRoot: string, contractId: string): string => `${projectRoot}\u0000${contractId}`;
 
 export interface ContractRunnerDeps {
   readonly judgmentLog?: Pick<import('@goodvibes-jev/judgment').DecisionLog, 'get'> | undefined;
@@ -501,10 +508,14 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     for (const entry of pending) void entry.settled.then(() => { entry.done = true; });
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<void>((resolve) => { timer = setTimeout(resolve, DISPOSE_DRAIN_LIMIT_MS); (timer as { unref?: () => void }).unref?.(); });
-    await Promise.race([Promise.all(pending.map((entry) => entry.settled)), deadline]);
+    const finished = Promise.race([Promise.all(pending.map((entry) => entry.settled)), deadline]).then(() => undefined);
+    const keys = pending.map((entry) => drainingKey(deps.store.projectRoot, entry.id));
+    for (const key of keys) drainingClaims.set(key, finished);
+    await finished;
     clearTimeout(timer);
     const stillRunning = pending.filter((entry) => !entry.done).map((entry) => entry.id);
     for (const id of stillRunning) releaseProcessLease(id);
+    for (const key of keys) if (drainingClaims.get(key) === finished) drainingClaims.delete(key);
     if (stillRunning.length > 0) logger.warn('contract runner: contracts still running at shutdown; their claims were released so a rebuilt runner can resume them', { stillRunning });
     return Object.freeze({
       stopped: Object.freeze(pending.filter((entry) => entry.done).map((entry) => `contract ${entry.id}`)),
@@ -1185,7 +1196,13 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         throw idempotencyKeyUnrecorded(error);
       }
       try {
-        const known = deps.store.readIdempotentStart(scope);
+        let known: ReturnType<ContractStore['readIdempotentStart']>;
+        try { known = deps.store.readIdempotentStart(scope); }
+        catch (error) {
+          // A record that cannot be read for an I/O reason cannot be relied on to find this start again either.
+          if (typeof (error as NodeJS.ErrnoException).code === 'string') throw idempotencyKeyUnrecorded(error);
+          throw error;
+        }
         if (known !== undefined) {
           if (known.fingerprint !== fingerprint) throw idempotencyKeyReused(known.contractId);
           let contract = deps.store.get(known.contractId) ?? deps.store.ended(known.contractId);
@@ -1744,6 +1761,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     nativeOnly: deps.nativeDecisions !== undefined,
     store: deps.store,
     isLive: (contractId) => runs.has(contractId) || heldContracts.has(contractId),
+    beforeClaim: (contractId) => drainingClaims.get(drainingKey(deps.store.projectRoot, contractId)),
     claim: claimProcessLease,
     hold: (contract, code, reason) => {
       deps.store.hold(contract);

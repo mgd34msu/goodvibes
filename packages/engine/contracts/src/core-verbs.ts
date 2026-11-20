@@ -491,6 +491,16 @@ export const SCOPED_EXEMPT_VERB_CATEGORIES: Readonly<Record<string, ScopedVerbEx
     // Retain this public verb for compatibility; its alias grant applies only
     // to the MCP server registry and does not authorize removal elsewhere.
   },
+  'mcp-server-actions': {
+    namespaces: ['mcp.servers'],
+    verbs: ['block', 'unblock', 'exempt', 'unexempt', 'accept'],
+    // The /mcp actions the daemon runs, named by the action's own word so the
+    // terminal, the web UI and the contract say the same thing:
+    // mcp.servers.tools.block|unblock|exempt|unexempt keep or drop one tool's
+    // rule (each drops only its own kind), and mcp.servers.quarantine.accept
+    // offers a server's changed tools again. None is generic CRUD; the grant
+    // applies only inside the MCP server registry.
+  },
   'occasion-erasure': {
     namespaces: ['occasions'],
     verbs: ['remove'],

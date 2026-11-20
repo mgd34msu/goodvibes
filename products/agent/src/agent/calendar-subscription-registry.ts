@@ -1,3 +1,4 @@
+import { revealOrNull, type Secret } from '@goodvibes-jev/engine/platform/platform/security';
 import { postToPublicWebhook } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { readJsonStore, runStoreFileUpdate, writeJsonStore, type JsonStoreContents, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
@@ -175,7 +176,7 @@ export interface RefreshOutcome {
  * subscription silently took the store's default (project) tier.
  */
 export interface SubscriptionSecretStore {
-  readonly get: (key: string) => Promise<string | null>;
+  readonly get: (key: string) => Promise<Secret | null>;
   readonly set: (key: string, value: string, options?: { readonly scope?: SecretScope }) => Promise<void>;
   readonly delete?: (key: string, options?: { readonly scope?: SecretScope }) => Promise<void>;
 }
@@ -495,7 +496,7 @@ export class CalendarSubscriptionRegistry {
     const baseByName = new Map<string, SubscriptionMeta>();
     const outcomes: RefreshOutcome[] = [];
     for (const target of targets) {
-      const url = await this.secrets.get(target.secretKey);
+      const url = revealOrNull(await this.secrets.get(target.secretKey), 'dispatch');
       if (url === null) {
         outcomes.push({ name: target.name, outcome: 'unreachable', detail: 'Stored feed URL is missing from the secret manager: unsubscribe and re-add.' });
         continue;
@@ -548,7 +549,7 @@ export class CalendarSubscriptionRegistry {
     const now = this.clock();
     const out: SubscriptionStatus[] = [];
     for (const s of file.subscriptions) {
-      const url = await this.secrets.get(s.secretKey);
+      const url = revealOrNull(await this.secrets.get(s.secretKey), 'owner-screen');
       out.push({
         name: s.name,
         maskedUrl: url ? maskFeedUrl(url) : '(url missing from secret manager)',

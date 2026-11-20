@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs, renameSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { capturePreparedFilePublication, publishFileMutation } from '../utils/file-mutation.js';
+import { defineFormat, FormatRoundTripError, renderChecked } from '../utils/format-codec.js';
 import type { ProfileMutationOptions } from './delegation.js';
 import {
   PROVENANCE_MARKER,
@@ -349,9 +350,26 @@ export function setField(projection: ProfileProjection, input: SetFieldInput): P
     ? findProfileSection(projection, def.section)
     : (sectionContaining(projection, existing.lineIndex) ?? findProfileSection(projection, def.section));
   const label = existing?.label ?? def.label;
+  // The field's line, read back the way the profile reader reads it and checked
+  // by the field's own validator before anything moves into history: a value
+  // the reader would discard is refused, and the current value stays in force.
+  const fieldLine = defineFormat<string>({
+    name: `profile field ${def.label}`,
+    parse(raw) {
+      const back = typeof raw === 'string' ? parseFieldLine(splitProvenanceSuffix(raw).text) : null;
+      if (back === null) return { ok: false, reason: 'the line does not read back as a field' };
+      const check = def.validate(back.value);
+      return check.valid ? { ok: true, value: back.value } : { ok: false, reason: check.reason ?? 'it is not a valid value' };
+    },
+    render(value) { return renderCappedLine(`${label}: `, value, input.provenance); },
+  });
   let line: string;
-  try { line = renderCappedLine(`${label}: `, input.value, input.provenance); }
-  catch (error) { if (error instanceof ProfileValueTooLongError) return refuse(projection, error.message); throw error; }
+  try { line = renderChecked(fieldLine, input.value) as string; }
+  catch (error) {
+    if (error instanceof ProfileValueTooLongError) return refuse(projection, error.message);
+    if (error instanceof FormatRoundTripError) return refuse(projection, `${def.label}: ${error.reason}; nothing was saved and the current value stays.`);
+    throw error;
+  }
   const change: ProfileChange = {
     kind: 'set',
     fieldId: def.id,

@@ -1,4 +1,5 @@
 import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils/lifecycle-machine';
+import { newIncarnation } from '@goodvibes-jev/engine/platform/platform/utils/target-ref';
 import { openSqliteFile, type SqliteFile } from '@goodvibes-jev/engine/platform/platform/state';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
@@ -240,6 +241,7 @@ function parseDocument(value: unknown): AgentDocumentRecord | null {
     status: documentStatus(value.status),
     createdAt,
     updatedAt: readString(value.updatedAt, createdAt),
+    incarnation: readString(value.incarnation).trim(),
     versions,
     versionCount,
     comments,
@@ -391,6 +393,12 @@ export interface AgentDocumentWriteOptions {
    * in between, instead of undoing it.
    */
   readonly expectedRevision?: number | undefined;
+  /**
+   * The document's incarnation when the caller read it: with the revision, the
+   * write lands only on that same document, never on one recreated meanwhile
+   * under the same id that happens to have reached the same revision.
+   */
+  readonly expectedIncarnation?: string | undefined;
 }
 
 export class AgentDocumentRegistry {
@@ -478,6 +486,7 @@ export class AgentDocumentRegistry {
       };
       const document: AgentDocumentRecord = {
         id: this.nextId(title),
+        incarnation: newIncarnation(),
         title,
         body,
         tags,
@@ -768,7 +777,8 @@ export class AgentDocumentRegistry {
   private require(idOrTitle: string, options: AgentDocumentWriteOptions = {}): { readonly document: AgentDocumentRecord; readonly revision: number } {
     const found = this.find(idOrTitle);
     if (!found) throw new Error(`Unknown document ${idOrTitle}`);
-    if (options.expectedRevision !== undefined && found.revision !== options.expectedRevision) {
+    if ((options.expectedRevision !== undefined && found.revision !== options.expectedRevision)
+      || (options.expectedIncarnation !== undefined && found.document.incarnation !== options.expectedIncarnation)) {
       throw new Error(`Document ${found.document.id} changed while this call was working on it. Nothing changed. Read it again with mode:"show" and repeat the call.`);
     }
     return found;

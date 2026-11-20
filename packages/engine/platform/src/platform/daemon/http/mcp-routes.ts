@@ -6,6 +6,7 @@ import type {
   McpServerConfig,
   McpToolRule,
 } from '../../mcp/config.js';
+import type { McpServerRole, McpTrustMode } from '../../runtime/mcp/types.js';
 import type { JsonRecord } from '../helpers.js';
 import { jsonErrorResponse } from './error-response.js';
 import { isRecord } from '../../utils/record-coerce.js';
@@ -20,6 +21,9 @@ interface McpRouteContext {
     | 'upsertServerConfig'
     | 'removeServerConfig'
     | 'storeServerToolRule'
+    | 'storeServerPolicy'
+    | 'clearServerToolDenial'
+    | 'approveSchemaQuarantine'
     | 'listServers'
     | 'listServerSecurity'
     | 'listServerSandboxBindings'
@@ -227,10 +231,21 @@ export const MCP_ROUTES: readonly { readonly method: string; readonly path: stri
   { method: 'POST', path: '/api/mcp/reload' },
   { method: 'POST', path: '/api/mcp/config/servers' },
   { method: 'DELETE', path: '/api/mcp/config/servers/{serverName}' },
-  { method: 'POST', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}/deny' },
-  { method: 'POST', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}/allow' },
-  { method: 'DELETE', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}' },
+  { method: 'POST', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}/block' },
+  { method: 'POST', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}/unblock' },
+  { method: 'POST', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}/exempt' },
+  { method: 'POST', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}/unexempt' },
+  { method: 'POST', path: '/api/mcp/config/servers/{serverName}/trust' },
+  { method: 'POST', path: '/api/mcp/config/servers/{serverName}/role' },
+  { method: 'POST', path: '/api/mcp/servers/{serverName}/accept-tools' },
 ];
+
+const TRUST_MODES: readonly McpTrustMode[] = ['constrained', 'ask-on-risk', 'blocked', 'allow-all'];
+const ROLES: readonly McpServerRole[] = ['general', 'docs', 'filesystem', 'git', 'database', 'browser', 'automation', 'ops', 'remote'];
+
+function refused(error: string, status = 400, code = 'INVALID_ARGUMENT'): Response {
+  return jsonErrorResponse({ error, code }, { status });
+}
 
 export async function dispatchMcpRoutes(req: Request, context: McpRouteContext): Promise<Response | null> {
   const url = new URL(req.url);
@@ -285,34 +300,101 @@ export async function dispatchMcpRoutes(req: Request, context: McpRouteContext):
     });
   }
 
-  // One tool's kept rule. Who may call each verb is the catalog's to say: allow and clear are the owner's own acts.
-  const toolRuleMatch = pathname.match(/^\/api\/mcp\/config\/servers\/([^/]+)\/tools\/([^/]+)(?:\/(allow|deny))?$/);
-  if (toolRuleMatch && ((req.method === 'POST' && toolRuleMatch[3] !== undefined) || (req.method === 'DELETE' && toolRuleMatch[3] === undefined))) {
+  // One tool's kept rule, by the /mcp action's word. Who may call each is the catalog's to say: unblock and exempt are the owner's own acts.
+  const toolRuleMatch = pathname.match(/^\/api\/mcp\/config\/servers\/([^/]+)\/tools\/([^/]+)\/(block|unblock|exempt|unexempt)$/);
+  if (toolRuleMatch && req.method === 'POST') {
     const admin = context.requireAdmin(req);
     if (admin) return admin;
     const serverName = decodePathSegment(toolRuleMatch[1]!);
-    const toolName = decodePathSegment(toolRuleMatch[2]!);
-    if (serverName === null || toolName === null || !toolName.trim()) {
-      return jsonErrorResponse({ error: 'Malformed server or tool name in path', code: 'INVALID_ARGUMENT' }, { status: 400 });
+    const rawTool = decodePathSegment(toolRuleMatch[2]!);
+    if (serverName === null || rawTool === null || !rawTool.trim()) return refused('Malformed server or tool name in path');
+    const toolName = rawTool.trim();
+    const rule = toolRuleMatch[3] as McpToolRule;
+    const entry = context.mcpRegistry.getEffectiveConfig(context.roots).servers.find((candidate) => candidate.server.name === serverName);
+    // unblock and unexempt say what they drop; one that has nothing of its kind to drop changed nothing and says so.
+    let sessionLifted = false;
+    if (rule === 'unblock') {
+      const kept = entry?.server.deniedTools?.includes(toolName) ?? false;
+      const session = context.mcpRegistry.listServerSecurity().find((server) => server.name === serverName)?.toolRules
+        ?.some((record) => record.toolName === toolName && record.rule === 'deny' && record.source === 'session') ?? false;
+      if (!kept && !session) return refused(`${toolName} on ${serverName} is not blocked; nothing changed.`, 409, 'NOT_BLOCKED');
+      if (session) sessionLifted = context.mcpRegistry.clearServerToolDenial(serverName, toolName);
+      if (!kept) {
+        return Response.json({
+          serverName, toolName, rule, scope: entry?.source.scope === 'global' ? 'global' : 'project', path: entry?.source.path ?? '',
+          changed: sessionLifted, reload: { added: 0, changed: 0, removed: 0, unchanged: 0, servers: [] },
+          config: serializeEffectiveConfig(context.mcpRegistry.getEffectiveConfig(context.roots)),
+        });
+      }
     }
-    const rule: McpToolRule = toolRuleMatch[3] === 'allow' ? 'allow' : toolRuleMatch[3] === 'deny' ? 'deny' : 'clear';
+    if (rule === 'unexempt' && !(entry?.server.allowedTools?.includes(toolName) ?? false)) {
+      return refused(`${toolName} on ${serverName} does not go past its limits; nothing changed.`, 409, 'NOT_EXEMPT');
+    }
     let result: Awaited<ReturnType<McpRouteContext['mcpRegistry']['storeServerToolRule']>>;
     try {
-      result = await context.mcpRegistry.storeServerToolRule(serverName, toolName.trim(), rule, context.roots);
+      result = await context.mcpRegistry.storeServerToolRule(serverName, toolName, rule, context.roots);
     } catch (error) {
-      // An unknown server, a file another program owns, or an allow aimed at the project file: nothing was written.
-      return jsonErrorResponse({ error: summarizeError(error), code: 'INVALID_ARGUMENT' }, { status: 400 });
+      // An unknown server, a file another program owns, or an exemption aimed at the project file: nothing was written.
+      return refused(summarizeError(error));
     }
     return Response.json({
       serverName,
-      toolName: toolName.trim(),
+      toolName,
       rule,
+      scope: result.scope,
+      path: result.path,
+      changed: result.changed || sessionLifted,
+      reload: result.reload,
+      config: serializeEffectiveConfig(context.mcpRegistry.getEffectiveConfig(context.roots)),
+    });
+  }
+
+  // A server's trust level or role, kept with its entry (the session's value for it ends).
+  const policyMatch = pathname.match(/^\/api\/mcp\/config\/servers\/([^/]+)\/(trust|role)$/);
+  if (policyMatch && req.method === 'POST') {
+    const admin = context.requireAdmin(req);
+    if (admin) return admin;
+    const serverName = decodePathSegment(policyMatch[1]!);
+    if (serverName === null) return refused('Malformed server name in path');
+    const body = await context.parseJsonBody(req);
+    if (body instanceof Response) return body;
+    let policy: { readonly trustMode: McpTrustMode } | { readonly role: McpServerRole };
+    if (policyMatch[2] === 'trust') {
+      const mode = body.trustMode;
+      if (typeof mode !== 'string' || !(TRUST_MODES as readonly string[]).includes(mode)) return refused(`trustMode must be one of ${TRUST_MODES.join(', ')}.`);
+      policy = { trustMode: mode as McpTrustMode };
+    } else {
+      const role = body.role;
+      if (typeof role !== 'string' || !(ROLES as readonly string[]).includes(role)) return refused(`role must be one of ${ROLES.join(', ')}.`);
+      policy = { role: role as McpServerRole };
+    }
+    let result: Awaited<ReturnType<McpRouteContext['mcpRegistry']['storeServerPolicy']>>;
+    try {
+      result = await context.mcpRegistry.storeServerPolicy(serverName, policy, context.roots);
+    } catch (error) {
+      return refused(summarizeError(error));
+    }
+    return Response.json({
+      serverName,
       scope: result.scope,
       path: result.path,
       changed: result.changed,
       reload: result.reload,
       config: serializeEffectiveConfig(context.mcpRegistry.getEffectiveConfig(context.roots)),
     });
+  }
+
+  const acceptMatch = pathname.match(/^\/api\/mcp\/servers\/([^/]+)\/accept-tools$/);
+  if (acceptMatch && req.method === 'POST') {
+    const admin = context.requireAdmin(req);
+    if (admin) return admin;
+    const serverName = decodePathSegment(acceptMatch[1]!);
+    if (serverName === null) return refused('Malformed server name in path');
+    const server = context.mcpRegistry.listServerSecurity().find((entry) => entry.name === serverName);
+    if (!server) return refused(`No MCP server named ${serverName}.`, 404, 'NOT_FOUND');
+    if (server.schemaFreshness !== 'quarantined') return refused(`${serverName}'s tools are not held back; nothing changed.`, 409, 'NOT_HELD_BACK');
+    context.mcpRegistry.approveSchemaQuarantine(serverName, 'owner');
+    return Response.json({ serverName, accepted: true });
   }
 
   const serverMatch = pathname.match(/^\/api\/mcp\/config\/servers\/([^/]+)$/);

@@ -104,7 +104,10 @@ export type {
 } from './integration-route-types.js';
 export { APPROVAL_REMEMBER_TIERS } from './system-route-types.js';
 export type {
-  ApprovalBrokerLike,
+  ApprovalActionInputLike,
+  ApprovalActionResultLike,
+  ApprovalActionsLike,
+  ApprovalViewerLike,
   ApprovalRememberTier,
   AutomationDeliveryGuarantee,
   AutomationRouteBindingKind,

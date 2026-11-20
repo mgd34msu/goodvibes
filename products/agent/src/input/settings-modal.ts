@@ -396,7 +396,9 @@ export class SettingsModal extends TerminalSettingsModalState<
   }
 
   activateSelected(): void {
-    if (this.currentCategory === 'mcp') {
+    // While a search is shown the highlighted row is a search result (a setting): the
+    // category the search started from never decides what Enter acts on.
+    if (!this.searchFocused && this.currentCategory === 'mcp') {
       const entry = this.getSelectedMcp();
       if (!entry) return;
       this.editingMode = true;
@@ -405,7 +407,7 @@ export class SettingsModal extends TerminalSettingsModalState<
       return;
     }
 
-    if (this.currentCategory === 'subscriptions') {
+    if (!this.searchFocused && this.currentCategory === 'subscriptions') {
       const entry = this.getSelectedSubscription();
       if (!entry) return;
       if (entry.state === 'active' || entry.state === 'pending') {

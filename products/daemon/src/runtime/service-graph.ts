@@ -10,6 +10,7 @@ import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods,
 import { openWorkspaceRegistrationStore, sharedWorkspaceRegisterPath, WorkspaceSwapManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { GatewayMethodCatalog, createOwnerInbox, ownerInboxStorePath, terminalSessionPresence, type DaemonBrowserGatewayService } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { resolvePairingWebOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { describeModeInForceWords } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes-jev/engine/platform/platform/daemon/receipts';
 import { MailboxReaders } from '@goodvibes-jev/engine/platform/platform/email';
 import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes-jev/engine/terminal-shell';
@@ -319,6 +320,11 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       // shared through the record.
       clusterRoles: graph.clusterRoles,
       authority: graph.authorityRecord,
+      // sessions.permissionMode.get reports the mode the gate decides by (jev-decides
+      // runs as ask-me while no decision model works), why, and the same in plain words.
+      modeInForce: (chosen, explicitlyChosen) => permissionManager.modeInForce(chosen, explicitlyChosen),
+      modeInForceReason: (chosen, explicitlyChosen) => permissionManager.describeModeInForce(chosen, explicitlyChosen).reason,
+      modeInForceWords: (chosen, explicitlyChosen) => describeModeInForceWords(configManager, { chosen, explicitlyChosen }),
     });
     disposalScope.registry.add('browser checkout seam holder', () => browserCheckoutSeam.clear()); // newer than 'browser sessions' above, so runs first
     disposalScope.registry.add('native automation updates', registerNativeAutomationGatewayMethods(gatewayMethods, { manager: automationManager, host: autonomousHost }));

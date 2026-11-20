@@ -1,4 +1,5 @@
 import type { ProviderRegistry } from '../../providers/registry.js';
+import { callWithFailover, type FailoverTarget } from '../../providers/failover.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import type { KnowledgeSemanticLlm } from './types.js';
@@ -66,15 +67,21 @@ async function completeWithCurrentModel(
   input.signal?.addEventListener('abort', abortFromParent, { once: true });
   try {
     const current = providerRegistry.getCurrentModel();
-    const provider = providerRegistry.getForModel(current.registryKey, current.provider);
-    const chatPromise = provider.chat({
-      model: current.id,
-      messages: [{ role: 'user', content: input.prompt }],
-      systemPrompt: input.systemPrompt,
-      ...(input.maxTokens === undefined ? {} : { maxTokens: input.maxTokens }),
-      reasoningEffort: 'low',
-      signal: controller.signal,
-    }).catch((error) => {
+    const first: FailoverTarget = {
+      model: { registryKey: current.registryKey, provider: current.provider, displayName: current.displayName },
+      modelId: current.id,
+      provider: providerRegistry.getForModel(current.registryKey, current.provider),
+    };
+    // The model fails over like a turn: its other sign-ins, then provider.fallbackModels; the timeout bounds the whole call.
+    const chatPromise = callWithFailover({ registry: providerRegistry, first, purpose: `Knowledge (${input.purpose})`, signal: controller.signal },
+      (target) => target.provider.chat({
+        model: target.modelId,
+        messages: [{ role: 'user', content: input.prompt }],
+        systemPrompt: input.systemPrompt,
+        ...(input.maxTokens === undefined ? {} : { maxTokens: input.maxTokens }),
+        reasoningEffort: 'low',
+        signal: controller.signal,
+      })).catch((error) => {
       if (timedOut || controller.signal.aborted) return null;
       throw error;
     });

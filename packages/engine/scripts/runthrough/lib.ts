@@ -418,7 +418,8 @@ export async function approvePending(daemon: Daemon, token: string, decide: (app
     if (approval.status !== 'pending' || typeof approval.id !== 'string') continue;
     const verb = decide(approval) ? 'approve' : 'deny';
     // As the web UI's approve and deny buttons send it: an explicit owner decision.
-    const result = await api(daemon, token, 'POST', `/api/approvals/${encodeURIComponent(approval.id)}/${verb}`, { disposition: verb === 'approve' ? 'approved' : 'denied' });
+    const result = await api(daemon, token, 'POST', `/api/approvals/${encodeURIComponent(approval.id)}/${verb}`,
+      { disposition: verb === 'approve' ? 'approved' : 'denied', expectedRevision: approval.revision });
     if (result.status < 300) answered.push(approval);
   }
   return answered;

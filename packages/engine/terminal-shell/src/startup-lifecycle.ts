@@ -11,6 +11,7 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { existsSync } from 'node:fs';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 import { resumeSessionCore, type SessionResumeDeps } from './session-resume.js';
 import { whenCrashSnapshotFound } from './session-crash-offer.js';
@@ -196,6 +197,8 @@ export async function restoreHeadlessSession(
     stopRecovering();
   }
   signal.throwIfAborted();
-  writeLastSessionPointer(target, { surface: ports.surface });
+  // The session opened; a pointer that was not written is said, and the next save writes it again.
+  try { writeLastSessionPointer(target, { surface: ports.surface }); }
+  catch (error) { logger.warn('The last-session pointer was not written after the session opened', { sessionId: target, error: summarizeError(error) }); }
   return recovery.report;
 }

@@ -27,6 +27,7 @@
  * (`daemon.timezone`, or this machine's zone when that is unset).
  */
 
+import { revealOrNull, type Secret } from '@goodvibes-jev/engine/platform/platform/security';
 import {
   CalendarApiError,
   CalendarConnector,
@@ -83,6 +84,13 @@ export interface CalendarConfigReader {
  * parameter is optional so the fake's two-argument shape still satisfies this.
  */
 export interface CalendarSecretSlice {
+  get(key: string): Promise<Secret | null>;
+  set(key: string, value: string, options?: { readonly scope?: SecretScope }): Promise<void>;
+  delete(key: string, options?: { readonly scope?: SecretScope }): Promise<void>;
+}
+
+/** The slice the connector and its token store read: each value revealed for the calendar service it is sent to. */
+export interface CalendarSecretTextSlice {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, options?: { readonly scope?: SecretScope }): Promise<void>;
   delete(key: string, options?: { readonly scope?: SecretScope }): Promise<void>;
@@ -112,9 +120,9 @@ export interface CalendarSecretSlice {
  * disconnect wants when a token stored before this fix is still sitting in the
  * project tier.
  */
-export function daemonScopedSecrets(secrets: CalendarSecretSlice): CalendarSecretSlice {
+export function daemonScopedSecrets(secrets: CalendarSecretSlice): CalendarSecretTextSlice {
   return {
-    get: (key) => secrets.get(key),
+    get: async (key) => revealOrNull(await secrets.get(key), 'dispatch'),
     set: (key, value, options) => secrets.set(key, value, {
       ...options,
       scope: resolveSecretWriteScope(key, options?.scope),
@@ -236,7 +244,7 @@ export class CalendarOAuthService {
    * connector, and a service that stopped wrapping would keep every visible
    * behavior and quietly file the refresh token where the daemon cannot see it.
    */
-  readonly secrets: CalendarSecretSlice;
+  readonly secrets: CalendarSecretTextSlice;
   private readonly connector: CalendarConnector;
 
   constructor(options: CalendarOAuthServiceOptions) {
@@ -536,8 +544,17 @@ export class CalendarOAuthService {
   ): Promise<CreateEventOutcome> {
     const config = await this.resolveConfig(provider);
     const calendars = await this.connector.listCalendars(config, options);
+    // By id; by name only when exactly one calendar has that name, never the first of several.
+    const byName = target.calendarId ? calendars.filter((candidate) => candidate.name === target.calendarId) : [];
+    if (target.calendarId && !calendars.some((candidate) => candidate.id === target.calendarId) && byName.length > 1) {
+      throw new CalendarApiError({
+        kind: 'provider-error',
+        status: 409,
+        detail: `${byName.length} calendars on the connected ${provider} account are named '${target.calendarId}', so nothing was created. Name the calendar by its id: ${byName.map((candidate) => candidate.id).join(', ')}.`,
+      });
+    }
     const calendar = target.calendarId
-      ? calendars.find((candidate) => candidate.id === target.calendarId || candidate.name === target.calendarId)
+      ? calendars.find((candidate) => candidate.id === target.calendarId) ?? byName[0]
       : calendars.find((candidate) => candidate.primary === true && candidate.canWrite) ?? calendars.find((candidate) => candidate.canWrite);
     if (calendar === undefined) {
       throw new CalendarApiError({

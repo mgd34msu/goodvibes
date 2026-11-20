@@ -1,6 +1,7 @@
 import { ArtifactStore } from '../artifacts/index.js';
 import type { ContentPart, LLMProvider, ProviderMessage } from '../providers/interface.js';
 import type { ModelDefinition, ProviderRegistry } from '../providers/registry.js';
+import { callWithFailover, type FailoverTarget } from '../providers/failover.js';
 import type {
   MediaAnalysisRequest,
   MediaAnalysisResult,
@@ -35,7 +36,8 @@ function isUnscoped(scope: ImageUnderstandingScope): boolean {
   return (scope.allowProviderIds?.length ?? 0) === 0 && !scope.requireLocal;
 }
 
-type ImageModelRegistry = Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'listModels' | 'describeRuntime'>;
+type ImageModelRegistry = Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'listModels' | 'describeRuntime'
+  | 'tryGet' | 'resolveProviderReference' | 'fallbackOrder'>;
 
 function buildAnalysisPrompt(prompt?: string): string {
   const task = prompt?.trim().length
@@ -101,6 +103,7 @@ async function resolveModel(
   providerId: string;
   provider: LLMProvider;
   modelId: string;
+  target: FailoverTarget;
 }> {
   const models: readonly ModelDefinition[] = providerRegistry.listModels();
   const named = async (requested: string) => {
@@ -158,6 +161,11 @@ async function resolveModel(
     providerId: selected.provider,
     provider,
     modelId: selected.id,
+    target: {
+      model: { registryKey: selected.registryKey, provider: selected.provider, displayName: selected.displayName },
+      modelId: selected.id,
+      provider,
+    },
   };
 }
 
@@ -210,11 +218,23 @@ async function analyzeWithScope(
       content,
     },
   ];
-  const response = await selected.provider.chat({
-    model: selected.modelId,
-    messages,
+  // The model fails over like a turn (its other sign-ins, then
+  // provider.fallbackModels), but only to a model that reads images and stays
+  // in this scope: an image never goes to a model the scope does not allow.
+  const { response, answered } = await callWithFailover({
+    registry: providerRegistry,
+    first: selected.target,
+    purpose: 'Image understanding',
     signal: request.signal,
-  });
+    admit: async (target) => {
+      const listed = providerRegistry.listModels().find((model) => model.registryKey === target.model.registryKey);
+      if (!listed?.capabilities.multimodal) return 'it does not read images';
+      return await modelMatchesScope(providerRegistry, toRecord(listed), scope) ? undefined : `it is outside the ${scope.label} scope`;
+    },
+  }, async (target) => ({
+    response: await target.provider.chat({ model: target.modelId, messages, signal: request.signal }),
+    answered: { providerId: target.model.provider, modelId: target.modelId },
+  }));
 
   const structured = parseStructuredAnalysis(response.content);
   if (structured) {
@@ -227,8 +247,8 @@ async function analyzeWithScope(
       metadata: {
         ...request.metadata,
         ...artifact.metadata,
-        llmProviderId: selected.providerId,
-        modelId: selected.modelId,
+        llmProviderId: answered.providerId,
+        modelId: answered.modelId,
         structured: rest,
       },
     };
@@ -240,8 +260,8 @@ async function analyzeWithScope(
     metadata: {
       ...request.metadata,
       ...artifact.metadata,
-      llmProviderId: selected.providerId,
-      modelId: selected.modelId,
+      llmProviderId: answered.providerId,
+      modelId: answered.modelId,
       format: 'plain-text-response',
     },
   };

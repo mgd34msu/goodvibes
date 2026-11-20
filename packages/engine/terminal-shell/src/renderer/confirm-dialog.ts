@@ -29,26 +29,39 @@ export function renderConfirmDialog(dialog: ConfirmView, screenWidth: number, sc
   const lines = body.split('\n').flatMap((para) => (para.trim() === '' ? [''] : wrapLines(para, modalInnerWidth(width))));
   // Fill rows: padding, title, blank, body, blank, buttons, empty last row.
   const f = beginModal(screenWidth, screenHeight, { title, width, height: lines.length + 6, center: true });
+  // Body rows run from the top to two rows above the buttons. A body taller than
+  // that scrolls, and its last row says how much is still below (or above).
+  const capacity = Math.max(1, f.bottom - 1 - f.top);
+  const overflow = lines.length > capacity;
+  const visible = overflow ? Math.max(1, capacity - 1) : lines.length;
+  dialog.noteBody?.(lines.length, visible);
+  const start = Math.max(0, Math.min(dialog.scroll ?? 0, lines.length - visible));
   let y = f.top;
-  for (const line of lines) {
-    if (y > f.bottom - 2) break;
-    f.canvas.put(f.l, y++, line, { fg: t.textMuted });
+  for (const line of lines.slice(start, start + visible)) f.canvas.put(f.l, y++, line, { fg: t.textMuted });
+  if (overflow) {
+    const below = lines.length - (start + visible);
+    f.canvas.put(f.l, y, below > 0
+      ? `↓ ${below} more line${below === 1 ? '' : 's'} (down or page down to read them)`
+      : `↑ ${start} line${start === 1 ? '' : 's'} above · end shown`, { fg: t.textMuted, bold: below > 0 });
   }
+  // Confirming is possible only once the whole body has been on screen.
+  const ready = dialog.seenToEnd ?? !overflow;
   const toneBg = tone === 'danger' ? t.error : tone === 'warning' ? t.warning : t.brand;
   const confirmW = buttonWidth(confirmLabel);
   const cancelW = buttonWidth(cancelLabel);
   const by = f.bottom;
-  const confirmX = f.r - confirmW + 1;
-  const cancelX = confirmX - 2 - cancelW;
+  // Kept inside the dialog on a narrow screen.
+  const confirmX = Math.max(f.l + cancelW + 2, f.r - confirmW + 1);
+  const cancelX = Math.max(f.l, confirmX - 2 - cancelW);
   f.canvas.put(cancelX, by, ` ${cancelLabel} `, dialog.chosen === 0
     ? { fg: t.selectedListItemText, bg: t.textMuted, bold: true }
     : { fg: t.textMuted, bg: t.border });
-  f.canvas.put(confirmX, by, ` ${confirmLabel} `, dialog.chosen === 1
-    ? { fg: t.selectedListItemText, bg: toneBg, bold: true }
-    : { fg: toneBg, bg: t.border, bold: true });
-  f.canvas.hitTargets.push(
-    { id: 'cancel', x: cancelX, y: by, width: cancelW, height: 1, keys: ['n'] },
-    { id: 'confirm', x: confirmX, y: by, width: confirmW, height: 1, keys: ['y'] },
-  );
+  f.canvas.put(confirmX, by, ` ${confirmLabel} `, !ready
+    ? { fg: t.textMuted, bg: t.border }
+    : dialog.chosen === 1
+      ? { fg: t.selectedListItemText, bg: toneBg, bold: true }
+      : { fg: toneBg, bg: t.border, bold: true });
+  f.canvas.hitTargets.push({ id: 'cancel', x: cancelX, y: by, width: cancelW, height: 1, keys: ['n'] });
+  if (ready) f.canvas.hitTargets.push({ id: 'confirm', x: confirmX, y: by, width: confirmW, height: 1, keys: ['y'] });
   return finishModal(f);
 }

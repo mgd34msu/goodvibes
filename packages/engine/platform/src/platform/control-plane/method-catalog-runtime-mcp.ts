@@ -9,6 +9,7 @@
  */
 import {
   BOOLEAN_SCHEMA,
+  EMPTY_OBJECT_SCHEMA,
   STRING_SCHEMA,
   NUMBER_SCHEMA,
   objectSchema,
@@ -124,17 +125,28 @@ export const MCP_TOOL_RULE_INPUT_SCHEMA = objectSchema({
   serverName: STRING_SCHEMA,
   toolName: STRING_SCHEMA,
 }, ['serverName', 'toolName']);
-/** The rule kept or cleared, where it was written, whether the file changed, and the reload that applied it. */
+/** The change made (the /mcp action's word), where it was written, whether the file changed, and the reload that applied it. */
 export const MCP_TOOL_RULE_RESPONSE_SCHEMA = objectSchema({
   serverName: STRING_SCHEMA,
   toolName: STRING_SCHEMA,
-  rule: enumSchema(['allow', 'deny', 'clear']),
+  rule: enumSchema(['block', 'unblock', 'exempt', 'unexempt']),
   scope: MCP_SCOPE_SCHEMA,
   path: STRING_SCHEMA,
   changed: BOOLEAN_SCHEMA,
   reload: MCP_RELOAD_RESULT_SCHEMA,
   config: MCP_CONFIG_RESPONSE_SCHEMA,
 }, ['serverName', 'toolName', 'rule', 'scope', 'path', 'changed', 'reload', 'config']);
+/** A server's trust level or role kept with its entry: where, whether the file changed, and the reload that applied it. */
+export const MCP_SERVER_POLICY_RESPONSE_SCHEMA = objectSchema({
+  serverName: STRING_SCHEMA,
+  scope: MCP_SCOPE_SCHEMA,
+  path: STRING_SCHEMA,
+  changed: BOOLEAN_SCHEMA,
+  reload: MCP_RELOAD_RESULT_SCHEMA,
+  config: MCP_CONFIG_RESPONSE_SCHEMA,
+}, ['serverName', 'scope', 'path', 'changed', 'reload', 'config']);
+export const MCP_TRUST_MODE_SCHEMA = enumSchema(['constrained', 'ask-on-risk', 'blocked', 'allow-all']);
+export const MCP_ROLE_SCHEMA = enumSchema(['general', 'docs', 'filesystem', 'git', 'database', 'browser', 'automation', 'ops', 'remote']);
 export const MCP_SERVER_STATUS_SCHEMA = objectSchema({
   name: STRING_SCHEMA,
   connected: BOOLEAN_SCHEMA,
@@ -170,45 +182,111 @@ export const MCP_TOOLS_RESPONSE_SCHEMA = objectSchema({
 }, ['tools']);
 
 /**
- * One tool's kept rule: deny tightens and is any admin's to set; allow and
- * clear loosen (clearing may lift a denial), so they are the owner's own acts
- * (`ownerOnly`), which the Agent's model is refused on every route.
+ * The /mcp actions the daemon runs, one method each and named by the action's
+ * word. block tightens and is any admin's to set; unblock and exempt loosen,
+ * so they are the owner's own acts (`owner.act`), which the Agent's model is
+ * refused on every route. unexempt tightens. Trust may loosen (ask-on-risk,
+ * allow-all) and accepting changed tools offers tools nobody has reviewed, so
+ * both are the owner's; a role and a reload change no protection.
  */
-export const MCP_TOOL_RULE_METHOD_DESCRIPTORS: readonly GatewayMethodDescriptor[] = [
+export const MCP_ACTION_METHOD_DESCRIPTORS: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
-    id: 'mcp.servers.tools.deny',
+    id: 'mcp.servers.tools.block',
     repeat: 'safe',
-    title: 'Deny MCP Tool',
-    description: 'Keep a denial of one tool with its MCP server\'s entry in the config file that holds it (global or this project\'s .goodvibes/mcp.json) and apply it at once: every call to the tool is refused, whatever the server\'s trust mode and scope allow, and a call not yet sent ends. A denial replaces a kept allow of the same tool. Refused for a server whose entry is in a file another program owns.',
+    title: 'Block an MCP Tool',
+    description: 'Keep a block of one tool with its MCP server\'s entry in the config file that holds it (global or this project\'s .goodvibes/mcp.json) and apply it at once: every call to the tool is refused, whatever the server\'s trust level and limits allow, and a call not yet sent ends. A block replaces a kept exemption of the same tool. Refused for a server whose entry is in a file another program owns. The same as /mcp block <server> <tool> --keep.',
     category: 'mcp',
     effects: ['mcp.administer'],
-    http: { method: 'POST', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}/deny' },
+    http: { method: 'POST', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}/block' },
     events: [runtimeEventId('mcp')],
     inputSchema: MCP_TOOL_RULE_INPUT_SCHEMA,
     outputSchema: MCP_TOOL_RULE_RESPONSE_SCHEMA,
   }),
   methodDescriptor({
-    id: 'mcp.servers.tools.allow',
+    id: 'mcp.servers.tools.unblock',
     repeat: 'safe',
     effects: ['mcp.administer', 'owner.act'],
-    title: 'Allow MCP Tool',
-    description: 'Keep an allow of one tool with its MCP server\'s entry in the owner\'s global MCP config and apply it at once: calls to the tool pass the server\'s path and host scope. A blocked server, a quarantined schema and a denial of the same tool still refuse. Loosens what the server may do, so it is the owner\'s own act: refused for the Agent\'s model and for a server kept in a project file.',
+    title: 'Stop Blocking an MCP Tool',
+    description: 'Drop the block kept for one tool with its MCP server\'s entry, and this daemon\'s block of it for its session, and apply it at once, so the server\'s trust level and limits decide the tool again. A kept exemption of the tool stays. Refused when the tool is not blocked. Loosens what the server may do, so it is the owner\'s own act: refused for the Agent\'s model. The same as /mcp unblock <server> <tool>.',
     category: 'mcp',
-    http: { method: 'POST', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}/allow' },
+    http: { method: 'POST', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}/unblock' },
     events: [runtimeEventId('mcp')],
     inputSchema: MCP_TOOL_RULE_INPUT_SCHEMA,
     outputSchema: MCP_TOOL_RULE_RESPONSE_SCHEMA,
   }),
   methodDescriptor({
-    id: 'mcp.servers.tools.clear',
+    id: 'mcp.servers.tools.exempt',
     repeat: 'safe',
     effects: ['mcp.administer', 'owner.act'],
-    title: 'Clear MCP Tool Rule',
-    description: 'Drop the allow or denial kept for one tool with its MCP server\'s entry and apply it at once, so the server\'s trust mode and scope decide the tool again. Lifting a denial loosens what the server may do, so it is the owner\'s own act: refused for the Agent\'s model.',
+    title: 'Let an MCP Tool Go Beyond Its Server\'s Limits',
+    description: 'Keep an exemption of one tool with its MCP server\'s entry in the owner\'s global MCP config and apply it at once: calls to the tool pass the server\'s folder and site limits. A blocked server, held-back tools and a block of the same tool still refuse. Loosens what the server may do, so it is the owner\'s own act: refused for the Agent\'s model and for a server kept in a project file. The same as /mcp exempt <server> <tool>.',
     category: 'mcp',
-    http: { method: 'DELETE', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}' },
+    http: { method: 'POST', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}/exempt' },
     events: [runtimeEventId('mcp')],
     inputSchema: MCP_TOOL_RULE_INPUT_SCHEMA,
     outputSchema: MCP_TOOL_RULE_RESPONSE_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'mcp.servers.tools.unexempt',
+    repeat: 'safe',
+    effects: ['mcp.administer'],
+    title: 'Make an MCP Tool Follow Its Server\'s Limits Again',
+    description: 'Drop the exemption kept for one tool with its MCP server\'s entry and apply it at once, so the server\'s folder and site limits hold the tool again. A kept block of the tool stays. Refused when the tool has no exemption. The same as /mcp unexempt <server> <tool>.',
+    category: 'mcp',
+    http: { method: 'POST', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}/unexempt' },
+    events: [runtimeEventId('mcp')],
+    inputSchema: MCP_TOOL_RULE_INPUT_SCHEMA,
+    outputSchema: MCP_TOOL_RULE_RESPONSE_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'mcp.servers.trust.set',
+    repeat: 'safe',
+    effects: ['mcp.administer', 'owner.act'],
+    title: 'Set an MCP Server\'s Trust Level',
+    description: 'Keep a server\'s trust level with its entry in the MCP config file that holds it and apply it at once, after a restart too; a level set for this daemon\'s session ends. allow-all is kept only in the owner\'s global file. A looser level loosens what the server may do, so it is the owner\'s own act: refused for the Agent\'s model. The same as /mcp trust <server> <mode>.',
+    category: 'mcp',
+    http: { method: 'POST', path: '/api/mcp/config/servers/{serverName}/trust' },
+    events: [runtimeEventId('mcp')],
+    inputSchema: objectSchema({ serverName: STRING_SCHEMA, trustMode: MCP_TRUST_MODE_SCHEMA }, ['serverName', 'trustMode']),
+    outputSchema: MCP_SERVER_POLICY_RESPONSE_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'mcp.servers.role.set',
+    repeat: 'safe',
+    effects: ['mcp.administer'],
+    title: 'Set an MCP Server\'s Role',
+    description: 'Keep a server\'s role (what kind of server it is) with its entry in the MCP config file that holds it and apply it at once, after a restart too; a role set for this daemon\'s session ends. The same as /mcp role <server> <role>.',
+    category: 'mcp',
+    http: { method: 'POST', path: '/api/mcp/config/servers/{serverName}/role' },
+    events: [runtimeEventId('mcp')],
+    inputSchema: objectSchema({ serverName: STRING_SCHEMA, role: MCP_ROLE_SCHEMA }, ['serverName', 'role']),
+    outputSchema: MCP_SERVER_POLICY_RESPONSE_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'mcp.servers.reload',
+    repeat: 'safe',
+    title: 'Reconnect Every MCP Server From Its Config',
+    description: 'Read every MCP config file again and reconnect the servers that were added, removed or changed, without restarting the daemon. The same as /mcp reload.',
+    category: 'mcp',
+    effects: ['mcp.administer'],
+    http: { method: 'POST', path: '/api/mcp/reload' },
+    events: [runtimeEventId('mcp')],
+    inputSchema: EMPTY_OBJECT_SCHEMA,
+    outputSchema: objectSchema({
+      reload: MCP_RELOAD_RESULT_SCHEMA,
+      config: MCP_CONFIG_RESPONSE_SCHEMA,
+    }, ['reload', 'config']),
+  }),
+  methodDescriptor({
+    id: 'mcp.servers.quarantine.accept',
+    repeat: 'safe',
+    effects: ['mcp.administer', 'owner.act'],
+    title: 'Accept an MCP Server\'s Changed Tools',
+    description: 'Accept the tools of a server whose tools were held back because they changed since they were last accepted, and offer them again on this daemon. Refused when its tools are not held back. Offers tools nobody has reviewed, so it is the owner\'s own act: refused for the Agent\'s model. The same as /mcp accept-tools <server>.',
+    category: 'mcp',
+    http: { method: 'POST', path: '/api/mcp/servers/{serverName}/accept-tools' },
+    events: [runtimeEventId('mcp')],
+    inputSchema: objectSchema({ serverName: STRING_SCHEMA }, ['serverName']),
+    outputSchema: objectSchema({ serverName: STRING_SCHEMA, accepted: BOOLEAN_SCHEMA }, ['serverName', 'accepted']),
   }),
 ];

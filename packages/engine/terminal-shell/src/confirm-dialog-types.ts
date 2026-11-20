@@ -25,4 +25,10 @@ export interface ConfirmView {
   readonly options: ConfirmOptions;
   /** 0 = cancel (left), 1 = confirm (right). */
   readonly chosen: 0 | 1;
+  /** The first body line shown (the body scrolls when it does not fit). */
+  readonly scroll?: number;
+  /** False until the whole body has been on screen: the confirming button is disabled until then. */
+  readonly seenToEnd?: boolean;
+  /** Told by the renderer how many body lines there are and how many fit, so the dialog can scroll. */
+  noteBody?(total: number, visible: number): void;
 }

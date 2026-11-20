@@ -163,7 +163,7 @@ export const featureConfigSettings: ConfigSettingRow[] = [
     key: 'fetch.allowedPrivateHosts',
     type: 'string',
     description:
-      'Comma-separated private-network hosts the fetch tool may reach when a call names them: a LAN device (192.168.1.20), a container (172.17.0.2), a VPN peer (100.101.102.103), or a name that resolves to one (nas.lan). Patterns match as in fetch.trustedHosts. Applies only to the host a call writes, never to a redirect target; cloud-metadata, link-local, loopback (see fetch.allowLocalhost) and other reserved addresses stay refused. A call in YOLO mode, or one the owner admitted, may also reach a private address written as an IP without this list. Your own settings only: a project settings file cannot set it.',
+      'Comma-separated private-network hosts the fetch tool and the browser may reach: a LAN device (192.168.1.20), a container (172.17.0.2), a VPN peer (100.101.102.103), or a name that resolves to one (nas.lan). Patterns match as in fetch.trustedHosts. For the fetch tool it applies only to the host a call writes, never to a redirect target; the browser holds every request a page makes (navigation, redirect, frame, subresource, WebSocket) to it, and asks the owner before opening any other private or loopback address for a page. Cloud-metadata, link-local, loopback (see fetch.allowLocalhost) and other reserved addresses stay refused. A call in YOLO mode, or one the owner admitted, may also reach a private address written as an IP without this list. Your own settings only: a project settings file cannot set it.',
   },
   {
     key: 'fetch.trustedHosts',

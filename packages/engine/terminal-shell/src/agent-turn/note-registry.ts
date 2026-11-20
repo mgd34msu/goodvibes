@@ -149,6 +149,21 @@ export function noteStorePath(shellPaths: AgentLocalStorePaths): string {
   return shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'notes', 'notes.json');
 }
 
+/**
+ * The one way a note is named, for reading and for every change: its id
+ * first, whatever order the notes are in, then its title only when exactly one
+ * note has it. A title equal to another note's id never wins over that id, so
+ * what is read is what is changed or deleted.
+ */
+function resolveNote(notes: readonly AgentNoteRecord[], idOrTitle: string): AgentNoteRecord | null {
+  const lookup = idOrTitle.trim().toLowerCase();
+  if (!lookup) return null;
+  const byId = notes.find((note) => note.id.toLowerCase() === lookup);
+  if (byId) return byId;
+  const byTitle = notes.filter((note) => note.title.toLowerCase() === lookup);
+  return byTitle.length === 1 ? byTitle[0]! : null;
+}
+
 export class AgentNoteRegistry {
   private held: JsonStoreContents<AgentNoteRecord> | null = null;
   private lastWrite: JsonStoreWriteReport | undefined;
@@ -186,9 +201,7 @@ export class AgentNoteRegistry {
   }
 
   public get(idOrTitle: string): AgentNoteRecord | null {
-    const lookup = idOrTitle.trim().toLowerCase();
-    if (!lookup) return null;
-    return this.list().find((note) => note.id.toLowerCase() === lookup || note.title.toLowerCase() === lookup) ?? null;
+    return resolveNote(this.list(), idOrTitle);
   }
 
   public create(input: AgentNoteCreateInput): AgentNoteRecord {
@@ -334,9 +347,7 @@ export class AgentNoteRegistry {
   }
 
   private findInStore(store: NoteStoreFile, idOrTitle: string): AgentNoteRecord | null {
-    const lookup = idOrTitle.trim().toLowerCase();
-    if (!lookup) return null;
-    return store.notes.find((note) => note.id.toLowerCase() === lookup || note.title.toLowerCase() === lookup) ?? null;
+    return resolveNote(store.notes, idOrTitle);
   }
 
   /** What the last write reported: notes this version cannot read that were kept, or a copy of an unreadable file. */

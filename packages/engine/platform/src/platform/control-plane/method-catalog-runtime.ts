@@ -82,7 +82,7 @@ import {
   MCP_SERVER_CONFIG_SCHEMA,
   MCP_SERVERS_RESPONSE_SCHEMA,
   MCP_TOOLS_RESPONSE_SCHEMA,
-  MCP_TOOL_RULE_METHOD_DESCRIPTORS,
+  MCP_ACTION_METHOD_DESCRIPTORS,
 } from './method-catalog-runtime-mcp.js';
 import type { ContractErrorCode } from '../types/foundation-contract.js';
 
@@ -170,21 +170,6 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     outputSchema: MCP_TOOLS_RESPONSE_SCHEMA,
   }),
   methodDescriptor({
-    id: 'mcp.config.reload',
-    repeat: 'safe',
-    title: 'Reload MCP Config',
-    description: 'Reload effective MCP config and reconnect added, removed, or changed servers without daemon restart.',
-    category: 'mcp',
-    effects: ['mcp.administer'],
-    http: { method: 'POST', path: '/api/mcp/reload' },
-    events: [runtimeEventId('mcp')],
-    inputSchema: EMPTY_OBJECT_SCHEMA,
-    outputSchema: objectSchema({
-      reload: MCP_RELOAD_RESULT_SCHEMA,
-      config: MCP_CONFIG_RESPONSE_SCHEMA,
-    }, ['reload', 'config']),
-  }),
-  methodDescriptor({
     id: 'mcp.servers.upsert',
     repeat: 'safe',
     effects: ['mcp.administer', 'owner.act'],
@@ -214,7 +199,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     }, ['serverName']),
     outputSchema: MCP_CONFIG_MUTATION_RESPONSE_SCHEMA,
   }),
-  ...MCP_TOOL_RULE_METHOD_DESCRIPTORS,
+  ...MCP_ACTION_METHOD_DESCRIPTORS,
   methodDescriptor({
     id: 'remote.snapshot',
     title: 'Remote Runtime Snapshot',

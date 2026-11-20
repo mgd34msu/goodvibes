@@ -50,6 +50,12 @@ export interface AgentDocumentAttachment {
 
 export interface AgentDocumentRecord {
   readonly id: string;
+  /**
+   * This document's own identity, fresh at create: a document deleted and
+   * created again under the same id (its id comes from its title) is another
+   * document, and a write prepared against the first is refused for it.
+   */
+  readonly incarnation: string;
   readonly title: string;
   readonly body: string;
   readonly tags: readonly string[];

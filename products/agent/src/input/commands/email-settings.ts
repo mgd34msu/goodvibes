@@ -15,6 +15,7 @@ import {
   type EmailServiceDeps,
   type SurfaceEmailSettings,
 } from '@goodvibes-jev/engine/platform/platform/email';
+import type { Secret } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ConfigKey } from '../../config/index.ts';
 import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
 
@@ -101,7 +102,7 @@ export interface MailboxConfigManagerLike {
 
 /** Secret store surface needed to store the password. */
 export interface MailboxSecretsManagerLike {
-  readonly get: (key: string) => Promise<string | null>;
+  readonly get: (key: string) => Promise<Secret | null>;
 }
 
 export interface PersistMailboxFieldResult {

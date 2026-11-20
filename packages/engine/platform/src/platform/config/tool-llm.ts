@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import type { ConfigManager } from './manager.js';
 import type { LLMProvider } from '../providers/interface.js';
 import type { ProviderRegistry } from '../providers/registry.js';
+import { callWithFailover, type FailoverTarget } from '../providers/failover.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitLlmResponseReceived } from '../runtime/emitters/turn.js';
 import { computeUsageCostUsdCents, usageCostSource } from '../providers/model-pricing.js';
@@ -29,11 +30,14 @@ import { summarizeError } from '../utils/error-display.js';
 export interface ResolvedToolLLM {
   provider: LLMProvider;
   modelId: string;
+  /** `provider:model`, the key a failover reads the model by. */
+  registryKey: string;
 }
 
 export interface ToolLLMDeps {
   readonly configManager: Pick<ConfigManager, 'get'>;
-  readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'resolveModelPricing'>;
+  readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'resolveModelPricing'
+    | 'listModels' | 'tryGet' | 'resolveProviderReference' | 'fallbackOrder'>;
   /**
    * Runtime bus for usage events. When present, every tool-internal LLM call
    * emits LLM_RESPONSE_RECEIVED with its token actuals so the shared
@@ -66,6 +70,7 @@ function resolveConfiguredToolRoute(deps: ToolLLMDeps, providerId: string, model
   return {
     provider: deps.providerRegistry.getForModel(registryKey, providerId),
     modelId: parsed.resolvedModelId,
+    registryKey,
   };
 }
 
@@ -97,7 +102,7 @@ export function resolveToolLLM(deps: ToolLLMDeps): ResolvedToolLLM | null {
     // provider-local model id to the provider implementation.
     const currentDef = deps.providerRegistry.getCurrentModel();
     const provider = deps.providerRegistry.getForModel(currentDef.registryKey, currentDef.provider);
-    return { provider, modelId: currentDef.id };
+    return { provider, modelId: currentDef.id, registryKey: currentDef.registryKey };
   } catch (err) {
     logger.error('resolveToolLLM: failed to resolve provider/model', { error: summarizeError(err) });
     throw err;
@@ -140,15 +145,29 @@ export class ToolLLM {
         throw new ToolLLMUnavailableError('Tool LLM is disabled.');
       }
 
-      const { provider, modelId } = resolved;
-      const response = await provider.chat({
-        model: modelId,
-        messages: [{ role: 'user', content: prompt }],
-        ...(options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens }),
-        systemPrompt: options.systemPrompt,
-        ...(options.signal === undefined ? {} : { signal: options.signal }),
-        ...(options.beforeAttempt === undefined ? {} : { beforeAttempt: options.beforeAttempt }),
-      });
+      // A provider failure fails over like a turn: the model's other sign-ins
+      // (inside the provider's request), then provider.fallbackModels; the
+      // first request is the only one when it answers.
+      const first: FailoverTarget = {
+        model: { registryKey: resolved.registryKey, provider: resolved.provider.name, displayName: resolved.modelId },
+        modelId: resolved.modelId,
+        provider: resolved.provider,
+      };
+      const { response, provider, modelId } = await callWithFailover(
+        { registry: this.deps.providerRegistry, first, purpose: 'Tool LLM', signal: options.signal },
+        async (target) => ({
+          response: await target.provider.chat({
+            model: target.modelId,
+            messages: [{ role: 'user', content: prompt }],
+            ...(options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens }),
+            systemPrompt: options.systemPrompt,
+            ...(options.signal === undefined ? {} : { signal: options.signal }),
+            ...(options.beforeAttempt === undefined ? {} : { beforeAttempt: options.beforeAttempt }),
+          }),
+          provider: target.provider,
+          modelId: target.modelId,
+        }),
+      );
 
       if (this.deps.runtimeBus) {
         // Token actuals for tool-internal spend. The emitter merges the

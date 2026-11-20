@@ -18,7 +18,9 @@
  * the same message.
  */
 
+import { createPublicKey } from 'node:crypto';
 import { validatePublicWebhookUrl } from '../utils/url-safety.js';
+import { defineFormat } from '../utils/format-codec.js';
 
 /**
  * Set to `1` to let a push endpoint be a plain-http or loopback/private address,
@@ -101,13 +103,33 @@ export class PushSubscriptionValidationError extends Error {
   }
 }
 
+/**
+ * A subscription's p256dh: an uncompressed P-256 point, base64url. Parsed the
+ * one way registration and encryption both read it, down to importing the
+ * point (on the curve, not only point-shaped), so a key the encryption would
+ * refuse is refused when it is offered instead of at every delivery after.
+ */
+export const P256DH_KEY = defineFormat<Buffer>({
+  name: 'push subscription key',
+  parse(raw) {
+    if (typeof raw !== 'string' || raw.length === 0) return { ok: false, reason: P256DH_INVALID_MESSAGE };
+    if (decodedByteLength(raw) !== P256DH_POINT_BYTES) return { ok: false, reason: P256DH_INVALID_MESSAGE };
+    const point = Buffer.from(raw, 'base64url');
+    if (point[0] !== UNCOMPRESSED_POINT_MARKER) return { ok: false, reason: P256DH_INVALID_MESSAGE };
+    try {
+      createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: point.subarray(1, 33).toString('base64url'), y: point.subarray(33, 65).toString('base64url') }, format: 'jwk' });
+    } catch {
+      return { ok: false, reason: P256DH_INVALID_MESSAGE };
+    }
+    return { ok: true, value: point };
+  },
+  render(point) { return point.toString('base64url'); },
+});
+
 /** Why this p256dh cannot be used, or null when it is a valid point. */
 export function describeP256dhProblem(value: unknown): string | null {
-  if (typeof value !== 'string' || value.length === 0) return P256DH_INVALID_MESSAGE;
-  const length = decodedByteLength(value);
-  if (length !== P256DH_POINT_BYTES) return P256DH_INVALID_MESSAGE;
-  if (Buffer.from(value, 'base64url')[0] !== UNCOMPRESSED_POINT_MARKER) return P256DH_INVALID_MESSAGE;
-  return null;
+  const parsed = P256DH_KEY.parse(value);
+  return parsed.ok ? null : parsed.reason;
 }
 
 /** Why this auth secret cannot be used, or null when it is 16 bytes. */

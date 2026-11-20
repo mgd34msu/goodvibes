@@ -788,8 +788,8 @@ export class ApprovalBroker {
    */
   async #commit(requests: readonly TransitionRequest[], cause?: ApprovalCause): Promise<TransitionOutcome[]> {
     const planned: PlannedTransition[] = [];
-    let failure: unknown;
-    let staleOwner: OwnerDecisionStaleError | undefined;
+    // Set inside the write unit: the write's failure, and an owner decision that went stale after it landed.
+    const ended: { failed?: { readonly error: unknown }; staleOwner?: OwnerDecisionStaleError } = {};
     const committed: PlannedTransition[] = [];
     await this.writes.run(async () => {
       const working = new Map<string, SharedApprovalRecord>();
@@ -814,7 +814,7 @@ export class ApprovalBroker {
       try {
         await this.store.persist({ approvals: snapshot.map(encodeStoredApproval) as SharedApprovalRecord[] });
       } catch (error) {
-        failure = error;
+        ended.failed = { error };
         // Deny direction: a refusal can never do what nobody agreed to, so its
         // waiters are refused and the record moves in memory; the next write saves it.
         for (const plan of changing) {
@@ -831,7 +831,7 @@ export class ApprovalBroker {
             plan.ownerCheck();
           } catch (error) {
             // On disk but no longer current: not put in effect; the caller cancels it.
-            staleOwner = new OwnerDecisionStaleError(plan.request.id, error);
+            ended.staleOwner = new OwnerDecisionStaleError(plan.request.id, error);
             continue;
           }
         }
@@ -844,8 +844,9 @@ export class ApprovalBroker {
       if (TERMINAL_APPROVAL_STATUSES.has(next.status) && next.decision) this.resolvePending(next.id, next.decision, plan.withheldAnswer);
       this.publish(next);
     }
-    if (staleOwner) throw staleOwner;
-    if (failure !== undefined) {
+    if (ended.staleOwner) throw ended.staleOwner;
+    if (ended.failed) {
+      const failure = ended.failed.error;
       const plan = planned.find((entry) => entry.next !== undefined);
       const id = plan?.request.id ?? requests[0]?.id ?? 'the approval';
       if (plan?.next && denyDirection(plan.next.status)) {

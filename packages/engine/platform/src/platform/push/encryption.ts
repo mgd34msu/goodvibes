@@ -19,7 +19,7 @@
  */
 
 import { createCipheriv, createECDH, createHmac, randomBytes } from 'node:crypto';
-import { describeAuthSecretProblem, describeP256dhProblem } from './subscription-validation.js';
+import { describeAuthSecretProblem, P256DH_KEY } from './subscription-validation.js';
 
 /** The subscription's own key material, base64url-encoded (browser PushSubscription shape). */
 export interface SubscriptionKeyMaterial {
@@ -98,8 +98,8 @@ export function encryptPushPayload(
   // The SAME predicates registration refuses junk with, so a record that got
   // past registration can never fail here for a reason registration would have
   // accepted, and the failure wording is identical on both paths.
-  const p256dhProblem = describeP256dhProblem(keys.p256dh);
-  if (p256dhProblem) throw new Error(p256dhProblem);
+  const receiverKey = P256DH_KEY.parse(keys.p256dh);
+  if (!receiverKey.ok) throw new Error(receiverKey.reason);
   const authProblem = describeAuthSecretProblem(keys.auth);
   if (authProblem) throw new Error(authProblem);
   // The fixed record cannot carry this payload, regardless of its encryption
@@ -107,7 +107,7 @@ export function encryptPushPayload(
   if (plaintext.length > PUSH_MAX_PLAINTEXT_BYTES) {
     throw new PushPayloadTooLargeError(PUSH_MAX_PLAINTEXT_BYTES);
   }
-  const receiverPublic = base64UrlToBuffer(keys.p256dh);
+  const receiverPublic = receiverKey.value;
   const authSecret = base64UrlToBuffer(keys.auth);
 
   // Ephemeral sender (application-server) keypair for this one message.

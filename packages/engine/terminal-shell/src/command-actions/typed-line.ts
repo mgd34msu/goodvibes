@@ -81,11 +81,22 @@ function findAction<Ctx>(description: CommandDescription<Ctx>, word: string): Ac
   return description.actions.find((action) => action.word === folded);
 }
 
+/**
+ * The one action of a single-action command (`/clear`, `/title <text>`): a
+ * command with exactly one action whose word is empty. Its line has no action
+ * word; the command name alone runs it (or asks its first missing blank).
+ */
+export function singleAction<A extends { readonly word: string }>(description: { readonly actions: readonly A[] }): A | undefined {
+  const only = description.actions.length === 1 ? description.actions[0] : undefined;
+  return only && only.word === '' ? only : undefined;
+}
+
 /** Read a typed line (the words after the command name) against the description. */
 export function parseTypedLine<Ctx>(description: CommandDescription<Ctx>, args: readonly string[]): ParsedLine {
-  const words = args.filter((word) => word !== '--yes');
+  const single = singleAction(description);
+  const words = single ? ['', ...args.filter((word) => word !== '--yes')] : args.filter((word) => word !== '--yes');
   if (words.length === 0) return { bare: true };
-  const action = findAction(description, words[0]!);
+  const action = single ?? findAction(description, words[0]!);
   if (!action) return { unknownWord: words[0]! };
   const values: Record<string, string> = {};
   const positions = action.inputs.filter((input) => 'position' in input.typed)
@@ -159,7 +170,7 @@ export function renderTypedLine(description: CommandShape, actionId: string, giv
   const action = description.actions.find((candidate) => candidate.id === actionId);
   if (!action) throw new Error(`/${description.name} has no action ${actionId}.`);
   const values = withImplied(action, given);
-  const parts = [`/${description.name}`, action.word];
+  const parts = action.word ? [`/${description.name}`, action.word] : [`/${description.name}`];
   const positions = action.inputs.filter((input) => 'position' in input.typed)
     .sort((a, b) => ('position' in a.typed ? a.typed.position : 0) - ('position' in b.typed ? b.typed.position : 0));
   for (const input of positions) {
@@ -201,8 +212,11 @@ export function linePattern(action: ActionShape): string {
     parts.push(toggle ? `[${input.typed.flag}]` : `[${input.typed.flag} <${input.label.toLowerCase()}>]${isRepeating(input) ? '...' : ''}`);
   }
   const tail = action.inputs.find((input) => 'tail' in input.typed);
-  if (tail) parts.push(tail.kind === 'list' ? `[-- <${tail.label.toLowerCase()}>...]` : `<${tail.label.toLowerCase()}...>`);
-  return parts.join(' ');
+  if (tail) {
+    const name = `<${tail.label.toLowerCase()}...>`;
+    parts.push(tail.kind === 'list' ? `[-- <${tail.label.toLowerCase()}>...]` : tail.required === true ? name : `[${name}]`);
+  }
+  return parts.filter(Boolean).join(' ');
 }
 
 /** How long a change with these values lasts, as the sentence's last words; empty for a read. */

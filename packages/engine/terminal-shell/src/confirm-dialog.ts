@@ -19,6 +19,11 @@ export class ConfirmDialog implements SurfaceModal, ConfirmView {
   readonly name = 'confirm';
   /** 0 = cancel (left), 1 = confirm (right). */
   chosen: 0 | 1;
+  /** First body line shown; a body taller than the screen scrolls with up/down and page up/down. */
+  scroll = 0;
+  /** The whole body has been on screen at least once; confirming is refused until then. */
+  seenToEnd = false;
+  private body = { total: 0, visible: 0 };
   private answered = false;
   get waitingForOwner(): boolean { return !this.answered; }
 
@@ -27,6 +32,23 @@ export class ConfirmDialog implements SurfaceModal, ConfirmView {
     private readonly onResult: (confirmed: boolean) => void,
   ) {
     this.chosen = options.tone === 'danger' || options.tone === 'warning' ? 0 : 1;
+  }
+
+  noteBody(total: number, visible: number): void {
+    this.body = { total, visible };
+    this.scroll = Math.max(0, Math.min(this.scroll, total - visible));
+    if (this.scroll + visible >= total) this.seenToEnd = true;
+  }
+
+  private scrollBy(lines: number): void {
+    this.scroll = Math.max(0, Math.min(this.scroll + lines, this.body.total - this.body.visible));
+    if (this.scroll + this.body.visible >= this.body.total) this.seenToEnd = true;
+  }
+
+  /** Confirming what was not all shown is refused: the body moves on a page instead. */
+  private confirm(host: SurfaceModalHost): void {
+    if (!this.seenToEnd) { this.scrollBy(Math.max(1, this.body.visible - 1)); return; }
+    this.answer(host, true);
   }
 
   private answer(host: SurfaceModalHost, confirmed: boolean): void {
@@ -38,17 +60,21 @@ export class ConfirmDialog implements SurfaceModal, ConfirmView {
   handleToken(token: InputToken, host: SurfaceModalHost): void {
     if (token.type === 'text') {
       const ch = token.value.toLowerCase();
-      if (ch === 'y') this.answer(host, true);
+      if (ch === 'y') this.confirm(host);
       else if (ch === 'n') this.answer(host, false);
       return;
     }
     if (token.type !== 'key') return;
     const key = token.logicalName ?? '';
     const chord = this.options.confirmChord;
-    if (chord && key === chord.key && Boolean(token.ctrl) === Boolean(chord.ctrl)) { this.answer(host, true); return; }
+    if (chord && key === chord.key && Boolean(token.ctrl) === Boolean(chord.ctrl)) { this.confirm(host); return; }
     if (key === 'left' || key === 'right' || key === 'tab') this.chosen = this.chosen === 0 ? 1 : 0;
-    else if (key === 'enter') this.answer(host, this.chosen === 1);
-    else if (key === 'y') this.answer(host, true);
+    else if (key === 'up') this.scrollBy(-1);
+    else if (key === 'down') this.scrollBy(1);
+    else if (key === 'pageup') this.scrollBy(-Math.max(1, this.body.visible - 1));
+    else if (key === 'pagedown') this.scrollBy(Math.max(1, this.body.visible - 1));
+    else if (key === 'enter') { if (this.chosen === 1) this.confirm(host); else this.answer(host, false); }
+    else if (key === 'y') this.confirm(host);
     else if (key === 'n') this.answer(host, false);
   }
 

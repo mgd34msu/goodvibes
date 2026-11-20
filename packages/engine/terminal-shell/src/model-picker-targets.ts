@@ -82,7 +82,7 @@ export function selectedModelPickerRoute(
 
 /** Shared asynchronous decorations; a catalog-load ticket in the picker owns publication. */
 export function modelPickerCatalogServices(options: {
-  readonly picker: { pinnedIds: Set<string>; pinEdits?: number | undefined; loadRecentModels(): Promise<void> };
+  readonly picker: { pinnedIds: Set<string>; pinEdits?: number | undefined; loadRecentModels(): Promise<void>; keepingSelection?(change: () => void): void };
   readonly getPinned: () => Promise<string[]>;
   readonly refreshLiveModels: () => Promise<readonly { readonly added: readonly unknown[]; readonly removed: readonly unknown[] }[]>;
 }) {
@@ -93,7 +93,12 @@ export function modelPickerCatalogServices(options: {
       const editsBefore = options.picker.pinEdits;
       const stored = await options.getPinned();
       // A pin flipped while the stored list was loading is newer than that list.
-      if (options.picker.pinEdits === editsBefore) options.picker.pinnedIds = new Set(stored);
+      // The pinned models move to the top: the highlight stays on the model it was on.
+      const apply = (): void => { options.picker.pinnedIds = new Set(stored); };
+      if (options.picker.pinEdits === editsBefore) {
+        if (options.picker.keepingSelection) options.picker.keepingSelection(apply);
+        else apply();
+      }
       await options.picker.loadRecentModels();
     },
   };

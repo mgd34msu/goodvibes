@@ -90,6 +90,8 @@ export interface AgentBrowserEngineOptions {
   readonly screenshotDirectory: string;
   readonly profileRoot: string;
   readonly homeDirectory: string;
+  /** The settings the browser's destination rule reads (`fetch.allowedPrivateHosts`). */
+  readonly destinationConfig?: { get(key: string): unknown } | undefined;
   /**
    * The untrusted-content contract handed to the engine. Defaults to the
    * agent's port over the process-wide session ledger every other ingesting
@@ -109,6 +111,7 @@ export function createAgentBrowserEngine(options: AgentBrowserEngineOptions): Br
     {
       screenshotDirectory: options.screenshotDirectory,
       untrusted: options.untrusted ?? createAgentUntrustedContentPort(),
+      ...(options.destinationConfig ? { destinationConfig: options.destinationConfig } : {}),
     },
   );
 }

@@ -338,8 +338,13 @@ export function keepHeadlessSessionRecoverable(input: {
       const snapshot = { ...input.snapshot(), turn: crashSnapshotTurn(moment, input.conversation) };
       if (!writeRecoveryFile(snapshot, sessionId, input.title(), { surface })) return;
       if (pointed === sessionId) return;
-      pointed = sessionId;
-      input.writeSessionPointer(sessionId);
+      try {
+        input.writeSessionPointer(sessionId);
+        pointed = sessionId;
+      } catch (error) {
+        // Tried again at the next turn moment.
+        logger.warn('[Recovery] The last-session pointer was not written', { sessionId, error: summarizeError(error) });
+      }
     },
   });
   return {

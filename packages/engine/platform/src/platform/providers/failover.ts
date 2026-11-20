@@ -229,6 +229,12 @@ export interface CallWithFailoverOptions {
   readonly notify?: ((line: string, level: 'warning' | 'error') => void) | undefined;
   /** A cancelled call is never moved to another model. */
   readonly signal?: AbortSignal | undefined;
+  /**
+   * Why a fallback model cannot take this call (an image needs a model that
+   * reads images and stays in the call's privacy scope), or undefined when it
+   * can. Asked only of a model the failover moved to, never of the first.
+   */
+  readonly admit?: ((target: FailoverTarget) => Promise<string | undefined> | string | undefined) | undefined;
 }
 
 /** The target for a model the failover chose, as the registry knows it. */
@@ -254,21 +260,33 @@ export async function callWithFailover<T>(
   call: (target: FailoverTarget) => Promise<T>,
 ): Promise<T> {
   let target = options.first;
+  const notify = options.notify ?? ((line: string, level: 'warning' | 'error') => {
+    const message = `${options.purpose}: ${line}`;
+    if (level === 'error') logger.warn(message);
+    else logger.info(message);
+  });
   const failOver = createTurnFailover({
     registry: options.registry,
     fallbackOrder: () => options.registry.fallbackOrder(),
     current: () => target.model,
     switchTo: (choice) => { target = targetFor(options.registry, choice); },
-    notify: options.notify ?? ((line, level) => {
-      const message = `${options.purpose}: ${line}`;
-      if (level === 'error') logger.warn(message);
-      else logger.info(message);
-    }),
+    notify,
   });
+  let failure: unknown;
   for (;;) {
+    if (options.admit && target !== options.first) {
+      const refused = await options.admit(target);
+      if (refused !== undefined) {
+        notify(`[Failover] ${target.model.registryKey} cannot take this call (${refused}); trying the next entry.`, 'warning');
+        // Counted as tried, and the move goes on from it with the first model's failure.
+        if (!failOver(failure)) throw failure;
+        continue;
+      }
+    }
     try {
       return await call(target);
     } catch (error) {
+      failure = error;
       if (options.signal?.aborted || !failOver(error)) throw error;
     }
   }

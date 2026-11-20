@@ -21,7 +21,7 @@ export interface BuiltinMediaProviderOptions {
 export function ensureBuiltinMediaProviders(
   registry: MediaProviderRegistry,
   artifactStore: Pick<ArtifactStore, 'readContent'> & Partial<Pick<ArtifactStore, 'createFromStream'>>,
-  providerRegistry: Pick<ProviderRegistry, 'describeRuntime' | 'getCurrentModel' | 'getForModel' | 'listModels'>,
+  providerRegistry: Pick<ProviderRegistry, 'describeRuntime' | 'getCurrentModel' | 'getForModel' | 'listModels' | 'tryGet' | 'resolveProviderReference' | 'fallbackOrder'>,
   options: BuiltinMediaProviderOptions = {},
 ): void {
   // First, so an unscoped lookup lands on the default reader, which uses the session's own model and sends an image nowhere else.

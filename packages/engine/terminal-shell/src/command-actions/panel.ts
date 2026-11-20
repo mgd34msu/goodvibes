@@ -258,6 +258,8 @@ export class GuidedPanel implements SurfaceModal {
     }
     const fields = this.stepFields();
     const input = fields[this.field];
+    // Some terminals deliver Tab as text: it moves between blanks, it is never typed into one.
+    if (token.type === 'text' && token.value === '\t') { this.field = (this.field + 1) % Math.max(1, fields.length); return; }
     if (token.type === 'text') {
       if (!input || fixedChoices(input)) return;
       if (listChoices(input) && !listChoices(input)!.allowOther) return;

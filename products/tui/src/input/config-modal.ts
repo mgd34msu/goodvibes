@@ -101,6 +101,8 @@ export class ConfigModal {
   private statusMessage = '';
   /** Pending destructive confirm: the action key awaiting a second press. */
   private pendingConfirmKey: string | null = null;
+  /** The row (tab and row id) the pending confirm was armed on: the second press acts only on that row. */
+  private pendingConfirmRow: string | null = null;
   /** True after the leader chord (Ctrl+G): the next typed key is an action key, not search text. */
   private leaderArmed = false;
   /**
@@ -398,9 +400,15 @@ export class ConfigModal {
     });
     if (!resolved) return false;
     const { action, row } = resolved;
-    if (action.confirm && this.pendingConfirmKey !== key) {
+    const rowRef = `${this.activeTabId}\0${row?.id ?? ''}`;
+    if (action.confirm && (this.pendingConfirmKey !== key || this.pendingConfirmRow !== rowRef)) {
+      // A second press confirms only the row the first was on; a refreshed or moved selection asks again.
+      const moved = this.pendingConfirmKey === key;
       this.pendingConfirmKey = key;
-      this.statusMessage = `Press ${actionKeyText(key)} again to ${action.label}.`;
+      this.pendingConfirmRow = rowRef;
+      this.statusMessage = moved
+        ? `The selected row changed since you pressed ${actionKeyText(key)}${row ? ` (now ${row.label})` : ''}. Press ${actionKeyText(key)} again to ${action.label} this one.`
+        : `Press ${actionKeyText(key)} again to ${action.label}.`;
       return true;
     }
     this._clearConfirm();

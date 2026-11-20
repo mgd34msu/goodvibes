@@ -92,6 +92,8 @@ const MISSING_HOST_SCRIPT_FIX =
 export interface BrowserCompositionDeps {
   /** Absent in narrow compositions; the browser needs a real storage root. */
   readonly homeDirectory?: string | undefined;
+  /** The settings the browser's destination rule reads (`fetch.allowedPrivateHosts`). */
+  readonly configManager?: { get(key: string): unknown } | undefined;
   /** Test seam: overrides the whole service, so no driver or process is touched. */
   readonly browserGateway?: DaemonBrowserGatewayService | undefined;
   /**
@@ -226,6 +228,7 @@ function daemonEngineFactory(
           toolName: 'browser',
         }),
         ...(cardFieldGuard === undefined ? {} : { cardFieldGuard }),
+        ...(deps.configManager ? { destinationConfig: deps.configManager } : {}),
       },
     ))();
     return pending;

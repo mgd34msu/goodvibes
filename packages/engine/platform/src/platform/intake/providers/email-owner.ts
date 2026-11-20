@@ -17,6 +17,7 @@ import type { OwnedInboxReadLease } from '../registration.js';
 import { digestSender, normalizeWhitespace, stripMarkup } from '../text-normalization.js';
 import type { InboundChannelItem, InboundProviderAdapter, PushedProviderSink, PushedProviderStatus, RouteResolver, SkippedMailMessage } from '../provider-adapter.js';
 import { resolveAccountInboxIdentity, type AccountInboxIdentity } from './account-identity.js';
+import { EMAIL_OWNER_PROVIDER_ID, emailItemId } from '../email-item-id.js';
 
 export interface EmailInboxAccount {
   readonly host: string;
@@ -187,8 +188,7 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
   const observations: OwnerMailObservation[] = [];
   const batchSkipped: SkippedMailMessage[] = [];
 
-  const imapItemId = (uidValidity: number, uid: number): string =>
-    `email:${scopeId}:${String(uidValidity).padStart(10, '0')}:${String(uid).padStart(10, '0')}`;
+  const imapItemId = (uidValidity: number, uid: number): string => emailItemId(scopeId, uidValidity, uid);
   const gmailItemId = (resourceId: string): string => `email:${scopeId}:gmail:${resourceId}`;
   const held = (id: string, target: PushedProviderSink): boolean => target.has(id) || rows.some((row) => row.id === id);
 
@@ -368,7 +368,7 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
   };
 
   const adapter: InboundProviderAdapter = {
-    id: 'email', pollIntervalMs: 0, checkpointKind: 'pushed',
+    id: EMAIL_OWNER_PROVIDER_ID, pollIntervalMs: 0, checkpointKind: 'pushed',
     async poll() { return { items: [], state: 'empty' }; },
     bind(target) {
       sink = target;

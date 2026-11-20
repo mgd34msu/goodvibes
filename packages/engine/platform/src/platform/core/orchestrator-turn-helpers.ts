@@ -138,17 +138,20 @@ export function reportSessionToolRound(session: ContractSessionTurn, round: { re
 }
 
 /**
- * Takes the nudges the runner queued for this session turn and reports each as
- * consumed. The caller puts them in the next model call's private context; they
- * are host instructions, so they never enter the transcript as the person's words.
+ * Takes the nudges the runner queued for this session turn. The caller puts
+ * them in the next model call's private context (host instructions, never in
+ * the transcript as the person's words) and calls `reportConsumed` once the
+ * provider request carrying them was dispatched: a turn stopped before that
+ * never says the model was told.
  */
-export function takeSessionNudges(args: ConsumedEmitterArgs, session: ContractSessionTurn): string[] {
+export function takeSessionNudges(args: ConsumedEmitterArgs, session: ContractSessionTurn): { readonly messages: string[]; readonly reportConsumed: () => void } {
   const messages: string[] = [];
+  const ids: string[] = [];
   for (let nudge = session.hooks.takeSessionNudge(session.record); nudge !== null; nudge = session.hooks.takeSessionNudge(session.record)) {
     messages.push(nudge.message);
-    nudgeConsumed(args, session, nudge.nudgeId);
+    ids.push(nudge.nudgeId);
   }
-  return messages;
+  return { messages, reportConsumed: () => { for (const id of ids.splice(0)) nudgeConsumed(args, session, id); } };
 }
 
 /**

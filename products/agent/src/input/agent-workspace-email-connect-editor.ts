@@ -20,6 +20,7 @@
  * one storage path, not a fork, and the keys are `surfaces.email.*`, the
  * mailbox the daemon reads.
  */
+import { Secret } from '@goodvibes-jev/engine/platform/platform/security';
 import type { CommandContext } from './command-registry.ts';
 import { isAffirmative } from './agent-workspace-editors.ts';
 import { EmailService, type EmailConnectionTestResult } from '@goodvibes-jev/engine/platform/platform/email';
@@ -153,7 +154,7 @@ const MAILBOX_PASSWORD_SECRET_KEY = daemonSecretKeyFor(MAILBOX_FIELDS.password);
 
 export type EmailConnectionTester = (
   getConfig: (key: string) => unknown,
-  secretsManager: { readonly get: (key: string) => Promise<string | null> },
+  secretsManager: { readonly get: (key: string) => Promise<Secret | null> },
 ) => { testConnection(): Promise<EmailConnectionTestResult> };
 
 /** `getConfig` answers the `surfaces.email.*` settings; the service reads them through the mailbox adapter. */
@@ -232,8 +233,8 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
       // served from memory under the mailbox password's name, nothing touches the store.
       const readCandidate = (key: string): unknown => (candidate.has(key) ? candidate.get(key) : view.get(key));
       const candidateSecrets = {
-        get: (key: string): Promise<string | null> => (key === MAILBOX_PASSWORD_SECRET_KEY && !keepStoredPassword
-          ? Promise.resolve(password)
+        get: (key: string): Promise<Secret | null> => (key === MAILBOX_PASSWORD_SECRET_KEY && !keepStoredPassword
+          ? Promise.resolve(Secret.of(password, MAILBOX_PASSWORD_SECRET_KEY))
           : secretsManager.get(key)),
       };
       const test = await buildTester(readCandidate, candidateSecrets).testConnection();

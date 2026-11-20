@@ -8,7 +8,8 @@ import type { BrowserProvisionLifetime } from './browser-failure-reading.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { resolveAndValidatePath } from '../utils/path-safety.js';
-import type { Locator, Page } from 'playwright-core';
+import type { BrowserContext, Locator, Page, Route, WebSocketRoute } from 'playwright-core';
+import { checkDestination, createHostAdmission, DestinationRefusedError, type ResolvedAddressRange } from '../runtime/network/destination.js';
 import { BrowserSessionError, BrowserSessionManager, hasDisplay } from './browser-sessions.js';
 import { isPaymentCheckoutAction, ORDER_SUBMIT_REFUSAL_FIX, placesOrder } from '../security/order-submission.js';
 import type { BrowserAttachOptions, BrowserLaunchOptions, RestoredBrowserPage } from './browser-sessions.js';
@@ -39,7 +40,6 @@ import {
   DEFAULT_TEXT_LIMIT,
   DEFAULT_WAIT_TIMEOUT_MS,
   boundedBrowserCall,
-  classifyNavigationTarget,
   deadlineError,
   deadlineFor,
   isDeadlineError,
@@ -100,6 +100,12 @@ class BrowserClickOutcomeUnknownError extends Error {
   constructor() { super('The browser click was attempted, but its result could not be confirmed. Inspect the page before trying again.'); }
 }
 
+/** No settings to read: no private host is listed as approved, so a private one needs the owner's approval. */
+const NO_CONFIG = { get: (): unknown => undefined };
+
+/** Ranges the owner may allow a page to reach (his own machine and network); metadata, link-local and reserved ranges never. */
+const OWNER_APPROVABLE_RANGES: ReadonlySet<ResolvedAddressRange | 'scheme' | 'unresolved'> = new Set(['private', 'loopback', 'unique-local', 'shared']);
+
 /**
  * The browser capability itself: provisioning, sessions, and every page
  * operation, with no Agent-surface types in sight.
@@ -124,6 +130,15 @@ export class BrowserEngine {
   private readonly watchedPages = new WeakSet<Page>();
   /** Credential-page verdicts, one per snapshot: the page is read for its purpose at most once per snapshot. */
   private readonly credentialVerdicts = new WeakMap<BrowserSnapshot, 'yes' | 'no'>();
+  /**
+   * One host admission per browser context (`createHostAdmission`, purpose
+   * `browser-page`): each host is resolved once for the context's life and
+   * every request the context makes (navigation, redirect, frame, subresource,
+   * WebSocket) is held to the answer before it leaves.
+   */
+  private readonly hostAdmissions = new WeakMap<BrowserContext, (host: string) => Promise<'allowed' | DestinationRefusedError>>();
+  /** Origins whose requests were refused, per session, reported with the next page result and then cleared. */
+  private readonly blockedOrigins = new Map<string, Set<string>>();
 
   constructor(
     private readonly sessions: BrowserSessionManager,
@@ -415,26 +430,50 @@ export class BrowserEngine {
   /** Drops what this engine holds for a session it no longer drives: snapshots and armed card material. */
   private forgetSessionState(sessionId: string): void {
     this.snapshots.clearSession(sessionId);
+    this.blockedOrigins.delete(sessionId);
     this.cardGuard?.disarmSession?.(sessionId);
     for (const key of [...this.localReach.keys()]) if (key.startsWith(`${sessionId}:`)) this.localReach.delete(key);
+  }
+
+  /**
+   * Where a URL reaches, from the destination owner (runtime/network/destination.ts):
+   * the host is resolved and every answer checked, so a name that resolves to
+   * a private or metadata address is caught before the browser connects, not
+   * only an address written as one. `public`: a host that may be reached (an
+   * address on the public web, or a private host the owner lists in
+   * `fetch.allowedPrivateHosts`). `local`: a local file, or a private-network
+   * or loopback host the owner may allow for this page. Anything else (a
+   * link-local or cloud-metadata address, a reserved range, a host that does
+   * not resolve) is refused here.
+   */
+  private async navigationReach(url: string): Promise<'public' | 'local'> {
+    let parsed: URL;
+    try { parsed = new URL(url); } catch { return 'public'; }
+    if (parsed.protocol === 'file:') return 'local';
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return 'public';
+    try {
+      await checkDestination(parsed, 'browser-page', { config: this.options.destinationConfig ?? NO_CONFIG });
+      return 'public';
+    } catch (error) {
+      if (error instanceof DestinationRefusedError && OWNER_APPROVABLE_RANGES.has(error.range)) return 'local';
+      const origin = this.untrusted.originOf(url);
+      if (error instanceof DestinationRefusedError) {
+        throw new BrowserSessionError(`${origin} is not opened: ${error.message.replace(/^Request blocked: /, '')}.`, `${error.next} Or ask the owner to open it in their own browser.`);
+      }
+      throw error;
+    }
   }
 
   /**
    * Opening a local file or a private-network address reads it into the
    * conversation, so it is put through the same outward-effect check as a
    * submit: refused when this turn has read page content, unless the owner
-   * approved it. Cloud metadata addresses are never opened.
+   * approved it. Cloud metadata and link-local addresses are never opened.
    */
   private async requireNavigationAllowed(url: string, page?: { readonly sessionId: string; readonly pageId: string; readonly mainOrigin: string }): Promise<string | null> {
-    const reach = classifyNavigationTarget(url);
+    const reach = await this.navigationReach(url);
     if (reach === 'public') return null;
     const origin = this.untrusted.originOf(url);
-    if (reach === 'link-local') {
-      throw new BrowserSessionError(
-        `${origin} is a link-local or cloud-metadata address, which the browser tool does not open or read.`,
-        'Use a public address, or ask the owner to open it in their own browser.',
-      );
-    }
     if (page) {
       const allowed = this.localReach.get(`${page.sessionId}:${page.pageId}`);
       if (allowed?.mainOrigin === page.mainOrigin && allowed.origins.has(origin)) return origin;
@@ -442,6 +481,65 @@ export class BrowserEngine {
     await this.requireOutwardEffectAllowed('browser.navigate-local', `open ${origin} (a local file or private-network address) in the browser`);
     if (page) this.rememberLocalReach(page.sessionId, page.pageId, page.mainOrigin, origin);
     return origin;
+  }
+
+  /**
+   * Hold every request of a browser context to the destination rule before it
+   * leaves: navigations, redirects, frames, subresources and WebSockets. A
+   * request to a refused host is aborted and its origin reported with the next
+   * page result; a private or loopback origin the owner allowed for a page of
+   * this session (`localReach`) goes through.
+   */
+  private guardContextRequests(sessionId: string, page: Page): void {
+    let context: BrowserContext;
+    try { context = page.context(); } catch { return; }
+    if (this.hostAdmissions.has(context)) return;
+    const admit = createHostAdmission('browser-page', this.options.destinationConfig ?? NO_CONFIG);
+    this.hostAdmissions.set(context, admit);
+    const allowed = async (url: string): Promise<boolean> => {
+      let parsed: URL;
+      try { parsed = new URL(url); } catch { return true; }
+      const scheme = parsed.protocol;
+      if (scheme !== 'http:' && scheme !== 'https:' && scheme !== 'ws:' && scheme !== 'wss:') return true;
+      const verdict = await admit(parsed.hostname);
+      if (verdict === 'allowed') return true;
+      const origin = this.untrusted.originOf(url.replace(/^ws/, 'http'));
+      if (OWNER_APPROVABLE_RANGES.has(verdict.range) && this.sessionAllowsOrigin(sessionId, origin)) return true;
+      const blocked = this.blockedOrigins.get(sessionId) ?? new Set<string>();
+      blocked.add(origin);
+      this.blockedOrigins.set(sessionId, blocked);
+      return false;
+    };
+    void context.route('**/*', async (route: Route) => {
+      try {
+        if (await allowed(route.request().url())) await route.continue();
+        else await route.abort('blockedbyclient');
+      } catch {
+        // The page or context went away while the request was held.
+      }
+    }).catch(() => { this.hostAdmissions.delete(context); });
+    void context.routeWebSocket(/.*/, async (socket: WebSocketRoute) => {
+      try {
+        if (await allowed(socket.url())) socket.connectToServer();
+        else await socket.close({ code: 1008, reason: 'blocked by the browser destination rule' });
+      } catch {
+        // The page or context went away while the connection was held.
+      }
+    }).catch(() => { /* a context that cannot intercept WebSockets still has its HTTP requests held */ });
+  }
+
+  /** Whether the owner allowed `origin` for any page of the session (a local page and what it loads). */
+  private sessionAllowsOrigin(sessionId: string, origin: string): boolean {
+    for (const [key, entry] of this.localReach) if (key.startsWith(`${sessionId}:`) && entry.origins.has(origin)) return true;
+    return false;
+  }
+
+  /** The origins refused since the last report, once, for a page result. */
+  private takeBlockedOrigins(sessionId: string): { readonly blockedRequests?: readonly string[] } {
+    const blocked = this.blockedOrigins.get(sessionId);
+    if (!blocked || blocked.size === 0) return {};
+    this.blockedOrigins.delete(sessionId);
+    return { blockedRequests: [...blocked].sort() };
   }
 
   private rememberLocalReach(sessionId: string, pageId: string, mainOrigin: string, origin: string | null): void {
@@ -469,6 +567,7 @@ export class BrowserEngine {
   private watchMainFrame(sessionId: string, pageId: string, page: Page): void {
     if (this.watchedPages.has(page)) return;
     this.watchedPages.add(page);
+    this.guardContextRequests(sessionId, page);
     page.on('framenavigated', (frame) => {
       if (frame.parentFrame() === null) this.observeMainFrame(sessionId, pageId, frame.url());
     });
@@ -590,6 +689,7 @@ export class BrowserEngine {
         url: page.url(),
         title,
         httpStatus: response?.status() ?? null,
+        ...this.takeBlockedOrigins(sessionId),
         ...this.setupReceipt(),
         next: 'Call action:"snapshot" to get element refs for this page.',
       };
@@ -634,6 +734,7 @@ export class BrowserEngine {
         snapshotId: controls?.verifySnapshotId ?? snapshot.snapshotId,
         elementCount: snapshot.elements.length,
         truncated: snapshot.truncated,
+        ...this.takeBlockedOrigins(sessionId),
         ...withheldNote(snapshotWithheldFrames(snapshot).map(frameUrl => this.untrusted.originOf(frameUrl))),
         elements: snapshot.elements.map((element) => ({
           ref: element.ref,

@@ -96,6 +96,7 @@ export async function handleBrowserCommand(runtime: CliCommandRuntime): Promise<
       screenshotDirectory: agentBrowserScreenshotRoot(home),
       profileRoot: agentBrowserProfileRoot(home),
       homeDirectory: home,
+      destinationConfig: runtime.configManager,
     }),
     // The owner typed this command: a file: address is his own read, so the
     // model's read policy has nothing to decide here.

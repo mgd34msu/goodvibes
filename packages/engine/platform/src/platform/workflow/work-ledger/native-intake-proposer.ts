@@ -5,6 +5,7 @@
  * the transcript once.
  */
 import type { ProviderRegistry } from '../../providers/registry.js';
+import { callWithFailover, type FailoverTarget } from '../../providers/failover.js';
 import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
 
 export interface NativeRequirementProposalRequest {
@@ -54,7 +55,9 @@ export function firstJsonObject(reply: string): unknown {
 }
 
 /** Uses the configured provider, with no tools, filesystem context or fallback generation. */
-export function createNativeRequirementProposer(providers: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel'>): NativeRequirementProposer {
+export function createNativeRequirementProposer(
+  providers: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'listModels' | 'tryGet' | 'resolveProviderReference' | 'fallbackOrder'>,
+): NativeRequirementProposer {
   return {
     async propose(input) {
       input.signal.throwIfAborted(); input.assertCurrent();
@@ -64,9 +67,15 @@ export function createNativeRequirementProposer(providers: Pick<ProviderRegistry
       // sourceRevision is a host-created protocol digest, not source material.
       const source = { sourceRevision: input.sourceRevision, content };
       const model = providers.getCurrentModel();
-      const provider = providers.getForModel(model.id, model.provider);
+      const first: FailoverTarget = {
+        model: { registryKey: model.registryKey, provider: model.provider, displayName: model.displayName },
+        modelId: model.id,
+        provider: providers.getForModel(model.id, model.provider),
+      };
       input.signal.throwIfAborted(); input.assertCurrent();
-      const response = await provider.chat({ model: model.id, signal: input.signal,
+      // The proposer's model fails over like a turn: its other sign-ins, then provider.fallbackModels.
+      const response = await callWithFailover({ registry: providers, first, purpose: 'Native work intake', signal: input.signal },
+        (target) => target.provider.chat({ model: target.modelId, signal: input.signal,
         systemPrompt: [
           'Select the original requirements from the person\'s immutable input. Return one strict JSON object, without markdown.',
           'The only allowed shape is {"sourceRevision":"the supplied revision","spans":[{"partId":"input","start":0,"end":12}]} .',
@@ -81,7 +90,7 @@ export function createNativeRequirementProposer(providers: Pick<ProviderRegistry
         messages: [{ role: 'user', content: JSON.stringify(source) }],
         beforeAttempt() { input.signal.throwIfAborted(); input.assertCurrent(); },
         onRetry() { input.signal.throwIfAborted(); input.assertCurrent(); },
-      });
+      }));
       input.signal.throwIfAborted(); input.assertCurrent();
       if (response.stopReason !== 'completed' || response.toolCalls.length !== 0
         || new TextEncoder().encode(response.content).byteLength > 32_768) throw new Error('Native requirement proposal unavailable');

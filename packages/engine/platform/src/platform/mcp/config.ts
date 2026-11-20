@@ -49,8 +49,13 @@ export interface McpServerConfig {
   allowedTools?: string[] | undefined;
 }
 
-/** A rule kept for one tool with its server's entry: allow, deny, or clear whichever is kept. */
-export type McpToolRule = 'allow' | 'deny' | 'clear';
+/**
+ * A change to the rule kept for one tool with its server's entry, named as the
+ * /mcp action that makes it: `block` refuses every call, `exempt` lets it past
+ * the server's path and host limits, `unblock` and `unexempt` each drop only
+ * their own kind of kept rule.
+ */
+export type McpToolRule = 'block' | 'unblock' | 'exempt' | 'unexempt';
 
 export interface McpConfig {
   servers: McpServerConfig[];
@@ -481,8 +486,8 @@ export function loadWritableMcpConfig(roots: McpConfigRoots, scope: McpConfigSco
 
 /** Why a project file never keeps a per-tool allow, and where the owner keeps one instead. */
 function projectAllowRefusal(serverName: string): string {
-  return `A per-tool allow for ${serverName} is not kept in the project's MCP file: a repository can bring that file, so an allow there is ignored. `
-    + `Add ${serverName} to your global MCP config (scope global) and allow the tool there.`;
+  return `A tool of ${serverName} that goes past its limits is not kept in the project's MCP file: a repository can bring that file, so one there is ignored. `
+    + `Add ${serverName} to your global MCP config (/mcp add with --scope global), then /mcp exempt the tool.`;
 }
 
 /**
@@ -534,12 +539,13 @@ export function upsertMcpServerConfig(
 }
 
 /**
- * Keep one tool's rule with its server's entry in a writable file: `deny`
- * refuses every call to it, `allow` lets it past the server's path and host
- * scope, `clear` drops whichever the entry keeps. A tool has at most one kept
- * rule, so allowing a denied tool replaces the denial. An allow is refused for
- * the project file (see {@link projectAllowRefusal}). `changed` is false when
- * the entry already kept that rule; the file is then left as it is.
+ * Keep one tool's rule with its server's entry in a writable file: `block`
+ * refuses every call to it, `exempt` lets it past the server's path and host
+ * scope, `unblock` drops a kept block and `unexempt` a kept exemption (each
+ * leaves the other kind alone). A tool has at most one kept rule, so exempting
+ * a blocked tool replaces the block. An exemption is refused for the project
+ * file (see {@link projectAllowRefusal}). `changed` is false when the entry
+ * already held what was asked; the file is then left as it is.
  */
 export function setMcpServerToolRule(
   roots: McpConfigRoots,
@@ -550,15 +556,16 @@ export function setMcpServerToolRule(
 ): { readonly path: string; readonly changed: boolean; readonly config: McpConfig } {
   const tool = toolName.trim();
   if (!tool) throw new Error('MCP tool name is required.');
-  if (rule === 'allow' && scope === 'project') throw new Error(projectAllowRefusal(serverName));
+  if (rule === 'exempt' && scope === 'project') throw new Error(projectAllowRefusal(serverName));
   const location = writableMcpConfigLocation(roots, scope);
   const current = readMcpConfigAtPath(location.path);
   const existing = current.servers.find((entry) => entry.name === serverName);
   if (!existing) throw new Error(`No MCP server named '${serverName}' in ${location.path}, so no rule for its tool '${tool}' was kept.`);
-  const denied = (existing.deniedTools ?? []).filter((name) => name !== tool);
-  const allowed = (existing.allowedTools ?? []).filter((name) => name !== tool);
-  if (rule === 'deny') denied.push(tool);
-  if (rule === 'allow') allowed.push(tool);
+  // block and exempt replace whichever rule the tool had; unblock and unexempt drop only their own kind.
+  const denied = rule === 'unexempt' ? [...(existing.deniedTools ?? [])] : (existing.deniedTools ?? []).filter((name) => name !== tool);
+  const allowed = rule === 'unblock' ? [...(existing.allowedTools ?? [])] : (existing.allowedTools ?? []).filter((name) => name !== tool);
+  if (rule === 'block') denied.push(tool);
+  if (rule === 'exempt') allowed.push(tool);
   const next: McpServerConfig = { ...existing, deniedTools: denied.length > 0 ? denied : undefined, allowedTools: allowed.length > 0 ? allowed : undefined };
   if (sameToolNames(existing.deniedTools, next.deniedTools) && sameToolNames(existing.allowedTools, next.allowedTools)) {
     return { path: location.path, changed: false, config: current };

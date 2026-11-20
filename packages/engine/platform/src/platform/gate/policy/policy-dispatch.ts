@@ -13,6 +13,7 @@
  * operator sees what it changes on this installation's recorded calls and
  * confirms that list with `promote --yes`.
  */
+import { contentDigest } from '../../utils/target-ref.js';
 import { readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { summarizeError } from '../../utils/error-display.js';
@@ -167,6 +168,17 @@ function printImpact(context: PolicyCommandContext, impact: PolicyImpact): void 
  * this installation's permission audit recorded that it decides differently,
  * decided again by code with no model request. Promotion then confirms it.
  */
+/**
+ * Per registry, the digest of the candidate `/policy simulate` last showed:
+ * `/policy promote --yes` enforces only that candidate, never one loaded since.
+ */
+const simulatedCandidates = new WeakMap<object, string>();
+
+/** The candidate's identity: its rules, its bundle and when it was loaded. */
+function candidateDigest(candidate: { readonly rules: unknown; readonly bundle: unknown; readonly loadedAt: string }): string {
+  return contentDigest({ rules: candidate.rules, bundle: candidate.bundle, loadedAt: candidate.loadedAt });
+}
+
 async function handleSimulate(_args: string[], context: PolicyCommandContext): Promise<void> {
   const registry = getRegistry(context);
   const policyState = getPolicyState(context);
@@ -195,6 +207,7 @@ async function handleSimulate(_args: string[], context: PolicyCommandContext): P
     return;
   }
   registry.attachImpact(impact);
+  simulatedCandidates.set(registry, candidateDigest(candidate));
   policyState.recordSimulationSummary({
     simulatedAt: new Date().toISOString(), mode: 'simulation-only',
     totalScenarios: impact.checkedCalls, divergentScenarios: impact.changed.length,
@@ -312,6 +325,11 @@ async function handlePromote(args: string[], context: PolicyCommandContext): Pro
   if (candidate?.state === 'promoting' && !args.includes('--yes')) {
     if (candidate.impact) printImpact(context, candidate.impact);
     context.print('[policy] Not promoted yet. Run `/policy promote --yes` to enforce the candidate with the changes above.');
+    return;
+  }
+  // The candidate enforced is the one simulate showed: a candidate loaded or changed since is refused.
+  if (candidate && simulatedCandidates.get(registry) !== candidateDigest(candidate)) {
+    context.print('[policy] Not promoted: the candidate is not the one `/policy simulate` showed (it was loaded or changed since, or never simulated). Run `/policy simulate` to see its changes, then `/policy promote --yes`.');
     return;
   }
   const result = registry.promote();

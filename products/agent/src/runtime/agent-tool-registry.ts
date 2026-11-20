@@ -169,6 +169,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
         screenshotDirectory: agentBrowserScreenshotRoot(services.shellPaths.homeDirectory),
         profileRoot: agentBrowserProfileRoot(services.shellPaths.homeDirectory),
         homeDirectory: services.shellPaths.homeDirectory,
+        destinationConfig: configManager,
       }),
       // A file: page is a local read, held to the same decision the read tool gets.
       readAccess: async (absolutePath) => (await services.permissionManager.readAccess(absolutePath, resolveSessionId())) === 'allow',

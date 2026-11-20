@@ -585,8 +585,23 @@ export class ModelPickerModal {
    * Call this when opening the picker to ensure recent models appear near the top.
    */
   async loadRecentModels(n = 10): Promise<void> {
-    this.recentIds = await this.favoritesStore.getRecentModels(n);
+    const recent = await this.favoritesStore.getRecentModels(n);
+    this.keepingSelection(() => { this.recentIds = recent; });
+  }
+
+  /**
+   * Apply a change that reorders the model list (recent or pinned models
+   * arriving) with the highlight kept on the same model, by its provider and
+   * id: two providers may serve models of one id, and a reorder never moves
+   * the highlight onto another model under the person's cursor.
+   */
+  keepingSelection(change: () => void): void {
+    const before = this.mode === 'model' ? this.getFilteredModels()[this.selectedIndex]?.registryKey ?? null : null;
+    change();
     this.clearFilteredCaches();
+    if (before === null) return;
+    const index = this.getFilteredModels().findIndex((model) => model.registryKey === before);
+    if (index >= 0) this.selectedIndex = index;
   }
 
   /**

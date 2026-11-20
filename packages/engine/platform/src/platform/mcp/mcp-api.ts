@@ -104,8 +104,8 @@ export interface McpApi {
   /** End this session's deny of one tool; false when it had none. */
   clearServerToolDenial?(serverName: string, toolName: string): boolean;
   /**
-   * Keep one tool's allow or deny with the server's entry in its MCP config
-   * file, or clear it, and apply it. An allow is the owner's act only.
+   * Keep one tool's block or exemption with the server's entry in its MCP
+   * config file, or drop it, and apply it. An exemption is the owner's act only.
    */
   storeServerToolRule?(serverName: string, toolName: string, rule: McpToolRule, roots?: McpConfigRoots): Promise<McpStoredToolRuleResult>;
   /**
@@ -149,8 +149,8 @@ export interface McpApiRegistry {
   /** End this session's deny of one tool; false when it had none. */
   clearServerToolDenial?(serverName: string, toolName: string): boolean;
   /**
-   * Keep one tool's allow or deny with the server's entry in its MCP config
-   * file, or clear it, and apply it. An allow is the owner's act only.
+   * Keep one tool's block or exemption with the server's entry in its MCP
+   * config file, or drop it, and apply it. An exemption is the owner's act only.
    */
   storeServerToolRule?(serverName: string, toolName: string, rule: McpToolRule, roots?: McpConfigRoots): Promise<McpStoredToolRuleResult>;
   quarantineSchema(serverName: string, reason: QuarantineReason, detail?: string): void;

@@ -16,6 +16,7 @@
 import type { NativeConversationInput, ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
 import type { NoticeLevel, OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createHeldInputs } from '@goodvibes-jev/engine/terminal-shell/held-input';
 import { withShellContext, type ShellContextHold } from '../input/shell-passthrough.ts';
 import { routeNativeConversationInput } from '../runtime/native-conversation-ingress.ts';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
@@ -53,6 +54,12 @@ export interface OwnerTurnSendOptions {
   readonly attachShellOutput?: boolean | undefined;
   /** The intake's lines go to the activity feed (a held message sent again). */
   readonly quiet?: boolean | undefined;
+  /**
+   * Gets the text when it may have been sent: the intake was handed it and its
+   * answer never came (`unknown`). Default: kept in {@link OwnerTurnSender.uncertain}
+   * and the composer draft, never sent again on its own.
+   */
+  readonly uncertain?: ((text: string) => void) | undefined;
 }
 
 export interface OwnerTurnSender {
@@ -62,6 +69,8 @@ export interface OwnerTurnSender {
   receiveOwnerInput(text: string, turnOptions: OrchestratorUserInputOptions | undefined): void;
   /** Messages held from the phone or a plan, oldest first. */
   held(): readonly string[];
+  /** Messages that may have been sent (their intake answer never came), oldest first: never sent again on their own. */
+  uncertain(): readonly string[];
   dispose(): void;
 }
 
@@ -72,6 +81,13 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
   const { messages } = deps;
   /** The reason last shown for running turns in this process; cleared once the host takes a message. */
   let localTurnReason: string | undefined;
+  /** Inputs whose intake answer never came: kept, shown as "may have been sent", not sent again by this sender. */
+  const uncertainInputs = createHeldInputs();
+  const UNCERTAIN_SESSION = 'agent-owner';
+  const keepUncertain = (text: string, reason: string): void => {
+    const held = uncertainInputs.hold({ sessionId: UNCERTAIN_SESSION, text, attachments: [], flags: {} });
+    uncertainInputs.unknown(held.clientMessageId, reason);
+  };
 
   function sendTurn(
     text: string,
@@ -84,6 +100,11 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
       return Promise.resolve(false);
     }
     const notSent = how.notSent ?? deps.restoreDraft;
+    // The intake may have taken it: it is kept and shown as such, and never counted as taken or as refused.
+    const uncertain = how.uncertain ?? ((kept: string): void => {
+      keepUncertain(kept, 'the intake did not answer');
+      deps.restoreDraft(kept);
+    });
     const spokenOutput = options.spokenOutput === true;
     const shell = how.attachShellOutput ? deps.shellContextHold.take() : null;
     const source: NativeConversationInput = { text: shell ? withShellContext(shell.blocks, text) : text, unsupportedSources: [] };
@@ -105,14 +126,25 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
       shell?.release();
       return deps.runTurn(source.text, spokenOutput, turnOptions);
     };
+    const mayHaveBeenSent = (): false => {
+      shell?.release();
+      uncertain(text);
+      const line = 'Your message may have been sent: its intake did not confirm it. It is kept; check /work intake-status before sending it again.';
+      if (how.quiet) messages.activity(line);
+      else messages.aboutInput(line, 'warning');
+      deps.render();
+      return false;
+    };
     const taken = (async (): Promise<boolean> => {
       try {
         // The hosted route refused it and nothing was sent: the shell output goes back and
         // `notSent` decides where the text goes (the composer, or the held queue for a phone
         // or plan message), and the caller is told it was not taken.
         let hostRefused = false;
-        const routed = await deps.remoteConversation.routeNativeOrExplain(source, deps.intake(), () => { hostRefused = true; });
+        let hostUncertain = false;
+        const routed = await deps.remoteConversation.routeNativeOrExplain(source, deps.intake(), () => { hostRefused = true; }, () => { hostUncertain = true; });
         if (hostRefused) return refused();
+        if (hostUncertain) return mayHaveBeenSent();
         if (routed && 'local' in routed) {
           await runLocal(routed.reason);
           return true;
@@ -138,6 +170,9 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
         if (state?.result) localTurnReason = undefined;
         // Refused (another input still being admitted or unresolved, input not acceptable): nothing was sent.
         if (state?.notSent || state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') return refused();
+        // Handed to the intake with no answer: it may have been recorded. Not taken (it is kept) and not
+        // refused (it is not sent again on its own); /work intake-status says which before a resend.
+        if (state?.status === 'unknown') return mayHaveBeenSent();
         shell?.release();
         return true;
       } catch (error) {
@@ -185,7 +220,18 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
       try {
         while (heldOwnerInput.length > 0 && !deps.isBusy()) {
           const next = heldOwnerInput[0]!;
-          if (!await sendTurn(next.text, {}, next.turnOptions, { notSent: () => {}, quiet: true })) break;
+          let mayHaveBeenSent = false;
+          const taken = await sendTurn(next.text, {}, next.turnOptions, {
+            notSent: () => {}, quiet: true,
+            uncertain: () => { mayHaveBeenSent = true; keepUncertain(next.text, 'the intake did not answer'); },
+          });
+          // A message that may have been sent leaves the queue: sending it again on a timer could send it twice.
+          if (mayHaveBeenSent) {
+            heldOwnerInput.shift();
+            messages.high(`${describeOwnerInput(next.text, next.turnOptions)} may have been sent: its intake did not confirm it. It is not sent again on its own; check /work intake-status.`, 'warning');
+            break;
+          }
+          if (!taken) break;
           heldOwnerInput.shift();
           messages.activity(`Sent ${describeOwnerInput(next.text, next.turnOptions)}, held until the previous message was taken.`);
         }
@@ -208,13 +254,14 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
     };
     // Behind a held message, a new one waits its turn so the order is kept.
     if (heldOwnerInput.length > 0) hold();
-    else void sendTurn(text, {}, turnOptions, { notSent: hold });
+    else void sendTurn(text, {}, turnOptions, { notSent: hold, uncertain: () => keepUncertain(text, 'the intake did not answer') });
   };
 
   return {
     sendTurn,
     receiveOwnerInput,
     held: () => heldOwnerInput.map((entry) => entry.text),
+    uncertain: () => uncertainInputs.list(UNCERTAIN_SESSION).map((entry) => entry.text),
     dispose: () => {
       disposed = true;
       if (heldOwnerTimer) clearTimeout(heldOwnerTimer);

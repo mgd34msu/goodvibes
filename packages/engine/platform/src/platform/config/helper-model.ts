@@ -22,7 +22,8 @@
 
 import { randomUUID } from 'node:crypto';
 import type { ConfigManager } from './manager.js';
-import type { LLMProvider } from '../providers/interface.js';
+import type { ChatResponse, LLMProvider } from '../providers/interface.js';
+import { callWithFailover, type FailoverTarget } from '../providers/failover.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitLlmResponseReceived } from '../runtime/emitters/turn.js';
@@ -41,6 +42,8 @@ export type HelperTask =
 export interface ResolvedHelper {
   provider: LLMProvider;
   modelId: string;
+  /** `provider:model`, the key a failover reads the model by. */
+  registryKey: string;
   /** true for a dedicated helper/tool-LLM route; false when the work inherits the main model. */
   isHelper: boolean;
 }
@@ -68,7 +71,8 @@ export interface HelperUsage {
 
 export interface HelperModelDeps {
   readonly configManager: Pick<ConfigManager, 'get' | 'getCategory'>;
-  readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'resolveModelPricing'>;
+  readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'resolveModelPricing'
+    | 'listModels' | 'tryGet' | 'resolveProviderReference' | 'fallbackOrder'>;
   /**
    * Runtime bus for usage events. When present, every helper-model call
    * emits LLM_RESPONSE_RECEIVED with its token actuals so the shared
@@ -109,6 +113,7 @@ export class HelperRouter {
     return {
       provider: this.deps.providerRegistry.getForModel(registryKey, provider),
       modelId: parsed.resolvedModelId,
+      registryKey,
       isHelper: true,
     };
   }
@@ -119,6 +124,7 @@ export class HelperRouter {
     return {
       provider: this.deps.providerRegistry.getForModel(current.registryKey, current.provider),
       modelId: current.id,
+      registryKey: current.registryKey,
       isHelper: false,
     };
   }
@@ -216,42 +222,18 @@ export class HelperModel {
       // The signal asks the provider to stop; the race frees the caller even when a provider ignores it.
       const timeoutMs = options.timeoutMs ?? DEFAULT_HELPER_TIMEOUT_MS;
       options.signal?.throwIfAborted();
-      const controller = new AbortController();
-      const request = resolved.provider.chat({
-        model: resolved.modelId,
-        messages: [{ role: 'user', content: prompt }],
-        ...(options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens }),
-        systemPrompt: options.systemPrompt,
-        signal: controller.signal,
-      });
-      // Armed only after chat() returned, so a synchronous throw leaves no timer behind.
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      let onCallerAbort: (() => void) | undefined;
-      const stopped = new Promise<never>((_, reject) => {
-        if (timeoutMs > 0) {
-          timer = setTimeout(() => {
-            const error = new Error(`Helper model request for ${task} timed out after ${timeoutMs} ms`);
-            controller.abort(error);
-            reject(error);
-          }, timeoutMs);
-          timer.unref?.();
-        }
-        if (options.signal) {
-          const callerSignal = options.signal;
-          onCallerAbort = () => { controller.abort(callerSignal.reason); reject(callerSignal.reason); };
-          callerSignal.addEventListener('abort', onCallerAbort, { once: true });
-        }
-      });
-      let response: Awaited<typeof request>;
-      try {
-        response = await (timeoutMs > 0 || options.signal ? Promise.race([request, stopped]) : request);
-      } finally {
-        clearTimeout(timer);
-        if (onCallerAbort) options.signal?.removeEventListener('abort', onCallerAbort);
-        // A late rejection of the abandoned request, or of the race it lost, must not become an unhandled rejection.
-        request.catch(() => undefined);
-        stopped.catch(() => undefined);
-      }
+      // A provider failure fails over like a turn: the model's other sign-ins
+      // (inside the provider's request), then provider.fallbackModels; the
+      // first request is the only one when it answers.
+      const first: FailoverTarget = {
+        model: { registryKey: resolved.registryKey, provider: resolved.provider.name, displayName: resolved.modelId },
+        modelId: resolved.modelId,
+        provider: resolved.provider,
+      };
+      const { response, target: answered } = await callWithFailover(
+        { registry: this.deps.providerRegistry, first, purpose: `Helper model (${task})`, signal: options.signal },
+        async (target) => ({ response: await this.request(task, target, prompt, options, timeoutMs), target }),
+      );
 
       // Track usage
       this._usage.inputTokens += response.usage?.inputTokens ?? 0;
@@ -270,16 +252,17 @@ export class HelperModel {
           cacheReadTokens: response.usage?.cacheReadTokens ?? 0,
           cacheWriteTokens: response.usage?.cacheWriteTokens ?? 0,
         };
-        const resolvedPricing = this.deps.providerRegistry.resolveModelPricing(resolved.modelId, resolved.provider.name);
-        const costUsdCents = computeUsageCostUsdCents(resolvedPricing, usage, resolved.provider.name);
+        // Priced and recorded as the model that answered, a fallback model included.
+        const resolvedPricing = this.deps.providerRegistry.resolveModelPricing(answered.modelId, answered.provider.name);
+        const costUsdCents = computeUsageCostUsdCents(resolvedPricing, usage, answered.provider.name);
         emitLlmResponseReceived(this.deps.runtimeBus, {
           sessionId: this.deps.sessionId?.() ?? '',
           source: 'helper-model',
           traceId: randomUUID(),
         }, {
           turnId: '',
-          provider: resolved.provider.name,
-          model: resolved.modelId,
+          provider: answered.provider.name,
+          model: answered.modelId,
           contentSummary: '',
           toolCallCount: 0,
           ...usage,
@@ -291,7 +274,7 @@ export class HelperModel {
       logger.debug('HelperModel.chat: success', {
         task,
         isHelper: resolved.isHelper,
-        modelId: resolved.modelId,
+        modelId: answered.modelId,
         inputTokens: response.usage?.inputTokens,
         outputTokens: response.usage?.outputTokens,
       });
@@ -304,6 +287,47 @@ export class HelperModel {
       logger.error('HelperModel.chat: request failed', { task, error: summarizeError(err) });
       throw err;
     }
+  }
+
+  /** One request to `target`, bounded by the timeout and the caller's signal. */
+  private async request(task: HelperTask, target: FailoverTarget, prompt: string, options: HelperChatOptions, timeoutMs: number): Promise<ChatResponse> {
+    const controller = new AbortController();
+    const request = target.provider.chat({
+      model: target.modelId,
+      messages: [{ role: 'user', content: prompt }],
+      ...(options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens }),
+      systemPrompt: options.systemPrompt,
+      signal: controller.signal,
+    });
+    // Armed only after chat() returned, so a synchronous throw leaves no timer behind.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let onCallerAbort: (() => void) | undefined;
+    const stopped = new Promise<never>((_, reject) => {
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          const error = new Error(`Helper model request for ${task} timed out after ${timeoutMs} ms`);
+          controller.abort(error);
+          reject(error);
+        }, timeoutMs);
+        timer.unref?.();
+      }
+      if (options.signal) {
+        const callerSignal = options.signal;
+        onCallerAbort = () => { controller.abort(callerSignal.reason); reject(callerSignal.reason); };
+        callerSignal.addEventListener('abort', onCallerAbort, { once: true });
+      }
+    });
+    let response: Awaited<typeof request>;
+    try {
+      response = await (timeoutMs > 0 || options.signal ? Promise.race([request, stopped]) : request);
+    } finally {
+      clearTimeout(timer);
+      if (onCallerAbort) options.signal?.removeEventListener('abort', onCallerAbort);
+      // A late rejection of the abandoned request, or of the race it lost, must not become an unhandled rejection.
+      request.catch(() => undefined);
+      stopped.catch(() => undefined);
+    }
+    return response;
   }
 
   /** Get cumulative helper usage since last reset. */

@@ -150,6 +150,8 @@ export interface ContractResumeDeps {
   readonly store: ContractStore;
   /** Whether this runner already runs the contract. */
   readonly isLive: (contractId: string) => boolean;
+  /** A claim a disposed runner of this process still holds while its run drains, resolved once it is released. */
+  readonly beforeClaim?: ((contractId: string) => Promise<void> | undefined) | undefined;
   /** Takes this process's claim on the contract: `elsewhere` when another live process holds it, `unavailable` when none can be taken. */
   readonly claim?: ((contractId: string) => ContractClaim) | undefined;
   /** Holds a stored contract without running it, with why (status reports it; cancel ends an `input-unavailable` hold). */
@@ -226,6 +228,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
       // A contract another live process runs is its to continue; two runners over one contract would both drive it.
       // The claim comes first, so nothing below (input restore, a hold, a cancel of the hold) touches a contract
       // another process owns.
+      await deps.beforeClaim?.(contractId);
       const claim = deps.claim?.(contractId) ?? 'claimed';
       if (claim === 'elsewhere') {
         deps.store.hold(contract);

@@ -23,7 +23,8 @@ export function isModelPickerCatalogCurrent(picker: Pick<ModelPickerCatalogState
 /** Preserve the selected item by identity, query and filters; superseded loads cannot publish. */
 export function fillModelPickerCatalog<Info>(picker: ModelPickerCatalogState<Info>, ticket: number, fill: ModelPickerCatalogFill<Info>, clearCaches: () => void, done = true): boolean {
  if (!isModelPickerCatalogCurrent(picker, ticket)) return false;
- const selectedId = picker.mode === 'model' ? picker.getFilteredModels()[picker.selectedIndex]?.id ?? null
+ // A model is known by provider and id (its registry key): providers share ids.
+ const selectedId = picker.mode === 'model' ? picker.getFilteredModels()[picker.selectedIndex]?.registryKey ?? null
   : picker.mode === 'provider' ? picker.getFilteredProviders()[picker.selectedIndex] ?? null
   : picker.mode === 'embeddingProvider' ? picker.embeddingProviders?.[picker.selectedIndex]?.id ?? null : null;
  if (fill.models) picker.models = fill.models;
@@ -33,7 +34,7 @@ export function fillModelPickerCatalog<Info>(picker: ModelPickerCatalogState<Inf
  if (fill.targetInfos) picker.targetInfos = fill.targetInfos;
  clearCaches();
  if (selectedId !== null) {
-  const ids = picker.mode === 'model' ? picker.getFilteredModels().map(model => model.id)
+  const ids = picker.mode === 'model' ? picker.getFilteredModels().map(model => model.registryKey)
    : picker.mode === 'provider' ? picker.getFilteredProviders() : picker.embeddingProviders?.map(provider => provider.id) ?? [];
   const index = ids.indexOf(selectedId);
   picker.selectedIndex = index >= 0 ? index : Math.min(picker.selectedIndex, Math.max(0, ids.length - 1));

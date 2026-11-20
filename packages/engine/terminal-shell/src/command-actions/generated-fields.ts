@@ -14,6 +14,7 @@ import {
   linePattern,
   parseTypedLine,
   riskWords,
+  singleAction,
 } from './typed-line.js';
 import type { ActionDescription, ActionValues, CommandDescription, InputDescription } from './types.js';
 
@@ -27,11 +28,14 @@ export function generatedUsage(description: CommandDescription<never>): string {
 }
 
 export function generatedArgsHint(description: CommandDescription<never>): string {
+  const single = singleAction(description);
+  if (single) return linePattern(single);
   return `[${description.actions.map((action) => action.word).join('|')}]`;
 }
 
 export function generatedSubcommandHints(description: CommandDescription<never>): Readonly<Record<string, string>> {
   const hints: Record<string, string> = {};
+  if (singleAction(description)) return hints;
   for (const action of description.actions) {
     const pattern = linePattern(action).slice(action.word.length).trim();
     hints[action.word] = pattern ? `${pattern}   ${action.label}` : action.label;
@@ -50,6 +54,18 @@ function secretInput(input: InputDescription): boolean {
 }
 
 export function generatedSecretArgs(description: CommandDescription<never>): CommandSecretArgs {
+  const single = singleAction(description);
+  if (single) {
+    // No action word: positions count from the first word after the name.
+    const positions = single.inputs.filter(secretInput).flatMap((input) => 'position' in input.typed ? [input.typed.position - 1] : []);
+    const flags = single.inputs.filter(secretInput).flatMap((input) => 'flag' in input.typed ? [input.typed.flag] : []);
+    const tailFrom = single.inputs.some((input) => secretInput(input) && 'tail' in input.typed) ? single.inputs.filter((other) => 'position' in other.typed).length : undefined;
+    return {
+      ...(positions.length > 0 ? { positions } : {}),
+      ...(flags.length > 0 ? { flags } : {}),
+      ...(tailFrom !== undefined ? { select: (args: readonly string[]) => args.map((_arg, index) => index).filter((index) => index >= tailFrom) } : {}),
+    };
+  }
   const subcommands: Record<string, number[] | { from: number }> = {};
   const flags = new Set<string>();
   for (const action of description.actions) {

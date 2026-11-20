@@ -80,7 +80,12 @@ export interface NativeRemoteConversationWiring extends RemoteConversationWiring
    * returned handle is then inert. The caller alone decides where the message goes back (the
    * composer for typed text, the held queue for a phone or plan message) and gives back what
    * it took for it, so a refusal never reads as taken. */
-  routeNativeOrExplain(source: NativeConversationInput, intake: NativeConversationIntakeActions | undefined, onNotSent?: () => void): Promise<RoutedTurnHandle | NativeLocalFallback | null>;
+  /**
+   * `onNotSent`: nothing was sent for it (the caller gives the text back).
+   * `onUncertain`: it was handed to the intake and no answer came, so it may
+   * have been recorded; the caller keeps it and does not count it as taken.
+   */
+  routeNativeOrExplain(source: NativeConversationInput, intake: NativeConversationIntakeActions | undefined, onNotSent?: () => void, onUncertain?: () => void): Promise<RoutedTurnHandle | NativeLocalFallback | null>;
   /** Explicit recovery observes the exact saved original without submitting it again. */
   observeNative(state: NativeConversationIntakeState, intake: NativeConversationIntakeActions): Promise<RoutedTurnHandle>;
   /** The same intake, reporting explicit recovery results (/work intake-*) back to this owner. */
@@ -356,7 +361,7 @@ export function installRemoteConversationRouting(
   return {
     isHostedTurn: (turnId: string) => hostedTurnIds.has(turnId),
     observeNative,
-    routeNativeOrExplain: async (source, intake, onNotSent) => {
+    routeNativeOrExplain: async (source, intake, onNotSent, onUncertain) => {
       if (disposed) return detachedHandle();
       if (ctx.services.configManager.get('hostedSessions.routeConversationTurns') === false) return null;
       if (nativePending) {
@@ -395,13 +400,15 @@ export function installRemoteConversationRouting(
         // 'unknown' may have been delivered and stays with the intake status.
         if (!state || (!state.notSent && (state.status === 'pending' || state.status === 'unavailable' || state.status === 'invalid'))) {
           onNotSent?.();
-        }
+        } else if (!state.notSent && state.status === 'unknown') onUncertain?.();
         activity.end();
         return detachedHandle();
       } catch {
         if (!disposed && sequence === routeSequence) {
           activity.end(); options.notify('Native delivery is unconfirmed. Inspect /work intake-status. No legacy turn was started.'); options.render();
         }
+        // Handed to the host and not answered: it may have been recorded.
+        onUncertain?.();
         return detachedHandle();
       } finally { if (nativePending === pending) nativePending = undefined; }
     },

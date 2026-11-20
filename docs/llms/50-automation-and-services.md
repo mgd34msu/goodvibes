@@ -344,7 +344,7 @@ Agent and workstream outcomes, approvals waiting and budget alerts are announced
 
 ```text
 /notify add https://ntfy.sh/<your-topic>
-/notify list            URLs are shown masked; --show reveals them
+/notify list            each URL shown by its host; --show reveals them
 /notify remove 1
 /notify clear
 /notify test
@@ -353,7 +353,7 @@ Agent and workstream outcomes, approvals waiting and budget alerts are announced
 /notifications          open the notification history view
 ```
 
-- `/notify add` keeps the URLs in `notifications.webhookUrls`. Each URL carries its own key, so the list is masked and stored as a credential. The setting applies at the next start.
+- `/notify add` keeps each URL in the secret store (key `GOODVIBES_NOTIFY_WEBHOOK_<id>`, daemon tier) and adds its `goodvibes://secrets/` reference to `notifications.webhookUrls`; the URL is read only when a notification is sent. Each URL carries its own key, so a literal URL written into the list is refused, screens show the host only, and the URL typed after `/notify add` or `/notify remove` is kept as `<redacted>` in the input history. `/notify remove` and `/notify clear` delete the stored URLs too. The setting applies at the next start.
 - Slack and Discord carry notifications only when they have somewhere to post: an incoming-webhook URL (`SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`) or a bot token with `surfaces.slack.defaultChannel` / `surfaces.discord.defaultChannelId`.
 - A notification that fails is retried, then kept in a failed list. The daemon keeps its own list on disk (operator methods `notifications.deadLetters.list` and `notifications.deadLetters.replay`).
 - A notification is sent only to the destination it was queued for: a retry waiting while the Slack or Discord webhook or default channel changed ends in the failed list with the reason instead of going to the new place. `/notify resend` (and `notifications.deadLetters.replay`) refuses one whose channel now posts somewhere else, naming the old and new destination (`destination-changed`), and leaves it in the list; `--to-current` (`toCurrent: true`) sends it to where the channel posts now.
@@ -1297,7 +1297,7 @@ Some settings hold a whole list. Each is read and written as one JSON value; a m
 
 | Setting | What it is for | Example |
 | --- | --- | --- |
-| `notifications.webhookUrls` | Webhook URLs that receive this machine's notifications (turn ends, approvals waiting, budget alerts). Stored as a credential and shown masked. Applies at the next start. Also managed by `/notify`. | `["https://ntfy.sh/<your-topic>"]` |
+| `notifications.webhookUrls` | Webhook URLs that receive this machine's notifications (turn ends, approvals waiting, budget alerts). Each member is a `goodvibes://secrets/` reference to a URL kept in the secret store; a literal URL is refused. Applies at the next start. Managed by `/notify add`. | `["goodvibes://secrets/goodvibes/GOODVIBES_NOTIFY_WEBHOOK_1A2B3C4D5E6F"]` |
 | `sandbox.egressAllowlist` | Command names the exec sandbox lets reach the network. From the next command. | `["git","npm"]` |
 | `sandbox.workspaceWritable` | Extra absolute paths sandboxed commands may write. From the next command. | `["/home/me/.cache/build"]` |
 | `surfaces.email.imap.authservIds` | Authserv-ids your mailbox's receiving server writes in `Authentication-Results`, for a provider that is not built in. An entry starting with `.` matches the hosts under that domain. | `["mx.example.com"]` |
@@ -1320,7 +1320,7 @@ How to edit one, from each surface:
 | Web UI | Settings: the key's field is a JSON editor that checks the list before it saves. |
 | Operator API | `config.set` and the other `config.*` methods (described in "The daemon, the web UI and networking"). |
 
-`notifications.webhookUrls` is easier through `/notify add|remove|list|clear`. A value that fails the key's check is refused whole with the key's hint, for example `list of absolute paths`.
+`notifications.webhookUrls` is set through `/notify add|remove|list|clear`, which keep each URL in the secret store. A value that fails the key's check is refused whole with the key's hint, for example `list of absolute paths`.
 
 ## Settings reference for this part
 

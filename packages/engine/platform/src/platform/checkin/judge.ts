@@ -3,6 +3,7 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import type { ProviderRegistry } from '../providers/registry.js';
+import { callWithFailover, type FailoverTarget } from '../providers/failover.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { worthInterrupting, checkinNoteFidelity } from './batteries/worth-interrupting.js';
@@ -42,7 +43,7 @@ export interface ProviderBackedCheckinJudgeOptions {
 
 /** The provider generates content only. Both semantic readings use the installed, recorded Jev runtime. */
 export function createProviderBackedCheckinJudge(
-  providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel'>,
+  providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'listModels' | 'tryGet' | 'resolveProviderReference' | 'fallbackOrder'>,
   options: ProviderBackedCheckinJudgeOptions = {},
 ): CheckinJudge {
   return {
@@ -91,11 +92,20 @@ export function createProviderBackedCheckinJudge(
       let message: string;
       try {
         const current = providerRegistry.getCurrentModel();
-        const provider = providerRegistry.getForModel(current.registryKey, current.provider);
+        const first: FailoverTarget = {
+          model: { registryKey: current.registryKey, provider: current.provider, displayName: current.displayName },
+          modelId: current.id,
+          provider: providerRegistry.getForModel(current.registryKey, current.provider),
+        };
         active();
-        const response = await abortable(provider.chat({ model: current.id,
-          messages: [{ role: 'user', content: briefing }], systemPrompt: CONTENT_PROMPT,
-          reasoningEffort: 'low', signal }), signal);
+        // The note's model fails over like a turn: its other sign-ins, then provider.fallbackModels.
+        const response = await callWithFailover({ registry: providerRegistry, first, purpose: 'Check-in note', signal },
+          (target) => {
+            active();
+            return abortable(target.provider.chat({ model: target.modelId,
+              messages: [{ role: 'user', content: briefing }], systemPrompt: CONTENT_PROMPT,
+              reasoningEffort: 'low', signal }), signal);
+          });
         signal.throwIfAborted();
         active();
         message = response.content?.trim() ?? '';

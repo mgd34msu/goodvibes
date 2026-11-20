@@ -59,6 +59,14 @@ export interface ConversationRewindPort extends RewindConversationPort {
   restoreBeforeSaved(undoSnapshotId: string): Promise<{ readonly restored: boolean; readonly notSaved?: string }>;
   /** Restore the post-truncation conversation (the /redo direction). */
   restoreAfter(undoSnapshotId: string): boolean;
+  /** restoreAfter, then the conversation's save awaited: `notSaved` says why when it failed. */
+  restoreAfterSaved(undoSnapshotId: string): Promise<{ readonly restored: boolean; readonly notSaved?: string }>;
+  /**
+   * The same as {@link messagesSinceRewind}, measured from the pre-rewind copy
+   * an undo put back: anything but 0 means re-applying the rewind would
+   * replace messages added after the undo.
+   */
+  messagesSinceUndo(undoSnapshotId: string): number | null;
   /**
    * How many messages the conversation holds beyond (positive) or short of
    * (negative) what that rewind left it with; null when the snapshot is
@@ -84,6 +92,9 @@ interface SnapshotPair {
   readonly afterCount: number;
   /** The post-truncation conversation as text, so an edit that keeps the length is still seen. */
   readonly afterSerialized: string;
+  /** The pre-truncation conversation's length and text, the state an undo puts back. */
+  readonly beforeCount: number;
+  readonly beforeSerialized: string;
 }
 
 /** A snapshot pair as written to `<undoDir>/<undoSnapshotId>.json`. */
@@ -174,7 +185,10 @@ export function createConversationRewindPort(
     });
     const conv = stored ? resolveConversation(stored.sessionId) : null;
     if (!stored || !conv) return undefined;
-    const pair: SnapshotPair = { sessionId: stored.sessionId, conv, before: stored.before, after: stored.after, afterCount: stored.afterCount, afterSerialized: JSON.stringify(stored.after) };
+    const pair: SnapshotPair = {
+      sessionId: stored.sessionId, conv, before: stored.before, after: stored.after, afterCount: stored.afterCount, afterSerialized: JSON.stringify(stored.after),
+      beforeCount: messagesOf(stored.before)?.length ?? 0, beforeSerialized: JSON.stringify(stored.before),
+    };
     snapshots.set(id, pair);
     return pair;
   }
@@ -248,7 +262,10 @@ export function createConversationRewindPort(
       conv.removeMessagesAfter(cut.keep);
       conv.rebuildHistory();
       const after = conv.toJSON() as ConversationJson;
-      remember(undoSnapshotId, anchor.sessionId, { sessionId: anchor.sessionId, conv, before, after, afterCount: conv.getMessageCount(), afterSerialized: JSON.stringify(after) });
+      remember(undoSnapshotId, anchor.sessionId, {
+        sessionId: anchor.sessionId, conv, before, after, afterCount: conv.getMessageCount(), afterSerialized: JSON.stringify(after),
+        beforeCount: cut.total, beforeSerialized: JSON.stringify(before),
+      });
       const notSaved = await save(conv);
       return {
         droppedMessages: Math.max(0, cut.total - cut.keep), undoSnapshotId, undoExpiresAfter: undoLifetime,
@@ -269,6 +286,21 @@ export function createConversationRewindPort(
 
     restoreAfter(undoSnapshotId: string): boolean {
       return restore(snapshotFor(undoSnapshotId), 'after');
+    },
+
+    async restoreAfterSaved(undoSnapshotId: string): Promise<{ readonly restored: boolean; readonly notSaved?: string }> {
+      const snapshot = snapshotFor(undoSnapshotId);
+      if (!apply(snapshot, 'after')) return { restored: false };
+      const notSaved = await save(snapshot!.conv);
+      return notSaved === undefined ? { restored: true } : { restored: true, notSaved };
+    },
+
+    messagesSinceUndo(undoSnapshotId: string): number | null {
+      const snapshot = snapshotFor(undoSnapshotId);
+      if (!snapshot) return null;
+      const delta = snapshot.conv.getMessageCount() - snapshot.beforeCount;
+      if (delta !== 0) return delta;
+      return JSON.stringify(snapshot.conv.toJSON()) === snapshot.beforeSerialized ? 0 : Number.NaN;
     },
 
     messagesSinceRewind(undoSnapshotId: string): number | null {

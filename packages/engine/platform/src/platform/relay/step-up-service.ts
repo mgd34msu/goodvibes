@@ -36,6 +36,7 @@ import type { StepUpAssertionVerifier, StepUpRefusalReason, StepUpRequestContext
 import type { AuthorityChange, AuthorityRecordFile } from '../cluster/authority-record-file.js';
 import type { AuthorityEntry, AuthorityKey, AuthorityView } from '../cluster/authority-record.js';
 import { randomUUID } from 'node:crypto';
+import { defineFormat, renderChecked } from '../utils/format-codec.js';
 
 /** User-verification requirement for the ceremony. Default `required`. */
 export type UserVerificationRequirement = 'required' | 'preferred' | 'discouraged';
@@ -216,7 +217,7 @@ export class StepUpService {
    * unreadable record leaves no credential: nothing is confirmed on a guess.
    */
   private async loadState(): Promise<StepUpState> {
-    const stored = parseState(revealOrNull(await this.secrets.get(STEP_UP_STATE_KEY), 'dispatch'), this.logger);
+    const stored = parseState(revealOrNull(await this.secrets.get(STEP_UP_STATE_KEY), 'dispatch'));
     const state = this.withRecord(stored);
     this.knownCredentialCount = state.credentials.length;
     return state;
@@ -280,7 +281,8 @@ export class StepUpService {
   }
 
   private async saveState(state: StepUpState): Promise<void> {
-    await this.secrets.set(STEP_UP_STATE_KEY, JSON.stringify(state));
+    // Rendered and read back with the reader's own codec before it is stored.
+    await this.secrets.set(STEP_UP_STATE_KEY, renderChecked(STEP_UP_STATE_FORMAT, state) as string);
     this.knownCredentialCount = state.credentials.length;
   }
 
@@ -382,7 +384,15 @@ export class StepUpService {
     } catch {
       throw new StepUpValidationError('publicKeyCose must be base64url');
     }
-    if (!coseP256ToRawPoint(cose)) throw new StepUpValidationError('publicKeyCose is not a valid EC2 P-256 COSE key');
+    const rawPoint = coseP256ToRawPoint(cose);
+    if (!rawPoint) throw new StepUpValidationError('publicKeyCose is not a valid EC2 P-256 COSE key');
+    // Imported now, the way verification imports it: a key that is shaped right
+    // but is not a point on the curve is refused here, not at every confirmation after.
+    try {
+      await crypto.subtle.importKey('raw', rawPoint, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+    } catch {
+      throw new StepUpValidationError('publicKeyCose is not a usable P-256 public key (its point is not on the curve)');
+    }
 
     const state = await this.loadState();
     // One relying party and origin policy covers every credential, so a
@@ -536,20 +546,63 @@ export class StepUpService {
   }
 }
 
-function parseState(raw: string | null, logger: StepUpServiceOptions['logger']): StepUpState {
-  if (!raw) return { rpId: '', origins: [], userVerification: 'required', credentials: [] };
-  try {
-    const parsed = JSON.parse(raw) as Partial<StepUpState>;
-    return {
-      rpId: typeof parsed.rpId === 'string' ? parsed.rpId : '',
-      origins: Array.isArray(parsed.origins) ? parsed.origins.filter((o): o is string => typeof o === 'string') : [],
-      userVerification: parsed.userVerification ?? 'required',
-      credentials: Array.isArray(parsed.credentials) ? parsed.credentials : [],
-    };
-  } catch {
-    logger?.warn('step-up: stored state is unparseable; treating as empty');
-    return { rpId: '', origins: [], userVerification: 'required', credentials: [] };
+/** The stored passkey state cannot be read: it is not "no passkey registered", and nothing is written over it. */
+export class StepUpStateUnreadableError extends Error {
+  constructor(reason: string) {
+    super(`The stored passkey state (secret ${STEP_UP_STATE_KEY}) cannot be read: ${reason}. No passkey can confirm a call until it is replaced; `
+      + `delete that secret from the secret store and register the passkeys again.`);
+    this.name = 'StepUpStateUnreadableError';
   }
+}
+
+const USER_VERIFICATION: ReadonlySet<string> = new Set(['required', 'preferred', 'discouraged']);
+
+function readStoredCredential(value: unknown): StoredStepUpCredential | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const entry = value as Readonly<Record<string, unknown>>;
+  if (typeof entry.credentialId !== 'string' || !entry.credentialId || typeof entry.publicKeyCose !== 'string' || !entry.publicKeyCose) return null;
+  if (typeof entry.signCount !== 'number' || !Number.isSafeInteger(entry.signCount) || entry.signCount < 0) return null;
+  if (typeof entry.createdAt !== 'number' || !Number.isFinite(entry.createdAt)) return null;
+  if (entry.label !== undefined && typeof entry.label !== 'string') return null;
+  return { credentialId: entry.credentialId, publicKeyCose: entry.publicKeyCose, signCount: entry.signCount,
+    ...(entry.label ? { label: entry.label } : {}), createdAt: entry.createdAt };
+}
+
+/** The stored passkey state: the one form the service writes and reads, every field checked on the way in. */
+const STEP_UP_STATE_FORMAT = defineFormat<StepUpState>({
+  name: 'step-up state',
+  parse(raw) {
+    if (typeof raw !== 'string') return { ok: false, reason: 'it is not text' };
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); } catch { return { ok: false, reason: 'it is not JSON' }; }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return { ok: false, reason: 'it is not an object' };
+    const record = parsed as Readonly<Record<string, unknown>>;
+    if (typeof record.rpId !== 'string') return { ok: false, reason: 'rpId is not text' };
+    if (!Array.isArray(record.origins) || record.origins.some((origin) => typeof origin !== 'string')) return { ok: false, reason: 'origins is not a list of text' };
+    if (typeof record.userVerification !== 'string' || !USER_VERIFICATION.has(record.userVerification)) return { ok: false, reason: 'userVerification is not required, preferred or discouraged' };
+    if (!Array.isArray(record.credentials)) return { ok: false, reason: 'credentials is not a list' };
+    const credentials: StoredStepUpCredential[] = [];
+    for (const [index, entry] of record.credentials.entries()) {
+      const credential = readStoredCredential(entry);
+      if (!credential) return { ok: false, reason: `credential ${index + 1} is not a complete credential` };
+      credentials.push(credential);
+    }
+    return { ok: true, value: { rpId: record.rpId, origins: record.origins as string[],
+      userVerification: record.userVerification as UserVerificationRequirement, credentials } };
+  },
+  render(state) {
+    return JSON.stringify({ rpId: state.rpId, origins: state.origins, userVerification: state.userVerification,
+      credentials: state.credentials.map((credential) => ({ credentialId: credential.credentialId, publicKeyCose: credential.publicKeyCose,
+        signCount: credential.signCount, ...(credential.label ? { label: credential.label } : {}), createdAt: credential.createdAt })) });
+  },
+});
+
+/** Nothing stored is no passkey; a stored state that does not read is an error, never an empty list. */
+function parseState(raw: string | null): StepUpState {
+  if (!raw) return { rpId: '', origins: [], userVerification: 'required', credentials: [] };
+  const parsed = STEP_UP_STATE_FORMAT.parse(raw);
+  if (!parsed.ok) throw new StepUpStateUnreadableError(parsed.reason);
+  return parsed.value;
 }
 
 /**

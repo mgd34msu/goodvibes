@@ -1131,13 +1131,14 @@ export class McpRegistry {
 
   /**
    * Keep one tool's rule with the server's entry in its MCP config file, then
-   * apply it: `deny` refuses every call to the tool, `allow` lets it past the
-   * server's path and host scope, `clear` drops the kept one. The entry must be
+   * apply it: `block` refuses every call to the tool, `exempt` lets it past the
+   * server's path and host scope, `unblock` and `unexempt` drop a kept block or
+   * exemption (only that kind). The entry must be
    * in a file this program writes (the owner's global file or the project's
-   * `.goodvibes/mcp.json`); an allow only in the global one. The roots are the
+   * `.goodvibes/mcp.json`); an exemption only in the global one. The roots are the
    * workspace the servers were started from unless given.
    *
-   * An allow loosens what a server may do: every caller that reaches this
+   * An exemption loosens what a server may do: every caller that reaches this
    * method for one is the owner's own act (Settings, the owner's own command,
    * an owner-only operator method), never a model's.
    */
@@ -1157,7 +1158,7 @@ export class McpRegistry {
     const source = entry.source;
     if (!source.writable || source.scope === 'external') {
       throw new Error(`${serverName} is configured in ${source.path}, a file another program owns, so no rule for its tool '${toolName}' can be kept there. `
-        + `Add ${serverName} to your own MCP config (/mcp add with --scope global) to keep per-tool rules, or use /mcp deny for this session.`);
+        + `Add ${serverName} to your own MCP config (/mcp add with --scope global) to keep per-tool rules, or block it for this session only: /mcp block ${serverName} ${toolName}.`);
     }
     const scope = source.scope;
     const written = await withMcpConfigLock(roots, scope, () => setMcpServerToolRule(roots, scope, serverName, toolName, rule));

@@ -828,10 +828,14 @@ async function executeToolCallsInMode(
       // A plain allow by code or rule is not reported; one Jev or the owner made is (with Jev's decision log id).
       const decided = checkResult.decision;
       if (decided && (decided.state !== 'allowed' || decided.decidedBy === 'owner')) result = { ...result, decision: decided };
-      // Do not race the tool promise: abort-ignoring work must actually return
-      // before this throw allows the turn's terminal cancellation event.
-      assertTurnActive();
-      if (deps.hookDispatcher && result.success === true) {
+      // The body returned, so this result is the call's receipt whatever a cancel
+      // says now: it is appended (and settled, below) even when the turn was
+      // cancelled meanwhile, so the transcript says the call ran and the model
+      // does not repeat it. A cancelled turn skips only the observers (hooks and
+      // events); a caller that is no longer current (revoked) still stops here.
+      callerCurrent?.();
+      const observe = turnSignal?.aborted !== true;
+      if (observe && deps.hookDispatcher && result.success === true) {
         await fireObservingHook(deps.hookDispatcher, {
           path: `Post:tool:${call.name}`,
           phase: 'Post',
@@ -844,8 +848,8 @@ async function executeToolCallsInMode(
         });
       }
 
-      assertTurnActive();
-      if (deps.runtimeBus) {
+      callerCurrent?.();
+      if (observe && deps.runtimeBus) {
         if (result.success) {
           emitToolSucceeded(deps.runtimeBus, deps.emitterContext(turnId), {
             callId: call.id,
@@ -866,8 +870,8 @@ async function executeToolCallsInMode(
         }
       }
 
-      assertTurnActive();
-      if (deps.hookDispatcher && (call.name === 'write' || call.name === 'edit')) {
+      callerCurrent?.();
+      if (observe && deps.hookDispatcher && (call.name === 'write' || call.name === 'edit')) {
         // The paths the call wrote (or tried to), never their contents: `files[].path` of a write,
         // `edits[].path` and a notebook operation's `path` of an edit, as the arguments that ran name them.
         const ran = prepared?.args ?? checkResult.modifiedArgs ?? call.arguments;
@@ -882,9 +886,8 @@ async function executeToolCallsInMode(
           timestamp: Date.now(),
           payload: { tool: call.name, path: paths[0] ?? '', paths, callId: call.id, ...(result.success ? {} : { error: result.error }) },
         });
-        // A cancellation during dispatch cannot admit another tool or continue
-        // the turn, including when the hook rejected and was logged above.
-        assertTurnActive();
+        // A revocation during dispatch stops here; a cancel is checked before the next call.
+        callerCurrent?.();
       }
 
       result = capToolResultOutput(call.name, call.arguments, result);
@@ -903,7 +906,7 @@ async function executeToolCallsInMode(
         }
       }
 
-      assertTurnActive();
+      callerCurrent?.();
       appendResult(result);
     } catch (error) {
       if (earlyCallSignal?.aborted && !turnSignal?.aborted) {
@@ -925,9 +928,10 @@ async function executeToolCallsInMode(
         ...(inputToRelease ? [Promise.resolve().then(() => deps.toolRegistry.releaseProjected(inputToRelease))] : []),
       ]);
       if (cleanup.some(result => result.status === 'rejected')) throw new Error('Tool input projection cleanup failed');
-      // Retention observes the same publication fences as the ordinary result.
-      // Never leak a current call's output through recovery after revocation.
-      assertTurnActive();
+      // Retention observes the same publication fence as the ordinary result:
+      // never leak a call's output through recovery after revocation. A cancel
+      // does not withhold it: a call whose body returned is settled as it ran.
+      callerCurrent?.();
       if (settledResult) deps.onToolSettled?.(settledResult);
     }
   }

@@ -1516,7 +1516,8 @@ Set a fallback order (it applies from the next failure, in every program that re
 
 ### Synthetic failover
 
-The `synthetic` provider groups one model across every backend that serves it, under one entry; the picker shows each entry with its number of providers and an S, A, B or C tier badge, split into Top Models and All Synthetic.
+The `synthetic` provider groups one model across every backend that serves it at the same billing tier (free, paid or subscription), under one entry; the picker shows each entry with its number of providers and an S, A, B or C tier badge, split into Top Models and All Synthetic.
+A model served free by some providers and paid by others becomes one entry per tier, named with the tier (`<model>-free`, `<model>-paid`), and each entry fails over only to backends of its own tier, so a free synthetic model never reaches a paid backend. An entry needs at least two providers in its tier.
 Backends are tried in order of context window, then maximum output tokens, skipping backends whose provider has no key.
 Each backend gets one attempt; a failed backend goes on cooldown and the next is tried at once:
 

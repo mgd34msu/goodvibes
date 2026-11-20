@@ -8,6 +8,7 @@ import type { Tool, ToolExecuteOptions } from '../../types/tools.js';
 import { AutomationCommands, type AutomationCommandExit } from '../../workflow/automation-commands.js';
 import { conditionProblem, HOOK_ACTION_TIMEOUT_MS, type HookActionFireResult } from '../../workflow/hook-action-executor.js';
 import { shellSplit } from '../../utils/shell-split.js';
+import { requireStopped } from '../../utils/owned-work.js';
 import type { ContractRunner } from '../../contract/runner.js';
 import { workflowSchema } from './schema.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -267,7 +268,8 @@ export class HookActionManager {
   }
 
   remove(id: string): boolean {
-    this.commands.stop('hook-action', id);
+    // The run keeps its slot until its exit is observed; the stop logs any child it could not end.
+    void this.commands.stop('hook-action', id);
     return this.actions.delete(id);
   }
 
@@ -417,7 +419,7 @@ export class ScheduleManager {
 
     // Re-adding a name replaces the schedule: its timer and any run of the old command stop.
     this._clearTimer(name);
-    this.commands.stop('schedule', name);
+    void this.commands.stop('schedule', name);
 
     const entry: ScheduleEntry = {
       name,
@@ -445,7 +447,7 @@ export class ScheduleManager {
   /** Removes the schedule and stops its command if a run is executing. */
   remove(name: string): boolean {
     this._clearTimer(name);
-    this.commands.stop('schedule', name);
+    void this.commands.stop('schedule', name);
     return this.schedules.delete(name);
   }
 
@@ -476,13 +478,17 @@ export class ScheduleManager {
     return Array.from(this.schedules.values());
   }
 
-  /** Stop all timers and clear state when the manager is disposed. */
-  destroy(): void {
+  /**
+   * Stop all timers and clear state when the manager is disposed. Resolves once
+   * every running scheduled command has exited; rejects naming each one that
+   * could not be confirmed ended.
+   */
+  async destroy(): Promise<void> {
     for (const name of [...this.timers.keys()]) {
       this._clearTimer(name);
     }
     this.schedules.clear();
-    this.commands.stop('schedule');
+    requireStopped('Scheduled commands', await this.commands.stop('schedule'));
   }
 
   private _arm(name: string, intervalMs: number): void {

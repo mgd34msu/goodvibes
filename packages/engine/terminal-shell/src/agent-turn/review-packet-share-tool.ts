@@ -282,7 +282,7 @@ export function createAgentReviewPacketShareTool(
       let deliveryStarted = false;
       try {
         const ledger = getSessionUntrustedContentLedger();
-        const ledgerSnapshot = () => JSON.stringify([ledger.originsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]);
+        const ledgerSnapshot = () => JSON.stringify([ledger.taintOriginsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]);
         const sources = ledgerSnapshot();
         const deliver = channelDeliveryRouter.deliver, listStrategies = channelDeliveryRouter.listStrategies;
         const strategies = listStrategies.call(channelDeliveryRouter).map(strategy => ({ strategy, canHandle: strategy.canHandle, deliver: strategy.deliver }));

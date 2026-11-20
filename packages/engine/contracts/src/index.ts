@@ -189,4 +189,33 @@ export { REASONING_EFFORT_SEVERITY } from './reasoning-effort-levels.js';
 export { toolActionClass, toolActivityFallback, toolActivityPhrase, toolCallActivity } from './tool-activity.js';
 export type { ToolActionClass, ToolActivity, ToolActivityWords } from './tool-activity.js';
 
+export { safeTerminalLink, stripDangerousAnsi } from './ansi-sanitize.js';
+export {
+  beadArgument,
+  beadBody,
+  beadName,
+  beadStatus,
+  beadSummary,
+  cellText,
+  formatBeadTime,
+  inferResultToolName,
+  isBackgroundCall,
+  needsAttention,
+  summarizeToolCall,
+  toolFamily,
+} from './tool-call-summary.js';
+export type {
+  BeadBody,
+  BeadStatus,
+  BeadStatusInput,
+  BeadSummary,
+  BodyTone,
+  CallOutcome,
+  ReadBodyFile,
+  SummaryTone,
+  ToolCallInput,
+  ToolCallState,
+  ToolCallSummary,
+} from './tool-call-summary.js';
+
 export { CATALOG_PROVIDER_NAME_ALIASES, declaredProviderCatalogId } from './provider-catalog.js';

@@ -100,9 +100,11 @@ export async function listEmailInbox(deps: EmailServiceDeps, config: EmailConfig
           current();
           return message;
         });
+        const uidValidity = client.mailboxStatus?.uidValidity ?? null;
         return {
           messages,
           total: uids.length,
+          ...(uidValidity === null ? {} : { uidValidity }),
           ...(batch.unreadable.length > 0
             ? {
               unreadable: batch.unreadable.map((problem) => ({

@@ -75,6 +75,12 @@ export async function runPluginTrustSubcommand(
         print(`Plugin '${name}' elevated to 'trusted' via signed manifest${signed.fingerprint ? ` (fingerprint: ${signed.fingerprint})` : ''}: ${effect}\n${await restartLine(signed.restarting)}`);
         return true;
       }
+      // The owner's override answers a signature that does not verify, the
+      // reason the confirmation named; a closed manager, an unknown plugin or
+      // an unsaved record is not that, and is a refusal.
+      if (signed.signatureRejected !== true) {
+        throw commandRefusal(signed.error ?? `the trust tier of '${name}' was not saved`, 'Nothing changed; fix the reason and run the line again.');
+      }
       note = `owner override after failed signature check (${signed.error ?? 'unknown reason'})${userNote ? `; ${userNote}` : ''}`;
     }
     const result = manager.trust(name, tier, note);

@@ -29,6 +29,7 @@ import { logger } from '../utils/logger.js';
 import { VERSION } from '../version.js';
 import type { McpServerConfig } from './config.js';
 import { summarizeError } from '../utils/error-display.js';
+import { OwnedScope, mergeCloseReports, NOTHING_RUNNING, requireStopped, type CloseReport } from '../utils/owned-work.js';
 import { isRecord } from '../utils/record-coerce.js';
 import { McpHttpConnection, McpRpcError } from './http-connection.js';
 import type {
@@ -229,6 +230,12 @@ export class McpClient {
    * it open) must not stop the next process from getting its own reader.
    */
   private readLoopProc: ReturnType<typeof Bun.spawn> | null = null;
+  /**
+   * Every server process this client started and has not yet seen exit, each
+   * owned by its own scope. A restart's earlier process stays here until its
+   * exit is observed, so disconnect() stops it too and never forgets one.
+   */
+  readonly #processScopes = new Map<ReturnType<typeof Bun.spawn>, OwnedScope>();
   private restartCount = 0;
   #phase: McpClientPhase = 'idle';
   #lastError: string | null = null;
@@ -535,9 +542,12 @@ export class McpClient {
   sessionEnded(): Promise<void> { return this.#sessionEnd; }
 
   /**
-   * disconnect, Stop the server process and clean up.
+   * disconnect, Stop the server process and clean up. A stdio server is asked
+   * to stop (stdin closed, SIGTERM), given 5 s, then killed and given 2 s more.
+   * Resolves with the report of what ended; rejects with StillRunningError
+   * naming a process whose exit could not be confirmed.
    */
-  async disconnect(): Promise<void> {
+  async disconnect(): Promise<CloseReport> {
     // Mark this as a deliberate shutdown so the read-loop finally does not
     // resurrect the process via _scheduleRestart(). Set synchronously before
     // any await so it is already true when the detached read loop runs.
@@ -549,10 +559,10 @@ export class McpClient {
       await http.close();
       this.#sessionEnd = http.sessionEnded();
       if (this.http === http) { this.http = null; this.negotiated = null; this.#phase = 'closed'; }
-      return;
+      return NOTHING_RUNNING;
     }
-    if (!this.proc) { this.#phase = 'closed'; return; }
     const proc = this.proc;
+    if (!proc && this.#processScopes.size === 0) { this.#phase = 'closed'; return NOTHING_RUNNING; }
     // Reject all pending requests
     for (const [, pending] of this.pendingRequests) {
       clearTimeout(pending.timer);
@@ -560,16 +570,18 @@ export class McpClient {
     }
     this.pendingRequests.clear();
 
+    // Closing stdin is a courtesy: its failure (a pipe already gone) never skips the stop below.
+    if (proc) {
+      try { (proc.stdin as import('bun').FileSink).end(); }
+      catch (err: unknown) { logger.debug('[McpClient] closing the server stdin failed', { server: this.config.name, error: summarizeError(err) }); }
+    }
+    let report: CloseReport = NOTHING_RUNNING;
     try {
-      (proc.stdin as import('bun').FileSink).end();
-      proc.kill();
-      await proc.exited;
-    } catch (err: unknown) {
-      // The process may already be gone; record the shutdown error for ops.
-      logger.warn('[McpClient] error during process shutdown', { error: String(err) });
+      report = mergeCloseReports(await Promise.all([...this.#processScopes.values()].map(scope => scope.close('the server was disconnected'))));
     } finally {
       this.#phase = 'closed';
-      if (this.proc === proc) {
+      // Cleared once its exit was observed, or once the report names it as still running.
+      if (proc && this.proc === proc) {
         this.proc = null;
         this.buffer = '';
         if (this.readLoopProc === proc) this.readLoopProc = null;
@@ -577,6 +589,8 @@ export class McpClient {
         this.negotiated = null;
       }
     }
+    if (report.killed.length > 0) logger.warn('[McpClient] the server ignored SIGTERM and was killed', { server: this.config.name, killed: report.killed });
+    return requireStopped(`MCP server ${this.config.name}`, report);
   }
 
   // ---------------------------------------------------------------------------
@@ -600,13 +614,19 @@ export class McpClient {
 
     try {
       this.options?.beforeProcessStart?.();
-      this.proc = Bun.spawn([...(processSpec?.wrapper ?? []), cmd, ...args], {
+      const proc = Bun.spawn([...(processSpec?.wrapper ?? []), cmd, ...args], {
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
         env,
         ...(cwd ? { cwd } : {}),
       });
+      this.proc = proc;
+      const label = `MCP server ${this.config.name}`;
+      const scope = new OwnedScope(label);
+      scope.child(label, { pid: proc.pid, kill: signal => proc.kill(signal), exited: proc.exited });
+      this.#processScopes.set(proc, scope);
+      void proc.exited.then(() => { this.#processScopes.delete(proc); }, () => { this.#processScopes.delete(proc); });
       this.buffer = '';
       this.intentionalClose = false;
       this._startReadLoop();

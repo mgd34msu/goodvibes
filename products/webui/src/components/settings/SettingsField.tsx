@@ -385,13 +385,20 @@ export function SettingsField({ field, onCommit, onCommitMany, onReset, persiste
             size="sm"
             className="settings-field-reset"
             disabled={saving}
-            title="Remove the saved value so this setting follows the built-in default again."
+            title={field.key === "judgment.endpoint"
+              ? "Return to the default decision endpoint. Authentication is reset to none; choose its credential source again."
+              : "Remove the saved value so this setting follows the built-in default again."}
             onClick={() => {
               if (inFlight.current) return;
               inFlight.current = true;
               setSaving(true);
               setError(null);
-              onReset(field.key)
+              // Resetting the decision endpoint moves its credential's destination: it
+              // clears the credential source in the same update, as an edit does.
+              // Any other destination the daemon refuses with the credential named.
+              (field.key === "judgment.endpoint"
+                ? commitJudgmentDestination(onCommitMany, field.key, field.default)
+                : onReset(field.key))
                 .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
                 .finally(() => {
                   inFlight.current = false;

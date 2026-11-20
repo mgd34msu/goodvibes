@@ -249,6 +249,8 @@ export const REWIND_CONVERSATION_REQUESTS_ANSWER_INPUT_SCHEMA = objectSchema(
     /** Preview answers: how many messages the rewind would drop, and leave. */
     messagesToDrop: NUMBER_SCHEMA,
     messagesRemaining: NUMBER_SCHEMA,
+    /** Preview answers, optional: the conversation's revision (message count and last message key) the counts were taken at. */
+    revision: STRING_SCHEMA,
     /** Rewind answers: how many were dropped, and the handle that restores them. */
     droppedMessages: NUMBER_SCHEMA,
     undoSnapshotId: STRING_SCHEMA,
@@ -259,7 +261,7 @@ export const REWIND_CONVERSATION_REQUESTS_ANSWER_INPUT_SCHEMA = objectSchema(
     /** Non-empty: this surface cannot serve the request, and this is why. */
     unavailableReason: STRING_SCHEMA,
     /** Undo refusals: why, when it is one the caller can act on. */
-    unavailableCode: enumSchema(['UNDO_POINT_GONE', 'CONVERSATION_CHANGED']),
+    unavailableCode: enumSchema(['UNDO_POINT_GONE', 'CONVERSATION_CHANGED', 'TARGET_CHANGED']),
   },
   ['hostId', 'requestId'],
 );

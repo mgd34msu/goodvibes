@@ -787,6 +787,7 @@ export function renderControlPlaneGatewayWebUi(authTokenHint = ''): Response {
   return new Response(html, {
     headers: {
       'content-type': 'text/html; charset=utf-8',
+      'content-security-policy': "img-src 'self' data: blob:",
     },
   });
 }

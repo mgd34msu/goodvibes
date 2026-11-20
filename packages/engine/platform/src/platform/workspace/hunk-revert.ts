@@ -235,8 +235,12 @@ export interface HunkRevertPreview {
   readonly matchedAtLine: number | null;
 }
 
-/** Compute, WITHOUT mutating anything, whether reverting `hunk` in `path` would apply cleanly. */
-export function previewHunkRevert(workspaceRoot: string, path: string, hunk: string): HunkRevertPreview {
+/**
+ * Compute, WITHOUT mutating anything, whether reverting `hunk` in `path` would
+ * apply cleanly. `seen` receives the file's content as it was read, so a
+ * caller can bind what was previewed without reading the file a second time.
+ */
+export function previewHunkRevert(workspaceRoot: string, path: string, hunk: string, seen?: (content: string) => void): HunkRevertPreview {
   let content: string;
   try {
     content = readWorkspaceFile(workspaceRoot, path);
@@ -246,6 +250,7 @@ export function previewHunkRevert(workspaceRoot: string, path: string, hunk: str
     }
     throw err;
   }
+  seen?.(content);
   const result = reverseApplyHunk(content, hunk);
   if (!result.ok) {
     return { path, applies: false, conflict: result.reason, hunkHeader: null, addedLinesRemoved: 0, removedLinesRestored: 0, matchedAtLine: null };
@@ -294,9 +299,12 @@ export async function applyHunkRevert(
   workspace: HunkRevertWorkspace,
   path: string,
   hunk: string,
+  /** Called with the file as read before anything is written; throws to refuse (a reviewed target that changed). */
+  verify?: (content: string, root: string) => void,
 ): Promise<HunkRevertReceipt> {
   const root = await workspace.resolveRoot();
   const content = readWorkspaceFile(root, path);
+  verify?.(content, root);
   const result = reverseApplyHunk(content, hunk);
   if (!result.ok) {
     throw new HunkRevertConflictError(result.reason);

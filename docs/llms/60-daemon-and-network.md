@@ -879,7 +879,7 @@ Manage users with the terminal app (`goodvibes auth ...`, described in "The term
 | `local_auth.sessions.delete` | `DELETE /api/local-auth/sessions/{sessionId}` |
 | `local_auth.bootstrap.delete` | `DELETE /api/local-auth/bootstrap-file` |
 
-The last user with the `admin` role cannot be deleted. Five sign-in attempts per minute are allowed from one address; past that the daemon answers `429` with code `RATE_LIMITED`.
+The last user with the `admin` role cannot be deleted. Five sign-in attempts per minute are allowed from one address; past that the daemon answers `429` with code `RATE_LIMITED`. A sign-in whose password was changed (or whose user was deleted) while the password check ran is refused with `401` `PASSWORD_CHANGED_DURING_SIGN_IN`: the newer password decides, so sign in with it.
 
 Roles: `admin` is the only role with a meaning; any other role name (the terminal app's `goodvibes auth add-user` uses `user` by default) gives the non-admin set: every read scope except the owner's private ones, and no writes. Through the API, `local_auth.users.create` without `roles` creates an **admin**; pass `"roles":["user"]` for a read-only user.
 

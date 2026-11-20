@@ -43,6 +43,11 @@ export interface EmailInboxUnreadableResponse {
  * at the service boundary.
  */
 export type EmailMessageRead =
-  | { readonly outcome: 'read'; readonly detail: ImapMessageDetail }
+  | {
+    readonly outcome: 'read';
+    readonly detail: ImapMessageDetail;
+    /** The mailbox generation (UIDVALIDITY) the UID was read under; null when the server reported none. */
+    readonly uidValidity: number | null;
+  }
   | { readonly outcome: 'gone' }
   | { readonly outcome: 'unreadable'; readonly problems: readonly EmailInboxUnreadableResponse[] };

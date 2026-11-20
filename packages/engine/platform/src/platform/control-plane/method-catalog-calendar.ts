@@ -66,7 +66,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.events.list',
     title: 'List Calendar Events',
-    description: 'Return event summaries from the configured calendar (a CalDAV server, or the connected Google account) within an optional time window. With no from or to, lists from 24 hours ago to 30 days ahead; a recurring event is listed at each occurrence in the window.',
+    description: 'Return event summaries from the configured calendar (a CalDAV server, or the connected Google account) within an optional time window. With no from or to, lists from 24 hours ago to 30 days ahead; a recurring event is listed at each occurrence in the window, each with its own id (on CalDAV, the resource href plus `#` and the occurrence\'s RECURRENCE-ID instant).',
     category: 'calendar',
     effects: ['calendar.read'],
     http: { method: 'GET', path: '/api/calendar/events' },
@@ -84,7 +84,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.events.get',
     title: 'Get Calendar Event',
-    description: 'Return the full event object including attendees, recurrence, and raw iCalendar UID.',
+    description: 'Return the full event object including attendees, recurrence, and raw iCalendar UID. An occurrence id from calendar.events.list returns that occurrence (its own start, end and any change made to it), not the first of its series.',
     category: 'calendar',
     effects: ['calendar.read'],
     http: { method: 'GET', path: '/api/calendar/events/{eventId}' },
@@ -99,7 +99,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
     replay: IDEMPOTENCY_KEY_REPLAY,
     recipients: ['attendees[]'],
     title: 'Create Calendar Event',
-    description: 'Create an event on the configured calendar. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. Change it with calendar.events.update and remove it with calendar.events.delete.',
+    description: 'Create an event on the configured calendar. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. When the calendar server takes the request but sends no answer, the call fails with 502 CALENDAR_OUTCOME_UNKNOWN naming the new event\'s UID: read it with calendar.events.get before creating it again. Change it with calendar.events.update and remove it with calendar.events.delete.',
     category: 'calendar',
     effects: ['calendar.administer', 'outward.send'],
     dangerous: true,

@@ -332,7 +332,11 @@ export class PluginManager {
   trustSigned(
     name: string,
     publicKey: string | undefined = this.state.publisherKeys[name],
-  ): PluginTrustChangeResult & { fingerprint?: string | undefined } {
+  ): PluginTrustChangeResult & {
+    fingerprint?: string | undefined;
+    /** Set only when the manifest's signature did not verify; any other failure (closed manager, unknown plugin, unsaved record) leaves it unset. */
+    signatureRejected?: true | undefined;
+  } {
     if (this.closed) return { ok: false, error: 'Plugin manager is closed' };
     const discovered = this.findDiscoveredPlugin(name);
     if (!discovered) {
@@ -348,7 +352,7 @@ export class PluginManager {
 
     const result = new PluginTrustStore().trustSigned(name, manifest, publicKey);
     if (!result.ok) {
-      return { ok: false, error: result.reason };
+      return { ok: false, error: result.reason, signatureRejected: true };
     }
 
     const failure = this.saveTrustRecord(name, result.record);

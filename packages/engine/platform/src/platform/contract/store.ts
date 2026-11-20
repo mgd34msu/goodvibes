@@ -198,11 +198,11 @@ export class ContractWriterBusyError extends Error {
   }
 }
 
-/** The checkpoint changed on disk after this process read it. */
+/** The checkpoint changed on disk after this process read it, in parts this process also changed (or it is gone). */
 export class ContractCheckpointStaleError extends Error {
   override readonly name = 'ContractCheckpointStaleError';
   constructor(readonly contractId: string) {
-    super(`Contract ${contractId} was saved by another process after this one read it; this one wrote nothing, so that save stands. Restart this process to read the contract again before continuing it here.`);
+    super(`Contract ${contractId} was saved by another process after this one read it, changing what this one changed too; this one wrote nothing and writes nothing more, so that save stands. Restart this process to read the contract again before continuing it here.`);
   }
 }
 
@@ -445,6 +445,39 @@ interface ProgressWriter {
   cleared: boolean;
 }
 
+type ProgressPath = readonly (string | number)[];
+
+/** The paths a save from `base` to `contract` would write, or null when they cannot be read. Writes nothing. */
+function changedPaths(base: ContractProgressTracker, contract: Contract): ProgressPath[] | null {
+  const change = base.diff(contract, 0, () => 'unwritten');
+  if (change.line === null) return [];
+  try {
+    const ops = (JSON.parse(change.line) as { readonly ops?: readonly { readonly p?: unknown }[] }).ops ?? [];
+    const paths: ProgressPath[] = [];
+    for (const op of ops) {
+      if (!Array.isArray(op.p) || !op.p.every(key => typeof key === 'string' || typeof key === 'number')) return null;
+      paths.push(op.p as ProgressPath);
+    }
+    return paths;
+  } catch { return null; }
+}
+
+function valueAt(root: unknown, path: ProgressPath): unknown {
+  let node = root;
+  for (const key of path) {
+    if (node === null || typeof node !== 'object') return undefined;
+    node = (node as Record<string | number, unknown>)[key];
+  }
+  return node;
+}
+
+/** One path is the other or contains it. */
+function overlaps(left: ProgressPath, right: ProgressPath): boolean {
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index++) if (left[index] !== right[index]) return false;
+  return true;
+}
+
 /** Keeps the newest `cap` files; returns the rest, oldest first. */
 function overCap(files: readonly DatedFile[], cap: number): DatedFile[] {
   if (files.length <= cap) return [];
@@ -476,6 +509,10 @@ export class ContractStore {
   private readonly trackers = new Map<string, ContractProgressTracker>();
   /** What each loaded record was on disk when it was read, until that record is saved. */
   private readonly loadedTrackers = new WeakMap<Contract, ContractProgressTracker>();
+  /** Live copies this store has read or written: one of these is never compared with a disk image it was not derived from. */
+  private readonly trackedCopies = new WeakSet<Contract>();
+  /** Copies refused because another writer changed the same parts of their checkpoint; they are never written. */
+  private readonly staleCopies = new WeakSet<Contract>();
   private readonly writers = new Map<string, ProgressWriter>();
   /** After disposal a save releases its contract's lock at once, so a rebuilt store can take it. */
   private disposed = false;
@@ -564,6 +601,7 @@ export class ContractStore {
     publishInitialContractCheckpoint(dir, basename(CHECKPOINT_BASE_FILE, JSON_SUFFIX), text, reservation.assertCurrent);
     original.assertCurrent();
     this.trackers.set(contract.id, ContractProgressTracker.of(contract, 'progress'));
+    this.trackedCopies.add(contract);
     this.noteSupportedVersion(join(dir, CHECKPOINT_BASE_FILE));
     state.contract = contract; this.contracts.set(contract.id, contract);
   }
@@ -740,7 +778,9 @@ export class ContractStore {
       }
     } catch (error) {
       logger.warn('contract store: closing a contract progress log failed', { contractId: id, error: summarizeError(error) });
-      this.trackers.delete(id);
+      // The log's identity is unknown now: the next save reads the disk again and takes in what differs (rebaseOnDisk).
+      const tracker = this.trackers.get(id);
+      if (tracker !== undefined) tracker.log = null;
     } finally {
       writer.lock?.release();
     }
@@ -752,6 +792,8 @@ export class ContractStore {
    */
   private currentTracker(contract: Contract): ContractProgressTracker {
     const id = contract.id;
+    // A copy refused once stays refused: it is never diffed against a disk image it was not read from.
+    if (this.staleCopies.has(contract)) throw new ContractCheckpointStaleError(id);
     const known = this.trackers.get(id), loaded = this.loadedTrackers.get(contract);
     for (const tracker of [known, loaded]) {
       if (tracker !== undefined && this.matchesDisk(id, tracker)) {
@@ -759,10 +801,18 @@ export class ContractStore {
         return tracker;
       }
     }
-    if (known !== undefined || loaded !== undefined) {
+    const base = known ?? loaded;
+    if (base !== undefined || this.trackedCopies.has(contract)) {
       this.trackers.delete(id);
-      // A newer build's save is reported as such (and not retried on every event); any other change is a stale copy.
-      try { this.loadAvailable(id); } catch (error) { if (error instanceof ContractStoreVersionError) throw error; }
+      // Another writer saved after this store's last read or write. Its changes are taken into this copy once,
+      // when they touch nothing this copy changed; otherwise this copy is refused for good. A newer build's save
+      // is reported as such (and not retried on every event).
+      const rebased = base === undefined ? null : this.rebaseOnDisk(contract, base);
+      if (rebased !== null) {
+        this.trackers.set(id, rebased);
+        return rebased;
+      }
+      this.staleCopies.add(contract);
       throw new ContractCheckpointStaleError(id);
     }
     // Not read or written by this store yet: what is on disk now, read under the lock.
@@ -770,7 +820,48 @@ export class ContractStore {
     const tracker = stored === null ? ContractProgressTracker.of(contract, 'none') : this.loadedTrackers.get(stored);
     if (tracker === undefined) throw new Error('The stored checkpoint could not be read back for comparison');
     this.trackers.set(id, tracker);
+    this.trackedCopies.add(contract);
     return tracker;
+  }
+
+  /**
+   * The checkpoint on disk moved past `base` (what this store last read or wrote). Reads it again and takes the
+   * other writer's changes into `contract` in place, so the next save appends only this copy's own changes on top
+   * of the newer image. Returns the newer image's tracker, or null when the two writers changed the same thing,
+   * the other writer replaced something this copy holds as an object, moved a status the runner drives, or the
+   * contract is gone: then this copy must not be written at all. Runs only on that conflict path; one read.
+   */
+  private rebaseOnDisk(contract: Contract, base: ContractProgressTracker): ContractProgressTracker | null {
+    let fresh: Contract | null;
+    try { fresh = this.loadAvailable(contract.id); }
+    catch (error) { if (error instanceof ContractStoreVersionError) throw error; return null; }
+    if (fresh === null) return null;
+    const freshTracker = this.loadedTrackers.get(fresh);
+    if (freshTracker === undefined || freshTracker.layout !== 'progress') return null;
+    const ours = changedPaths(base, contract), theirs = changedPaths(base, fresh);
+    if (ours === null || theirs === null) return null;
+    const live = contract as unknown as Record<string, unknown>, disk = fresh as unknown as Record<string, unknown>;
+    const absorb: { readonly parent: Record<string | number, unknown>; readonly key: string | number; readonly value: unknown }[] = [];
+    for (const path of theirs) {
+      // Side tables (file labels, baseline origins) live beside the contract object: not merged.
+      if (path[0] !== 'contract' || path.length < 2) return null;
+      const inner = path.slice(1);
+      const mine = valueAt(live, inner), theirsValue = valueAt(disk, inner);
+      if (JSON.stringify(mine) === JSON.stringify(theirsValue)) continue;
+      if (ours.some(own => overlaps(own.slice(1), inner))) return null;
+      if (inner[inner.length - 1] === 'status') return null;
+      if (mine !== null && typeof mine === 'object') return null;
+      const parent = valueAt(live, inner.slice(0, -1));
+      if (parent === null || typeof parent !== 'object') return null;
+      absorb.push({ parent: parent as Record<string | number, unknown>, key: inner[inner.length - 1]!, value: theirsValue });
+    }
+    for (const { parent, key, value } of absorb) {
+      if (value === undefined && !Array.isArray(parent)) delete parent[key];
+      else parent[key] = value;
+    }
+    logger.info('contract store: the checkpoint was saved by another process; its changes were taken in before this save', { contractId: contract.id, taken: absorb.length });
+    this.loadedTrackers.set(contract, freshTracker);
+    return freshTracker;
   }
 
   private matchesDisk(id: string, tracker: ContractProgressTracker): boolean {
@@ -798,6 +889,7 @@ export class ContractStore {
     // The old single file holds an older schema; the new base holds all of it.
     if (replacesSingleFile) removeFile(contractPath(this.projectRoot, contract.id));
     this.trackers.set(contract.id, ContractProgressTracker.of(contract, 'progress'));
+    this.trackedCopies.add(contract);
     this.noteSupportedVersion(join(writer.dir, CHECKPOINT_BASE_FILE));
   }
 
@@ -1009,6 +1101,9 @@ export class ContractStore {
     this.cancelPendingWrite(contractId);
     // A newer build's file is never overwritten; retrying on every event only repeats the refusal.
     if (this.writeFailures.get(contractId)?.newerFormat) return;
+    // Likewise a copy refused as stale: its failure is recorded once and it is never written.
+    const live = this.contracts.get(contractId);
+    if (live !== undefined && this.staleCopies.has(live)) return;
     const timer = setTimeout(() => {
       this.timers.delete(contractId);
       this.write(contractId);

@@ -71,12 +71,14 @@ export interface RewindConversationUndoPort {
   /** restoreBefore with the conversation's save awaited, where the port's conversations are saved by their owner. */
   restoreBeforeSaved?(undoSnapshotId: string): Promise<{ readonly restored: boolean; readonly notSaved?: string }>;
   messagesSinceRewind(undoSnapshotId: string): number | null;
+  /** The session a rewind's undo snapshot was taken of; null when the snapshot is unknown. */
+  snapshotSession?(undoSnapshotId: string): string | null;
 }
 
 /** What the surface hosting a session answered to an undo; null when no surface hosts it. */
 export type RewindHostedUndoAnswer =
   | { readonly undone: true; readonly label: string }
-  | { readonly undone: false; readonly label: string; readonly reason: string; readonly code: 'UNDO_POINT_GONE' | 'CONVERSATION_CHANGED' | null }
+  | { readonly undone: false; readonly label: string; readonly reason: string; readonly code: 'UNDO_POINT_GONE' | 'CONVERSATION_CHANGED' | 'TARGET_CHANGED' | null }
   | null;
 
 /** Where rewind.undo finds a session's conversation. */
@@ -121,6 +123,10 @@ export function createRewindUndoHandler(
       return { undone: true, sessionId, undoSnapshotId, refusal: null };
     }
     if (hosted && !hosted.undone) {
+      if (hosted.code === 'TARGET_CHANGED') {
+        return refused('TARGET_CHANGED', 'nothing was done', hosted.reason,
+          [`rewind.undo with sessionId set to the session the rewind receipt names`]);
+      }
       if (hosted.code === 'UNDO_POINT_GONE') {
         return refused('UNDO_POINT_GONE', 'the undo snapshot is gone',
           `${hosted.label} no longer holds that rewind's snapshot (${hosted.reason}); the conversation itself is unchanged`,
@@ -143,6 +149,15 @@ export function createRewindUndoHandler(
     // The pre-rewind copy replaces the whole conversation, so it is only restored
     // while nothing newer was added since the rewind.
     const since = local.messagesSinceRewind(undoSnapshotId);
+    // The snapshot is restored into the conversation it was taken of, so one
+    // asked for under another session's id is refused rather than restoring a
+    // conversation the caller did not name.
+    const owner = since === null ? null : local.snapshotSession?.(undoSnapshotId) ?? null;
+    if (owner !== null && owner !== sessionId) {
+      return refused('TARGET_CHANGED', 'nothing was done',
+        `undo snapshot ${undoSnapshotId} is of session ${owner}, not ${sessionId}`,
+        [`rewind.undo with sessionId ${owner} and undoSnapshotId ${undoSnapshotId}`]);
+    }
     if (since === null) {
       return refused('UNDO_POINT_GONE', 'the undo snapshot is gone',
         'That rewind can no longer be undone: only the newest 32 rewinds keep their snapshot, and one is restored only while its session is open here; the conversation itself is unchanged',

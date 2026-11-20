@@ -239,9 +239,13 @@ function addQueryValue(url: URL, key: string, value: unknown): void {
   url.searchParams.append(key, String(value));
 }
 
-function hasHeader(headers: Record<string, string>, name: string): boolean {
+/** A header's value under any spelling of its name. */
+function headerValue(headers: Record<string, string>, name: string): string | undefined {
   const normalized = name.toLowerCase();
-  return Object.keys(headers).some((key) => key.toLowerCase() === normalized);
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === normalized && value.trim().length > 0) return value;
+  }
+  return undefined;
 }
 
 /** Sets a header, replacing any spelling of it already present: two spellings reach the server as one comma-joined value. */
@@ -465,8 +469,16 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
     // A key goes only on a mutating call the server deduplicates (or one whose
     // caller brought its own key): sending keys on every mutation could make a
     // proxy's own retry of a non-idempotent request look like a replay.
-    const idempotencyKey = IDEMPOTENCY_KEY_METHODS.has(method.toUpperCase())
-      ? requestOptions.idempotencyKey ?? (idempotent ? generateIdempotencyKey() : undefined)
+    // The key is pinned once, before the first attempt, and every attempt sends
+    // exactly it, whatever a header resolver or a middleware supplies later: a
+    // resolver that minted a new key per attempt would make a retry after a lost
+    // answer look like a new request to the daemon's dedupe. Precedence: the
+    // caller's `idempotencyKey`, then an `Idempotency-Key` among the call's own
+    // headers, then one the default headers or the resolver give the first
+    // attempt, then a generated key for a call the server deduplicates.
+    const keyedMethod = IDEMPOTENCY_KEY_METHODS.has(method.toUpperCase());
+    let idempotencyKey: string | undefined = keyedMethod
+      ? requestOptions.idempotencyKey ?? headerValue(mergeHeaderRecord(requestOptions.headers ?? {}), 'Idempotency-Key')
       : undefined;
 
     let attempt = 0;
@@ -493,10 +505,11 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
         mergedHeaders[k] = v;
       }
 
-      // The same key on every attempt of this call; a caller-set header wins.
-      if (idempotencyKey && !hasHeader(mergedHeaders, 'Idempotency-Key')) {
-        mergedHeaders['Idempotency-Key'] = idempotencyKey;
+      // The same key on every attempt of this call (pinned above, or on the first attempt here).
+      if (keyedMethod && attempt === 1 && idempotencyKey === undefined) {
+        idempotencyKey = headerValue(mergedHeaders, 'Idempotency-Key') ?? (idempotent ? generateIdempotencyKey() : undefined);
       }
+      if (idempotencyKey !== undefined) setHeader(mergedHeaders, 'Idempotency-Key', idempotencyKey);
 
       // Notify observer before dispatching the request.
       invokeTransportObserver(() => observer?.onTransportActivity?.({ direction: 'send', url, kind: 'http' }), observer?.onObserverError);
@@ -527,6 +540,8 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
       // The parsed body on `ctx.parsedBody` is the one carrier of the result;
       // `ctx.response` is built from it only if a middleware reads it.
       const innerFetch = async (c: TransportContext): Promise<void> => {
+        // A middleware may rewrite headers; the pinned key is what goes out.
+        if (idempotencyKey !== undefined) setHeader(c.headers, 'Idempotency-Key', idempotencyKey);
         const init: RequestInit = {
           method: c.method,
           credentials: 'include',

@@ -10,7 +10,7 @@
  * (schema-types.ts) imports their interfaces, and their keys and value types
  * are read off those interfaces.
  */
-import type { ConfigSetting } from './schema-types.js';
+import type { ConfigSettingRow } from './schema-types.js';
 import { intRange, numRange } from './schema-shared.js';
 
 /** Fetch tool: response-sanitization mode, trust-tier host defaults, localhost approval. */
@@ -145,7 +145,7 @@ export const featureConfigDefaults: {
   },
 };
 
-export const featureConfigSettings: ConfigSetting[] = [
+export const featureConfigSettings: ConfigSettingRow[] = [
   {
     key: 'fetch.sanitizeMode',
     type: 'enum',

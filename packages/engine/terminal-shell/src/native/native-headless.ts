@@ -219,15 +219,14 @@ export async function executeNativeHeadless(options: NativeHeadlessOptions, poli
                         return record;
                     }, confirm: (binding, command) => journal.confirm(binding, command),
                     claimTurn: (binding, command, revision) => journal.claimTurn(binding, command, revision),
-                    // Settling an input (refused by the host, dropped, its turn finished or never started) goes to
-                    // the same file the interactive app reads, so no stale record holds the next message back.
-                    remove: (binding, command) => journal.remove(binding, command),
-                    finishTurn: (binding, command, revision) => journal.finishTurn(binding, command, revision),
-                    releaseTurnClaim: (binding, command, revision) => journal.releaseTurnClaim(binding, command, revision),
-                    discardUncaptured: (binding, command) => journal.discardUncaptured(binding, command),
+                    // Settling an input (refused by the host, dropped, or its turn never started) goes to the same
+                    // file the interactive app reads, so no stale record holds the next message back.
+                    ...(journal.remove ? { remove: journal.remove.bind(journal) } : {}),
+                    ...(journal.releaseTurnClaim ? { releaseTurnClaim: journal.releaseTurnClaim.bind(journal) } : {}),
+                    ...(journal.discardUncaptured ? { discardUncaptured: journal.discardUncaptured.bind(journal) } : {}),
                     saveExecutionIntent: (binding, command, intent) => journal.saveExecutionIntent(binding, command, intent),
                     // A hosted reply needs its durable source identity recorded, as in the interactive app.
-                    saveHostedSource: (binding, command, source) => journal.saveHostedSource(binding, command, source),
+                    ...(journal.saveHostedSource ? { saveHostedSource: journal.saveHostedSource.bind(journal) } : {}),
                     async save(binding, command, expected) {
                         await journal.save(binding, command, expected);
                         // Ownership starts at proven durable publication, not principal lookup or old-input discovery.

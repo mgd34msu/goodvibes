@@ -7,10 +7,10 @@
  * the runtime derives its internal gates from these keys (see
  * runtime/feature-flags/feature-settings.ts for the bindings).
  */
-import type { ConfigSetting } from './schema-types.js';
+import type { ConfigSettingRow } from './schema-types.js';
 import { intRange, numRange } from './schema-shared.js';
 
-export const featureControlSettings: ConfigSetting[] = [
+export const featureControlSettings: ConfigSettingRow[] = [
   {
     key: 'permissions.engine',
     type: 'enum',

@@ -394,19 +394,29 @@ export function resolveWorkspaceActionIdentity(args: AgentHarnessWorkspaceAction
   const normalized = lookup.input.toLowerCase();
   const commandInput = lookup.source === 'command' ? lookup.input.trim() : '';
 
-  const exactId = entries.find((entry) => entry.action.id === lookup.input);
-  if (exactId) return { status: 'found', ...exactId, lookup: { ...lookup, resolvedBy: 'id' } };
-  const exactLabel = entries.find((entry) => entry.action.label === lookup.input);
-  if (exactLabel) return { status: 'found', ...exactLabel, lookup: { ...lookup, resolvedBy: 'label' } };
-  const exactCommand = commandInput ? entries.find((entry) => entry.action.command === commandInput) : null;
-  if (exactCommand) return { status: 'found', ...exactCommand, lookup: { ...lookup, resolvedBy: 'command' } };
-
-  const insensitiveId = entries.find((entry) => entry.action.id.toLowerCase() === normalized);
-  if (insensitiveId) return { status: 'found', ...insensitiveId, lookup: { ...lookup, resolvedBy: 'case-insensitive-id' } };
-  const insensitiveLabel = entries.find((entry) => entry.action.label.toLowerCase() === normalized);
-  if (insensitiveLabel) return { status: 'found', ...insensitiveLabel, lookup: { ...lookup, resolvedBy: 'case-insensitive-label' } };
-
-  return null;
+  // Only an id names one action; a label or a command can be shared by several
+  // categories ("Delete selected"), so a match on either that hits more than
+  // one entry is ambiguous and names each candidate's id and category.
+  type Entry = (typeof entries)[number];
+  const settle = (matches: readonly Entry[], resolvedBy: WorkspaceActionLookup['resolvedBy']): WorkspaceActionResolution | null => {
+    if (matches.length === 0) return null;
+    if (matches.length === 1) return { status: 'found', ...matches[0]!, lookup: { ...lookup, resolvedBy } };
+    return {
+      status: 'ambiguous',
+      input: lookup.input,
+      candidates: matches.map((entry) => ({
+        actionId: entry.action.id,
+        categoryId: entry.category.id,
+        label: entry.action.label,
+        ...(entry.action.command ? { command: entry.action.command } : {}),
+      })),
+    };
+  };
+  return settle(entries.filter((entry) => entry.action.id === lookup.input), 'id')
+    ?? settle(entries.filter((entry) => entry.action.label === lookup.input), 'label')
+    ?? (commandInput ? settle(entries.filter((entry) => entry.action.command === commandInput), 'command') : null)
+    ?? settle(entries.filter((entry) => entry.action.id.toLowerCase() === normalized), 'case-insensitive-id')
+    ?? settle(entries.filter((entry) => entry.action.label.toLowerCase() === normalized), 'case-insensitive-label');
 }
 
 export async function resolveWorkspaceActionDetail(args: AgentHarnessWorkspaceActionArgs, options: CatalogRankingOptions = {}): Promise<WorkspaceActionResolution | null> {

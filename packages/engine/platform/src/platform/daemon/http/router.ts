@@ -627,9 +627,17 @@ export class DaemonHttpRouter {
   private streamAuthority(req: Request): { readonly principalId?: string; readonly isAuthorized?: () => boolean } {
     const opened = this.context.authenticateRequest(req)?.principal;
     if (!opened) return {};
+    // A stream's grant is fixed when it opens: a credential whose rights narrowed
+    // since then closes it (the client reopens it under the narrower grant), so a
+    // frame the narrower grant does not cover is never written.
+    const covered = (now: RequestPrincipal): boolean => (now.admin || !opened.admin)
+      && (now.scopeSet.has('*') || opened.scopes.every((scope) => now.scopeSet.has(scope)));
     return {
       principalId: opened.principalId,
-      isAuthorized: () => this.context.authenticateRequest(req)?.principal.principalId === opened.principalId,
+      isAuthorized: () => {
+        const now = this.context.authenticateRequest(req)?.principal;
+        return now !== undefined && now.principalId === opened.principalId && (now === opened || covered(now));
+      },
     };
   }
 

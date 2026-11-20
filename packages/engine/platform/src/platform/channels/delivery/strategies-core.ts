@@ -32,6 +32,7 @@ import {
 import { HttpStatusError } from '@goodvibes-jev/engine/errors';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { outcomeOfFailure } from '../../state/operation.js';
 
 /**
  * Posts to an explicit chat webhook address taken from a target or binding.
@@ -121,6 +122,9 @@ export function createWebhookDeliveryStrategy(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // The identity of this message for every attempt at it (a retry, a send
+          // again after a restart): the receiver drops a repeat by this key.
+          ...(request.announces ? { 'Idempotency-Key': request.announces } : {}),
         },
         signal: request.signal ? AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
         body: JSON.stringify({
@@ -246,6 +250,12 @@ export function createDiscordDeliveryStrategy(
           request,
         ).then(() => true, (error: unknown) => {
           if (!replyChannel) throw error;
+          // A new post only when Discord refused the edit (nothing was applied). A
+          // timeout, a reset connection or a 5xx may have applied it: posting as
+          // well would show the answer twice, so that failure is reported as is
+          // (an edit is safe to repeat, so a retry repeats the edit).
+          const outcome = outcomeOfFailure(error, 'sent', undefined, 'Look at the command\'s original response in Discord');
+          if (outcome.state !== 'failed') throw error;
           logger.warn('Discord interaction edit refused; posting the reply to its channel', { channelId: replyChannel, error: summarizeError(error) });
           return false;
         });
@@ -268,7 +278,7 @@ export function createDiscordDeliveryStrategy(
           serviceName: 'discord', serviceField: 'primary', configKey: 'surfaces.discord.botToken',
           environmentValue: process.env.DISCORD_BOT_TOKEN,
         });
-        await new DiscordIntegration('', botToken ?? '').postMessage(channelId, bodyWithAttachments, undefined, request);
+        await new DiscordIntegration('', botToken ?? '').postMessage(channelId, bodyWithAttachments, undefined, request, request.announces);
         return success(channelId);
       }
       const webhookUrl = await serviceRegistry.resolveSecret('discord', 'webhookUrl') ?? process.env.DISCORD_WEBHOOK_URL;

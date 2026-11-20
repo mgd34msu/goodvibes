@@ -30,8 +30,11 @@ export type { AnyRuntimeEvent };
  * The auth state kind used in transition notifications.
  * - `'anonymous'`, no credentials present
  * - `'token'`, a bearer token is stored
+ * - `'credential'`, a login returned a bearer to the caller but nothing was
+ *   stored (`persistToken: false`, or a client without a token store); the
+ *   stored state is unchanged. Only ever a `to`.
  */
-export type AuthStateKind = 'anonymous' | 'token';
+export type AuthStateKind = 'anonymous' | 'token' | 'credential';
 
 /**
  * The reason an auth transition occurred.

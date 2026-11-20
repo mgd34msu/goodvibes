@@ -1,3 +1,5 @@
+import { done, failedOutcome, observe, refusal, tally, type EffectOutcome, type Tally } from '@goodvibes-jev/engine/errors';
+
 type JsonRecord = Record<string, unknown>;
 
 export interface AgentKnowledgeFailureLike {
@@ -378,19 +380,72 @@ export function formatIngest(
   ].filter((line): line is string => Boolean(line)).join('\n');
 }
 
+/** The text before a batch error's first ": " names its item (a URL, a profile); the rest is the reason. */
+function splitBatchError(line: string): { readonly id: string; readonly reason: string } {
+  const at = line.indexOf(': ');
+  return at > 0 ? { id: line.slice(0, at), reason: line.slice(at + 2) } : { id: line, reason: line };
+}
+
+/**
+ * The per-item outcomes of a batch import as the host reported them. Every
+ * failure is kept with its reason: the host's error lines, then any source it
+ * marked failed that no line named. An imported source is `done` because the
+ * host's answer lists it.
+ */
+export async function tallyBatchIngest(data: unknown): Promise<Tally> {
+  const record = isRecord(data) ? data : {};
+  const sources = readArray(record, 'sources').filter(isRecord);
+  const errors = readArray(record, 'errors').map(cleanInline).filter((line) => line.length > 0);
+  const failedCount = readNumber(record, 'failed') ?? 0;
+  const items: { id: string; outcome: EffectOutcome<unknown> }[] = [];
+  const failedIds = new Set<string>();
+  for (const line of errors) {
+    const { id, reason } = splitBatchError(line);
+    failedIds.add(id);
+    items.push({ id, outcome: failedOutcome(refusal({ code: 'KNOWLEDGE_IMPORT_FAILED', state: 'not imported', reason })) });
+  }
+  const sourceUri = (source: JsonRecord): string => cleanInline(source.canonicalUri) || cleanInline(source.sourceUri)
+    || cleanInline(source.url) || cleanInline(source.id) || 'untitled';
+  const failedSources = sources.filter((source) => source.status === 'failed'
+    || (source.status === 'pending' && isRecord(source.metadata) && source.metadata.ingestHold !== undefined));
+  for (const source of failedSources) {
+    if (items.length >= failedCount) break;
+    const id = sourceUri(source);
+    if (failedIds.has(id)) continue;
+    failedIds.add(id);
+    const reason = cleanInline(source.crawlError) || 'the host could not import it';
+    items.push({ id, outcome: failedOutcome(refusal({ code: 'KNOWLEDGE_IMPORT_FAILED', state: 'not imported', reason })) });
+  }
+  const importedSources = sources.filter((source) => !failedSources.includes(source));
+  const imported = readNumber(record, 'imported') ?? importedSources.length;
+  for (let index = 0; index < imported; index += 1) {
+    const source = importedSources[index];
+    const id = source ? sourceUri(source) : `item ${index + 1}`;
+    const seen = await observe('the host listed it as imported', () => id);
+    if (seen) items.push({ id, outcome: done(seen) });
+  }
+  return tally(imported + failedCount, items);
+}
+
 export function formatBatchIngest(data: unknown, label: string): string {
   const record = isRecord(data) ? data : {};
   const imported = readNumber(record, 'imported');
   const failed = readNumber(record, 'failed');
   const sources = readArray(record, 'sources');
   const errors = readArray(record, 'errors');
+  const importedCount = imported ?? sources.length;
+  const failedCount = failed ?? errors.length;
+  const headline = failedCount === 0 && errors.length === 0
+    ? importedCount === 0 ? 'imported nothing (nothing was found to import)' : 'imported'
+    : importedCount === 0 ? 'failed: nothing was imported' : 'partly imported';
   return [
-    `Agent Knowledge ${label} accepted`,
+    `Agent Knowledge ${label} ${headline}`,
     `  imported ${imported ?? sources.length}`,
     `  failed ${failed ?? errors.length}`,
     `  sources ${sources.length}`,
     ...sources.slice(0, 5).map((source) => `  - ${sourceLine(source)}`),
-    ...(errors.length > 0 ? ['  errors', ...errors.slice(0, 5).map((error) => `  - ${cleanInline(error)}`)] : []),
+    ...(errors.length > 0 ? ['  errors', ...errors.slice(0, 20).map((error) => `  - ${cleanInline(error)}`)] : []),
+    ...(errors.length > 20 ? [`  ... ${errors.length - 20} more`] : []),
   ].join('\n');
 }
 

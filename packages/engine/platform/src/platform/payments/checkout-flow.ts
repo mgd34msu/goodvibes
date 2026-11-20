@@ -935,7 +935,14 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
         answer = await (reception ? reception.awaitAnswer(deadlineMs)
           : notifier.awaitAnswer({ purchaseId: request.purchaseId, kind, notice: message, deadlineMs, signal }));
         addressCurrent();
-      } catch (error) { await releaseUnlessStopped(); throw error; }
+      } catch (error) {
+        await releaseUnlessStopped();
+        // An answer that could not be read is never silence, in either window: nothing is bought on it.
+        if (error instanceof RefusalError && error.refusal.code === PAYMENT_ANSWER_UNREADABLE) {
+          return { done: refused('answer-unreadable', `Held: ${error.refusal.reason} ${error.refusal.next.join(' ')}`.trim()) };
+        }
+        throw error;
+      }
       return { deliveries, answer };
     } finally { reception?.cancel(); }
   };

@@ -744,14 +744,50 @@ export class SubscriptionManager {
       createdAt: this.read().subscriptions[provider]?.createdAt ?? now,
       updatedAt: now,
     };
+    // The pending login's state is this sign-in's claim: a logout removes it and
+    // a newer start replaces it while the exchange runs. Checked before the
+    // tokens are stored and again, under the lock, in the write that names them.
+    this.assertLoginCurrent(provider, pending.state, this.read());
     const stored = await this.storable(subscription, this.read().subscriptions[provider]?.tokenRevision);
     // Merge only this provider into the store as it is now, after the await.
-    this.mutate((store) => {
+    const superseded = this.mutate((store): SubscriptionStore | null => {
+      if (store.pending[provider]?.state !== pending.state) return { ...store };
       store.subscriptions[provider] = stored;
-      if (store.pending[provider]?.state === pending.state) delete store.pending[provider];
-    });
+      delete store.pending[provider];
+      return null;
+    }, (result) => result === null);
+    if (superseded) {
+      await this.dropUnnamedTokens(provider, stored.tokenRevision);
+      this.assertLoginCurrent(provider, pending.state, superseded);
+    }
     this.notifyChanged(provider);
     return { ...subscription, ...(stored.tokenRevision !== undefined ? { tokenRevision: stored.tokenRevision } : {}) };
+  }
+
+  /** Throws when `state` is no longer `provider`'s pending login: signed out, or a newer login started. */
+  private assertLoginCurrent(provider: string, state: string, store: SubscriptionStore): void {
+    const now = store.pending[provider];
+    if (now?.state === state) return;
+    throw new Error(now
+      ? `This ${provider} sign-in was replaced by a newer one started at ${new Date(now.createdAt).toISOString()} (state ${now.state.slice(0, 8)}...); nothing was saved. Finish the newer sign-in instead.`
+      : `This ${provider} sign-in was ended while it completed (signed out, or finished elsewhere); nothing was saved. Start with /subscription login ${provider} start to sign in again.`);
+  }
+
+  /**
+   * After a refused sign-in write: the tokens it stored are removed again when no
+   * record names them, so a signed-out provider keeps no tokens. A record that
+   * still names the previous revision keeps resolving through `previous`.
+   */
+  private async dropUnnamedTokens(provider: string, revision: number | undefined): Promise<void> {
+    if (!this.secrets || revision === undefined) return;
+    if (this.read().subscriptions[provider] !== undefined) return;
+    if (this.readTokenSecret(provider)?.revision !== revision) return;
+    try {
+      await this.secrets.delete(subscriptionTokensKey(provider));
+      this.tokenSecrets.delete(provider);
+    } catch (error) {
+      logger.warn('SubscriptionManager: tokens of a sign-in that was ended meanwhile could not be removed from the secret store', { provider, error: summarizeError(error) });
+    }
   }
 
   /**

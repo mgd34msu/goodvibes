@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { ChatRequest, ChatResponse } from '@goodvibes-jev/engine/platform/platform/providers';
+import { admitsCandidate, isLocalBaseUrl, type ChatRequest, type ChatResponse, type RouteConstraint } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { AgentModelCompareArtifactStore, AgentModelCompareCatalogModel, AgentModelCompareModelCatalog, AgentModelCompareToolArgs, AgentModelCompareToolDeps, CompareCandidateResult, ComparisonArtifactStatus, ResolvedCompareModel, SavedComparisonArtifact, StoredComparison } from './model-compare-types.js';
 import { BLIND_LABELS, COMPARISON_STORE_LIMIT, DEFAULT_CANDIDATE_COUNT, DEFAULT_CANDIDATE_OUTPUT_CHARS, DEFAULT_MAX_TOKENS, DEFAULT_SIDE_BY_SIDE_PREVIEW_BYTES, MAX_SIDE_BY_SIDE_PREVIEW_BYTES, MIN_CANDIDATES, MODE_ANALYTICS, MODE_APPLY, MODE_EXPORT, MODE_HANDOFF, MODE_HANDOFF_ARCHIVE, MODE_HANDOFF_DIFF, MODE_JUDGE, MODE_REVEAL, MODE_REVIEW, MODE_ROUTE_DECISION, MODE_RUN, MODE_SIDE_BY_SIDE, MODE_SYNTHESIS } from './model-compare-types.js';
 import { clamp, isTextLike, listAllArtifacts, shuffled, readBenchmarkKind, readComparisonTag, readModelRefs, readNumber, readRecord, readString, readStringList, previewText } from './model-compare-utils.js';
@@ -86,15 +86,35 @@ export function resolveRequestedModels(
   return dedupeModels(resolved);
 }
 
+/**
+ * The route promise a benchmark tag makes: a tag that begins with "local"
+ * (the local benchmark's `local-model-route`) promises every candidate it
+ * picks itself is served on this machine or its local network.
+ */
+export function benchmarkRouteConstraint(benchmarkKind: string): RouteConstraint {
+  return /^local\b/i.test(benchmarkKind.trim()) ? { locality: 'local' } : {};
+}
+
+/** Whether a model's provider is served locally: its base URL is this machine or a private-network address. */
+export function isLocalCompareModel(registry: AgentModelCompareToolDeps['providerRegistry'], model: ResolvedCompareModel): boolean {
+  try {
+    const provider = registry.getForModel(model.modelId, model.providerId) as { readonly baseURL?: unknown };
+    return typeof provider.baseURL === 'string' && isLocalBaseUrl(provider.baseURL);
+  } catch {
+    return false;
+  }
+}
+
 export async function selectComparisonModels(
   catalog: AgentModelCompareModelCatalog,
   refs: readonly string[],
   candidateCount: number,
   random: () => number = Math.random,
+  route: { readonly constraint: RouteConstraint; readonly isLocal: (model: ResolvedCompareModel) => boolean } = { constraint: {}, isLocal: () => false },
 ): Promise<readonly ResolvedCompareModel[]> {
   // Labels follow this order, so it is shuffled: otherwise candidate A would
   // always be the model in use (or the first reference the caller typed).
-  const selected = await selectComparisonModelsInOrder(catalog, refs, candidateCount);
+  const selected = await selectComparisonModelsInOrder(catalog, refs, candidateCount, route);
   return shuffled(selected, random);
 }
 
@@ -102,12 +122,14 @@ async function selectComparisonModelsInOrder(
   catalog: AgentModelCompareModelCatalog,
   refs: readonly string[],
   candidateCount: number,
+  route: { readonly constraint: RouteConstraint; readonly isLocal: (model: ResolvedCompareModel) => boolean },
 ): Promise<readonly ResolvedCompareModel[]> {
   const selectableModels = await listSelectableModels(catalog);
   if (selectableModels.length < MIN_CANDIDATES) {
     throw new Error(`At least ${MIN_CANDIDATES} selectable models are required for blind comparison.`);
   }
 
+  // A named model is used as named, a remote baseline included: naming it is the choice.
   if (refs.length > 0) {
     const requested = resolveRequestedModels(refs, selectableModels);
     const missing = refs.length - requested.length;
@@ -118,12 +140,19 @@ async function selectComparisonModelsInOrder(
     return requested;
   }
 
+  // Filling a blank list keeps the run's promise: a local benchmark picks only local routes.
+  const admitted = selectableModels.filter((model) => admitsCandidate(route.constraint,
+    { registryKey: model.registryKey, tier: 'paid', local: route.constraint.locality === 'local' ? route.isLocal(model) : false }));
+  if (route.constraint.locality === 'local' && admitted.length < MIN_CANDIDATES) {
+    throw new Error(`A local benchmark fills a blank model list from local routes only, and ${admitted.length === 0 ? 'none is' : 'only one is'} configured. `
+      + `Add a local route (a custom provider at a local address, or a discovered local server), or name the models, a baseline route included.`);
+  }
   const current = await resolveCurrentModel(catalog);
   const count = Math.max(MIN_CANDIDATES, Math.trunc(candidateCount));
   const ordered = dedupeModels([
     ...(current ? [current] : []),
-    ...selectableModels,
-  ]).filter((model) => selectableModels.some((selectable) => selectable.registryKey === model.registryKey));
+    ...admitted,
+  ]).filter((model) => admitted.some((selectable) => selectable.registryKey === model.registryKey));
   return ordered.slice(0, count);
 }
 

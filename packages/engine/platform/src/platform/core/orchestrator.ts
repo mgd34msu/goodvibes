@@ -1362,10 +1362,9 @@ export class Orchestrator {
     const structured = (error instanceof AppError && (error.statusCode !== undefined || error.category !== 'unknown')) || classifyFailure(error) !== undefined;
     const msg = judgmentFailed ? `[Judgment] ${error.message}` : structured ? formatError(error, display)
       : await readFormattedError(error, { site: 'core.orchestrator.turn-error', ...display }).catch(() => formatError(error, display));
-    // The line in the transcript always ends with what the person can do next.
-    const next = judgmentFailed || /\n\s+Hint: /.test(msg) ? ''
-      : error instanceof ProviderError ? '\n  Next: send it again, or choose another provider or model with /model.'
-        : '\n  Next: send it again; if it keeps failing, /health shows what is wrong.';
+    // A model request that failed with no hint of its own says what the person can do next.
+    const next = error instanceof ProviderError && !/\n\s+Hint: /.test(msg)
+      ? '\n  Next: send it again, or choose another provider or model with /model.' : '';
     this.conversation.addTurnFailure(`${msg}${next}`);
     this.requestRender();
     // The person's fallback order was already tried inside the turn (providers/failover.ts),

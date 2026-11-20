@@ -34,7 +34,7 @@ export function createAgentLocalModelBenchmarkEditor(): AgentWorkspaceLocalEdito
     mode: 'create',
     title: 'Run Local Model Benchmark',
     selectedFieldIndex: 0,
-    message: 'Run the local-route benchmark with the first-class blind comparison tool and save a tagged local review artifact. Enter a local model route plus a baseline route, then type yes on the final field.',
+    message: 'Run the local-route benchmark with the first-class blind comparison tool and save a tagged local review artifact. Blank Models picks local routes only (at least two); name a baseline route in Models to compare against it. Type yes on the final field.',
     fields: [
       {
         id: 'prompt',
@@ -50,12 +50,12 @@ export function createAgentLocalModelBenchmarkEditor(): AgentWorkspaceLocalEdito
         hint: 'Exact benchmark prompt sent identically to every candidate model. Ctrl-J inserts a new line.',
       },
       { id: 'artifactId', label: 'Source artifact', value: '', required: false, multiline: false, hint: 'Optional saved text artifact id to include identically in the benchmark prompt.' },
-      { id: 'modelRefs', label: 'Models', value: '', required: false, multiline: true, hint: 'Recommended: local route first, then current/baseline route. Registry keys or model ids, separated by commas or new lines.' },
+      { id: 'modelRefs', label: 'Models', value: '', required: false, multiline: true, hint: 'Blank picks local routes only and refuses with fewer than two. Name a remote baseline route here to include it. Registry keys or model ids, separated by commas or new lines.' },
       { id: 'candidateCount', label: 'Auto count', value: '2', required: false, multiline: false, hint: 'Used only when Models is blank. 2 to 4.' },
       { id: 'rubric', label: 'Rubric', value: 'Prefer fast first useful output, correct project context, concrete setup-risk identification, and one actionable next route or command.', required: false, multiline: true, hint: 'Judging rubric shown with blinded benchmark results.' },
       { id: 'systemPrompt', label: 'System prompt', value: '', required: false, multiline: true, hint: 'Optional system prompt sent identically to every candidate.' },
       { id: 'maxTokens', label: 'Max tokens', value: '', required: false, multiline: false, hint: 'Optional output cap per candidate. Blank uses the model default.' },
-      { id: 'benchmarkKind', label: 'Benchmark tag', value: 'local-model-route', required: false, multiline: false, hint: 'Keeps the saved comparison visible in local model benchmark history.' },
+      { id: 'benchmarkKind', label: 'Benchmark tag', value: 'local-model-route', required: false, multiline: false, hint: 'Keeps the saved comparison visible in local model benchmark history. A tag beginning with "local" limits a blank Models list to local routes.' },
       { id: 'taskType', label: 'Task type', value: 'local-model-route', required: false, multiline: false, hint: 'Tags the saved judgment trend for filtered analytics.' },
       { id: 'reveal', label: 'Reveal now', value: 'no', required: false, multiline: false, hint: 'yes/no. Blank or no keeps model identities hidden until reveal.' },
       { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to spend model tokens and save the local benchmark artifact.' },

@@ -56,9 +56,13 @@ const registryKeyOf = (model: CatalogModel): string => `${model.providerId}:${mo
 
 /**
  * Group callable provider offerings with the same published model identity
- * (`canonical_model_id`); a group needs at least two providers. `isUsable`
- * says which offerings can be called; the registry passes the providers' own
- * answer, so a key in the credential store counts like one in the environment.
+ * (`canonical_model_id`) AND the same billing tier; a group needs at least two
+ * providers. A synthetic model's tier is therefore the tier of every backend
+ * it may fail over to: a free synthetic model never routes to a paid backend.
+ * When one identity has groups in several tiers, each id names its tier
+ * (`<slug>-free`, `<slug>-paid`). `isUsable` says which offerings can be
+ * called; the registry passes the providers' own answer, so a key in the
+ * credential store counts like one in the environment.
  */
 export function buildSyntheticCanonicalModels(
   models: readonly CatalogModel[],
@@ -67,14 +71,14 @@ export function buildSyntheticCanonicalModels(
   const groups = new Map<string, CatalogModel[]>();
   for (const model of models) {
     if (!model.canonicalModelId || !isUsable(model.providerId, model)) continue;
-    const group = groups.get(model.canonicalModelId) ?? [];
+    const key = `${model.canonicalModelId}\u0000${model.tier}`;
+    const group = groups.get(key) ?? [];
     group.push(model);
-    groups.set(model.canonicalModelId, group);
+    groups.set(key, group);
   }
 
   const canonical: CanonicalModel[] = [];
   const usedIds = new Set<string>();
-  const tierPriority: Record<SyntheticTier, number> = { free: 2, subscription: 1, paid: 0 };
   // Ids are handed out in representative-key order, not catalog order, so a
   // refresh that reorders the catalog cannot move a slug to a different model
   // under a persisted `synthetic:<slug>` selection.
@@ -82,10 +86,14 @@ export function buildSyntheticCanonicalModels(
     .filter((group) => new Set(group.map((model) => model.providerId)).size >= 2)
     .map((group) => [...group].sort((a, b) => registryKeyOf(a).localeCompare(registryKeyOf(b))))
     .sort((a, b) => registryKeyOf(a[0]!).localeCompare(registryKeyOf(b[0]!)));
+  const tiersPerIdentity = new Map<string, number>();
+  for (const ordered of orderedGroups) tiersPerIdentity.set(ordered[0]!.canonicalModelId!, (tiersPerIdentity.get(ordered[0]!.canonicalModelId!) ?? 0) + 1);
   for (const ordered of orderedGroups) {
     const distinctProviders = new Set(ordered.map((model) => model.providerId)).size;
     const representative = ordered[0]!;
-    const slug = nameToSlug(representative.name) || nameToSlug(representative.id);
+    const tier: SyntheticTier = representative.tier;
+    const baseSlug = nameToSlug(representative.name) || nameToSlug(representative.id);
+    const slug = (tiersPerIdentity.get(representative.canonicalModelId!) ?? 1) > 1 ? `${baseSlug}-${tier}` : baseSlug;
     let canonicalId = slug;
     if (usedIds.has(canonicalId)) canonicalId = `${nameToSlug(representative.canonicalModelId ?? representative.id)}-${slug}`;
     for (let suffix = 2; usedIds.has(canonicalId); suffix += 1) canonicalId = `${slug}-${suffix}`;
@@ -97,8 +105,8 @@ export function buildSyntheticCanonicalModels(
       contextWindow: model.contextWindow,
       maxOutputTokens: model.maxOutputTokens,
       envVars: model.providerEnvVars.length > 0 ? model.providerEnvVars : undefined,
+      tier: model.tier,
     }));
-    const tier = ordered.reduce<SyntheticTier>((best, model) => ((tierPriority[model.tier] ?? 0) > (tierPriority[best] ?? 0) ? model.tier : best), ordered[0]!.tier);
     canonical.push({ id: canonicalId, tier, backends, backendCount: backends.length, keyedBackendCount: distinctProviders });
   }
   return canonical;

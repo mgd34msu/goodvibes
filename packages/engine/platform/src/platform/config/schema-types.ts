@@ -330,7 +330,10 @@ export * from "./schema-types-values.js";
  * programming error and fails at module load, so every setting has exactly one
  * default and nothing restates it.
  */
-export function defineSettingsDomain<D extends object>(defaults: D, rows: readonly Omit<ConfigSetting, 'default'>[]): ConfigSetting[] {
+/** A settings row as a domain writes it: everything but its default, which its defaults object owns. */
+export type ConfigSettingRow = Omit<ConfigSetting, 'default'>;
+
+export function defineSettingsDomain<D extends object>(defaults: D, rows: readonly ConfigSettingRow[]): ConfigSetting[] {
   return rows.map((row) => {
     let value: unknown = defaults;
     for (const part of row.key.split('.')) {

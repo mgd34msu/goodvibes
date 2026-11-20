@@ -51,6 +51,11 @@ if (positionals[0] === 'sweep') {
   const report = (await Bun.file(reportPath).json()) as CalibrationReport;
   const thresholds = values.thresholds === undefined ? DEFAULT_SWEEP : values.thresholds.split(',').map(Number);
   const name = positionals[2];
+  if (name !== undefined && !report.decisions.some((d) => d.name === name)) {
+    // A name the report does not hold is a usage error, never an empty sweep that passes.
+    console.error(`calibrate sweep: ${name} is not in ${reportPath}. Decisions in it: ${report.decisions.map((d) => d.name).join(', ') || 'none'}`);
+    process.exit(2);
+  }
   for (const decision of report.decisions.filter((d) => name === undefined || d.name === name)) {
     console.log(formatSweep(decision.name, sweep(decision.checks, thresholds)));
   }

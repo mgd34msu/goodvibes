@@ -140,7 +140,7 @@ export function createAgentMediaGenerateTool(
       if (readFlag(args.preview, 'preview', false)) return output(preview(args, generationProviderCount));
       try {
         const ledger = getSessionUntrustedContentLedger();
-        const ledgerCurrent = () => JSON.stringify([ledger.getPublicationRevision(), ledger.originsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]);
+        const ledgerCurrent = () => JSON.stringify([ledger.getPublicationRevision(), ledger.taintOriginsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]);
         const sources = ledgerCurrent();
         const assertCurrent = () => {
           executionOptions?.signal?.throwIfAborted();

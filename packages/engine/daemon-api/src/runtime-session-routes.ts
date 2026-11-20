@@ -10,7 +10,7 @@ import { withAdmin } from './auth-helpers.js';
 import { randomUUID } from 'node:crypto';
 import { jsonErrorResponse } from './error-response.js';
 import { agentRetrySpawnInput } from './tasks.js';
-import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
+import { EngineErrorCodes, isOperationKey, OPERATION_KEY_RULE } from '@goodvibes-jev/engine/errors';
 import { REASONING_EFFORT_SEVERITY } from '@goodvibes-jev/engine/contracts';
 import {
   AUTOMATION_SURFACE_KINDS,
@@ -708,15 +708,13 @@ async function handleCompanionMessageKind(
 
 /** Client-chosen message ids being stored right now, so two concurrent retries cannot both append. */
 const companionMessagesInFlight = new Set<string>();
-const MAX_CLIENT_MESSAGE_ID_LENGTH = 128;
-const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const DEDUPE_LOOKBACK_MESSAGES = 200;
 
 function readClientMessageId(value: unknown): string | undefined | Response {
   if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_CLIENT_MESSAGE_ID_LENGTH || !CLIENT_MESSAGE_ID_PATTERN.test(value)) {
+  if (!isOperationKey(value)) {
     return jsonErrorResponse(
-      { error: `messageId must be 1 to ${MAX_CLIENT_MESSAGE_ID_LENGTH} characters of letters, digits, '.', '_', ':' or '-', so the message was not stored. Send it again with such an id, or without one.`, code: 'INVALID_MESSAGE_ID' },
+      { error: `messageId must be ${OPERATION_KEY_RULE}, so the message was not stored. Send it again with such an id, or without one.`, code: 'INVALID_MESSAGE_ID' },
       { status: 400 },
     );
   }

@@ -467,6 +467,8 @@ async function runProviderSetupAction(
     if (chatTopic) context.deps.configManager.set('surfaces.ntfy.chatTopic', chatTopic);
     if (agentTopic) context.deps.configManager.set('surfaces.ntfy.agentTopic', agentTopic);
     if (remoteTopic) context.deps.configManager.set('surfaces.ntfy.remoteTopic', remoteTopic);
+    // A new server with a new token: the old token is cleared first, so it is never sent to the new server.
+    if (baseUrl && token && baseUrl !== context.deps.configManager.get('surfaces.ntfy.baseUrl')) context.deps.configManager.set('surfaces.ntfy.token', '');
     if (baseUrl) context.deps.configManager.set('surfaces.ntfy.baseUrl', baseUrl);
     if (token) await storeSurfaceSecret(context.deps, 'ntfy', 'primary', token, readSecretScope(input?.secretScope));
     const configured = Boolean(topic || chatTopic || agentTopic || remoteTopic || token || account.configured);

@@ -340,13 +340,14 @@ export function createGoodVibesAuthClient(
       // `from` field reflects the actual pre-login state (anonymous vs token
       // refresh), not the post-login state.
       const priorToken = await ts?.getToken();
-      const result = await sm.login(input, options);
+      const { result, persisted } = await sm.loginReporting(input, options);
       // Notify observer of the auth state transition. Observer errors are
-      // isolated and reported by invokeObserver.
+      // isolated and reported by invokeObserver. `to` is what the session
+      // manager did: 'token' only when it stored the token.
       invokeObserver(() =>
         observer?.onAuthTransition?.({
           from: priorToken ? 'token' : 'anonymous',
-          to: 'token',
+          to: persisted ? 'token' : 'credential',
           reason: 'login',
         }),
         { label: 'onAuthTransition' },

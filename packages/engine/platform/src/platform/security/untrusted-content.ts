@@ -44,6 +44,7 @@
  * outward-effect guard as ONE composition rather than two unrelated acts.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { failedRead, present, refusal, type Observed } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { findContentTaint, describeContentTaint, markLedgerTaintSource, type TaintFinding, type TaintOptions, type TaintSource } from './content-taint.js';
 import { captureOwnedJson, judgmentInputProblem } from '../gate/judgment-input.js';
@@ -531,14 +532,32 @@ export class UntrustedContentLedger {
     return [...this.ingests];
   }
 
-  originsThisTurn(): readonly string[] {
-    return [...new Set(this.ingestedThisTurn().map((entry) => entry.origin))];
+  /**
+   * The distinct origins this turn read, as an observed read: `present` with
+   * the origins (empty when nothing untrusted was read), or `failed` when an
+   * ingest this turn could see was evicted by the retention cap before it could
+   * be checked. A failed read is never "nothing was read": an outward gate
+   * refuses on it.
+   */
+  taintOriginsThisTurn(): Observed<readonly string[]> {
+    const scope = currentUntrustedContentScope();
+    const start = this.turnStartOf(scope);
+    if (this.evictedSince(start, scope)) {
+      return failedRead(refusal({
+        code: 'UNTRUSTED_EVIDENCE_EVICTED',
+        state: 'what this turn read was evicted before it could be checked',
+        reason: 'This turn read more untrusted content than is kept, so what it read was evicted before it could be checked against an outward effect.',
+        next: ['Send it again in a new turn.', 'Or let the owner send it.'],
+        retryable: false,
+      }));
+    }
+    return present([...new Set(this.ingestedSince(start, scope).map((entry) => entry.origin))]);
   }
 
   /**
    * Distinct (surface, origin) pairs this turn.
    *
-   * `originsThisTurn` loses which KIND of thing each origin was, and a refusal
+   * `taintOriginsThisTurn` loses which KIND of thing each origin was, and a refusal
    * that has lost that says "those pages" about a mailbox. Wording that fits
    * the surface needs the pair, so the pair is what this returns.
    */
@@ -554,8 +573,10 @@ export class UntrustedContentLedger {
     return exposures;
   }
 
+  /** Whether this turn read anything untrusted, including reads evicted before they could be checked. */
   hasIngestedThisTurn(): boolean {
-    return this.ingestedThisTurn().length > 0;
+    const read = this.taintOriginsThisTurn();
+    return read.kind !== 'present' || read.value.length > 0;
   }
 
   /** The retained untrusted text of this turn, for a derivation check. */
@@ -847,6 +868,12 @@ function describeApprovalMismatch(mismatch: ApprovalMismatch): string {
  * an outward action without the owner saying so on a surface that carries
  * command authority.
  */
+/** This turn's origins for a decision's record; a failed read (evicted evidence) lists none. */
+function originsOrNone(ledger: UntrustedContentLedger): readonly string[] {
+  const read = ledger.taintOriginsThisTurn();
+  return read.kind === 'present' ? read.value : [];
+}
+
 export async function evaluateOutwardEffect(input: {
   readonly request: OutwardEffectRequest;
   readonly ledger: UntrustedContentLedger;
@@ -886,7 +913,7 @@ export async function evaluateOutwardEffect(input: {
 }): Promise<OutwardEffectDecision> {
   if (input.taintOptions?.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
   if (input.sourcePolicy !== 'required' && isYoloExecution()) {
-    return { allowed: true, reason: null, fix: null, untrustedOrigins: input.ledger.originsThisTurn(), taint: [] };
+    return { allowed: true, reason: null, fix: null, untrustedOrigins: originsOrNone(input.ledger), taint: [] };
   }
   const ownerAsked = input.requestedBy === 'owner-direct';
   const disclosed = input.ledger.disclosedDatesThisTurn();
@@ -905,7 +932,7 @@ export async function evaluateOutwardEffect(input: {
       if (!approved.authorized) {
         return {
           allowed: false,
-          untrustedOrigins: input.ledger.originsThisTurn(),
+          untrustedOrigins: originsOrNone(input.ledger),
           taint: [],
           reason: carried
             ? `Held: the ${carried.field} of ${input.request.description} carries ${carried.date.date} (${carried.date.label}), a private date shown to the owner this turn. `
@@ -922,7 +949,32 @@ export async function evaluateOutwardEffect(input: {
       }
     }
   }
-  const origins = input.ledger.originsThisTurn();
+  const originsRead = input.ledger.taintOriginsThisTurn();
+  if (originsRead.kind === 'failed') {
+    // What this turn read was evicted before it could be checked: that is not "nothing was
+    // read". Only the owner's approval of this exact content clears it.
+    const approved = checkOwnerApproval({
+      approval: input.approval,
+      action: input.request.action,
+      clearingContentTaint: input.content !== undefined,
+      contentInQuestion: input.content,
+      ...(input.now === undefined ? {} : { now: input.now }),
+    });
+    if (approved.authorized) return { allowed: true, reason: null, fix: null, untrustedOrigins: [], taint: [] };
+    return {
+      allowed: false,
+      untrustedOrigins: [],
+      taint: [],
+      reason: `Held: ${input.request.description} cannot be checked, because what this turn read was evicted before it could be checked.`,
+      fix: [
+        describeApprovalMismatch(approved.mismatch),
+        ownerAsked
+          ? `Send it again in a new turn, or approve it as it stands: ${describeRemedy(input.ownerRemedy)}`
+          : 'Send it again in a new turn, or tell the owner and let them send it.',
+      ].filter((part) => part.length > 0).join(' '),
+    };
+  }
+  const origins = originsRead.kind === 'present' ? originsRead.value : [];
   if (origins.length === 0) {
     return { allowed: true, reason: null, fix: null, untrustedOrigins: [], taint: [] };
   }

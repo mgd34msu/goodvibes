@@ -38,7 +38,7 @@ interface Loosening {
  * as well.
  */
 const PROJECT_UNSETTABLE_KEYS: readonly string[] = [
-  'judgment.endpoint', 'notifications.webhookUrls', ...CREDENTIAL_DESTINATION_KEYS,
+  'notifications.webhookUrls', ...CREDENTIAL_DESTINATION_KEYS,
 ];
 
 /**

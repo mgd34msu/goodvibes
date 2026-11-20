@@ -1,36 +1,26 @@
 /**
- * SignedOutGate, the honest first-paint front door.
+ * SignedOutGate, the front door: shown INSTEAD of the shell while auth.current
+ * reports signed out, so nothing behind it can make a request that 401s.
  *
- * Replaces the old behavior where the full operator shell rendered regardless of auth
- * and merely dropped a dismissible banner while every API call 401'd. When auth.current
- * reports signed-out, this screen is shown INSTEAD of the shell: the nav and views are
- * gated behind it.
+ * Plain words first (ux A1.5): the heading, one sentence naming `goodvibes pair`,
+ * and the scan button. Scanning the QR that command shows opens a link back here
+ * with the sign-in code in the URL fragment (usePairingHandoff), or, with the
+ * in-page scanner (PairingQrScanner), reads that link or the JSON payload the
+ * desktop app and terminal print. A scan feeds the SAME tokenMutation /
+ * loginMutation / relay calls the forms use, so a code is checked in one place
+ * and a refusal is reported in one place.
  *
- * PRIMARY path: scan the QR shown by `goodvibes pair` in the terminal. That QR encodes
- * a link back here with the operator token in the URL fragment; opening it hands the
- * token off automatically (usePairingHandoff → setExplicitAuthToken), no copy/paste.
- * This screen leads with that flow and explains it prominently.
+ * Everything else sits in "Other ways to sign in", in this order: paste a
+ * sign-in code (setExplicitAuthToken checks it with auth.current and clears it
+ * on refusal), the relay code for a device that cannot reach the computer
+ * directly, the username and password (works only while the first-run password
+ * is still kept), and where to find a code.
  *
- * The same section carries the IN-PAGE scanner (PairingQrScanner), which replaces the
- * retired Android companion app: a phone already looking at this screen can open its
- * own camera here instead of leaving for a separate app, and it also reads the
- * companion connection payload the desktop app and TUI print, which is a JSON object
- * rather than a link and so cannot be "opened" by a phone's camera app at all. A scan
- * does not get its own sign-in code path: it feeds the SAME tokenMutation /
- * loginMutation / relay-store calls the manual forms below use, so there is exactly one
- * place where a token is validated and one place where a rejection is reported.
- *
- * FALLBACK path: paste the operator token by hand (setExplicitAuthToken self-validates
- * via auth.current and auto-clears on failure). Password login is offered only as a
- * de-emphasized tertiary path, on hosts where the bootstrap credential was already
- * consumed it is structurally dead, so it must not be presented co-equal.
- *
- * `pairingError` is set when a pairing link's token was rejected by the daemon (an
- * expired or malformed QR); it surfaces as a banner so a failed scan is never a silent
- * bounce back to the token field.
+ * `pairingError` is set when a pairing link's code was refused (an expired or
+ * malformed QR), so a failed scan is never a silent bounce back to this screen.
  */
 
-import { Camera, KeyRound, QrCode, Radio, ShieldCheck } from 'lucide-react';
+import { Camera, KeyRound, Radio, ShieldCheck } from 'lucide-react';
 import { useEffect, useState, useSyncExternalStore, type SyntheticEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { GOODVIBES_BASE_URL, login, setExplicitAuthToken } from '../../lib/goodvibes';
@@ -72,6 +62,9 @@ async function validateSignIn<T>(read: () => Promise<T>): Promise<T> {
 // remounts this gate; a refused token must still be in the field to correct, so the
 // text lives here, in memory only, until a sign-in succeeds.
 let typedToken = '';
+// Whether "Other ways to sign in" is open. Kept beside the typed code for the same
+// reason: a refused code remounts this gate, and its message must not be folded away.
+let otherWaysOpenNow = false;
 
 /** A failure belongs to the gate that showed it: a later sign-out must open on a clean gate. */
 function retireSignInError(): void {
@@ -95,6 +88,8 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
   useEffect(() => retireSignInError, []);
   const [token, setTokenState] = useState(() => typedToken);
   const setToken = (value: string) => { typedToken = value; setTokenState(value); };
+  const [otherWaysOpen, setOtherWaysOpenState] = useState(() => otherWaysOpenNow || typedToken !== '' || validationError != null);
+  const setOtherWaysOpen = (open: boolean) => { otherWaysOpenNow = open; setOtherWaysOpenState(open); };
   const [showPassword, setShowPassword] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -119,6 +114,8 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
       await queryClient.cancelQueries();
       await queryClient.invalidateQueries();
     },
+    // A refused scan reports under the code field: open the section that holds it.
+    onError: () => setOtherWaysOpen(true),
   });
 
   const loginMutation = useMutation({
@@ -214,49 +211,34 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
         </div>
         <h1>Sign in to GoodVibes</h1>
         <p className="signed-out-lede">
-          This operator shell talks to a daemon that requires an operator token. The
-          quickest way in is to scan a QR from your terminal, no copy/paste.
+          Run <code>goodvibes pair</code> on your computer and scan the code.
         </p>
 
         {pairingError != null && (
           <div className="banner warning" role="alert">
-            The pairing link was rejected: {formatError(pairingError)}. Its token was
-            cleared; scan a fresh QR from <code>goodvibes pair</code>, or paste a token below.
+            That code didn&rsquo;t work. It may have expired; run <code>goodvibes pair</code> again.
           </div>
         )}
 
         {relayPairingError != null && (
           <div className="banner warning" role="alert">
-            The relay pairing link was not recognized: {formatError(relayPairingError)}.
-            Scan a fresh relay QR, or paste a relay code below.
+            That relay link wasn&rsquo;t recognised. Scan a new relay code, or paste one under
+            Other ways to sign in.
           </div>
         )}
 
-        <section className="signed-out-pair" aria-labelledby="signed-out-pair-title">
-          <div className="signed-out-pair__mark">
-            <QrCode size={20} aria-hidden="true" />
-          </div>
-          <div className="signed-out-pair__copy">
-            <h2 id="signed-out-pair-title">Scan the QR from your terminal</h2>
-            <p>
-              Run <code>goodvibes pair</code> in the terminal where the daemon is running.
-              It prints a QR code, scan it with this device&rsquo;s camera and the link
-              signs you in automatically.
-            </p>
-            <Button
-              size="sm"
-              className="signed-out-pair__scan"
-              icon={<Camera aria-hidden="true" />}
-              onClick={() => {
-                setScanNotice(null);
-                setScanOriginNote(null);
-                setScanOpen(true);
-              }}
-            >
-              Scan with this device&rsquo;s camera
-            </Button>
-          </div>
-        </section>
+        <Button
+          variant="primary"
+          className="signed-out-scan"
+          icon={<Camera aria-hidden="true" />}
+          onClick={() => {
+            setScanNotice(null);
+            setScanOriginNote(null);
+            setScanOpen(true);
+          }}
+        >
+          Scan the code
+        </Button>
 
         {scanNotice != null && (
           <div className="banner" role="status">
@@ -266,154 +248,143 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
 
         {scanOriginNote != null && (
           <div className="banner warning" role="status">
-            That QR names the daemon at <code>{scanOriginNote}</code>, but this page is
-            served from <code>{GOODVIBES_BASE_URL}</code>. Often that is the same daemon
-            reached by another address and everything works; if sign-in is rejected, that
-            mismatch is the first thing to check.
+            That code is for GoodVibes at <code>{scanOriginNote}</code>, and this page is at{' '}
+            <code>{GOODVIBES_BASE_URL}</code>. That is often the same computer reached by another
+            address; if sign-in fails, check this first.
           </div>
         )}
 
-        <Dialog open={scanOpen} onClose={() => setScanOpen(false)} title="Scan a pairing QR">
+        <Dialog open={scanOpen} onClose={() => setScanOpen(false)} title="Scan the code">
           <PairingQrScanner onScanned={acceptScan} onCancel={() => setScanOpen(false)} />
         </Dialog>
 
-        <div className="signed-out-or" role="separator" aria-label="or paste a token">
-          <span>or paste a token</span>
-        </div>
-
-        <form className="signed-out-form" onSubmit={submitToken}>
-          <Field label="Operator token">
-            <Input
-              value={token}
-              onChange={(event) => setToken(event.target.value)}
-              type="password"
-              autoComplete="off"
-              placeholder="Paste an operator token"
-              // eslint-disable-next-line jsx-a11y/no-autofocus -- primary action on a dedicated sign-in screen
-              autoFocus
-            />
-          </Field>
-          <Button variant="primary" type="submit" disabled={tokenMutation.isPending || !token.trim()}>
-            {tokenMutation.isPending ? 'Validating…' : 'Sign in with token'}
-          </Button>
-        </form>
-
-        {tokenError != null && (
-          <div className="banner warning" role="alert">
-            {isAuthExpiredError(tokenError)
-              ? 'The daemon did not accept that token. Check that it was copied whole; a revoked or expired token needs a new one from your terminal.'
-              : `${formatError(tokenError)}: sign-in failed. Try fresh credentials.`}
-          </div>
-        )}
-
-        <div className="signed-out-secondary">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="signed-out-toggle"
-            icon={<Radio aria-hidden="true" />}
-            onClick={() => setShowRelayPaste((current) => !current)}
-            aria-expanded={showRelayPaste}
-          >
-            Connecting from outside the LAN?
-          </Button>
-          {showRelayPaste && (
-            <form className="signed-out-form signed-out-password" onSubmit={submitRelayCode}>
-              <p className="signed-out-note">
-                If this device cannot reach the daemon directly, scan or paste the relay
-                pairing code the daemon shows (a separate QR from the sign-in one). It
-                lets this device reach the daemon through the relay instead. It does
-                not sign you in by itself; still scan or paste an operator token above (or
-                after) to sign in. Live updates (chat streaming, fleet events) are not
-                available over the relay, so those views fall back to periodic refresh.
-              </p>
-              <Field label="Relay pairing code">
+        <details
+          className="dv-disclosure signed-out-other"
+          open={otherWaysOpen}
+          onToggle={(event) => setOtherWaysOpen(event.currentTarget.open)}
+        >
+          <summary className="dv-disclosure__summary">Other ways to sign in</summary>
+          <div className="dv-disclosure__body signed-out-other__body">
+            <form className="signed-out-form" onSubmit={submitToken}>
+              <Field label="Sign-in code">
                 <Input
-                  value={relayCode}
-                  onChange={(event) => setRelayCode(event.target.value)}
-                  type="text"
-                  autoComplete="off"
-                  placeholder="gvrelay1.…"
-                />
-              </Field>
-              <Button type="submit" disabled={!relayCode.trim()}>
-                Review relay pairing
-              </Button>
-              {relayOffer !== null && (
-                <RelayPairingOffer pairing={relayOffer} onConfirm={confirmRelayOffer} onDismiss={() => setRelayOffer(null)} />
-              )}
-              {relayStored && (
-                <div className="banner" role="status">
-                  Relay pairing saved. This device will use it automatically when the
-                  direct connection is unavailable.
-                </div>
-              )}
-              {relayPasteError != null && (
-                <div className="banner warning" role="alert">
-                  {formatError(relayPasteError)}: not a recognizable relay pairing code.
-                </div>
-              )}
-            </form>
-          )}
-        </div>
-
-        <Disclosure summary="Where do I find a token?">
-          <ul className="signed-out-help">
-            <li>
-              Easiest: run <code>goodvibes pair</code> and scan the QR: it carries the
-              token for you, no copy/paste.
-            </li>
-            <li>
-              The daemon prints an operator token in its startup output when it boots.
-            </li>
-            <li>
-              It is also written to the daemon&rsquo;s <code>operator-tokens.json</code>, or
-              mint one from the TUI.
-            </li>
-            <li>
-              Operator tokens are typically ephemeral, if sign-in stops working, the token
-              likely expired; grab the current one from the daemon output.
-            </li>
-          </ul>
-        </Disclosure>
-
-        <div className="signed-out-secondary">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="signed-out-toggle"
-            icon={<KeyRound aria-hidden="true" />}
-            onClick={() => setShowPassword((current) => !current)}
-            aria-expanded={showPassword}
-          >
-            Use a username &amp; password instead
-          </Button>
-          {showPassword && (
-            <form className="signed-out-form signed-out-password" onSubmit={submitLogin}>
-              <p className="signed-out-note">
-                Password login only works on hosts where the daemon still holds a bootstrap
-                credential. If it was already consumed, this path will not work, use a token.
-              </p>
-              <Field label="Username">
-                <Input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
-              </Field>
-              <Field label="Password">
-                <Input
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
+                  value={token}
+                  onChange={(event) => setToken(event.target.value)}
                   type="password"
-                  autoComplete="current-password"
+                  autoComplete="off"
+                  placeholder="Paste the code from goodvibes pair"
                 />
               </Field>
-              <Button type="submit" disabled={loginMutation.isPending || !username || !password}>
-                {loginMutation.isPending ? 'Signing in…' : 'Sign in with password'}
-              </Button>
-              {loginMutation.error && (
-                <div className="banner warning" role="alert">{formatError(loginMutation.error)}</div>
+              {tokenError != null && (
+                <div className="banner warning" role="alert">
+                  {isAuthExpiredError(tokenError)
+                    ? <>That code didn&rsquo;t work. It may have expired; run <code>goodvibes pair</code> again.</>
+                    : `Couldn't check that code: ${formatError(tokenError)}. Try again.`}
+                </div>
               )}
+              <Button variant="primary" type="submit" disabled={tokenMutation.isPending || !token.trim()}>
+                {tokenMutation.isPending ? 'Checking…' : 'Sign in'}
+              </Button>
             </form>
-          )}
-        </div>
+
+            <div className="signed-out-secondary">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="signed-out-toggle"
+                icon={<Radio aria-hidden="true" />}
+                onClick={() => setShowRelayPaste((current) => !current)}
+                aria-expanded={showRelayPaste}
+              >
+                Not on the same network as your computer?
+              </Button>
+              {showRelayPaste && (
+                <form className="signed-out-form signed-out-password" onSubmit={submitRelayCode}>
+                  <p className="signed-out-note">
+                    Paste the relay code GoodVibes shows on your computer (a different code from the
+                    sign-in one). It lets this device reach your computer through the relay; it does
+                    not sign you in, so you still need a sign-in code. Over the relay, live updates
+                    (a reply as it is written, agent progress) refresh every few seconds instead.
+                  </p>
+                  <Field label="Relay code">
+                    <Input
+                      value={relayCode}
+                      onChange={(event) => setRelayCode(event.target.value)}
+                      type="text"
+                      autoComplete="off"
+                      placeholder="gvrelay1.…"
+                    />
+                  </Field>
+                  <Button type="submit" disabled={!relayCode.trim()}>
+                    Check relay code
+                  </Button>
+                  {relayOffer !== null && (
+                    <RelayPairingOffer pairing={relayOffer} onConfirm={confirmRelayOffer} onDismiss={() => setRelayOffer(null)} />
+                  )}
+                  {relayStored && (
+                    <div className="banner" role="status">
+                      Relay saved. This device uses it by itself when it can&rsquo;t reach your
+                      computer directly.
+                    </div>
+                  )}
+                  {relayPasteError != null && (
+                    <div className="banner warning" role="alert">
+                      That isn&rsquo;t a relay code. Copy it again whole, starting with gvrelay1.
+                    </div>
+                  )}
+                </form>
+              )}
+            </div>
+
+            <div className="signed-out-secondary">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="signed-out-toggle"
+                icon={<KeyRound aria-hidden="true" />}
+                onClick={() => setShowPassword((current) => !current)}
+                aria-expanded={showPassword}
+              >
+                Use a username and password
+              </Button>
+              {showPassword && (
+                <form className="signed-out-form signed-out-password" onSubmit={submitLogin}>
+                  <p className="signed-out-note">
+                    Works only while GoodVibes still keeps its first-run password; once that has
+                    been used up or removed, sign in with a code.
+                  </p>
+                  <Field label="Username">
+                    <Input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
+                  </Field>
+                  <Field label="Password">
+                    <Input
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      type="password"
+                      autoComplete="current-password"
+                    />
+                  </Field>
+                  <Button type="submit" disabled={loginMutation.isPending || !username || !password}>
+                    {loginMutation.isPending ? 'Signing in…' : 'Sign in with password'}
+                  </Button>
+                  {loginMutation.error && (
+                    <div className="banner warning" role="alert">{formatError(loginMutation.error)}</div>
+                  )}
+                </form>
+              )}
+            </div>
+
+            <Disclosure summary="Where do I find a code?">
+              <ul className="signed-out-help">
+                <li>
+                  Run <code>goodvibes pair</code> on your computer. It shows the code, and a QR
+                  code that signs you in when you scan it.
+                </li>
+                <li>The GoodVibes service prints a code when it starts.</li>
+              </ul>
+            </Disclosure>
+          </div>
+        </details>
       </div>
     </div>
   );

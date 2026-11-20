@@ -95,7 +95,7 @@ function captureCommsEffect(context: CommandContext, args: Record<string, unknow
   const parent = captureAgentExportPath(home, dirname(destination));
   const ledger = getSessionUntrustedContentLedger();
   const ledgerRevision = ledger.getPublicationRevision();
-  const signature = () => JSON.stringify(captureCatalogData([ledger.originsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]));
+  const signature = () => JSON.stringify(captureCatalogData([ledger.taintOriginsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]));
   const source = signature();
   const assertSourceCurrent = () => {
     options?.signal?.throwIfAborted();

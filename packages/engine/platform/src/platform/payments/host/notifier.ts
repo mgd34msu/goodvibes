@@ -23,7 +23,8 @@
 import type { ChannelDeliveryRouter, ChannelDeliveryTarget } from '../../channels/index.js';
 import { createChannelPaymentNotifier } from '../notice-delivery.js';
 import type { PaymentNoticeRouter, PaymentNoticeTarget, PaymentReplySource } from '../notice-delivery.js';
-import type { PaymentNotifier, PaymentNoticeWindow } from '../payment-ports.js';
+import { absent, failedRead, present, refusal, RefusalError, type Observed } from '@goodvibes-jev/engine/errors';
+import { PAYMENT_ANSWER_UNREADABLE, type PaymentNotifier, type PaymentNoticeWindow } from '../payment-ports.js';
 import type { NewOwnerItem, OwnerItem } from '../../control-plane/owner-inbox.js';
 import type { ChannelDelivery } from '../windows.js';
 import { readNotifyChannels, type PaymentsConfigReader } from '../payments-config.js';
@@ -168,6 +169,17 @@ export function purchaseInboxItem(kind: PaymentWindowKind | 'notice', message: s
  *
  * Cost: one record-log append per notice, one per answer or withdrawal.
  */
+/** The refusal for an owner answer that could not be read: never silence, so nothing is bought on it. */
+function unreadableAnswer(error: unknown): ReturnType<typeof refusal> {
+  return refusal({
+    code: PAYMENT_ANSWER_UNREADABLE,
+    state: 'your answer to the purchase notice could not be read',
+    reason: `Your answer to the purchase notice could not be read (${error instanceof Error ? error.message : String(error)}), so it is not taken as silence; nothing was bought.`,
+    next: ['Check that the owner inbox store is readable, then start the purchase again.'],
+    retryable: false,
+  });
+}
+
 export function withOwnerInbox(
   inner: PaymentNotifier,
   inbox: PaymentOwnerInbox,
@@ -197,12 +209,17 @@ export function withOwnerInbox(
    * window's deadline: an answer written to the store by another process (a
    * terminal app not connected to this daemon) still settles the window.
    */
-  const recordedAnswer = (kind: PaymentWindowKind, id: string, deadlineMs: number): NotifierAnswer => {
+  const recordedAnswer = (kind: PaymentWindowKind, id: string, deadlineMs: number): Observed<NonNullable<NotifierAnswer>> => {
     let stored: OwnerItem | undefined;
-    try { stored = inbox.get(id); } catch { return null; }
-    if (stored?.status !== 'answered' || stored.closedAt === undefined || !(stored.closedAt <= deadlineMs)) return null;
+    try { stored = inbox.get(id); } catch (error) { return failedRead(unreadableAnswer(error)); }
+    if (stored?.status !== 'answered' || stored.closedAt === undefined || !(stored.closedAt <= deadlineMs)) return absent;
     const answer = inboxAnswer(kind, stored.answer?.option ?? stored.answer?.text?.trim().toLowerCase());
-    return answer === null ? null : { answer, channel: 'owner-inbox' };
+    return answer === null ? absent : present({ answer, channel: 'owner-inbox' });
+  };
+  /** A read of the owner's answer: present, absent (silence), or a failed read, which is never silence. */
+  const settle = (read: Observed<NonNullable<NotifierAnswer>>): NotifierAnswer => {
+    if (read.kind === 'failed') throw new RefusalError(read.refusal);
+    return read.kind === 'present' ? read.value : null;
   };
 
   const firstAnswer = async (
@@ -223,21 +240,23 @@ export function withOwnerInbox(
     const stop = new AbortController();
     const onAbort = (): void => { stop.abort(); };
     signal?.addEventListener('abort', onAbort, { once: true });
-    const fromInbox = inbox.waitForAnswer(item.id, stop.signal).then((settled): NotifierAnswer | undefined => {
-      if (settled.status !== 'answered') return undefined;
+    const fromInbox = inbox.waitForAnswer(item.id, stop.signal).then((settled): Observed<NonNullable<NotifierAnswer>> => {
+      if (settled.status !== 'answered') return absent;
       const answer = inboxAnswer(kind, settled.answer?.option ?? settled.answer?.text?.trim().toLowerCase());
-      return answer === null ? undefined : { answer, channel: 'owner-inbox' };
-    }, () => undefined);
+      return answer === null ? absent : present({ answer, channel: 'owner-inbox' });
+    // The wait ends by our own stop once the window closes; any other rejection is an answer that could not be read.
+    }, (error: unknown) => stop.signal.aborted ? absent : failedRead(unreadableAnswer(error)));
     try {
       const first = await Promise.race([
         fromChannels,
         fromInbox.then((answer) => ({ from: 'inbox' as const, answer })),
       ]);
       // Silence on the channels is read against the item once before it counts: the inbox answer may not have been heard yet.
-      if (first.from === 'channel') return first.answer ?? recordedAnswer(kind, item.id, deadlineMs);
-      if (first.answer !== undefined) {
+      if (first.from === 'channel') return first.answer ?? settle(recordedAnswer(kind, item.id, deadlineMs));
+      if (first.answer.kind === 'failed') throw new RefusalError(first.answer.refusal);
+      if (first.answer.kind === 'present') {
         retireChannels?.();
-        return first.answer;
+        return first.answer.value;
       }
       // Closed without an answer (expired with the window, or withdrawn): the channels decide.
       return await channelWait;

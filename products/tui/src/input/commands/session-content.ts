@@ -1,6 +1,5 @@
 import { createSessionListCommand } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
 import { join } from 'path';
-import { unlinkSync } from 'node:fs';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
 import { TemplateManager, parseTemplateArgs, type TemplateDeleteResult, type TemplateScope } from '@goodvibes-jev/engine/platform/platform/templates';
@@ -364,20 +363,26 @@ const sessionsCommand = createSessionListCommand<CommandContext>({
     if (result.action === 'delete') {
       const sessionInfo = sessions.find((s) => s.name === result.item.id);
       if (!sessionInfo) return;
+      // The same refusals as /session delete: never the active session, never without asking.
+      if (sessionInfo.name === ctx.session.runtime.sessionId) {
+        ctx.print(`Cannot delete the active session (${sessionInfo.name}). Switch to another session first with /session resume <id>.`);
+        ctx.renderRequest();
+        return;
+      }
+      if (!ctx.confirm) {
+        ctx.print(`Deleting a session asks first. Use /session delete ${sessionInfo.name} --yes`);
+        ctx.renderRequest();
+        return;
+      }
       const remove = (): void => {
         try {
-          unlinkSync(sessionInfo.filePath);
+          sessionManager.delete(sessionInfo.name);
           ctx.print(`Session deleted: ${result.item.id}`);
         } catch (e) {
           ctx.print(`Failed to delete session: ${summarizeError(e)}`);
         }
         ctx.renderRequest();
       };
-      // Deleting is permanent, so it asks first where a confirm dialog exists.
-      if (!ctx.confirm) {
-        remove();
-        return;
-      }
       void ctx
         .confirm({
           title: 'Delete session?',

@@ -27,6 +27,7 @@ import type {
 } from './types.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/native-error-summary.js';
+import { done, failedOutcome, observe, refusal, tally, type EffectOutcome } from '@goodvibes-jev/engine/errors';
 
 export interface HomeGraphReindexContext {
   readonly signal?: AbortSignal | undefined;
@@ -109,18 +110,31 @@ export async function runHomeGraphReindex(
   const quality = await runStage(context.signal, remaining, true, () => context.refreshQualityIssues(spaceId, installationId));
   await yieldToEventLoop();
   context.signal?.throwIfAborted();
+  const deviceOutcomes: { id: string; outcome: EffectOutcome<unknown> }[] = [];
   const pages = await runStage(context.signal, remaining, input.refreshPages !== false, () => refreshHomeGraphPagesForSources({
     store: context.store,
     artifactStore: context.artifactStore,
     spaceId,
     installationId,
     signal: context.signal,
-  }, readHomeGraphState(context.store, spaceId).sources, changedSourceIds, clampPositive(input.generatedPageLimit, 256, 1, 512), deadlineAt));
+  }, readHomeGraphState(context.store, spaceId).sources, changedSourceIds, clampPositive(input.generatedPageLimit, 256, 1, 512), deadlineAt, deviceOutcomes));
   context.signal?.throwIfAborted();
   const generated = pages.value ?? emptyGeneratedPagesSummary();
-  const pagesOutcome = pages.outcome.status === 'done' && (generated.deferredDevicePassports ?? 0) > 0
-    ? { status: 'deferred' as const, reason: `${generated.deferredDevicePassports} device page(s) did not fit in the run budget` }
-    : pages.outcome;
+  // The stage is done only when no device page failed: a device whose page
+  // could not be refreshed holds the stage, named with its reason.
+  const devices = tally(deviceOutcomes.length, deviceOutcomes);
+  const deferredPages = generated.deferredDevicePassports ?? 0;
+  const pagesOutcome: HomeGraphStageOutcome = pages.outcome.status !== 'done'
+    ? pages.outcome
+    : devices.failed.length > 0
+      ? {
+        status: 'held',
+        reason: `${devices.failed.length} of ${devices.requested} device page(s) failed: ${devices.failed.map((item) => `${item.id} (${item.refusal.reason})`).join('; ')}`
+          + (deferredPages > 0 ? `; ${deferredPages} more did not fit in the run budget` : ''),
+      }
+      : deferredPages > 0
+        ? { status: 'deferred', reason: `${deferredPages} device page(s) did not fit in the run budget` }
+        : pages.outcome;
   const refreshedGeneratedPageCount = generated.devicePassports + generated.roomPages;
   const budgetExhausted = reindex.budgetExhausted === true || [link.outcome, semanticOutcome, quality.outcome, pages.outcome].some((outcome) => outcome.status === 'deferred')
     || pagesOutcome.status === 'deferred';
@@ -234,6 +248,7 @@ async function refreshHomeGraphPagesForSources(
   sourceIds: readonly string[],
   limit: number,
   deadlineAt: number,
+  outcomes: { id: string; outcome: EffectOutcome<unknown> }[],
 ): Promise<HomeGraphGeneratedPagesSummary> {
   const summary = emptyGeneratedPagesSummary();
   const state = readHomeGraphState(context.store, context.spaceId);
@@ -263,8 +278,13 @@ async function refreshHomeGraphPagesForSources(
       summary.devicePassports += 1;
       if (page.artifactCreated) summary.artifacts += 1;
       if (page.source) summary.sources += 1;
+      const seen = await observe('the device page was written', () => page);
+      if (seen) outcomes.push({ id: deviceId, outcome: done(seen) });
     } catch (error) {
       context.signal?.throwIfAborted();
+      outcomes.push({ id: deviceId, outcome: failedOutcome(refusal({
+        code: 'HOME_GRAPH_PAGE_FAILED', state: 'page not refreshed', reason: error instanceof Error ? error.message : String(error),
+      })) });
       summary.errors.push({
         kind: 'device-passport',
         targetId: deviceId,

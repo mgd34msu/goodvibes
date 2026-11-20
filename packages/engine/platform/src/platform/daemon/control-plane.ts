@@ -38,7 +38,7 @@ import { redactDiagnosticText } from '../utils/redaction.js';
 import { validateInvocationInput } from '../control-plane/invoke-input-validation.js';
 import { readGatewayVerbRefusal } from '../control-plane/routes/gateway-verb-error.js';
 import { AUTHENTICATION_REQUIRED_GUIDANCE, authenticationRequiredResponse, buildErrorResponseBody, jsonErrorResponse } from './http/error-response.js';
-import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
+import { EngineErrorCodes, isRefusal, refusalErrorBody } from '@goodvibes-jev/engine/errors';
 import {
   actorFromPrincipal,
   NO_OWNER_USER,
@@ -840,15 +840,20 @@ export class DaemonControlPlaneHelper {
       admin: ws.data.admin,
       remoteAddress: ws.data.remoteAddress,
     }, (event, payload) => {
-      // Nothing is delivered before the socket authenticates, and a revoked socket is served nothing.
+      // The gateway asked `current` (below) before filtering this frame with the grant in force now.
       if (!ws.data.authenticated || this.socketSignal(ws).aborted) return;
+      this.sendFrame(ws, socketEventFrame(event, payload));
+    }, () => this.closeRevokedSocket(ws), () => {
+      // Nothing is delivered before the socket authenticates, and a revoked socket is served nothing.
+      if (!ws.data.authenticated || this.socketSignal(ws).aborted) return false;
+      // The authentication fence, checked at send time: a narrowed credential regrants the
+      // socket here, before the gateway decides whether this frame is still covered.
       if (!this.socketPrincipalCurrent(ws)) {
         this.closeRevokedSocket(ws);
-        return;
+        return false;
       }
-      // What the socket may receive was decided by the gateway when it subscribed.
-      this.sendFrame(ws, socketEventFrame(event, payload));
-    }, () => this.closeRevokedSocket(ws));
+      return true;
+    });
     ws.data.clientId = connection.clientId;
   }
 
@@ -1408,10 +1413,14 @@ export class DaemonControlPlaneHelper {
         // counts too. See routes/gateway-verb-error.ts.
         const refusal = readGatewayVerbRefusal(error);
         if (refusal) {
+          // A refusal error carries its own state, next steps and, for a target
+          // that changed since it was reviewed, the change list: all of it goes
+          // on the wire, so an agent reads what changed without parsing prose.
+          const own = (error as { readonly refusal?: unknown }).refusal;
           return {
             status: refusal.status,
             ok: false,
-            body: refusalBody(refusal.message, refusal.code, refusal.status),
+            body: isRefusal(own) ? refusalErrorBody(own) : refusalBody(refusal.message, refusal.code, refusal.status),
           };
         }
         // redactSensitiveData outside classic mode answers only markers on its first call; local masking keeps the message readable.

@@ -546,6 +546,8 @@ Connecting a calendar account over OAuth needs your own OAuth client id: no clie
 
 Daemon operator methods for calendars: `calendar.calendars.list`, `calendar.events.list`, `calendar.events.get`, `calendar.events.create`, `calendar.events.update`, `calendar.events.delete`, `calendar.ics.import`, `calendar.ics.export`.
 
+On a CalDAV calendar each occurrence of a recurring event has its own id (the resource href, `#`, and the instant it recurs at), and `calendar.events.get` with that id answers that occurrence. A create whose request got no answer fails with `CALENDAR_OUTCOME_UNKNOWN` and names the new event's UID: read it with `calendar.events.get` before creating it again. A feed event without a UID gets an id made from its feed, start and title, so it keeps the same id on every read.
+
 ## Google (Gmail and Google Calendar)
 
 The Agent's `/google` (alias `/gmail`) connects one Google account for both mail and calendar. Saying "connect my Google account" to the Agent runs the same flow.

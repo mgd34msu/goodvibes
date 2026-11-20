@@ -296,6 +296,11 @@ export function createDaemonSystemRouteHandlers(
           const key = arm.key;
           const reset = arm.operation === 'reset-default';
           const value = arm.value;
+          const unbound = reset ? context.configManager.resetRefusal?.(key) ?? null : null;
+          if (unbound) {
+            return jsonErrorResponse({ error: unbound.reason, code: unbound.code, state: unbound.state, next: [...unbound.next] },
+              { status: unbound.status ?? 409 });
+          }
           const putToOwner = await ownerActResponse(context, req, '/config', [{ key, value, ...(reset ? { toDefault: true } : {}) }],
             reset ? 'config.reset' : 'config.set', reset ? { key } : { key, value },
             () => (reset ? context.configManager.reset?.(key) : context.configManager.setDynamic(key, value)));
@@ -346,6 +351,7 @@ export function createDaemonSystemRouteHandlers(
       try {
         context.configManager.setDynamic(key, value);
       } catch (error: unknown) {
+        if (error instanceof RefusalError) return jsonErrorResponse(error, { status: error.refusal.status ?? 400 });
         return readJsonErrorResponse(error, { status: 400, fallbackMessage: 'Failed to set config' });
       }
       // Report what the host now HOLDS, not what the caller asked for.
@@ -523,6 +529,12 @@ export function createDaemonSystemRouteHandlers(
         return jsonErrorResponse({ error: 'This host cannot reset a setting.', code: 'CONFIG_RESET_UNSUPPORTED', state: unchanged,
           next: ['Write the default value with config.set instead.'] }, { status: 409 });
       }
+      // A reset of a destination moves its credential to the default destination: refused before anything is asked or done.
+      const unbound = context.configManager.resetRefusal?.(key) ?? null;
+      if (unbound) {
+        return jsonErrorResponse({ error: unbound.reason, code: unbound.code, state: unbound.state, next: [...unbound.next] },
+          { status: unbound.status ?? 409 });
+      }
       const reset = context.configManager.reset.bind(context.configManager);
       const putToOwner = await ownerActResponse(context, req, '/config/reset', [{ key, value: undefined, toDefault: true }], 'config.reset', { key },
         () => reset(key));
@@ -533,6 +545,7 @@ export function createDaemonSystemRouteHandlers(
         // The manager owns the managed-policy lock and refuses a locked key here.
         context.configManager.reset(key);
       } catch (error: unknown) {
+        if (error instanceof RefusalError) return jsonErrorResponse(error, { status: error.refusal.status ?? 400 });
         return readJsonErrorResponse(error, { status: 400, fallbackMessage: 'Failed to reset config' });
       }
       const source = context.configManager.describeConfigKeySource?.(key);

@@ -10,7 +10,7 @@
  * provider/catalog sources or land on honest UNKNOWN, never $0.
  */
 
-import type { ConfigSetting } from './schema-types.js';
+import type { ConfigSettingRow } from './schema-types.js';
 import { validateManualModelPrices } from './manual-model-prices.js';
 
 export const pricingConfigDefaults = {
@@ -19,7 +19,7 @@ export const pricingConfigDefaults = {
   },
 };
 
-export const pricingConfigSettings: ConfigSetting[] = [
+export const pricingConfigSettings: ConfigSettingRow[] = [
   {
     key: 'pricing.modelPrices',
     type: 'object',

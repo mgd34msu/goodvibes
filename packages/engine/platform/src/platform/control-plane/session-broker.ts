@@ -65,6 +65,8 @@ import {
   moveSharedSessionInputOrKeep,
   filterSessionInputsSince,
   finalizeAgentSessionInputs,
+  markChannelReplyOwedInputs,
+  CHANNEL_REPLY_METADATA_KEY,
   retireAbandonedSurfaceInputs,
   refreshPendingInputCount,
   settleChannelReplyInputs,
@@ -189,6 +191,10 @@ export class SharedSessionBroker {
   private eventPublisher: SharedSessionEventPublisher | null = null;
   private continuationRunner: SharedSessionContinuationRunner | null = null;
   private surfaceReplyBinder: SharedSessionSurfaceReplyBinder | null = null;
+  /** Whether a channel send of this agent's answer is still to come; its completion then writes the rows `owed` in the same save. */
+  private channelReplyOwedProbe: ((agentId: string) => boolean) | null = null;
+  /** Completions being stored, by agent: a channel send of the answer waits for its save. */
+  private readonly completionsInFlight = new Map<string, Promise<unknown>>();
   /** Sender attribution and channel profiles for channel messages; set by host composition. */
   private channelIntake: ChannelIntake | null = null;
   private surfaceNoticeSender: ((routeId: string, text: string) => void) | null = null;
@@ -471,6 +477,16 @@ export class SharedSessionBroker {
    */
   setSurfaceReplyBinder(binder: SharedSessionSurfaceReplyBinder | null): void {
     this.surfaceReplyBinder = binder;
+  }
+
+  /**
+   * Install the question "will this agent's answer still be sent to a
+   * channel?": a completion stored while it says yes marks the channel rows
+   * `owed` in the same save, so the send that follows needs no write of its own
+   * before it starts (see markChannelReplyOwed).
+   */
+  setChannelReplyOwedProbe(probe: ((agentId: string) => boolean) | null): void {
+    this.channelReplyOwedProbe = probe;
   }
 
   /**
@@ -1001,6 +1017,21 @@ export class SharedSessionBroker {
     metadata: Record<string, unknown> = {},
     options: { readonly channelReplyOwed?: boolean } = {},
   ): Promise<SharedSessionCompletion | null> {
+    // Registered before the first await, so a channel send of this answer that
+    // starts while it is being stored waits for the save (markChannelReplyOwed).
+    const run = this.completeAgentNow(sessionId, agentId, body, metadata, options);
+    this.completionsInFlight.set(agentId, run);
+    try { return await run; }
+    finally { if (this.completionsInFlight.get(agentId) === run) this.completionsInFlight.delete(agentId); }
+  }
+
+  private async completeAgentNow(
+    sessionId: string,
+    agentId: string,
+    body: string,
+    metadata: Record<string, unknown>,
+    options: { readonly channelReplyOwed?: boolean },
+  ): Promise<SharedSessionCompletion | null> {
     await this.start();
     const session = this.sessions.get(sessionId);
     if (!session) return null;
@@ -1039,7 +1070,7 @@ export class SharedSessionBroker {
       agentId,
       metadata.status === 'failed' ? 'failed' : metadata.status === 'cancelled' ? 'cancelled' : 'completed',
       metadata.status === 'failed' ? body : undefined,
-      options,
+      { channelReplyOwed: options.channelReplyOwed ?? this.channelReplyOwedProbe?.(agentId) === true },
     );
     await this.persist();
     this.publishUpdate('session-agent-completed', {
@@ -1067,7 +1098,44 @@ export class SharedSessionBroker {
    */
   async settleChannelReply(sessionId: string, agentId: string): Promise<void> {
     await this.start();
+    await this.completionsInFlight.get(agentId)?.catch(() => undefined);
     if (settleChannelReplyInputs(this.sessionInputStore(), sessionId, agentId)) await this.persist();
+  }
+
+  /**
+   * Before an agent's answer is sent to its channel: the channel rows say
+   * `owed` on disk, so a daemon that dies while the send is in flight sends it
+   * again after its restart (listOwedChannelReplies). Waits for a completion
+   * of the same agent being stored now; writes only when a row was not
+   * already marked (a completion stored with the probe saying yes marked it).
+   */
+  async markChannelReplyOwed(sessionId: string, agentId: string): Promise<void> {
+    await this.start();
+    await this.completionsInFlight.get(agentId)?.catch(() => undefined);
+    if (markChannelReplyOwedInputs(this.sessionInputStore(), sessionId, agentId)) await this.persist();
+  }
+
+  /**
+   * Channel answers stored and owed but never marked sent: the daemon stopped
+   * while their send was in flight, or before it began. Read once at start-up
+   * from the sessions already in memory (every active session and every one
+   * with work owed); no session history is loaded for it. Each entry carries
+   * the stored answer, the newest message of that agent.
+   */
+  listOwedChannelReplies(): Array<{ readonly sessionId: string; readonly agentId: string; readonly routeId: string; readonly task: string; readonly body: string }> {
+    const owed: Array<{ sessionId: string; agentId: string; routeId: string; task: string; body: string }> = [];
+    for (const session of this.sessions.values()) {
+      if (session.routeIds.length === 0) continue;
+      const seen = new Set<string>();
+      for (const row of this.inputs.peek(session.id) ?? []) {
+        if (row.metadata?.[CHANNEL_REPLY_METADATA_KEY] !== 'owed' || !row.activeAgentId || !row.routeId || seen.has(row.activeAgentId)) continue;
+        seen.add(row.activeAgentId);
+        const answer = [...(this.messages.peek(session.id) ?? [])].reverse()
+          .find((message) => message.agentId === row.activeAgentId && (message.role === 'assistant' || message.role === 'system'));
+        owed.push({ sessionId: session.id, agentId: row.activeAgentId, routeId: row.routeId, task: row.body, body: answer?.body ?? '' });
+      }
+    }
+    return owed;
   }
 
   /**

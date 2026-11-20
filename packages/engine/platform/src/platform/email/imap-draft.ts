@@ -179,7 +179,7 @@ export async function selectDraftsMailboxFrames(lines: readonly (string | ImapFe
 // APPENDUID
 // ---------------------------------------------------------------------------
 
-const APPENDUID = /\[APPENDUID\s+\d+\s+(\d+)\]/i;
+const APPENDUID = /\[APPENDUID\s+(\d+)\s+(\d+)\]/i;
 
 /**
  * The UID the server assigned the appended message, when it advertises UIDPLUS
@@ -193,8 +193,19 @@ export function parseAppendUid(lines: readonly string[]): number | null {
   for (const line of lines) {
     const match = APPENDUID.exec(line);
     if (match === null) continue;
-    const uid = parseInt(match[1] ?? '', 10);
+    const uid = parseInt(match[2] ?? '', 10);
     if (isFinite(uid) && uid > 0) return uid;
+  }
+  return null;
+}
+
+/** The UIDVALIDITY half of an APPENDUID reply, or null when the server reported none. */
+export function parseAppendUidValidity(lines: readonly string[]): number | null {
+  for (const line of lines) {
+    const match = APPENDUID.exec(line);
+    if (match === null) continue;
+    const validity = parseInt(match[1] ?? '', 10);
+    if (isFinite(validity) && validity > 0) return validity;
   }
   return null;
 }

@@ -23,13 +23,12 @@ import { Readable } from 'node:stream';
 import { createReadStream, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { describeArtifactUpload, isArtifactUploadRequest, type ArtifactUploadDescription } from '@goodvibes-jev/engine/daemon-api/artifact-upload';
+import { isOperationKey, OPERATION_KEY_RULE } from '@goodvibes-jev/engine/errors';
 import type { ContractReplayKey } from '../types/foundation-contract.js';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
-/** The longest key a caller may send. */
-export const MAX_IDEMPOTENCY_KEY_LENGTH = 255;
 /** How long a key is remembered. */
 export const IDEMPOTENT_REPLAY_RETENTION_MS = 24 * 60 * 60_000;
 /** The answer kept for a replay is bounded; a larger answer is not kept and its repeat says so. */
@@ -42,7 +41,7 @@ const MAX_KEPT_BODY_BYTES = 256 * 1024;
 export const IDEMPOTENCY_KEY_REPLAY: ContractReplayKey = Object.freeze({
   in: 'header',
   name: 'Idempotency-Key',
-  behavior: 'Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.',
+  behavior: `Send a key (${OPERATION_KEY_RULE}) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as \`idempotencyKey\` beside \`body\`.`,
 });
 
 /** One request's answer, as the transport sends it. */
@@ -95,8 +94,8 @@ export class IdempotentReplayStore {
   static readKey(raw: unknown): string | ReplayableAnswer | undefined {
     if (raw === undefined || raw === null) return undefined;
     const key = typeof raw === 'string' ? raw.trim() : '';
-    if (!key || key.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
-      return refusal(400, 'INVALID_ARGUMENT', `Idempotency-Key must be 1 to ${MAX_IDEMPOTENCY_KEY_LENGTH} characters. Nothing was done.`, { field: 'Idempotency-Key' });
+    if (!isOperationKey(key)) {
+      return refusal(400, 'INVALID_ARGUMENT', `Idempotency-Key must be ${OPERATION_KEY_RULE}. Nothing was done.`, { field: 'Idempotency-Key' });
     }
     return key;
   }

@@ -7,7 +7,8 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { isDeepStrictEqual } from 'node:util';
 import { VERSION } from '../version.js';
-import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
+import { JudgmentAuthorityRetiredError, RefusalError } from '@goodvibes-jev/engine/errors';
+import { unboundCredentialDestinationRefusal } from './credential-destination-keys.js';
 import { decisionOrClassic, isClassicOperation, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { ProcessLockBusyError } from '../utils/process-lock.js';
@@ -855,6 +856,8 @@ export class ConfigManager {
       || requests.some(request => !knownKeys.has(request.key))) {
       throw new ConfigError('Invalid prepared settings plan.');
     }
+    this.#refuseUnboundDestination(requests.map(request => ({ key: request.key,
+      value: request.operation === 'reset' ? readDotPath(DEFAULT_CONFIG_SNAPSHOT, request.key).value : request.value })));
     if (requests.length === 1) return this.prepareSingleSettingMutation(requests[0]!);
     const projected = this.preparedProjection(requests.map(request => ({ key: request.key, value: this.preparedRequestedValue(request) })));
     const steps = Object.freeze(requests.map(request => this.prepareSingleSettingMutation(request, projected)));
@@ -1532,9 +1535,27 @@ export class ConfigManager {
     return facts.loosens(current, next) ? (facts.loosening ?? 'loosen security') : null;
   }
 
+  /**
+   * Refuses (CREDENTIAL_DESTINATION_UNBOUND) an update that moves where a
+   * configured credential is sent without stating that credential in the
+   * same update (credential-destination-keys.ts). `changes` holds each key
+   * with the value it will have afterwards.
+   */
+  #refuseUnboundDestination(changes: readonly { readonly key: string; readonly value: unknown }[]): void {
+    const refused = unboundCredentialDestinationRefusal(changes, key => readDotPath(this.#config, key).value);
+    if (refused) throw new RefusalError(refused, { category: 'config', source: 'config' });
+  }
+
+  /** Why {@link reset} of `key` would be refused for moving a credential's destination, or null: for a caller that asks before it acts. */
+  resetRefusal(key: string): Refusal | null {
+    return unboundCredentialDestinationRefusal([{ key, value: readDotPath(DEFAULT_CONFIG_SNAPSHOT, key).value }],
+      current => readDotPath(this.#config, current).value);
+  }
+
   /** Set a config value by dot-path key and auto-save to disk. */
   set<K extends ConfigKey>(key: K, value: ConfigValue<K>, options: ConfigSetOptions = {}): void {
     this.requireWritable();
+    this.#refuseUnboundDestination([{ key, value }]);
     this.invalidateLifetimes();
     if (this.hostSettings.has(key) && this.hostSettingHasProjectValue(key)) {
       (this.setProjectValue as (k: ConfigKey, v: unknown, o: ConfigSetOptions) => void)(key, value, options);
@@ -1640,8 +1661,10 @@ export class ConfigManager {
     // Choosing a mode retires the legacy auto-approve override in the same write.
     const batch: readonly ConfigChange[] = keys.has('permissions.mode') && !keys.has('behavior.autoApprove') && this.get('behavior.autoApprove')
       ? [{ key: 'behavior.autoApprove', value: false }, ...changes] : changes;
+    const unbound = unboundCredentialDestinationRefusal(batch, key => readDotPath(this.#config, key).value);
+    if (unbound) return { ok: false, saved: [], refusal: unbound };
 
-    const invalid = (key: string, detail: string): SetResult =>
+    const invalid =(key: string, detail: string): SetResult =>
       refuse({ code: 'CONFIG_INVALID', reason: `Invalid value for ${key} (${detail}).`, next: [`Check ${key} against the settings list and send a valid value.`], status: 400 });
     const admitted: AdmittedChange[] = [];
     const projected = structuredClone(this.#config) as unknown as Record<string, unknown>;
@@ -1786,6 +1809,7 @@ export class ConfigManager {
    */
   setProjectValue<K extends ConfigKey>(key: K, value: ConfigValue<K>, options: ConfigSetOptions = {}): void {
     this.requireWritable();
+    this.#refuseUnboundDestination([{ key, value }]);
     this.invalidateLifetimes();
     if (!this.projectConfigPath) {
       (this.set as (k: ConfigKey, v: unknown, o: ConfigSetOptions) => void)(key, value, options);
@@ -2468,6 +2492,8 @@ export class ConfigManager {
   /** Remove explicit preferences; full reset retains this frontend's defaults. Cross-tier disk writes are not transactional. */
   reset(key?: ConfigKey, options: ConfigSetOptions = {}): void {
     this.requireWritable();
+    // Resetting a destination moves it to the default destination: the same change as setting it there.
+    if (key !== undefined) this.#refuseUnboundDestination([{ key, value: readDotPath(DEFAULT_CONFIG_SNAPSHOT, key).value }]);
     const route = key !== undefined ? this.#routedDaemonWrite(key, options) : null;
     if (key !== undefined && route) {
       const lock = getManagedSettingLock(key, this.configDir);

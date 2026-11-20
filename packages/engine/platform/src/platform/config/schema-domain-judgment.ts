@@ -6,7 +6,7 @@
  */
 import { type ConfigSettingDefinition, intRange } from './schema-shared.js';
 import type { JudgmentSettings } from './schema-types-judgment.js';
-import type { ConfigSetting } from './schema-types.js';
+import type { ConfigSettingRow } from './schema-types.js';
 import { validJudgmentFallbackSettings, validJudgmentCredentialName } from './judgment-fallback-settings.js';
 import { DEFAULT_DECISION_DEADLINE_MS, MAX_DECISION_DEADLINE_MS, captureJudgmentBackendSettings, validEndpointURL } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentVolumeMonitorControl } from '../observe/judgment-volume-monitor.js';
@@ -30,7 +30,7 @@ function isEndpoint(value: unknown): boolean {
   return typeof value === 'string' && (value === '' || validEndpointURL(value));
 }
 
-export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[] = [
+export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSettingRow)[] = [
   {
     key: 'judgment.volumeMonitor', type: 'object', 
     description: 'Local decision call-volume alerts. Set enabled:true and budgets:[{name:"All decisions",maxLogicalDecisions:1000,maxWireAttempts:2000}]. Optional battery/site restrict each budget; windowMs defaults to one hour, intervalMs to one minute, limit to 10000 log entries. Alerts report usage without calling models or stopping work. Disabled settings retain the optional GOODVIBES_JUDGMENT_MONITOR file override.',
@@ -46,7 +46,7 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
   {
     key: 'judgment.endpoint',
     type: 'string',
-    description: 'Address of the decision model server the engine asks for judgments (a server that answers the decision API, POST /v1/systemone, as the hosted Jev does); empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model. Choose credential references explicitly when changing destinations; embedded credentials, query strings and fragments are refused',
+    description: 'Address of the decision model server the engine asks for judgments (a server that answers the decision API, POST /v1/systemone, as the hosted Jev does); empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model. While judgment.keySource is not none, change or reset it only together with judgment.keySource or judgment.keyName in one update (keep or clear the credential), or it is refused; embedded credentials, query strings and fragments are refused',
     validate: isEndpoint,
     validationHint: 'empty, or an http(s) URL without embedded credentials, query or fragment',
   },

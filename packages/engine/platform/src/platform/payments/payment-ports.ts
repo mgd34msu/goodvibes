@@ -35,6 +35,9 @@ export interface PurchaseLedger {
 }
 
 /** Delivering a prompt and hearing back, over channels that carry authority. */
+/** The refusal code of an owner answer to a purchase window that could not be read (never silence). */
+export const PAYMENT_ANSWER_UNREADABLE = 'PAYMENT_ANSWER_UNREADABLE';
+
 export interface PaymentNotifier {
   /** The native channel composition reserves reply reception before sending,
    * so an owner answering during delivery/journal I/O cannot fall through to
@@ -66,7 +69,9 @@ export interface PaymentNotifier {
    *
    * Resolves null on silence. The caller decides what silence MEANS, because
    * the two windows mean opposite things by it and a notifier that decided
-   * would be one place where they could be accidentally unified.
+   * would be one place where they could be accidentally unified. An answer
+   * that could not be read is never silence: it rejects with a RefusalError
+   * coded {@link PAYMENT_ANSWER_UNREADABLE}, and nothing is bought on it.
    */
   awaitAnswer(input: {
     /** The exact purchase whose persisted window is being answered. */

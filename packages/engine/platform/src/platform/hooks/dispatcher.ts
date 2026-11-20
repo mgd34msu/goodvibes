@@ -23,6 +23,7 @@ import { guardExecCommand } from '../tools/exec/ast-guard.js';
 import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
 import type { HookActionManagerLike } from '../workflow/hook-action-executor.js';
 import { summarizeError } from '../utils/error-display.js';
+import { requireStopped } from '../utils/owned-work.js';
 
 export type HookRunnerDeps = {
   readonly agentManager?: (Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'> & Partial<Pick<AgentManager, 'spawnOwned' | 'join'>>) | undefined;
@@ -186,15 +187,16 @@ export class HookDispatcher {
    * detaches the manager and kills that manager's actions still running; other
    * runtimes' actions are left alone.
    */
-  setHookActions(tm: HookActionManagerLike | null, featureFlags?: Pick<FeatureFlagManager, 'isEnabled'>): () => void {
+  setHookActions(tm: HookActionManagerLike | null, featureFlags?: Pick<FeatureFlagManager, 'isEnabled'>): () => Promise<void> {
     this.hookActions = tm;
     tm?.commands.setCommandGuard(async (command) => {
       const guard = await guardExecCommand(command, featureFlags ?? null);
       return guard.allowed ? undefined : (guard.denialMessage ?? 'Command refused by the command guard.');
     });
-    return () => {
+    // Resolves once the manager's running actions have exited; rejects naming any that could not be ended.
+    return async () => {
       if (this.hookActions === tm) this.hookActions = null;
-      tm?.commands.stop('hook-action');
+      if (tm) requireStopped('Hook actions', await tm.commands.stop('hook-action'));
     };
   }
 

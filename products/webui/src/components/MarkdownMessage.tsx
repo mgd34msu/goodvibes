@@ -107,8 +107,42 @@ function CodeBlock({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * The image a message may show inline: a `data:` or `blob:` image, or an
+ * artifact this daemon serves (same origin, under /api/artifacts/). Any other
+ * image URL in model or data-block text is never fetched on render: it would
+ * send a request (and whatever its URL carries) to a server the text chose.
+ */
+function inlineImageSource(src: unknown): string | null {
+  if (typeof src !== 'string' || src.trim() === '') return null;
+  const value = src.trim();
+  if (/^data:image\//i.test(value) || /^blob:/i.test(value)) return value;
+  try {
+    const url = new URL(value, window.location.href);
+    if (url.origin === window.location.origin && url.pathname.startsWith('/api/artifacts/')) return url.toString();
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function MarkdownImage({ src, alt, title }: { src?: string | undefined; alt?: string | undefined; title?: string | undefined }) {
+  const inline = inlineImageSource(src);
+  if (inline) return <img src={inline} alt={alt ?? ''} title={title} loading="lazy" />;
+  if (typeof src !== 'string' || src.trim() === '') return <>{alt ?? ''}</>;
+  // A remote image is a link the person can choose to open, never an automatic request.
+  return (
+    <a href={src} target="_blank" rel="noreferrer noopener" title={src}>
+      {alt ? `Image: ${alt}` : 'Image link'}
+    </a>
+  );
+}
+
 const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 const COMPONENTS: Components = {
+  img: ({ src, alt, title }) => (
+    <MarkdownImage src={typeof src === 'string' ? src : undefined} alt={alt} title={title} />
+  ),
   a: ({ children, node: _node, ...props }) => (
     <a {...props} target="_blank" rel="noreferrer">
       {children}

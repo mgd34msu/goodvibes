@@ -49,7 +49,7 @@ import type {
 export type ConversationRewindRequestKind = 'preview' | 'rewind' | 'undo';
 
 /** Why a host could not undo a rewind, when it is a reason the caller can act on. */
-export type ConversationUndoRefusalCode = 'UNDO_POINT_GONE' | 'CONVERSATION_CHANGED';
+export type ConversationUndoRefusalCode = 'UNDO_POINT_GONE' | 'CONVERSATION_CHANGED' | 'TARGET_CHANGED';
 
 /** A surface's live claim on one session's conversation. */
 export interface ConversationRewindHost {
@@ -75,7 +75,7 @@ export interface ConversationRewindRequest {
 
 /** What a host answers with. */
 export type ConversationRewindAnswer =
-  | { readonly kind: 'preview'; readonly messagesToDrop: number; readonly messagesRemaining: number }
+  | { readonly kind: 'preview'; readonly messagesToDrop: number; readonly messagesRemaining: number; readonly revision?: string | undefined }
   | { readonly kind: 'rewind'; readonly droppedMessages: number; readonly undoSnapshotId: string; readonly undoExpiresAfter?: string | undefined }
   | { readonly kind: 'undone' }
   | { readonly kind: 'unavailable'; readonly reason: string; readonly code?: ConversationUndoRefusalCode | undefined };
@@ -420,7 +420,8 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
     }
     const answer = await this.ask(host, anchor.sessionId, anchor.turnId ?? null, 'preview');
     if (answer.kind === 'preview') {
-      return { messagesToDrop: answer.messagesToDrop, messagesRemaining: answer.messagesRemaining };
+      return { messagesToDrop: answer.messagesToDrop, messagesRemaining: answer.messagesRemaining,
+        ...(answer.revision ? { revision: answer.revision } : {}) };
     }
     return {
       messagesToDrop: 0,

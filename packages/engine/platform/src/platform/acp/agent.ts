@@ -67,6 +67,7 @@ import type { PermissionPromptDecision, PermissionPromptRequest, PermissionReque
 import type { McpServerConfig } from '../mcp/config.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { OwnedScope } from '../utils/owned-work.js';
 
 /** Factory seam for the embedded-session substrate (tests inject fakes). */
 export type EmbeddedSessionFactory = (options: {
@@ -229,6 +230,8 @@ export function mapPermissionOutcome(
  */
 export class GoodVibesAcpAgent implements Agent {
   private readonly sessions = new Map<string, AcpSessionState>();
+  /** Owns each session still being opened: one that lands after dispose() is stopped, never added. */
+  readonly #opening = new OwnedScope('ACP agent sessions');
 
   constructor(
     private readonly conn: Pick<AgentSideConnection, 'sessionUpdate' | 'requestPermission'>,
@@ -279,25 +282,22 @@ export class GoodVibesAcpAgent implements Agent {
           requestPermission,
           ...(servers && servers.length > 0 ? { mcpServers: servers } : {}),
         }));
-    const embedded = await factory({
-      workspace: cwd,
-      requestPermission: (request) => this.bridgePermission(acpSessionId, request),
-      ...(mcpServers.length > 0 ? { mcpServers } : {}),
-    });
-    try {
-      const shared = await embedded.sessions.createSession({ project: cwd, title: `ACP session ${acpSessionId}` });
-      this.sessions.set(acpSessionId, {
-        cwd,
-        embedded,
-        sharedSessionId: shared.id,
-        agentIds: new Set(),
-        activePrompt: null,
-        cancelled: false,
+    const state = await this.#opening.opening(`ACP session ${acpSessionId}`, async (signal): Promise<AcpSessionState> => {
+      const embedded = await factory({
+        workspace: cwd,
+        requestPermission: (request) => this.bridgePermission(acpSessionId, request),
+        ...(mcpServers.length > 0 ? { mcpServers } : {}),
       });
-    } catch (error) {
-      await this.stopEmbedded(cwd, embedded);
-      throw error;
-    }
+      try {
+        signal.throwIfAborted();
+        const shared = await embedded.sessions.createSession({ project: cwd, title: `ACP session ${acpSessionId}` });
+        return { cwd, embedded, sharedSessionId: shared.id, agentIds: new Set(), activePrompt: null, cancelled: false };
+      } catch (error) {
+        await this.stopEmbedded(cwd, embedded);
+        throw error;
+      }
+    }, opened => this.stopEmbedded(opened.cwd, opened.embedded));
+    this.sessions.set(acpSessionId, state);
     return { sessionId: acpSessionId };
   }
 
@@ -427,6 +427,9 @@ export class GoodVibesAcpAgent implements Agent {
 
   /** Tear down every embedded session (used by serveAcpAgent on stream end); the daemon stops with the last. */
   async dispose(): Promise<void> {
+    // Opens still in flight are stopped as they land (bounded); one that never lands is named.
+    const report = await this.#opening.close('the ACP connection ended');
+    if (report.stillRunning.length > 0) logger.warn('ACP sessions were still opening when the connection ended', { stillRunning: report.stillRunning.map(entry => entry.label) });
     const states = [...this.sessions.values()];
     this.sessions.clear();
     await Promise.allSettled(states.map((state) => state.embedded.stop()));

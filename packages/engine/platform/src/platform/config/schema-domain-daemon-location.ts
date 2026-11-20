@@ -11,10 +11,10 @@
  * phone's GPS permission, neither of which says where the daemon is. A daily
  * budget cannot be built without that answer.
  */
-import type { ConfigSetting } from './schema-types.js';
+import type { ConfigSettingRow } from './schema-types.js';
 import { isValidTimezone } from '../utils/timezone.js';
 
-export const daemonLocationConfigSettings: ConfigSetting[] = [
+export const daemonLocationConfigSettings: ConfigSettingRow[] = [
   {
     key: 'daemon.timezone',
     type: 'string',

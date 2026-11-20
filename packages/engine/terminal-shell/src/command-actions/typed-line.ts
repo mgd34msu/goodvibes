@@ -20,6 +20,7 @@ import {
   type CommandShape,
   type FixedChoice,
   type InputDescription,
+  type ListChoices,
 } from './types.js';
 
 export type ParsedLine =
@@ -50,6 +51,11 @@ export function withImplied(action: Pick<ActionShape, 'inputs'>, values: ActionV
     }
   }
   return out;
+}
+
+/** The live list an input chooses from, or undefined when it has fixed choices or none. */
+export function listChoices(input: InputDescription): ListChoices | undefined {
+  return input.choices !== undefined && !Array.isArray(input.choices) ? (input.choices as ListChoices) : undefined;
 }
 
 /** Whether an input is asked with these values (one shown only when another holds a value). */

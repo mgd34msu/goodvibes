@@ -109,16 +109,18 @@ function readAnswer(
   // says so, and saying so is more useful than any number it could invent.
   const unavailableReason = typeof params.unavailableReason === 'string' ? params.unavailableReason.trim() : '';
   if (unavailableReason) {
-    const code = kind === 'undo' && (params.unavailableCode === 'UNDO_POINT_GONE' || params.unavailableCode === 'CONVERSATION_CHANGED')
+    const code = kind === 'undo' && (params.unavailableCode === 'UNDO_POINT_GONE' || params.unavailableCode === 'CONVERSATION_CHANGED' || params.unavailableCode === 'TARGET_CHANGED')
       ? params.unavailableCode : undefined;
     return { kind: 'unavailable', reason: unavailableReason, ...(code ? { code } : {}) };
   }
 
   if (kind === 'preview') {
+    const revision = typeof params.revision === 'string' ? params.revision.trim() : '';
     return {
       kind: 'preview',
       messagesToDrop: requireCount(params.messagesToDrop, 'messagesToDrop'),
       messagesRemaining: requireCount(params.messagesRemaining, 'messagesRemaining'),
+      ...(revision ? { revision } : {}),
     };
   }
   if (kind === 'undo') {

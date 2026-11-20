@@ -6,8 +6,6 @@
  */
 export { UnifiedRewindService, RewindTokenError, REWIND_CONFIRM_OPTIONS } from './service.js';
 export type { UnifiedRewindServiceDeps, RewindApplyOptions } from './service.js';
-export { RewindTokenStore, rewindFingerprint, REWIND_TOKEN_TTL_MS } from './tokens.js';
-export type { IssuedRewindToken } from './tokens.js';
 export {
   ConversationRewindHostBroker,
   ConversationRewindHostError,

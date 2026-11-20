@@ -42,6 +42,37 @@ export interface OwnedScopeOptions {
   readonly now?: (() => number) | undefined;
 }
 
+/** An empty report: nothing was running. */
+export const NOTHING_RUNNING: CloseReport = Object.freeze({ stopped: Object.freeze([]), killed: Object.freeze([]), stillRunning: Object.freeze([]) });
+
+/** One report for several closes (a service that closes a scope per run or per child). */
+export function mergeCloseReports(reports: readonly CloseReport[]): CloseReport {
+  if (reports.length === 1) return reports[0]!;
+  return Object.freeze({
+    stopped: Object.freeze(reports.flatMap(report => report.stopped)),
+    killed: Object.freeze(reports.flatMap(report => report.killed)),
+    stillRunning: Object.freeze(reports.flatMap(report => report.stillRunning)),
+  });
+}
+
+/** A stop that could not confirm everything ended. Its message names each label (and pid) still running. */
+export class StillRunningError extends Error {
+  readonly code = 'STILL_RUNNING';
+  readonly report: CloseReport;
+  constructor(owner: string, report: CloseReport) {
+    const names = report.stillRunning.map(entry => entry.pid !== undefined ? `${entry.label} (pid ${entry.pid})` : entry.label);
+    super(`${owner} stopped, but ${names.length === 1 ? 'this is' : 'these are'} still running: ${names.join(', ')}.`);
+    this.name = 'StillRunningError';
+    this.report = report;
+  }
+}
+
+/** Returns the report when everything ended; throws {@link StillRunningError} naming what did not. For teardown callbacks, whose failure the disposal scope records. */
+export function requireStopped(owner: string, report: CloseReport): CloseReport {
+  if (report.stillRunning.length > 0) throw new StillRunningError(owner, report);
+  return report;
+}
+
 interface Owned {
   readonly label: string;
   readonly settled: Promise<void>;

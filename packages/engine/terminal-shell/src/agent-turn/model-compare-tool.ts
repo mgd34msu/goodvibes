@@ -11,7 +11,7 @@ import { createComparisonOperation } from './model-compare-operation.js';
 import { createZipArchive } from './artifact-archive.js';
 import type { AgentModelCompareToolArgs, AgentModelCompareToolDeps, CompareCandidateResult, LoadedComparisonJudgment, SavedComparisonArtifact, StoredComparison } from './model-compare-types.js';
 import { BLIND_LABELS, DEFAULT_CANDIDATE_COUNT, DEFAULT_MAX_TOKENS, DEFAULT_SIDE_BY_SIDE_PREVIEW_BYTES, MAX_SIDE_BY_SIDE_PREVIEW_BYTES, MIN_CANDIDATES, MODE_ANALYTICS, MODE_APPLY, MODE_EXPORT, MODE_HANDOFF, MODE_HANDOFF_ARCHIVE, MODE_HANDOFF_DIFF, MODE_JUDGE, MODE_REVEAL, MODE_REVIEW, MODE_ROUTE_DECISION, MODE_RUN, MODE_SIDE_BY_SIDE, MODE_SYNTHESIS } from './model-compare-types.js';
-import { buildRunPromptFromArtifact, formatPreview, formatReveal, formatReview, formatRunResult, formatSavedComparisonArtifacts, formatSavedHandoffArtifacts, loadComparisonFromArtifact, parseMode, rememberComparison, resolveComparisonForRead, resolveCurrentModel, runCandidate, saveComparisonArtifact, selectComparisonModels } from './model-compare-run.js';
+import { benchmarkRouteConstraint, buildRunPromptFromArtifact, isLocalCompareModel, formatPreview, formatReveal, formatReview, formatRunResult, formatSavedComparisonArtifacts, formatSavedHandoffArtifacts, loadComparisonFromArtifact, parseMode, rememberComparison, resolveComparisonForRead, resolveCurrentModel, runCandidate, saveComparisonArtifact, selectComparisonModels } from './model-compare-run.js';
 import { ensureSelectableWinnerModel, findCandidate, formatApplyPreview, formatApplyResult, formatComparisonAnalytics, formatComparisonSynthesis, formatJudgePreview, formatJudgmentResult, formatRouteDecisionPreview, formatRouteDecisionResult, loadJudgmentFromArtifact, loadSavedJudgments, parseRouteDecision, unreadableJudgmentsNote, readComparisonAnalyticsFilters, saveComparisonJudgmentArtifact, saveRouteDecisionArtifact } from './model-compare-judgment.js';
 import { comparisonExportMarkdown, comparisonHandoffMarkdown, formatSideBySideReview, judgmentExportMarkdown, loadHandoffRelatedArtifacts, saveComparisonExportArtifact, saveComparisonHandoffArtifact } from './model-compare-export.js';
 import { buildComparisonHandoffArchivePayload, findRouteDecisionArtifactIdsForHandoff, formatExportPreview, formatExportResult, formatHandoffArchivePreview, formatHandoffArchiveResult, formatHandoffDiff, formatHandoffPreview, formatHandoffResult, loadHandoffArchiveArtifacts, loadHandoffDiffArtifact, loadHandoffFromArtifact, saveComparisonHandoffArchiveArtifact } from './model-compare-handoff.js';
@@ -88,7 +88,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           },
           reveal: {
             type: 'boolean',
-            description: 'For run, review and side-by-side: include model identities with the outputs. For judge: also write the winner model into the judgment. apply and routeDecision read the winner model from the judged comparison either way, so a blind judgment can be applied; a judgment of a comparison that was not saved needs reveal:true to be applied.',
+            description: 'For run, review, side-by-side, export and handoff: include model identities (and a judged winner model) in this output; without it none is printed, even when the judgment stored one. For judge: also write the winner model into the judgment. apply and routeDecision read the winner model from the judged comparison either way, so a blind judgment can be applied; a judgment of a comparison that was not saved needs reveal:true to be applied.',
           },
           saveArtifact: {
             type: 'boolean',
@@ -96,7 +96,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           },
           benchmarkKind: {
             type: 'string',
-            description: 'Optional benchmark tag for saved comparisons or analytics filters.',
+            description: 'Optional benchmark tag for saved comparisons or analytics filters. A tag beginning with "local" (local-model-route) makes a blank modelRefs list fill from local routes only, and refuses with fewer than two; name a remote baseline in modelRefs to include one.',
           },
           taskType: {
             type: 'string',
@@ -244,7 +244,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
             sourceArtifactId: artifactId,
             comparisonId: judgment.comparisonId,
             judgment,
-            reveal: judgment.revealIncludedInJudgment,
+            reveal: readFlag(args.reveal, 'reveal', false) && judgment.revealIncludedInJudgment,
             relatedArtifacts,
             previewBytes,
           }));
@@ -472,7 +472,8 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
 
           const judgment = await loadJudgmentFromArtifact(deps.artifactStore, artifactId);
           if (!judgment) return failure('Unknown comparison or judgment artifact. Pass a saved blind model comparison artifactId.');
-          const reveal = judgment.revealIncludedInJudgment;
+          // This output reveals the winner model only when the request asks and the judgment stored one.
+          const reveal = readFlag(args.reveal, 'reveal', false) && judgment.revealIncludedInJudgment;
           if (!assertCurrentToolEffect(rawArgs, options, 'write')) {
             return failure([
               formatExportPreview({
@@ -490,7 +491,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
             sourceArtifactId: artifactId,
             sourceKind: 'judgment',
             comparisonId: judgment.comparisonId,
-            markdown: judgmentExportMarkdown(judgment),
+            markdown: judgmentExportMarkdown(judgment, reveal),
             reveal,
           });
           return output(formatExportResult({
@@ -556,7 +557,8 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
 
           const judgment = await loadJudgmentFromArtifact(deps.artifactStore, artifactId);
           if (!judgment) return failure('Unknown comparison or judgment artifact. Pass a saved blind model comparison artifactId.');
-          const reveal = judgment.revealIncludedInJudgment;
+          // This output reveals the winner model only when the request asks and the judgment stored one.
+          const reveal = readFlag(args.reveal, 'reveal', false) && judgment.revealIncludedInJudgment;
           if (!assertCurrentToolEffect(rawArgs, options, 'write')) {
             return failure([
               formatHandoffPreview({
@@ -581,7 +583,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
               sourceKind: 'judgment',
               sourceArtifactId: artifactId,
               comparisonId: judgment.comparisonId,
-              comparisonMarkdown: judgmentExportMarkdown(judgment),
+              comparisonMarkdown: judgmentExportMarkdown(judgment, reveal),
               reveal,
               relatedArtifacts,
             }),
@@ -663,7 +665,8 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
 
         const maxTokens = Math.max(0, Math.trunc(readNumber(args.maxTokens, DEFAULT_MAX_TOKENS)));
         const systemPrompt = readString(args.systemPrompt);
-        const models = await selectComparisonModels(deps.modelCatalog, refs, candidateCount, sourceDeps.random);
+        const models = await selectComparisonModels(deps.modelCatalog, refs, candidateCount, sourceDeps.random,
+          { constraint: benchmarkRouteConstraint(benchmarkKind), isLocal: (model) => isLocalCompareModel(deps.providerRegistry, model) });
         if (models.length > BLIND_LABELS.length) return failure(`Compare at most ${BLIND_LABELS.length} models at a time; ${models.length} were requested.`);
         operation.assertSend();
         // Every candidate sends the same text, so it is screened once here and each candidate is cleared against that screening.

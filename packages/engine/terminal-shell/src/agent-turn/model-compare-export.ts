@@ -52,14 +52,16 @@ export function comparisonExportMarkdown(comparison: StoredComparison, reveal: b
   return lines.join('\n');
 }
 
-export function judgmentExportMarkdown(judgment: LoadedComparisonJudgment): string {
+/** A judgment as markdown; the winner model is written only when this output may reveal (`reveal`) and the judgment stored one. */
+export function judgmentExportMarkdown(judgment: LoadedComparisonJudgment, reveal: boolean): string {
+  const winnerModel = reveal ? judgment.winnerModel : undefined;
   const lines = [
     '# Blind Model Comparison Judgment',
     '',
     `Judgment: ${judgment.judgmentId}`,
     `Comparison: ${judgment.comparisonId}`,
     `Winner: Candidate ${judgment.winnerBlindId}`,
-    ...(judgment.winnerModel ? [`Winner model: ${judgment.winnerModel.registryKey} (${judgment.winnerModel.displayName})`] : ['Winner model: (not revealed in judgment)']),
+    ...(winnerModel ? [`Winner model: ${winnerModel.registryKey} (${winnerModel.displayName})`] : [`Winner model: (not revealed ${judgment.winnerModel ? 'in this output' : 'in judgment'})`]),
     '',
     '## Reasons',
     '',
@@ -75,7 +77,7 @@ export function judgmentExportMarkdown(judgment: LoadedComparisonJudgment): stri
   lines.push('## Route Update');
   lines.push('');
   // apply reads the winner model from the judged comparison, so a blind judgment applies as it is.
-  lines.push(`Confirmed apply route: agent_model_compare mode:"apply" artifactId:"${judgment.artifact.artifactId}"${judgment.winnerModel ? '' : ' (the winner model is read from the judged comparison)'}`);
+  lines.push(`Confirmed apply route: agent_model_compare mode:"apply" artifactId:"${judgment.artifact.artifactId}"${winnerModel ? '' : ' (the winner model is read from the judged comparison)'}`);
   lines.push('');
   return lines.join('\n');
 }
@@ -219,7 +221,7 @@ export function formatComparisonEvidencePane(input: {
       `  judgment ${judgment.judgmentId}`,
       `  comparison ${judgment.comparisonId}`,
       `  winner Candidate ${judgment.winnerBlindId}`,
-      `  winner model ${judgment.winnerModel ? `${judgment.winnerModel.registryKey} (${judgment.winnerModel.displayName})` : '(not revealed)'}`,
+      `  winner model ${input.reveal && judgment.winnerModel ? `${judgment.winnerModel.registryKey} (${judgment.winnerModel.displayName})` : '(not revealed)'}`,
       ...(judgment.benchmarkKind ? [`  benchmark ${judgment.benchmarkKind}`] : []),
       ...(judgment.taskType ? [`  task type ${judgment.taskType}`] : []),
       ...(judgment.documentId ? [`  document ${judgment.documentId}`] : []),

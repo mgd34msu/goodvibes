@@ -44,7 +44,20 @@ export class SessionManager {
     input: GoodVibesLoginInput,
     options: GoodVibesAuthLoginOptions = {},
   ): Promise<GoodVibesLoginOutput> {
+    return (await this.loginReporting(input, options)).result;
+  }
+
+  /**
+   * {@link login}, also saying whether the token was stored: `persisted` is
+   * true only when it was written to the token store, so an observer never
+   * reads a login that stored nothing as a stored token.
+   */
+  async loginReporting(
+    input: GoodVibesLoginInput,
+    options: GoodVibesAuthLoginOptions = {},
+  ): Promise<{ readonly result: GoodVibesLoginOutput; readonly persisted: boolean }> {
     const result = await this.#operator.control.auth.login(input);
+    let persisted = false;
     if ((options.persistToken ?? true) && this.#tokenStore) {
       // Prefer setTokenEntry to persist expiry alongside the token.
       if (result.expiresAt) {
@@ -52,13 +65,14 @@ export class SessionManager {
       } else {
         await this.#tokenStore.setToken(result.token);
       }
+      persisted = true;
     }
     // Note: observer notification is intentionally NOT emitted here. The
     // `createGoodVibesAuthClient` facade in `../auth.ts` owns the observer
     // wiring with full priorToken awareness (anonymous→token vs token→token);
     // emitting here would produce duplicate transitions. The `#observer` field
     // is retained for future use cases that bypass the facade.
-    return result;
+    return { result, persisted };
   }
 
   /**

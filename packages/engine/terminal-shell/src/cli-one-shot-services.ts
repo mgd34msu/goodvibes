@@ -32,6 +32,7 @@ import {
 import type { ProviderCatalogOptions, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 
 type ProviderStackServices = ReturnType<typeof createProviderStack>;
 
@@ -40,6 +41,14 @@ export interface OneShotRuntime {
   readonly configManager: ConfigManager;
   readonly workingDirectory: string;
   readonly homeDirectory: string;
+  /** The parsed command line, when the command has one: a refusal prints as JSON under `--output json`. */
+  readonly cli?: { readonly flags: { readonly outputFormat?: string | undefined } } | undefined;
+}
+
+function isCliCommandOutput(value: unknown): value is { readonly output: string; readonly exitCode: number } {
+  return typeof value === 'object' && value !== null
+    && typeof (value as { readonly output?: unknown }).output === 'string'
+    && typeof (value as { readonly exitCode?: unknown }).exitCode === 'number';
 }
 
 export interface OneShotProviderServices {
@@ -159,11 +168,28 @@ export function createOneShotServices(
         benchmarkStore: stack.benchmarkStore,
       });
       // A daemon setting the command changed went to the daemon; wait for its
-      // answer before this process exits, and say which ones it refused.
-      for (const refused of await configManager.settleDaemonWrites()) {
-        process.stderr.write(`The daemon refused ${refused.key}; it was not changed: ${summarizeError(refused.error)}\n`);
+      // answer before this process exits. A refused write is the command's
+      // result: it exits 1 naming each refused key, never with the success text.
+      const refused = await configManager.settleDaemonWrites();
+      if (refused.length === 0) return result;
+      const reasons = refused.map((entry) => ({ key: entry.key, reason: summarizeError(entry.error) }));
+      const error = `The daemon refused ${reasons.map((entry) => entry.key).join(', ')}; ${refused.length === 1 ? 'it was' : 'they were'} not changed.`;
+      if (isCliCommandOutput(result)) {
+        const json = runtime.cli?.flags.outputFormat === 'json';
+        return {
+          ...result,
+          output: json
+            ? JSON.stringify({ ok: false, kind: 'daemon_refused', error, refused: reasons }, null, 2)
+            : [error, ...reasons.map((entry) => `  ${entry.key}: ${entry.reason}`)].join('\n'),
+          exitCode: 1,
+        };
       }
-      return result;
+      throw new RefusalError(refusal({
+        code: 'DAEMON_REFUSED_SETTING',
+        state: 'not changed',
+        reason: `${error} ${reasons.map((entry) => `${entry.key}: ${entry.reason}`).join('; ')}`,
+        next: ['Read the reason, then run the command again once the daemon accepts the setting.'],
+      }));
     } finally {
       await stack?.providerRegistry.closeWatching().catch(() => undefined);
       await scope.close();

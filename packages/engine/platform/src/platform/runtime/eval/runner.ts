@@ -78,11 +78,14 @@ export class EvalRunner {
    * Compare a fresh suite result against a stored baseline and enforce the
    * absolute per-dimension floors.
    *
-   * The gate fails when EITHER of these holds for any scenario:
-   *   1. The scenario is below its absolute floor (`scorecard.passed === false`)
-   *     , checked for every fresh scenario, independently of the baseline.
-   *   2. The scenario regressed more than `regressionThreshold` points versus
+   * The gate fails when any of these holds:
+   *   1. A scenario is below its absolute floor (`scorecard.passed === false`,
+   *      or a score that is not a finite number), checked for every fresh
+   *      scenario, independently of the baseline.
+   *   2. A scenario regressed more than `regressionThreshold` points versus
    *      its baseline score.
+   *   3. A scenario the baseline holds is missing from the run (`missingFromRun`).
+   *   4. The run has no results at all.
    *
    * Scenarios present in the fresh run but absent from the baseline are NOT
    * silently skipped: they are still floor-checked (rule 1) and surfaced in
@@ -104,7 +107,8 @@ export class EvalRunner {
 
     for (const result of fresh.results) {
       const freshScore = result.scorecard.compositeScore;
-      const floorPassed = result.scorecard.passed;
+      // A score that is not a number cannot clear a floor.
+      const floorPassed = result.scorecard.passed && Number.isFinite(freshScore);
 
       // Rule 1, absolute floor, enforced regardless of baseline presence.
       if (!floorPassed) {
@@ -141,7 +145,10 @@ export class EvalRunner {
 
     return {
       suite: fresh.suite,
-      passed: regressions.length === 0 && floorFailures.length === 0,
+      // A run with no results, or one that left out a scenario the baseline
+      // holds, did not show that nothing regressed: it does not pass.
+      passed: regressions.length === 0 && floorFailures.length === 0
+        && missingFromRun.length === 0 && fresh.results.length > 0,
       regressionThreshold: this.regressionThreshold,
       fresh,
       baseline,

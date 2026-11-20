@@ -2,6 +2,7 @@ import { logger } from '../../utils/logger.js';
 import type { JsonRpcRequest, JsonRpcResponse, JsonRpcNotification, Diagnostic } from './protocol.js';
 import type { LspCapabilities } from './capabilities.js';
 import { summarizeError } from '../../utils/error-display.js';
+import type { ChildHandle } from '../../utils/owned-work.js';
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -254,6 +255,12 @@ export class LspClient {
     const out = new Map<string, readonly Diagnostic[]>();
     for (const [uri, entry] of this.published) out.set(uri, entry.diagnostics);
     return out;
+  }
+
+  /** The server process, for an owner that must see it exit (null before start or after stop). */
+  get child(): ChildHandle | null {
+    const proc = this.proc;
+    return proc ? { pid: proc.pid, kill: signal => proc.kill(signal), exited: proc.exited } : null;
   }
 
   /** Is the server running? */

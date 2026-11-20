@@ -104,6 +104,8 @@ export interface ConversationRewindHostOptions {
   readonly port: RewindConversationPort & {
     restoreBefore?(undoSnapshotId: string): boolean;
     messagesSinceRewind?(undoSnapshotId: string): number | null;
+    /** The session a rewind's undo snapshot was taken of; an undo asked for another session is refused. */
+    snapshotSession?(undoSnapshotId: string): string | null;
   };
   /** Whether this process is actually holding that session's conversation. */
   readonly hosts: (sessionId: string) => boolean;
@@ -242,7 +244,8 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
       const preview = await options.port.preview(anchor);
       if (!isCurrent(offer)) return undefined;
       if (preview.available === false) return unavailable(preview.unavailableReason);
-      return { messagesToDrop: preview.messagesToDrop, messagesRemaining: preview.messagesRemaining };
+      return { messagesToDrop: preview.messagesToDrop, messagesRemaining: preview.messagesRemaining,
+        ...(preview.revision ? { revision: preview.revision } : {}) };
     }
     const outcome = await options.port.rewind(anchor);
     if (outcome.available === false) return isCurrent(offer) ? unavailable(outcome.unavailableReason) : undefined;
@@ -264,6 +267,10 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
       return { unavailableReason: 'this surface keeps no undo snapshots for its conversation' };
     }
     const since = id ? port.messagesSinceRewind(id) : null;
+    const owner = since === null ? null : port.snapshotSession?.(id) ?? null;
+    if (owner !== null && owner !== request.sessionId) {
+      return { unavailableReason: `undo snapshot ${id} is of session ${owner}, not ${request.sessionId}; nothing was changed`, unavailableCode: 'TARGET_CHANGED' };
+    }
     if (since === null) {
       return { unavailableReason: 'the undo snapshot is gone from this surface (only the newest 32 rewinds keep one)', unavailableCode: 'UNDO_POINT_GONE' };
     }

@@ -21,6 +21,7 @@ import { GoodVibesError, structuredTransience } from '@goodvibes-jev/engine/erro
 import type { GoodVibesTokenStore } from './types.js';
 import type { PlatformObserver } from '../observer/index.js';
 import { invokeObserver } from '../observer/index.js';
+import { sha256Base64Url } from '../platform/utils/sha256.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -140,6 +141,15 @@ export class AutoRefreshCoordinator {
 
   readonly #now: () => number;
 
+  /**
+   * The sign-in each token belongs to, by token fingerprint: a token this
+   * coordinator obtained by refreshing another belongs to that token's
+   * sign-in; any other token (a new login, a token stored from outside) is a
+   * sign-in of its own. A request refused with 401 is repeated only under a
+   * token of the sign-in it was sent with, never under someone's newer login.
+   */
+  readonly #signIns = new Map<string, string>();
+
   constructor(options: AutoRefreshCoordinatorOptions) {
     this.#tokenStore = options.tokenStore;
     this.#autoRefresh = options.autoRefresh;
@@ -234,6 +244,7 @@ export class AutoRefreshCoordinator {
           await this.#tokenStore.setToken(token);
         }
         this.#sessionCleared = false;
+        if (typeof startedFrom === 'string' && startedFrom) this.#recordRefresh(startedFrom, token);
         invokeObserver(() =>
           this.#observer?.onAuthTransition?.({
             from: 'token',
@@ -353,6 +364,37 @@ export class AutoRefreshCoordinator {
     }
   }
 
+  /** The sign-in `token` belongs to: its own fingerprint, or the sign-in of the token it was refreshed from. */
+  #signInOf(token: string): string {
+    const fingerprint = sha256Base64Url(token).slice(0, 12);
+    return this.#signIns.get(fingerprint) ?? fingerprint;
+  }
+
+  #recordRefresh(from: string, to: string): void {
+    const signIn = this.#signInOf(from);
+    // A few dozen refreshes a day at most; the oldest entries are dropped past 64.
+    if (this.#signIns.size >= 64) this.#signIns.delete(this.#signIns.keys().next().value!);
+    this.#signIns.set(sha256Base64Url(to).slice(0, 12), signIn);
+  }
+
+  /**
+   * Refuses to repeat a request sent with `usedToken` when the store now holds
+   * a token of another sign-in (someone logged in since): the request was
+   * refused as the old account and is never replayed as the new one.
+   */
+  async #assertSameSignIn(usedToken: string | null | undefined): Promise<void> {
+    if (!usedToken) return;
+    let current: string | null;
+    try { current = await this.#tokenStore.getToken(); } catch { return; }
+    if (current === null || current === usedToken || this.#signInOf(current) === this.#signInOf(usedToken)) return;
+    const error = new GoodVibesError(
+      'Authentication failed · Signed in as someone else since this request was sent, so it was not repeated under the new sign-in · Send it again if it is meant for the account now signed in.',
+      { code: 'AUTH_REQUIRED', category: 'authentication', source: 'transport', status: 401, recoverable: false },
+    );
+    invokeObserver(() => this.#observer?.onError?.(error));
+    throw error;
+  }
+
   // ---------------------------------------------------------------------------
   // Reactive 401 retry wrapper
   // ---------------------------------------------------------------------------
@@ -382,6 +424,7 @@ export class AutoRefreshCoordinator {
       if (!await this.#usedTokenIsStale(usedToken)) {
         await this.#doRefresh();
       }
+      await this.#assertSameSignIn(usedToken);
 
       // Retry once.
       try {
@@ -438,6 +481,7 @@ export class AutoRefreshCoordinator {
     if (!await this.#usedTokenIsStale(usedToken)) {
       await this.#doRefresh();
     }
+    await this.#assertSameSignIn(usedToken);
     // Single retry attempt.
     try {
       return await fn();

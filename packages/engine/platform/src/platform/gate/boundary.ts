@@ -117,10 +117,22 @@ const APPROVAL_FIX = 'The owner can approve this exact call in the prompt the ga
 /** The outward-effect check: the ledger's record, then Jev's reading of derivation. */
 async function outwardCheck(input: BoundaryInput, content: Record<string, string>): Promise<BoundaryCheck & { approvable: boolean; reason?: string }> {
   const ledger = input.ledger ?? getProcessUntrustedContentLedger();
-  const origins = ledger.originsThisTurn();
-  if (origins.length === 0) return { check: 'outward-effect', result: 'pass', detail: 'nothing untrusted read this turn', approvable: false };
+  const originsRead = ledger.taintOriginsThisTurn();
   const action = `tool:${input.toolName}`;
   const cleared = (): boolean => checkOwnerApproval({ approval: input.approval, action, contentInQuestion: content, clearingContentTaint: true }).authorized;
+  if (originsRead.kind === 'failed') {
+    // Evicted evidence is not "nothing was read": the call cannot be checked, so only the owner's approval clears it.
+    if (cleared()) return { check: 'outward-effect', result: 'pass', detail: 'owner approved this exact content', approvable: false };
+    return {
+      check: 'outward-effect',
+      result: 'refuse',
+      detail: 'what this turn read was evicted before it could be checked',
+      approvable: true,
+      reason: `What this turn read was evicted before it could be checked, so whether this ${input.toolName} call repeats it cannot be established. Send it again in a new turn, or the owner can approve this exact outward call.`,
+    };
+  }
+  const origins = originsRead.kind === 'present' ? originsRead.value : [];
+  if (origins.length === 0) return { check: 'outward-effect', result: 'pass', detail: 'nothing untrusted read this turn', approvable: false };
   const assessment = await assessOutwardContent(ledger, content, { signal: input.signal, port: input.port });
   if (assessment.kind === 'incomplete') {
     if (cleared()) return { check: 'outward-effect', result: 'pass', detail: 'owner approved this exact content', approvable: false };

@@ -361,6 +361,7 @@ export type {
   SecretWriteTransitionFacts,
   SecretWriteEffectOwner,
   SecretsManagerOptions,
+  WriteScopeEntries,
 } from './secrets.js';
 // The one way a product builds its credential store (the daemon home is required).
 export { createRuntimeSecretsManager } from '../runtime/secrets-composition.js';

@@ -13,7 +13,8 @@ import {
   stripCommandFlag,
 } from './agent-knowledge-args.ts';
 import { parseBrowserImportScope } from '../input/commands/knowledge-browser-flags.ts';
-import { formatAsk, formatAgentKnowledgeFailureKind, formatBatchIngest, formatConnector, formatConnectorDoctor, formatConnectors, formatEntityList, formatFailure, formatIngest, formatItem, formatMap, formatReindex, reindexFailures, formatSearch, formatStatus, isRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/knowledge-format';
+import { formatAsk, formatAgentKnowledgeFailureKind, formatBatchIngest, formatConnector, formatConnectorDoctor, formatConnectors, formatEntityList, formatFailure, formatIngest, formatItem, formatMap, formatReindex, reindexFailures, formatSearch, formatStatus, isRecord, tallyBatchIngest } from '@goodvibes-jev/engine/terminal-shell/agent-turn/knowledge-format';
+import { exitCodeOfTally } from '@goodvibes-jev/engine/errors';
 import { AGENT_KNOWLEDGE_METHODS, DELEGATION_METHOD } from '@goodvibes-jev/engine/terminal-shell/agent-turn/knowledge-methods';
 import { createAgentPlatform, findDisallowedKnowledgeScopeFlag, formatScopeFlagRejection, getAgentKnowledgeJson, postAgentKnowledgeJson, runKnowledgeCall } from '@goodvibes-jev/engine/terminal-shell/agent-turn/knowledge-runtime';
 import { inspectCliExternalRuntime } from './external-runtime.ts';
@@ -25,6 +26,26 @@ interface DelegationResult {
   readonly message: unknown;
   readonly task: string;
   readonly reviewRequested: boolean;
+}
+
+/**
+ * A batch import's output and exit code from its per-item outcomes: 0 when
+ * every item was imported (or there was nothing to import), 1 when any failed,
+ * with each failed item and its reason in the text and under `outcome` in JSON.
+ */
+async function batchIngestOutput(runtime: CliCommandRuntime, result: { readonly data: unknown }, label: string): Promise<CliCommandOutput> {
+  const outcome = await tallyBatchIngest(result.data);
+  const exitCode = outcome.state === 'nothing-selected' ? 0 : exitCodeOfTally(outcome);
+  const value = {
+    ...result,
+    outcome: {
+      state: outcome.state,
+      requested: outcome.requested,
+      imported: outcome.done.length,
+      failed: outcome.failed.map((item) => ({ id: item.id, reason: item.refusal.reason })),
+    },
+  };
+  return { output: formatJsonOrText(runtime.cli)(value, formatBatchIngest(result.data, label)), exitCode };
 }
 
 function itemWasFound(data: unknown): boolean {
@@ -386,10 +407,7 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
       })
     ));
     if (!result.ok) return { output: formatFailure(result, json), exitCode: 1 };
-    return {
-      output: formatJsonOrText(runtime.cli)(result, formatBatchIngest(result.data, normalized)),
-      exitCode: 0,
-    };
+    return await batchIngestOutput(runtime, result, normalized);
   }
 
   if (normalized === 'import-browser-history' || normalized === 'sync-browser-history') {
@@ -427,10 +445,7 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
       })
     ));
     if (!result.ok) return { output: formatFailure(result, json), exitCode: 1 };
-    return {
-      output: formatJsonOrText(runtime.cli)(result, formatBatchIngest(result.data, 'browser-history')),
-      exitCode: 0,
-    };
+    return await batchIngestOutput(runtime, result, 'browser-history');
   }
 
   if (normalized === 'ingest-connector') {
@@ -468,10 +483,7 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
       })
     ));
     if (!result.ok) return { output: formatFailure(result, json), exitCode: 1 };
-    return {
-      output: formatJsonOrText(runtime.cli)(result, formatBatchIngest(result.data, `connector ${connectorId}`)),
-      exitCode: 0,
-    };
+    return await batchIngestOutput(runtime, result, `connector ${connectorId}`);
   }
 
   if (normalized === 'reindex') {

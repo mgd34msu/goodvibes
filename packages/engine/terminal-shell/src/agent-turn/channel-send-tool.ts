@@ -130,7 +130,7 @@ export function createAgentChannelSendTool(
         return output(formatAgentChannelDeliveryPreview(preview, channelDeliveryRouter.listStrategies().length));
       }
       const ledger = getSessionUntrustedContentLedger();
-      const ledgerSnapshot = () => JSON.stringify([ledger.originsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]);
+      const ledgerSnapshot = () => JSON.stringify([ledger.taintOriginsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]);
       const sources = ledgerSnapshot();
       const receiptPaths = options.shellPaths, receiptResolver = receiptPaths?.resolveUserPath, receiptHome = receiptPaths?.homeDirectory;
       const receiptPath = receiptPaths && agentChannelDeliveryReceiptPath(receiptPaths);

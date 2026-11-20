@@ -15,11 +15,11 @@ const HOST_JUDGED_METHODS: ReadonlySet<string> = new Set(['payments.checkout.beg
 /** Retain the local source record; this does not mint execution or human authority. */
 export function captureOperatorRequestPolicy() {
   const ledger = getProcessUntrustedContentLedger();
-  const origins = ledger.originsThisTurn, exposures = ledger.exposuresThisTurn, sources = ledger.taintSourcesThisTurn;
+  const origins = ledger.taintOriginsThisTurn, exposures = ledger.exposuresThisTurn, sources = ledger.taintSourcesThisTurn;
   const current = () => captureStrictJudgmentJson([origins.call(ledger), exposures.call(ledger), sources.call(ledger)]);
   const original = current();
   const assertCurrent = () => {
-    if (getProcessUntrustedContentLedger() !== ledger || ledger.originsThisTurn !== origins
+    if (getProcessUntrustedContentLedger() !== ledger || ledger.taintOriginsThisTurn !== origins
       || ledger.exposuresThisTurn !== exposures || ledger.taintSourcesThisTurn !== sources
       || !isDeepStrictEqual(current(), original)) throw new ToolInputProjectionError('stale');
   };

@@ -9,7 +9,7 @@
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
-import { formatRefusal, RefusalError } from '@goodvibes-jev/engine/errors';
+import { formatRefusal, isOperationKey, OPERATION_KEY_RULE, RefusalError } from '@goodvibes-jev/engine/errors';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
 import { ContractOperatorError, projectContractOperatorView, type ContractOperatorService } from '../../contract/operator-service.js';
@@ -18,8 +18,6 @@ import { attachHandler } from './attach-handler.js';
 /** The reason a cancel over the operator surface records when the caller gives none. */
 export const OPERATOR_CANCEL_REASON = 'cancelled by an operator';
 
-/** The longest retry key a caller may send (the Idempotency-Key header or `idempotencyKey`). */
-const MAX_IDEMPOTENCY_KEY_LENGTH = 255;
 
 function optionalString(params: Record<string, unknown>, field: string): string | undefined {
   const value = params[field];
@@ -122,8 +120,8 @@ export function createContractsStartHandler(service: ContractOperatorService): G
     const workspaceRoot = optionalString(params, 'workspaceRoot');
     const isolation = optionalIsolation(params);
     const idempotencyKey = optionalString(params, 'idempotencyKey');
-    if (idempotencyKey !== undefined && idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
-      throw new GatewayVerbError(`idempotencyKey must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`, 'INVALID_ARGUMENT', 400, 'idempotencyKey');
+    if (idempotencyKey !== undefined && !isOperationKey(idempotencyKey)) {
+      throw new GatewayVerbError(`idempotencyKey must be ${OPERATION_KEY_RULE}`, 'INVALID_ARGUMENT', 400, 'idempotencyKey');
     }
     try {
       return await service.start({
@@ -147,8 +145,8 @@ export function createContractsDispatchHandler(service: ContractOperatorService)
     const ask = params['ask'] as string;
     const workspaceRoot = optionalString(params, 'workspaceRoot');
     const idempotencyKey = optionalString(params, 'idempotencyKey');
-    if (idempotencyKey !== undefined && idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
-      throw new GatewayVerbError(`idempotencyKey must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`, 'INVALID_ARGUMENT', 400, 'idempotencyKey');
+    if (idempotencyKey !== undefined && !isOperationKey(idempotencyKey)) {
+      throw new GatewayVerbError(`idempotencyKey must be ${OPERATION_KEY_RULE}`, 'INVALID_ARGUMENT', 400, 'idempotencyKey');
     }
     try {
       return await service.dispatch({

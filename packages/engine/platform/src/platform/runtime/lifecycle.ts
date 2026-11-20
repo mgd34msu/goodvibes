@@ -118,7 +118,7 @@ export async function shutdownRuntime(
   if (!shutdownError) await fireHook('save');
 
   try {
-    scheduleManager?.destroy();
+    await scheduleManager?.destroy();
   } catch (err) {
     logger.warn('ScheduleManager.destroy failed during shutdown', {
       error: summarizeError(err),

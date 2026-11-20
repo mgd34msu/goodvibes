@@ -123,6 +123,13 @@ interface LiveControlPlaneClient {
   principalId?: string | undefined;
   /** Ends the connection from the daemon side. */
   readonly close?: ((reason: string) => void) | undefined;
+  /**
+   * Asked before each frame is filtered for this client: false skips it (the
+   * owner has ended the client). The owner may narrow `grant` inside it (its
+   * credential's rights shrank), so the filter that follows uses the grant in
+   * force when the frame is sent, never the one from when it subscribed.
+   */
+  readonly current?: (() => boolean) | undefined;
 }
 
 const sseEncoder = new TextEncoder();
@@ -357,6 +364,7 @@ export class ControlPlaneGateway {
       if (message.clientId && client.clientId !== message.clientId) continue;
       if (message.routeId && client.routeId !== message.routeId) continue;
       if (message.surfaceId && client.surfaceId !== message.surfaceId) continue;
+      if (client.current && !client.current()) continue;
       if (!grantAllowsEvent(client.grant, 'surface-message', Boolean(message.clientId))) continue;
       client.send('surface-message', message, record.id);
     }
@@ -398,6 +406,7 @@ export class ControlPlaneGateway {
       if (filter?.clientIdPrefix && !client.clientId.startsWith(filter.clientIdPrefix)) continue;
       if (filter?.routeId && client.routeId !== filter.routeId) continue;
       if (filter?.surfaceId && client.surfaceId !== filter.surfaceId) continue;
+      if (client.current && !client.current()) continue;
       if (!grantAllowsEvent(client.grant, event, addressed)) continue;
       if (grantNeedsOwnedSession(client.grant, event) && !this.ownsFrame(client.principalId, ownedFrameSessionId(payload))) continue;
       // Domain filter, AND-ed with the grant (null = deliver-all; untagged = delivered).
@@ -504,6 +513,8 @@ export class ControlPlaneGateway {
     send: (event: string, payload: unknown, id?: string) => void,
     /** Ends the socket from the daemon side (revocation). */
     close?: (reason: string) => void,
+    /** See {@link LiveControlPlaneClient.current}: the socket's credential checked (and its grant narrowed) before each frame is filtered. */
+    current?: () => boolean,
   ): { clientId: string; domains: readonly RuntimeEventDomain[] } {
     this.requireEnabled('open websocket client');
     if (!this.runtimeBus) {
@@ -549,6 +560,7 @@ export class ControlPlaneGateway {
       send,
       principalId: options.principalId,
       close,
+      current,
     });
     this.websocketClients.set(clientId, {
       clientId,
@@ -676,6 +688,8 @@ export class ControlPlaneGateway {
     for (const domain of nextDomains) {
       if (wsClient.unsubscribers.has(domain)) continue;
       const unsubscribe = this.runtimeBus.onDomain(domain, (envelope) => {
+        // A credential narrowed since the subscription may no longer cover this domain (the narrowing unsubscribes it for later frames).
+        if (liveClient.current && (!liveClient.current() || !grantAllowsDomain(liveClient.grant, domain))) return;
         if (grantNeedsOwnedSession(liveClient.grant, domain) && !this.ownsFrame(liveClient.principalId, envelope.sessionId)) return;
         this.touchWebSocketClient(clientId, { lastEventType: envelope.type });
         const record = this.rememberRuntimeEvent(domain, envelope);

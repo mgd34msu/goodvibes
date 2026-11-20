@@ -269,15 +269,16 @@ function compileResponseValidator(method: OperatorMethodContract): ResponseValid
   // The contract generator refuses a method without an output schema, so this
   // is reached only by a hand-built manifest that declares none.
   if (!schema || typeof schema !== 'object') return async () => {};
-  const applied = isMutatingRoute(method.http?.method);
+  const mutating = isMutatingRoute(method.http?.method);
+  const notice = mutating ? receivedNotice(method.repeat === 'keyed' || replaysSafely(method)) : undefined;
   const methodId = method.id;
   return async (body, options) => {
     const failure = await firstJsonSchemaFailureAsync(schema, body, options);
     if (!failure) return;
     throw new ContractError(
       `Response validation failed for operator method "${methodId}": field "${failure.path}" expected ${failure.expected} but received ${failure.received}. Ensure the daemon is running the matching GoodVibes contract version.`
-        + (applied ? ` ${REQUEST_APPLIED_NOTICE}` : ''),
-      { source: 'contract', ...(applied ? { phase: 'response-validation', hint: REQUEST_APPLIED_NOTICE } : {}) },
+        + (notice ? ` ${notice}` : ''),
+      { source: 'contract', ...(notice ? { phase: 'response-validation', hint: notice } : {}) },
     );
   };
 }
@@ -541,10 +542,19 @@ export function createOperatorRemoteClient(
 }
 
 /**
- * Said on a response-shape failure of a request that changes state: the
- * transport only gets here after a 2xx answer, so the daemon already acted.
+ * Said on a response-shape failure of a request that changes state. The
+ * transport only gets here after a 2xx answer, so the daemon received the
+ * request; but a success can mean done, accepted and queued to run later
+ * (202), or found already settled, so the effect is not verified. A keyed
+ * method may be repeated with the same key (the daemon answers a repeat with
+ * the first answer); any other is not repeated blindly.
  */
-const REQUEST_APPLIED_NOTICE = 'The daemon answered successfully, so this request was applied; only its response did not match the expected shape. Do not repeat the request: check the resulting state instead.';
+function receivedNotice(keyed: boolean): string {
+  return 'The daemon answered with a success status, so it received this request, but its answer could not be read: whether the change finished, was queued to run later or was already settled is not known. '
+    + (keyed
+      ? 'Read the resulting state; to learn the outcome, repeat the request only with the same Idempotency-Key or retry id, which returns the first answer and acts no second time.'
+      : 'Do not repeat the request: read the resulting state first.');
+}
 
 function isMutatingRoute(method: unknown): boolean {
   return typeof method === 'string' && !['GET', 'HEAD'].includes(method.toUpperCase());

@@ -3,9 +3,9 @@ export { cdpEndpointCandidates } from './browser-cdp.js';
 export type { ReachableCdpEndpoint } from './browser-cdp.js';
 import { assertProvisionCurrent, ownProvisionLifetime, type BrowserProvisionLifetime } from './browser-failure-reading.js';
 import { readBrowserLaunchCause } from './launch-reading.js';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { OwnedScope } from '../utils/owned-work.js';
+import { OwnedScope, StillRunningError } from '../utils/owned-work.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { findOriginalBrowserPage, observeBrowserPageConnection, type BrowserPageConnection } from './browser-page-connection.js';
@@ -227,6 +227,22 @@ function launchDeadlineFailure(message: string, executablePath: string): Browser
   );
 }
 
+/** How long a launched browser has to close its context before its process group is killed. */
+const CONTEXT_CLOSE_DEADLINE_MS = 5_000;
+
+/**
+ * The main process of a browser launched on `profileDirectory`, read from the
+ * `SingletonLock` link Chromium writes at start (`<host>-<pid>`). Null where
+ * there is none (another platform, a browser that wrote none).
+ */
+function launchedBrowserPid(profileDirectory: string): number | null {
+  try {
+    const match = /-(\d+)$/.exec(readlinkSync(join(profileDirectory, 'SingletonLock')));
+    const pid = match ? Number(match[1]) : NaN;
+    return Number.isSafeInteger(pid) && pid > 1 ? pid : null;
+  } catch { return null; }
+}
+
 export interface BrowserSessionManagerDeps {
   /** Directory that holds saved browser profiles. Owned by the composition root. */
   readonly profileRoot: string;
@@ -272,6 +288,8 @@ export class BrowserSessionManager {
   readonly #unpublishedPages = new Set<Page>();
   readonly #pageClosures = new Map<Page, Promise<void>>();
   readonly #contextClosures = new Map<BrowserContext, Promise<void>>();
+  /** The browser process each launched context runs in, so a close that hangs can end it. */
+  readonly #launchedPids = new WeakMap<BrowserContext, number>();
   readonly #unpublishedHosts = new Set<BrowserHostClient>();
   readonly #hostRetirements = new Map<BrowserHostClient, Promise<void>>();
   private readonly sessions = new Map<string, TrackedSession>();
@@ -503,6 +521,8 @@ export class BrowserSessionManager {
       throw await describeLaunchFailure(error instanceof Error ? error.message : String(error), profileDirectory, options);
     }
     this.#unpublishedContexts.add(context);
+    const pid = launchedBrowserPid(profileDirectory);
+    if (pid !== null) this.#launchedPids.set(context, pid);
     try {
       assertProvisionCurrent(options);
       const info = this.register({
@@ -1111,7 +1131,13 @@ export class BrowserSessionManager {
     });
   }
 
-  /** Retain failures and coalesce actual native context closure across callers. */
+  /**
+   * Retain failures and coalesce actual native context closure across callers.
+   * The close is bounded: a launched browser that has not closed within 5 s
+   * has its process group killed (and 2 s more to go); one whose end still
+   * cannot be confirmed fails the close with StillRunningError naming its pid,
+   * and stays owned so shutdown reports it.
+   */
   private closeContext(context: BrowserContext): Promise<void> {
     const existing = this.#contextClosures.get(context);
     if (existing) return existing;
@@ -1119,11 +1145,34 @@ export class BrowserSessionManager {
     const closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
     this.#unpublishedContexts.add(context);
     this.#contextClosures.set(context, closing);
-    const done = (): void => {
-      this.#contextClosures.delete(context); this.#unpublishedContexts.delete(context); resolve();
-    };
-    const failed = (error: unknown): void => { this.#contextClosures.delete(context); reject(error); };
-    try { void Promise.resolve(context.close()).then(done, failed); } catch (error) { failed(error); }
+    let closeError: { error: unknown } | undefined;
+    const pid = this.#launchedPids.get(context);
+    const scope = new OwnedScope('browser context close', { stopDeadlineMs: CONTEXT_CLOSE_DEADLINE_MS });
+    const closed = scope.run('browser context close', () => Promise.resolve(context.close()))
+      .then(() => {}, (error: unknown) => { closeError = { error }; });
+    if (pid !== undefined) {
+      // The polite stop is context.close(); the scope only escalates to SIGKILL of the browser's process group.
+      scope.child('browser process', {
+        pid,
+        kill: signal => {
+          if (signal === 'SIGTERM') return;
+          try { process.kill(process.platform === 'win32' ? pid : -pid, signal); } catch { /* already gone */ }
+        },
+        exited: closed,
+      });
+    }
+    void scope.close('the browser session is closing').then(report => {
+      this.#contextClosures.delete(context);
+      if (report.stillRunning.length > 0) {
+        reject(new StillRunningError('The browser', report));
+        return;
+      }
+      if (report.killed.length > 0) logger.warn('The browser did not close within its deadline; its process was killed', { pid });
+      if (closeError && report.killed.length === 0) { reject(closeError.error); return; }
+      this.#unpublishedContexts.delete(context);
+      this.#launchedPids.delete(context);
+      resolve();
+    });
     void closing.catch(() => {});
     return closing;
   }

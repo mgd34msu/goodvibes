@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { assertDeliveryCurrent, runDeliveryPublication, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
 import { retireDeliveryResponse } from './delivery-diagnostics.js';
 import { DeliveryError } from './delivery.js';
@@ -373,7 +374,13 @@ export class DiscordIntegration {
    * Post a message to a channel via the Discord Bot API.
    * Requires DISCORD_BOT_TOKEN.
    */
-  async postMessage(channelId: string, content: string, embeds?: unknown[], lifetime: DeliveryLifetime = {}): Promise<void> {
+  /**
+   * `effect` is the identity of this message for every attempt at it (an
+   * `announces` value): it is sent as Discord's `nonce` with `enforce_nonce`,
+   * so a repeat of the same message, a retry or a send again after a restart,
+   * is dropped by Discord instead of posted twice.
+   */
+  async postMessage(channelId: string, content: string, embeds?: unknown[], lifetime: DeliveryLifetime = {}, effect?: string): Promise<void> {
     if (!this.botToken) {
       throw new DeliveryError('DiscordIntegration: botToken is required for postMessage', 'terminal');
     }
@@ -381,6 +388,11 @@ export class DiscordIntegration {
     const payload: Record<string, unknown> = {};
     if (content) payload.content = content;
     if (embeds && embeds.length > 0) payload.embeds = embeds;
+    if (effect) {
+      // Discord takes a nonce of at most 25 characters: a digest of the identity.
+      payload.nonce = createHash('sha256').update(effect).digest('base64url').slice(0, 25);
+      payload.enforce_nonce = true;
+    }
 
     assertDeliveryCurrent(lifetime);
     const res = await runDeliveryPublication(lifetime, () => instrumentedFetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {

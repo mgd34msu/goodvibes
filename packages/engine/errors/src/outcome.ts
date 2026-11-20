@@ -91,6 +91,25 @@ export function failedOutcome(refusal: Refusal): EffectOutcome<never> {
   return Object.freeze({ state: 'failed' as const, refusal });
 }
 
+/**
+ * The one rule for a key a client sends to name one operation (the
+ * `Idempotency-Key` header, `idempotencyKey`, `clientMessageId`, a session
+ * message's `messageId`): 1 to 255 letters, digits, ".", "_", ":" or "-". Every
+ * route that takes such a key, and `operationIdFromClient`, checks this one
+ * pattern, so a key one route accepts is never refused by another it reaches.
+ */
+export const MAX_OPERATION_KEY_LENGTH = 255;
+const OPERATION_KEY = /^[A-Za-z0-9._:-]{1,255}$/;
+/** The rule in words, for refusals and method descriptions. */
+export const OPERATION_KEY_RULE = '1 to 255 characters of letters, digits, ".", "_", ":" or "-"';
+/** The JSON Schema of an operation key, for the operator contract. */
+export const OPERATION_KEY_SCHEMA = Object.freeze({ type: 'string', minLength: 1, maxLength: MAX_OPERATION_KEY_LENGTH, pattern: '^[A-Za-z0-9._:-]+$' } as const);
+
+/** Whether `value` is a usable operation key ({@link OPERATION_KEY_RULE}). */
+export function isOperationKey(value: unknown): value is string {
+  return typeof value === 'string' && OPERATION_KEY.test(value);
+}
+
 /** For a switch's default branch: a new state is a compile error at every switch. */
 export function assertNeverOutcome(outcome: never): never {
   throw new TypeError(`Unhandled effect outcome: ${JSON.stringify(outcome)}`);

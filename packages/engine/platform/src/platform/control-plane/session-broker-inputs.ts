@@ -428,6 +428,26 @@ export function finalizeAgentSessionInputs(
 }
 
 /**
+ * Record that an agent's answer is about to be sent to the channel its message
+ * came from: every channel row of the agent not yet settled says `owed`, so a
+ * daemon that stops while the send is in flight sends it again after its
+ * restart. Returns whether a row changed (and so needs writing).
+ */
+export function markChannelReplyOwedInputs(store: SharedSessionInputStore, sessionId: string, agentId: string): boolean {
+  let changed = false;
+  for (const entry of store.inputs.get(sessionId) ?? []) {
+    if (entry.activeAgentId !== agentId || entry.routeId === undefined || isDelegatedSessionInput(entry)) continue;
+    const mark = entry.metadata?.[CHANNEL_REPLY_METADATA_KEY];
+    if (mark === 'owed' || mark === 'sent') continue;
+    updateSharedSessionInput(store, sessionId, entry.id, (row) => ({
+      ...row, metadata: { ...row.metadata, [CHANNEL_REPLY_METADATA_KEY]: 'owed' },
+    }));
+    changed = true;
+  }
+  return changed;
+}
+
+/**
  * Record that an agent's answer was handed to the channel its message came
  * from: every channel row of the agent says `sent`, so a report of the same
  * answer repeated after a restart is not sent again. Returns whether a row

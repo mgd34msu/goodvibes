@@ -38,6 +38,7 @@ import type {
   ParsedCalendar,
 } from './types.js';
 import { describeRecurrence } from './rrule.js';
+import { contentDigest } from '../utils/target-ref.js';
 import {
   isKnownTimeZone,
   parseContentLine as parseWireContentLine,
@@ -117,14 +118,18 @@ function parseDateList(value: string, params: ReadonlyMap<string, string>): { re
   return { values, errors };
 }
 
-let syntheticCounter = 0;
-
-/** Build a stable synthetic UID for a VEVENT that omitted one. */
-function syntheticUid(start: EventDateTime | undefined, summary: string): string {
-  syntheticCounter += 1;
-  const stamp = start?.value ?? 'no-start';
-  const slug = summary.replace(/\s+/g, '-').slice(0, 24) || 'event';
-  return `synthetic:${slug}:${stamp}:${syntheticCounter}`;
+/**
+ * The UID of a VEVENT that omitted one: a digest of the feed it came from, its
+ * start, its title and its place among identical events of the same feed, so
+ * the same event gets the same id on every read of the feed, whatever else was
+ * parsed before it.
+ */
+function syntheticUid(source: string | undefined, start: EventDateTime, summary: string, seen: Map<string, number>): string {
+  const facts = { source: source ?? null, start: start.value, kind: start.kind, zone: start.zone, tzid: start.tzid ?? null, summary };
+  const key = contentDigest(facts);
+  const ordinal = seen.get(key) ?? 0;
+  seen.set(key, ordinal + 1);
+  return `synthetic:${contentDigest({ ...facts, ordinal })}`;
 }
 
 interface VEventDraft {
@@ -151,8 +156,13 @@ interface VEventDraft {
  * Parse .ics text into typed events plus honest skip/diagnostic lists.
  *
  * @param text raw .ics content (file body or fetched feed body).
+ * @param options.source the feed address (or file) the text came from; it is
+ *   part of the id a VEVENT without a UID is given.
  */
-export function parseIcs(text: string): ParsedCalendar {
+export function parseIcs(text: string, options: { readonly source?: string | undefined } = {}): ParsedCalendar {
+  // Identical UID-less events seen so far in this feed, for their ordinal.
+  const syntheticSeen = new Map<string, number>();
+  const synthetic = (start: EventDateTime, summary: string): string => syntheticUid(options.source, start, summary, syntheticSeen);
   const lines = unfoldContentLines(text).map(({ text: raw, line }) => ({ raw, line }));
   const events: CalendarEvent[] = [];
   const overrides: CalendarEvent[] = [];
@@ -187,7 +197,7 @@ export function parseIcs(text: string): ParsedCalendar {
       continue;
     }
     if (cl.name === 'END' && cl.value.trim().toUpperCase() === 'VEVENT') {
-      if (draft) finalizeEvent(draft, events, skipped, diagnostics, overrides, thisAndFutureUids);
+      if (draft) finalizeEvent(draft, events, skipped, diagnostics, overrides, thisAndFutureUids, synthetic);
       inEvent = false;
       draft = undefined;
       continue;
@@ -277,7 +287,7 @@ export function parseIcs(text: string): ParsedCalendar {
 
   if (inEvent && draft) {
     diagnostics.push({ line: draft.startLine, component: 'VEVENT', message: 'VEVENT was not closed with END:VEVENT before end of feed, finalised anyway.' });
-    finalizeEvent(draft, events, skipped, diagnostics, overrides, thisAndFutureUids);
+    finalizeEvent(draft, events, skipped, diagnostics, overrides, thisAndFutureUids, synthetic);
   }
 
   // A RECURRENCE-ID override replaces one occurrence of the series sharing its
@@ -322,13 +332,14 @@ function finalizeEvent(
   diagnostics: ParseDiagnostic[],
   overrides: CalendarEvent[],
   thisAndFutureUids: Set<string>,
+  synthetic: (start: EventDateTime, summary: string) => string,
 ): void {
   if (!draft.start) {
     skipped.push({ line: draft.startLine, component: 'VEVENT', message: `Skipped VEVENT '${draft.summary ?? draft.uid ?? 'untitled'}', no usable DTSTART.` });
     return;
   }
   const summary = draft.summary ?? '(no title)';
-  const uid = draft.uid && draft.uid !== '' ? draft.uid : syntheticUid(draft.start, summary);
+  const uid = draft.uid && draft.uid !== '' ? draft.uid : synthetic(draft.start, summary);
   const isOverride = draft.recurrenceId !== undefined;
 
   // An override is one event; a THISANDFUTURE one marks the series it moves.

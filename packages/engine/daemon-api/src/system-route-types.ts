@@ -53,6 +53,8 @@ export interface ConfigManagerLike {
     | { readonly ok: false; readonly refusal: Refusal; readonly saved: readonly string[] };
   /** Remove the explicit value of one key (every key when omitted) so it reads as its default again, in every tier that holds it. */
   reset?(key?: string): void;
+  /** Why resetting `key` would be refused for moving where a configured credential is sent (CREDENTIAL_DESTINATION_UNBOUND), or null. */
+  resetRefusal?(key: string): Refusal | null;
   /**
    * Absolute path of the settings file this manager writes to.
    *

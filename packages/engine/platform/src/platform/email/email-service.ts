@@ -252,6 +252,13 @@ export interface EmailInboxListResult {
    * today sees a change; a caller that wants to know reads `unreadable?.length`.
    */
   readonly unreadable?: readonly EmailInboxUnreadableResponse[] | undefined;
+  /**
+   * The mailbox generation (UIDVALIDITY) the UIDs on this page belong to, as
+   * EXAMINE reported it; absent when the server reported none. A change to a
+   * listed message names it with this, so a reset mailbox refuses instead of
+   * changing whichever message now holds the UID.
+   */
+  readonly uidValidity?: number | undefined;
 }
 
 /**
@@ -544,9 +551,9 @@ export class EmailService {
    * `readMessageResult` is the same read without the throw, for a caller that
    * would rather branch than catch.
    */
-  async readMessage(uid: number): Promise<ImapMessageDetail | null> {
+  async readMessage(uid: number): Promise<(ImapMessageDetail & { readonly uidValidity: number | null }) | null> {
     const read = await this.readMessageResult(uid);
-    if (read.outcome === 'read') return read.detail;
+    if (read.outcome === 'read') return { ...read.detail, uidValidity: read.uidValidity };
     if (read.outcome === 'gone') return null;
     throw new Error(
       `The mail server answered the request for UID ${String(uid)} with `
@@ -618,15 +625,51 @@ export class EmailService {
   }
 
   /**
-   * Mark one message in the read mailbox read or unread, archive it, or move it
-   * to Trash. `uidValidity`, when given, is the mailbox generation the UID was
-   * listed under; a reset mailbox refuses instead of changing another message.
+   * Replace one saved draft with an edited one, so the Drafts folder keeps one
+   * copy: the draft is named by its UID and the Drafts folder's UIDVALIDITY as
+   * `listDrafts` (or `createDraft`) returned them, and a reset folder or a
+   * draft that is gone refuses with nothing changed. The folder is found as
+   * `createDraft` finds it.
    */
-  async updateMessage(uid: number, action: ImapMessageAction, uidValidity?: number): Promise<ImapMessageActionResult> {
+  async replaceDraft(input: EmailDraftInput & { readonly uid: number; readonly uidValidity: number }): Promise<ImapAppendDraftResult & { readonly replaced: number }> {
+    const config = this.getValidatedConfig('read');
+    input = { ...input };
+    const from = input.from !== undefined && input.from.trim().length > 0
+      ? input.from
+      : config.fromAddress;
+    if (from.trim().length === 0) {
+      throw new EmailConfigurationError(
+        'A draft needs a From address and none is set. Pass from, or set surfaces.email.from.', 'invalid');
+    }
+    const account = draftsAccountKey(config);
+    const chosen = input.mailbox ?? (config.draftsMailbox.length > 0 ? config.draftsMailbox : undefined);
+    const remembered = chosen === undefined ? this.#draftsMailboxes.get(account) : undefined;
+    const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
+    const result = await withEmailReadConnection(this.deps, config, sourceRead, undefined, (client) => client.replaceDraft({
+      to: input.to,
+      subject: input.subject,
+      body: input.body,
+      from,
+      inReplyTo: input.inReplyTo,
+      references: input.references,
+      mailbox: chosen ?? remembered,
+      uid: input.uid,
+      uidValidity: input.uidValidity,
+    }));
+    if (chosen === undefined) this.#draftsMailboxes.set(account, result.mailbox);
+    return result;
+  }
+
+  /**
+   * Mark one message in the read mailbox read or unread, archive it, or move it
+   * to Trash. `uidValidity` is the mailbox generation the UID was listed
+   * under; a reset mailbox refuses instead of changing another message.
+   */
+  async updateMessage(uid: number, action: ImapMessageAction, uidValidity: number): Promise<ImapMessageActionResult> {
     const config = this.getValidatedConfig('read');
     const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
     return withEmailReadConnection(this.deps, config, sourceRead, undefined,
-      (client) => client.applyMessageAction(uid, action, uidValidity ?? null));
+      (client) => client.applyMessageAction(uid, action, uidValidity));
   }
 
   /**
@@ -642,7 +685,7 @@ export class EmailService {
   }
 
   /** The newest drafts in the account's Drafts folder, newest first, each with its body. */
-  async listDrafts(limit = 25): Promise<{ readonly drafts: readonly ImapDraftSummary[]; readonly total: number; readonly mailbox: string }> {
+  async listDrafts(limit = 25): Promise<{ readonly drafts: readonly ImapDraftSummary[]; readonly total: number; readonly mailbox: string; readonly uidValidity: number | null }> {
     const config = this.getValidatedConfig('read');
     const account = draftsAccountKey(config);
     const chosen = config.draftsMailbox.length > 0 ? config.draftsMailbox : this.#draftsMailboxes.get(account);

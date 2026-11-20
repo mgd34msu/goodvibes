@@ -15,6 +15,7 @@ import type { ShellPathService } from '../../runtime/shell-paths.js';
 import type { Diagnostic } from './protocol.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { readDocument, writeDocument } from '../../utils/atomic-json-store.js';
+import { OwnedScope, requireStopped, type CloseReport } from '../../utils/owned-work.js';
 
 type LspRoots = Pick<ShellPathService, 'workingDirectory' | 'resolveUserPath'>;
 
@@ -140,6 +141,12 @@ export class LspService {
   private installOutcomes: Map<string, LanguageServerInstallOutcome> | null = null;
   private readonly roots: LspRoots;
   private readonly idleStopMs: number;
+  /**
+   * Owns every server process and every start in flight. A start that lands
+   * after shutdown() stops its server and is never added; shutdown() ends each
+   * process (SIGTERM, 5 s, SIGKILL) and names one it could not end.
+   */
+  readonly #scope = new OwnedScope('language servers');
 
   constructor(roots: LspRoots, options: { readonly idleStopMs?: number | undefined } = {}) {
     this.roots = roots;
@@ -232,15 +239,30 @@ export class LspService {
     const resolvedCommand = locateCommand(config.command, this.userBinaryDir());
     if (!resolvedCommand) return this._missing(langId, config.command);
 
+    const stopped: LspClientResolution = { status: 'failed', reason: `The language service has stopped, so ${config.command} was not started.`, next: [] };
+    if (this.#scope.closed) return stopped;
     const client = new LspClient(resolvedCommand, config.args);
+    const label = `language server ${config.command}`;
     try {
       await client.start();
-      await this._initializeServer(client, config);
+      const child = client.child;
+      // Owned from its spawn: a shutdown during the handshake kills it instead of leaving it behind.
+      if (child) this.#scope.child(label, child);
+      await this.#scope.opening(label, async signal => {
+        const abort = (): void => { void client.stop(); };
+        signal.addEventListener('abort', abort, { once: true });
+        try { await this._initializeServer(client, config); } finally { signal.removeEventListener('abort', abort); }
+        return client;
+      }, value => value.stop());
       this.clients.set(key, client);
       this.touch(key);
       logger.info('LspService: started server', { langId, command: config.command });
       return { status: 'ok', client };
     } catch (err) {
+      if (this.#scope.closed) {
+        void client.stop();
+        return stopped;
+      }
       const stderr = client.recentStderr;
       const reason = `The ${config.command} language server did not start: ${summarizeError(err)}${stderr ? ` (${stderr.split('\n').slice(-3).join(' ')})` : ''}`;
       this.startFailures.set(key, { reason, at: Date.now(), program: programStamp(resolvedCommand) });
@@ -428,15 +450,23 @@ export class LspService {
     return out;
   }
 
-  /** Stop all running servers. */
-  async shutdown(): Promise<void> {
+  /**
+   * Stop all running servers and every start in flight. Resolves with the
+   * report once each server process has exited; rejects with StillRunningError
+   * naming any whose exit could not be confirmed after SIGKILL.
+   */
+  async shutdown(): Promise<CloseReport> {
     for (const timer of this.idleTimers.values()) clearTimeout(timer);
     this.idleTimers.clear();
-    const stops = Array.from(this.clients.values()).map(c => c.stop().catch((error) => {
-      logger.warn('LSP server stop failed during shutdown', { error: summarizeError(error) });
-    }));
-    await Promise.all(stops);
+    // The polite stop (stdin closed, SIGTERM); the scope bounds the wait and escalates.
+    for (const client of this.clients.values()) {
+      client.stop().catch((error: unknown) => {
+        logger.warn('LSP server stop failed during shutdown', { error: summarizeError(error) });
+      });
+    }
+    const report = await this.#scope.close('the language service stopped');
     this.clients.clear();
     this.starting.clear();
+    return requireStopped('The language service', report);
   }
 }

@@ -1,7 +1,7 @@
 import { handleSimplePermissionInput, routeCardInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import type { PermissionRequest, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { applyHunkKey, hunkSelectionAnswer, type HunkSelectionState } from '../permissions/hunk-selection.ts';
-import { offersNoRemembering, permissionButtons } from '../permissions/prompt-card.ts';
+import { defaultPermissionChoice, offersNoRemembering, permissionButtons } from '../permissions/prompt-card.ts';
 
 export type PendingPermissionState = PermissionRequest & {
   resolve: (
@@ -55,7 +55,7 @@ const KEY_PAGE_DOWN = '\x1b[6~';
 function withChoice(req: PendingPermissionState, delta: number): PendingPermissionState {
   const count = permissionButtons(req, req).length;
   if (count === 0) return req;
-  return { ...req, choice: ((req.choice ?? 0) + delta + count) % count };
+  return { ...req, choice: ((req.choice ?? defaultPermissionChoice(req, req)) + delta + count) % count };
 }
 
 export type BlockingInputHandlerOptions = {
@@ -117,7 +117,7 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       // Deny on a hunk card declines this edit only, exactly as on the plain
       // card: the model gets the declined result and can adapt. Ctrl+C is the
       // one abort.
-      if ((data === '\r' || data === '\n') && permissionButtons(req, req)[req.choice ?? 0]?.id === 'deny') {
+      if ((data === '\r' || data === '\n') && permissionButtons(req, req)[req.choice ?? defaultPermissionChoice(req, req)]?.id === 'deny') {
         req.resolve(false, false);
         render();
         return { handled: true, pendingPermission: null };
@@ -221,7 +221,7 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       return { handled: true, pendingPermission: { ...req, scroll: Math.max(0, (req.scroll ?? 0) + step) } };
     }
     if (data === '\r' || data === '\n') {
-      const pressed = permissionButtons(req, req)[req.choice ?? 0];
+      const pressed = permissionButtons(req, req)[req.choice ?? defaultPermissionChoice(req, req)];
       if (pressed?.id === 'allow') {
         req.resolve(true, false);
         render();

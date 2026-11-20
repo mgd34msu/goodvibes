@@ -199,6 +199,7 @@ export function createServiceBackedGateway(service: EmailService): EmailGatewayS
             messageId: message.messageId,
           })),
           total: result.total,
+          ...(result.uidValidity === undefined ? {} : { uidValidity: result.uidValidity }),
           ...(result.unreadable !== undefined && result.unreadable.length > 0
             ? {
               unreadable: result.unreadable.map((problem) => ({
@@ -224,6 +225,7 @@ export function createServiceBackedGateway(service: EmailService): EmailGatewayS
           bodyText: message.bodyText,
           ...(message.bodyHtml.length > 0 ? { bodyHtml: message.bodyHtml } : {}),
           ...(message.attachments.length > 0 ? { attachments: message.attachments } : {}),
+          ...(message.uidValidity === null ? {} : { uidValidity: message.uidValidity }),
         };
         return detail;
       });

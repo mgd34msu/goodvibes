@@ -23,7 +23,7 @@ import { coreConfigDefaults } from './schema-domain-core.js';
 import { runtimeConfigDefaults } from './schema-domain-runtime.js';
 import { daemonMailboxConfigDefaults } from './schema-domain-daemon-mailbox.js';
 
-export interface ListConfigSetting extends Omit<ConfigSetting, 'key' | 'type'> {
+export interface ListConfigSetting extends Omit<ConfigSetting, 'key' | 'type' | 'default'> {
   readonly key: ListConfigKey;
   readonly type: 'object';
 }

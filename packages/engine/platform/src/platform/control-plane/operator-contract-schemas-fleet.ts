@@ -386,6 +386,8 @@ export const CHECKPOINTS_REVERT_HUNK_RECEIPT_SCHEMA = objectSchema({
   removedLinesRestored: NUMBER_SCHEMA,
   safetyCheckpointId: nullableSchema(STRING_SCHEMA),
   undo: nullableSchema(CHECKPOINTS_REVERT_HUNK_UNDO_SCHEMA),
+  /** The workspace root the hunk was reverted in: the previewed one when a confirmToken was spent. */
+  workspaceRoot: STRING_SCHEMA,
 }, ['reverted', 'path', 'hunkHeader', 'addedLinesRemoved', 'removedLinesRestored', 'safetyCheckpointId', 'undo']);
 
 /**

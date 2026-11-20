@@ -9,6 +9,7 @@ import {
 } from '../tools/exec/credential-env.js';
 import { resolveRuntimeSandboxPlan, type ExecSandboxPlan, type ExecSandboxRuntime } from '../tools/exec/sandbox.js';
 import { SANDBOX_RUNTIME_BIN, withSandboxRuntimes } from '../tools/exec/sandbox-runtimes.js';
+import { OwnedScope, mergeCloseReports, NOTHING_RUNNING, type CloseReport } from '../utils/owned-work.js';
 
 // ---------------------------------------------------------------------------
 // AutomationCommands
@@ -21,6 +22,10 @@ import { SANDBOX_RUNTIME_BIN, withSandboxRuntimes } from '../tools/exec/sandbox-
 // or per-schedule limit on runs in flight, the kill timer, how each run ended,
 // and the set of running processes that shutdown kills. One instance per
 // WorkflowServices, so disposing one runtime stops only that runtime's commands.
+// Each run owns its child through an OwnedScope: a stop or a timeout sends
+// SIGTERM, waits 2 s, sends SIGKILL, and the run keeps its slot (and counts
+// against the in-flight limit) until its exit is observed. A stop returns the
+// CloseReport, which names any child that could not be confirmed ended.
 // ---------------------------------------------------------------------------
 
 export type AutomationCommandKind = 'hook-action' | 'schedule';
@@ -73,9 +78,13 @@ export type AutomationCommandGuard = (command: string) => Promise<string | undef
 interface Run {
   readonly kind: AutomationCommandKind;
   readonly key: string;
-  proc: { kill(): void } | null;
+  /** Owns the child once spawned; closing it is the only way the child is stopped. */
+  readonly scope: OwnedScope;
   stopped: boolean;
 }
+
+/** How long a stopped or timed-out command has between SIGTERM and SIGKILL. */
+const STOP_GRACE_MS = 2_000;
 
 const defaultTimer = (callback: () => void, ms: number): (() => void) => {
   const timer = setTimeout(callback, ms);
@@ -172,7 +181,8 @@ export class AutomationCommands {
     const { kind, key } = request;
     const running = this.running(kind, key);
     if (running >= request.maxInFlight) return { started: false, reason: 'busy', running, limit: request.maxInFlight };
-    const run: Run = { kind, key, proc: null, stopped: false };
+    const label = `automation ${kind} ${key}`;
+    const run: Run = { kind, key, scope: new OwnedScope(label, { stopDeadlineMs: STOP_GRACE_MS }), stopped: false };
     this.#runs.add(run);
     let spawned = false;
     try {
@@ -190,11 +200,13 @@ export class AutomationCommands {
         stderr: 'ignore',
       });
       spawned = true;
-      run.proc = proc;
+      run.scope.child(label, { pid: proc.pid, kill: signal => proc.kill(signal), exited: proc.exited });
       let timedOut = false;
       const cancelTimer = request.timeoutMs === undefined ? () => {} : (request.startTimer ?? defaultTimer)(() => {
         timedOut = true;
-        try { proc.kill(); } catch { /* already exited */ }
+        void run.scope.close('timed out').then(report => {
+          if (report.stillRunning.length > 0) logger.warn('Automation command did not exit after its timeout and SIGKILL', { kind, key, pid: proc.pid });
+        });
       }, request.timeoutMs);
       proc.exited.then((code) => {
         if (timedOut) logger.warn('Automation command killed after its timeout', { kind, key, pid: proc.pid, timeoutMs: request.timeoutMs });
@@ -214,16 +226,21 @@ export class AutomationCommands {
     }
   }
 
-  /** Kills every command of `kind` (all kinds when omitted; only `key`'s runs when given) and cancels any still starting. */
-  stop(kind?: AutomationCommandKind, key?: string): void {
-    for (const run of [...this.#runs]) {
-      if (kind !== undefined && run.kind !== kind) continue;
-      if (key !== undefined && run.key !== key) continue;
-      run.stopped = true;
-      this.#runs.delete(run);
-      try { run.proc?.kill(); } catch (err) {
-        logger.debug('Automation command kill failed', { kind: run.kind, key: run.key, error: summarizeError(err) });
-      }
+  /**
+   * Stops every command of `kind` (all kinds when omitted; only `key`'s runs
+   * when given) and cancels any still starting: SIGTERM, 2 s, SIGKILL, 2 s.
+   * A run keeps its slot until its exit is observed, so a child that ignores
+   * SIGTERM still counts against its limit. The report names every child not
+   * confirmed ended (also logged).
+   */
+  async stop(kind?: AutomationCommandKind, key?: string): Promise<CloseReport> {
+    const selected = [...this.#runs].filter(run => (kind === undefined || run.kind === kind) && (key === undefined || run.key === key));
+    if (selected.length === 0) return NOTHING_RUNNING;
+    for (const run of selected) run.stopped = true;
+    const report = mergeCloseReports(await Promise.all(selected.map(run => run.scope.close('stopped'))));
+    if (report.stillRunning.length > 0) {
+      logger.warn('Automation commands still running after stop', { stillRunning: report.stillRunning.map(entry => ({ label: entry.label, pid: entry.pid })) });
     }
+    return report;
   }
 }

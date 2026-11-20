@@ -34,6 +34,7 @@
 import type { PermissionCategory, PermissionPromptRequest, PermissionRequestAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { buildPermissionApprovalBrief, buildRememberOptions, execFileOperationLines, execRunPlace, fallbackAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { decodeBase64 } from '@goodvibes-jev/engine/platform/platform/control-plane/approval-hunk-apply';
+import { enterAnswer } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import { activeTokens } from '../renderer/theme.ts';
 import {
   beginModal,
@@ -104,6 +105,16 @@ export function permissionButtons(request: PermissionPromptRequest, state: Pick<
     tiers > 0 ? { id: 'remember', label: 'Allow for session ▸' } : { id: 'session', label: 'Allow for session' },
     { id: 'deny', label: 'Deny' },
   ];
+}
+
+/**
+ * The button a card opens on, which Enter presses: never the broadest answer.
+ * Allow once, or Deny for a call that cannot be undone (terminal-shell
+ * blocking-permission-input.ts enterAnswer).
+ */
+export function defaultPermissionChoice(request: PermissionPromptRequest, state: Pick<PermissionCardState, 'hunkState' | 'replyMode'>): number {
+  if (state.hunkState || enterAnswer(request) !== 'deny') return 0;
+  return Math.max(0, permissionButtons(request, state).findIndex((b) => b.id === 'deny'));
 }
 
 // ---------------------------------------------------------------------------
@@ -496,7 +507,7 @@ export function renderPermissionCard(request: PermissionPromptRequest, state: Pe
   let y = scrollBottom + 1;
   if (buttons.length > 0) {
     y++;
-    const choice = Math.max(0, Math.min(state.choice ?? 0, buttons.length - 1));
+    const choice = Math.max(0, Math.min(state.choice ?? defaultPermissionChoice(request, state), buttons.length - 1));
     let bx = f.l;
     buttons.forEach((b, i) => {
       if (bx + buttonWidth(b.label) - 1 > f.r) return;

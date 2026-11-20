@@ -12,7 +12,8 @@
  * event so surfaces can render it.
  */
 import type { WorkspaceEvent } from '../../events/workspace.js';
-import { RewindTokenStore, rewindFingerprint } from './tokens.js';
+import { ReviewTokenStore } from '../control-plane/review-tokens.js';
+import { TargetChangedError, targetRef, type TargetRef } from '../utils/target-ref.js';
 import { discardTurnAnchorsAfter, dropAnchorsAgainFor, restoreAnchorsDroppedBy } from './turn-anchors.js';
 import type { SessionSurface } from '../runtime/session-surface.js';
 import type {
@@ -31,7 +32,7 @@ import type {
   RewindWorkspacePort,
 } from './types.js';
 
-/** Thrown when rewind.apply is handed an invalid/expired/mismatched confirm token. */
+/** Thrown when rewind.apply is handed an unknown, spent or expired confirm token. */
 export class RewindTokenError extends Error {
   constructor(message: string) {
     super(message);
@@ -53,7 +54,7 @@ export interface UnifiedRewindServiceDeps {
   /** Receipt event sink. Absent → no events emitted (a graceful degrade). */
   readonly emit?: RewindEventSink | null;
   readonly now?: () => number;
-  readonly tokens?: RewindTokenStore;
+  readonly tokens?: ReviewTokenStore;
   /**
    * The session surface that owns the sessions directory. When present, a
    * conversation rewind also rewrites the turn-anchor sidecar, so a resume
@@ -82,6 +83,23 @@ function unmatchedTurnReason(turnId: string): string {
   return `Turn ${turnId} has no workspace checkpoint of its own (it changed no files, or its checkpoint was pruned), so the files as they were at that turn cannot be identified, and rewinding only the conversation would leave later file edits in place. Rewind with scope "conversation" to keep the files as they are, or pick a turn that changed files to rewind both.`;
 }
 
+/** The conversation as counted: its port's revision, else its message count. */
+function conversationRevision(preview: { readonly messagesToDrop: number; readonly messagesRemaining: number; readonly revision?: string | undefined }): string {
+  return preview.revision?.trim() || `${preview.messagesToDrop + preview.messagesRemaining} messages`;
+}
+
+/**
+ * What a rewind plan showed and its apply must still find: the session, turn
+ * and scope, the workspace checkpoint it restores, and the conversation's
+ * revision when it was counted (null when no conversation was counted).
+ */
+function rewindTarget(anchor: RewindAnchor, scope: RewindScope, checkpointId: string | null, conversation: string | null): TargetRef<'rewind'> {
+  return targetRef('rewind', `${anchor.sessionId}:${anchor.turnId ?? 'latest'}:${scope}`,
+    { checkpoint: checkpointId, conversation },
+    { checkpoint: checkpointId ?? 'none', conversation: conversation ?? 'not counted' },
+    anchor.sessionId);
+}
+
 // A files rewind restores the whole workspace tree, not only what this session
 // wrote, so edits other sessions, agents or the user made after the checkpoint go too.
 const WHOLE_WORKSPACE_WARNING = 'files rewind resets the whole workspace to the checkpoint, not only this session\'s edits: changes made after it by other sessions, agents or you are reverted too. The receipt names a checkpoint that undoes it.';
@@ -91,7 +109,7 @@ export class UnifiedRewindService {
   private readonly conversation: RewindConversationPort | null;
   private readonly emitSink: RewindEventSink | null;
   private readonly now: () => number;
-  private readonly tokens: RewindTokenStore;
+  private readonly tokens: ReviewTokenStore;
   private readonly anchorSurface: SessionSurface | null;
   /** Sessions with an apply running; a second apply for one of them is refused. */
   private readonly applying = new Set<string>();
@@ -101,7 +119,7 @@ export class UnifiedRewindService {
     this.conversation = deps.conversation ?? null;
     this.emitSink = deps.emit ?? null;
     this.now = deps.now ?? Date.now;
-    this.tokens = deps.tokens ?? new RewindTokenStore(this.now);
+    this.tokens = deps.tokens ?? new ReviewTokenStore(this.now);
     this.anchorSurface = deps.anchorSurface ?? null;
   }
 
@@ -125,11 +143,11 @@ export class UnifiedRewindService {
     const warnings: string[] = [];
     const resolved = wants(scope, 'files') ? await this.resolveFiles(anchor) : null;
     const files = resolved ? await this.planFiles(resolved, warnings) : null;
-    const conversation = wants(scope, 'conversation') ? await this.planConversation(anchor, warnings) : null;
+    const counted = wants(scope, 'conversation') ? await this.planConversation(anchor, warnings) : null;
+    const conversation = counted?.plan ?? null;
     if (scope === 'both' && resolved?.unmatchedTurn) warnings.push(unmatchedTurnReason(resolved.unmatchedTurn));
 
-    const fingerprint = rewindFingerprint(anchor.sessionId, turnId, scope, resolved?.checkpoint?.id ?? null);
-    const { token, expiresAt } = this.tokens.issue(fingerprint);
+    const { token, expiresAt } = this.tokens.issue(rewindTarget(anchor, scope, resolved?.checkpoint?.id ?? null, counted?.revision ?? null));
     this.emitEvent({ type: 'REWIND_PLANNED', sessionId: anchor.sessionId, turnId, scope }, anchor.sessionId);
     return { sessionId: anchor.sessionId, turnId, scope, token, expiresAt, files, conversation, warnings };
   }
@@ -161,11 +179,10 @@ export class UnifiedRewindService {
 
   private async applyNow(anchor: RewindAnchor, scope: RewindScope, opts: RewindApplyOptions): Promise<RewindApplyResult> {
     const turnId = anchor.turnId ?? null;
-    const resolved = wants(scope, 'files') ? await this.resolveFiles(anchor) : null;
-    const fingerprint = rewindFingerprint(anchor.sessionId, turnId, scope, resolved?.checkpoint?.id ?? null);
     // The token is the one authority: it binds this apply to the plan that
-    // previewed it (including which workspace checkpoint gets restored), and
-    // the plan is where the whole-workspace warning is shown.
+    // previewed it (which workspace checkpoint gets restored, and the
+    // conversation as it was counted), and the plan is where the
+    // whole-workspace warning is shown.
     if (opts.confirmToken === undefined) {
       return {
         receipt: null,
@@ -178,9 +195,19 @@ export class UnifiedRewindService {
         },
       };
     }
-    if (!this.tokens.consume(opts.confirmToken, fingerprint)) {
+    const resolved = wants(scope, 'files') ? await this.resolveFiles(anchor) : null;
+    // The conversation is counted again now: a message that arrived after the
+    // plan would otherwise be cut by a rewind that never showed it.
+    const preview = wants(scope, 'conversation') && this.conversation ? await this.previewNow(anchor) : null;
+    const spent = this.tokens.consume(opts.confirmToken,
+      rewindTarget(anchor, scope, resolved?.checkpoint?.id ?? null, preview?.revision ?? null));
+    if (!spent.ok && spent.reason === 'changed' && spent.reviewed) {
+      throw new TargetChangedError(spent.reviewed, spent.changes ?? [],
+        `rewind.plan with sessionId ${anchor.sessionId}${turnId ? `, turnId ${turnId}` : ''} and scope ${scope}`);
+    }
+    if (!spent.ok) {
       throw new RewindTokenError(
-        'confirmToken is invalid, already used, expired, or was issued for a different rewind (including a plan that previewed a different workspace checkpoint than this anchor resolves to now). Re-run rewind.plan.',
+        `confirmToken is ${spent.reason === 'expired' ? 'expired' : 'unknown or already used'}. Re-run rewind.plan.`,
       );
     }
 
@@ -203,7 +230,7 @@ export class UnifiedRewindService {
     // leave the two at different points in time, so the conversation is asked
     // first and a refusal changes nothing.
     if (scope === 'both' && resolved?.checkpoint && this.conversation) {
-      const reason = await this.conversationBlocker(anchor);
+      const reason = preview === null ? null : 'reason' in preview ? preview.reason : null;
       if (reason !== null) {
         return {
           receipt: null,
@@ -286,16 +313,16 @@ export class UnifiedRewindService {
     return { checkpoint: [...list].sort((a, b) => b.createdAt - a.createdAt)[0] ?? null, unmatchedTurn: null };
   }
 
-  /** Why the conversation cannot be rewound now, or null when it can. */
-  private async conversationBlocker(anchor: RewindAnchor): Promise<string | null> {
+  /** The conversation's revision now, or why it cannot be rewound now. */
+  private async previewNow(anchor: RewindAnchor): Promise<{ readonly revision: string | null } | { readonly revision: null; readonly reason: string }> {
     try {
       const preview = await this.conversation!.preview(anchor);
       if (preview.available === false) {
-        return preview.unavailableReason?.trim() || 'no conversation is reachable for this session';
+        return { revision: null, reason: preview.unavailableReason?.trim() || 'no conversation is reachable for this session' };
       }
-      return null;
+      return { revision: conversationRevision(preview) };
     } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+      return { revision: null, reason: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -319,19 +346,22 @@ export class UnifiedRewindService {
     };
   }
 
-  private async planConversation(anchor: RewindAnchor, warnings: string[]): Promise<RewindPlanConversation> {
+  private async planConversation(anchor: RewindAnchor, warnings: string[]): Promise<{ readonly plan: RewindPlanConversation; readonly revision: string | null }> {
     if (!this.conversation) {
       warnings.push('conversation rewind unavailable: no conversation store is wired on this runtime');
-      return { available: false, messagesToDrop: 0, messagesRemaining: 0 };
+      return { plan: { available: false, messagesToDrop: 0, messagesRemaining: 0 }, revision: null };
     }
     const preview = await this.conversation.preview(anchor);
     if (preview.available === false) {
       warnings.push(preview.unavailableReason?.trim()
         ? `conversation rewind unavailable: ${preview.unavailableReason.trim()}`
         : 'conversation rewind unavailable: no conversation is reachable for this session');
-      return { available: false, messagesToDrop: 0, messagesRemaining: 0 };
+      return { plan: { available: false, messagesToDrop: 0, messagesRemaining: 0 }, revision: null };
     }
-    return { available: true, messagesToDrop: preview.messagesToDrop, messagesRemaining: preview.messagesRemaining };
+    return {
+      plan: { available: true, messagesToDrop: preview.messagesToDrop, messagesRemaining: preview.messagesRemaining },
+      revision: conversationRevision(preview),
+    };
   }
 
   private async applyFiles(

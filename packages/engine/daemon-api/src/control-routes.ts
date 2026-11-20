@@ -1,6 +1,6 @@
 import type { DaemonControlRouteHandlers, GatewayRestVerbInvocation } from './context.js';
 import type { RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
-import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
+import { EngineErrorCodes, isOperationKey, OPERATION_KEY_RULE } from '@goodvibes-jev/engine/errors';
 import { authenticationRequiredResponse, jsonErrorResponse } from './error-response.js';
 import { GATEWAY_METHOD_INVOKE_PATH } from './operator.js';
 import type { AuthenticatedPrincipal, CredentialKind, RequestPrincipal } from './http-policy.js';
@@ -193,7 +193,6 @@ function readExplicitUserRequest(req: Request): boolean | undefined {
   return raw.trim().toLowerCase() === 'true' ? true : false;
 }
 
-const MAX_IDEMPOTENCY_KEY_LENGTH = 255;
 const MAX_ACKNOWLEDGED_RECEIPTS = 200;
 
 /**
@@ -206,8 +205,8 @@ function withContractRetryKey(methodId: string, req: Request, body: unknown): un
   if (methodId !== 'contracts.start') return body;
   const key = req.headers.get('idempotency-key')?.trim();
   if (!key) return body;
-  if (key.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
-    return jsonErrorResponse({ error: `Idempotency-Key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`, code: 'INVALID_ARGUMENT' }, { status: 400 });
+  if (!isOperationKey(key)) {
+    return jsonErrorResponse({ error: `Idempotency-Key must be ${OPERATION_KEY_RULE}`, code: 'INVALID_ARGUMENT' }, { status: 400 });
   }
   const record = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {};
   return { ...record, idempotencyKey: key };

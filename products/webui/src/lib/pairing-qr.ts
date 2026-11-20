@@ -236,11 +236,11 @@ export function describeScannedPairing(scanned: ScannedPairing): string {
   const where = scanned.url ? ` for ${scanned.url}` : '';
   switch (scanned.kind) {
     case 'token':
-      return `Scanned an operator token${where}`;
+      return `Scanned a sign-in code${where}`;
     case 'password':
       return `Scanned sign-in credentials for ${scanned.username}${where}`;
     case 'relay':
-      return 'Scanned a relay pairing code';
+      return 'Scanned a relay code';
   }
 }
 

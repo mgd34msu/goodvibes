@@ -51,9 +51,11 @@ interface EffectRow {
 const ROWS = [
   // ── Named effects ──────────────────────────────────────────────────────
   { id: 'auth.sign-in', least: 'guest', scope: '', subject: 'any', public: true },
-  { id: 'session.transcript.read', least: 'member', scope: 'read:transcripts', subject: 'own' },
-  { id: 'session.attach', least: 'member', scope: 'write:sessions', subject: 'own' },
-  { id: 'session.share', least: 'member', scope: 'write:sessions', subject: 'own' },
+  // A paired device (a phone that only chats) reads, joins and shares the sessions it owns, as a member does.
+  { id: 'session.transcript.read', least: 'device', scope: 'read:transcripts', subject: 'own' },
+  { id: 'session.attach', least: 'device', scope: 'write:sessions', subject: 'own' },
+  /** Adding a principal to a session's owners; only an owner of the session (or an admin) shares it. */
+  { id: 'session.share', least: 'device', scope: 'write:sessions', subject: 'own' },
   /** Live `turn`/`tools`/`gate`/`session` frames and approval and hosted-session notices of a session (the event stream reads it). */
   { id: 'session.watch', least: 'device', scope: 'read:own-sessions', subject: 'own' },
   { id: 'session.end', least: 'device', scope: 'write:sessions', subject: 'own', irreversible: true },

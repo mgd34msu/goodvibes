@@ -82,7 +82,7 @@ const INPUT_NOT_CLAIMABLE: ContractErrorCode = { code: 'INPUT_NOT_CLAIMABLE', st
 const INPUT_NOT_DELIVERABLE: ContractErrorCode = { code: 'INPUT_NOT_DELIVERABLE', status: 409, meaning: 'The input is not in a state a surface may report on; the body returns the input and its state.' };
 const CANCEL_NOT_ALLOWED: ContractErrorCode = { code: 'CANCEL_NOT_ALLOWED', status: 409, meaning: 'Only a queued input can be cancelled; the body says whether it is running or ended.' };
 const INVALID_KIND: ContractErrorCode = { code: 'INVALID_KIND', status: 400, meaning: 'Unknown message kind (task, message or followup); nothing was changed.' };
-const INVALID_MESSAGE_ID: ContractErrorCode = { code: 'INVALID_MESSAGE_ID', status: 400, meaning: 'messageId is not 1 to 128 letters, digits, ".", "_", ":" or "-"; nothing was changed.' };
+const INVALID_MESSAGE_ID: ContractErrorCode = { code: 'INVALID_MESSAGE_ID', status: 400, meaning: 'messageId is not 1 to 255 letters, digits, ".", "_", ":" or "-"; nothing was changed.' };
 /** What every route that submits work to a session can answer. */
 const SUBMISSION_ERROR_CODES: readonly ContractErrorCode[] = [SESSION_NOT_FOUND, SESSION_CLOSED, SESSION_AGENT_BIND_FAILED];
 const INVALID_ARGUMENT: ContractErrorCode = { code: 'INVALID_ARGUMENT', status: 400, meaning: 'A field is missing or not in its documented shape (the body names it in `field`); nothing was changed.' };
@@ -598,7 +598,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     replay: {
       in: 'body',
       name: 'messageId',
-      behavior: 'Sending the same messageId again to the same session (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.',
+      behavior: 'Sending the same messageId again to the same session (1 to 255 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.',
     },
     events: ['control.session_update'],
     inputSchema: bodyEnvelopeSchema({
@@ -639,7 +639,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     replay: {
       in: 'body',
       name: 'messageId',
-      behavior: 'Sending the same messageId again to the same session (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.',
+      behavior: 'Sending the same messageId again to the same session (1 to 255 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.',
     },
     events: ['control.session_update'],
     inputSchema: bodyEnvelopeSchema({
@@ -664,7 +664,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     replay: {
       in: 'body',
       name: 'messageId',
-      behavior: 'Sending the same messageId again to the same session (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.',
+      behavior: 'Sending the same messageId again to the same session (1 to 255 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.',
     },
     events: ['control.session_update'],
     inputSchema: bodyEnvelopeSchema({

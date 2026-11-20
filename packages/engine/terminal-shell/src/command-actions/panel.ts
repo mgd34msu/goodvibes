@@ -23,7 +23,7 @@ import { tokenizeSlashCommand } from '../slash-command-parser.js';
 import { beginModal, finishModal, standardModalWidth, type KitHint, type SurfaceLayer } from '../renderer/surface-kit.js';
 import { activeTokens } from '../renderer/theme.js';
 import { listByName } from './lists.js';
-import { fixedChoices, isShown, renderTypedLine, riskWords } from './typed-line.js';
+import { fixedChoices, isShown, listChoices, renderTypedLine, riskWords } from './typed-line.js';
 import type { ActionDescription, ActionValues, CommandActionContext, CommandDescription, FirstScreenGroup, InputDescription } from './types.js';
 
 export type PanelResult =
@@ -204,7 +204,7 @@ export class GuidedPanel implements SurfaceModal {
   }
 
   private pick(input: InputDescription): void {
-    const list = input.choices && !Array.isArray(input.choices) ? input.choices : undefined;
+    const list = listChoices(input);
     if (!list || !this.ctx.openSelection) return;
     const open = this.ctx.openSelection;
     this.picking = true;
@@ -226,7 +226,7 @@ export class GuidedPanel implements SurfaceModal {
   private advance(): void {
     const fields = this.stepFields();
     const current = fields[this.field];
-    if (current && current.choices && !Array.isArray(current.choices) && !this.texts[current.id]) { this.pick(current); return; }
+    if (current && listChoices(current) && !this.texts[current.id]) { this.pick(current); return; }
     const missing = this.missingInStep();
     if (missing) { this.note = `${missing.label} is needed.`; this.field = Math.max(0, fields.indexOf(missing)); return; }
     const action = this.action!;
@@ -259,7 +259,7 @@ export class GuidedPanel implements SurfaceModal {
     const input = fields[this.field];
     if (token.type === 'text') {
       if (!input || fixedChoices(input)) return;
-      if (input.choices && !Array.isArray(input.choices) && !input.choices.allowOther) return;
+      if (listChoices(input) && !listChoices(input)!.allowOther) return;
       this.texts[input.id] = (this.texts[input.id] ?? '') + token.value;
       this.note = '';
       return;
@@ -376,7 +376,7 @@ export class GuidedPanel implements SurfaceModal {
           f.canvas.put(x + 3, y, `suggested from the ${suggested.from}`, { fg: t.textMuted });
         } else {
           if (focused) x = f.canvas.put(x, y, '▏', { fg: t.textMuted });
-          const hint = input.choices && !Array.isArray(input.choices) ? (focused ? '⏎ to choose' : '') : input.required === true ? '' : input.required.defaultMeans;
+          const hint = listChoices(input) ? (focused ? '⏎ to choose' : '') : input.required === true ? '' : input.required.defaultMeans;
           if (hint) f.canvas.put(x + 1, y, hint, { fg: t.textFaint });
         }
       }

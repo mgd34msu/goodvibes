@@ -547,7 +547,7 @@ Prerequisite: a TypeSafe API key for the hosted endpoint.
 
 | Setting | Meaning |
 | --- | --- |
-| `judgment.endpoint` | The decision endpoint's base URL (`http` or `https`). Empty uses `TYPESAFE_BASE_URL`, then the hosted endpoint `https://api.typesafe.ai`. A loopback address (`localhost`, `127.x.x.x`, `::1`) marks a local model. Embedded credentials, query strings and fragments are refused. |
+| `judgment.endpoint` | The decision endpoint's base URL (`http` or `https`). Empty uses `TYPESAFE_BASE_URL`, then the hosted endpoint `https://api.typesafe.ai`. A loopback address (`localhost`, `127.x.x.x`, `::1`) marks a local model. Embedded credentials, query strings and fragments are refused. While `judgment.keySource` is not `none`, the endpoint is changed or reset only in the same update as `judgment.keySource` or `judgment.keyName` (keep it by sending its current value, or clear it with `none`); alone it is refused with `CREDENTIAL_DESTINATION_UNBOUND` and nothing is saved, so a key is never sent to an address nobody chose it for. The settings screens do this for you: the terminal's decision-model picker asks for the credential with the endpoint, and the web UI's edit and Reset set authentication to none. |
 | `judgment.model` | The model name sent in each request. Empty uses `TYPESAFE_DEFAULT_MODEL`, then `jev-latest`. |
 | `judgment.keySource` | `env`, `secret` or `none`. |
 | `judgment.keyName` | The environment variable (`env`) or secret-store entry (`secret`) holding the key. It must be a non-empty name (letters, digits, `_ . / : -`); with `keySource` `none` it is ignored, so leave it as it is. |
@@ -598,9 +598,9 @@ The named models (starting configurations, not a closed list):
 Prerequisite: a server speaking the protocol above, for example Kev-9B listening on `http://127.0.0.1:8080`.
 
 ```text
+/config set judgment.keySource none
 /config set judgment.endpoint http://127.0.0.1:8080
 /config set judgment.model kev-latest
-/config set judgment.keySource none
 /config set judgment.backend {"adapter":"system-one"}
 /config set judgment.fallbacks []
 /config set judgment.policy Decision Model Only
@@ -608,6 +608,7 @@ Prerequisite: a server speaking the protocol above, for example Kev-9B listening
 ```
 
 - `judgment.fallbacks []` makes sure no hosted model answers in its place.
+- `judgment.keySource none` comes first: while a credential is configured, `judgment.endpoint` changes only together with it (see below).
 - `Decision Model Only` makes an outage stop work instead of falling back: a call that needs the model fails with the model's error (`System One could not be reached`, `System One answered HTTP <status>`), and the gate does not ask you instead. With `Hybrid` an outage would fall back silently after one notice.
 - `permissions.mode jev-decides` is set explicitly: the unchosen default would behave as `ask-me` on a model the shipped calibration did not measure.
 - With an authenticated server: `/secrets set KEV_API_KEY <your-api-key> --user`, `/config set judgment.keySource secret`, `/config set judgment.keyName KEV_API_KEY`.

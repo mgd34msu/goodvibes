@@ -16,15 +16,17 @@
  * built copy). Chromium comes from RUNTHROUGH_CHROMIUM (default
  * /usr/bin/chromium).
  */
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { done, exitCodeOfTally, failedOutcome, observe, refusal, tally, type EffectOutcome } from '../../errors/src/index.ts';
 import { REPO } from './lib.ts';
 import { answerAsAModelWould, startFakeDecision } from './fake-decision.ts';
 
 const JOURNEYS = [
   'j1-tool-turn', 'j2-delegation', 'j3-channels', 'j4-knowledge', 'j5-purchases', 'j6-pairing', 'j7-webui',
   'j8-permission-modes', 'j9-crash-recovery', 'j10-inbox-and-hosted-agent', 'j11-contracts', 'j12-mail', 'j13-decision-notice',
-  'j14-save-then-acknowledge',
+  'j14-save-then-acknowledge', 'j15-guided-commands',
 ] as const;
 const POLICY_DEFAULT = ['j1', 'j8', 'j10', 'j13'];
 const POLICIES = ['No Decision Model', 'Hybrid', 'Decision Model Only'] as const;
@@ -37,6 +39,12 @@ const policies = process.argv.includes('--policies');
 const only = flag('--only')?.split(',').map((entry) => entry.trim()).filter(Boolean) ?? (policies ? POLICY_DEFAULT : undefined);
 const dir = flag('--dir') ?? process.env.RUNTHROUGH_DIR ?? join(process.env.TMPDIR ?? '/tmp', 'goodvibes-runthrough');
 const selected = JOURNEYS.filter((name) => !only || only.some((prefix) => name === prefix || name.startsWith(`${prefix}-`)));
+const unmatched = (only ?? []).filter((prefix) => !JOURNEYS.some((name) => name === prefix || name.startsWith(`${prefix}-`)));
+if (selected.length === 0 || unmatched.length > 0) {
+  // A selector that names no journey is a usage error, never a run of nothing that passes.
+  process.stdout.write(`[runthrough] --only ${unmatched.join(',') || (only ?? []).join(',')} names no journey. Journeys: ${JOURNEYS.join(', ')}\n`);
+  process.exit(2);
+}
 mkdirSync(dir, { recursive: true });
 
 /** One journey run: under the journey's own decision settings, or one policy combination. */
@@ -53,12 +61,30 @@ const tasks: Task[] = policies
   : selected.map((name): Task => ({ name, label: '', dir, env: {} }));
 
 let webuiDist = process.env.RUNTHROUGH_WEBUI_DIST;
+/**
+ * The source the built web UI came from: the commit, the uncommitted changes
+ * and the untracked files. A build is reused only when it was made from the
+ * same source, so the journey never drives a stale copy.
+ */
+function sourceStamp(): string {
+  const git = (...args: string[]): string => Bun.spawnSync(['git', '-C', REPO, ...args], { stdout: 'pipe', stderr: 'pipe' }).stdout.toString();
+  return createHash('sha256')
+    .update(git('rev-parse', 'HEAD'))
+    .update(git('diff', 'HEAD', '--', 'products/webui', 'packages/engine'))
+    .update(git('ls-files', '--others', '--exclude-standard', '--', 'products/webui', 'packages/engine'))
+    .digest('hex');
+}
 if (selected.includes('j7-webui') && !webuiDist) {
   webuiDist = join(dir, 'webui-dist');
-  if (!existsSync(join(webuiDist, 'index.html'))) {
+  const stampPath = join(dir, 'webui-dist.source');
+  const stamp = sourceStamp();
+  const builtFrom = existsSync(stampPath) ? readFileSync(stampPath, 'utf8') : undefined;
+  if (!existsSync(join(webuiDist, 'index.html')) || builtFrom !== stamp) {
     process.stdout.write(`[runthrough] building the web UI into ${webuiDist}\n`);
+    rmSync(stampPath, { force: true });
     const built = Bun.spawnSync([process.execPath, 'run', '--cwd', join(REPO, 'products/webui'), 'vite', 'build', '--outDir', webuiDist, '--emptyOutDir'], { stdout: 'pipe', stderr: 'pipe' });
     if (built.exitCode !== 0) process.stdout.write(`[runthrough] the web UI build failed: ${built.stderr.toString().slice(-600)}\n`);
+    else writeFileSync(stampPath, stamp);
   }
 }
 
@@ -87,7 +113,14 @@ async function worker(): Promise<void> {
 await Promise.all(Array.from({ length: Math.min(3, tasks.length) }, () => worker()));
 decision?.stop();
 process.stdout.write('\n');
+const outcomes: { id: string; outcome: EffectOutcome<unknown> }[] = [];
 for (const result of results.sort((a, b) => tasks.indexOf(a.task) - tasks.indexOf(b.task))) {
   process.stdout.write(`${result.code === 0 ? 'PASS' : 'FAIL'} ${result.task.label}${result.task.name} (${(result.ms / 1000).toFixed(0)} s)\n`);
+  const id = `${result.task.label}${result.task.name}`;
+  const seen = await observe('the journey exited 0', () => (result.code === 0 ? result.code : undefined));
+  outcomes.push({ id, outcome: seen ? done(seen) : failedOutcome(refusal({ code: 'JOURNEY_FAILED', state: 'failed', reason: `exited ${result.code}` })) });
 }
-process.exit(results.every((result) => result.code === 0) ? 0 : 1);
+// Every selected journey counts: one that never reported is not a pass.
+const summary = tally(tasks.length, outcomes);
+process.stdout.write(`${summary.done.length} of ${summary.requested} journeys passed\n`);
+process.exit(exitCodeOfTally(summary));

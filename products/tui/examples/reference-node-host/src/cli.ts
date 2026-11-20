@@ -47,7 +47,17 @@ async function main(): Promise<void> {
     case 'verify': {
       await client.loadState();
       const verified = await client.verifyPairing();
-      console.log(JSON.stringify({ verified, state: client.getState() }, null, 2));
+      // The state holds the peer's bearer token; only facts about the pairing are printed.
+      const state = client.getState();
+      console.log(JSON.stringify({
+        verified,
+        paired: state.token !== undefined,
+        peerId: state.peer?.id ?? null,
+        tokenId: state.token?.id ?? null,
+        tokenIssuedAt: state.token?.issuedAt ?? null,
+        lastHeartbeatAt: state.lastHeartbeatAt ?? null,
+        lastError: state.lastError ?? null,
+      }, null, 2));
       return;
     }
     case 'once': {

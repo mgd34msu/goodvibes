@@ -188,6 +188,17 @@ function idempotencyKeyReused(contractId: string): RefusalError {
   }));
 }
 
+/** The retry key could not be recorded or locked: nothing was started, because an unkeyed start could run twice. */
+function idempotencyKeyUnrecorded(error: unknown): RefusalError {
+  return new RefusalError(refusal({
+    code: 'CONTRACT_KEY_UNRECORDED',
+    state: 'no contract was started',
+    reason: `The Idempotency-Key could not be recorded in the project's contract directory (${summarizeError(error)}), so a retry could not find this start`,
+    next: ['Make the project\'s .goodvibes/contracts directory writable and send the same request with the same key again', 'Or send the request without an Idempotency-Key if a second start on retry is acceptable'],
+    status: 503,
+  }));
+}
+
 /** The request a retry must repeat, in a canonical form: the same fields in any order give the same text. */
 function startFingerprint(input: StartContractInput): string {
   const fields: Record<string, unknown> = { ask: input.ask, sessionId: input.sessionId, origin: input.origin, projectRoot: input.projectRoot, isolation: input.isolation ?? null };

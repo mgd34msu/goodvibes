@@ -10,7 +10,7 @@
  * per-purchase ceiling off, see config/config-key-facts.ts) is put to the owner
  * there, as an owner-only change (permissions/manager.ts `settingsWriteLoosens`).
  */
-import { CREDENTIAL_DESTINATION_KEYS } from '../../config/credential-destination-keys.js';
+import { isCredentialDestinationKey } from '../../config/credential-destination-keys.js';
 import { daemonSecretKeyFor } from '../../config/daemon-secret-keys.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { isStructuredCredentialReferenceConfigKey } from '../../config/structured-credential-config.js';
@@ -37,12 +37,13 @@ function referencedSecretKey(value: string): string | null {
 export function agentSettingsWriteRefusal(args: SettingsToolArgs): string | null {
   if (typeof args.key !== 'string') return null;
   const key = args.key.trim();
+  // A reset moves a destination to its default destination, so it is the same change as a set.
+  if ((args.mode === 'set' || args.mode === 'reset') && isCredentialDestinationKey(key)) {
+    return `${key} decides which host receives a stored credential, so only the owner changes it, in the settings screen, stating the credential for the new host. Nothing was changed. Tell the owner the value you were given and ask them to set it.`;
+  }
   if (args.mode !== 'set') return null;
   if (configKeyFacts(key).cardMaterial) {
     return `${key} holds payment card material, which is entered only through the local terminal or web UI secure card setup. Nothing was changed. Ask the owner to enter the card there and use the stored card id.`;
-  }
-  if (CREDENTIAL_DESTINATION_KEYS.has(key)) {
-    return `${key} decides which host receives this service's stored credential, so only the owner changes it, in the settings screen. Nothing was changed. Tell the owner the value you were given and ask them to set it.`;
   }
   if (isSecretBearingConfigKey(key) && !isStructuredCredentialReferenceConfigKey(key) && args.value !== undefined && args.value !== null && args.value !== '') {
     const own = daemonSecretKeyFor(key);

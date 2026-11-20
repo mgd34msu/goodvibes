@@ -1117,7 +1117,9 @@ export class PermissionManager {
     const decided = askedByOwnerRule(classifyCall(mode, this.callFacts({
       toolName, args, category, mode, surface: effectSurface, definition, ownerOnly,
       directory: capturedAuthority.directory, rule,
-      untrustedRead: Array.isArray(exposure) && exposure.length > 0,
+      // A turn whose reads were evicted before they could be checked still read something untrusted.
+      untrustedRead: (Array.isArray(exposure) && exposure.length > 0)
+        || (rawAuthority as { readonly exposureCoverage?: { readonly complete?: unknown } }).exposureCoverage?.complete === false,
       declaredReadOnly: preparedCall?.registry.isPreparedReadOnly(preparedCall.call) === true,
     })), typeof ownerAsk === 'string');
     const policyResult = this.policyResultOf(decided, analysis);
@@ -1695,7 +1697,7 @@ export class PermissionManager {
     const decided = classifyCall(mode, {
       tool: 'the hook change', category: 'write', sideEffects: undefined, surface: this.gate.surfaceOf?.(), rule,
       recoverable: false, ownerOnly,
-      untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).ingestedThisTurn().length > 0,
+      untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).hasIngestedThisTurn(),
     });
     const refusal = (decision: ToolDecision): string => [decision.reason, ...(decision.next ?? []).slice(0, 1)].join('; ');
     if (decided.kind === 'fact') return decided.allow ? { approved: true } : { approved: false, reason: refusal(decided.decision) };
@@ -1803,7 +1805,7 @@ export class PermissionManager {
     const decided = askedByOwnerRule(classifyCall(mode, this.callFacts({
       toolName, args, category, mode, surface, definition, ownerOnly,
       directory: config.directory, rule,
-      untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).ingestedThisTurn().length > 0,
+      untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).hasIngestedThisTurn(),
     })), ownerAsk !== undefined);
     const policyResult = this.policyResultOf(decided, analysis);
     const safety = await this.assessExecutionSafety({
@@ -1886,7 +1888,7 @@ export class PermissionManager {
     const decided = classifyCall(mode, this.callFacts({
       toolName, args: captured, category, mode, surface: this.gate.surfaceOf?.(), definition, ownerOnly,
       directory: this.configReader.getWorkingDirectory(), rule,
-      untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).ingestedThisTurn().length > 0,
+      untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).hasIngestedThisTurn(),
     }));
     return { mode, category, decided };
   }

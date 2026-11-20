@@ -8,6 +8,7 @@ import { fetchWithTimeout, instrumentedFetch } from '../../utils/fetch-with-time
 import { isRecord } from '../../utils/record-coerce.js';
 import { redactDiagnosticText } from '../../utils/redaction.js';
 import { parseRetryAfterMs } from '../../providers/rate-limit-headers.js';
+import { checkDestination, DestinationRefusedError, egress, type CheckedDestination } from '../../runtime/network/destination.js';
 
 export function trimToUndefined(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
@@ -140,36 +141,6 @@ export async function voiceHttpError(provider: string, operation: string, respon
   });
 }
 
-/** Only an https audio URL is fetched on the caller's behalf; see {@link resolveAudioInput}. */
-function assertFetchableAudioUri(value: string): URL {
-  let url: URL;
-  try { url = new URL(value); } catch { throw new Error('Voice audio uri is not a valid URL; send the audio as dataBase64 or an https URL.'); }
-  if (url.protocol !== 'https:') {
-    throw new Error(`Voice audio uri must be https (got ${url.protocol}); local files and plain-http URLs are not fetched. Send the audio as dataBase64 or an https URL.`);
-  }
-  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  if (isPrivateHost(host)) {
-    throw new Error('Voice audio uri points at a loopback, link-local or private address, which is not fetched. Send the audio as dataBase64 or a public https URL.');
-  }
-  return url;
-}
-
-function isPrivateHost(host: string): boolean {
-  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return true;
-  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
-    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31)
-      || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
-  }
-  if (host.includes(':')) {
-    // IPv6 literal: loopback, unspecified, unique-local, link-local, or an IPv4-mapped address.
-    return host === '::1' || host === '::' || /^f[cd]/.test(host) || /^fe[89ab]/.test(host) || host.startsWith('::ffff:');
-  }
-  // A name is not resolved here: a public name that resolves to a private address is not caught.
-  return false;
-}
-
 export async function resolveAudioInput(
   audio: VoiceAudioArtifact,
   signal?: AbortSignal,
@@ -181,11 +152,22 @@ export async function resolveAudioInput(
     };
   }
   if (typeof audio.uri === 'string' && audio.uri.trim().length > 0) {
-    const response = await voiceFetch(assertFetchableAudioUri(audio.uri.trim()), {
-      ...signalInit(signal),
-      // A redirect could lead to the loopback or private address the check above refused.
-      redirect: 'error',
-    });
+    // The destination owner resolves the name and checks every answer: only an
+    // https URL whose every address is public is fetched, connected to the
+    // address it checked, and a redirect is never followed.
+    let destination: CheckedDestination;
+    try {
+      destination = await checkDestination(audio.uri.trim(), 'voice-audio', signal ? { signal } : {});
+    } catch (error) {
+      if (error instanceof DestinationRefusedError) throw new Error(`Voice audio uri was not fetched: ${error.message.replace(/^Request blocked: /, '')}. ${error.next} Or send the audio as dataBase64.`);
+      throw error;
+    }
+    const timeout = AbortSignal.timeout(VOICE_REQUEST_TIMEOUT_MS);
+    const response = await egress(destination, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error(`Voice audio uri answered with a redirect (HTTP ${response.status}), which is not followed. Send the final https URL or the audio as dataBase64.`);
+    }
     if (!response.ok) throw await voiceHttpError('Voice audio uri', 'download', response);
     return {
       buffer: new Uint8Array(await response.arrayBuffer()),

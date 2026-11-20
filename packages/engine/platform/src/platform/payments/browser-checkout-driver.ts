@@ -78,7 +78,7 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
  * untrusted-content ledger's turn watermark (`startTurnForOwnerRequest`,
  * security/turn-boundary.ts) before this flow does anything. Nothing this
  * flow itself does calls `snapshot`/`readText`/`extract`, so the watermark
- * reset is usually what leaves `originsThisTurn()` empty at the moment of the
+ * reset is usually what leaves `taintOriginsThisTurn()` empty at the moment of the
  * click, and an empty set clears the guard with no `OwnerApproval` involved at
  * all. This is a fact about how the verb is normally invoked, not a property
  * this driver enforces, and it stops holding the moment something reads page

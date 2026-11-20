@@ -21,15 +21,17 @@ import type {
 } from './protocol.js';
 import type { SubagentInfo, SubagentResult, SubagentTask } from './protocol.js';
 import {
+  ACP_CHILD_FORCED_EXIT_MS,
+  ACP_CHILD_GRACE_MS,
   ACP_HANDSHAKE_TIMEOUT_MS,
   drainStderrTail,
   messageChunkText,
   permissionOutcomeFor,
   readNdJsonMessages,
-  stopAcpChild,
   wellFormedPermissionOptions,
   withTimeout,
 } from './protocol.js';
+import { OwnedScope, type CloseReport } from '../utils/owned-work.js';
 import { admitExternalRequest, externalAskDeadlineMs, type ExternalPermissionHost, type ExternalOperationSource } from '../permissions/external-request.js';
 import { AcpPermissionWire } from './permission-wire.js';
 import { runnerCeilingRefusal } from './runner-ceiling.js';
@@ -114,7 +116,9 @@ export class AcpConnection {
   private outputTruncated = false;
   private stderr: { tail(): string } | null = null;
   private transportClosed = false;
-  private stopping: Promise<void> | null = null;
+  private stopping: Promise<CloseReport> | null = null;
+  /** Owns the child from its spawn until its exit is observed: SIGTERM, 250 ms, SIGKILL, 5 s. */
+  readonly #scope: OwnedScope;
   private readonly hookDispatcher: Pick<HookDispatcher, 'fire'> | null;
   private readonly permissionHost: ExternalPermissionHost | undefined;
   private readonly operation: ExternalOperationSource | undefined;
@@ -134,6 +138,7 @@ export class AcpConnection {
     this.permissionHost = options.permissionHost;
     this.operation = options.operation;
     this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? ACP_HANDSHAKE_TIMEOUT_MS;
+    this.#scope = new OwnedScope(`ACP subagent ${id}`, { stopDeadlineMs: ACP_CHILD_GRACE_MS, killGraceMs: ACP_CHILD_FORCED_EXIT_MS });
     this.info = {
       id,
       task: task.description,
@@ -149,9 +154,23 @@ export class AcpConnection {
 
   /**
    * Spawn the child process, perform the ACP handshake, and run the prompt.
-   * Resolves with SubagentResult when the subagent completes or errors.
+   * Resolves with SubagentResult when the subagent completes or errors, once
+   * the child's exit has been observed. A child that could not be stopped
+   * stays owned and is named in the result, which then never reads as success.
    */
   async run(): Promise<SubagentResult> {
+    const result = await this.runSession();
+    const report = await this.cleanup();
+    if (report.stillRunning.length === 0) return result;
+    const names = report.stillRunning.map(entry => entry.pid !== undefined ? `pid ${entry.pid}` : entry.label).join(', ');
+    return {
+      ...result,
+      success: false,
+      output: `${result.output}\n\nThe subagent process (${names}) did not exit after SIGTERM and SIGKILL; it may still be running.`,
+    };
+  }
+
+  private async runSession(): Promise<SubagentResult> {
     const startedAt = this.info.startedAt;
 
     try {
@@ -166,11 +185,14 @@ export class AcpConnection {
       this.lifetime.signal.throwIfAborted();
 
       // 1. Spawn child process with piped stdio
-      this.childProcess = Bun.spawn(this.spawnCmd, {
+      const spawned = Bun.spawn(this.spawnCmd, {
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
       });
+      this.childProcess = spawned;
+      // A cancel that already closed the scope kills it here and the run fails as cancelled.
+      this.#scope.child(`ACP subagent ${this.id}`, { pid: spawned.pid, kill: signal => spawned.kill(signal), exited: spawned.exited });
       this.stderr = drainStderrTail(this.childProcess.stderr);
 
       // 2. Wire the child's stdio. The permission wire is the one serialiser of
@@ -305,8 +327,6 @@ export class AcpConnection {
       }
       this.emitTransportTerminalFailure(error.message);
       return failureResult;
-    } finally {
-      void this.cleanup();
     }
   }
 
@@ -397,18 +417,14 @@ export class AcpConnection {
     });
   }
 
-  /** Revoke the run's authority and stop the child; every caller shares one stop. */
-  private cleanup(): Promise<void> {
+  /** Revoke the run's authority and stop the child; every caller shares one stop and its report. */
+  private cleanup(): Promise<CloseReport> {
     this.lifetime.abort();
     this.permissionWire?.close();
-    if (!this.stopping) {
-      const child = this.childProcess;
-      this.stopping = child
-        ? stopAcpChild(child).catch((error: unknown) => {
-          logger.error('AcpConnection: the subagent process could not be stopped', { id: this.id, pid: child.pid, err: summarizeError(error) });
-        })
-        : Promise.resolve();
-    }
+    this.stopping ??= this.#scope.close('the subagent run ended').then(report => {
+      if (report.stillRunning.length > 0) logger.error('AcpConnection: the subagent process could not be stopped', { id: this.id, stillRunning: report.stillRunning });
+      return report;
+    });
     this.childProcess = null;
     this.conn = null;
     this.sessionId = null;

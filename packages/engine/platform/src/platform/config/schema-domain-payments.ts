@@ -25,7 +25,7 @@
  *
  * See docs/payments.md for the decision order these numbers feed.
  */
-import type { ConfigSetting } from './schema-types.js';
+import type { ConfigSettingRow } from './schema-types.js';
 import { intRange } from './schema-shared.js';
 import { moneyAmount } from './money-value.js';
 
@@ -65,7 +65,7 @@ export const paymentsConfigDefaults = {
   },
 };
 
-export const paymentsConfigSettings: ConfigSetting[] = [
+export const paymentsConfigSettings: ConfigSettingRow[] = [
   {
     key: 'payments.enabled',
     type: 'boolean',

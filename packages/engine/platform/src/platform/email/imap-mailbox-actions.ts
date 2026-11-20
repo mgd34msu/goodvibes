@@ -146,11 +146,12 @@ export async function fetchImapAttachment(session: ImapSession, uid: number, ind
  * its recipient, subject, thread reference and up to 64 KB of body text, so a
  * draft can be opened in a composer without a second request.
  */
-export async function listImapDrafts(session: ImapSession, mailbox: string, limit: number): Promise<{ drafts: ImapDraftSummary[]; total: number }> {
-  await session.command(`EXAMINE ${formatMailboxName(mailbox)}`);
+export async function listImapDrafts(session: ImapSession, mailbox: string, limit: number): Promise<{ drafts: ImapDraftSummary[]; total: number; uidValidity: number | null }> {
+  const examined = parseMailboxStatus(await session.command(`EXAMINE ${formatMailboxName(mailbox)}`));
+  const uidValidity = examined.uidValidity;
   const uids = parseSearchNumbers(await session.command('UID SEARCH ALL'));
   const page = uids.slice(-Math.max(1, Math.min(limit, 100)));
-  if (page.length === 0) return { drafts: [], total: uids.length };
+  if (page.length === 0) return { drafts: [], total: uids.length, uidValidity };
   const headers = await session.commandFrames(`UID FETCH ${page.join(',')} (UID BODY.PEEK[HEADER.FIELDS (TO SUBJECT DATE IN-REPLY-TO MESSAGE-ID FROM CONTENT-TYPE CONTENT-TRANSFER-ENCODING)])`);
   const batch = readEnvelopeBatch(headers, mailbox, page);
   const rawHeaders = new Map<number, string>();
@@ -177,5 +178,38 @@ export async function listImapDrafts(session: ImapSession, mailbox: string, limi
       body,
     });
   }
-  return { drafts, total: uids.length };
+  return { drafts, total: uids.length, uidValidity };
+}
+
+/**
+ * Before a saved draft is replaced: the Drafts folder SELECTed read-write, its
+ * UIDVALIDITY the one the draft was listed under, the draft still there, and
+ * a way to remove that one message alone (UIDPLUS's UID EXPUNGE; a replaced
+ * draft is not moved to Trash, it is superseded). Refuses with nothing
+ * changed otherwise.
+ */
+export async function prepareDraftReplacement(
+  session: ImapSession,
+  mailbox: string,
+  uid: number,
+  uidValidity: number,
+  capabilities: readonly string[],
+): Promise<void> {
+  requireUid(uid);
+  if (!capabilities.map((capability) => capability.toUpperCase()).includes('UIDPLUS')) {
+    throw new Error('This mail server cannot remove one message by UID (it does not offer UIDPLUS), so the saved draft cannot be replaced. Nothing was changed; save it as a new draft and delete the old one in your mail program.');
+  }
+  const selected = parseMailboxStatus(await session.command(`SELECT ${formatMailboxName(mailbox)}`));
+  if (selected.uidValidity !== uidValidity) {
+    throw new Error(`The drafts folder '${mailbox}' was reset since this draft was listed, so nothing was changed. List the drafts again and reopen it.`);
+  }
+  const exists = parseSearchNumbers(await session.command(`UID SEARCH UID ${uid}`));
+  if (!exists.includes(uid)) throw new Error(`Draft ${uid} is no longer in '${mailbox}', so nothing was changed. List the drafts again.`);
+}
+
+/** Remove the replaced draft, this UID only, after its replacement was appended. */
+export async function removeReplacedDraft(session: ImapSession, uid: number): Promise<void> {
+  requireUid(uid);
+  await session.command(`UID STORE ${uid} +FLAGS.SILENT (\\Deleted)`);
+  await session.command(`UID EXPUNGE ${uid}`);
 }

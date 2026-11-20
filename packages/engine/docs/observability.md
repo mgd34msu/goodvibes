@@ -507,11 +507,13 @@ export interface PlatformObserver {
   /**
    * Called when auth state transitions. `replace` is a token the caller set
    * over an existing one (`auth.setToken`); `refresh` is only the platform's
-   * own automatic refresh.
+   * own automatic refresh. `to: 'credential'` is a login whose token was
+   * returned to the caller but not stored (`persistToken: false`, or no
+   * token store); the stored state did not change.
    */
   onAuthTransition?(transition: {
-    readonly from: 'anonymous' | 'token';
-    readonly to: 'anonymous' | 'token';
+    readonly from: 'anonymous' | 'token' | 'credential';
+    readonly to: 'anonymous' | 'token' | 'credential';
     readonly reason: 'login' | 'logout' | 'replace' | 'refresh' | 'expire';
   }): void;
 }

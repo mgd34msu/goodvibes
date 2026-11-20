@@ -102,6 +102,7 @@ import { hasFetchResponse } from './imap-bodystructure.js';
 import {
   buildDraftMessage,
   parseAppendUid,
+  parseAppendUidValidity,
   selectDraftsMailboxFrames,
   validateDraftInput,
 } from './imap-draft.js';
@@ -126,6 +127,8 @@ import {
   applyImapMessageAction,
   fetchImapAttachment,
   listImapDrafts,
+  prepareDraftReplacement,
+  removeReplacedDraft,
   type ImapAttachmentContent,
   type ImapDraftSummary,
   type ImapMessageAction,
@@ -134,6 +137,7 @@ import {
 import type {
   ImapAppendDraftInput,
   ImapAppendDraftResult,
+  ImapReplaceDraftInput,
   ImapClientOptions,
   ImapEnvelope,
   ImapEnvelopeBatch,
@@ -657,7 +661,7 @@ export class ImapClient {
         { signal: selection.signal, assertCurrent: current },
       );
       current();
-      return { uid: parseAppendUid(lines), mailbox };
+      return { uid: parseAppendUid(lines), uidValidity: parseAppendUidValidity(lines), mailbox };
     } catch {
       // Once APPEND starts the server may be waiting for literal bytes. Never
       // reuse that transport or expose its potentially private failure text.
@@ -665,6 +669,35 @@ export class ImapClient {
       throw new Error('The draft append could not be confirmed.');
     } finally { selection.signal?.removeEventListener('abort', retire); }
 
+  }
+
+  /**
+   * Replace one saved draft: the edited message is appended to the Drafts
+   * folder, then the draft it replaces (by UID, in the folder generation it
+   * was listed under) is removed, so the folder holds one copy. Everything
+   * that can refuse (folder reset, draft gone, no single-message removal) is
+   * checked before anything is written. When the old copy cannot be removed
+   * after the new one was saved, the error says both copies are there.
+   */
+  async replaceDraft(input: ImapReplaceDraftInput): Promise<ImapAppendDraftResult & { readonly replaced: number }> {
+    input = { ...input };
+    validateDraftInput(input);
+    const capabilities = await this.capabilities();
+    const session = this.requireSession();
+    const selection = await this.resolveDraftsMailbox(session, input.mailbox);
+    const current = () => { selection.assertCurrent(); assertImapReadingCurrent(this.readingOptions(session)); };
+    current();
+    const mailbox = selection.value;
+    await prepareDraftReplacement(session, mailbox, input.uid, input.uidValidity, capabilities);
+    current();
+    const appended = await this.appendDraft({ ...input, mailbox });
+    try {
+      current();
+      await removeReplacedDraft(session, input.uid);
+    } catch {
+      throw new Error(`The edited draft was saved${appended.uid === null ? '' : ` as ${String(appended.uid)}`}, but the earlier copy (${String(input.uid)}) could not be removed, so '${mailbox}' holds both. Delete the earlier one in your mail program.`);
+    }
+    return { ...appended, replaced: input.uid };
   }
 
   /**
@@ -739,7 +772,7 @@ export class ImapClient {
   }
 
   /** The newest drafts in the Drafts folder (discovered as `appendDraft` does), newest first. */
-  async listDrafts(limit: number, override?: string): Promise<{ readonly drafts: readonly ImapDraftSummary[]; readonly total: number; readonly mailbox: string }> {
+  async listDrafts(limit: number, override?: string): Promise<{ readonly drafts: readonly ImapDraftSummary[]; readonly total: number; readonly mailbox: string; readonly uidValidity: number | null }> {
     const session = this.requireSession();
     const selection = await this.resolveDraftsMailbox(session, override);
     selection.assertCurrent();

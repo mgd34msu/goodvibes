@@ -123,6 +123,14 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
         next: [`Set a password with goodvibes auth rotate-password ${username}`],
       }, { status: 401 });
     }
+    if (authResult.passwordChangedDuringSignIn) {
+      // Only someone who knew the previous password can reach this, so saying why tells a stranger nothing.
+      return jsonErrorResponse({
+        error: 'Invalid credentials', code: 'PASSWORD_CHANGED_DURING_SIGN_IN',
+        state: 'this password was changed (or the account deleted) while the sign-in was being checked, so the previous password no longer signs in',
+        next: ['Sign in with the new password'],
+      }, { status: 401 });
+    }
     return Response.json({ error: 'Invalid credentials' }, { status: 401 });
   }
 

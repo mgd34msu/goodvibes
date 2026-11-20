@@ -11,6 +11,7 @@
  * companion.chat.sessions.delete).
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { OPERATION_KEY_SCHEMA } from '@goodvibes-jev/engine/errors';
 import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
@@ -72,7 +73,7 @@ function companionChatMessageInputSchema(
  * INVALID_MODEL_ROUTE). Neither is required alone, this is a dependency
  * between two optional fields, which is what `dependentRequired` is for.
  */
-const CLIENT_MESSAGE_ID_SCHEMA = { type: 'string', minLength: 1, maxLength: 128 } as const;
+const CLIENT_MESSAGE_ID_SCHEMA = OPERATION_KEY_SCHEMA;
 
 const COMPANION_MODEL_ROUTE_DEPENDENCY: Readonly<Record<string, readonly string[]>> = {
   model: ['provider'],
@@ -200,7 +201,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
     replay: { in: 'body', name: 'clientMessageId', behavior: 'A second send with the same `clientMessageId` returns the first message\'s id and starts no second turn, while the session stays loaded in the daemon (a daemon restart forgets the id).' },
     effects: ['sessions.write', 'outward.send'],
     title: 'Send Companion Chat Message',
-    description: 'Post a user message to a companion-chat session. Accepts either `body` or `content` in the payload; `body` wins when both are provided. Attachments reference artifacts created through `artifacts.create`. A message queued behind a running turn whose turn can never run (the chat closed, the service shut down or the daemon restarted first) ends as `deliveryState: "unanswered"`. Optional `clientMessageId` (1-128 characters) makes the send safe to repeat: a second send with the same id returns the first message\'s id and starts no second turn, so a client whose response was lost can resend. The id is remembered while the session stays loaded in the daemon; a daemon restart forgets it.',
+    description: 'Post a user message to a companion-chat session. Accepts either `body` or `content` in the payload; `body` wins when both are provided. Attachments reference artifacts created through `artifacts.create`. A message queued behind a running turn whose turn can never run (the chat closed, the service shut down or the daemon restarted first) ends as `deliveryState: "unanswered"`. Optional `clientMessageId` (1 to 255 letters, digits, ".", "_", ":" or "-") makes the send safe to repeat: a second send with the same id returns the first message\'s id and starts no second turn, so a client whose response was lost can resend. The id is remembered while the session stays loaded in the daemon; a daemon restart forgets it.',
     category: 'companion',
     http: { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages' },
     inputSchema: companionChatMessageInputSchema({ sessionId: STRING_SCHEMA, clientMessageId: CLIENT_MESSAGE_ID_SCHEMA }, ['sessionId']),

@@ -85,6 +85,12 @@ export interface RewindConversationAvailability {
 export interface RewindConversationPreview extends RewindConversationAvailability {
   readonly messagesToDrop: number;
   readonly messagesRemaining: number;
+  /**
+   * The conversation's revision when it was counted: its message count and the
+   * key of its last message. A rewind plan binds it, so an apply after a new
+   * message arrived is refused instead of cutting that message too.
+   */
+  readonly revision?: string | undefined;
 }
 
 /** Conversation rewind outcome, carrying the undo handle for redo. */

@@ -158,6 +158,12 @@ export interface SecretWriteOptions {
   readonly medium?: SecretStorageMedium | undefined;
 }
 
+/** What a scope's own write stores hold for one key, as stored, per medium (null: no entry). */
+export interface WriteScopeEntries {
+  readonly secure: string | null;
+  readonly plaintext: string | null;
+}
+
 export interface SecretDeleteOptions {
   readonly scope?: SecretScope | undefined;
   readonly medium?: SecretStorageMedium | undefined;
@@ -1214,6 +1220,61 @@ export class SecretsManager {
       .filter((store) => existsSync(store.path) && this.storeContainsKey(store, key));
     if (stores.length === 0) return;
     await this.withCredentialMutation(key, () => this.withStoreMutations(stores.map(store => store.path), () => this.deleteFromScopeOwned(key, stores)));
+  }
+
+  /**
+   * What each of the scope's own write stores holds for `key`, exactly as
+   * stored, per medium: the state an undo puts back, so a value read from the
+   * secure store is never restored into the plaintext one. An unreadable store
+   * throws, as {@link getWriteScopeEntry} does.
+   */
+  async readWriteScopeEntries(key: string, scope: SecretScope): Promise<WriteScopeEntries> {
+    const entries: { secure: string | null; plaintext: string | null } = { secure: null, plaintext: null };
+    for (const medium of ['secure', 'plaintext'] as const) {
+      const target = this.resolveWriteTarget(scope, medium);
+      const result = target.secure ? this.readEncryptedStore(target.path) : this.readPlaintextStore(target.path);
+      if (result.status === 'unreadable') {
+        throw new SecretStoreUnreadableError(`The secrets store at ${target.path} exists but cannot be read (${result.reason}).`);
+      }
+      if (result.status === 'ok' && Object.hasOwn(result.secrets, key)) entries[medium] = result.secrets[key] ?? null;
+    }
+    return Object.freeze(entries);
+  }
+
+  /**
+   * Undo a write of `key` in `scope`: put each medium's entry back to
+   * `previous` (as stored, in the medium it came from), but only while the
+   * entry reads would see is still `wrote`, the value the undoing caller
+   * stored. The compare and the restore run under the same store locks, so a
+   * value another writer stored after that write is never rolled back:
+   * `newer` says so and changes nothing. `unchanged` when the stores already
+   * hold `previous` (the write never landed); `restored` when they hold it now.
+   */
+  async restoreWriteScopeEntriesIf(key: string, scope: SecretScope, wrote: string, previous: WriteScopeEntries): Promise<'restored' | 'unchanged' | 'newer'> {
+    const stores = (['secure', 'plaintext'] as const).map((medium) => ({ medium, store: this.resolveWriteTarget(scope, medium) }));
+    return this.withCredentialMutation(key, () => this.withStoreMutations(stores.map(({ store }) => store.path), () => {
+      const now = stores.map(({ medium, store }) => ({ medium, store, values: this.readStoreForWrite(store) }));
+      if (now.every(({ medium, values }) => (Object.hasOwn(values, key) ? values[key]! : null) === previous[medium])) return 'unchanged' as const;
+      const visible = now.map(({ values }) => (Object.hasOwn(values, key) ? values[key]! : null)).find((value) => value !== null) ?? null;
+      if (visible === null || (visible !== wrote && decodeLiteralSecret(visible) !== wrote)) return 'newer' as const;
+      let changed = false;
+      try {
+        for (const { medium, store, values } of now) {
+          const before = previous[medium];
+          const held = Object.hasOwn(values, key) ? values[key]! : null;
+          if (held === before) continue;
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          if (before === null) delete values[key];
+          else values[key] = before;
+          if (store.secure) this.writeEncryptedFile(store.path, values);
+          else this.writePlaintextFile(store.path, values);
+          changed = true;
+        }
+      } finally {
+        if (changed) this.notifyChanged(key);
+      }
+      return 'restored' as const;
+    }, [stores[1]!.store.path]));
   }
 
   private async getInternal(key: string, seen: Set<string>): Promise<string | null> {

@@ -130,6 +130,34 @@ interface CalDavEvent extends ParsedICalEvent {
   readonly href: string;
   /** The logical calendar id this event was read from. */
   readonly calendarId: string;
+  /**
+   * For one occurrence of a recurring series: the instant (ISO) it recurs at,
+   * its RECURRENCE-ID. Absent for a single event and for a stored series.
+   */
+  readonly occurrence?: string;
+}
+
+/**
+ * The id a caller is handed for an event: its resource href, and for one
+ * occurrence of a series the href plus `#` and the occurrence's
+ * RECURRENCE-ID instant, so every occurrence has its own id and reading it
+ * answers that occurrence, not the series' first.
+ */
+function eventIdOf(event: CalDavEvent): string {
+  const occurrence = event.occurrence ?? event.recurrenceId;
+  const base = event.href || event.uid;
+  return occurrence === undefined || event.href.length === 0 ? base : `${base}#${occurrence}`;
+}
+
+/** An event id split into its resource href and, for one occurrence, its RECURRENCE-ID instant. */
+function splitEventId(eventId: string): { readonly href: string; readonly occurrence?: string } {
+  const mark = eventId.indexOf('#');
+  if (mark < 0 || !isHrefLike(eventId.slice(0, mark))) return { href: eventId };
+  const instant = Date.parse(eventId.slice(mark + 1));
+  if (!Number.isFinite(instant)) {
+    throw new GatewayVerbError(`Event id '${eventId}' names no occurrence this calendar can read. Use an event id calendar.events.list returned.`, 'INVALID_ARGUMENT', 400);
+  }
+  return { href: eventId.slice(0, mark), occurrence: new Date(instant).toISOString() };
 }
 
 // ---------------------------------------------------------------------------
@@ -174,7 +202,7 @@ function displayAttendees(event: CalDavEvent): string[] {
 function toSummary(event: CalDavEvent): CalendarGatewayEventSummary {
   const attendees = displayAttendees(event);
   return {
-    id: event.href || event.uid,
+    id: eventIdOf(event),
     title: event.summary,
     start: event.start,
     end: event.end,
@@ -248,15 +276,21 @@ function expandResourceLocally(resource: CalDavResource, events: readonly CalDav
   const master = events.find((event) => event.recurrenceId === undefined) ?? events[0];
   const out: CalDavEvent[] = [];
   for (const occurrence of occurrences) {
-    const source = occurrence.event.recurrenceId !== undefined
-      ? events.find((event) => event.recurrenceId === new Date(eventDateTimeEpochMs(occurrence.event.recurrenceId!)).toISOString()) ?? master
+    const recurrenceId = occurrence.event.recurrenceId !== undefined
+      ? new Date(eventDateTimeEpochMs(occurrence.event.recurrenceId)).toISOString()
+      : undefined;
+    const source = recurrenceId !== undefined
+      ? events.find((event) => event.recurrenceId === recurrenceId) ?? master
       : master;
     if (source === undefined) continue;
     const startMs = eventDateTimeEpochMs({ ...occurrence.event.start, value: occurrence.start });
     if (!Number.isFinite(startMs)) continue;
     const lengthMs = Math.max(0, Date.parse(source.end) - Date.parse(source.start));
     if (startMs >= toMs || startMs + lengthMs < fromMs) continue;
-    out.push({ ...source, start: new Date(startMs).toISOString(), end: new Date(startMs + lengthMs).toISOString() });
+    // The occurrence is named by the instant it recurs at: an override's
+    // RECURRENCE-ID, otherwise the start the rule gave it.
+    const recursAt = recurrenceId ?? new Date(startMs).toISOString();
+    out.push({ ...source, start: new Date(startMs).toISOString(), end: new Date(startMs + lengthMs).toISOString(), occurrence: recursAt });
   }
   for (const series of unexpandedSeries) {
     logger.warn('CalDAV recurring event not expanded: its recurrence is outside what this build expands', {
@@ -268,6 +302,20 @@ function expandResourceLocally(resource: CalDavResource, events: readonly CalDav
     if (stored !== undefined && Date.parse(stored.start) < toMs && Date.parse(stored.end) >= fromMs) out.push(stored);
   }
   return out;
+}
+
+/**
+ * The one occurrence of a resource's series that recurs at `recursAt` (an ISO
+ * instant): the override written for it, else the rule's occurrence at that
+ * instant. Undefined when the series has no occurrence there.
+ */
+function occurrenceOf(resource: CalDavResource, events: readonly CalDavEvent[], recursAt: string): CalDavEvent | undefined {
+  const override = events.find((event) => event.recurrenceId === recursAt);
+  if (override !== undefined) return { ...override, occurrence: recursAt };
+  if (!events.some((event) => event.recurrence !== undefined)) return undefined;
+  const instant = Date.parse(recursAt);
+  return expandResourceLocally(resource, events, instant, instant + 1)
+    .find((event) => event.occurrence === recursAt);
 }
 
 /** The components of a VCALENDAR text worth storing or returning: events and the zones they name. */
@@ -549,7 +597,9 @@ export function createCalDavCalendarGatewayService(
     const { config, request } = await connect();
     const id = calendarId && calendarId.length > 0 ? calendarId : config.defaultCalendarId;
     const collectionUrl = await collectionUrlOf(config, request, id);
-    let href = eventId;
+    // An occurrence id names its series' resource; a change to it is then
+    // refused below as a change to the whole series.
+    let href = splitEventId(eventId).href;
     if (!isHrefLike(eventId)) {
       const response = await request(collectionUrl, 'REPORT', calendarQueryByUidBody(eventId), { Depth: '1' });
       const resource = resourcesFromMultistatus(response.body)
@@ -736,10 +786,11 @@ export function createCalDavCalendarGatewayService(
       // name): resolve it to a single resource URL and GET that. A true
       // single-event fetch, not a collection scan.
       if (isHrefLike(eventId)) {
+        const named = splitEventId(eventId);
         let body: string;
         try {
           body = (await request(
-            resolveResourceUrl(collectionUrl, config.baseUrl, eventId),
+            resolveResourceUrl(collectionUrl, config.baseUrl, named.href),
             'GET',
             undefined,
             { Depth: '0' },
@@ -752,17 +803,21 @@ export function createCalDavCalendarGatewayService(
           throw error;
         }
         const parsed = parseICSDetailed(body);
-        const first = parsed.events[0];
         const unreadable = parsed.errors[0];
-        if (first === undefined && unreadable !== undefined) {
+        if (parsed.events.length === 0 && unreadable !== undefined) {
           throw new GatewayVerbError(
             `Event ${eventId} could not be read: ${unreadable.message}`,
             'CALENDAR_EVENT_UNREADABLE',
             422,
           );
         }
-        if (first === undefined) throw notFound(eventId);
-        const event = { ...first, href: toRelativeHref(eventId), calendarId: id };
+        const href = toRelativeHref(named.href);
+        const events = parsed.events.map((event) => ({ ...event, href, calendarId: id }));
+        const event = named.occurrence === undefined
+          // The resource as a whole: a series is answered by its master, not by whichever override comes first.
+          ? events.find((candidate) => candidate.recurrenceId === undefined) ?? events[0]
+          : occurrenceOf({ href, calendarData: body }, events, named.occurrence);
+        if (event === undefined) throw notFound(eventId);
         recordEventsRead(id, [event]);
         return toDetail(event);
       }
@@ -805,7 +860,16 @@ export function createCalDavCalendarGatewayService(
         ...(input.attendees === undefined ? {} : { attendees: input.attendees }),
         status: 'confirmed',
       });
-      const href = await putEvent(config, request, calendarId, uid, ics, true);
+      let href: string;
+      try {
+        href = await putEvent(config, request, calendarId, uid, ics, true);
+      } catch (error) {
+        // The PUT went out and no answer came back: the event may be on the
+        // calendar. Creating it again would make a second one under a new
+        // UID, so the answer is "unknown" and names the UID to look for.
+        if (error instanceof GatewayVerbError && error.code === 'CALENDAR_NETWORK_ERROR') throw outcomeUnknown(uid, error);
+        throw error;
+      }
       return { eventId: href, uid, createdAt };
     },
 
@@ -916,6 +980,16 @@ function generateICSOrRefuse(input: GenerateICalInput): string {
     }
     throw error;
   }
+}
+
+/** A create whose PUT got no answer: whether the event exists is unknown, and its UID says where to look. */
+function outcomeUnknown(uid: string, cause: GatewayVerbError): GatewayVerbError {
+  const why = cause.message.replace(/^CalDAV request failed: /, '').replace(/;? ?try again later\.?$/, '').replace(/\.$/, '');
+  return new GatewayVerbError(
+    `No answer came back for the new event (${why}), so whether event ${uid} was created is unknown. Read it with calendar.events.get eventId ${uid} before creating it again; creating it again now could add it twice.`,
+    'CALENDAR_OUTCOME_UNKNOWN',
+    502,
+  );
 }
 
 function notFound(eventId: string): GatewayVerbError {

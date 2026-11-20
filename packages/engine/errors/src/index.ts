@@ -746,7 +746,8 @@ export {
   type CommandResult, type Refusal, type RefusalInit, type TargetChange,
 } from './refusal.js';
 export {
-  assertNeverOutcome, done, exitCodeOfTally, failedOutcome, isObservation, observe, pending, tally, unknownOutcome,
+  assertNeverOutcome, done, exitCodeOfTally, failedOutcome, isObservation, isOperationKey, MAX_OPERATION_KEY_LENGTH, observe,
+  OPERATION_KEY_RULE, OPERATION_KEY_SCHEMA, pending, tally, unknownOutcome,
   type EffectOutcome, type Observation, type Seen, type Tally,
 } from './outcome.js';
 export {

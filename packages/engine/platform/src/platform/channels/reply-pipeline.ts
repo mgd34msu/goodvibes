@@ -110,6 +110,15 @@ interface ReplyPipelineDeps {
    * was evicted.
    */
   readonly contractAsk?: ((contractId: string) => string | undefined) | undefined;
+  /**
+   * Save, then send: called before a conversation's final answer is sent and
+   * awaited, so the record that the answer is owed (the session's channel rows)
+   * is on disk before the send can begin; a daemon that dies mid-send sends it
+   * again after its restart. A failure is logged and the answer is still sent.
+   */
+  readonly recordFinalOwed?: ((reply: { readonly sessionId: string; readonly agentId: string }) => Promise<void>) | undefined;
+  /** Called once the final was handed to the channel (accepted or not), or found to have nothing to send: the owed record is settled. */
+  readonly recordFinalHanded?: ((reply: { readonly sessionId: string; readonly agentId: string }) => Promise<void>) | undefined;
 }
 
 /** Pauses before the second and third attempt at a final reply a channel refused with a transient error. */
@@ -131,9 +140,13 @@ interface ReplyBufferState {
   /** A final answer for this agent has been taken up (in flight or done); see `finalOwner`. */
   finalTaken?: boolean | undefined;
   /**
-   * Announcements dispatched for this reply, by phase: the sequence number in
-   * the identity a surface deduplicates on (`announces` on the pending copy),
-   * so two different messages are never taken for one because their words match.
+   * Announcements made for this reply: `progress` counts progress messages and
+   * `final` counts final legs (a chain that keeps tracking sends more than
+   * one). The identity a surface deduplicates on (`announces` on the pending
+   * copy) is built from them, so two different messages are never taken for
+   * one because their words match, and a part of a final keeps one identity
+   * for every attempt at it (`agent:<id>:final:<leg>:<part>`), also when it is
+   * sent again after a restart.
    */
   announced?: { progress: number; final: number } | undefined;
 }
@@ -183,10 +196,14 @@ export class ChannelReplyPipeline {
   private readonly replyStyleOf: ((agentId: string) => ChannelReplyStyle | undefined) | null;
   private readonly waitBeforeRetry: (ms: number) => Promise<void>;
   private readonly renderSources: ChannelRenderSources;
+  private readonly recordFinalOwed: ReplyPipelineDeps['recordFinalOwed'];
+  private readonly recordFinalHanded: ReplyPipelineDeps['recordFinalHanded'];
 
   constructor(deps: ReplyPipelineDeps) {
     this.channelPlugins = deps.channelPlugins;
     this.routeBindings = deps.routeBindings;
+    this.recordFinalOwed = deps.recordFinalOwed;
+    this.recordFinalHanded = deps.recordFinalHanded;
     this.now = deps.now ?? (() => Date.now());
     this.undeliveredReporter = deps.onUndelivered ?? null;
     this.deliveredReporter = deps.onDelivered ?? null;
@@ -446,6 +463,7 @@ export class ChannelReplyPipeline {
     if (!text.trim()) {
       markEventsDelivered(state, renderEvents);
       if (!options.keepTracking) this.untrack(agentId);
+      await this.settleFinalRecord(state);
       return null;
     }
     // A chain that keeps tracking (an ntfy reply that follows a contract) can reach this more
@@ -453,8 +471,15 @@ export class ChannelReplyPipeline {
     // second outcome, publish it once.
     if (text && state.lastDeliveredText === text) {
       if (!options.keepTracking) this.untrack(agentId);
+      await this.settleFinalRecord(state);
       return null;
     }
+    // Save, then send: the answer is recorded as owed before its first part goes out.
+    await this.recordFinalOwedFor(state);
+    // One leg of finals for this reply; every part of it keeps its identity for every attempt.
+    const announced = state.announced ??= { progress: 0, final: 0 };
+    announced.final += 1;
+    const leg = announced.final;
     // A final reply is delivered ONCE, whether or not the surface accepted it.
     //
     // Letting a throwing dispatch escape used to skip the untrack below, which
@@ -465,6 +490,7 @@ export class ChannelReplyPipeline {
     // still allowed to fail, it just fails once, loudly, and stops.
     let result: ChannelRenderResult | null = null;
     let deliveryError: unknown = null;
+    let partsDelivered = 0;
     try {
       // The body is the delta; the event list handed to the renderer is not.
       // Renderers classify an outcome from it (an `error` event is what marks a
@@ -475,10 +501,11 @@ export class ChannelReplyPipeline {
       // chain keeps them from interleaving); the first one the surface did not
       // accept is the result, so a partial delivery is never reported as whole.
       const dispatchEvents = finalEvents.length > 0 ? finalEvents : state.events.slice(-policy.maxEventsPerUpdate);
-      for (const part of parts) {
-        const partResult = await this.dispatchFinalWithRetry(state, policy, part, dispatchEvents);
+      for (const [index, part] of parts.entries()) {
+        const partResult = await this.dispatchFinalWithRetry(state, policy, part, dispatchEvents, `agent:${state.pending.agentId}:final:${leg}:${index + 1}`);
         if (result === null || result.delivered) result = partResult;
         if (!partResult?.delivered) break;
+        partsDelivered += 1;
       }
     } catch (error) {
       deliveryError = error;
@@ -492,14 +519,16 @@ export class ChannelReplyPipeline {
       });
       this.reportUndelivered(state, 'final', text, summarizeError(error));
     }
-    // Mark exactly what this body was built from, so a later leg of a chain
-    // that keeps tracking renders its own news and not this one again.
-    markEventsDelivered(state, renderEvents);
+    // Mark what this body was built from only when every part of it arrived, so
+    // a later leg of a chain that keeps tracking still carries what did not.
+    if (partsDelivered === parts.length) markEventsDelivered(state, renderEvents);
     state.lastDeliveredText = text;
     state.lastDeliveredAt = this.now();
     if (!options.keepTracking) {
       this.untrack(agentId);
     }
+    // Handed to the channel, accepted or not (a final is sent once): the owed record is settled.
+    await this.settleFinalRecord(state);
     if (deliveryError) return null;
     if (result?.delivered) {
       // Close the ledger entry this reply opened when it was queued. Without
@@ -514,6 +543,29 @@ export class ChannelReplyPipeline {
       });
     }
     return result;
+  }
+
+  /** The conversation's own final (not a child agent's) records its owed answer; a failed record is logged and the answer is still sent. */
+  private async recordFinalOwedFor(state: ReplyBufferState): Promise<void> {
+    const sessionId = state.pending.sessionId;
+    if (!this.recordFinalOwed || !sessionId || !state.pending.routeId || state.pending.parentAgentId) return;
+    try { await this.recordFinalOwed({ sessionId, agentId: state.pending.agentId }); }
+    catch (error) {
+      logger.error('A channel answer could not be recorded as owed before its send; a restart during the send would lose it', {
+        surface: state.pending.surfaceKind, agentId: state.pending.agentId, sessionId, reason: summarizeError(error),
+      });
+    }
+  }
+
+  private async settleFinalRecord(state: ReplyBufferState): Promise<void> {
+    const sessionId = state.pending.sessionId;
+    if (!this.recordFinalHanded || !sessionId || !state.pending.routeId || state.pending.parentAgentId) return;
+    try { await this.recordFinalHanded({ sessionId, agentId: state.pending.agentId }); }
+    catch (error) {
+      logger.warn('A sent channel answer could not be marked sent; a restart may send it again', {
+        surface: state.pending.surfaceKind, agentId: state.pending.agentId, sessionId, reason: summarizeError(error),
+      });
+    }
   }
 
   /**
@@ -730,10 +782,11 @@ export class ChannelReplyPipeline {
     policy: ChannelRenderPolicy,
     text: string,
     events: readonly ChannelRenderEvent[],
+    announces: string,
   ): Promise<ChannelRenderResult | null> {
     for (let attempt = 0; ; attempt++) {
       try {
-        return await this.dispatch(state, policy, 'final', text, events);
+        return await this.dispatch(state, policy, 'final', text, events, announces);
       } catch (error) {
         const backoff = FINAL_RETRY_BACKOFF_MS[attempt];
         const failure = classifyFailure(error);
@@ -755,10 +808,15 @@ export class ChannelReplyPipeline {
     phase: ChannelRenderPhase,
     text: string,
     events: readonly ChannelRenderEvent[],
+    finalAnnounces?: string,
   ): Promise<ChannelRenderResult | null> {
-    const announced = state.announced ??= { progress: 0, final: 0 };
-    announced[phase === 'final' ? 'final' : 'progress'] += 1;
-    const announces = `agent:${state.pending.agentId}:${phase}:${announced[phase === 'final' ? 'final' : 'progress']}`;
+    // A final part brings its identity (fixed for every attempt); each progress message is a new one.
+    let announces = finalAnnounces;
+    if (announces === undefined) {
+      const announced = state.announced ??= { progress: 0, final: 0 };
+      announced.progress += 1;
+      announces = `agent:${state.pending.agentId}:${phase}:${announced.progress}`;
+    }
     const request: ChannelRenderRequest = {
       surface: state.pending.surfaceKind,
       phase,

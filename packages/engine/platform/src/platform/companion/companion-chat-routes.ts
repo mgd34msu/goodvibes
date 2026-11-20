@@ -27,7 +27,7 @@
 
 import { createHash } from 'node:crypto';
 import { readReasoningEffortLevel } from '../providers/reasoning-effort.js';
-import { EngineErrorCodes, readRefusal, refusal, refusalErrorBody, type Refusal } from '@goodvibes-jev/engine/errors';
+import { EngineErrorCodes, isOperationKey, OPERATION_KEY_RULE, readRefusal, refusal, refusalErrorBody, type Refusal } from '@goodvibes-jev/engine/errors';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type {
@@ -595,15 +595,13 @@ function readCompanionChatAttachments(
   return attachments;
 }
 
-const MAX_CLIENT_MESSAGE_ID_LENGTH = 128;
-
 /** The sender's idempotency id for a send: absent, a usable string, or the 400 that names the problem. */
 function readClientMessageId(body: Record<string, unknown>): string | undefined | Response {
   const raw = body['clientMessageId'];
   if (raw === undefined || raw === null) return undefined;
-  if (typeof raw !== 'string' || raw.trim().length === 0 || raw.length > MAX_CLIENT_MESSAGE_ID_LENGTH) {
+  if (!isOperationKey(raw)) {
     return Response.json(
-      { error: `clientMessageId must be a non-empty string of at most ${MAX_CLIENT_MESSAGE_ID_LENGTH} characters`, code: 'INVALID_ARGUMENT' },
+      { error: `clientMessageId must be ${OPERATION_KEY_RULE}`, code: 'INVALID_ARGUMENT' },
       { status: 400 },
     );
   }

@@ -5,6 +5,7 @@ import type { BenchmarkEntry } from './model-benchmarks.js';
 import { compositeScore } from './model-benchmarks.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitModelFallback } from '../runtime/emitters/index.js';
+import { admitsCandidate } from './route-constraint.js';
 import { summarizeError } from '../utils/error-display.js';
 
 // --- Types ---
@@ -28,6 +29,8 @@ export interface SyntheticBackend {
    * Empty array or undefined means no key required (always available).
    */
   envVars?: string[] | undefined;
+  /** How this backend bills; the synthetic model admits only backends of its own tier. */
+  tier?: SyntheticTier | undefined;
 }
 
 /** Whether a backend can be called now: its provider is registered and configured. */
@@ -110,8 +113,12 @@ function buildBackendList(
   const canonical = catalog.find(m => m.id === syntheticId);
   if (!canonical) return null;
 
-  // Only backends whose provider is configured (a key in the environment or the credential store).
-  const keyed = canonical.backends.filter(isUsable);
+  // Only backends of the model's own tier (a free model never fails over to a
+  // paid backend), whose provider is configured (a key in the environment or
+  // the credential store). A backend that does not state its tier is not admitted.
+  const keyed = canonical.backends.filter((backend) => backend.tier !== undefined
+    && admitsCandidate({ tier: canonical.tier }, { registryKey: backend.registryKey ?? `${backend.providerName}:${backend.modelId}`, tier: backend.tier, local: false })
+    && isUsable(backend));
 
   // Sort: context desc → maxOutput desc
   const sorted = keyed.slice().sort((a, b) => {

@@ -333,7 +333,7 @@ export function formatOperatorActionFailure(result: OperatorActionFailure): stri
     `  error: ${result.error}`,
     ...(result.applied === 'unknown' ? ['  outcome: unknown; the host may have applied it, so read the current state before repeating it'] : []),
     ...(result.applied === 'no' ? ['  outcome: not applied; nothing changed on the host'] : []),
-    ...(result.applied === 'yes' ? ['  outcome: applied; the host acted on it but its answer could not be read, so do not repeat it'] : []),
+    ...(result.applied === 'answered' ? ['  outcome: received; the host answered with success but its answer could not be read, so whether it finished or is queued is not verified: read the current state, do not repeat it'] : []),
   ].join('\n');
 }
 

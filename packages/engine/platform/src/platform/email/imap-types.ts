@@ -188,8 +188,16 @@ export interface ImapAppendDraftInput {
 export interface ImapAppendDraftResult {
   /** The APPENDUID the server reported (RFC 4315), or null when it reported none. */
   readonly uid: number | null;
+  /** The Drafts folder's UIDVALIDITY the APPENDUID belongs to, or null when the server reported none. */
+  readonly uidValidity: number | null;
   /** The mailbox the draft was appended to, after discovery. */
   readonly mailbox: string;
+}
+
+/** A saved draft to be replaced, named by its UID in the Drafts folder and that folder's generation. */
+export interface ImapReplaceDraftInput extends ImapAppendDraftInput {
+  readonly uid: number;
+  readonly uidValidity: number;
 }
 
 export interface ImapClientOptions {

@@ -68,19 +68,18 @@ function FailureBody({ failure }: { failure: ScannerFailure }) {
     case 'insecure-context':
       return (
         <p>
-          Browsers only hand the camera to pages on a secure origin, and this page is on
-          plain http. Serve the daemon over HTTPS and scanning works: on the machine
-          running the daemon, <code>tailscale serve --bg 3421</code> gives you an https
-          address on your tailnet, then open the app there. See
+          Browsers only hand the camera to pages on a secure (https) address, and this
+          page is on plain http. On your computer, <code>tailscale serve --bg 3421</code>
+          gives GoodVibes an https address on your tailnet; open the app there. See
           {' '}<code>docs/deployment.md</code> under "Moving the host: reaching the
-          daemon over Tailscale". Until then, paste the operator token instead.
+          daemon over Tailscale". Until then, paste the sign-in code instead.
         </p>
       );
     case 'no-camera-api':
       return (
         <p>
           This browser does not expose a camera to web pages at all. Use a different
-          browser, or paste the operator token instead.
+          browser, or paste the sign-in code instead.
         </p>
       );
     case 'permission-denied':
@@ -88,13 +87,13 @@ function FailureBody({ failure }: { failure: ScannerFailure }) {
         <p>
           Allow camera access for this site and try again. On a phone the permission is
           usually behind the padlock or the "site settings" item in the address
-          bar. You can also paste the operator token instead.
+          bar. You can also paste the sign-in code instead.
         </p>
       );
     case 'no-camera':
       return (
         <p>
-          The browser reported no usable camera on this device. Paste the operator token
+          The browser reported no usable camera on this device. Paste the sign-in code
           instead.
         </p>
       );
@@ -102,13 +101,13 @@ function FailureBody({ failure }: { failure: ScannerFailure }) {
       return (
         <p>
           Another app or tab is holding the camera. Close it and try again, or paste the
-          operator token instead.
+          sign-in code instead.
         </p>
       );
     case 'camera-failed':
       return (
         <p>
-          The camera opened but would not start. Try again, or paste the operator token
+          The camera opened but would not start. Try again, or paste the sign-in code
           instead.
         </p>
       );
@@ -116,7 +115,7 @@ function FailureBody({ failure }: { failure: ScannerFailure }) {
       return (
         <p>
           This browser has no built-in QR decoder, and the bundled one could not be
-          loaded. Reload the page while online and try again, or paste the operator token
+          loaded. Reload the page while online and try again, or paste the sign-in code
           instead.
         </p>
       );

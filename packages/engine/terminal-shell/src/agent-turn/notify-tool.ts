@@ -109,7 +109,7 @@ export function createAgentNotifyTool(
         // The configuration's revision: a settings change meanwhile means the captured targets may be stale.
         const incarnation = configManager.getConfigurationIncarnation?.() ?? null;
         const ledger = getSessionUntrustedContentLedger();
-        const ledgerCurrent = () => JSON.stringify([ledger.getPublicationRevision(), ledger.originsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]);
+        const ledgerCurrent = () => JSON.stringify([ledger.getPublicationRevision(), ledger.taintOriginsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]);
         const sources = ledgerCurrent();
         const assertCurrent = () => {
           executionOptions?.signal?.throwIfAborted();

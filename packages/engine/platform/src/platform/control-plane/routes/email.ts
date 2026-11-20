@@ -86,6 +86,8 @@ export interface EmailGatewayMessageDetail {
   readonly bodyText: string;
   readonly bodyHtml?: string;
   readonly attachments?: readonly EmailGatewayAttachment[];
+  /** The mailbox generation (UIDVALIDITY) the UID was read under; `email.inbox.update` needs it. */
+  readonly uidValidity?: number;
 }
 
 export interface EmailGatewayListInput {
@@ -118,6 +120,8 @@ export interface EmailGatewayListResult {
    * is looking at a list that is missing mail and reading it as complete.
    */
   readonly unreadable?: readonly EmailGatewayUnreadableResponse[];
+  /** The mailbox generation (UIDVALIDITY) the page's UIDs belong to; `email.inbox.update` needs it. */
+  readonly uidValidity?: number;
 }
 
 export interface EmailGatewayDraftInput {
@@ -139,6 +143,19 @@ export interface EmailGatewayDraftResult {
   readonly uid?: number;
   /** The Drafts folder the message actually landed in. */
   readonly mailbox: string;
+  /** The Drafts folder's UIDVALIDITY that `uid` belongs to, when the server reported it; `email.draft.update` needs it. */
+  readonly uidValidity?: number;
+}
+
+/** A saved draft replaced by an edited one: the UID and folder generation it was listed under. */
+export interface EmailGatewayDraftUpdateInput extends EmailGatewayDraftInput {
+  readonly uid: number;
+  readonly uidValidity: number;
+}
+
+export interface EmailGatewayDraftUpdateResult extends EmailGatewayDraftResult {
+  /** The UID of the draft that was replaced and removed. */
+  readonly replaced: number;
 }
 
 export interface EmailGatewaySendInput {
@@ -155,8 +172,8 @@ export type EmailGatewayMessageAction = 'seen' | 'unseen' | 'archive' | 'delete'
 export interface EmailGatewayMessageUpdate {
   readonly uid: number;
   readonly action: EmailGatewayMessageAction;
-  /** The mailbox generation the UID was listed under, when the caller has it. */
-  readonly uidValidity?: number | undefined;
+  /** The mailbox generation the UID was listed or read under; a reset mailbox refuses instead of changing another message. */
+  readonly uidValidity: number;
 }
 
 export interface EmailGatewayMessageUpdateResult {
@@ -186,6 +203,8 @@ export interface EmailGatewayDraftList {
   readonly drafts: readonly EmailGatewayDraftSummary[];
   readonly total: number;
   readonly mailbox: string;
+  /** The Drafts folder's UIDVALIDITY the draft UIDs belong to; `email.draft.update` needs it. */
+  readonly uidValidity?: number;
 }
 
 export interface EmailGatewaySendResult {
@@ -217,6 +236,8 @@ export interface EmailGatewayService {
   readAttachment?(uid: number, index: number): Promise<EmailGatewayAttachmentContent | null>;
   /** The newest drafts in the Drafts folder, each with its body. */
   listDrafts?(limit: number): Promise<EmailGatewayDraftList>;
+  /** Replace one saved draft with an edited one; absent on a backend that cannot. */
+  updateDraft?(input: EmailGatewayDraftUpdateInput): Promise<EmailGatewayDraftUpdateResult>;
 }
 
 function readOptionalString(value: unknown): string | undefined {
@@ -234,6 +255,15 @@ function readUid(value: unknown): number {
   const parsed = typeof value === 'string' ? Number(value) : value;
   if (typeof parsed !== 'number' || !Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
     throw new GatewayVerbError('uid (a positive integer IMAP UID) is required', 'INVALID_ARGUMENT', 400, 'uid');
+  }
+  return parsed;
+}
+
+/** A mailbox generation (UIDVALIDITY): a positive integer, as list and read return it. */
+function readUidValidity(value: unknown): number {
+  const parsed = typeof value === 'string' ? Number(value) : value;
+  if (typeof parsed !== 'number' || !Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new GatewayVerbError('uidValidity must be the positive integer email.inbox.list or email.inbox.read returned. Nothing was changed.', 'INVALID_ARGUMENT', 400, 'uidValidity');
   }
   return parsed;
 }
@@ -338,13 +368,19 @@ export function createEmailInboxUpdateHandler(service: EmailGatewayService): Gat
     if (typeof action !== 'string' || !(MESSAGE_ACTIONS as readonly string[]).includes(action)) {
       throw new GatewayVerbError(`action must be one of ${MESSAGE_ACTIONS.join(', ')}`, 'INVALID_ARGUMENT', 400, 'action');
     }
+    // A UID names a message only within its mailbox generation: without the
+    // generation it was listed under, a reset mailbox would have this change
+    // whichever message now holds the number.
+    if (params.uidValidity === undefined || params.uidValidity === null) {
+      throw new GatewayVerbError(
+        'uidValidity is required: pass the uidValidity email.inbox.list or email.inbox.read returned with this uid. Nothing was changed.',
+        'INVALID_ARGUMENT', 400, 'uidValidity',
+      );
+    }
+    const uidValidity = readUidValidity(params.uidValidity);
     refuseNonUserRequest(invocation, 'email.inbox.update');
     if (!service.updateMessage) return unsupported('changing a message');
-    return service.updateMessage({
-      uid,
-      action: action as EmailGatewayMessageAction,
-      ...(params.uidValidity === undefined ? {} : { uidValidity: readUid(params.uidValidity) }),
-    });
+    return service.updateMessage({ uid, action: action as EmailGatewayMessageAction, uidValidity });
   };
 }
 
@@ -374,6 +410,31 @@ export function createEmailDraftsListHandler(service: EmailGatewayService): Gate
     const params = readInvocationParams(invocation);
     if (!service.listDrafts) return unsupported('listing drafts');
     return service.listDrafts(Math.min(100, readOptionalCount(params.limit) ?? 25));
+  };
+}
+
+export function createEmailDraftUpdateHandler(service: EmailGatewayService): GatewayMethodHandler {
+  return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    const uid = readUid(params.uid);
+    if (params.uidValidity === undefined || params.uidValidity === null) {
+      throw new GatewayVerbError(
+        'uidValidity is required: pass the uidValidity email.drafts.list or email.draft.create returned with this uid. Nothing was changed.',
+        'INVALID_ARGUMENT', 400, 'uidValidity',
+      );
+    }
+    const uidValidity = readUidValidity(params.uidValidity);
+    const input: EmailGatewayDraftUpdateInput = {
+      uid,
+      uidValidity,
+      to: requireStringValue(params.to, 'to'),
+      subject: requireStringValue(params.subject, 'subject'),
+      body: requireStringValue(params.body, 'body'),
+      inReplyTo: readOptionalString(params.inReplyTo),
+      references: readOptionalString(params.references),
+    };
+    if (!service.updateDraft) return unsupported('replacing a saved draft');
+    return service.updateDraft(input);
   };
 }
 
@@ -413,7 +474,17 @@ export function createEmailDraftCreateHandler(service: EmailGatewayService): Gat
  * on its own.
  */
 function untrustedExposureDisclosure(ledger: UntrustedContentLedger): Record<string, unknown> {
-  const origins = ledger.originsThisTurn();
+  const read = ledger.taintOriginsThisTurn();
+  if (read.kind === 'failed') {
+    return {
+      untrustedContent: {
+        originsInScope: [],
+        rule: UNTRUSTED_CONTENT_RULE,
+        note: `${read.refusal.reason} The send passed the derivation check on what was still kept.`,
+      },
+    };
+  }
+  const origins = read.kind === 'present' ? read.value : [];
   if (origins.length === 0) return {};
   return {
     untrustedContent: {

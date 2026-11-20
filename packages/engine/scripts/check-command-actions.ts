@@ -49,7 +49,7 @@ function placeholders(action: ActionDescription<never>): Record<string, string> 
   return Object.fromEntries(action.inputs.filter((input) => input.required === true && !input.showWhen).map((input) => [input.id, `<${input.id}>`]));
 }
 
-function checkDescription(description: CommandDescription<never>, problems: string[]): void {
+export function checkDescription(description: CommandDescription<never>, problems: string[]): void {
   const at = (action: ActionDescription<never> | undefined, text: string) => problems.push(`/${description.name}${action ? ` ${action.word} (${action.id})` : ''}: ${text}`);
   const seen = { id: new Map<string, string>(), word: new Map<string, string>(), label: new Map<string, string>(), sentence: new Map<string, string>() };
   const words = new Set(description.actions.map((action) => action.word));
@@ -136,37 +136,39 @@ function shape(description: CommandDescription<never>): string {
   return JSON.stringify(description, (_key, value: unknown) => typeof value === 'function' ? '[run]' : value);
 }
 
-const { tui, agent } = await loadCommandRegistries();
-const problems: string[] = [];
-const byName = new Map<string, { tui?: RegisteredCommand; agent?: RegisteredCommand }>();
-for (const command of tui) byName.set(command.name, { ...byName.get(command.name), tui: command });
-for (const command of agent) byName.set(command.name, { ...byName.get(command.name), agent: command });
-const waiting = new Set(WAITING_LIST);
-const stillOld: string[] = [];
-for (const [name, { tui: inTui, agent: inAgent }] of [...byName].sort(([a], [b]) => a.localeCompare(b))) {
-  const described = [inTui?.described, inAgent?.described].filter((entry): entry is CommandDescription<never> => entry !== undefined);
-  if (described.length === 0) {
-    stillOld.push(name);
-    if (!waiting.has(name)) problems.push(`/${name}: not built with defineCommand and not on the waiting list (12)`);
-    continue;
+if (import.meta.main) {
+  const { tui, agent } = await loadCommandRegistries();
+  const problems: string[] = [];
+  const byName = new Map<string, { tui?: RegisteredCommand; agent?: RegisteredCommand }>();
+  for (const command of tui) byName.set(command.name, { ...byName.get(command.name), tui: command });
+  for (const command of agent) byName.set(command.name, { ...byName.get(command.name), agent: command });
+  const waiting = new Set(WAITING_LIST);
+  const stillOld: string[] = [];
+  for (const [name, { tui: inTui, agent: inAgent }] of [...byName].sort(([a], [b]) => a.localeCompare(b))) {
+    const described = [inTui?.described, inAgent?.described].filter((entry): entry is CommandDescription<never> => entry !== undefined);
+    if (described.length === 0) {
+      stillOld.push(name);
+      if (!waiting.has(name)) problems.push(`/${name}: not built with defineCommand and not on the waiting list (12)`);
+      continue;
+    }
+    if (waiting.has(name)) problems.push(`/${name}: built with defineCommand but still on the waiting list; take it off (12)`);
+    // 10
+    if (inTui && inAgent && (!inTui.described || !inAgent.described || shape(inTui.described) !== shape(inAgent.described))) {
+      problems.push(`/${name}: the two terminal apps describe it differently (10)`);
+    }
+    checkDescription(described[0]!, problems);
   }
-  if (waiting.has(name)) problems.push(`/${name}: built with defineCommand but still on the waiting list; take it off (12)`);
-  // 10
-  if (inTui && inAgent && (!inTui.described || !inAgent.described || shape(inTui.described) !== shape(inAgent.described))) {
-    problems.push(`/${name}: the two terminal apps describe it differently (10)`);
-  }
-  checkDescription(described[0]!, problems);
-}
-for (const name of waiting) if (!byName.has(name)) problems.push(`waiting list names /${name}, which neither app registers; take it off`);
+  for (const name of waiting) if (!byName.has(name)) problems.push(`waiting list names /${name}, which neither app registers; take it off`);
 
-if (process.argv.includes('--write-waiting-list')) {
-  console.log(JSON.stringify(stillOld, null, 2));
-  process.exit(0);
+  if (process.argv.includes('--write-waiting-list')) {
+    console.log(JSON.stringify(stillOld, null, 2));
+    process.exit(0);
+  }
+  if (problems.length > 0) {
+    console.error(`commands:check: ${problems.length} problem(s)`);
+    for (const problem of problems) console.error(`  ${problem}`);
+    console.error('Name the action for what you get, label the blank, give it a list or a reason, write the sentence (packages/engine/terminal-shell/src/command-actions/).');
+    process.exit(1);
+  }
+  console.log(`commands:check: ${byName.size - stillOld.length} described, ${stillOld.length} waiting to be converted.`);
 }
-if (problems.length > 0) {
-  console.error(`commands:check: ${problems.length} problem(s)`);
-  for (const problem of problems) console.error(`  ${problem}`);
-  console.error('Name the action for what you get, label the blank, give it a list or a reason, write the sentence (packages/engine/terminal-shell/src/command-actions/).');
-  process.exit(1);
-}
-console.log(`commands:check: ${byName.size - stillOld.length} described, ${stillOld.length} waiting to be converted.`);

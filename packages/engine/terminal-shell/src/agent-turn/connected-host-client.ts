@@ -170,10 +170,12 @@ export type HostFailureKind =
 
 /**
  * Whether the host may have acted on a failed call: `no` (refused or never
- * sent), `unknown` (a write sent and not answered), `yes` (a write the host
- * answered with success but in a shape this Agent could not read).
+ * sent), `unknown` (a write sent and not answered), `answered` (a write the
+ * host answered with a success status in a shape this Agent could not read:
+ * the host received it, but a success can mean done, queued to run later or
+ * already settled, so its effect is not verified).
  */
-export type HostCallApplied = 'no' | 'unknown' | 'yes';
+export type HostCallApplied = 'no' | 'unknown' | 'answered';
 
 /** A failed connected-host call. The message is `<what failed>: <cause>; <next step>`. */
 export class HostFailure extends Error {
@@ -583,12 +585,12 @@ async function classifyFailure(error: unknown, facts: CallFacts): Promise<HostFa
 
   if (error instanceof GoodVibesError) {
     if (error.phase === 'response-validation' || error.category === 'protocol') {
-      const applied: HostCallApplied = isRead ? 'no' : error.phase === 'response-validation' ? 'yes' : 'unknown';
+      const applied: HostCallApplied = isRead ? 'no' : error.phase === 'response-validation' ? 'answered' : 'unknown';
       return failure('connected_host_error', applied, {
         code: 'response_invalid', reason: hostMessage(error), retryable: false,
         state: 'the host answered, but not in the shape this Agent expects',
-        next: [applied === 'yes'
-          ? 'do not repeat the request: the host applied it; check the resulting state'
+        next: [applied === 'answered'
+          ? 'do not repeat the request: the host received it, but whether it finished or is still queued is not verified; check the resulting state'
           : 'run the same GoodVibes version on the host and in this Agent, then retry'],
       });
     }

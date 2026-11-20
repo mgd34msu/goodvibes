@@ -308,6 +308,9 @@ function cacheControlFor(pathname: string, isShell: boolean): string {
   return 'public, max-age=3600';
 }
 
+/** The images a served page may load (control-plane/gateway-web-ui.ts sends the same policy). */
+const WEBUI_IMAGE_POLICY = "img-src 'self' data: blob:";
+
 async function fileResponse(
   req: Request,
   file: ReturnType<typeof Bun.file>,
@@ -317,6 +320,9 @@ async function fileResponse(
   const headers: Record<string, string> = {
     'Content-Type': contentTypeFor(pathname),
     'Cache-Control': cacheControlFor(pathname, isShell),
+    // A page shows only its own images, data: and blob: images: an image URL in
+    // model or tool text is never fetched by rendering it.
+    ...(isShell || extensionOf(pathname) === 'html' ? { 'Content-Security-Policy': WEBUI_IMAGE_POLICY } : {}),
   };
   if (req.method === 'HEAD') {
     const size = await file.size;

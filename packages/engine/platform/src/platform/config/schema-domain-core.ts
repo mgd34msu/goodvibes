@@ -1,4 +1,4 @@
-import type { ConfigSetting } from './schema-types.js';
+import type { ConfigSettingRow } from './schema-types.js';
 import { DEFAULT_DECISION_ROUTER_SETTINGS, validDecisionRouterSettings } from './decision-router-settings.js';
 import { type ConfigSettingDefinition, intRange, numRange, optionalWorkLimit, reasoningEffortSetting } from './schema-shared.js';
 import { parseDaemonOrigin } from './control-plane-base-url.js';
@@ -166,7 +166,7 @@ export const coreConfigDefaults = {
   },
 };
 
-export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSetting)[] = [
+export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow)[] = [
   {
     key: 'display.stream',
     type: 'boolean',

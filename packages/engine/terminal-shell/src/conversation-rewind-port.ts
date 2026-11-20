@@ -46,7 +46,7 @@ export interface RewindConversation extends Pick<CoreConversation, 'getMessageCo
   /** Saves the changed conversation where its owner keeps it; a rewind awaits it and reports a failure. */
   persist?(): Promise<void>;
 }
-import { resolveTurnAnchor, resolveTurnBoundary, type BoundaryMessage } from '@goodvibes-jev/engine/platform/platform/rewind';
+import { resolveTurnAnchor, resolveTurnBoundary, turnBoundaryKey, type BoundaryMessage } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { logger, readDocument, summarizeError, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
 
 type ConversationJson = Parameters<CoreConversation['fromJSON']>[0];
@@ -67,6 +67,8 @@ export interface ConversationRewindPort extends RewindConversationPort {
    * changing its length, so there is no count to give.
    */
   messagesSinceRewind(undoSnapshotId: string): number | null;
+  /** The session a rewind's undo snapshot belongs to; null when the snapshot is unknown. */
+  snapshotSession(undoSnapshotId: string): string | null;
 }
 
 /** How many rewinds stay reversible per port; older ones are forgotten so a long-lived process does not keep every closed conversation alive. */
@@ -74,6 +76,8 @@ const MAX_UNDOABLE_REWINDS = 32;
 
 /** One truncation's captured state, the target conversation and its snapshots. */
 interface SnapshotPair {
+  /** The session the rewind was of; an undo for another session is refused. */
+  readonly sessionId: string;
   readonly conv: RewindConversation;
   readonly before: ConversationJson;
   readonly after: ConversationJson;
@@ -170,7 +174,7 @@ export function createConversationRewindPort(
     });
     const conv = stored ? resolveConversation(stored.sessionId) : null;
     if (!stored || !conv) return undefined;
-    const pair: SnapshotPair = { conv, before: stored.before, after: stored.after, afterCount: stored.afterCount, afterSerialized: JSON.stringify(stored.after) };
+    const pair: SnapshotPair = { sessionId: stored.sessionId, conv, before: stored.before, after: stored.after, afterCount: stored.afterCount, afterSerialized: JSON.stringify(stored.after) };
     snapshots.set(id, pair);
     return pair;
   }
@@ -222,9 +226,15 @@ export function createConversationRewindPort(
     async preview(anchor: RewindAnchor): Promise<RewindConversationPreview> {
       const conv = resolveConversation(anchor.sessionId);
       if (!conv) return { messagesToDrop: 0, messagesRemaining: 0 };
-      const cut = keepFor(anchor, conv, () => messagesOf(conv.toJSON()));
+      let read: readonly BoundaryMessage[] | null | undefined;
+      const messages = (): readonly BoundaryMessage[] | null => (read === undefined ? (read = messagesOf(conv.toJSON())) : read);
+      const cut = keepFor(anchor, conv, messages);
       if ('reason' in cut) return { available: false, unavailableReason: cut.reason, messagesToDrop: 0, messagesRemaining: cut.total };
-      return { messagesToDrop: Math.max(0, cut.total - cut.keep), messagesRemaining: cut.keep };
+      const last = messages()?.at(-1);
+      return {
+        messagesToDrop: Math.max(0, cut.total - cut.keep), messagesRemaining: cut.keep,
+        revision: `${cut.total} messages, last ${last ? turnBoundaryKey(last) : 'none'}`,
+      };
     },
 
     async rewind(anchor: RewindAnchor): Promise<RewindConversationOutcome> {
@@ -238,7 +248,7 @@ export function createConversationRewindPort(
       conv.removeMessagesAfter(cut.keep);
       conv.rebuildHistory();
       const after = conv.toJSON() as ConversationJson;
-      remember(undoSnapshotId, anchor.sessionId, { conv, before, after, afterCount: conv.getMessageCount(), afterSerialized: JSON.stringify(after) });
+      remember(undoSnapshotId, anchor.sessionId, { sessionId: anchor.sessionId, conv, before, after, afterCount: conv.getMessageCount(), afterSerialized: JSON.stringify(after) });
       const notSaved = await save(conv);
       return {
         droppedMessages: Math.max(0, cut.total - cut.keep), undoSnapshotId, undoExpiresAfter: undoLifetime,
@@ -267,6 +277,10 @@ export function createConversationRewindPort(
       const delta = snapshot.conv.getMessageCount() - snapshot.afterCount;
       if (delta !== 0) return delta;
       return JSON.stringify(snapshot.conv.toJSON()) === snapshot.afterSerialized ? 0 : Number.NaN;
+    },
+
+    snapshotSession(undoSnapshotId: string): string | null {
+      return snapshotFor(undoSnapshotId)?.sessionId ?? null;
     },
   };
 }

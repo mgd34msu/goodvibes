@@ -32,7 +32,8 @@ import { applyHunkRevert, HunkRevertConflictError, previewHunkRevert } from '../
 import type { WorkspaceEvent } from '../../../events/workspace.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
-import { RestoreTokenStore } from './checkpoint-restore-tokens.js';
+import { ReviewTokenStore } from '../review-tokens.js';
+import { contentDigest, TargetChangedError, targetRef, type TargetRef } from '../../utils/target-ref.js';
 
 /** Sink for the checkpoints.revertHunk receipt event (adapted onto the RuntimeEventBus by the registrar). */
 export type CheckpointsEventSink = (event: WorkspaceEvent, sessionId: string) => void;
@@ -83,6 +84,31 @@ async function callOrHonestNotFound<T>(fn: () => Promise<T>): Promise<T> {
     }
     throw err;
   }
+}
+
+/** What a restore preview showed: the checkpoint, in the workspace root it restores. */
+function checkpointTarget(id: string, root: string): TargetRef<'checkpoint'> {
+  return targetRef('checkpoint', id, { root }, { root }, root);
+}
+
+/**
+ * What a hunk revert preview showed: the hunk in the file as it read then, in
+ * that workspace root, for that session. The session is kept as shown text so
+ * the apply acts in the previewed workspace whatever session it names.
+ */
+function hunkTarget(root: string, path: string, hunk: string, content: string, sessionId: string | undefined): TargetRef<'hunk'> {
+  const file = contentDigest(content);
+  return targetRef('hunk', path, { root, hunk, file },
+    { root, session: sessionId ?? '', file: `${path} at ${file.slice(0, 12)}` }, root);
+}
+
+function tokenRefused(reason: 'unknown' | 'expired' | 'changed', what: string, previewMethod: string): GatewayVerbError {
+  return new GatewayVerbError(
+    `confirmToken is ${reason === 'expired' ? 'expired' : 'unknown or already used'}; nothing was ${what}. Call ${previewMethod} to obtain a fresh one.`,
+    'INVALID_ARGUMENT',
+    400,
+    'confirmToken',
+  );
 }
 
 function optionalString(value: unknown): string | undefined {
@@ -271,7 +297,7 @@ export function createCheckpointsDiffHandler(manager: CheckpointsGatewayManager)
  */
 export function createCheckpointsRestorePreviewHandler(
   manager: CheckpointsGatewayManager,
-  tokens: RestoreTokenStore,
+  tokens: ReviewTokenStore,
 ): GatewayMethodHandler {
   return async (invocation) => {
     const body = readInvocationParams(invocation);
@@ -283,7 +309,7 @@ export function createCheckpointsRestorePreviewHandler(
     const diff = await callOrHonestNotFound(() => holder.diff(id));
     const checkpoint = (await holder.list()).find((c) => c.id === id);
     const affectedPaths = diff.files;
-    const { token, expiresAt } = tokens.issue(id);
+    const { token, expiresAt } = tokens.issue(checkpointTarget(id, await holder.resolveRoot()));
     return {
       token,
       expiresAt,
@@ -300,7 +326,7 @@ export function createCheckpointsRestorePreviewHandler(
 
 export function createCheckpointsRestoreHandler(
   manager: CheckpointsGatewayManager,
-  tokens: RestoreTokenStore,
+  tokens: ReviewTokenStore,
 ): GatewayMethodHandler {
   return async (invocation) => {
     const body = readInvocationParams(invocation);
@@ -324,15 +350,14 @@ export function createCheckpointsRestoreHandler(
       }
       // An explicit token that does not check out is a real failure of the
       // caller's confirm attempt (not the "you didn't confirm" refusal), so it
-      // is an honest 400 that names the remedy, mint a fresh one.
-      if (!tokens.consume(confirmToken, id)) {
-        throw new GatewayVerbError(
-          'confirmToken is invalid, already used, expired, or was issued for a different checkpoint, call checkpoints.restorePreview to obtain a fresh one.',
-          'INVALID_ARGUMENT',
-          400,
-          'confirmToken',
-        );
+      // is an honest 400 that names the remedy, mint a fresh one. A token for
+      // another checkpoint or workspace is refused with what differs.
+      const holding = await managerHolding(manager, id);
+      const spent = tokens.consume(confirmToken, checkpointTarget(id, await holding.resolveRoot()));
+      if (!spent.ok && spent.reason === 'changed' && spent.reviewed) {
+        throw new TargetChangedError(spent.reviewed, spent.changes ?? [], `checkpoints.restorePreview with id ${id}`);
       }
+      if (!spent.ok) throw tokenRefused(spent.reason, 'restored', 'checkpoints.restorePreview');
     } else if (confirm !== true) {
       // Unconfirmed: honest, actionable, NON-destructive. Not a thrown error,
       // a 200 body the caller can branch on.
@@ -366,20 +391,25 @@ export function createCheckpointsRestoreHandler(
  */
 export function createCheckpointsRevertHunkPreviewHandler(
   manager: CheckpointsGatewayManager,
-  tokens: RestoreTokenStore,
+  tokens: ReviewTokenStore,
 ): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const path = requireStringValue(params.path, 'path');
     const hunk = requireStringValue(params.hunk, 'hunk', { verbatim: true });
+    const sessionId = optionalString(params.sessionId);
     // Diff paths are relative to the root the manager resolved at init (the
     // enclosing repository's top level when started in a subdirectory), in the
     // workspace of the session the diff came from.
-    const preview = previewHunkRevert(await managerFor(manager, optionalString(params.sessionId)).resolveRoot(), path, hunk);
+    const root = await managerFor(manager, sessionId).resolveRoot();
+    let content = '';
+    const preview = previewHunkRevert(root, path, hunk, (read) => { content = read; });
     if (!preview.applies) {
       return { ...preview, token: null, expiresAt: null };
     }
-    const { token, expiresAt } = tokens.issue({ path, hunk });
+    // The token binds the workspace, the hunk and the file as it read now: the
+    // apply acts in this root, and refuses when the file changed since.
+    const { token, expiresAt } = tokens.issue(hunkTarget(root, path, hunk, content, sessionId));
     return { ...preview, token, expiresAt };
   };
 }
@@ -394,25 +424,35 @@ export function createCheckpointsRevertHunkPreviewHandler(
  */
 export function createCheckpointsRevertHunkHandler(
   manager: CheckpointsGatewayManager,
-  tokens: RestoreTokenStore,
+  tokens: ReviewTokenStore,
   emit?: CheckpointsEventSink,
 ): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const path = requireStringValue(params.path, 'path');
     const hunk = requireStringValue(params.hunk, 'hunk', { verbatim: true });
-    const sessionId = optionalString(params.sessionId);
+    let sessionId = optionalString(params.sessionId);
     const confirm = optionalBoolean(params.confirm, 'confirm');
     const confirmToken = optionalString(params.confirmToken);
+    // With a token, the workspace is the one the preview read, never the one
+    // the apply call's sessionId resolves to now.
+    let verify: ((content: string, root: string) => void) | undefined;
     if (confirmToken !== undefined) {
-      if (!tokens.consume(confirmToken, { path, hunk })) {
-        throw new GatewayVerbError(
-          'confirmToken is invalid, already used, expired, or was issued for a different hunk, call checkpoints.revertHunkPreview to obtain a fresh one.',
-          'INVALID_ARGUMENT',
-          400,
-          'confirmToken',
-        );
+      const reviewed = tokens.peek(confirmToken);
+      if (!reviewed) {
+        // Spent here too, so an expired token does not linger.
+        const spent = tokens.consume(confirmToken, null);
+        throw tokenRefused(spent.ok ? 'unknown' : spent.reason, 'reverted', 'checkpoints.revertHunkPreview');
       }
+      sessionId = reviewed.shown.session || undefined;
+      const previewedSession = sessionId;
+      verify = (content, root) => {
+        const spent = tokens.consume(confirmToken, hunkTarget(root, path, hunk, content, previewedSession));
+        if (!spent.ok && spent.reason === 'changed' && spent.reviewed) {
+          throw new TargetChangedError(spent.reviewed, spent.changes ?? [], `checkpoints.revertHunkPreview with path ${path}${previewedSession ? ` and sessionId ${previewedSession}` : ''}`);
+        }
+        if (!spent.ok) throw tokenRefused(spent.reason, 'reverted', 'checkpoints.revertHunkPreview');
+      };
     } else if (confirm !== true) {
       return {
         receipt: null,
@@ -427,8 +467,12 @@ export function createCheckpointsRevertHunkHandler(
     }
 
     let receipt;
+    let workspaceRoot = '';
     try {
-      receipt = await applyHunkRevert(managerFor(manager, sessionId), path, hunk);
+      receipt = await applyHunkRevert(managerFor(manager, sessionId), path, hunk, (content, root) => {
+        workspaceRoot = root;
+        verify?.(content, root);
+      });
     } catch (err) {
       if (err instanceof HunkRevertConflictError) {
         // The hunk went stale (the file changed since the diff was taken). Honest
@@ -450,7 +494,7 @@ export function createCheckpointsRevertHunkHandler(
         sessionId ?? 'workspace',
       );
     }
-    return { receipt, refused: false, refusal: null };
+    return { receipt: { ...receipt, workspaceRoot }, refused: false, refusal: null };
   };
 }
 
@@ -469,11 +513,11 @@ export function registerCheckpointGatewayMethods(
 ): void {
   // One token store shared by the preview (mints) and restore (consumes)
   // handlers for this daemon's lifetime.
-  const restoreTokens = new RestoreTokenStore();
+  const restoreTokens = new ReviewTokenStore();
   // A separate store for the per-hunk revert preview/apply pair, its tokens bind
-  // to the exact private (path, hunk) pair, so they never cross with
+  // to the hunk, its file and its workspace, so they never cross with
   // the whole-checkpoint restore tokens above.
-  const revertHunkTokens = new RestoreTokenStore();
+  const revertHunkTokens = new ReviewTokenStore();
 
   const listDescriptor = catalog.get('checkpoints.list');
   if (listDescriptor) catalog.register(listDescriptor, createCheckpointsListHandler(manager), { replace: true });

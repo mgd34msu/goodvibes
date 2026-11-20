@@ -204,7 +204,7 @@ export class SubscriptionStore {
       // A cold validate should never see 304 (no validators sent); treat as fetch failure.
       return { ok: false, stage: 'fetch', detail: 'Server returned 304 Not Modified to an unconditional request, no calendar body to validate.' };
     }
-    const parsed = parseIcs(res.body);
+    const parsed = parseIcs(res.body, { source: url });
     if (parsed.events.length === 0 && parsed.skipped.length === 0 && !parsed.calendarName) {
       return { ok: false, stage: 'parse', detail: 'Fetched, but no VEVENTs or calendar name were found, this does not look like an iCalendar feed.' };
     }
@@ -233,7 +233,7 @@ export class SubscriptionStore {
     if (res.kind === 'not-modified') {
       return { ok: false, stage: 'fetch', detail: 'Server returned 304 Not Modified to an unconditional request, no calendar body to add.' };
     }
-    const parsed = parseIcs(res.body);
+    const parsed = parseIcs(res.body, { source: input.url });
     if (parsed.events.length === 0 && parsed.skipped.length === 0 && !parsed.calendarName) {
       return { ok: false, stage: 'parse', detail: 'Fetched, but no VEVENTs or calendar name were found, this does not look like an iCalendar feed.' };
     }
@@ -366,7 +366,7 @@ export class SubscriptionStore {
       return { name, outcome: 'not-modified', health: this.healthOf(r, now), ...(r.eventCount !== undefined ? { eventCount: r.eventCount } : {}) };
     }
 
-    const parsed = parseIcs(res.body);
+    const parsed = parseIcs(res.body, { source: r.url });
     // A 200 that is not a calendar at all (a captive-portal page, an error page,
     // an empty body) must not replace the events the last good fetch left.
     if (parsed.events.length === 0 && parsed.skipped.length === 0 && !parsed.calendarName && !/BEGIN:VCALENDAR/i.test(res.body)) {

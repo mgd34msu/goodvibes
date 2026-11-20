@@ -178,6 +178,13 @@ export type AuthenticateResult =
      * that password can trigger this, so the caller may say so.
      */
     readonly withdrawnBootstrapCredential?: true;
+    /**
+     * The password was right for the account as it was when the check began,
+     * but the password was changed or the account deleted while it ran: the
+     * newer password decides, so this sign-in is refused. Only someone who
+     * knew the old password can trigger this.
+     */
+    readonly passwordChangedDuringSignIn?: true;
   };
 
 /**
@@ -702,7 +709,15 @@ export class UserAuthManager {
     const run = this.#signInQueue.then(async (): Promise<AuthenticateResult> => {
       const attempt = this.beginAttempt(username, clientAddress);
       if ('result' in attempt) return attempt.result;
-      const settled = this.settleAttempt(attempt, await verifyPasswordAsync(password, attempt.hashToCheck));
+      const verified = await verifyPasswordAsync(password, attempt.hashToCheck);
+      // The password was checked against the hash read before the wait. A
+      // password changed (here, by the CLI, or on another machine of the group)
+      // or a user deleted meanwhile is the newer fact: the hash is the user's
+      // password revision, and a moved one refuses this sign-in.
+      if (attempt.user && verified && this.#passwordMoved(username, attempt.user.passwordHash)) {
+        return { ok: false, passwordChangedDuringSignIn: true };
+      }
+      const settled = this.settleAttempt(attempt, verified);
       if ('ok' in settled) return this.explainFailure(settled, username, password);
       let user = settled.user;
       if (settled.upgrade) {
@@ -713,6 +728,12 @@ export class UserAuthManager {
     });
     this.#signInQueue = run.then(() => undefined, () => undefined).finally(() => { this.#signInsWaiting--; });
     return run;
+  }
+
+  /** Whether `username`'s password hash is no longer `heldHash`, after taking in another writer's change. One stat. */
+  #passwordMoved(username: string, heldHash: string): boolean {
+    this.refreshFromDisk();
+    return this.users.get(username)?.passwordHash !== heldHash;
   }
 
   private lockKey(username: string, clientAddress: string | undefined): string {

@@ -195,9 +195,15 @@ async function handleGate(args: string[], context: CommandContext): Promise<void
     }
   }
 
+  const gateFailures = [
+    `${gate.floorFailures.length} failed task(s)`,
+    `${gate.regressions.length} regression(s) against the baseline`,
+    ...(gate.missingFromRun.length > 0 ? [`${gate.missingFromRun.length} baseline task(s) missing from the run: ${gate.missingFromRun.join(', ')}`] : []),
+    ...(fresh.results.length === 0 ? ['the run has no tasks'] : []),
+  ];
   report.push(gate.passed
     ? '[eval] Gate PASSED.'
-    : `[eval] Gate FAILED: ${gate.floorFailures.length} failed task(s), ${gate.regressions.length} regression(s) against the baseline.`);
+    : `[eval] Gate FAILED: ${gateFailures.join(', ')}.`);
   context.print(report.join('\n'));
 }
 

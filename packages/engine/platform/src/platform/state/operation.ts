@@ -23,7 +23,7 @@
  * Cost per request: none of these does I/O. `durableAfter` waits for a sync the
  * caller already started; it adds no write and no fsync.
  */
-import { failedOutcome, httpStatusOf, refusal, RefusalError, toRefusal, unknownOutcome, type EffectOutcome } from '@goodvibes-jev/engine/errors';
+import { failedOutcome, httpStatusOf, isOperationKey, OPERATION_KEY_RULE, refusal, RefusalError, toRefusal, unknownOutcome, type EffectOutcome } from '@goodvibes-jev/engine/errors';
 
 declare const opBrand: unique symbol;
 declare const effectBrand: unique symbol;
@@ -36,17 +36,14 @@ export type EffectKey = string & { readonly [effectBrand]: true };
 /** A record that is on disk. Made only by {@link durableAfter}, after the sync it was handed resolved. */
 export type Durable<R> = R & { readonly [durableBrand]: true };
 
-/** What a client may send as an operation key (Idempotency-Key, clientMessageId). */
-const CLIENT_KEY = /^[A-Za-z0-9._:-]{1,128}$/;
-
-/** The client's key as an operation id. Throws a 400 `INVALID_ARGUMENT` refusal for a key outside `[A-Za-z0-9._:-]{1,128}`. */
+/** The client's key as an operation id. Throws a 400 `INVALID_ARGUMENT` refusal for a key outside the one rule (`isOperationKey`: `[A-Za-z0-9._:-]{1,255}`). */
 export function operationIdFromClient(key: string): OperationId {
-  if (typeof key !== 'string' || !CLIENT_KEY.test(key)) {
+  if (!isOperationKey(key)) {
     throw new RefusalError(refusal({
       code: 'INVALID_ARGUMENT',
       status: 400,
       state: 'nothing was accepted',
-      reason: 'The operation key must be 1 to 128 characters of letters, digits, ".", "_", ":" or "-".',
+      reason: `The operation key must be ${OPERATION_KEY_RULE}.`,
       next: ['Send the request again with a key of that form, and use the same key for every retry of it'],
       retryable: false,
     }));

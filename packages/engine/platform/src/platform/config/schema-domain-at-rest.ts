@@ -9,7 +9,7 @@
  * debugging window survives while a long-lived daemon cannot grow these files
  * without limit.
  */
-import type { AtRestConfig, ConfigSetting } from './schema-types.js';
+import type { AtRestConfig, ConfigSettingRow } from './schema-types.js';
 import { intRange } from './schema-shared.js';
 
 export const atRestConfigDefaults: { atRest: AtRestConfig } = {
@@ -20,7 +20,7 @@ export const atRestConfigDefaults: { atRest: AtRestConfig } = {
   },
 };
 
-export const atRestConfigSettings: ConfigSetting[] = [
+export const atRestConfigSettings: ConfigSettingRow[] = [
   {
     key: 'atRest.redactionEnabled',
     type: 'boolean',

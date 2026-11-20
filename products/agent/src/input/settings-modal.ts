@@ -251,6 +251,8 @@ export class SettingsModal extends TerminalSettingsModalState<
 
   /** Replace the search query and recompute the ranked results (an empty query clears the search). */
   setSearchQuery(query: string): void {
+    // A new search starts clean: the last change's message belongs to the row it was made on.
+    if (query !== this.searchQuery) this.lastSettingEffectMessage = null;
     this.searchQuery = query;
     this.searchResults = query.trim().length === 0 ? [] : searchSettingsInOrder(query, this.searchEntries, getSettingLabel);
     this.selectedIndex = 0;
@@ -287,6 +289,7 @@ export class SettingsModal extends TerminalSettingsModalState<
     this.selectedIndex = 0;
     this.contextScroll = 0;
     this.subscriptionLogoutConfirmationTarget = null;
+    this.lastSettingEffectMessage = null;
   }
 
   /** The next topic (Down in the topic rail). */

@@ -44,7 +44,7 @@ export const JUDGMENT_FAILURE_REASONS = {
   'invalid-attempt-guard': 'The asynchronous judgment attempt guard returned a value; it must return nothing.',
   'target-capability': 'The complete judgment input exceeds what this decision target accepts; partition the evidence or use a target with a larger limit.',
   'target-configuration': 'The decision target is configured in a way it cannot serve: check its endpoint address, model and server mode.',
-  'no-credential': 'The decision target has no API key. Set the judgment key (judgment.keySource and judgment.keyName, or TYPESAFE_API_KEY) and retry.',
+  'no-credential': 'The decision model has no API key. Set "Where the decision model key comes from" and "Decision model key name" in /settings open, then retry.',
   'truncated-evidence': 'The decision model read only part of the evidence, so its answer was not used; partition the evidence or use a target with a larger context.',
   'malformed-response': 'The decision model sent an answer this client cannot read; check that the target is a supported decision server.',
   'candidate-too-large': 'Every candidate is larger than one judgment request can carry, so nothing was asked; read the content another way.',
@@ -53,7 +53,7 @@ export const JUDGMENT_FAILURE_REASONS = {
   'endpoint-status': 'The decision endpoint answered with an error status; retry in a moment.',
   unreachable: 'The decision endpoint could not be reached; check that it is running and its address is right, then retry.',
   'endpoint-timeout': 'The decision endpoint did not answer in time; retry in a moment.',
-  'deadline-missed': 'The decision model did not answer within the deadline; retry, or raise judgment.decisionDeadlineMs.',
+  'deadline-missed': 'The decision model did not answer in time; retry, or raise "Longest a waiting decision may take" in /settings open.',
   'targets-slow': 'The decision models missed their deadline repeatedly and are skipped for a minute; retry after that.',
   'rate-limited': 'The decision models are rate limited; retry after the wait they asked for.',
 } as const;

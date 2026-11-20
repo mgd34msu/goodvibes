@@ -4,7 +4,7 @@
  * secret store, the settings list holding its reference), a test, a send, the
  * notifications that failed and resending them; and the history view.
  */
-import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { isSecretReferenceValue, type ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import {
   forgetNotificationWebhook,
   resolveNotificationWebhook,
@@ -61,6 +61,18 @@ function host(): NotifyHost<NotifyContext> {
 function storedUrls(context: NotifyContext): string[] {
   const notifications = context.platform.configManager.getCategory('notifications');
   return Array.isArray(notifications.webhookUrls) ? [...notifications.webhookUrls] : [];
+}
+/**
+ * The list as it may be written: 3.3.1 saved plain addresses in it, and a
+ * settings write now admits only references. Before an add or a remove writes
+ * the list, each plain address is stored in the secret store and replaced by
+ * its reference, so it keeps being sent to. Done once: afterwards every member
+ * is a reference.
+ */
+async function writableUrls(context: NotifyContext, secrets: Parameters<typeof storeNotificationWebhook>[1]): Promise<string[]> {
+  const urls: string[] = [];
+  for (const entry of storedUrls(context)) urls.push(isSecretReferenceValue(entry) ? entry : await storeNotificationWebhook(entry, secrets));
+  return urls;
 }
 async function resolveUrl(context: NotifyContext, entry: string): Promise<string | null> {
   const secrets = context.platform.secretsManager ?? undefined;
@@ -162,8 +174,8 @@ export function registerNotifyCommands<Context extends NotifyContext & CommandAc
           const notifier = host().webhookNotifier(context);
           const problem = notifier.targetProblem(url);
           if (problem !== undefined) throw commandRefusal(`Nothing was added: ${problem}`);
-          const urls = storedUrls(context);
-          if ((await Promise.all(urls.map((entry) => resolveUrl(context, entry)))).includes(url)) return `Already set: ${shownNotificationWebhook(url)}`;
+          if ((await Promise.all(storedUrls(context).map((entry) => resolveUrl(context, entry)))).includes(url)) return `Already set: ${shownNotificationWebhook(url)}`;
+          const urls = await writableUrls(context, secrets);
           // The address goes to the secret store; the list keeps its reference.
           const reference = await storeNotificationWebhook(url, secrets);
           urls.push(reference);
@@ -185,7 +197,8 @@ export function registerNotifyCommands<Context extends NotifyContext & CommandAc
         operator: { terminalOnly: 'the addresses are kept in this program\'s secret store' },
         example: { address: '1' },
         async run(values, context) {
-          const urls = storedUrls(context);
+          const secrets = context.platform.secretsManager ?? undefined;
+          const urls = secrets ? await writableUrls(context, secrets) : storedUrls(context);
           const index = Number(values.address) - 1;
           const entry = Number.isInteger(index) ? urls[index] : undefined;
           if (entry === undefined) throw commandRefusal(`No address has the number ${values.address}; /notify list shows ${urls.length === 0 ? 'none set' : `1 to ${urls.length}`}.`);
@@ -193,7 +206,6 @@ export function registerNotifyCommands<Context extends NotifyContext & CommandAc
           const next = urls.filter((_, at) => at !== index);
           context.platform.configManager.mergeCategory('notifications', { webhookUrls: next });
           host().webhookNotifier(context).setUrls(next);
-          const secrets = context.platform.secretsManager ?? undefined;
           if (secrets) await forgetNotificationWebhook(entry, secrets).catch(() => undefined);
           return `Webhook removed: ${shown}`;
         },

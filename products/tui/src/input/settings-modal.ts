@@ -355,6 +355,8 @@ export class SettingsModal extends TerminalSettingsModalState<
    * Setting an empty string clears search mode.
    */
   setSearchQuery(query: string): void {
+    // A new search starts clean: the last change's message belongs to the row it was made on.
+    if (query !== this.searchQuery) this.lastSettingEffectMessage = null;
     this.searchQuery = query;
     this.searchFocused = true;
     this.contextScroll = 0;
@@ -381,6 +383,7 @@ export class SettingsModal extends TerminalSettingsModalState<
     this.selectedIndex = 0;
     this.contextScroll = 0;
     this.subscriptionLogoutConfirmationTarget = null;
+    this.lastSettingEffectMessage = null;
   }
 
   /** The next topic (Down in the topic rail). */

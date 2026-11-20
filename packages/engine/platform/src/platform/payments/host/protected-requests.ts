@@ -135,7 +135,8 @@ function own(value: unknown): ProtectedPaymentRequest {
     || input['requestedMax'] !== undefined && (typeof input['requestedMax'] !== 'string' || !/^\d+(?:\.\d{1,3})?$/.test(input['requestedMax']))
     || input['merchantDiscovered'] !== undefined && typeof input['merchantDiscovered'] !== 'boolean'
     || input['ownerApprovedMaxMinorUnits'] !== undefined && !amount(input['ownerApprovedMaxMinorUnits'])
-    || input['standingAuthorizationId'] !== undefined && !text(input['standingAuthorizationId'])) throw new ProtectedPaymentRequestError();
+    || input['standingAuthorizationId'] !== undefined && !text(input['standingAuthorizationId'])
+    || input['askedInSessionId'] !== undefined && !text(input['askedInSessionId'])) throw new ProtectedPaymentRequestError();
   const authority = host['authority'];
   if ((authority['kind'] !== 'pairing-token' && authority['kind'] !== 'local') || authority['principalId'] !== row['principalId'] || !text(authority['tokenId'])
     || !text(authority['authorityId']) || !text(authority['authorityRevision']) || !Array.isArray(authority['scopes'])
@@ -167,7 +168,7 @@ function own(value: unknown): ProtectedPaymentRequest {
     if (browserControls.controls.length !== refs.size || browserControls.controls.some(control => !refs.has(control.ref))) throw new ProtectedPaymentRequestError();
   }
   return Object.freeze({ ...row, ...(window ? { window } : {}), ...(replyHistory ? { replyHistory } : {}), evidence: captureRetainedTaintEvidence(row['evidence']),
-    input: optionalFields({ ...input, controls: optionalFields(controls, ['addressFields', 'shippingTargets', 'expirySeparator', 'twoDigitYear']) }, ['preferredTier', 'requestedMax', 'merchantDiscovered', 'ownerApprovedMaxMinorUnits', 'standingAuthorizationId']),
+    input: optionalFields({ ...input, controls: optionalFields(controls, ['addressFields', 'shippingTargets', 'expirySeparator', 'twoDigitYear']) }, ['preferredTier', 'requestedMax', 'merchantDiscovered', 'ownerApprovedMaxMinorUnits', 'standingAuthorizationId', 'askedInSessionId']),
     host: Object.freeze({ authority, configuration: savedConfig,
       ...(host['browser'] === undefined ? {} : { browser: captureBrowserPageConnection(host['browser']) }),
       ...(browserControls === undefined ? {} : { browserControls }),

@@ -20,7 +20,8 @@ export function watcherServes(id: string): ProcessServes {
  * record through its sourceStatusFor derivation (healthy/lagging/stale/
  * failed), so the mapping here reads the post-derivation state:
  * running → 'idle' (alive, armed between checks), starting → 'queued',
- * degraded → 'stalled' (heartbeat lagging/stale is the watcher-shaped stall),
+ * degraded → 'stalled' when its heartbeat is stale (two intervals) or it reports an
+ * error, 'idle' while a beat is only due (lagging),
  * failed → 'failed', stopped → 'killed'.
  */
 export function adaptWatcher(record: WatcherRecord, now: number): ProcessNode {
@@ -33,7 +34,9 @@ export function adaptWatcher(record: WatcherRecord, now: number): ProcessNode {
       state = 'queued';
       break;
     case 'degraded':
-      state = 'stalled';
+      // A beat that is only due (lagging: past one interval, inside two) is a timer firing a
+      // moment late, not a service that stopped answering; stale (two intervals) or an error is.
+      state = record.sourceStatus === 'lagging' && !record.lastError ? 'idle' : 'stalled';
       break;
     case 'failed':
       state = 'failed';

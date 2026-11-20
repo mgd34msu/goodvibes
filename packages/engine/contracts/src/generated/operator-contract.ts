@@ -136205,6 +136205,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "twoDigitYear": {
               "type": "boolean"
             },
+            "askedInSession": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$",
+              "description": "The session whose turn began this purchase: the agent's operator call sets it from its own turn, so the purchase window names the chat it came from. A label only; it decides nothing about the purchase."
+            },
             "standingId": {
               "type": "string",
               "pattern": "^standing-[0-9a-f]{8}$",

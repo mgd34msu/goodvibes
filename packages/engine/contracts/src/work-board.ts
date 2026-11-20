@@ -261,9 +261,10 @@ function clause(text: string): string {
 
 function askRow(ask: WorkBoardAsk, now: number, who?: string | undefined): BoardRow {
   const p = ask.presentation;
+  // A purchase says where it came from: its chat, or the schedule or standing authorisation that began it.
   const from = p.origin?.sessionTitle !== undefined
     ? p.kind === 'purchase' ? `From "${p.origin.sessionTitle}"` : `Asked by ${p.origin.by} in "${p.origin.sessionTitle}"`
-    : p.origin ? `Asked by ${p.origin.by}` : undefined;
+    : p.origin ? p.kind === 'purchase' ? `From ${p.origin.by}` : `Asked by ${p.origin.by}` : undefined;
   const minutes = p.countdown ? Math.max(0, Math.ceil((p.countdown.at - now) / 60_000)) : undefined;
   const until = p.countdown ? new Date(p.countdown.at) : undefined;
   const countdown = p.countdown && minutes !== undefined && until

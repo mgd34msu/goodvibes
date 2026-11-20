@@ -27167,6 +27167,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "preferredTier": "normal",
       "expirySeparator": "sample",
       "twoDigitYear": false,
+      "askedInSession": "sample",
       "standingId": "sample",
       "requestedMax": "sample"
     },

@@ -558,7 +558,7 @@ export class AcpHostService {
         } catch (error) {
           if (record.lifetime.signal.aborted || operation.lifetime.signal.aborted) return cancelled;
           return refuse(deadline.aborted
-            ? `the permission decision did not arrive within ${deadlineMs} ms (judgment.decisionDeadlineMs)`
+            ? `the permission decision did not arrive within ${deadlineMs} ms ("Longest a waiting decision may take" in /settings open)`
             : `the permission ask could not be decided: ${summarizeError(error)}`);
         } finally {
           if (!deferred) { admission?.close(); cleanup(); }

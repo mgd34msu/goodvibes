@@ -26,7 +26,7 @@ import { buildPermissionApprovalBrief } from './briefs/build.js';
 import { execRunPlace, permissionSubject } from './subject.js';
 import { composeConsequence, folderName, readingAnswer, undoFactOf, commandEffect, type SandboxFact } from './ask-consequence.js';
 import type { ModeInForceWords } from './decision-model-readiness.js';
-import { PURCHASE_AMOUNT_METADATA, PURCHASE_DEADLINE_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA } from '../payments/payment-ports.js';
+import { PURCHASE_AMOUNT_METADATA, PURCHASE_DEADLINE_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA, PURCHASE_STANDING_METADATA } from '../payments/payment-ports.js';
 import { formatMinorUnits } from '../payments/message.js';
 import { minorUnitExponent } from '../payments/money-parsing.js';
 
@@ -114,6 +114,8 @@ export interface AskFacts {
   readonly modeInForce: ModeInForceWords;
   /** A purchase window's facts, by purchase id (payments/window-view.ts and the operation view). */
   readonly purchase?: ((purchaseId: string) => PurchaseAskFacts | undefined) | undefined;
+  /** The name of the schedule a session runs for, when a schedule's run made it ("Order filters"). */
+  readonly scheduleOfSession?: ((sessionId: string) => string | undefined) | undefined;
 }
 
 export interface PurchaseAskFacts {
@@ -691,8 +693,15 @@ export function presentInboxAsk(item: OwnerItem, facts: AskFacts, request?: Perm
         : windowKind === 'approval'
           ? [{ id: 'once', label: 'Yes, buy it', key: 'y', value: 'approve' }, { id: 'no', label: 'No', key: 'n', default: true, value: 'deny' }]
           : [{ id: 'acknowledge', label: 'OK', key: 'y', default: true, value: 'ok' }];
+      // Where it came from: the chat whose turn began it ('From "Plan the spring garden beds"'), or, for a
+      // purchase nobody asked for in the moment, the schedule that ran it or the owner's standing authorisation.
+      const schedule = item.sessionId !== undefined ? facts.scheduleOfSession?.(item.sessionId) : undefined;
+      const standing = item.metadata?.[PURCHASE_STANDING_METADATA] === true;
+      const { origin: chatOrigin, ...withoutOrigin } = base;
+      const origin = schedule !== undefined ? { by: `your schedule "${schedule}"` }
+        : standing ? { by: 'your standing authorisation' } : chatOrigin;
       return {
-        ...base, kind: 'purchase', mark: 'ask', question,
+        ...withoutOrigin, ...(origin ? { origin } : {}), kind: 'purchase', mark: 'ask', question,
         ...(purchase?.merchant ? { subject: { kind: 'money' as const, lines: [purchase.merchant] } } : {}),
         body: firstLine(item.detail),
         ...(budget ? { consequence: { text: budget, withPlace: budget, tone: 'plain' as const } } : {}),

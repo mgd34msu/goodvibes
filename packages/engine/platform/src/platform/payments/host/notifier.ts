@@ -24,7 +24,7 @@ import type { ChannelDeliveryRouter, ChannelDeliveryTarget } from '../../channel
 import { createChannelPaymentNotifier } from '../notice-delivery.js';
 import type { PaymentNoticeRouter, PaymentNoticeTarget, PaymentReplySource } from '../notice-delivery.js';
 import { absent, failedRead, present, refusal, RefusalError, type Observed } from '@goodvibes/engine/errors';
-import { PAYMENT_ANSWER_UNREADABLE, PURCHASE_AMOUNT_METADATA, PURCHASE_DEADLINE_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA, type PaymentNotifier, type PaymentNoticeWindow, type PurchaseNoticeFacts } from '../payment-ports.js';
+import { PAYMENT_ANSWER_UNREADABLE, PURCHASE_AMOUNT_METADATA, PURCHASE_DEADLINE_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA, PURCHASE_STANDING_METADATA, type PaymentNotifier, type PaymentNoticeWindow, type PurchaseNoticeFacts } from '../payment-ports.js';
 import type { NewOwnerItem, OwnerItem } from '../../control-plane/owner-inbox.js';
 import type { ChannelDelivery } from '../windows.js';
 import { readNotifyChannels, type PaymentsConfigReader } from '../payments-config.js';
@@ -152,11 +152,14 @@ export function purchaseInboxItem(kind: PaymentWindowKind | 'notice', message: s
     expiresAt,
     // The window's subject travels as facts, so every surface asks "Buy <item> from <shop> for <amount>?" from them.
     ...(purchaseId === undefined ? {} : { key: purchaseInboxKey(purchaseId, kind) }),
+    // The chat whose turn began the purchase: the window says which chat it came from, and that chat lists it.
+    ...(facts?.askedInSessionId === undefined ? {} : { sessionId: facts.askedInSessionId }),
     // The window's own deadline too, so its countdown ("goes ahead in 9 min") is the window's and not the item's.
     ...(purchaseId === undefined && !facts && deadlineMs === undefined ? {} : { metadata: {
       ...(purchaseId === undefined ? {} : { purchaseId }),
       ...(facts ? { [PURCHASE_ITEM_METADATA]: facts.item, [PURCHASE_SHOP_METADATA]: facts.shop, [PURCHASE_AMOUNT_METADATA]: facts.amount } : {}),
       ...(deadlineMs === undefined ? {} : { [PURCHASE_DEADLINE_METADATA]: deadlineMs }),
+      ...(facts?.standing === true ? { [PURCHASE_STANDING_METADATA]: true } : {}),
     } }),
   };
 }

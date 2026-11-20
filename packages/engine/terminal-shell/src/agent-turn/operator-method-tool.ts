@@ -1,4 +1,5 @@
 import { captureStrictJudgmentJson } from '@goodvibes/engine/platform/platform/gate';
+import { currentTurn } from '@goodvibes/engine/platform/platform/security';
 import { isServiceMethodId, serviceExpectedOutcome, serviceLifecycleDecision, serviceOutcomeCertified, serviceReceiptEvidence } from './service-lifecycle.js';
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
@@ -62,6 +63,17 @@ type WatcherMethodId =
 // with the owner-request signal; this tool sends it after this call's own admission passed, never
 // because an argument asked for it.
 const AGENT_PURCHASE_METHOD_IDS = new Set(['payments.checkout.begin', 'payments.purchase.cancel']);
+
+/**
+ * A begin carries the session of the turn that makes it (`askedInSession`),
+ * so the purchase window names the chat it came from. Only the turn sets it:
+ * a value the model wrote is dropped, and a call outside a turn sends none.
+ */
+function withAskingSession(payload: Record<string, unknown>): Record<string, unknown> {
+  const { askedInSession: _modelWritten, ...rest } = payload;
+  const sessionId = currentTurn()?.sessionId;
+  return sessionId ? { ...rest, askedInSession: sessionId } : rest;
+}
 // The profile tool owns these reads and its disclosure rules; the generic path has none of them.
 const PROFILE_TOOL_ONLY_METHOD_IDS = new Set(['profile.read', 'profile.person', 'profile.get', 'profile.provenance']);
 // Profile writes state their provenance (`authority: "autonomous"`, no quote).
@@ -457,7 +469,8 @@ export function createAgentOperatorMethodTool(
         const wirePayload = AUTONOMOUS_PROFILE_METHOD_IDS.has(methodSnapshot.id)
           ? { ...retainedPayload, authority: 'autonomous',
             ...(PROFILE_QUOTE_METHOD_IDS.has(methodSnapshot.id) ? { said: '' } : {}) }
-          : methodSnapshot.id === 'payments.purchase.cancel' ? { ...retainedPayload, confirm: true } : retainedPayload;
+          : methodSnapshot.id === 'payments.purchase.cancel' ? { ...retainedPayload, confirm: true }
+            : methodSnapshot.id === 'payments.checkout.begin' ? withAskingSession(retainedPayload) : retainedPayload;
         // The Agent's call: its delegated credential for a write it makes for the owner, its ordinary one otherwise.
         const { delegated } = await agentCallConnection(connection, methodSnapshot.id, 'agent', shellPaths.homeDirectory, options?.signal);
         const bearer = delegated?.token ?? connection.token;

@@ -86,7 +86,8 @@ export function createSettingsLayout<Modal extends SettingsLayoutModal>(policy: 
     const inner = f.r - f.l + 1;
     let detailX = 2;
     // Search spans every topic, so the topics step aside for it.
-    if (inner >= 56 && !modal.searchFocused) {
+    // Below about 100 columns the rail steps aside: the title names the topic and ↑↓ on the topics still switch it.
+    if (inner >= 90 && !modal.searchFocused) {
       const rail = policy.topicRows(modal);
       const widest = rail.reduce((most, row) => Math.max(most, getDisplayWidth(row.label ?? '')), 0);
       const catW = Math.max(16, Math.min(24, widest + 4));

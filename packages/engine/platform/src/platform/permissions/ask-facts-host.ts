@@ -36,6 +36,8 @@ export interface HostAskFactsSource {
   readonly sessionTitle?: ((sessionId: string) => string | undefined) | undefined;
   /** A purchase window's facts by purchase id. */
   readonly purchase?: ((purchaseId: string) => PurchaseAskFacts | undefined) | undefined;
+  /** The schedule a session runs for, by session id (a schedule's run makes its session). */
+  readonly scheduleOfSession?: ((sessionId: string) => string | undefined) | undefined;
 }
 
 /** The facts as the host holds them now. No chat is "this one" for a host: every ask names the chat it came from. */
@@ -46,6 +48,7 @@ export function hostAskFacts(source: HostAskFactsSource, sessionId?: string | un
     settingLabel: settingLabelOf,
     ...(source.sessionTitle ? { sessionTitle: source.sessionTitle } : {}),
     ...(source.purchase ? { purchase: source.purchase } : {}),
+    ...(source.scheduleOfSession ? { scheduleOfSession: source.scheduleOfSession } : {}),
     ...(sessionId !== undefined ? { sessionId } : {}),
   };
 }

@@ -35,7 +35,7 @@ function unavailableMessage(reason: JudgmentFailureReason | undefined, status: n
     : reason === 'unreachable' ? 'could not be reached'
     : reason === 'no-credential' ? 'has no API key' : undefined;
   if (what === undefined) return DECISION_MODELS_UNAVAILABLE_NOTICE;
-  const next = reason === 'no-credential' ? 'Set the judgment key (judgment.keySource and judgment.keyName, or TYPESAFE_API_KEY), then retry.'
+  const next = reason === 'no-credential' ? 'Set "Where the decision model key comes from" and "Decision model key name" in /settings open, then retry.'
     : reason === 'unreachable' ? 'Check that the decision endpoint is running and its address is right, then retry.'
     : 'Retry in a moment.';
   return targets === 1 ? `The decision endpoint ${what}. ${next}` : `None of the ${targets} decision targets answered; the last ${what}. ${next}`;

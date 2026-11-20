@@ -50,12 +50,18 @@ export const PURCHASE_SHOP_METADATA = 'purchaseShop';
 export const PURCHASE_AMOUNT_METADATA = 'purchaseAmount';
 /** When a window closes (epoch ms): a veto window goes ahead then, an approval window stops waiting. The item itself outlives it by a minute. */
 export const PURCHASE_DEADLINE_METADATA = 'purchaseDeadline';
+/** True on a window whose purchase runs under the owner's standing authorisation (a schedule or trigger began it). */
+export const PURCHASE_STANDING_METADATA = 'purchaseStanding';
 
 /** A purchase window's subject as facts: the item, the shop and the amount with its currency ("$64.00"). */
 export interface PurchaseNoticeFacts {
   readonly item: string;
   readonly shop: string;
   readonly amount: string;
+  /** The session whose turn began the purchase, so its window names the chat it came from as every other ask does. */
+  readonly askedInSessionId?: string | undefined;
+  /** The purchase runs under the owner's standing authorisation: a schedule or trigger began it, nobody asked in the moment. */
+  readonly standing?: boolean | undefined;
 }
 
 export interface PaymentNotifier {

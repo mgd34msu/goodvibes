@@ -31,10 +31,12 @@
  *
  * When the row is short, pieces give way in this order until it fits: the
  * menu keycap, the cost, optional chips, the mode's reason shortens
- * (`decision model unreachable` → `unreachable`), the mode's reason goes (the
- * words the design lets shorten go before any segment), the branch, the
- * context, the background summary (unless it holds focus), the model, the
- * notices, the mode's keycap. The mode's words, `asking you for now`, the
+ * (`decision model unreachable` → `unreachable`), the mode's reason goes (it
+ * is in the notices and on a click), the notices lose their keycap (the count
+ * stays), the branch loses its state word (`branch main`): the words that
+ * may shorten go before any segment; then the branch, the context, the
+ * background summary (unless it holds focus), the model, the notices, the
+ * mode's keycap. The mode's words, `asking you for now`, the
  * kept chips and the esc hint always stay. A segment given up
  * before a later step freed the room comes back when it fits (the model, then
  * the context, the branch, the cost, the menu keycap).
@@ -242,12 +244,13 @@ function noticesRuns(notices: StatusNotices): Run[] {
     const t = activeTokens();
     return [{ text: `${notices.count} notice${notices.count === 1 ? '' : 's'}`, fg: t.info, bold: true }];
 }
-function noticesWidth(notices: StatusNotices): number {
-    return runsWidth(noticesRuns(notices)) + (notices.key ? KEY_GAP + getDisplayWidth(notices.key) + 2 : 0);
+function noticesWidth(notices: StatusNotices, withKey: boolean): number {
+    return runsWidth(noticesRuns(notices)) + (withKey && notices.key ? KEY_GAP + getDisplayWidth(notices.key) + 2 : 0);
 }
-function branchRuns(branch: StatusBranch): Run[] {
+/** `branch main, changed`; with `short`, the state word goes (`branch main`). */
+function branchRuns(branch: StatusBranch, short = false): Run[] {
     const t = activeTokens();
-    return [{ text: 'branch ', fg: t.textFaint }, { text: branch.changed ? `${branch.name}, changed` : branch.name, fg: t.textMuted }];
+    return [{ text: 'branch ', fg: t.textFaint }, { text: branch.changed && !short ? `${branch.name}, changed` : branch.name, fg: t.textMuted }];
 }
 function modelRuns(model: string): Run[] {
     const t = activeTokens();
@@ -273,6 +276,10 @@ interface Plan {
     asks: AsksForm;
     chips: StatusChip[];
     notices: boolean;
+    /** The notices segment keeps its `ctrl+n` keycap. */
+    noticesKey: boolean;
+    /** The branch drops its state word (`, changed`). */
+    branchShort: boolean;
     summary: boolean;
     cost: boolean;
     context: boolean;
@@ -312,6 +319,8 @@ export function renderStatusLine(options: StatusLineOptions): Line {
         asks: { because: 'full', key: true },
         chips: [...chips],
         notices: notices !== null,
+        noticesKey: true,
+        branchShort: false,
         summary: bg !== null,
         cost: cost !== null,
         context: ctx !== null,
@@ -332,7 +341,7 @@ export function renderStatusLine(options: StatusLineOptions): Line {
         if (p.chips.length > 0)
             widths.push(p.chips.reduce((s, c, i) => s + (i > 0 ? CHIP_GAP : 0) + getDisplayWidth(c.text), 0));
         if (p.notices && notices)
-            widths.push(noticesWidth(notices));
+            widths.push(noticesWidth(notices, p.noticesKey));
         if (leadW > 0)
             widths.push(leadW);
         if (escHints)
@@ -348,7 +357,7 @@ export function renderStatusLine(options: StatusLineOptions): Line {
         if (p.context && ctx)
             widths.push(runsWidth(contextRuns(ctx)));
         if (p.branch && branch)
-            widths.push(runsWidth(branchRuns(branch)));
+            widths.push(runsWidth(branchRuns(branch, p.branchShort)));
         if (p.model && model)
             widths.push(runsWidth(modelRuns(model)));
         return widths;
@@ -373,6 +382,8 @@ export function renderStatusLine(options: StatusLineOptions): Line {
         }),
         () => { plan.asks = { ...plan.asks, because: 'short' }; },
         () => { plan.asks = { ...plan.asks, because: 'none' }; },
+        () => { plan.noticesKey = false; },
+        () => { plan.branchShort = true; },
         () => { plan.branch = false; },
         () => { plan.context = false; },
         () => { if (!bg?.focused) plan.summary = false; },
@@ -419,7 +430,7 @@ export function renderStatusLine(options: StatusLineOptions): Line {
     if (plan.context && ctx)
         rightSegments.push({ runs: contextRuns(ctx), target: 'context' });
     if (plan.branch && branch)
-        rightSegments.push({ runs: branchRuns(branch), target: 'changes' });
+        rightSegments.push({ runs: branchRuns(branch, plan.branchShort), target: 'changes' });
     if (plan.model && model)
         rightSegments.push({ runs: modelRuns(model), target: 'model' });
     let drewRight = false;
@@ -479,7 +490,7 @@ export function renderStatusLine(options: StatusLineOptions): Line {
     if (plan.notices && notices) {
         const start = next();
         x = putRuns(line, start, rightEdge, noticesRuns(notices));
-        if (notices.key)
+        if (notices.key && plan.noticesKey)
             x = putText(line, x + KEY_GAP, rightEdge, keycapRun(notices.key));
         options.tagRegion?.(line, start, x, 'notices');
     }

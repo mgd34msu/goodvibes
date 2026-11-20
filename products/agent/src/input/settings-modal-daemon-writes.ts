@@ -86,6 +86,11 @@ export function routeSettingWriteToConnectedHost(
       await target.client.set(key, value);
     } catch (error) {
       const message = summarizeError(error);
+      // A loosening change made with a token minted for automation is put to the owner, not refused.
+      if ((error as { readonly code?: unknown } | null)?.code === 'OWNER_APPROVAL_PENDING') {
+        report({ ok: false, settled: true, message: `Waiting for the owner's approval: nothing has changed yet. ${message}` });
+        return;
+      }
       logger.error('SettingsModal: the connected host refused a setting write', { key, error: message });
       report({ ok: false, settled: true, message: `Save failed: ${message}` });
       return;

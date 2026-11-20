@@ -43,7 +43,8 @@ export function originWords(ask: OpenAsk): string | undefined {
   const origin = ask.presentation.origin;
   if (!origin) return undefined;
   if (origin.sessionTitle !== undefined) return ask.presentation.kind === 'purchase' ? `From "${origin.sessionTitle}"` : `Asked by ${origin.by} in "${origin.sessionTitle}"`;
-  return `Asked by ${origin.by}`;
+  // A purchase nobody asked for in the moment: "From your schedule "Order filters"".
+  return ask.presentation.kind === 'purchase' ? `From ${origin.by}` : `Asked by ${origin.by}`;
 }
 
 /** A purchase window's deadline: "goes ahead in 9 min unless you say no" | "waits for you until 14:05". */

@@ -229,8 +229,9 @@ Work is one list of everything working for you, grouped by what you would do
 about it: Waiting for you (approvals, questions, purchase windows and anything
 else that needs your answer, each in a sentence, with who asked and, when it
 loosens a protection, "this weakens a safety setting"; a purchase window reads
-"Buy a drip irrigation kit from Example Garden Supply for $38.40?" with "inside
-your daily budget · goes ahead in 9 min unless you say no"), Running now (each
+"Buy a drip irrigation kit from Example Garden Supply for $38.40?" with "From
+"Plan the spring garden beds" · inside your daily budget · goes ahead in 9 min
+unless you say no", naming the chat whose turn began it, or the schedule), Running now (each
 agent by what it is doing in words, "Reading 2 files", or its task when nothing
 is known; never a tool's name), Scheduled
 (schedules, triggers and CI watches between runs, with when they run and how the

@@ -495,7 +495,7 @@ export class AcpConnection {
         } catch (error) {
           if (this.lifetime.signal.aborted) return cancelled;
           return this.refuse(deadline?.aborted
-            ? `the permission decision did not arrive within ${deadlineMs} ms (judgment.decisionDeadlineMs)`
+            ? `the permission decision did not arrive within ${deadlineMs} ms ("Longest a waiting decision may take" in /settings open)`
             : `the permission ask could not be decided: ${summarizeError(error)}`);
         } finally { if (!deferred) admission?.close(); }
       },

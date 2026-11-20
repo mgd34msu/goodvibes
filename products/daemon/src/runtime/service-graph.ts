@@ -189,7 +189,14 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     });
     disposalScope.registry.add('owner inbox', () => ownerInbox.dispose());
     // Every item carries its words (question, consequence, choices) on the wire, worded with this host's facts.
-    const askFactsSource = { configManager, homeDirectory, sessionTitle: (id: string) => sessionBroker.getSession(id)?.title };
+    const askFactsSource = {
+      configManager, homeDirectory, sessionTitle: (id: string) => sessionBroker.getSession(id)?.title,
+      // A schedule's run makes its own session (automation/manager-runtime-execution.ts): a purchase it begins says "From your schedule <name>".
+      scheduleOfSession: (id: string) => {
+        const jobId = sessionBroker.getSession(id)?.metadata['jobId'];
+        return typeof jobId === 'string' ? automationManager.getJob(jobId)?.name : undefined;
+      },
+    };
     ownerInbox.usePresentation(hostItemPresenter(askFactsSource));
     // The same words ride every approval-update frame and approvals.list row, so no surface reads the inbox to word an approval.
     approvalBroker.usePresentation((request, sessionId) => hostApprovalPresentation(askFactsSource, request, sessionId));

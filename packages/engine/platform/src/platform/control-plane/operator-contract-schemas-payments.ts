@@ -374,6 +374,7 @@ export const PAYMENTS_CHECKOUT_BEGIN_INPUT_SCHEMA = objectSchema(
     preferredTier: enumSchema(['normal', 'fast', 'fastest']),
     expirySeparator: STRING_SCHEMA,
     twoDigitYear: BOOLEAN_SCHEMA,
+    askedInSession: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$', description: 'The session whose turn began this purchase: the agent\'s operator call sets it from its own turn, so the purchase window names the chat it came from. A label only; it decides nothing about the purchase.' },
     standingId: { type: 'string', pattern: '^standing-[0-9a-f]{8}$', description: 'For a purchase a schedule or trigger starts, with nobody asking in the moment: the id of the owner\'s standing authorisation from payments.standing.list. The item must be that entry\'s item and the merchant one of its shops; the purchase may come to at most the smaller of its per-purchase maximum and what is left of its period. Omit it for a purchase the owner asked for now.' },
     requestedMax: { ...STRING_SCHEMA, pattern: '^\\d+(?:\\.\\d{1,3})?$', description: 'Owner-requested maximum for the entire purchase, including tax, mandatory fees and delivery. Supply one non-negative decimal amount in the configured budget currency, such as 20.00, without grouping, currency symbols or prose. Precision must fit that currency. Exceeding it requires a new explicit approval; silence never raises it. Required while payments.confirmEveryPurchase is on: it is the amount the owner approved.' },
   },

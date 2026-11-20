@@ -160,6 +160,11 @@ export function applySettingValue({
       refreshGroups();
       onAsyncSaved?.((effect ? effect.message : undefined) ?? 'Saved by the daemon.');
     }, (error: unknown) => {
+      // A loosening change made with a token minted for automation is put to the owner, not refused.
+      if ((error as { readonly code?: unknown } | null)?.code === 'OWNER_APPROVAL_PENDING') {
+        onAsyncError?.(`Waiting for the owner's approval: nothing has changed yet. ${summarizeError(error)}`);
+        throw error;
+      }
       logger.error('SettingsModal: the daemon refused a daemon-owned config write', { key, error: summarizeError(error) });
       onAsyncError?.(`Not saved: the daemon refused that setting, and nothing was written: ${summarizeError(error)}`);
       throw error;

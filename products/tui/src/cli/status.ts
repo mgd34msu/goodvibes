@@ -635,7 +635,7 @@ export function renderCliStatus(options: CliStatusOptions): string {
     ] : []),
     '',
     'Decision model:',
-    `  policy: ${snapshot.decisionModel.policyLabel} (judgment.policy)`,
+    `  when it is missing or fails: ${snapshot.decisionModel.policyLabel}`,
     `  ${snapshot.decisionModel.line}`,
     '',
     'Auth:',

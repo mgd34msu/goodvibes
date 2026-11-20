@@ -182,6 +182,12 @@ export interface PurchaseRequest {
    * the purchase.
    */
   readonly standingAuthorizationId?: string | undefined;
+  /**
+   * The session whose turn began this purchase (an agent's operator call
+   * carries its turn's session), so the window names the chat it came from.
+   * A label only: it decides nothing about the purchase.
+   */
+  readonly askedInSessionId?: string | undefined;
 }
 
 export type { PurchaseRecord } from './purchase-record.js';
@@ -887,7 +893,9 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
    */
   type WindowAnswer = Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
   // What the window is about, as facts on its inbox item: every surface asks "Buy <item> from <shop> for <amount>?".
-  const noticeFacts = { item: request.item, shop: request.merchantDomain, amount: formatMoney(money(draw.totalMinorUnits, checkout.currency)) };
+  const noticeFacts = { item: request.item, shop: request.merchantDomain, amount: formatMoney(money(draw.totalMinorUnits, checkout.currency)),
+    ...(request.askedInSessionId === undefined ? {} : { askedInSessionId: request.askedInSessionId }),
+    ...(request.standingAuthorizationId === undefined ? {} : { standing: true }) };
   const runWindow = async (kind: 'approval' | 'veto', message: string, minutes: number, restored: boolean, heldReply = false)
     : Promise<{ readonly done: CheckoutOutcome } | { readonly deliveries: readonly ChannelDelivery[]; readonly answer: WindowAnswer | undefined }> => {
     if (!addressStillCurrent()) { await releaseUnlessStopped(); return { done: refused('no-shipping-address', 'The stored address changed before the purchase notice.') }; }

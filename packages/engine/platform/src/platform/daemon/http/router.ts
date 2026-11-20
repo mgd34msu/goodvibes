@@ -435,8 +435,8 @@ export class DaemonHttpRouter {
               error: error.message,
               code: 'DECISION_MODELS_DISABLED',
               category: 'bad_request',
-              state: 'no decision model is in use (none is set, or judgment.policy is No Decision Model)',
-              next: ['Set a decision model (judgment.model, judgment.endpoint or TYPESAFE_API_KEY) with judgment.policy Hybrid or Decision Model Only to use this, or use the alternative the message names'],
+              state: 'no decision model is in use (none is chosen, or decision models are turned off)',
+              next: ['Choose a Decision model in settings, with "When the decision model is missing or fails" set to Hybrid or Decision Model Only, to use this; or use the alternative the message names'],
             }, { status: 409 });
           }
           // A route that throws must still answer: a bare rejection reaches the

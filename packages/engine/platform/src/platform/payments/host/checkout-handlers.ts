@@ -285,7 +285,22 @@ function parseBeginCheckoutInput(params: Record<string, unknown>, settings: Begi
     // silence denies, so the flag can never make spending more automatic.
     // The item and any stated maximum are taint-checked either way.
     merchantDiscovered: discovered === true,
+    ...readAskedInSession(params),
   };
+}
+
+/**
+ * The session whose turn began the purchase, as the agent's operator call
+ * sends it from its turn: a label its window shows ("From \"<chat>\""), read
+ * beside the begin input and deciding nothing about the purchase.
+ */
+function readAskedInSession(params: Record<string, unknown>): { readonly askedInSessionId?: string } {
+  const value = params['askedInSession'];
+  if (value === undefined) return {};
+  if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/.test(value.trim())) {
+    throw invalid('askedInSession', 'must be the id of the session whose turn began the purchase.');
+  }
+  return { askedInSessionId: value.trim() };
 }
 
 /** The standing authorisation a scheduled begin names, read beside the begin input (it is not part of what the purchase runs on). */

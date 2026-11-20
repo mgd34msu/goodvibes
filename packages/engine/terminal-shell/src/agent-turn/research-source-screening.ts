@@ -157,10 +157,12 @@ function captureCredential(key: string, secrets: CredentialOwner): { readonly va
     localKey = reference.id;
   }
   const snapshot = secrets.resolveLocalCredentialSnapshot(localKey);
-  if (snapshot.state !== 'resolved' || !snapshot.value || snapshot.value.trim() !== snapshot.value || /[\r\n\0]/.test(snapshot.value)) {
+  // Revealed for the screening provider it is sent to.
+  const text = snapshot.state === 'resolved' ? snapshot.value.reveal('dispatch') : '';
+  if (snapshot.state !== 'resolved' || !text || text.trim() !== text || /[\r\n\0]/.test(text)) {
     return unconfigured(missingKey(key));
   }
-  return { value: snapshot.value, assertCurrent() { if (process.env[key] !== environment) changed(); } };
+  return { value: text, assertCurrent() { if (process.env[key] !== environment) changed(); } };
 }
 
 /**

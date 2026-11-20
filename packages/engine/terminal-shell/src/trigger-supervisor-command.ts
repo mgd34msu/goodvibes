@@ -149,6 +149,7 @@ const WATCH_KINDS: readonly FixedChoice[] = [
   { value: 'prints', label: 'A line a command prints', help: 'Keep a command running and act on each line that matches.' },
   { value: 'page', label: 'A web address changing', help: 'Fetch it every so often and act when it is different.' },
   { value: 'file', label: 'A file changing', help: 'Look at it every so often and act when it is different.' },
+  { value: 'written', label: 'Something else, written out', help: 'A definition with any probe, rule or action the trigger family takes.' },
 ];
 
 const THEN: readonly FixedChoice[] = [
@@ -162,6 +163,12 @@ function slug(name: string): string {
 }
 
 async function definitionOf(values: ActionValues, ctx: TriggerCommandContext): Promise<Record<string, unknown>> {
+  if (values.kind === 'written') {
+    let written: unknown;
+    try { written = JSON.parse(values.definition ?? ''); } catch (error) { throw commandRefusal(`The definition is not JSON: ${display(error instanceof Error ? error.message : error)}. Nothing was made.`); }
+    if (!written || typeof written !== 'object' || Array.isArray(written)) throw commandRefusal('The definition is a JSON object: { spec, action? } (the id and label come from its name). Nothing was made.');
+    return { ...(written as Record<string, unknown>), id: slug(values.name!), label: values.name };
+  }
   const words = (values.command ?? '').split('\n').filter(Boolean);
   const command = words[0];
   const args = words.slice(1);
@@ -246,8 +253,9 @@ export const TRIGGERS_COMMAND: CommandDescription<TriggerCommandContext> = {
         {
           id: 'kind', label: 'Watch', help: 'What it watches', kind: 'choice', choices: WATCH_KINDS, step: 1,
           required: { default: 'finishes', defaultMeans: 'a command finishing' },
-          typed: { impliedBy: { input: 'match', ifGiven: 'prints', ifNot: 'finishes', orIfGiven: [{ input: 'url', value: 'page' }, { input: 'path', value: 'file' }] } },
+          typed: { impliedBy: { input: 'match', ifGiven: 'prints', ifNot: 'finishes', orIfGiven: [{ input: 'url', value: 'page' }, { input: 'path', value: 'file' }, { input: 'definition', value: 'written' }] } },
         },
+        { id: 'definition', label: 'Definition', help: 'JSON: { "spec": {...}, "action": {...} }, as the trigger family reads it', kind: 'long-text', freeTextReason: 'a probe, rule or action the choices above do not cover', required: true, typed: { flag: '--definition' }, step: 1, showWhen: { input: 'kind', is: 'written' } },
         { id: 'command', label: 'Command', help: 'The program and its own arguments, as you would type them', kind: 'list', freeTextReason: 'the program and its arguments', required: true, typed: { tail: true }, step: 1, showWhen: { input: 'kind', is: 'finishes' } },
         { id: 'match', label: 'Lines that match', help: 'A pattern, such as ERROR|FAILED', kind: 'text', freeTextReason: 'a pattern a line matches', required: true, typed: { flag: '--match' }, step: 1, showWhen: { input: 'kind', is: 'prints' } },
         { id: 'url', label: 'Address', help: 'The https:// page to fetch', kind: 'text', freeTextReason: 'the page\'s address', required: true, typed: { flag: '--url' }, step: 1, showWhen: { input: 'kind', is: 'page' } },

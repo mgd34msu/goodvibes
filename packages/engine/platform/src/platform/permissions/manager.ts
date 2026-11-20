@@ -41,6 +41,9 @@ import { undoFactOf } from './ask-consequence.js';
 import { canonicalJson } from '../utils/target-ref.js';
 import { callCommands, callRecipients, changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
 import { OWNER_ADDRESS_CONFIG_KEYS, splitRecipients } from '../security/owner-identity.js';
+import { isSecretReferenceValue } from '../config/secret-bearing-config-keys.js';
+import { resolveNotificationWebhookLocally } from '../integrations/notification-webhooks.js';
+import type { SecretsManager } from '../config/secrets.js';
 import { undeclaredSendRecipients } from '../gate/send-recipients.js';
 import { callShellTexts, neverRunMatchIn, parseNeverRunPattern, type CallShellTexts, type NeverRunMatch, type NeverRunPattern } from '../gate/never-run.js';
 import { toolDecisionOf } from './denial.js';
@@ -464,6 +467,13 @@ export interface PermissionConfigReader {
    */
   getSetting?(key: string): unknown;
   /**
+   * The value a credential setting's `goodvibes://secrets/` reference stands
+   * for, read from this machine's own secret store (no request), or null. The
+   * owner's webhook destinations are kept as references, so the recipient
+   * check reads what they name.
+   */
+  readStoredReference?(reference: string): string | null;
+  /**
    * The `telemetry.decisionOtlp*` keys, as the exporter's own config shape.
    *
    * A method of its own rather than three more domains on
@@ -511,6 +521,7 @@ function capturePermissionConfiguration(reader: PermissionConfigReader, read: ()
 
 export function createPermissionConfigReader(
   configManager: Pick<ConfigManager, 'get' | 'getRaw' | 'getWorkingDirectory'> & Partial<Pick<ConfigManager, 'getAutonomousPermissionSnapshot' | 'flushConfigFileChanges' | 'isExplicitlySet'>>,
+  secrets?: Pick<SecretsManager, 'resolveLocalSecretSync'> | null,
 ): PermissionConfigReader {
   const snapshotAccessor = configManager.getAutonomousPermissionSnapshot;
   const permissionSnapshot = snapshotAccessor?.bind(configManager);
@@ -529,6 +540,7 @@ export function createPermissionConfigReader(
     getSetting: (key) => {
       try { return configManager.get(key as ConfigKey); } catch { return undefined; }
     },
+    ...(secrets ? { readStoredReference: (reference: string) => resolveNotificationWebhookLocally(reference, secrets) } : {}),
     // Read per decision, not captured: switching export on is a live change.
     getDecisionOtlpConfig: () => readDecisionOtlpConfig(configManager),
   };
@@ -1943,7 +1955,10 @@ export class PermissionManager {
       let value: unknown;
       try { value = this.configReader.getSetting?.(key); } catch { continue; }
       for (const entry of Array.isArray(value) ? value : [value]) {
-        if (typeof entry === 'string') for (const part of recipientParts(entry)) known.add(part);
+        if (typeof entry !== 'string') continue;
+        // A webhook destination is stored as a reference to its URL: the URL is what a send names.
+        const named = isSecretReferenceValue(entry) ? this.configReader.readStoredReference?.(entry) ?? null : entry;
+        if (named !== null) for (const part of recipientParts(named)) known.add(part);
       }
     }
     return known;

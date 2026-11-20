@@ -45,10 +45,12 @@ function captureCredential(key: string, secrets: CredentialOwner): { value: stri
     localKey = reference.id;
   }
   const snapshot = secrets.resolveLocalCredentialSnapshot(localKey);
-  if (snapshot.state !== 'resolved' || !snapshot.value || snapshot.value.trim() !== snapshot.value
-    || /[\r\n\0]/.test(snapshot.value)) throw new InboxAdmissionRefusal('credential-unavailable', 'Hosted inbox screening credential is unavailable');
+  // Revealed for the screening provider it is sent to.
+  const text = snapshot.state === 'resolved' ? snapshot.value.reveal('dispatch') : '';
+  if (snapshot.state !== 'resolved' || !text || text.trim() !== text
+    || /[\r\n\0]/.test(text)) throw new InboxAdmissionRefusal('credential-unavailable', 'Hosted inbox screening credential is unavailable');
   // A stored credential that changes fires the host's invalidation, which aborts the acquisition.
-  return { value: snapshot.value, assertCurrent() {
+  return { value: text, assertCurrent() {
     if (process.env[key] !== environment) throw new Error('Hosted inbox screening credential changed');
   } };
 }

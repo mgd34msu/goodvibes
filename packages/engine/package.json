@@ -2098,6 +2098,11 @@
       "types": "./terminal-shell/dist/git-status.d.ts",
       "import": "./terminal-shell/dist/git-status.js"
     },
+    "./terminal-shell/turn-failure-actions": {
+      "bun": "./terminal-shell/src/turn-failure-actions.ts",
+      "types": "./terminal-shell/dist/turn-failure-actions.d.ts",
+      "import": "./terminal-shell/dist/turn-failure-actions.js"
+    },
     "./terminal-shell/session-permission-mode": {
       "bun": "./terminal-shell/src/session-permission-mode.ts",
       "types": "./terminal-shell/dist/session-permission-mode.d.ts",

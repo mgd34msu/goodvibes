@@ -102,7 +102,7 @@ export function resolveViewName(name: string, modalRedirect: (name: string) => s
 /** A one-line description of where a view name goes, for `/panel list`. */
 export function describeViewRoute(route: ViewRoute): string {
   switch (route.kind) {
-    case 'agents': return route.hosted ? 'Agents (the hosted session)' : 'Agents';
+    case 'agents': return route.hosted ? 'Your agents (the hosted session)' : 'Your agents';
     case 'usage': return 'Usage';
     case 'changes': return route.mode === 'review' ? 'Changes (review)' : 'Changes';
     case 'notifications': return 'Notifications';

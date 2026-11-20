@@ -53,6 +53,8 @@ export const CROSS_LISTED_SETTING_ROOTS: Readonly<Record<string, SettingsCategor
   push: 'notifications',
   cluster: 'fleet',
   checkpoints: 'storage',
+  // browser.network.pinned decides what the browser may reach, beside the fetch tool's host rules.
+  browser: 'fetch',
 };
 
 export const SETTINGS_CATEGORY_GROUPS: ReadonlyArray<{

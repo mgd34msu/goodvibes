@@ -1,52 +1,49 @@
-import { attemptGroupProgress } from './attempt-group-progress';
 /**
- * The Work view's one list, as data (design doc "Data views", Work row).
+ * The Work view's list, as the work board reads it (ux A3.1): waiting for you,
+ * running now, scheduled, finished, and the platform's own background services
+ * behind one line. The words and the grouping are the board's
+ * (contracts/src/work-board.ts readWorkBoard); this file only hands it what the
+ * page fetched and maps each row back to the detail it opens.
  *
- * Sessions (daemon-hosted ones among them, one row each), the fleet (agents, workstreams, watchers,
- * background processes, observed external agents), runtime tasks, CI watches
- * and approvals used to be seven pages. They answer one question, "what is
- * running for me, and what needs me", so they become one list in three
- * groups: Needs you (pending approvals, input asks, pick-a-winner, merge
- * conflicts), Running, and Finished. Each row carries a kind (Sessions,
- * Agents, Processes) the page filters on with its segmented control.
+ * What the board reads:
+ * - fleet nodes as they arrive (`serves`, `progress`, `schedule` set by the
+ *   daemon's adapters; never inferred here);
+ * - asks: approvals and open inbox items with their presentation (lib/asks.ts);
+ * - sessions: a daemon-hosted session while its turn runs, and once it ended;
+ * - runtime tasks; contracts the fleet does not carry; CI watches, which watch
+ *   for their event like a trigger; a ready best-of-N group, which waits for
+ *   your pick (its attempts fold into it), stated as the node's own words.
  *
- * Rows follow the kit Row: a status dot with a word, a title, one line of
- * meta, one right value. Cost is a right value only when the daemon priced it;
- * an unpriced node shows no cost at all (no "price unknown" chips).
+ * Counts: the sidebar badge, the account menu and the page all read the same
+ * board's `counts` (lib/needs-you.ts), so they cannot disagree.
  *
  * Pure: every function here is a projection of the fetched records.
  */
+import {
+  readWorkBoard,
+  type BoardRow,
+  type WorkBoard,
+  type WorkBoardNode,
+  type WorkBoardSession,
+  type WorkBoardTask,
+} from '@goodvibes-jev/engine/contracts';
 import type { StatusTone } from '../../components/ui/StatusDot';
 import type {
-  ContractSummaryRecord,
   ApprovalRecord,
+  ContractSummaryRecord,
   FleetAttemptGroup,
   FleetProcessNode,
   HostedSessionRecord,
   OperatorMethodOutput,
   RuntimeTaskSummary,
 } from '../../lib/goodvibes';
-import {
-  attemptGroupIds,
-  buildFleetRows,
-  formatDurationMs,
-  isAwaitingApprovalState,
-  isObservedKind,
-  isStalledState,
-  isTerminalState,
-  readHeadline,
-  readStallTell,
-} from '../../lib/fleet';
-import { readExecPromptAsk, isTerminalApprovalStatus } from '../../lib/approvals';
-import { hostedStatusLabel } from '../../lib/hosted-sessions';
-import { isClosedStatus, isReapedStatus, kindLabel as sessionKindLabel, projectLabel, type UnionSessionRecord } from '../../lib/sessions-union';
+import { attemptGroupRef, isAwaitingApprovalState, isObservedKind, isStalledState, isTerminalState } from '../../lib/fleet';
+import { boardAsk, wirePresentation, type OpenAsk } from '../../lib/asks';
+import { isClosedStatus, type UnionSessionRecord } from '../../lib/sessions-union';
 import { whenLabel } from '../../lib/when-label';
 import type { ProcessKind } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import { attemptGroupProgress } from './attempt-group-progress';
 
-/**
- * A relative time for a row or a detail, or '' when the record carries no
- * real time (missing, zero, or before 2000): never an epoch date.
- */
 /** Short time label ("5m ago", "Nov 14"); '' for a missing or epoch time. */
 export { whenLabel };
 
@@ -57,71 +54,6 @@ export function sentenceCase(word: string): string {
 }
 
 export type CiWatch = OperatorMethodOutput<'ci.watches.list'>['watches'][number];
-
-/** The segmented filter's kinds. `all` shows every kind. */
-export type WorkKind = 'sessions' | 'agents' | 'processes';
-
-export type WorkItemType = 'approval' | 'attempt-group' | 'fleet' | 'session' | 'task' | 'ci-watch' | 'contract';
-
-export type WorkGroup = 'needs' | 'running' | 'finished';
-
-export interface WorkItem {
-  /** Unique across types: `${type}:${id}`. */
-  readonly key: string;
-  readonly type: WorkItemType;
-  readonly id: string;
-  readonly kind: WorkKind;
-  readonly group: WorkGroup;
-  readonly title: string;
-  /** One line of plain meta. */
-  readonly meta: string;
-  readonly tone: StatusTone;
-  /** The word beside the dot (status is never color alone). */
-  readonly status: string;
-  /** Right-aligned value: a known cost, a duration, a count. */
-  readonly value?: string;
-  /** Tree depth for fleet rows (children indent under their parent). */
-  readonly depth: number;
-  /** The daemon's attention reason for a needs-you fleet row. */
-  readonly attentionReason?: string;
-  /** For sorting within a group; newer first where no tree order applies. */
-  readonly sortAt: number;
-  /** An externally launched agent GoodVibes only observes (not counted as its own work). */
-  readonly external?: boolean;
-  /**
-   * Doing something right now: a turn, a run or a check in progress. An open
-   * session between turns, a watcher or schedule waiting for its next run and an
-   * idle code index are listed but not running.
-   */
-  readonly active: boolean;
-}
-
-export interface WorkSources {
-  /** One summary per contract (`contracts.summaries`); the tree is read only by the contract's detail. */
-  readonly contracts?: readonly ContractSummaryRecord[];
-  readonly approvals: readonly ApprovalRecord[];
-  readonly nodes: readonly FleetProcessNode[];
-  readonly attemptGroups: readonly FleetAttemptGroup[];
-  readonly sessions: readonly UnionSessionRecord[];
-  /**
-   * A chat's current title by id, from the chat list. The chat owns its title; the
-   * shared session record keeps the one it was created with, so a renamed chat
-   * reads by this.
-   */
-  readonly chatTitles?: ReadonlyMap<string, string> | undefined;
-  readonly hosted: readonly HostedSessionRecord[];
-  readonly tasks: readonly RuntimeTaskSummary[];
-  readonly ciWatches: readonly CiWatch[];
-  /** Nodes come from the fleet archive (fleet.archived.list), not the live fleet. */
-  readonly archived?: boolean;
-}
-
-/** Fleet kinds that are an agent (a model loop) rather than a process around one. */
-const AGENT_KINDS = new Set<string>(['agent', 'acp-agent', 'observed-external'] satisfies ProcessKind[]);
-
-export function fleetKindOf(node: Pick<FleetProcessNode, 'kind'>): WorkKind {
-  return AGENT_KINDS.has(node.kind) ? 'agents' : 'processes';
-}
 
 /** One phrase per engine process kind: adding a kind to the engine fails the typecheck here. */
 const FLEET_KIND_PHRASES: Record<ProcessKind, string> = {
@@ -175,7 +107,7 @@ export function fleetTone(node: Pick<FleetProcessNode, 'state' | 'needsAttention
   return 'live';
 }
 
-/** Human words for a fleet attention reason (the dot's word on a needs-you row). */
+/** Human words for a fleet attention reason. */
 export function attentionPhrase(reason: string): string {
   if (reason === 'approval') return 'Needs approval';
   if (reason === 'input') return 'Needs input';
@@ -186,7 +118,7 @@ export function attentionPhrase(reason: string): string {
 
 /**
  * A cost string only when the daemon priced it (priced or estimated with a
- * figure). Unpriced and unknown return undefined: the row shows nothing rather
+ * figure). Unpriced and unknown return undefined: nothing is shown rather
  * than a "price unknown" marker.
  */
 export function knownCost(node: Pick<FleetProcessNode, 'costUsd' | 'costState' | 'kind'>): string | undefined {
@@ -196,209 +128,14 @@ export function knownCost(node: Pick<FleetProcessNode, 'costUsd' | 'costState' |
   return node.costState === 'estimated' ? `~${amount}` : amount;
 }
 
+/** An approval's one line, in the presentation's words ("Run bun test?"). */
 export function approvalTitle(record: ApprovalRecord): string {
-  const exec = readExecPromptAsk(record);
-  if (exec) return `Answer: ${exec.prompt || exec.command || 'a running command'}`;
-  const summary = record.request.analysis.summary.trim();
-  return summary ? `Approve ${record.request.tool}: ${summary}` : `Approve ${record.request.tool}`;
-}
-
-export function approvalRequester(record: ApprovalRecord): string {
-  const attribution = record.request.attribution;
-  if (!attribution) return 'Agent';
-  switch (attribution.kind) {
-    case 'background-agent': return `Agent ${attribution.agentId}`;
-    case 'mcp-server': return `MCP server ${attribution.serverName}`;
-    case 'sandbox-escalation': return `Sandbox ${attribution.sandbox}`;
-    case 'exec-prompt': return 'A running command';
-    default: return 'Agent';
-  }
-}
-
-function approvalItem(record: ApprovalRecord): WorkItem {
-  const terminal = isTerminalApprovalStatus(record.status);
-  const risk = record.request.analysis.riskLevel;
-  const exec = readExecPromptAsk(record);
-  let status = 'Needs approval';
-  let tone: StatusTone = 'warn';
-  if (exec) status = 'Needs input';
-  if (record.status === 'claimed') { status = 'Claimed'; tone = 'info'; }
-  if (terminal) {
-    status = record.status === 'approved' ? 'Approved' : record.status === 'denied' ? 'Denied' : record.status === 'expired' ? 'Expired' : 'Cancelled';
-    tone = record.status === 'approved' ? 'ok' : record.status === 'denied' ? 'bad' : 'idle';
-  }
-  const metaParts = [approvalRequester(record)];
-  if (risk && !exec) metaParts.push(`${risk} risk`);
-  metaParts.push(whenLabel(record.resolvedAt ?? record.createdAt));
-  return {
-    key: `approval:${record.id}`,
-    type: 'approval',
-    id: record.id,
-    kind: 'agents',
-    group: terminal ? 'finished' : 'needs',
-    title: approvalTitle(record),
-    meta: metaParts.filter(Boolean).join(' · '),
-    tone,
-    status,
-    active: false,
-    depth: 0,
-    sortAt: record.resolvedAt ?? record.createdAt,
-  };
-}
-
-function attemptGroupItem(group: FleetAttemptGroup): WorkItem {
-  const progress = attemptGroupProgress(group);
-  const { count } = progress;
-  const meta = `Workstream · ${progress.meta}`;
-  return {
-    key: `attempt-group:${group.groupId}`,
-    type: 'attempt-group',
-    id: group.groupId,
-    kind: 'processes',
-    group: progress.ready ? 'needs' : 'running',
-    title: progress.ready
-      ? `Pick a winner: ${count} attempt${count === 1 ? '' : 's'}${group.sourceTitle ? ` for ${group.sourceTitle}` : ''}`
-      : `Best of ${count}: ${group.sourceTitle || group.groupId}`,
-    meta,
-    tone: progress.tone,
-    status: progress.status,
-    active: !progress.ready,
-    depth: 0,
-    sortAt: 0,
-  };
-}
-
-function fleetMeta(node: FleetProcessNode): string {
-  const parts = [fleetKindPhrase(node.kind)];
-  const headline = readHeadline(node);
-  if (node.needsAttention?.detail) parts.push(node.needsAttention.detail);
-  else if (headline) parts.push(headline.text);
-  else parts.push(fleetStatePhrase(node.state));
-  const stall = readStallTell(node);
-  if (stall) parts.push(`quiet ${formatDurationMs(stall.quietForMs)}`);
-  return parts.join(' · ');
-}
-
-/** Fleet states of a process that exists but is not doing anything now. */
-const IDLE_FLEET_STATES: ReadonlySet<string> = new Set(['idle', 'paused', 'queued']);
-
-function fleetItem(node: FleetProcessNode, depth: number, pendingApprovalSessions: ReadonlySet<string>): WorkItem {
-  const reason = node.needsAttention?.reason;
-  // An approval-blocked node is already in Needs you as its approval; the node
-  // itself stays under Running (its state says it is waiting) so the same ask
-  // never shows twice.
-  const approvalDuplicate = reason === 'approval'
-    && Boolean(node.sessionRef?.sessionId && pendingApprovalSessions.has(node.sessionRef.sessionId));
-  const needs = Boolean(reason) && !approvalDuplicate;
-  const terminal = isTerminalState(node.state);
-  const status = needs && reason ? attentionPhrase(reason) : fleetStatePhrase(node.state);
-  return {
-    key: `fleet:${node.id}`,
-    type: 'fleet',
-    id: node.id,
-    kind: fleetKindOf(node),
-    group: needs ? 'needs' : terminal ? 'finished' : 'running',
-    title: node.label || node.id,
-    meta: fleetMeta(node),
-    tone: fleetTone(node),
-    status: status.charAt(0).toUpperCase() + status.slice(1),
-    active: !terminal && !IDLE_FLEET_STATES.has(node.state),
-    value: knownCost(node) ?? (terminal || typeof node.elapsedMs !== 'number' ? undefined : formatDurationMs(node.elapsedMs)),
-    depth,
-    ...(reason ? { attentionReason: reason } : {}),
-    ...(isObservedKind(node.kind) ? { external: true } : {}),
-    sortAt: node.startedAt ?? 0,
-  };
-}
-
-function messageCountValue(count: number): string | undefined {
-  return count > 0 ? `${count} msg${count === 1 ? '' : 's'}` : undefined;
-}
-
-/**
- * One row per session id. A daemon-hosted session is on the union list too
- * (kind `hosted`); its hosted record, matched by id, supplies what only the
- * engine knows: whether a turn is running, its workspace, its turns, and
- * whether it has ended. A hosted record the union list does not carry yet
- * (registration still pending) is a row of its own under the same key.
- */
-function sessionItem(record: UnionSessionRecord | undefined, hosted: HostedSessionRecord | undefined, chatTitle?: string): WorkItem {
-  const id = record?.id ?? hosted?.id ?? '';
-  const ended = hosted ? hosted.status === 'terminated' : isClosedStatus(record?.status ?? '');
-  const reaped = !hosted && record !== undefined && isReapedStatus(record);
-  const parts = hosted
-    ? ['Hosted', hosted.workspaceRoot, `${hosted.turnCount} turn${hosted.turnCount === 1 ? '' : 's'}`]
-    : [sessionKindLabel(record?.kind ?? ''), projectLabel(record?.project ?? '')];
-  if (record && record.pendingInputCount > 0) parts.push(`${record.pendingInputCount} waiting`);
-  const updatedAt = Math.max(record?.updatedAt ?? 0, hosted?.updatedAt ?? 0);
-  parts.push(whenLabel(updatedAt));
-  const status = hosted
-    ? sentenceCase(hostedStatusLabel(hosted.status))
-    : reaped ? 'Reaped' : ended ? 'Closed' : sentenceCase(record?.status ?? '') || 'Active';
-  const tone: StatusTone = record?.lastError ? 'bad' : ended ? 'idle' : hosted?.status === 'running' ? 'live' : 'ok';
-  return {
-    key: `session:${id}`,
-    type: 'session',
-    id,
-    kind: 'sessions',
-    group: ended ? 'finished' : 'running',
-    title: chatTitle || record?.title || hosted?.title || id,
-    meta: parts.filter(Boolean).join(' · '),
-    tone,
-    status,
-    active: hosted?.status === 'running',
-    value: messageCountValue(Math.max(record?.messageCount ?? 0, hosted?.messageCount ?? 0)),
-    depth: 0,
-    sortAt: updatedAt,
-  };
-}
-
-const FINISHED_TASK = new Set(['completed', 'failed', 'cancelled']);
-
-function taskItem(task: RuntimeTaskSummary): WorkItem {
-  const finished = FINISHED_TASK.has(task.status);
-  const tone: StatusTone = task.status === 'failed' ? 'bad'
-    : task.status === 'blocked' ? 'warn'
-      : task.status === 'running' ? 'live'
-        : finished ? 'idle' : 'info';
-  return {
-    key: `task:${task.id}`,
-    type: 'task',
-    id: task.id,
-    kind: 'processes',
-    group: finished ? 'finished' : 'running',
-    title: task.title || task.id,
-    meta: ['Task', task.kind, task.owner ? `owner ${task.owner}` : '', task.error ?? ''].filter(Boolean).join(' · '),
-    tone,
-    status: task.status ? task.status.charAt(0).toUpperCase() + task.status.slice(1) : 'Unknown',
-    active: task.status === 'running',
-    depth: 0,
-    sortAt: task.startedAt ?? task.queuedAt,
-  };
+  return wirePresentation(record)?.title ?? (record.request.analysis.summary.trim() || record.request.tool);
 }
 
 export function ciWatchLabel(watch: Pick<CiWatch, 'repo' | 'ref' | 'prNumber'>): string {
   if (watch.prNumber) return `${watch.repo} #${watch.prNumber}`;
   return watch.ref ? `${watch.repo}@${watch.ref}` : watch.repo;
-}
-
-function ciItem(watch: CiWatch): WorkItem {
-  const overall = watch.lastOverall ?? '';
-  const tone: StatusTone = overall === 'passed' ? 'ok' : overall === 'failed' ? 'bad' : overall === 'pending' ? 'live' : 'idle';
-  return {
-    key: `ci-watch:${watch.id}`,
-    type: 'ci-watch',
-    id: watch.id,
-    kind: 'processes',
-    group: 'running',
-    title: ciWatchLabel(watch),
-    meta: ['CI watch', `delivers to ${watch.deliveryChannel}`, watch.triggerFixSession ? 'starts a fix session on failure' : ''].filter(Boolean).join(' · '),
-    tone,
-    status: overall ? overall.charAt(0).toUpperCase() + overall.slice(1) : 'Watching',
-    active: false,
-    depth: 0,
-    sortAt: watch.createdAt,
-  };
 }
 
 /**
@@ -411,117 +148,188 @@ export function visibleFleetNodes(
 ): FleetProcessNode[] {
   if (groups.length === 0) return [...nodes];
   const groupIds = new Set(groups.map((g) => g.groupId));
-  if (attemptGroupIds(nodes).size === 0) return [...nodes];
   return nodes.filter((n) => {
-    const ref = (n as { attemptGroup?: { groupId?: unknown } }).attemptGroup;
-    const gid = ref && typeof ref.groupId === 'string' ? ref.groupId : '';
+    const gid = attemptGroupRef(n)?.groupId ?? '';
     return !(gid && groupIds.has(gid));
   });
 }
 
-/** Fixed wire lifecycle projection only; this does not judge contract progress. */
-function contractItem(contract: ContractSummaryRecord): WorkItem {
-  const terminal = contract.status === 'passed' || contract.status === 'failed' || contract.status === 'cancelled';
+/** The fields the board reads that the generated contract type may not list yet. */
+type BoardFields = Partial<Pick<WorkBoardNode, 'serves' | 'progress' | 'schedule' | 'currentActivity' | 'completedAt' | 'parentId' | 'task'>>;
+
+/** A fleet node as the board reads it. A node with no `serves` (an older daemon) counts as yours. */
+function boardNode(node: FleetProcessNode): WorkBoardNode {
+  const extra = node as FleetProcessNode & BoardFields;
   return {
-    key: `contract:${contract.id}`,
-    type: 'contract',
-    id: contract.id,
-    kind: 'processes',
-    group: terminal ? 'finished' : 'running',
-    title: contract.goal || contract.ask || contract.id,
-    meta: `Contract · ${contract.groupCount} groups · ${contract.unitCount} units`,
-    status: sentenceCase(contract.status),
-    active: !terminal,
-    tone: contract.status === 'passed' ? 'ok' : contract.status === 'failed' ? 'bad' : terminal ? 'idle' : 'live',
-    depth: 0,
-    sortAt: contract.createdAt,
+    id: node.id,
+    kind: node.kind,
+    serves: extra.serves === 'system' ? 'system' : 'you',
+    ...(extra.parentId ? { parentId: extra.parentId } : {}),
+    label: node.label || node.id,
+    ...(extra.task ? { task: extra.task } : {}),
+    state: node.state,
+    ...(typeof node.startedAt === 'number' ? { startedAt: node.startedAt } : {}),
+    ...(typeof extra.completedAt === 'number' ? { completedAt: extra.completedAt } : {}),
+    ...(extra.progress ? { progress: extra.progress } : {}),
+    ...(extra.schedule ? { schedule: extra.schedule } : {}),
+    ...(extra.currentActivity ? { currentActivity: extra.currentActivity } : {}),
+    capabilities: node.capabilities,
+    ...(node.sessionRef ? { sessionRef: node.sessionRef } : {}),
+    ...(node.needsAttention ? { needsAttention: node.needsAttention } : {}),
   };
 }
 
-/** Every row, in display order within each group. */
-export function buildWorkItems(sources: WorkSources): WorkItem[] {
-  const pendingApprovalSessions = new Set(
-    sources.approvals
-      .flatMap((a) => (!isTerminalApprovalStatus(a.status) && a.sessionId ? [a.sessionId] : [])),
-  );
-  const nodes = sources.archived ? [...sources.nodes] : visibleFleetNodes(sources.nodes, sources.attemptGroups);
-  const contractRows = new Map((sources.contracts ?? []).map((contract) => [`contract:${contract.id}`, contractItem(contract)]));
-  const representedContracts = new Set<string>();
-  const fleetRows = buildFleetRows(nodes).map(({ node, depth }) => {
-    // The engine's contract adapter names roots contract:<id>. Replace just
-    // that summary row, retaining the existing fleet children and controls.
-    const contract = node.kind === 'contract' ? contractRows.get(node.id) : undefined;
-    if (contract && !sources.archived) {
-      representedContracts.add(node.id);
-      const fleet = fleetItem(node, depth, pendingApprovalSessions);
-      return { ...contract, depth, ...(contract.group !== 'finished' && fleet.group === 'needs'
-        ? { group: fleet.group, tone: fleet.tone, attentionReason: fleet.attentionReason } : {}) };
-    }
-    return fleetItem(node, depth, pendingApprovalSessions);
-  });
-  if (sources.archived) return fleetRows.map((item) => ({ ...item, group: 'finished' as const }));
+const NO_CONTROLS = { interruptible: false, killable: false, pausable: false, resumable: false } as const;
 
-  const approvals = [...sources.approvals].map(approvalItem).sort((a, b) => b.sortAt - a.sortAt);
-  const attempts = sources.attemptGroups.map(attemptGroupItem);
-  const hostedById = new Map(sources.hosted.map((session) => [session.id, session]));
-  const unionIds = new Set(sources.sessions.map((record) => record.id));
-  const sessions = [
-    ...sources.sessions.map((record) => sessionItem(record, hostedById.get(record.id), sources.chatTitles?.get(record.id))),
-    ...sources.hosted.filter((session) => !unionIds.has(session.id)).map((session) => sessionItem(undefined, session)),
-  ].sort((a, b) => b.sortAt - a.sortAt);
-  const tasks = sources.tasks.map(taskItem).sort((a, b) => b.sortAt - a.sortAt);
-  const ci = sources.ciWatches.map(ciItem).sort((a, b) => b.sortAt - a.sortAt);
-
-  // Fleet rows keep their tree order (parents before children); the other
-  // sources follow, newest first.
-  const contracts = [...contractRows.entries()].filter(([id]) => !representedContracts.has(id)).map(([, item]) => item).sort((a, b) => b.sortAt - a.sortAt);
-  return [...contracts, ...approvals, ...attempts, ...fleetRows, ...sessions, ...tasks, ...ci];
+/** A ready best-of-N group waits for your pick; its attempts fold into it. */
+function attemptGroupNode(group: FleetAttemptGroup): WorkBoardNode | undefined {
+  const progress = attemptGroupProgress(group);
+  if (!progress.ready) return undefined;
+  const count = progress.count;
+  return {
+    id: `attempt-group:${group.groupId}`,
+    kind: 'workflow',
+    serves: 'you',
+    label: group.sourceTitle || 'Best of several attempts',
+    state: 'idle',
+    capabilities: NO_CONTROLS,
+    needsAttention: {
+      reason: 'pick',
+      detail: `Pick a winner: ${count} attempt${count === 1 ? '' : 's'}${group.sourceTitle ? ` for ${group.sourceTitle}` : ''}`,
+    },
+  };
 }
 
-export interface WorkGroups {
-  readonly needs: WorkItem[];
-  readonly running: WorkItem[];
-  readonly finished: WorkItem[];
+/** A CI watch watches for its event, as a trigger does. */
+function ciWatchNode(watch: CiWatch): WorkBoardNode {
+  return {
+    id: `ci-watch:${watch.id}`,
+    kind: 'watcher',
+    serves: 'you',
+    label: `Watch CI on ${ciWatchLabel(watch)}`,
+    state: 'idle',
+    startedAt: watch.createdAt,
+    capabilities: NO_CONTROLS,
+  };
 }
 
-/** Split and filter the rows for display. `kind` 'all' keeps every kind. */
-export function groupWorkItems(
-  items: readonly WorkItem[],
-  kind: WorkKind | 'all',
-  query = '',
-): WorkGroups {
-  const needle = query.trim().toLowerCase();
-  const keep = (item: WorkItem) =>
-    (kind === 'all' || item.kind === kind)
-    && (!needle || item.title.toLowerCase().includes(needle) || item.meta.toLowerCase().includes(needle));
-  const needs = items.filter((i) => i.group === 'needs' && keep(i));
-  const running = items.filter((i) => i.group === 'running' && keep(i));
-  const finished = items.filter((i) => i.group === 'finished' && keep(i));
-  return { needs, running, finished };
+const TASK_STATES: ReadonlySet<string> = new Set(['queued', 'running', 'blocked', 'completed', 'failed', 'cancelled']);
+
+function boardTask(task: RuntimeTaskSummary): WorkBoardTask {
+  const status = TASK_STATES.has(task.status) ? task.status as WorkBoardTask['status'] : 'running';
+  return {
+    id: `task:${task.id}`,
+    title: task.title || task.id,
+    status,
+    ...(typeof task.startedAt === 'number' ? { startedAt: task.startedAt } : {}),
+    ...(typeof (task as { endedAt?: unknown }).endedAt === 'number' ? { endedAt: (task as { endedAt: number }).endedAt } : {}),
+  };
+}
+
+/** A contract the fleet does not carry (its summary only): running until it passes, fails or is cancelled. */
+function contractTask(contract: ContractSummaryRecord): WorkBoardTask {
+  const status: WorkBoardTask['status'] = contract.status === 'passed' ? 'completed'
+    : contract.status === 'failed' ? 'failed' : contract.status === 'cancelled' ? 'cancelled' : 'running';
+  const updatedAt = (contract as { updatedAt?: unknown }).updatedAt;
+  return {
+    id: `contract:${contract.id}`,
+    title: contract.goal || contract.ask || contract.id,
+    status,
+    startedAt: contract.createdAt,
+    ...(status !== 'running' ? { endedAt: typeof updatedAt === 'number' ? updatedAt : contract.createdAt } : {}),
+  };
 }
 
 /**
- * The page's one-line description: "6 running · 3 need you". Observed external
- * agents are GoodVibes' to watch, not its own work, so they are counted on
- * their own ("· 2 external"), never folded into "running". In the archive the
- * line counts what is archived instead.
+ * A session the board lists: a daemon-hosted one while its turn runs, and any
+ * session once it ended. An open session between turns is not work in
+ * progress; WorkView lists those apart (`openSessions`).
  */
-/** How many listed items are doing something right now (observed external agents apart). */
-export function runningNowCount(items: readonly WorkItem[]): number {
-  return items.filter((i) => i.group !== 'finished' && i.active && !i.external).length;
+function boardSession(record: UnionSessionRecord | undefined, hosted: HostedSessionRecord | undefined, chatTitle: string | undefined): WorkBoardSession {
+  const id = record?.id ?? hosted?.id ?? '';
+  const ended = hosted ? hosted.status === 'terminated' : isClosedStatus(record?.status ?? '');
+  const updatedAt = Math.max(record?.updatedAt ?? 0, hosted?.updatedAt ?? 0);
+  const state: WorkBoardSession['state'] = ended ? (record?.lastError ? 'failed' : 'ended') : hosted?.status === 'running' ? 'running' : 'idle';
+  return {
+    id,
+    title: chatTitle || record?.title || hosted?.title || id,
+    state,
+    ...(state === 'running' ? { startedAt: updatedAt } : {}),
+    ...(ended ? { endedAt: updatedAt } : {}),
+  };
 }
 
-export function workSummary(items: readonly WorkItem[], archived = false): string {
-  // The archive lists only finished work, so "running" and "needs you" would read as zeros.
-  if (archived) return items.length === 0 ? 'nothing archived' : `${items.length} archived`;
-  // Running means doing something now: an idle watcher, a schedule between runs or
-  // an open chat between turns is listed under Running but not counted as running.
-  const running = runningNowCount(items);
-  const external = items.filter((i) => i.group !== 'finished' && i.external).length;
-  const needs = items.filter((i) => i.group === 'needs').length;
-  const parts = [`${running} running`];
-  if (needs > 0) parts.push(`${needs} need${needs === 1 ? 's' : ''} you`);
-  else parts.push('nothing needs you');
-  if (external > 0) parts.push(`${external} external`);
-  return parts.join(' · ');
+export interface WorkSources {
+  readonly asks: readonly OpenAsk[];
+  readonly nodes: readonly FleetProcessNode[];
+  readonly attemptGroups: readonly FleetAttemptGroup[];
+  readonly sessions?: readonly UnionSessionRecord[];
+  /** A chat's current title by id (the chat owns its title; the session record keeps the first one). */
+  readonly chatTitles?: ReadonlyMap<string, string> | undefined;
+  readonly hosted?: readonly HostedSessionRecord[];
+  readonly tasks?: readonly RuntimeTaskSummary[];
+  readonly ciWatches?: readonly CiWatch[];
+  /** One summary per contract; a contract the fleet carries is its node's row. */
+  readonly contracts?: readonly ContractSummaryRecord[];
+}
+
+export interface WorkReading {
+  readonly board: WorkBoard;
+  /** Sessions open between turns: listed apart, behind one line, so none is unreachable. */
+  readonly openSessions: readonly WorkBoardSession[];
+}
+
+/** The board for what the page (or the shell, for its counts) fetched. */
+export function readWork(sources: WorkSources, now: number): WorkReading {
+  const ready = sources.attemptGroups.map(attemptGroupNode).filter((node): node is WorkBoardNode => node !== undefined);
+  const readyIds = new Set(sources.attemptGroups.filter((group) => attemptGroupProgress(group).ready).map((group) => group.groupId));
+  // Attempts of a group still running stay rows of their own; a ready group is one row.
+  const fleet = sources.nodes.filter((node) => {
+    const gid = attemptGroupRef(node)?.groupId;
+    return !(gid && readyIds.has(gid));
+  });
+  const nodeIds = new Set(fleet.map((node) => node.id));
+  const nodes = [...fleet.map(boardNode), ...ready, ...(sources.ciWatches ?? []).map(ciWatchNode)];
+
+  const hostedById = new Map((sources.hosted ?? []).map((session) => [session.id, session]));
+  const unionIds = new Set((sources.sessions ?? []).map((record) => record.id));
+  const sessions = [
+    ...(sources.sessions ?? []).map((record) => boardSession(record, hostedById.get(record.id), sources.chatTitles?.get(record.id))),
+    ...(sources.hosted ?? []).filter((session) => !unionIds.has(session.id)).map((session) => boardSession(undefined, session, undefined)),
+  ];
+  const tasks = [
+    ...(sources.tasks ?? []).map(boardTask),
+    ...(sources.contracts ?? []).filter((contract) => !nodeIds.has(`contract:${contract.id}`)).map(contractTask),
+  ];
+  const board = readWorkBoard({ nodes, asks: sources.asks.map(boardAsk), sessions, tasks }, now);
+  return { board, openSessions: sessions.filter((session) => session.state === 'idle') };
+}
+
+/** The archive: every archived node as a finished row, in the board's words (no "newest ten" limit). */
+export function archivedRows(nodes: readonly FleetProcessNode[], now: number): BoardRow[] {
+  return nodes.flatMap((node) => {
+    const finished = { ...boardNode(node), serves: 'you' as const, state: isTerminalState(node.state) ? node.state : 'done' };
+    return readWorkBoard({ nodes: [finished] }, now).groups.finished;
+  });
+}
+
+/**
+ * The Work key of a row's detail: `approval:<id>` and `inbox:<id>` for an ask,
+ * `session:<id>`, `task:<id>` / `contract:<id>` for a task row, and for a node
+ * `attempt-group:<id>`, `ci-watch:<id>`, `contract:<id>` (a contract root opens
+ * the contract) or `fleet:<id>`.
+ */
+export function workKeyOf(row: BoardRow): string {
+  const { type, id } = row.ref;
+  if (type === 'ask' || type === 'task') return id;
+  if (type === 'session') return `session:${id}`;
+  if (id.startsWith('attempt-group:') || id.startsWith('ci-watch:')) return id;
+  return `fleet:${id}`;
+}
+
+/** Rows matching a search, on their title and their words. */
+export function matchesQuery(row: BoardRow, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return row.title.toLowerCase().includes(needle) || row.meta.full.toLowerCase().includes(needle) || (row.who ?? '').toLowerCase().includes(needle);
 }

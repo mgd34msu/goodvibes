@@ -10,6 +10,7 @@ import type { AutonomousToolPromptHost } from './autonomous-tool-prompts.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import type { ConfigManager } from '../../config/manager.js';
+import type { SecretsManager } from '../../config/secrets.js';
 import type { PermissionPromptDecision, PermissionPromptRequest } from '../../permissions/prompt.js';
 import { callingAgentId } from '../../agents/calling-agent.js';
 import type { GatePresetName } from '../../gate/presets.js';
@@ -100,6 +101,8 @@ export interface BrokeredPermissionManagerOptions {
   readonly hookDispatcher: HookDispatcher;
   readonly featureFlags: FeatureFlagManager;
   readonly userRuleStore: UserPermissionRuleAccess | null;
+  /** Reads what the owner's stored webhook destinations name, for the recipient check. */
+  readonly secretsManager?: Pick<SecretsManager, 'resolveLocalSecretSync'> | null | undefined;
   /** The session the call being checked belongs to, read when it asks: the approval is raised under that session. */
   readonly sessionOfAsk?: (() => string | undefined) | undefined;
 }
@@ -139,7 +142,7 @@ export function createBrokeredPermissionManager(options: BrokeredPermissionManag
           : {}),
       });
     },
-    createPermissionConfigReader(options.configManager),
+    createPermissionConfigReader(options.configManager, options.secretsManager ?? null),
     options.policyRuntimeState,
     options.hookDispatcher,
     options.featureFlags,

@@ -18,6 +18,7 @@ import type { MemoryConfig } from './schema-domain-memory.js';
 import type { OccasionsConfig } from './schema-types-occasions.js';
 import type { OwnerProfileConfig } from './schema-types-owner-profile.js';
 import type { PowerConfig } from './schema-domain-power.js';
+import type { BrowserConfig } from './schema-domain-browser.js';
 import type { PushConfig } from './schema-domain-push.js';
 import type { CheckinConfig, WorktreeConfig } from './schema-domain-runtime.js';
 import type { UpdateConfig } from './schema-domain-update.js';
@@ -237,6 +238,7 @@ export interface GoodVibesConfig {
   occasions: OccasionsConfig;
   profile: OwnerProfileConfig;
   power: PowerConfig;
+  browser: BrowserConfig;
   push: PushConfig;
   worktree: WorktreeConfig;
   checkin: CheckinConfig;

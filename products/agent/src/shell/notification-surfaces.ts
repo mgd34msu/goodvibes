@@ -30,9 +30,9 @@ export function wireNotificationSurfaces(options: NotificationSurfaceOptions): v
     const open = input.surfaceModals.modals().find((modal) => modal instanceof NotificationsModal);
     input.surfaceModals.push(open ?? new NotificationsModal({
       feed: getSharedNotificationFeed(),
-      // Agent and chain notices are about what the Activity modal shows.
-      resolveSubject: (subject) => (subject === 'agents' && commandContext.openActivityModal
-        ? () => { commandContext.openActivityModal?.(); }
+      // Agent and chain notices are about what Your agents shows.
+      resolveSubject: (subject) => (subject === 'agents' && commandContext.openAgents
+        ? () => { commandContext.openAgents?.(); }
         : null),
     }));
     render();

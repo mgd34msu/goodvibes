@@ -1244,6 +1244,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
         return again ? 'continue' : 'end';
       },
       retryDelaysMs: TURN_RETRY_DELAYS_MS,
+      failoverAvailable: () => agentFailover.available(),
       failOver: (error) => agentFailover(error),
       onRetry: (attempt, delayMs, error, failure) => {
         const label = failure.category === 'network' ? 'Network error' : failure.category === 'rate_limit' ? 'Rate limited' : 'Provider error';

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// acp-runtime.ts, `/agents`. Bare `/agents` opens the Agents modal
+// acp-runtime.ts, `/agents`. Bare `/agents` opens the Your agents panel
 // (`--target <id>[:<kind>]` selects a process in it). The scripted path for
 // hosting third-party coding agents drives the SAME verbs the Agents modal's
 // n key does (acp.agents.list / acp.sessions.create). `/agents list` shows what the daemon discovered
@@ -22,16 +22,16 @@ export function registerAcpRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'agents',
     aliases: ['acp'],
-    description: 'Open Agents (everything running: agents, chains, workflows, hosted sessions); list or host third-party coding agents over ACP',
+    description: 'Open Your agents: what is running, what waits for you, what is scheduled; list or host third-party coding agents',
     usage: '[--target <id>[:<kind>]] | list | host <agentId> [directory]',
     argsHint: '[list|host|--target <id>]',
     async handler(args, ctx) {
       const rest = [...args];
       const target = takeTargetFlag(rest);
       if (rest.length === 0) {
-        // Bare /agents (or /agents --target <id>) opens the Agents modal.
+        // Bare /agents (or /agents --target <id>) opens the Your agents panel.
         if (ctx.openAgents) ctx.openAgents({ target });
-        else ctx.print('The Agents view is not available in this session; /agents list prints the hostable agents.');
+        else ctx.print('Your agents is not available in this session; /agents list prints the hostable agents.');
         return;
       }
       const sub = (rest[0] ?? 'list').toLowerCase();

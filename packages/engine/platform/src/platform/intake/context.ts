@@ -1,6 +1,8 @@
+import type { Secret } from '../security/secret.js';
+
 /** Local owner incarnation only; raw values stay inside provider ownership. */
 export type IntakeCredentialSnapshot =
-  | { readonly state: 'resolved'; readonly value: string; readonly revision: string }
+  | { readonly state: 'resolved'; readonly value: Secret; readonly revision: string }
   | { readonly state: 'absent'; readonly revision: string }
   | { readonly state: 'unsupported' };
 /** Read-only credential capability required by inbound provider adapters. */

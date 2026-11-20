@@ -32,7 +32,7 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
     return {
       confirmation: 'Status is read-only.',
       preferredModelTool: `${agentHarnessModes('run_command')} commandName:"triggers"`,
-      boundary: '/triggers status inspects the actual surface supervisor without promoting ownership.',
+      boundary: '/triggers list reads the actual surface supervisor and its triggers without promoting ownership.',
     };
   }
   if (root === 'work-import') {

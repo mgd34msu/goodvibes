@@ -11,6 +11,7 @@ import { hostedSessionsConfigDefaults, hostedSessionsConfigSettings } from './sc
 import { atRestConfigDefaults, atRestConfigSettings } from './schema-domain-at-rest.js';
 import { learningConfigDefaults, learningConfigSettings } from './schema-domain-learning.js';
 import { powerConfigDefaults, powerConfigSettings } from './schema-domain-power.js';
+import { browserConfigDefaults, browserConfigSettings } from './schema-domain-browser.js';
 import { memoryConfigDefaults, memoryConfigSettings } from './schema-domain-memory.js';
 import { ownerProfileConfigDefaults, ownerProfileConfigSettings } from './schema-domain-owner-profile.js';
 import { occasionsConfigDefaults, occasionsConfigSettings } from './schema-domain-occasions.js';
@@ -67,6 +68,7 @@ export const DEFAULT_CONFIG = {
   worktree: runtimeConfigDefaults.worktree,
   learning: learningConfigDefaults.learning,
   power: powerConfigDefaults.power,
+  browser: browserConfigDefaults.browser,
   memory: memoryConfigDefaults.memory,
   profile: ownerProfileConfigDefaults.profile,
   occasions: occasionsConfigDefaults.occasions,
@@ -106,6 +108,7 @@ export const CONFIG_SCHEMA: ConfigSetting[] = defineSettingsDomain(DEFAULT_CONFI
   ...daemonLocationConfigSettings,
   ...learningConfigSettings,
   ...powerConfigSettings,
+  ...browserConfigSettings,
   ...memoryConfigSettings,
   ...ownerProfileConfigSettings,
   ...occasionsConfigSettings,

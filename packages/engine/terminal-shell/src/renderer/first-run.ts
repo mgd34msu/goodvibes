@@ -20,7 +20,7 @@
  * Pure drawing: the flow (first-run/first-run-flow.ts) holds the state.
  */
 import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
-import { beginModal, finishModal, standardModalWidth, NARROW_MODAL_BREAKPOINT, MODAL_MARK_INSET, wrapLines, type KitHint, type KitStyle, type ModalFrame, type SurfaceCanvas, type SurfaceLayer } from './surface-kit.js';
+import { beginModal, finishModal, standardModalWidth, NARROW_MODAL_BREAKPOINT, wrapLines, type KitHint, type KitStyle, type ModalFrame, type SurfaceCanvas, type SurfaceLayer } from './surface-kit.js';
 import { activeTokens } from './theme.js';
 import type { FirstRunOffers } from '../first-run/offers.js';
 
@@ -139,7 +139,7 @@ function offerRowLines(how: string, extra: FirstRunOffers['rows'][number]['extra
 function chooseLayout(view: ChooseStepView, inner: number): { readonly rows: number; readonly foundRows: StyledSegment[][] } {
   const offers = view.offers;
   if (!offers) return { rows: 3, foundRows: [] };
-  const room = inner - 1 - NAME_COLUMN;
+  const room = inner - 3 - NAME_COLUMN;
   const offerLines = offers.rows.reduce((sum, row) => sum + offerRowLines(row.how, row.extra, room).length, 0);
   const foundRows = offers.foundKey
     ? wrapSegments([
@@ -157,19 +157,22 @@ function chooseLayout(view: ChooseStepView, inner: number): { readonly rows: num
 export function renderChooseStep(screenW: number, screenH: number, view: ChooseStepView): SurfaceLayer {
   const t = activeTokens();
   const width = firstRunWidth(screenW);
-  const inner = width - 8;
+  // Text starts under the title (the kit puts the title one column in).
+  const inner = width - 8 - 1;
   const layout = chooseLayout(view, inner);
   const f = frame(screenW, screenH, 'Welcome to GoodVibes', '1 of 3', layout.rows, [['↑↓', 'move'], ['⏎', 'choose'], ['esc', 'set up later']]);
+  const x0 = f.l + 1;
   let y = f.top;
-  f.canvas.put(f.l, y, 'Which model should answer you?', { fg: t.text });
+  f.canvas.put(x0, y, 'Which model should answer you?', { fg: t.text });
   y += 2;
   const offers = view.offers;
   if (!offers) return finishModal(f);
-  const nameX = f.l + 1;
+  // Rows sit three columns in; the selection bar starts one column before the name.
+  const nameX = x0 + 3;
   const howX = nameX + NAME_COLUMN;
   const room = f.r - howX + 1;
-  const barX = f.l - MODAL_MARK_INSET + 1;
-  const barW = f.r - barX + 2;
+  const barX = nameX - 1;
+  const barW = f.r - barX + 1;
   const drawRow = (index: number, name: string, lines: StyledSegment[][]): void => {
     const selected = index === view.selected;
     lines.forEach((segments, k) => {
@@ -192,7 +195,7 @@ export function renderChooseStep(screenW: number, screenH: number, view: ChooseS
     y += 1;
     for (const segments of layout.foundRows) {
       if (y > f.bottom) break;
-      drawSegments(f.canvas, f.l, y, segments);
+      drawSegments(f.canvas, x0, y, segments);
       y += 1;
     }
   }
@@ -296,20 +299,22 @@ function signInBody(view: SignInStepView, inner: number): { readonly lines: Styl
 export function renderSignInStep(screenW: number, screenH: number, view: SignInStepView): SurfaceLayer {
   const t = activeTokens();
   const width = firstRunWidth(screenW);
-  const inner = width - 8;
+  const inner = width - 8 - 1;
   const body = signInBody(view, inner);
   const title = view.kind === 'local' ? view.name : `Sign in to ${view.name}`;
   const f = frame(screenW, screenH, title, '2 of 3', body.lines.length, body.hints);
+  const x0 = f.l + 1;
   let y = f.top;
   const localStart = view.kind === 'local' && !view.none ? 2 : -1;
   body.lines.forEach((segments, index) => {
     if (y > f.bottom) return;
-    if (view.kind === 'local' && localStart >= 0 && index - localStart === view.selected && index - localStart < view.models.length) {
-      f.canvas.grad(f.l - MODAL_MARK_INSET + 1, y, f.r - f.l + MODAL_MARK_INSET + 1, t.brand, t.brandEnd);
-      let x = f.l + 1;
+    const listRow = view.kind === 'local' && localStart >= 0 && index >= localStart && index - localStart < view.models.length;
+    if (listRow && index - localStart === view.selected) {
+      f.canvas.grad(x0 + 2, y, f.r - x0 - 1, t.brand, t.brandEnd);
+      let x = x0 + 3;
       for (const segment of segments) x = f.canvas.put(x, y, shown(segment), { fg: t.selectedListItemText, bold: true });
     } else {
-      drawSegments(f.canvas, view.kind === 'local' && localStart >= 0 && index >= localStart && index - localStart < view.models.length ? f.l + 1 : f.l, y, segments);
+      drawSegments(f.canvas, listRow ? x0 + 3 : x0, y, segments);
     }
     y += 1;
   });

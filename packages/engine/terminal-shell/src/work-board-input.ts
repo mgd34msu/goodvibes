@@ -52,13 +52,14 @@ export interface WorkBoardListSources {
   readonly now?: (() => number) | undefined;
 }
 
-type Section = 'waiting' | 'agents' | 'scheduled' | 'service';
+export type WorkBoardSection = 'waiting' | 'agents' | 'scheduled' | 'service';
 
-interface Selectable {
+/** A row the cursor can rest on. */
+export interface WorkBoardSelectable {
   readonly key: string;
   readonly row: BoardRow;
   readonly depth: number;
-  readonly section: Section;
+  readonly section: WorkBoardSection;
 }
 
 /** The state word of a healthy background service, listed while the services are open. */
@@ -171,13 +172,13 @@ export class WorkBoardList {
   }
 
   /** Every row the cursor can rest on, in the order the panel draws them. */
-  selectables(): Selectable[] {
+  selectables(): WorkBoardSelectable[] {
     if (this.archive) {
       return this.readArchive().rows.filter((row) => this.matches(row)).map((row) => ({ key: boardKey(row), row, depth: 0, section: 'agents' as const }));
     }
     const board = this.board();
     if (!board) return [];
-    const out: Selectable[] = [];
+    const out: WorkBoardSelectable[] = [];
     for (const row of board.groups.waiting) if (this.matches(row)) out.push({ key: boardKey(row), row, depth: 0, section: 'waiting' });
     const agents = [...board.groups.running, ...board.groups.finished].filter((row) => this.matches(row));
     const running = nestRows(agents.filter((row) => row.group === 'running'));
@@ -188,7 +189,7 @@ export class WorkBoardList {
     return out;
   }
 
-  selected(): Selectable | null {
+  selected(): WorkBoardSelectable | null {
     const all = this.selectables();
     if (all.length === 0) return null;
     return all.find((entry) => entry.key === this.selectedKey) ?? all[0]!;
@@ -246,7 +247,7 @@ export class WorkBoardList {
     const read = this.read();
     const board = read.board;
     const selected = this.selected();
-    const entry = (item: Selectable): WorkBoardEntry => ({
+    const entry = (item: WorkBoardSelectable): WorkBoardEntry => ({
       key: item.key,
       row: item.row,
       depth: item.depth,

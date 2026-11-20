@@ -42,7 +42,7 @@ export function createJudgmentSourceLifetime(source: Pick<JudgmentSettingsSource
       ...fallbacks.filter(target => target.keySource === 'secret').map(target => target.keyName)];
     const credentialObservations = secretNames.flatMap(name => {
       const snapshot = source.secrets.resolveLocalCredentialSnapshot?.(name);
-      return snapshot?.state === 'resolved' ? [snapshot.state, snapshot.revision, snapshot.value]
+      return snapshot?.state === 'resolved' ? [snapshot.state, snapshot.revision, snapshot.value.reveal('dispatch')]
         : snapshot?.state === 'absent' ? [snapshot.state, snapshot.revision] : [snapshot?.state];
     });
     const observation = [configBefore, secretBefore?.generation,

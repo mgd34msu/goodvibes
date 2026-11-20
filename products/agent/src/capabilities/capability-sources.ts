@@ -1,3 +1,4 @@
+import type { Secret } from '@goodvibes-jev/engine/platform/platform/security';
 import type { CommandContext } from '../input/command-registry.ts';
 import { isInvokableContractMethod, operatorContractMethods } from '../tools/agent-harness-personal-ops-discovery.ts';
 import type { McpServerPosture, PresenceReading } from './capability-probe-runner.ts';
@@ -50,7 +51,7 @@ const PRESENT: PresenceReading = { state: 'present' };
 const ABSENT: PresenceReading = { state: 'absent' };
 
 interface SecretsManagerLike {
-  readonly resolveLocalCredentialSnapshot: (key: string) => { readonly state: string; readonly value?: string; readonly reason?: string };
+  readonly resolveLocalCredentialSnapshot: (key: string) => { readonly state: string; readonly value?: Secret; readonly reason?: string };
 }
 
 /**
@@ -65,7 +66,7 @@ export function secretValueIsPresent(secretsManager: unknown, key: string): Pres
   if (!manager || typeof manager.resolveLocalCredentialSnapshot !== 'function') return { state: 'unreadable', reason: 'no secret store in this session' };
   try {
     const snapshot = manager.resolveLocalCredentialSnapshot(key);
-    if (snapshot.state === 'resolved') return typeof snapshot.value === 'string' && snapshot.value.trim().length > 0 ? PRESENT : ABSENT;
+    if (snapshot.state === 'resolved') return snapshot.value !== undefined && snapshot.value.reveal('owner-screen').trim().length > 0 ? PRESENT : ABSENT;
     if (snapshot.state === 'absent') return ABSENT;
     return { state: 'unreadable', reason: snapshot.reason ?? 'store unreadable' };
   } catch {

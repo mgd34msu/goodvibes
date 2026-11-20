@@ -151,29 +151,33 @@ export function registerSettingsSyncRuntimeCommands(registry: CommandRegistry): 
       }),
       {
         id: 'pull', label: 'Take the settings from a sync bundle', word: 'pull', inputs: [BUNDLE],
-        sentence: 'The settings in {path} replace yours until you change them, except keys a managed lock owns; changes that touch security are shown and asked about first.', done: '',
+        sentence: 'The settings in {path} replace yours until you change it, except keys a managed lock owns; changes that touch security are shown and asked about first.', done: '',
         touches: 'this-machine', lasts: 'kept', risk: 'none',
         operator: { terminalOnly: TERMINAL_ONLY }, example: { path: 'settings-sync.json' },
         async run(values, ctx) {
           const sourcePath = requireShellPaths(ctx).resolveWorkspacePath(values.path!);
           const config = ctx.platform.configManager;
+          const failed = (error: unknown): never => {
+            recordSettingsSyncFailure('settings-sync', summarizeError(error), config.getControlPlaneConfigDir());
+            throw commandRefusal(`Not pulled: ${summarizeError(error)}`, '/settings-sync inspect <file> shows what the bundle holds');
+          };
+          // One read: the changes shown are the changes applied.
+          let bundle: SettingsSyncBundle;
+          try { bundle = readSettingsSyncBundle(sourcePath); } catch (error) { return failed(error); }
+          const changes = Object.entries(bundle.settings)
+            .filter(([key]) => CONFIG_KEYS.has(key as ConfigKey))
+            .map(([key, next]) => ({ key, previous: config.get(key as ConfigKey), next }))
+            .filter((change) => JSON.stringify(change.previous) !== JSON.stringify(change.next));
+          if (changes.some(isSecurityBearingChange)) {
+            const body = [...describeSetupTransferChanges(changes), 'A key a managed lock owns is skipped; /managed history lists what changed.'].join('\n');
+            if (!ctx.confirm) throw commandRefusal(`These synced settings change security, so they are pulled only where you can be asked:\n${body}`);
+            if (!(await ctx.confirm({ title: 'Pull synced settings that change security?', body, confirmLabel: 'Pull', cancelLabel: 'Back', tone: 'danger' }))) throw commandRefusal('Not pulled: nothing was changed.');
+          }
           try {
-            // One read: the changes shown are the changes applied.
-            const bundle = readSettingsSyncBundle(sourcePath);
-            const changes = Object.entries(bundle.settings)
-              .filter(([key]) => CONFIG_KEYS.has(key as ConfigKey))
-              .map(([key, next]) => ({ key, previous: config.get(key as ConfigKey), next }))
-              .filter((change) => JSON.stringify(change.previous) !== JSON.stringify(change.next));
-            if (changes.some(isSecurityBearingChange)) {
-              const body = [...describeSetupTransferChanges(changes), 'A key a managed lock owns is skipped; /managed history lists what changed.'].join('\n');
-              if (!ctx.confirm) throw commandRefusal(`These synced settings change security, so they are pulled only where you can be asked:\n${body}`);
-              if (!(await ctx.confirm({ title: 'Pull synced settings that change security?', body, confirmLabel: 'Pull', cancelLabel: 'Back', tone: 'danger' }))) throw commandRefusal('Not pulled: nothing was changed.');
-            }
             const result = applySettingsSyncBundle(config, bundle, sourcePath);
             return `Pulled the settings sync bundle from ${sourcePath} (${result.appliedCount} applied, ${result.conflictCount} conflicts${result.skippedLockedKeys ? `, ${result.skippedLockedKeys.length} skipped because managed locks own them: ${result.skippedLockedKeys.join(', ')}` : ''}).`;
           } catch (error) {
-            recordSettingsSyncFailure('settings-sync', summarizeError(error), config.getControlPlaneConfigDir());
-            throw commandRefusal(`Not pulled: ${summarizeError(error)}`, '/settings-sync inspect <file> shows what the bundle holds');
+            return failed(error);
           }
         },
       },

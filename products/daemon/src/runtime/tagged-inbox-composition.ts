@@ -61,7 +61,7 @@ export function createDaemonTriageTaggingFactory(input: {
         for (const key of keys) {
           const observation = snapshot(key); observations.push(observation);
           if (observation.state === 'unsupported') throw new Error('Triage local credential ownership unavailable');
-          if (observation.state === 'resolved' && observation.value.length) { value = observation.value; break; }
+          if (observation.state === 'resolved' && !observation.value.empty) { value = observation.value.reveal('dispatch'); break; }
         }
         if (!value) throw new Error('Triage local credential absent');
         return { value, assertCurrent() {
@@ -69,7 +69,7 @@ export function createDaemonTriageTaggingFactory(input: {
           for (let i = 0; i < observations.length; i++) {
             const before = observations[i]!, now = snapshot(keys[i]!);
             if (before.state === 'unsupported' || now.state === 'unsupported' || before.state !== now.state || before.revision !== now.revision
-              || (before.state === 'resolved' && (now.state !== 'resolved' || before.value !== now.value))) throw new Error('Triage local credential changed');
+              || (before.state === 'resolved' && (now.state !== 'resolved' || before.value.reveal('dispatch') !== now.value.reveal('dispatch')))) throw new Error('Triage local credential changed');
           }
         } };
       },

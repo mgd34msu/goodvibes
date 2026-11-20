@@ -173,9 +173,23 @@ export function describeFailoverCost(
  * other failure (a refused hook, a cancelled request, a failed check) is not
  * the provider's and returns false at once.
  */
-export function createTurnFailover(options: TurnFailoverOptions): (error: unknown) => boolean {
+/** A turn's failover, and whether a move is open to it now. */
+export type TurnFailover = ((error: unknown) => boolean) & {
+  /**
+   * Whether a provider failure now would move the turn: an entry of the
+   * fallback order not yet tried whose provider is signed in. Reads only what
+   * the program holds; no request. The turn loop shortens its retry waits when
+   * it is true, so a down model does not hold a turn that has somewhere to go.
+   */
+  readonly available: () => boolean;
+};
+
+export function createTurnFailover(options: TurnFailoverOptions): TurnFailover {
   const visited = new Set<string>();
-  return (error) => {
+  const available = (): boolean => chooseFailover({
+    registry: options.registry, current: options.current(), visited, fallbackOrder: options.fallbackOrder(),
+  }).kind === 'switch';
+  return Object.assign((error: unknown): boolean => {
     if (!(error instanceof ProviderError)) return false;
     const failed = options.current();
     visited.add(failed.registryKey);
@@ -201,7 +215,7 @@ export function createTurnFailover(options: TurnFailoverOptions): (error: unknow
       );
       return true;
     }
-  };
+  }, { available });
 }
 
 /** What a single call outside a turn is sent to: the model, its provider's own id for it, and the provider. */

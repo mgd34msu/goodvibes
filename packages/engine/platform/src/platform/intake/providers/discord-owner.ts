@@ -192,7 +192,7 @@ export async function createDiscordInboxOwner(
   };
   const sameObservation = (a: IntakeCredentialSnapshot, b: IntakeCredentialSnapshot): boolean =>
     a.state !== 'unsupported' && b.state !== 'unsupported' && a.state === b.state && a.revision === b.revision
-    && (a.state !== 'resolved' || (b.state === 'resolved' && a.value === b.value));
+    && (a.state !== 'resolved' || (b.state === 'resolved' && a.value.reveal('dispatch') === b.value.reveal('dispatch')));
   // Set when the local credential changed under a proven bot; reads wait for the next poll.
   let credentialStale = false;
   const assertCredentialCurrent = (): void => {
@@ -209,7 +209,7 @@ export async function createDiscordInboxOwner(
     const value = await resolveCredential(KEY);
     current();
     if (epoch !== identityEpoch || !sameObservation(observation, observeCredential(KEY))
-      || value !== (observation.state === 'resolved' ? observation.value : null)) {
+      || value !== (observation.state === 'resolved' ? observation.value.reveal('dispatch') : null)) {
       invalidateIdentity(); throw new Error('Discord inbox credential observation was revoked');
     }
     credentialObservation = observation; credentialStale = false;

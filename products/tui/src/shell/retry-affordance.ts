@@ -5,11 +5,13 @@
  *
  * Each is reached by a chord that can never be typed text, Alt+R and Alt+J,
  * so a sentence that starts with "r" or "j", or `j` pressed to move down a
- * list, always goes where it was typed. While an action is on offer the
- * footer says so (actionHint); the offer stays until it is used, replaced by
- * a newer one, or (for retry) a new prompt is sent, so the hint on screen is
- * always the action the chord will run.
+ * list, always goes where it was typed. The retry is named on the failed
+ * turn's own row in the transcript (alt+r try again, beside alt+o and alt+i;
+ * terminal-shell turn-failure-actions.ts), so the footer names only the fix
+ * session (actionHint). An offer stays until it is used, replaced by a newer
+ * one, or (for retry) a new prompt is sent.
  */
+import { offerFailedTurnRetry } from '@goodvibes-jev/engine/terminal-shell/turn-failure-actions';
 
 /** Alt+<letter> in both encodings a terminal sends: ESC-prefixed, or CSI-u with the Alt modifier (kitty keyboard protocol). */
 function isAltChord(data: string, letter: string): boolean {
@@ -31,14 +33,9 @@ export function createShellActionOffers(): ShellActionOffers {
   return { retry: null, fixSessionId: null };
 }
 
-/** The footer line while an action is on offer; null when nothing is. */
+/** The footer line while a fix session is on offer; null when none is. The retry is on the failed turn's row. */
 export function actionHint(offers: ShellActionOffers): string | null {
-  const parts: string[] = [];
-  if (offers.retry) {
-    parts.push(`${RETRY_CHORD_LABEL} ${offers.retry.continues ? 'continue' : 'retry'}${offers.retry.exhausted ? ' same provider' : ''} · /model switch model`);
-  }
-  if (offers.fixSessionId) parts.push(`${FIX_SESSION_CHORD_LABEL} open fix session`);
-  return parts.length > 0 ? `[Next] ${parts.join(' · ')}` : null;
+  return offers.fixSessionId ? `${FIX_SESSION_CHORD_LABEL} open fix session` : null;
 }
 
 /** Offer the retry whenever a user-visible error surfaces and a retry is actually possible. */
@@ -70,6 +67,13 @@ export interface ShellActionChordDeps {
  * chord with nothing on offer, is left for normal input.
  */
 export function handleShellActionChord(data: string, offers: ShellActionOffers, deps: ShellActionChordDeps): boolean {
+  // The failed turn's row sends its prompt to the model chosen with alt+o through this same retry.
+  offerFailedTurnRetry(() => {
+    if (!offers.retry) return;
+    offers.retry = null;
+    deps.retry();
+    deps.render();
+  });
   if (offers.retry && isAltChord(data, 'r')) {
     offers.retry = null;
     deps.retry();

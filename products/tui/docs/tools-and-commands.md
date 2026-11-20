@@ -264,7 +264,7 @@ Representative slash-command families, with a one-line summary of each:
 | `/model` | Select or display the current LLM model |
 | `/settings` | Open the fullscreen configuration workspace |
 | `/config` | Open the fullscreen configuration workspace, or set a key directly |
-| `/recall` | Project memory: bare opens the Memory modal, subcommands add decisions, constraints, incidents, and patterns with provenance |
+| `/memory` | Project memory: remember decisions, constraints, incidents and patterns with where each came from; bare opens the list of actions |
 | `/knowledge` | Structured knowledge graph: ingest URLs and bookmarks, inspect issues, and build compact prompt packets |
 | `/remote` | Inspect, dispatch, and review self-hosted remote runners and artifacts |
 | `/sandbox` | Review and configure VM isolation policy for MCP and evaluation runtimes |
@@ -295,7 +295,7 @@ Composer capture markers: a single line beginning with `# ` (a hash and a space)
 
 A typed line that starts with `!` runs the rest as a shell command in the working directory, beside the composer: the output is shown and goes in front of your next message as context, and `Esc` stops a command that is still running. Spoken input is never run as a shell command.
 
-`/schedule add when "<natural language>" <prompt...>` accepts natural-language times parsed locally, for example `every weekday at 9am`, `daily at 6pm`, `every 30 minutes`, `every monday at 08:00`, or `in 2 hours`. The command always echoes back the concrete interpretation (the resulting cron/interval/one-shot schedule) before the job is saved, so you can see exactly what was understood.
+`/schedule add --when "<natural language>" <what it does...>` (or "Describe it" in the guided form) accepts natural-language times, for example `every weekday at 9am`, `daily at 6pm`, `every 30 minutes`, `every monday at 08:00`, or `in 2 hours`. The command always echoes back the concrete interpretation (`Read as: <schedule>`) before the schedule is kept, so you can see exactly what was understood.
 
 `/search <query> [--limit <n>]` runs a provider-backed web search directly (bypassing the agent-tool JSON wrapper) and renders ranked results, an instant answer, and the source label into the transcript; it degrades honestly using the web-search service's own status note.
 

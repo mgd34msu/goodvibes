@@ -175,7 +175,7 @@ export function createAtRestCipher(
         assertCurrent(); key = Buffer.from(selected, 'base64');
         if (key.length !== AES_KEY_BYTES || key.toString('base64') !== selected) throw new Error('Draft encryption key is invalid; existing material was preserved.');
         const before = store.resolveDaemonCredentialSnapshot(keyName);
-        if (before.state !== 'resolved' || before.value !== selected) throw new Error('Draft encryption key changed.');
+        if (before.state !== 'resolved' || before.value.reveal('dispatch') !== selected) throw new Error('Draft encryption key changed.');
         const observe = store.resolveDaemonCredentialSnapshot;
         const current = () => {
           assertCurrent();
@@ -201,8 +201,9 @@ export function createAtRestCipher(
         const observe = store.resolveDaemonCredentialSnapshot;
         const before = observe.call(store, keyName);
         if (before.state !== 'resolved') throw new Error('Draft encryption key is missing; no replacement was created.');
-        key = Buffer.from(before.value, 'base64');
-        if (key.length !== AES_KEY_BYTES || key.toString('base64') !== before.value) throw new Error('Draft encryption key is invalid; existing material was preserved.');
+        const material = before.value.reveal('dispatch');
+        key = Buffer.from(material, 'base64');
+        if (key.length !== AES_KEY_BYTES || key.toString('base64') !== material) throw new Error('Draft encryption key is invalid; existing material was preserved.');
         const current = () => {
           assertCurrent();
           if (store.resolveDaemonCredentialSnapshot !== observe || JSON.stringify(observe.call(store, keyName)) !== JSON.stringify(before)) throw new Error('Draft encryption key changed.');

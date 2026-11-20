@@ -16,7 +16,7 @@ export type TriggerOperatorFailureKind = 'other-process' | 'future-version' | 'u
 export const TRIGGER_OPERATOR_MESSAGES: Readonly<Record<TriggerOperatorFailureKind, string>> = Object.freeze({
   'other-process': 'Another GoodVibes process supervises these triggers. Inspect them here, or close that process: this one takes over on its next supervision tick.',
   'future-version': 'This trigger state was written by a newer GoodVibes reader. Update this installation before continuing; the saved state has been preserved.',
-  unavailable: 'Trigger state could not be read. The daemon log names the file and the cause; check that file and its permissions, then run /triggers status again.',
+  unavailable: 'Trigger state could not be read. The daemon log names the file and the cause; check that file and its permissions, then run /triggers list again.',
 });
 export function readTriggerOperatorStatus(value: unknown): TriggerOperatorStatus {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid trigger status');

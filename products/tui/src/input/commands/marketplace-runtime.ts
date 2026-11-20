@@ -1,10 +1,12 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { describeUncheckedCatalogEntries, exportEcosystemCatalogBundle, importEcosystemCatalogBundle, inspectEcosystemCatalogBundle, inspectInstalledEcosystemEntry, installEcosystemCatalogEntry, listEcosystemInstallBackups, listInstalledEcosystemEntries, loadEcosystemCatalog, rollbackInstalledEcosystemEntry, reviewEcosystemCatalogEntry, searchEcosystemCatalog, uninstallEcosystemCatalogEntry, updateInstalledEcosystemEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
 import type { EcosystemCatalogBundle, EcosystemCatalogEntry, EcosystemEntryKind } from '@/runtime/index.ts';
 import { openModalCommand, requireEcosystemCatalogPaths, requireReadModels, requireShellPaths } from './runtime-services.ts';
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { defineCommand, defineList, type ActionDescription, type ActionValues, type InputDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { doAction, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 
 function resolveMarketplaceEntry(
   kind: EcosystemEntryKind,
@@ -41,275 +43,292 @@ function unknownEntry(kind: string | undefined, entryId: string | undefined): Er
   return commandRefusal(`Unknown curated ${kind} entry: ${entryId}`, '/marketplace browse lists the catalog entries', 'NOT_FOUND');
 }
 
+/** "Install for": the one labelled choice behind every scope of /marketplace, /plugin and /skills. */
+export const INSTALL_SCOPE: InputDescription = {
+  id: 'scope', label: 'Install for', help: 'This project, or all your projects', kind: 'choice',
+  choices: [{ value: 'project', label: 'This project' }, { value: 'user', label: 'All your projects' }],
+  required: { default: 'project', defaultMeans: 'this project' }, typed: { flag: '--scope' },
+};
+const KINDS = [
+  { value: 'plugin', label: 'Plugin' },
+  { value: 'skill', label: 'Skill' },
+  { value: 'hook-pack', label: 'Hook pack' },
+  { value: 'policy-pack', label: 'Policy pack' },
+];
+const KIND_LABEL = new Map(KINDS.map((kind) => [kind.value, kind.label.toLowerCase()]));
+const TERMINAL_ONLY = 'The catalog and what is installed are on this machine.';
+
+const CATALOG = defineList<CommandContext>({
+  name: 'marketplace.catalog',
+  async read(ctx, earlier) {
+    const kind = earlier.kind as EcosystemEntryKind | undefined;
+    if (!kind) return [];
+    const installed = new Set(listInstalledEcosystemEntries(kind, requireEcosystemCatalogPaths(ctx)).map((receipt) => receipt.entry.id));
+    return loadEcosystemCatalog(kind, requireEcosystemCatalogPaths(ctx)).map((entry): ListRow => ({ value: entry.id, label: entry.name, detail: entry.summary, ...(installed.has(entry.id) ? { state: 'installed' } : {}) }));
+  },
+  operator: { terminalOnly: TERMINAL_ONLY },
+});
+const INSTALLED = defineList<CommandContext>({
+  name: 'marketplace.installed',
+  async read(ctx, earlier) {
+    const kind = earlier.kind as EcosystemEntryKind | undefined;
+    if (!kind) return [];
+    return listInstalledEcosystemEntries(kind, requireEcosystemCatalogPaths(ctx)).map((receipt): ListRow => ({ value: receipt.entry.id, label: receipt.entry.name, state: receipt.scope === 'user' ? 'all your projects' : 'this project' }));
+  },
+  operator: { terminalOnly: TERMINAL_ONLY },
+});
+const BACKUPS = defineList<CommandContext>({
+  name: 'marketplace.backups',
+  async read(ctx, earlier) {
+    const kind = earlier.kind as EcosystemEntryKind | undefined;
+    if (!kind || !earlier.entry) return [];
+    const scope = earlier.scope === 'user' ? 'user' : 'project';
+    return listEcosystemInstallBackups(kind, earlier.entry, { ...requireEcosystemCatalogPaths(ctx), scope })
+      .map((backup): ListRow => ({ value: backup.id, label: new Date(backup.createdAt).toLocaleString(), detail: backup.reason, state: backup.receipt.entry.version ?? undefined }));
+  },
+  operator: { terminalOnly: TERMINAL_ONLY },
+});
+
+const KIND: InputDescription = { id: 'kind', label: 'Kind', help: 'What sort of thing it is', kind: 'choice', choices: KINDS, required: true, typed: { position: 1 } };
+const CATALOG_ENTRY = listInput({ id: 'entry', label: 'Entry', help: 'Curated entries of this kind', list: CATALOG, position: 2, dependsOn: 'kind' });
+const INSTALLED_ENTRY = listInput({ id: 'entry', label: 'Entry', help: 'Installed entries of this kind', list: INSTALLED, position: 2, dependsOn: 'kind' });
+const BUNDLE_FILE = textInput({ id: 'path', label: 'Bundle file', help: 'A marketplace bundle (JSON)', why: 'a file path in this project', kind: 'path', typed: { position: 1 } });
+
+function entryOf(ctx: CommandContext, values: ActionValues): EcosystemCatalogEntry {
+  const entry = resolveMarketplaceEntry(values.kind as EcosystemEntryKind, values.entry!, requireEcosystemCatalogPaths(ctx));
+  if (!entry) throw unknownEntry(values.kind, values.entry);
+  return entry;
+}
+function scoped(ctx: CommandContext, values: ActionValues) {
+  return { ...requireEcosystemCatalogPaths(ctx), scope: values.scope === 'user' ? 'user' as const : 'project' as const };
+}
+function installChange(fields: Pick<ActionDescription<CommandContext>, 'id' | 'label' | 'word' | 'sentence' | 'risk' | 'undoneBy'> & { readonly inputs: readonly InputDescription[]; readonly run: ActionDescription<CommandContext>['run'] }): ActionDescription<CommandContext> {
+  return { ...fields, done: '', touches: 'this-machine', lasts: 'kept', operator: { terminalOnly: TERMINAL_ONLY }, example: { kind: 'skill', entry: 'release-notes' } };
+}
+
 export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
+  registry.register(defineCommand<CommandContext>({
     name: 'marketplace',
-    aliases: ['catalog'],
-    description: 'Browse the unified plugin and skill marketplace',
-    usage: '[open|overview|recommend|browse [query]|review <plugin|skill|hook-pack|policy-pack> <id>|provenance <plugin|skill|hook-pack|policy-pack> <id>|install-hint <plugin|skill|hook-pack|policy-pack> <id>|install <plugin|skill|hook-pack|policy-pack> <id> [project|user]|update <plugin|skill|hook-pack|policy-pack> <id> [project|user]|rollback <plugin|skill|hook-pack|policy-pack> <id> [project|user] [backupId]|history <plugin|skill|hook-pack|policy-pack> <id> [project|user]|uninstall <plugin|skill|hook-pack|policy-pack> <id> [project|user]|receipt <plugin|skill|hook-pack|policy-pack> <id> [project|user]|bundle export <path> [project|user]|bundle inspect <path>|bundle import <path> [project|user]|installed]',
-    confirm(args) {
-      if (args[0] !== 'uninstall' || !args[1] || !args[2] || !['plugin', 'skill', 'hook-pack', 'policy-pack'].includes(args[1])) return undefined;
-      // A scope word that is not project or user is refused by the handler; nothing would change.
-      if (args[3] !== undefined && args[3] !== 'project' && args[3] !== 'user') return undefined;
-      return {
-        title: `Uninstall ${args[1]} ${args[2]}?`,
-        detail: `The installed ${args[1]} ${args[2]} (${args[3] ?? 'project'} scope) is removed from disk with its install receipt; /marketplace install installs it again from the catalog.`,
-        confirmLabel: 'Uninstall',
-      };
-    },
-    async handler(args, ctx) {
-      const shellPaths = requireShellPaths(ctx);
-      const ecosystemPaths = requireEcosystemCatalogPaths(ctx);
-      const sub = args[0] ?? 'open';
-      if (sub === 'open' || sub === 'panel') {
-        openModalCommand(ctx, 'marketplace-modal');
-        return;
-      }
-      if (sub === 'overview') {
-        const pluginCatalog = loadEcosystemCatalog('plugin', ecosystemPaths);
-        const skillCatalog = loadEcosystemCatalog('skill', ecosystemPaths);
-        const hookPackCatalog = loadEcosystemCatalog('hook-pack', ecosystemPaths);
-        const policyPackCatalog = loadEcosystemCatalog('policy-pack', ecosystemPaths);
-        const installedPlugins = listInstalledEcosystemEntries('plugin', ecosystemPaths);
-        const installedSkills = listInstalledEcosystemEntries('skill', ecosystemPaths);
-        const installedHookPacks = listInstalledEcosystemEntries('hook-pack', ecosystemPaths);
-        const installedPolicyPacks = listInstalledEcosystemEntries('policy-pack', ecosystemPaths);
-        ctx.print([
-          'Marketplace Overview',
-          `  curated plugins: ${pluginCatalog.length}`,
-          `  curated skills: ${skillCatalog.length}`,
-          `  curated hook packs: ${hookPackCatalog.length}`,
-          `  curated policy packs: ${policyPackCatalog.length}`,
-          `  installed plugins: ${installedPlugins.length}`,
-          `  installed skills: ${installedSkills.length}`,
-          `  installed hook packs: ${installedHookPacks.length}`,
-          `  installed policy packs: ${installedPolicyPacks.length}`,
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'browse') {
-        const query = args.slice(1).join(' ');
-        const browse = (kind: 'plugin' | 'skill' | 'hook-pack' | 'policy-pack') => (query
-          ? searchEcosystemCatalog(kind, query, ecosystemPaths)
-          : Promise.resolve({ entries: loadEcosystemCatalog(kind, ecosystemPaths), unchecked: 0 }));
-        const [plugins, skills, hookPacks, policyPacks] = await Promise.all([
-          browse('plugin'), browse('skill'), browse('hook-pack'), browse('policy-pack'),
-        ]);
-        const unchecked = (search: { readonly unchecked: number }) => {
-          const line = describeUncheckedCatalogEntries(search);
-          return line ? [`    ${line}`] : [];
-        };
-        ctx.print([
-          `Marketplace Browse${query ? ` (${query})` : ''}`,
-          `  plugins: ${plugins.entries.length}`,
-          ...plugins.entries.map((entry) => `    plugin  ${entry.id}  ${entry.name}  ${entry.summary}`),
-          ...unchecked(plugins),
-          `  skills: ${skills.entries.length}`,
-          ...skills.entries.map((entry) => `    skill   ${entry.id}  ${entry.name}  ${entry.summary}`),
-          ...unchecked(skills),
-          `  hook packs: ${hookPacks.entries.length}`,
-          ...hookPacks.entries.map((entry) => `    hook-pack   ${entry.id}  ${entry.name}  ${entry.summary}`),
-          ...unchecked(hookPacks),
-          `  policy packs: ${policyPacks.entries.length}`,
-          ...policyPacks.entries.map((entry) => `    policy-pack ${entry.id}  ${entry.name}  ${entry.summary}`),
-          ...unchecked(policyPacks),
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'recommend') {
-        // Ranking is asked for here and awaited, so the answer is the ranked list, not the one before it.
-        const snapshot = await requireReadModels(ctx).marketplace.recommend();
-        if (snapshot.ranking === 'failed') {
-          ctx.print(['Marketplace Recommendations', ...snapshot.startupIssues.map((issue) => `  ${issue}`)].join('\n'));
-          return;
-        }
-        const recommendations = snapshot.recommendations;
-        // Without a decision model the list is unranked; the snapshot's issues, its notice among them, go above it.
-        const notice = snapshot.ranking === 'off' ? snapshot.startupIssues.map((issue) => `  ${issue}`) : [];
-        ctx.print(recommendations.length > 0
-          ? [
-            'Marketplace Recommendations',
-            ...notice,
-            ...recommendations.map((recommendation) => `  ${recommendation.kind} ${recommendation.entry.id}  ${recommendation.title}`),
-            ...recommendations.map((recommendation) => `    ${recommendation.reason}  next=${recommendation.command}`),
-          ].join('\n')
-          : ['Marketplace Recommendations', ...notice, '  No contextual recommendations right now.'].join('\n'));
-        return;
-      }
-      if (sub === 'installed') {
-        const receipts = [
-          ...listInstalledEcosystemEntries('plugin', ecosystemPaths).map((receipt) => `  plugin  ${receipt.entry.id}  ${receipt.scope}  ${receipt.targetPath}`),
-          ...listInstalledEcosystemEntries('skill', ecosystemPaths).map((receipt) => `  skill   ${receipt.entry.id}  ${receipt.scope}  ${receipt.targetPath}`),
-          ...listInstalledEcosystemEntries('hook-pack', ecosystemPaths).map((receipt) => `  hook-pack   ${receipt.entry.id}  ${receipt.scope}  ${receipt.targetPath}`),
-          ...listInstalledEcosystemEntries('policy-pack', ecosystemPaths).map((receipt) => `  policy-pack ${receipt.entry.id}  ${receipt.scope}  ${receipt.targetPath}`),
-        ];
-        ctx.print(receipts.length > 0
-          ? ['Marketplace Installs', ...receipts].join('\n')
-          : 'Marketplace Installs\n  No curated plugins or skills installed yet.');
-        return;
-      }
-      if (sub === 'bundle') {
-        const mode = args[1];
-        const target = args[2];
-        const scope = mode === 'inspect' ? 'project' : parseScope(args[3], ctx);
-        if ((mode === 'export' || mode === 'inspect' || mode === 'import') && !target) {
-          throw commandRefusal(`Usage: /marketplace bundle ${mode} <path>${mode === 'export' || mode === 'import' ? ' [project|user]' : ''}`);
-        }
-        if (mode === 'export') {
-          const bundle = exportEcosystemCatalogBundle(scope, ecosystemPaths);
-          const targetPath = shellPaths.resolveWorkspacePath(target!);
+    title: 'Marketplace',
+    summary: 'Find, install and update curated plugins, skills, hook packs and policy packs',
+    group: 'Extensions',
+    report: 'overview',
+    firstScreenRows: [
+      'overview', 'browse', 'recommend', 'install', 'installed',
+      { label: 'Check an entry before installing', actions: ['review', 'provenance', 'install-hint'] },
+      { label: 'Update, roll back or uninstall', actions: ['update', 'history', 'rollback', 'receipt', 'uninstall'] },
+      { label: 'Move installs to another machine', actions: ['bundle-export', 'bundle-inspect', 'bundle-import'] },
+      'open',
+    ],
+    actions: [
+      readAction<CommandContext>({
+        id: 'overview', label: 'See the marketplace at a glance', word: 'overview',
+        sentence: 'Shows how many curated entries of each kind there are and how many are installed.',
+        async run(_values, ctx) {
+          const paths = requireEcosystemCatalogPaths(ctx);
+          const kinds = ['plugin', 'skill', 'hook-pack', 'policy-pack'] as const;
+          return [
+            'Marketplace Overview',
+            ...kinds.map((kind) => `  curated ${KIND_LABEL.get(kind)}s: ${loadEcosystemCatalog(kind, paths).length}`),
+            ...kinds.map((kind) => `  installed ${KIND_LABEL.get(kind)}s: ${listInstalledEcosystemEntries(kind, paths).length}`),
+          ].join('\n');
+        },
+      }),
+      doAction<CommandContext>({
+        id: 'open', label: 'Open the marketplace screen', word: 'open', touches: 'reads',
+        sentence: 'Opens the full-screen marketplace to browse and install from.', operator: { terminalOnly: 'It is a terminal screen.' },
+        async run(_values, ctx) { openModalCommand(ctx, 'marketplace-modal'); },
+      }),
+      readAction<CommandContext>({
+        id: 'browse', label: 'Browse the catalog', word: 'browse',
+        inputs: [textInput({ id: 'query', label: 'Looking for', help: 'Words to search for', why: 'your own words', typed: { tail: true }, optional: { default: '', means: 'everything' } })],
+        sentence: 'Lists curated entries of every kind that match {query}.', example: { query: 'release notes' },
+        async run(values, ctx) {
+          const paths = requireEcosystemCatalogPaths(ctx);
+          const query = values.query ?? '';
+          const browse = (kind: 'plugin' | 'skill' | 'hook-pack' | 'policy-pack') => (query
+            ? searchEcosystemCatalog(kind, query, paths)
+            : Promise.resolve({ entries: loadEcosystemCatalog(kind, paths), unchecked: 0 }));
+          const [plugins, skills, hookPacks, policyPacks] = await Promise.all([browse('plugin'), browse('skill'), browse('hook-pack'), browse('policy-pack')]);
+          const unchecked = (search: { readonly unchecked: number }) => {
+            const line = describeUncheckedCatalogEntries(search);
+            return line ? [`    ${line}`] : [];
+          };
+          return [
+            `Marketplace Browse${query ? ` (${query})` : ''}`,
+            `  plugins: ${plugins.entries.length}`, ...plugins.entries.map((entry) => `    plugin  ${entry.id}  ${entry.name}  ${entry.summary}`), ...unchecked(plugins),
+            `  skills: ${skills.entries.length}`, ...skills.entries.map((entry) => `    skill   ${entry.id}  ${entry.name}  ${entry.summary}`), ...unchecked(skills),
+            `  hook packs: ${hookPacks.entries.length}`, ...hookPacks.entries.map((entry) => `    hook-pack   ${entry.id}  ${entry.name}  ${entry.summary}`), ...unchecked(hookPacks),
+            `  policy packs: ${policyPacks.entries.length}`, ...policyPacks.entries.map((entry) => `    policy-pack ${entry.id}  ${entry.name}  ${entry.summary}`), ...unchecked(policyPacks),
+          ].join('\n');
+        },
+      }),
+      readAction<CommandContext>({
+        id: 'recommend', label: 'See what fits this project', word: 'recommend',
+        sentence: 'Shows curated entries that fit this project, ranked when a decision model is set.',
+        async run(_values, ctx) {
+          // Ranking is asked for here and awaited, so the answer is the ranked list, not the one before it.
+          const snapshot = await requireReadModels(ctx).marketplace.recommend();
+          if (snapshot.ranking === 'failed') return ['Marketplace Recommendations', ...snapshot.startupIssues.map((issue) => `  ${issue}`)].join('\n');
+          const recommendations = snapshot.recommendations;
+          // Without a decision model the list is unranked; the snapshot's issues, its notice among them, go above it.
+          const notice = snapshot.ranking === 'off' ? snapshot.startupIssues.map((issue) => `  ${issue}`) : [];
+          return recommendations.length > 0
+            ? ['Marketplace Recommendations', ...notice, ...recommendations.map((recommendation) => `  ${recommendation.kind} ${recommendation.entry.id}  ${recommendation.title}`), ...recommendations.map((recommendation) => `    ${recommendation.reason}  next=${recommendation.command}`)].join('\n')
+            : ['Marketplace Recommendations', ...notice, '  No contextual recommendations right now.'].join('\n');
+        },
+      }),
+      readAction<CommandContext>({
+        id: 'installed', label: 'See what is installed', word: 'installed',
+        sentence: 'Lists every curated entry installed, where, and for which projects.',
+        async run(_values, ctx) {
+          const paths = requireEcosystemCatalogPaths(ctx);
+          const receipts = (['plugin', 'skill', 'hook-pack', 'policy-pack'] as const).flatMap((kind) => listInstalledEcosystemEntries(kind, paths).map((receipt) => `  ${kind.padEnd(11)} ${receipt.entry.id}  ${receipt.scope}  ${receipt.targetPath}`));
+          return receipts.length > 0 ? ['Marketplace Installs', ...receipts].join('\n') : 'Marketplace Installs\n  No curated plugins or skills installed yet.';
+        },
+      }),
+      readAction<CommandContext>({
+        id: 'review', label: 'Check an entry before installing', word: 'review', inputs: [KIND, CATALOG_ENTRY],
+        sentence: 'Shows the {kind} {entry}\'s source, risk, compatibility and the scope it suits.', example: { kind: 'skill', entry: 'release-notes' },
+        async run(values, ctx) {
+          const entry = entryOf(ctx, values);
+          const review = await reviewEcosystemCatalogEntry(entry, requireEcosystemCatalogPaths(ctx));
+          return [
+            `Marketplace Review: ${entry.name}`, `  kind: ${values.kind}`, `  id: ${entry.id}`, `  source: ${entry.source}`, `  sourceKind: ${review.sourceKind}`,
+            `  sourceExists: ${review.sourceExists ? 'yes' : 'no'}`, `  recommendedScope: ${review.recommendedScope}`, `  risk: ${review.riskLevel}`,
+            `  compatibility: ${review.compatibility.status}`, `  notes: ${formatCompatibility(review)}`,
+          ].join('\n');
+        },
+      }),
+      readAction<CommandContext>({
+        id: 'provenance', label: 'See where an entry comes from', word: 'provenance', inputs: [KIND, CATALOG_ENTRY],
+        sentence: 'Shows the {kind} {entry}\'s source, author, version, signature and trust notes.', example: { kind: 'skill', entry: 'release-notes' },
+        async run(values, ctx) {
+          const entry = entryOf(ctx, values);
+          const review = await reviewEcosystemCatalogEntry(entry, requireEcosystemCatalogPaths(ctx));
+          return [
+            `Marketplace Provenance: ${entry.name}`, `  source: ${entry.source}`, `  provenance: ${entry.provenance ?? '(none declared)'}`, `  version: ${entry.version ?? '(unspecified)'}`,
+            `  author: ${entry.author ?? '(unspecified)'}`, `  signature: ${entry.signature ?? '(none declared)'}`, `  compatibility: ${formatCompatibility(review)}`, `  trust notes: ${entry.trustNotes ?? '(none)'}`,
+          ].join('\n');
+        },
+      }),
+      readAction<CommandContext>({
+        id: 'install-hint', label: 'See how an entry is installed', word: 'install-hint', inputs: [KIND, CATALOG_ENTRY],
+        sentence: 'Shows the {kind} {entry}\'s install guidance and trust notes.', example: { kind: 'skill', entry: 'release-notes' },
+        async run(values, ctx) {
+          const entry = entryOf(ctx, values);
+          return [`Marketplace Install Guidance: ${entry.name}`, `  kind: ${values.kind}`, `  source: ${entry.source}`, `  install hint: ${entry.installHint ?? 'Install from a local curated source with explicit scope.'}`, `  trust notes: ${entry.trustNotes ?? '(none)'}`].join('\n');
+        },
+      }),
+      installChange({
+        id: 'install', label: 'Install an entry', word: 'install', inputs: [KIND, CATALOG_ENTRY, INSTALL_SCOPE],
+        sentence: 'The {kind} {entry} is installed for {scope} until you change it.', risk: 'none', undoneBy: 'uninstall',
+        async run(values, ctx) {
+          const result = installEcosystemCatalogEntry(values.kind as EcosystemEntryKind, values.entry!, scoped(ctx, values));
+          if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
+          return `Installed curated ${values.kind} ${values.entry} into ${result.receipt.targetPath}`;
+        },
+      }),
+      installChange({
+        id: 'update', label: 'Update an installed entry', word: 'update', inputs: [KIND, INSTALLED_ENTRY, INSTALL_SCOPE],
+        sentence: 'The installed {kind} {entry} ({scope}) is updated to the catalog\'s version until you change it; the old one is kept as a backup.', risk: 'none', undoneBy: 'rollback',
+        async run(values, ctx) {
+          const result = updateInstalledEcosystemEntry(values.kind as EcosystemEntryKind, values.entry!, scoped(ctx, values));
+          if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
+          return `Updated curated ${values.kind} ${values.entry} in ${result.receipt.targetPath}`;
+        },
+      }),
+      readAction<CommandContext>({
+        id: 'history', label: 'See an entry\'s backups', word: 'history', inputs: [KIND, INSTALLED_ENTRY, INSTALL_SCOPE],
+        sentence: 'Lists the backups the {kind} {entry} can be rolled back to.', example: { kind: 'skill', entry: 'release-notes' },
+        async run(values, ctx) {
+          const backups = listEcosystemInstallBackups(values.kind as EcosystemEntryKind, values.entry!, scoped(ctx, values));
+          return backups.length > 0
+            ? [`Marketplace Rollback History: ${values.kind} ${values.entry}`, ...backups.map((backup) => `  ${backup.id}  ${new Date(backup.createdAt).toISOString()}  ${backup.reason}  ${backup.receipt.entry.version ?? 'n/a'}`)].join('\n')
+            : `Marketplace Rollback History: ${values.kind} ${values.entry}\n  No rollback backups recorded.`;
+        },
+      }),
+      installChange({
+        id: 'rollback', label: 'Roll an entry back to a backup', word: 'rollback',
+        inputs: [KIND, INSTALLED_ENTRY, INSTALL_SCOPE, { ...listInput({ id: 'backup', label: 'Backup', help: 'Its backups, newest first', list: BACKUPS, dependsOn: 'entry', optional: { default: '', means: 'the newest one' } }), typed: { flag: '--backup' } }],
+        sentence: 'The installed {kind} {entry} ({scope}) goes back to an earlier backup until you change it.', risk: 'none', undoneBy: 'update',
+        async run(values, ctx) {
+          const result = rollbackInstalledEcosystemEntry(values.kind as EcosystemEntryKind, values.entry!, { ...scoped(ctx, values), ...(values.backup ? { backupId: values.backup } : {}) });
+          if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
+          return `Rolled back curated ${values.kind} ${values.entry} in ${result.receipt.targetPath} using backup ${result.restoredFrom.id}`;
+        },
+      }),
+      readAction<CommandContext>({
+        id: 'receipt', label: 'See an entry\'s install receipt', word: 'receipt', inputs: [KIND, INSTALLED_ENTRY, INSTALL_SCOPE],
+        sentence: 'Shows when and where the {kind} {entry} was installed, and its provenance and compatibility.', example: { kind: 'skill', entry: 'release-notes' },
+        async run(values, ctx) {
+          const result = inspectInstalledEcosystemEntry(values.kind as EcosystemEntryKind, values.entry!, scoped(ctx, values));
+          if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
+          const { receipt } = result;
+          return [
+            `Marketplace Receipt: ${receipt.entry.name}`, `  installedAt: ${new Date(receipt.installedAt).toISOString()}`, `  scope: ${receipt.scope}`, `  targetPath: ${receipt.targetPath}`,
+            `  provenance: ${receipt.provenanceSummary}`, `  compatibility: ${receipt.compatibility.status}`, ...receipt.compatibility.reasons.map((reason) => `  note: ${reason}`),
+          ].join('\n');
+        },
+      }),
+      installChange({
+        id: 'uninstall', label: 'Uninstall an entry', word: 'uninstall', inputs: [KIND, INSTALLED_ENTRY, INSTALL_SCOPE],
+        sentence: 'The installed {kind} {entry} ({scope}) is removed from disk with its install receipt; /marketplace install installs it again from the catalog.', risk: 'cannot-be-undone',
+        async run(values, ctx) {
+          const result = uninstallEcosystemCatalogEntry(values.kind as EcosystemEntryKind, values.entry!, scoped(ctx, values));
+          if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
+          return `Uninstalled curated ${values.kind} ${values.entry} from ${result.removedPath}`;
+        },
+      }),
+      doAction<CommandContext>({
+        id: 'bundle-export', label: 'Save your installs to a bundle', word: 'bundle-export', inputs: [{ ...BUNDLE_FILE, help: 'Where to write the bundle' }, INSTALL_SCOPE],
+        sentence: 'What is installed for {scope} is written to {path} as a bundle another machine can bring in.',
+        operator: { terminalOnly: TERMINAL_ONLY }, example: { path: 'marketplace.json' },
+        async run(values, ctx) {
+          const bundle = exportEcosystemCatalogBundle(values.scope === 'user' ? 'user' : 'project', requireEcosystemCatalogPaths(ctx));
+          const targetPath = requireShellPaths(ctx).resolveWorkspacePath(values.path!);
           mkdirSync(dirname(targetPath), { recursive: true });
           writeFileSync(targetPath, `${JSON.stringify(bundle, null, 2)}\n`, 'utf-8');
-          ctx.print(`Marketplace bundle exported to ${targetPath}`);
-          return;
-        }
-        if (mode === 'inspect' || mode === 'import') {
-          const bundlePath = shellPaths.resolveWorkspacePath(target!);
-          let bundle: EcosystemCatalogBundle;
-          try {
-            bundle = JSON.parse(readFileSync(bundlePath, 'utf-8')) as EcosystemCatalogBundle;
-          } catch (error) {
-            throw commandRefusal(`Marketplace bundle ${mode} failed: could not read ${bundlePath} as JSON (${error instanceof Error ? error.message : String(error)}). Nothing was changed.`, undefined, 'BUNDLE_UNREADABLE');
-          }
-          if (mode === 'inspect') {
-            const summary = inspectEcosystemCatalogBundle(bundle);
-            // Date rejects values outside +-8.64e15 ms, so a bundle's number can pass isFinite and still not be a date.
-            const exportedDate = typeof summary.exportedAt === 'number' ? new Date(summary.exportedAt) : undefined;
-            const exportedAt = exportedDate !== undefined && !Number.isNaN(exportedDate.getTime())
-              ? exportedDate.toISOString()
-              : 'unknown';
-            ctx.print([
-              'Marketplace Bundle Review',
-              `  exportedAt: ${exportedAt}`,
-              `  scope: ${summary.scope}`,
-              `  plugins: ${summary.counts.plugin}`,
-              `  skills: ${summary.counts.skill}`,
-              `  hook packs: ${summary.counts['hook-pack']}`,
-              `  policy packs: ${summary.counts['policy-pack']}`,
-            ].join('\n'));
-            return;
-          }
-          const result = importEcosystemCatalogBundle(bundle, { ...ecosystemPaths, scope });
-          if (result.error) {
-            throw commandRefusal(`Marketplace bundle import failed: ${result.error}`, undefined, 'BUNDLE_IMPORT_FAILED');
-          }
-          ctx.print([
-            `Marketplace bundle imported from ${bundlePath}`,
+          return `Saved the marketplace bundle to ${targetPath}`;
+        },
+      }),
+      readAction<CommandContext>({
+        id: 'bundle-inspect', label: 'Look inside a marketplace bundle', word: 'bundle-inspect', inputs: [BUNDLE_FILE],
+        sentence: 'Shows what {path} holds; nothing is installed.', example: { path: 'marketplace.json' },
+        async run(values, ctx) {
+          const summary = inspectEcosystemCatalogBundle(readMarketplaceBundle(requireShellPaths(ctx).resolveWorkspacePath(values.path!), 'inspect'));
+          // Date rejects values outside +-8.64e15 ms, so a bundle's number can pass isFinite and still not be a date.
+          const exportedDate = typeof summary.exportedAt === 'number' ? new Date(summary.exportedAt) : undefined;
+          const exportedAt = exportedDate !== undefined && !Number.isNaN(exportedDate.getTime()) ? exportedDate.toISOString() : 'unknown';
+          return ['Marketplace Bundle Review', `  exportedAt: ${exportedAt}`, `  scope: ${summary.scope}`, `  plugins: ${summary.counts.plugin}`, `  skills: ${summary.counts.skill}`, `  hook packs: ${summary.counts['hook-pack']}`, `  policy packs: ${summary.counts['policy-pack']}`].join('\n');
+        },
+      }),
+      {
+        id: 'bundle-import', label: 'Bring in installs from a bundle', word: 'bundle-import', inputs: [BUNDLE_FILE, INSTALL_SCOPE],
+        sentence: 'The entries in {path} are merged into what is installed for {scope}, by kind and id, until you change it.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'none',
+        operator: { terminalOnly: TERMINAL_ONLY }, example: { path: 'marketplace.json' },
+        async run(values, ctx) {
+          const bundlePath = requireShellPaths(ctx).resolveWorkspacePath(values.path!);
+          const result = importEcosystemCatalogBundle(readMarketplaceBundle(bundlePath, 'import'), { ...requireEcosystemCatalogPaths(ctx), scope: values.scope === 'user' ? 'user' : 'project' });
+          if (result.error) throw commandRefusal(`Marketplace bundle import failed: ${result.error}`, undefined, 'BUNDLE_IMPORT_FAILED');
+          return [
+            `Brought in the marketplace bundle from ${bundlePath}`,
             `  merged into existing entries by kind and id; ${result.rejected.length} rejected`,
             `  entries: ${result.imported}`,
             ...Object.entries(result.pathByKind).map(([kind, path]) => `  ${kind}: ${path}`),
             ...result.rejected.map((entry) => `  rejected ${entry.id}: ${entry.reason}`),
-          ].join('\n'));
-          return;
-        }
-        throw commandRefusal('Usage: /marketplace bundle <export|inspect|import> <path> [project|user]');
-      }
+          ].join('\n');
+        },
+      },
+    ],
+  }));
+}
 
-      const kind = args[1] as EcosystemEntryKind | undefined;
-      const entryId = args[2];
-      if ((sub === 'review' || sub === 'provenance' || sub === 'install-hint' || sub === 'install' || sub === 'update' || sub === 'rollback' || sub === 'history' || sub === 'uninstall' || sub === 'receipt') && (!kind || !entryId || !['plugin', 'skill', 'hook-pack', 'policy-pack'].includes(kind))) {
-        throw commandRefusal(`Usage: /marketplace ${sub} <plugin|skill|hook-pack|policy-pack> <id>${sub === 'install' || sub === 'update' || sub === 'rollback' || sub === 'history' || sub === 'uninstall' || sub === 'receipt' ? ' [project|user]' : ''}`);
-      }
-      if (sub === 'review') {
-        const entry = resolveMarketplaceEntry(kind!, entryId!, ecosystemPaths);
-        if (!entry) throw unknownEntry(kind, entryId);
-        const review = await reviewEcosystemCatalogEntry(entry, ecosystemPaths);
-        ctx.print([
-          `Marketplace Review: ${entry.name}`,
-          `  kind: ${kind}`,
-          `  id: ${entry.id}`,
-          `  source: ${entry.source}`,
-          `  sourceKind: ${review.sourceKind}`,
-          `  sourceExists: ${review.sourceExists ? 'yes' : 'no'}`,
-          `  recommendedScope: ${review.recommendedScope}`,
-          `  risk: ${review.riskLevel}`,
-          `  compatibility: ${review.compatibility.status}`,
-          `  notes: ${formatCompatibility(review)}`,
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'provenance') {
-        const entry = resolveMarketplaceEntry(kind!, entryId!, ecosystemPaths);
-        if (!entry) throw unknownEntry(kind, entryId);
-        const review = await reviewEcosystemCatalogEntry(entry, ecosystemPaths);
-        ctx.print([
-          `Marketplace Provenance: ${entry.name}`,
-          `  source: ${entry.source}`,
-          `  provenance: ${entry.provenance ?? '(none declared)'}`,
-          `  version: ${entry.version ?? '(unspecified)'}`,
-          `  author: ${entry.author ?? '(unspecified)'}`,
-          `  signature: ${entry.signature ?? '(none declared)'}`,
-          `  compatibility: ${formatCompatibility(review)}`,
-          `  trust notes: ${entry.trustNotes ?? '(none)'}`,
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'install-hint') {
-        const entry = resolveMarketplaceEntry(kind!, entryId!, ecosystemPaths);
-        if (!entry) throw unknownEntry(kind, entryId);
-        ctx.print([
-          `Marketplace Install Guidance: ${entry.name}`,
-          `  kind: ${kind}`,
-          `  source: ${entry.source}`,
-          `  install hint: ${entry.installHint ?? 'Install from a local curated source with explicit scope.'}`,
-          `  trust notes: ${entry.trustNotes ?? '(none)'}`,
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'receipt') {
-        const scope = parseScope(args[3], ctx);
-        const result = inspectInstalledEcosystemEntry(kind!, entryId!, { ...ecosystemPaths, scope });
-        if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
-        const { receipt } = result;
-        ctx.print([
-          `Marketplace Receipt: ${receipt.entry.name}`,
-          `  installedAt: ${new Date(receipt.installedAt).toISOString()}`,
-          `  scope: ${receipt.scope}`,
-          `  targetPath: ${receipt.targetPath}`,
-          `  provenance: ${receipt.provenanceSummary}`,
-          `  compatibility: ${receipt.compatibility.status}`,
-          ...receipt.compatibility.reasons.map((reason) => `  note: ${reason}`),
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'history') {
-        const scope = parseScope(args[3], ctx);
-        const backups = listEcosystemInstallBackups(kind!, entryId!, { ...ecosystemPaths, scope });
-        ctx.print(backups.length > 0
-          ? [
-            `Marketplace Rollback History: ${kind} ${entryId}`,
-            ...backups.map((backup) => `  ${backup.id}  ${new Date(backup.createdAt).toISOString()}  ${backup.reason}  ${backup.receipt.entry.version ?? 'n/a'}`),
-          ].join('\n')
-          : `Marketplace Rollback History: ${kind} ${entryId}\n  No rollback backups recorded.`);
-        return;
-      }
-      if (sub === 'install' || sub === 'update' || sub === 'rollback' || sub === 'uninstall') {
-        const scope = parseScope(args[3], ctx);
-        if (sub === 'install') {
-          const result = installEcosystemCatalogEntry(kind!, entryId!, { ...ecosystemPaths, scope });
-          if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
-          ctx.print(`Installed curated ${kind} ${entryId} into ${result.receipt.targetPath}`);
-          return;
-        }
-        if (sub === 'update') {
-          const result = updateInstalledEcosystemEntry(kind!, entryId!, { ...ecosystemPaths, scope });
-          if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
-          ctx.print(`Updated curated ${kind} ${entryId} in ${result.receipt.targetPath}`);
-          return;
-        }
-        if (sub === 'rollback') {
-          const backupId = args[4];
-          const result = rollbackInstalledEcosystemEntry(kind!, entryId!, { ...ecosystemPaths, scope, backupId });
-          if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
-          ctx.print(`Rolled back curated ${kind} ${entryId} in ${result.receipt.targetPath} using backup ${result.restoredFrom.id}`);
-          return;
-        }
-        const result = uninstallEcosystemCatalogEntry(kind!, entryId!, { ...ecosystemPaths, scope });
-        if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
-        ctx.print(`Uninstalled curated ${kind} ${entryId} from ${result.removedPath}`);
-        return;
-      }
-      throw commandRefusal('Usage: /marketplace [open|overview|recommend|browse [query]|review <plugin|skill|hook-pack|policy-pack> <id>|provenance <plugin|skill|hook-pack|policy-pack> <id>|install-hint <plugin|skill|hook-pack|policy-pack> <id>|install <plugin|skill|hook-pack|policy-pack> <id> [project|user]|update <plugin|skill|hook-pack|policy-pack> <id> [project|user]|rollback <plugin|skill|hook-pack|policy-pack> <id> [project|user] [backupId]|history <plugin|skill|hook-pack|policy-pack> <id> [project|user]|uninstall <plugin|skill|hook-pack|policy-pack> <id> [project|user]|receipt <plugin|skill|hook-pack|policy-pack> <id> [project|user]|bundle export <path> [project|user]|bundle inspect <path>|bundle import <path> [project|user]|installed]');
-    },
-  });
+function readMarketplaceBundle(bundlePath: string, mode: 'inspect' | 'import'): EcosystemCatalogBundle {
+  try {
+    return JSON.parse(readFileSync(bundlePath, 'utf-8')) as EcosystemCatalogBundle;
+  } catch (error) {
+    throw commandRefusal(`Marketplace bundle ${mode} failed: could not read ${bundlePath} as JSON (${error instanceof Error ? error.message : String(error)}). Nothing was changed.`, undefined, 'BUNDLE_UNREADABLE');
+  }
 }

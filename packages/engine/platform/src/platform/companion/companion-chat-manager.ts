@@ -1468,6 +1468,7 @@ export class CompanionChatManager {
         signal: abortSignal,
         request,
         ...(turnFailover ? {
+          failoverAvailable: () => turnFailover.available(),
           failOver: (error: unknown) => {
             const moved = turnFailover(error);
             if (moved) { assistantContent = attemptBase; uncommittedContent = ''; }

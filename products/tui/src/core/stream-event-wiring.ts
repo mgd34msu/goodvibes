@@ -3,12 +3,9 @@ import type { NoticeLevel } from '@goodvibes-jev/engine/platform/platform/core';
 import type { StreamMetrics } from './stream-metrics.ts';
 import { createStreamStallWatchdog, type StallTimers } from './stream-stall-watchdog.ts';
 import { buildRoutingChip } from './model-routing-chip.ts';
-import { userErrorLine } from './format-user-error.ts';
-import { describeUserError, readUserErrorClass, type UserFacingError } from '@goodvibes-jev/engine/platform/platform/routing';
 import { createUserTurnOwner, type UserTurnOwner } from './user-turn.ts';
 import { ProviderSetupReadings, describeProviderSetup, type ProviderSetupClassification } from '../providers/provider-classification.ts';
 import type { ProviderRuntimeMetadata } from '@goodvibes-jev/engine/platform/platform/providers';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 
 // Preserve the existing wiring API while shared-state consumers use the leaf.
 export { createStreamMetrics, type StreamMetrics } from './stream-metrics.ts';
@@ -66,7 +63,7 @@ export interface WireStreamEventMetricsOptions {
   readonly orchestrator: StreamOrchestrator;
   /** Provider registry used by the stall watchdog to name the current provider. */
   readonly providerRegistry: StreamProviderRegistry;
-  /** System message router for turn-error and stall notifications. */
+  /** System message router for provider-switch and stall notifications. */
   readonly systemMessageRouter: StreamSystemMessageRouter;
   /** Trigger a UI repaint after a state mutation. */
   readonly render: () => void;
@@ -155,7 +152,7 @@ function billingChangedSuffix(from: ProviderSetupClassification, to: ProviderSet
  * Responsibilities:
  *   - Track stream start time, delta count, token speed, and TTFT
  *   - Track the currently executing tool name and start time
- *   - Display TURN_ERROR messages via systemMessageRouter
+ *   - Offer the failed turn's retry when a TURN_ERROR ends a user turn (its row is in the transcript)
  *   - Emit a stall hint when STREAM_START has no delta within the watchdog threshold
  */
 export function wireStreamEventMetrics(
@@ -287,41 +284,20 @@ export function wireStreamEventMetrics(
   }
 
   /**
-   * The error line was printed from structure at once. A reading of the
-   * wording may say more (a context overflow, a subscription session that
-   * ended); then it adds one line, never replaces or delays the first.
-   */
-  const refineErrorLater = (errVal: unknown, shown: UserFacingError, stillCurrent: () => boolean): void => {
-    void readUserErrorClass(errVal, 'tui.stream-error').then((reading) => {
-      if (reading.kind === shown.kind && !reading.sessionEnded) return;
-      if (closed || !stillCurrent() || options.isActive?.() === false) return;
-      systemMessageRouter.high(`[Error] ${userErrorLine(describeUserError(errVal, reading))}`, 'error');
-      render();
-    }, (error: unknown) => logger.debug('error reading failed', { error: String(error) }));
-  };
-
-  /**
-   * One failed turn. The error line is decided from facts already held, at
-   * once, from the status and errno. A provider failure reaches here only
-   * after the engine's turn loop tried the person's fallback order
-   * (providers/failover.ts) and said so in its [Failover] lines.
+   * One failed turn. Its failure row is already in the transcript (the
+   * orchestrator wrote it from the turn's facts, core/turn-failure.ts) and
+   * carries the next steps on its keys; no notice is shown over it. A provider
+   * failure reaches here only after the engine's turn loop tried the person's
+   * fallback order (providers/failover.ts). This offers the failed turn's
+   * retry (Alt+R) and repaints.
    */
   unsubs.push(userTurn.onFailure((failure) => {
     const event = failure.event;
     metrics.modelActive = false;
-    // The wire text alone can only be read by wording. When the emitter also carries the
-    // provider's status or errno code, the line fixes 401, 429 and network failures from those.
-    const errVal: unknown = event.status === undefined && event.code === undefined
-      ? event.error
-      : { message: event.error, ...(event.status === undefined ? {} : { status: event.status }), ...(event.code === undefined ? {} : { code: event.code }) };
-    const shown = describeUserError(errVal);
-    const errorClass = userErrorLine(shown);
     if (options.isActive?.() === false) return;
-    systemMessageRouter.high(`[Error] ${errorClass}`, 'error');
     // An event without a stop reason comes from an older emitter and is read as a provider failure.
     notifyErrorSurfaced(event.stopReason === undefined || event.stopReason === 'provider_error' || event.stopReason === 'provider_exhausted');
     render();
-    refineErrorLater(errVal, shown, failure.isCurrent);
   }));
 
   // --- Stream stall watchdog: emit a low hint each time a no-delta gap (at

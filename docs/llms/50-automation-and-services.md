@@ -38,49 +38,54 @@ A routine is a prompt that runs on a schedule. Each time it fires it produces a 
 | `at` | One date and time, ISO form; read in this machine's zone when it has no zone | `2026-12-01T09:00` |
 | `when` | Natural language, read by the decision model into one of the three above | `"every weekday at 9am"` |
 
-### Terminal app: `/schedule`
+### `/schedule`, in both programs
+
+`/schedule` alone opens its list of actions (in a script or for a model it prints the schedules, as "See your schedules" does). Both programs take the same lines; the terminal app keeps a schedule with the daemon (or runs it itself while the daemon is off), the Agent keeps it on its connected host. A line with something missing opens the step that asks for it.
+
+| Action | Line | Risk |
+| --- | --- | --- |
+| See your schedules | `/schedule list` | |
+| Schedule something to run | `/schedule add (--when <words> \| --at <date> \| --every <interval> \| --cron <pattern>) [options] <what it does...>` | |
+| Run one now | `/schedule run <schedule>` | |
+| Pause one | `/schedule pause <schedule>` (picked from the ones that run) | |
+| Resume one | `/schedule resume <schedule>` (picked from the paused ones) | |
+| Change a schedule | `/schedule change <schedule> [--when ... \| --at ... \| --every ... \| --cron ...] [--tz <zone>] [--stagger <duration>] [--name <name>] [--task <task> --success-criteria <result>] [<what it does...>]` | |
+| Remove one | `/schedule remove <schedule>` | cannot be undone |
 
 ```text
-/schedule list
-/schedule add cron "0 9 * * 1-5" "summarize open pull requests" --tz America/Chicago
-/schedule add every 15m "check the build status"
-/schedule add at 2026-12-01T09:00 "send the release reminder"
-/schedule add when "every weekday at 9am" "post the standup summary"
-/schedule enable <id>
-/schedule disable <id>
-/schedule run <id>
-/schedule remove <id>
+/schedule add --when "every weekday at 9am" post the standup summary
+/schedule add --cron "0 9 * * 1-5" --tz America/Chicago summarize open pull requests
+/schedule add --every 15m check the build status
+/schedule add --at 2026-12-01T09:00 send the release reminder
+/schedule pause weekly-report
 ```
 
-`/sched` is an alias. Options for `add` (they may appear anywhere after the schedule value; a prompt word that starts with `--` must be quoted):
+A schedule is named by its id, its name or the start of its id (one that names more than one is refused with the candidates). Options of `add` ("Anything else?" in the guided form; each blank keeps the usual setting):
 
 | Option | Meaning |
 | --- | --- |
-| `--name <name>` | Routine name; default is the first 40 characters of the prompt. |
+| `--name <name>` | Its name; default is the first 40 characters of what it does. |
 | `--model <model>`, `--provider <provider>` | The model to run it with. |
 | `--fallback <a,b>` | Fallback models. |
 | `--reasoning <level>`, `--thinking <mode>` | Reasoning effort and thinking mode. |
-| `--target main\|current\|isolated\|pinned\|background\|session:<id>` | Which session the run uses. |
+| `--target isolated\|main\|background\|pinned` | Where it runs: a fresh conversation each time (the usual), the main conversation, a background session, or the pinned one. |
 | `--wake now\|next-heartbeat` | Run at once when due, or with the next heartbeat. |
 | `--template <tmpl>` | A prompt template. |
 | `--tool <name>` | Allow only these tools (repeat the option). A run limited this way does not get the mail and calendar tool unless `--tool google` is given. |
 | `--deliver <channel>` | Where each run's answer goes: a channel written as in settings, `telegram`, `slack:C123` and so on (`telegram` alone uses `surfaces.telegram.defaultChatId`). Without it the answer goes to the owner inbox. |
 | `--external-source <kind>` | Marks where outside content comes from. |
-| `--allow-unsafe-external-content` | Lets outside content in unscreened. |
+| `--allow-unsafe-external-content` | May act on content from outside sources ("Yes" loosens a protection: it asks first, and a model's line is refused). |
+| `--paused` | Kept, but runs only once resumed. |
 | `--light-context` | Run with a small context. |
-| `--tz <zone>`, `--stagger <ms>` | Cron only. |
+| `--tz <zone>`, `--stagger <duration>` | For a pattern or a description: its time zone, and a spread of the start (such as `5m`). |
 
 Successful `add` output (the id is generated):
 
 ```text
-Routine created: job-3f9c2a1b7d
-  name: check the build status
-  schedule: every 15m
-  next run: 2026-11-18 10:15 America/Chicago (runs once, with or without a terminal open)
-  answer goes to: the owner inbox
+Scheduled.
+"check the build status": every 15m; next run 2026-11-18 10:15 America/Chicago (runs once, with or without a terminal open).
+The answer goes to your owner inbox. Id job-3f9c2a1b7d.
 ```
-
-An id may be given as a unique prefix. An ambiguous prefix is refused with the candidates, and nothing changes.
 
 With `daemon.enabled` off, the terminal that holds the routine lock keeps and runs the routines while it is open (`kept and run by this terminal (daemon off)`); another terminal can list them but not change them. When the daemon is turned on later, routines kept by a terminal are moved to the daemon and the move is reported.
 
@@ -88,40 +93,20 @@ Failures:
 
 | Message | Fix |
 | --- | --- |
-| `Routines are kept and run by the GoodVibes daemon ... it cannot be reached: <reason> Nothing was scheduled or changed.` | Start the daemon; check `goodvibes status`. |
-| `Not scheduled: "<value>" is not a date and time.` | Use an ISO timestamp. |
-| `Not scheduled: <time> has already passed.` | Pick a future time. |
-| `Not scheduled: the timing is <reason>; give it as cron, every or at instead.` | The decision model could not read the phrase, or none is set. Use `cron`, `every` or `at`. |
-| `Unknown option --x.` | Use one of the listed options. |
+| `Schedules are kept and run by the GoodVibes daemon ... it cannot be reached: <reason> Nothing was scheduled or changed.` | Start the daemon; check `goodvibes status`. |
+| `Not kept: "<value>" is not a date and time. ...` | Use an ISO timestamp. |
+| `Not kept: <time> has already passed.` | Pick a future time. |
+| `Not kept: the timing is <reason>; give it as a date (--at), an interval (--every) or a pattern (--cron) instead.` | The decision model could not read the words, or none is set. Use `--at`, `--every` or `--cron`. |
+| `/schedule add has no option --x.` | Use one of the listed options. |
 
-### The Agent: `/schedule` and `/automation`
+### The Agent: `/routines promote` and `/automation`
 
-The Agent's `/schedule` manages the connected daemon's schedules and reminders:
-
-```text
-/schedule list
-/schedule remind --at 2026-12-01T09:00:00Z --message "renew the passport" --yes
-/schedule remind --cron "0 8 * * 1" --timezone Europe/Berlin --delivery-channel telegram "weekly review" --yes
-/schedule edit <schedule-id> --cron "0 7 * * *" --revision <rev> --yes
-/schedule run <schedule-id> --yes
-/schedule enable <schedule-id> --yes
-/schedule disable <schedule-id> --yes
-/schedule delete <schedule-id> --yes
-/schedule receipts
-/schedule receipt <receipt-id>
-/schedule reconcile
-/schedule promote-routine <routine-id> --cron "0 9 * * *" --timezone America/Chicago --yes
-```
-
-Delivery options for `remind` and `promote-routine`: `--delivery-channel <channel[:route]>`, `--delivery-route <route>`, `--delivery-webhook <url>`, `--delivery-link <name>`; `--disabled` creates it switched off. Every change needs `--yes`.
+An Agent routine becomes a schedule on the connected host with `/routines promote <routine-id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <name>] [--delivery-channel <channel[:route]>|--delivery-route <route>|--delivery-webhook <url>|--delivery-link <name>] [--disabled] --yes`; `/routines receipts`, `/routines receipt <id>` and `/routines reconcile` read what promotion recorded. From the shell: `goodvibes-agent routines promote <routine-id> --cron "0 9 * * *" --timezone America/Chicago --yes`.
 
 ```text
 /automation job <run|pause|resume> <job-id> --yes
 /automation run <cancel|retry> <run-id> --yes
-/automation schedule <run|enable|disable|delete> <schedule-id> --yes
 ```
-
-From the shell: `goodvibes-agent routines promote <routine-id> --cron "0 9 * * *" --timezone America/Chicago --yes`.
 
 ### The model's `schedule` tool
 
@@ -143,34 +128,32 @@ The model can list and create schedules with the `schedule` tool (its inputs are
 
 ### Where a routine's result goes, and what a routine can use
 
-- Each run's answer goes to the surface named on the routine. The terminal app's `/schedule add` takes `--deliver <channel>`; the Agent's `/schedule remind` and `/schedule promote-routine`, and the Agent model's schedule tools, take `--delivery-channel <surface>` (for example `telegram`), `--delivery-channel <surface>:<route id>`, `--delivery-route <route id>`, `--delivery-webhook <url>` or `--delivery-link <name>`. In the Agent's flags the part after `:` is a route binding id, not a chat id. A Telegram delivery with no route or address goes to `surfaces.telegram.defaultChatId`; with neither, that send fails with `Missing Telegram chat id`.
+- Each run's answer goes to the surface named on the routine. `/schedule add` takes `--deliver <channel>` in both programs; `/routines promote` and the Agent model's schedule tools take `--delivery-channel <surface>` (for example `telegram`), `--delivery-channel <surface>:<route id>`, `--delivery-route <route id>`, `--delivery-webhook <url>` or `--delivery-link <name>`. In the Agent's flags the part after `:` is a route binding id, not a chat id. A Telegram delivery with no route or address goes to `surfaces.telegram.defaultChatId`; with neither, that send fails with `Missing Telegram chat id`.
 - A routine that names no surface, or whose every named surface failed, leaves its answer in the owner inbox as a report titled `Scheduled run: <name>` (the answer, cut at about 3,800 characters; when a send failed, the reason first). It stays open until you answer it `read` (`/inbox`, the web UI's Work view, or a channel). A failed or missed run of such a routine leaves `Scheduled run failed: <name>` (or `missed`) there too. Every run is also kept in the run history (the web UI and the `automation.runs.*` methods). The routine itself keeps how its last run ended for the person as `lastOutcome`: `delivered` (a named surface took it), `not-delivered` (every named surface failed; it went to the inbox instead), `inbox` (it names no surface) or `failed` (the run failed); It is on the routine's record (`automation.jobs.list`) and on its fleet node (`schedule.lastOutcome`).
 - A routine the terminal app keeps itself (with `daemon.enabled` off) has no owner inbox to fall back to: an answer with no surface is kept only in its run history.
 - A run's answer is owed from the moment the run ends (saved with the run's end) until its delivery is recorded. A daemon that stops in between delivers it at its next start, under the same identity, so a surface that drops repeats drops a second copy. A one-shot routine is removed only once its run's answer was delivered.
-- `/schedule remind` does not send its text as is: at each run a model turn is started with the text framed as a reminder ("GoodVibes Agent scheduled reminder. Reminder: <text> ... Keep the reminder concise and state any next action"), and its answer is delivered.
+- The model's `schedule` tool with `action:"remind"` does not send its text as is: at each run a model turn is started with the text framed as a reminder ("GoodVibes Agent scheduled reminder. Reminder: <text> ... Keep the reminder concise and state any next action"), and its answer is delivered. `/schedule add` sends what it does as written.
 - A scheduled run is an agent the daemon starts with the platform's tool set (files, shell, fetch, web search, MCP, channel tools, and the like). Once you have connected mail or a calendar (a Google account with `/google connect`, or a CalDAV server in `surfaces.calendar.caldavUrl` and `surfaces.calendar.caldavUser`), it also gets the `google` tool: `mail.list` and `mail.read` on the connected Gmail, and `calendar.list` on the daemon's calendar (the CalDAV server when one is set, otherwise the Google calendar). Its calls pass the same permission gate as any turn. A send or a calendar event it makes may not carry what it read from mail or a calendar, and `calendar.create` is refused in a scheduled run (nobody asked for that event at that moment). A routine limited with `--tool` gets the tool only when `google` is listed.
 
 ### A daily 8 am summary of mail and calendar delivered to Telegram
 
 1. Connect the mail and calendar to the daemon: in the Agent, `/google connect` (Gmail and Google Calendar over OAuth, Path B in "Google" below: the model's `google` tool reads mail only through it, in a conversation as in a scheduled run), or set a CalDAV server for the calendar. `/google status` shows the connection.
 2. Set up Telegram as in "Telegram" (owner claim accepted) and give it a delivery chat: `/config set surfaces.telegram.defaultChatId <your-numeric-id>`.
-3. Create the routine in the terminal app:
+3. Create the schedule (either program):
 
    ```text
-   /schedule add cron "0 8 * * *" --tz America/Chicago --deliver telegram "Summarize my unread mail from the last 24 hours and today's calendar events. Group the mail by sender and give the events in time order."
+   /schedule add --cron "0 8 * * *" --tz America/Chicago --deliver telegram Summarize my unread mail from the last 24 hours and today's calendar events. Group the mail by sender and give the events in time order.
    ```
 
    ```text
-   Routine created: job-3f9c2a1b7d
-     name: Summarize my unread mail from the last
-     schedule: cron 0 8 * * * (America/Chicago)
-     next run: 2026-11-20 08:00 America/Chicago (runs once, with or without a terminal open)
-     answer goes to: telegram
+   Scheduled.
+   "Summarize my unread mail from the last": 0 8 * * * [America/Chicago]; next run 2026-11-20 08:00 America/Chicago (runs once, with or without a terminal open).
+   The answer goes to telegram. Id job-3f9c2a1b7d.
    ```
 
 4. Try it at once: `/schedule run job-3f9c2a1b7d`. The run reads the mail and the calendar with the `google` tool and its answer arrives in your Telegram chat. If the send fails (the bot cannot reach the chat), the answer is in the owner inbox instead, with the reason.
 
-In the Agent the same routine is `/schedule remind --cron "0 8 * * *" --timezone America/Chicago --delivery-channel telegram --message "Summarize my unread mail from the last 24 hours and today's calendar events" --yes`; its run is framed as a reminder (see above) and has the same tools.
+In the Agent the same line keeps the schedule on the connected host; its run has the same tools.
 
 ## Supervised triggers
 
@@ -194,18 +177,21 @@ Stored triggers start being supervised at once. Triggers are saved in `triggers.
 
 ### `/triggers`
 
-```text
-/triggers                         status of the selected daemon's supervisor
-/triggers list
-/triggers history <id> [count]
-/triggers create <definition JSON>
-/triggers cancel <id>
-/triggers reset <id>
-/triggers grants
-/triggers grant <id> <command> [args...]
-```
+`/triggers` alone opens its list of actions (in a script or for a model it prints the supervisor's state and the triggers, as "See your triggers" does). A line with something missing opens the step that asks for it.
 
-The model creates, lists, cancels and resets triggers with the `trigger` tool. Only the owner registers a grant: `/triggers grant` typed by the model is refused.
+| Action | Line | Risk |
+| --- | --- | --- |
+| See your triggers | `/triggers list` (who supervises them, then each trigger) | |
+| Watch for something | `/triggers watch <name> [-- <command>...] [--match <pattern>] [--url <address>] [--file <path>] [--definition <json>] [--every <interval>] [--say <text>] [--deliver <channel>] [--run <approved command>]` | |
+| See what a trigger did | `/triggers history <trigger> [--count <1-200>]` | |
+| Stop a trigger | `/triggers stop <trigger>` | cannot be undone |
+| Start a trigger that gave up | `/triggers restart <trigger>` | |
+| See commands triggers may run | `/triggers commands` | |
+| Let triggers run a command | `/triggers allow-command <name> -- <command>...` | loosens a protection |
+
+"Watch for something" asks what to watch: a command finishing (the command after `--`; an `on-exit` trigger), a line a command prints (`--match`; a `stream` trigger), a web address changing (`--url`, looked at `--every`, default 5m; a `condition` with an `http` probe and a `change` rule), a file changing (`--file`, likewise with a `file` probe), or something else written out (`--definition`, the `{ "spec": ..., "action": ... }` JSON below, for any probe, rule or action). Its id is made from the name. Then it asks what happens: the agent looks at it (`--say` adds your instructions; `--deliver` names the channel its answer goes to, else the owner inbox), or a command you let triggers run (`--run`).
+
+The model creates, lists, cancels and resets triggers with the `trigger` tool. Only the owner lets triggers run a command: `/triggers allow-command` from a model is refused before anything is asked.
 
 ### Definition JSON
 
@@ -229,7 +215,7 @@ Why it fired: <reason>
 Act on what this actually indicates. Verify before assuming anything the trigger did not directly observe.
 ```
 
-`{"kind":"agent-turn","prompt":"<text>"}` puts `<text>`, a blank line, then that message. `{"kind":"agent-turn","model":"<provider:model>"}` runs the turn on that model; without it the supervising process's default model is used. A `sessionId` in an agent-turn action is refused on a new trigger. When the turn ends its answer is delivered: to the channel `deliverTo` names (`{"kind":"agent-turn","deliverTo":"telegram"}`, or `"slack:C123"`; written as in settings), else to the owner inbox as a report titled `Trigger <label>`. A send that fails puts the answer in the owner inbox with the reason. A `deliverTo` that names no delivery surface is refused when the trigger is created. The firing is also recorded in the trigger's runs (`/triggers history <id>`, with the action's result, `agent:<id>`) and the turn appears with the supervising process's agents (the web UI Work view for the daemon). The turn gets the same tools as a scheduled run, the `google` mail and calendar tool included once mail or a calendar is connected. `{"kind":"action-grant","grantId":"<id>","digest":"<digest>"}` runs a command the owner approved with `/triggers grant`; the grant answer prints the exact action JSON to use.
+`{"kind":"agent-turn","prompt":"<text>"}` puts `<text>`, a blank line, then that message. `{"kind":"agent-turn","model":"<provider:model>"}` runs the turn on that model; without it the supervising process's default model is used. A `sessionId` in an agent-turn action is refused on a new trigger. When the turn ends its answer is delivered: to the channel `deliverTo` names (`{"kind":"agent-turn","deliverTo":"telegram"}`, or `"slack:C123"`; written as in settings), else to the owner inbox as a report titled `Trigger <label>`. A send that fails puts the answer in the owner inbox with the reason. A `deliverTo` that names no delivery surface is refused when the trigger is created. The firing is also recorded in the trigger's runs (`/triggers history <trigger>`, with the action's result, `agent:<id>`) and the turn appears with the supervising process's agents (the web UI Work view for the daemon). The turn gets the same tools as a scheduled run, the `google` mail and calendar tool included once mail or a calendar is connected. `{"kind":"action-grant","grantId":"<id>","digest":"<digest>"}` runs a command the owner let triggers run with `/triggers allow-command`; `/triggers commands` shows each one's digest.
 
 Spec fields:
 
@@ -267,16 +253,16 @@ Rules:
 Example: fire when a health endpoint stops answering `ok` three checks in a row.
 
 ```text
-/triggers create {"id":"health","label":"API health","spec":{"kind":"condition","probe":{"kind":"http","url":"https://api.example.com/health","capture":"body"},"extract":{"kind":"raw"},"rule":{"kind":"debounce-n","count":3,"inner":{"kind":"value","operator":"ne","operand":"ok"}},"intervalMs":60000}}
+/triggers watch "API health" --definition '{"spec":{"kind":"condition","probe":{"kind":"http","url":"https://api.example.com/health","capture":"body"},"extract":{"kind":"raw"},"rule":{"kind":"debounce-n","count":3,"inner":{"kind":"value","operator":"ne","operand":"ok"}},"intervalMs":60000}}'
 ```
 
 ### Trigger states and failures
 
-- Only an `on-exit` trigger finishes when it fires (state `fired`, final). A `condition` or `stream` trigger records each firing (`firedCount`, a `fired` entry in its runs) and keeps watching. A cancelled trigger is finished. Cancelling a running `on-exit` trigger stops its process and records the run's termination as `cancel-requested` (not observed) until the supervisor sees the process end, then as what it saw (`signalled` or `exited`, reason `cancelled`); a process started before a daemon restart is not ours to stop, so its cancel records no termination and says the process was not stopped. `reset` applies only to `idle`, `backoff`, `circuit-open` and `failed` triggers; resetting another is refused with what to do instead.
+- Only an `on-exit` trigger finishes when it fires (state `fired`, final). A `condition` or `stream` trigger records each firing (`firedCount`, a `fired` entry in its runs) and keeps watching. A cancelled trigger is finished. Cancelling a running `on-exit` trigger stops its process and records the run's termination as `cancel-requested` (not observed) until the supervisor sees the process end, then as what it saw (`signalled` or `exited`, reason `cancelled`); a process started before a daemon restart is not ours to stop, so its cancel records no termination and says the process was not stopped. "Start a trigger that gave up" (`/triggers restart`) applies only to `idle`, `backoff`, `circuit-open` and `failed` triggers; another is refused with what to do instead.
 - A failing check backs off along `watchers.triggers.backoffLadderMs`; after `watchers.triggers.breakerStrikes` failures in a row the breaker opens (`circuit-open`) until reset.
 - An action that fails to deliver is kept owed and delivered again when due, once at a time: an action slower than the supervision tick is not started a second time, and a batch leaves the owed list only when the attempt that delivered it ends. A stream keeps at most eight undelivered batches; a dropped one is recorded in the trigger's runs.
 - A save that fails sets `lastError` to `not saved: <cause> (<path>)` and is retried on the next tick; the trigger keeps running.
-- `/triggers` answers `/triggers <verb> was not done: <reason>` when the daemon refuses.
+- `/triggers` answers `<what> was not done: <reason>` when the daemon refuses (for example `Stopping it was not done: ...`).
 
 ## Watchers
 

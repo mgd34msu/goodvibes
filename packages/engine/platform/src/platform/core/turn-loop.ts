@@ -40,6 +40,13 @@ export type TurnSpeaker = 'owner' | 'parent-agent';
 
 /** Waits before each retry of a request whose failure is retryable; one list for every caller. */
 export const TURN_RETRY_DELAYS_MS: readonly number[] = Object.freeze([5_000, 10_000, 20_000, 40_000, 60_000]);
+/**
+ * The waits when the turn has a fallback model to move to: one short retry
+ * (a passing blip), then the move. A server asking to wait longer than this is
+ * not waited for; the turn moves at once. The full ladder above is for a model
+ * with nowhere to go.
+ */
+export const TURN_RETRY_DELAYS_WITH_FAILOVER_MS: readonly number[] = Object.freeze([2_000]);
 /** A server asking to come back later than this is not waited for: the failure is reported instead. */
 const MAX_RETRY_AFTER_MS = 5 * 60_000;
 /** Drafts the completion check may send back in one turn; the next one is shown with what was not verified. */
@@ -196,8 +203,10 @@ export interface TurnContext {
   awaitDelegates?(signal: AbortSignal, round?: TurnToolRound): Promise<boolean>;
   /** Waits before each retry of a request whose failure is retryable; absent: no retry. */
   readonly retryDelaysMs?: readonly number[] | undefined;
-  /** Told before each retry wait (an event, a progress line). */
-  onRetry?(attempt: number, delayMs: number, error: unknown, failure: FailureClassification): void;
+  /** Told before each retry wait (an event, a progress line); `plan` is the waits in force and whether a move follows them. */
+  onRetry?(attempt: number, delayMs: number, error: unknown, failure: FailureClassification, plan: RetryPlan): void;
+  /** Whether a provider failure now would move the turn to another model (TurnFailover.available). */
+  failoverAvailable?(): boolean;
   /** The retry wait itself; absent: a timer bound to the turn's signal. */
   waitBeforeRetry?(delayMs: number, signal: AbortSignal): Promise<void>;
   /**
@@ -240,9 +249,18 @@ export class TurnEnded extends Error {
   }
 }
 
+/** The retry waits a failed request gets, and whether the turn moves to another model once they are spent. */
+export interface RetryPlan {
+  readonly delaysMs: readonly number[];
+  readonly thenFailover: boolean;
+}
+
 async function requestWithRetry(ctx: TurnContext, request: Omit<TurnRequest, 'attempt'>): Promise<TurnModelResponse> {
-  const delays = ctx.retryDelaysMs ?? [];
   for (let attempt = 0; ; attempt++) {
+    // With a fallback model to go to, a failing model gets one short retry,
+    // not minutes of waiting: the person's order says where to go instead.
+    const thenFailover = ctx.failoverAvailable?.() === true;
+    const delays = thenFailover ? TURN_RETRY_DELAYS_WITH_FAILOVER_MS : ctx.retryDelaysMs ?? [];
     let shown = false;
     try {
       return await ctx.request({ ...request, attempt, onDelta: (text) => { shown = true; request.onDelta(text); } });
@@ -254,7 +272,7 @@ async function requestWithRetry(ctx: TurnContext, request: Omit<TurnRequest, 'at
       const retryable = failure?.retryable === true && wait !== undefined
         // Text already shown cannot be taken back; a second attempt would show the answer again after it.
         && !shown
-        && (failure.retryAfterMs ?? 0) <= MAX_RETRY_AFTER_MS
+        && (failure.retryAfterMs ?? 0) <= (thenFailover ? wait : MAX_RETRY_AFTER_MS)
         // A spent account is reported under a rate limit by some providers; waiting never clears it.
         && !(failure.category === 'rate_limit' && await isBillingOrCreditError(error, 'core.turn-loop.rate-limit-retry'));
       if (!retryable || failure === undefined || wait === undefined) {
@@ -268,7 +286,7 @@ async function requestWithRetry(ctx: TurnContext, request: Omit<TurnRequest, 'at
         throw error;
       }
       const delayMs = Math.max(wait, failure.retryAfterMs ?? 0);
-      ctx.onRetry?.(attempt + 1, delayMs, error, failure);
+      ctx.onRetry?.(attempt + 1, delayMs, error, failure, { delaysMs: delays, thenFailover });
       try {
         if (ctx.waitBeforeRetry) await ctx.waitBeforeRetry(delayMs, ctx.signal);
         else await delay(delayMs, undefined, { signal: ctx.signal });

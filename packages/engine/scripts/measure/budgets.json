@@ -1,8 +1,8 @@
 {
   "about": "Speed budgets checked by `bun run measure:check` (packages/engine/scripts/measure/run.ts --check). Counts may not grow; bytes written may grow 10%; wall time is compared only as a ratio inside one run. To change a budget on purpose, run `bun run measure -- --write-budgets packages/engine/scripts/measure/budgets.json` (add --only <names> to rewrite only those scenarios) and commit the diff with the reason.",
   "recorded": {
-    "commit": "76a19407a",
-    "measuredAt": "2026-11-20T05:03:49.892Z",
+    "commit": "e542e7fde",
+    "measuredAt": "2026-11-20T06:52:11.295Z",
     "bun": "1.3.14"
   },
   "scenarios": {
@@ -32,6 +32,19 @@
         "bytesWritten": 0
       }
     },
+    "approval-list-50": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 0
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
     "approval-raise-answer": {
       "counts": {
         "decisionRequests": 0,
@@ -42,7 +55,20 @@
         "sqliteStatements": 0
       },
       "bytes": {
-        "bytesWritten": 121216
+        "bytesWritten": 1505
+      }
+    },
+    "approval-raise-approve": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 3,
+        "fsyncs": 3,
+        "sqliteStatements": 0
+      },
+      "bytes": {
+        "bytesWritten": 2904
       }
     },
     "automation-run-settle": {

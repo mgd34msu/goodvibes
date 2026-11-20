@@ -67,13 +67,11 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
       // The outcome goes back to the modal so it never claims a send that did not happen.
       // The draft's own attachment travels with it: sent only to the session it was written for.
       steerHosted: (text, binding) => sayToHosted(commandContext, text, undefined, binding),
-      sessionCost: () => {
-        const cost = views.usage.sessionCost();
-        return cost.priced ? cost.usd : null;
-      },
       confirm: (confirmOptions) => confirmThrough(host, confirmOptions),
       requestRender: render,
       openSessionView: (target) => commandContext.openSessionView?.(target) ?? false,
+      // Finished work listed is this run's: the service's older finished rows stay in its own history.
+      sessionStartedAt: Math.floor(performance.timeOrigin),
     });
     if (opts.target) modal.reveal(opts.target);
     if (opts.hosted) modal.showHosted();

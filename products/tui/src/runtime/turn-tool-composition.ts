@@ -92,7 +92,7 @@ export function createTuiTurnPermissionManager(services: RuntimeServices, reques
       ),
       requestTrustDecision, // indirection through the ref, not bound early. main.ts patches the real impl in later
     ),
-    createPermissionConfigReader(services.configManager),
+    createPermissionConfigReader(services.configManager, services.secretsManager),
     services.policyRuntimeState,
     services.hookDispatcher,
     services.featureFlags,

@@ -386,12 +386,12 @@ function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
         confirmation: 'agent_harness mode:"run_keybinding" requires current recorded Jev effect admission.',
         note: 'Runs the available clear-screen route.',
       };
-    case 'activity-open':
+    case 'open-agents':
       return {
         supported: false,
         effect: 'visible-ui-navigation',
         confirmation: 'Direct user interaction only.',
-        note: 'Opens the Activity modal (running work, what needs you, what is coming up, recent activity).',
+        note: 'Opens Your agents (what is running, what waits for you, what is scheduled, background services).',
       };
     case 'command-palette':
       return {

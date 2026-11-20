@@ -9,7 +9,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { resolveAndValidatePath } from '../utils/path-safety.js';
 import type { BrowserContext, Locator, Page, Route, WebSocketRoute } from 'playwright-core';
-import { checkDestination, createHostAdmission, DestinationRefusedError, type ResolvedAddressRange } from '../runtime/network/destination.js';
+import { checkDestination, createHostAdmission, DestinationRefusedError, pinnedFetch, type ResolvedAddressRange } from '../runtime/network/destination.js';
 import { BrowserSessionError, BrowserSessionManager, hasDisplay } from './browser-sessions.js';
 import { isPaymentCheckoutAction, ORDER_SUBMIT_REFUSAL_FIX, placesOrder } from '../security/order-submission.js';
 import type { BrowserAttachOptions, BrowserLaunchOptions, RestoredBrowserPage } from './browser-sessions.js';
@@ -102,6 +102,11 @@ class BrowserClickOutcomeUnknownError extends Error {
 
 /** No settings to read: no private host is listed as approved, so a private one needs the owner's approval. */
 const NO_CONFIG = { get: (): unknown => undefined };
+
+/** Headers the pinned fetch sets for itself (the written host, the body's length) or that belong to one connection. */
+const PINNED_DROPPED_REQUEST_HEADERS: ReadonlySet<string> = new Set(['host', 'content-length', 'connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'proxy-connection']);
+/** The fetched body is handed over decoded and whole, so its encoding and framing headers no longer describe it. */
+const PINNED_DROPPED_RESPONSE_HEADERS: ReadonlySet<string> = new Set(['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'keep-alive', 'set-cookie']);
 
 /** Ranges the owner may allow a page to reach (his own machine and network); metadata, link-local and reserved ranges never. */
 const OWNER_APPROVABLE_RANGES: ReadonlySet<ResolvedAddressRange | 'scheme' | 'unresolved'> = new Set(['private', 'loopback', 'unique-local', 'shared']);
@@ -452,7 +457,7 @@ export class BrowserEngine {
     if (parsed.protocol === 'file:') return 'local';
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return 'public';
     try {
-      await checkDestination(parsed, 'browser-page', { config: this.options.destinationConfig ?? NO_CONFIG });
+      await checkDestination(parsed, 'browser-page', { config: this.options.destinationConfig ?? NO_CONFIG, ...this.resolverOption() });
       return 'public';
     } catch (error) {
       if (error instanceof DestinationRefusedError && OWNER_APPROVABLE_RANGES.has(error.range)) return 'local';
@@ -494,8 +499,15 @@ export class BrowserEngine {
     let context: BrowserContext;
     try { context = page.context(); } catch { return; }
     if (this.hostAdmissions.has(context)) return;
-    const admit = createHostAdmission('browser-page', this.options.destinationConfig ?? NO_CONFIG);
+    const config = this.options.destinationConfig ?? NO_CONFIG;
+    const admit = createHostAdmission('browser-page', config, this.resolverOption());
     this.hostAdmissions.set(context, admit);
+    const block = (url: string): void => {
+      const origin = this.untrusted.originOf(url.replace(/^ws/, 'http'));
+      const blocked = this.blockedOrigins.get(sessionId) ?? new Set<string>();
+      blocked.add(origin);
+      this.blockedOrigins.set(sessionId, blocked);
+    };
     const allowed = async (url: string): Promise<boolean> => {
       let parsed: URL;
       try { parsed = new URL(url); } catch { return true; }
@@ -510,8 +522,13 @@ export class BrowserEngine {
       this.blockedOrigins.set(sessionId, blocked);
       return false;
     };
+    // browser.network.pinned, read when the context is first guarded: every
+    // HTTP request is resolved and checked afresh and fetched by this process
+    // from the address that passed, so the browser never resolves a name itself.
+    const pinned = config.get('browser.network.pinned') === true;
     void context.route('**/*', async (route: Route) => {
       try {
+        if (pinned && await this.fulfilPinned(sessionId, route, config, block)) return;
         if (await allowed(route.request().url())) await route.continue();
         else await route.abort('blockedbyclient');
       } catch {
@@ -526,6 +543,55 @@ export class BrowserEngine {
         // The page or context went away while the connection was held.
       }
     }).catch(() => { /* a context that cannot intercept WebSockets still has its HTTP requests held */ });
+  }
+
+  private resolverOption(): { readonly resolver?: NonNullable<BrowserEngineOptions['destinationResolver']> } {
+    return this.options.destinationResolver ? { resolver: this.options.destinationResolver } : {};
+  }
+
+  /**
+   * Pinned mode for one HTTP request: resolve and check the host now
+   * (`checkDestination`, purpose `browser-page`), fetch the request from the
+   * address that passed (`pinnedFetch`, the connection `egress` makes; TLS
+   * still checks the written name), and hand the answer to the page. A
+   * redirect is handed back as it is, so the browser's next request comes
+   * through here and is checked again. A refused host is aborted and
+   * reported, except a private or loopback origin the owner allowed for a page
+   * of this session, which the browser reaches itself. Returns false for a
+   * request this mode leaves to the ordinary check (not http or https).
+   */
+  private async fulfilPinned(sessionId: string, route: Route, config: { get(key: string): unknown }, block: (url: string) => void): Promise<boolean> {
+    const request = route.request();
+    const url = request.url();
+    let parsed: URL;
+    try { parsed = new URL(url); } catch { return false; }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    let checked: Awaited<ReturnType<typeof checkDestination>>;
+    try {
+      checked = await checkDestination(parsed, 'browser-page', { config, ...this.resolverOption() });
+    } catch (error) {
+      if (error instanceof DestinationRefusedError && OWNER_APPROVABLE_RANGES.has(error.range) && this.sessionAllowsOrigin(sessionId, this.untrusted.originOf(url))) {
+        await route.continue();
+        return true;
+      }
+      block(url);
+      await route.abort('blockedbyclient');
+      return true;
+    }
+    const headers: Record<string, string> = {};
+    for (const [name, value] of Object.entries(request.headers())) {
+      if (!PINNED_DROPPED_REQUEST_HEADERS.has(name.toLowerCase())) headers[name] = value;
+    }
+    const body = request.postDataBuffer();
+    const response = await pinnedFetch(checked.url.toString(), {
+      method: request.method(), headers, redirect: 'manual', ...(body ? { body } : {}),
+    }, checked.addresses);
+    const answered: Record<string, string> = {};
+    response.headers.forEach((value, name) => { if (!PINNED_DROPPED_RESPONSE_HEADERS.has(name)) answered[name] = value; });
+    const cookies = response.headers.getSetCookie();
+    if (cookies.length > 0) answered['set-cookie'] = cookies.join('\n');
+    await route.fulfill({ status: response.status, headers: answered, body: Buffer.from(await response.arrayBuffer()) });
+    return true;
   }
 
   /** Whether the owner allowed `origin` for any page of the session (a local page and what it loads). */

@@ -436,6 +436,7 @@ export function resolveDaemonFacadeRuntime(
       hookDispatcher: runtimeServices.hookDispatcher,
       featureFlags: runtimeServices.featureFlags,
       userRuleStore: runtimeServices.userPermissionRuleStore,
+      secretsManager: runtimeServices.secretsManager,
     }),
     hookDispatcher: runtimeServices.hookDispatcher,
     // The per-session limit follows runtime.companionChatLimiter.perSessionLimit on every check, not only the boot environment.

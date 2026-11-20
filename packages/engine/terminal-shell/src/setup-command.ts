@@ -9,7 +9,7 @@
  * topics it can open (its own form for each) and any actions only it has; a
  * topic a program does not pass is not listed there.
  */
-import type { ActionDescription, CommandDescription, FirstScreenGroup } from './command-actions/types.js';
+import type { ActionDescription, ActionValues, CommandDescription, FirstScreenGroup, InputDescription } from './command-actions/types.js';
 import { doAction } from './described-command-kit.js';
 
 export type SetupTopicId =
@@ -75,13 +75,22 @@ const FEATURE_GROUP: readonly SetupTopicId[] = ['safety', 'memory', 'telemetry',
 /** Topics listed on their own row, in order (the two groups sit after `store-key` and `how-it-works`). */
 const SINGLE_ROWS: readonly SetupTopicId[] = ['model', 'sign-in', 'add-provider', 'store-key', 'chat-apps', 'who-signs-in', 'how-it-works', 'history', 'import-settings'];
 
+/** A topic whose form is the guided form itself: its blanks, its sentence and what Save does. */
+export interface SetupTopicForm<Ctx> {
+  readonly inputs: readonly InputDescription[];
+  /** What saving does, with the blanks in braces. */
+  readonly sentence: string;
+  readonly example: ActionValues;
+  readonly run: (values: ActionValues, ctx: Ctx) => Promise<string | void>;
+}
+
 export interface SetupCommandOptions<Ctx> {
   /**
-   * The topics this program opens, each with its form. A topic left out is not
-   * listed. The function returns the line to print, or nothing when the form it
-   * opened says what happened.
+   * The topics this program opens. A topic left out is not listed. A function
+   * opens the program's own form and returns the line to print (nothing when
+   * the form it opened says what happened); a form object is asked here.
    */
-  readonly topics: Partial<Record<SetupTopicId, (ctx: Ctx) => Promise<string | void>>>;
+  readonly topics: Partial<Record<SetupTopicId, ((ctx: Ctx) => Promise<string | void>) | SetupTopicForm<Ctx>>>;
   /** A right-hand dim note for a topic's row (`Agent only`), read when the list opens. */
   readonly topicNotes?: Partial<Record<SetupTopicId, string>> | undefined;
   /** Actions only this program has, after the topics. */
@@ -90,8 +99,24 @@ export interface SetupCommandOptions<Ctx> {
   readonly extraRows?: readonly (string | FirstScreenGroup)[] | undefined;
 }
 
-function topicAction<Ctx>(id: SetupTopicId, open: (ctx: Ctx) => Promise<string | void>, note: string | undefined): ActionDescription<Ctx> {
+function topicAction<Ctx>(id: SetupTopicId, open: ((ctx: Ctx) => Promise<string | void>) | SetupTopicForm<Ctx>, note: string | undefined): ActionDescription<Ctx> {
   const words = SETUP_TOPICS[id];
+  if (typeof open !== 'function') {
+    return {
+      id,
+      label: words.label,
+      word: words.word,
+      inputs: open.inputs,
+      sentence: open.sentence,
+      done: '',
+      touches: 'this-machine',
+      lasts: 'kept',
+      risk: 'none',
+      example: open.example,
+      run: open.run,
+      ...(note !== undefined ? { rowValue: async () => note } : {}),
+    };
+  }
   return doAction<Ctx>({
     id,
     label: words.label,

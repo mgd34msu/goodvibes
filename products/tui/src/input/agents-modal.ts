@@ -1,24 +1,21 @@
 /**
- * agents-modal.ts, the Agents modal (/agents, F2, ctrl+o, ctrl+p "agents" and
- * every old console name: fleet, cockpit, tasks, wrfc, inspector, ops, …).
- *
- * One list of everything running or finished this session (agents, contracts
- * and their members, workflows, watchers, schedules, background
- * processes, third-party agents hosted over ACP, observed foreign sessions)
- * plus the daemon-hosted conversation this terminal is attached to. The right
- * side tails the selected one live.
+ * agents-modal.ts, the "Your agents" panel (/agents, F2, ctrl+o, and the old
+ * console names fleet, cockpit, tasks, …): the work board reading drawn by
+ * the shared renderer (terminal-shell renderer/work-board.ts) around the
+ * shared list (terminal-shell work-board-input.ts), with this program's full
+ * views and controllers.
  *
  * Keys on the list: ↑↓ move; Enter opens the selected agent (or background
- * process) full screen, outside the modal, with its own composer (or acts on
- * a row waiting on you: pick a winner, resolve a conflict); other kinds with
- * a transcript open full height inside the modal; s steers
- * (inline input); x stops it and its descendants (asks first); i interrupts;
- * p pauses or resumes; n hosts a third-party agent; D discards a worktree;
- * b jumps to the next thing waiting on you; f follows the newest running
- * agent; v switches to the archive, a archives or restores, A archives
- * everything finished; / filters. In the full view ctrl+x stops (asks first),
- * [ ] steps between opened agents, and Esc goes back up a level and never
- * interrupts anything.
+ * process) full screen with its own composer, which steers it; a contract,
+ * workflow or hosted agent opens full height inside the panel, where s steers
+ * it; a row waiting on you acts (pick a winner, resolve a conflict) or opens
+ * the agent whose ask waits; s stops it and what it started (asks first; also
+ * ctrl+x); n starts a new agent; b opens the background services; p pauses or
+ * resumes a schedule; i interrupts; D discards a worktree; f follows the
+ * newest running agent; v switches to the archive, a archives or restores, A
+ * archives everything finished; / filters. In the full view ctrl+x stops
+ * (asks first), [ ] step between opened agents, and Esc goes back up a level
+ * and never stops anything.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -29,29 +26,23 @@ import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ProcessNode, SteerResult } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { WorkBoardSession } from '@goodvibes-jev/engine/contracts';
 import type { SurfaceModal, SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
+import { renderWorkBoardPanel, type PanelDetail, type PanelText, type WorkBoardPanelView } from '@goodvibes-jev/engine/terminal-shell/work-board';
+import { WorkBoardList } from '@goodvibes-jev/engine/terminal-shell/work-board-input';
 import type { KitHint, SurfaceLayer } from '../renderer/surface-kit.ts';
-import type { KitRow } from '../renderer/surface-kit-list.ts';
-import { activeTokens } from '../renderer/theme.ts';
-import { renderAgentsModal, type AgentsDetail, type AgentsModalView, type AgentsText } from '../renderer/agents-modal.ts';
-import { formatUsd } from '../renderer/usage-modal.ts';
-import {
-  fleetAttentionText, fleetNodeAttention, fleetStallMarker, isBlockedOnUserNode, isRunningProcessState, isTerminalProcessState,
-  type FleetReadModel, type FleetSnapshot, type FleetTreeRow,
-} from '../views/fleet-read-model.ts';
+import { fleetNodeAttention, isRunningProcessState, isTerminalProcessState, type FleetReadModel, type FleetSnapshot } from '../views/fleet-read-model.ts';
 import type { FleetActs } from '../views/fleet-acts.ts';
 import type { FleetSpawn } from '../views/fleet-spawn.ts';
 import {
   activeFleetTab, attachFleetTab, EMPTY_FLEET_TABS_STATE, isAttachableFleetKind, stepFleetTab, type FleetTab, type FleetTabsState,
 } from '../views/fleet-session-tabs.ts';
-import { liveSteerableLabels, reconcileSteerBadges, steerBadgeGlyph, steerRefusalMessage, steerBadgeFromReceipt, steerReceiptLabel } from '../views/fleet-steer.ts';
-import { buildFleetTreeHints, FleetStopTracker, fleetKillConfirmArgs, fleetStateDisplay, toggleFleetPause } from '../views/fleet-stop.ts';
-import { formatFleetCost, renderFleetDetailLines } from '../views/fleet-format.ts';
-import { hasFleetCost } from '../views/fleet-read-model.ts';
+import { liveSteerableLabels, reconcileSteerBadges, steerRefusalMessage, steerBadgeFromReceipt, steerReceiptLabel } from '../views/fleet-steer.ts';
+import { countDescendantStats, FleetStopTracker, toggleFleetPause } from '../views/fleet-stop.ts';
+import { renderFleetDetailLines } from '../views/fleet-format.ts';
 import { parseAgentLedger, renderFleetAgentTranscript, renderFleetContractSummary, renderFleetLedgerFallback, renderFleetTranscriptLoading } from '../views/fleet-transcript.ts';
 import { isObservedExternalNode } from '../views/fleet-observed-render.ts';
 import type { HostedSessionFeed } from '../views/hosted-session-feed.ts';
-import { formatElapsed } from '../utils/format-elapsed.ts';
 import { isTextBackspace } from './delete-key-policy.ts';
 import type { ConfirmOptions } from './confirm-dialog.ts';
 import type { ViewTarget } from './views.ts';
@@ -60,7 +51,7 @@ import { HostedTranscriptViewport } from './hosted-transcript-viewport.ts';
 import { currentHostedBinding } from '../runtime/client/hosted-attachments.ts';
 import type { SessionBinding } from '@goodvibes-jev/engine/platform/platform/runtime/client/session-binding';
 
-/** What the modal can do to a process (the process registry, through the fleet read model). */
+/** What the panel can do to a process (the process registry, through the fleet read model). */
 export interface FleetActionCallbacks {
   readonly interrupt: (id: string) => boolean;
   readonly resume: (id: string) => boolean;
@@ -85,19 +76,18 @@ export interface AgentsModalDeps {
    * error; a plain return (nothing to await) counts as sent.
    */
   readonly steerHosted?: (text: string, binding: SessionBinding | null) => void | Promise<void | { readonly ok: boolean; readonly error?: string }>;
-  /** This session's own cost (the "you" half of the header), or null when unpriced. */
-  readonly sessionCost?: () => number | null;
   readonly confirm?: (options: ConfirmOptions) => Promise<boolean>;
   readonly requestRender: () => void;
   /** Tick for elapsed times and steer badges (ms; 0 disables, for tests). */
   readonly tickMs?: number;
   /** Open an agent or background process full screen (shell/session-views.ts); false when it is not known here. */
   readonly openSessionView?: (target: { readonly kind: 'agent' | 'process'; readonly id: string }) => boolean;
+  /** When this run of the program began: finished work from before it is not listed. */
+  readonly sessionStartedAt?: number;
 }
 
 const HOSTED_ID = 'hosted-session';
-
-type ListEntry = { readonly kind: 'node'; readonly row: FleetTreeRow } | { readonly kind: 'hosted' };
+const HOSTED_END_HINT = 'The hosted session ends with /hosted end; /hosted leave keeps or ends it, as its setting says.';
 
 /** One key in the vocabulary the fleet controllers (acts, spawn) take. */
 function keyName(token: InputToken): string | null {
@@ -108,10 +98,7 @@ function keyName(token: InputToken): string | null {
 
 export class AgentsModal implements SurfaceModal {
   readonly name = 'agents';
-  view: 'active' | 'archived' = 'active';
-  query = '';
-  filtering = false;
-  selectedId: string | null = null;
+  readonly list: WorkBoardList;
   follow = false;
   tabs: FleetTabsState = EMPTY_FLEET_TABS_STATE;
   /** The full-height view of the hosted session is open. */
@@ -119,8 +106,8 @@ export class AgentsModal implements SurfaceModal {
   /** The composer: its target and, for the hosted session, the attachment it was opened for (sent only there). */
   steer: { readonly id: string; draft: string; readonly binding?: SessionBinding | null } | null = null;
   private hostedSending = false;
-  status: AgentsText | null = null;
-  private receiptStatus: { nodeId: string; messageId: string; label: string; status: AgentsText } | null = null;
+  status: PanelText | null = null;
+  private receiptStatus: { nodeId: string; messageId: string; label: string; status: PanelText } | null = null;
   readonly stopTracker = new FleetStopTracker();
   private readonly unsubs: Array<() => void> = [];
   private tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -134,10 +121,16 @@ export class AgentsModal implements SurfaceModal {
   private liveSnapshot: FleetSnapshot | null = null;
   private archivedSnapshot: FleetSnapshot | null = null;
   /** The selected agent's transcript tail, read once per fleet reading. */
-  private tailCache: { readonly nodeId: string; readonly texts: AgentsText[] } | null = null;
+  private tailCache: { readonly nodeId: string; readonly texts: PanelText[] } | null = null;
 
   constructor(private readonly deps: AgentsModalDeps) {
-    // What 'n' (new agent) finds or fails on is said here, not behind the modal.
+    this.list = new WorkBoardList({
+      nodes: () => this.fleet().rows.map((row) => row.node),
+      sessions: () => this.hostedSessions(),
+      archived: () => this.archivedFleet().rows.map((row) => row.node),
+      sessionStartedAt: deps.sessionStartedAt,
+    });
+    // What 'n' (new agent) finds or fails on is said here, not behind the panel.
     deps.spawn?.reportTo((message) => { this.say(message, 'faint'); this.invalidate(); });
     this.unsubs.push(deps.readModel.subscribe(() => { this.invalidate(); this.onFleetChange(); deps.requestRender(); }));
     this.unsubs.push(deps.readModel.subscribeConsumed((event) => {
@@ -154,7 +147,7 @@ export class AgentsModal implements SurfaceModal {
     if (deps.hosted) this.unsubs.push(deps.hosted.subscribe(() => {
       // Feed dispatch snapshots listeners; a queued callback can outlive close.
       if (this.closed) return;
-      this.synchronizeHostedView(); deps.requestRender();
+      this.synchronizeHostedView(); this.list.invalidate(); deps.requestRender();
     }));
     const tickMs = deps.tickMs ?? 1_000;
     if (tickMs > 0) this.tickTimer = setInterval(() => { this.invalidate(); this.onFleetChange(); deps.requestRender(); }, tickMs);
@@ -164,6 +157,7 @@ export class AgentsModal implements SurfaceModal {
     this.liveSnapshot = null;
     this.archivedSnapshot = null;
     this.tailCache = null;
+    this.list.invalidate();
   }
 
   private fleet(): FleetSnapshot {
@@ -172,6 +166,13 @@ export class AgentsModal implements SurfaceModal {
 
   private archivedFleet(): FleetSnapshot {
     return this.archivedSnapshot ??= this.deps.readModel.getArchivedSnapshot();
+  }
+
+  /** The daemon-hosted conversation this terminal is attached to, listed while it answers. */
+  private hostedSessions(): WorkBoardSession[] {
+    const state = this.deps.hosted?.getState();
+    if (!state?.record || !state.streaming) return [];
+    return [{ id: HOSTED_ID, title: state.record.title.trim() || 'Hosted session', state: 'running' }];
   }
 
   onClose(): void {
@@ -196,10 +197,6 @@ export class AgentsModal implements SurfaceModal {
 
   // ── Data ───────────────────────────────────────────────────────────────────
 
-  private snapshotRows(): readonly FleetTreeRow[] {
-    return this.view === 'archived' ? this.archivedFleet().rows : this.fleet().rows;
-  }
-
   private findNode(id: string): ProcessNode | null {
     return this.fleet().rows.find((row) => row.node.id === id)?.node ?? null;
   }
@@ -209,85 +206,39 @@ export class AgentsModal implements SurfaceModal {
     if (!feed) return;
     const state = feed.getState();
     this.hostedViewport.synchronize(state, feed.getGeneration());
-    if (!state.record && this.hostedFull) { this.hostedFull = false; this.selectedId = null; }
+    if (!state.record && this.hostedFull) this.hostedFull = false;
   }
 
   private hostedAttached(): boolean {
-    return this.view === 'active' && Boolean(this.deps.hosted?.getState().record);
+    return !this.list.archive && Boolean(this.deps.hosted?.getState().record);
   }
 
-  private matches(row: FleetTreeRow): boolean {
-    const q = this.query.trim().toLowerCase();
-    if (!q) return true;
-    const node = row.node;
-    return [node.label, node.task ?? '', node.kind, node.id, node.currentActivity?.text ?? '', node.headline?.text ?? '']
-      .some((text) => text.toLowerCase().includes(q));
-  }
-
-  /** The list in display order, grouped: hosted, running (whole subtrees), finished. */
-  private groups(): Array<{ readonly name: string; readonly entries: ListEntry[] }> {
-    const rows = this.snapshotRows().filter((row) => this.matches(row));
-    if (this.view === 'archived') return rows.length > 0 ? [{ name: 'Archived', entries: rows.map((row) => ({ kind: 'node', row })) }] : [];
-    const groups: Array<{ name: string; entries: ListEntry[] }> = [];
-    const hostedMatches = !this.query.trim() || 'hosted'.includes(this.query.trim().toLowerCase()) || (this.deps.hosted?.getState().record?.title ?? '').toLowerCase().includes(this.query.trim().toLowerCase());
-    if (this.hostedAttached() && hostedMatches) groups.push({ name: 'Hosted', entries: [{ kind: 'hosted' }] });
-    // A root and everything under it stays together, in the group of its liveliest node.
-    const all = this.snapshotRows();
-    const rootOf = new Map<string, string>();
-    let currentRoot = '';
-    for (const row of all) {
-      if (row.depth === 0) currentRoot = row.node.id;
-      rootOf.set(row.node.id, currentRoot);
-    }
-    const liveRoots = new Set<string>();
-    for (const row of all) if (!isTerminalProcessState(row.node.state)) liveRoots.add(rootOf.get(row.node.id) ?? row.node.id);
-    const running = rows.filter((row) => liveRoots.has(rootOf.get(row.node.id) ?? row.node.id));
-    const finished = rows.filter((row) => !liveRoots.has(rootOf.get(row.node.id) ?? row.node.id));
-    if (running.length > 0) groups.push({ name: 'Running', entries: running.map((row) => ({ kind: 'node', row })) });
-    if (finished.length > 0) groups.push({ name: 'Finished', entries: finished.map((row) => ({ kind: 'node', row })) });
-    return groups;
-  }
-
-  private entries(): ListEntry[] {
-    return this.groups().flatMap((group) => group.entries);
-  }
-
-  private entryId(entry: ListEntry): string {
-    return entry.kind === 'hosted' ? HOSTED_ID : entry.row.node.id;
-  }
-
-  private selectedEntry(): ListEntry | null {
-    const entries = this.entries();
-    if (entries.length === 0) return null;
-    return entries.find((entry) => this.entryId(entry) === this.selectedId) ?? entries[0]!;
-  }
-
+  /** The node of the selected row (live or archived), or null for a session row or none. */
   selectedNode(): ProcessNode | null {
-    const entry = this.selectedEntry();
-    return entry?.kind === 'node' ? entry.row.node : null;
+    const selected = this.list.selected();
+    if (!selected || selected.row.ref.type === 'session') return null;
+    const id = selected.row.ref.id;
+    const rows = this.list.archive ? this.archivedFleet().rows : this.fleet().rows;
+    return rows.find((row) => row.node.id === id)?.node ?? null;
   }
 
   private move(delta: number): void {
-    const entries = this.entries();
-    if (entries.length === 0) return;
-    const current = entries.findIndex((entry) => this.entryId(entry) === this.selectedId);
-    const next = Math.max(0, Math.min(entries.length - 1, (current < 0 ? 0 : current) + delta));
-    const nextId = this.entryId(entries[next]!);
-    if (nextId !== this.selectedId) this.deps.acts?.cancelPick();
-    this.selectedId = nextId;
+    const before = this.list.selected()?.key;
+    this.list.move(delta);
+    if (this.list.selected()?.key !== before) this.deps.acts?.cancelPick();
     this.follow = false;
   }
 
   private applyFollow(): void {
     if (!this.follow) return;
-    let best: FleetTreeRow | null = null;
+    let best: ProcessNode | null = null;
     for (const row of this.fleet().rows) {
-      if (!isRunningProcessState(row.node.state)) continue;
-      if (!best || (row.node.startedAt ?? 0) >= (best.node.startedAt ?? 0)) best = row;
+      if (!isRunningProcessState(row.node.state) || row.node.serves === 'system') continue;
+      if (!best || (row.node.startedAt ?? 0) >= (best.startedAt ?? 0)) best = row.node;
     }
     if (best) {
-      if (best.node.id !== this.selectedId) this.deps.acts?.cancelPick();
-      this.selectedId = best.node.id;
+      if (this.list.selected()?.row.ref.id !== best.id) this.deps.acts?.cancelPick();
+      this.list.selectId(best.id);
     }
   }
 
@@ -301,17 +252,19 @@ export class AgentsModal implements SurfaceModal {
     const row = target.kind === 'tool'
       ? rows.find((r) => r.node.currentActivity?.toolName === target.id)
       : rows.find((r) => r.node.id === target.id && (!target.kind || r.node.kind === target.kind));
-    this.view = 'active';
+    this.list.archive = false;
     this.tabs = { tabs: this.tabs.tabs, activeTabIndex: 0 };
     this.hostedFull = false;
-    this.query = '';
+    this.list.query = '';
     if (!row) {
       this.status = target.kind === 'tool'
         ? { text: `Nothing is running ${target.id} right now.`, tone: 'muted' }
         : { text: `${target.id} is no longer running here.`, tone: 'warning' };
       return false;
     }
-    this.selectedId = row.node.id;
+    // A background service is listed under the services line: open it so the row shows.
+    if (row.node.serves === 'system') this.list.servicesOpen = true;
+    this.list.selectId(row.node.id);
     this.status = null;
     return true;
   }
@@ -321,8 +274,8 @@ export class AgentsModal implements SurfaceModal {
     this.hostedViewport.reset();
     this.synchronizeHostedView();
     this.deps.acts?.cancelPick();
-    this.view = 'active';
-    this.selectedId = HOSTED_ID;
+    this.list.archive = false;
+    this.list.selectId(HOSTED_ID);
     this.hostedFull = this.hostedAttached();
     this.tabs = { tabs: this.tabs.tabs, activeTabIndex: 0 };
   }
@@ -335,18 +288,27 @@ export class AgentsModal implements SurfaceModal {
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
-  private say(text: string, tone: AgentsText['tone'] = 'muted'): void {
+  private say(text: string, tone: PanelText['tone'] = 'muted'): void {
     this.receiptStatus = null;
     this.status = { text, tone };
   }
 
-  private openFull(host: SurfaceModalHost): void {
-    const entry = this.selectedEntry();
-    if (!entry) return;
-    if (entry.kind === 'hosted') { this.hostedViewport.reset(); this.synchronizeHostedView(); this.hostedFull = true; return; }
-    const node = entry.row.node;
+  private openSelected(host: SurfaceModalHost): void {
+    const selected = this.list.selected();
+    if (!selected) return;
+    const row = selected.row;
+    if (row.ref.type === 'session' && row.ref.id === HOSTED_ID) { this.hostedViewport.reset(); this.synchronizeHostedView(); this.hostedFull = this.hostedAttached(); return; }
+    if (selected.section === 'service') {
+      if (row.actions.includes('resume') && this.deps.actions.resume(row.ref.id)) { this.say(`Restarting ${this.findNode(row.ref.id)?.label ?? row.title}…`, 'warning'); return; }
+      this.say(`${row.title}: it can't be restarted from here.`, 'faint');
+      return;
+    }
+    const node = this.selectedNode();
+    if (!node) return;
     if (this.deps.acts?.handleTreeKey('enter', node)) return;
-    // An agent or a background process opens full screen, outside the modal.
+    // An observed agent opens its own steering line (typing into its terminal session).
+    if (isObservedExternalNode(node)) { this.deps.acts?.handleTreeKey('s', node); return; }
+    // An agent or a background process opens full screen, outside the panel, with its own composer.
     const target = node.kind === 'agent' ? { kind: 'agent' as const, id: node.id }
       : node.kind === 'background-process' ? { kind: 'process' as const, id: node.id } : null;
     if (target && this.deps.openSessionView?.(target)) {
@@ -354,25 +316,26 @@ export class AgentsModal implements SurfaceModal {
       return;
     }
     if (!isAttachableFleetKind(node.kind)) {
-      this.say(`${node.kind} has no transcript to open; its details are on the right.`, 'faint');
+      this.say(`${row.title} has nothing more to open; its details are on this row.`, 'faint');
       return;
     }
     this.tabs = attachFleetTab(this.tabs, node);
   }
 
+  /** s in an opened agent's full view: the composer line that steers it. */
   private beginSteer(): void {
-    const entry = this.selectedEntry();
-    if (!entry) return;
-    if (entry.kind === 'hosted') {
-      if (!this.deps.steerHosted) { this.say('Steering the hosted session is not available here.', 'error'); return; }
+    if (this.hostedFull) {
+      if (!this.deps.steerHosted) { this.say('Talking to the hosted session is not available here.', 'error'); return; }
       // The draft belongs to the session attached now; an attach that completes while it is typed does not redirect it.
       this.steer = { id: HOSTED_ID, draft: '', binding: this.deps.hosted ? currentHostedBinding(this.deps.hosted) : null };
       return;
     }
-    const node = entry.row.node;
+    const tab = activeFleetTab(this.tabs);
+    const node = tab ? this.findNode(tab.nodeId) : null;
+    if (!node) { this.say('That agent finished: nothing to steer.', 'faint'); return; }
     if (isObservedExternalNode(node)) { this.deps.acts?.handleTreeKey('s', node); return; }
     if (isTerminalProcessState(node.state)) { this.say(`${node.label} already finished: nothing to steer.`, 'faint'); return; }
-    if (!node.capabilities.steerable || !isAttachableFleetKind(node.kind)) { this.say(`${node.kind} does not take steering.`, 'faint'); return; }
+    if (!node.capabilities.steerable || !isAttachableFleetKind(node.kind)) { this.say(`${node.label} does not take messages.`, 'faint'); return; }
     this.steer = { id: node.id, draft: '' };
   }
 
@@ -397,7 +360,7 @@ export class AgentsModal implements SurfaceModal {
       }
       this.hostedSending = true;
       void (pending as Promise<void | { readonly ok: boolean; readonly error?: string }>).then(
-        (outcome) => outcome && outcome.ok === false ? (outcome.error ?? 'the daemon did not accept it') : null,
+        (outcome) => outcome && outcome.ok === false ? (outcome.error ?? 'the GoodVibes service did not accept it') : null,
         (error: unknown) => summarizeError(error),
       ).then((failure) => {
         this.hostedSending = false;
@@ -415,7 +378,7 @@ export class AgentsModal implements SurfaceModal {
     }
     const submittedKind = this.findNode(steer.id)?.kind;
     const result = this.deps.actions.steer(steer.id, text);
-    // A synchronous host callback can close this modal or replace the composer.
+    // A synchronous host callback can close this panel or replace the composer.
     // Its receipt must not overwrite a newer target/draft or paint a closed view.
     if (this.closed || this.steer !== steer) return;
     if (result.queued === 'partial') {
@@ -443,24 +406,34 @@ export class AgentsModal implements SurfaceModal {
     if (node && this.status) this.receiptStatus = { nodeId: node.id, messageId: badge.messageId, label: node.label, status: this.status };
   }
 
-  /** x / ctrl+x: stop the node and its descendants, after asking. */
+  /** s / ctrl+x: stop the node and everything it started, after asking. */
   private stopSelected(nodeId?: string): void {
     const node = nodeId ? this.findNode(nodeId) : this.selectedNode();
-    if (!node || isTerminalProcessState(node.state)) { if (node) this.say(`${node.label} already finished.`, 'faint'); return; }
-    if (!node.capabilities.killable) { this.say(`${node.kind} cannot be stopped from here.`, 'faint'); return; }
-    const args = fleetKillConfirmArgs(node, this.snapshotRows(), {
-      kill: (id) => this.deps.actions.kill(id, { cascade: true }),
-      markStopping: (id) => this.stopTracker.mark(id),
-    });
+    const row = this.list.selected()?.row;
+    if (!node) {
+      if (row?.ref.id === HOSTED_ID) this.say(HOSTED_END_HINT, 'faint');
+      return;
+    }
+    const name = node.kind === 'agent' || node.kind === 'acp-agent' ? (row?.ref.id === node.id && row.who ? row.who : node.label) : node.label;
+    const title = row && row.ref.id === node.id ? row.title : node.task ?? node.label;
+    if (isTerminalProcessState(node.state)) { this.say(`${name} already finished.`, 'faint'); return; }
+    if (!node.capabilities.killable) { this.say(`${name} can't be stopped from here.`, 'faint'); return; }
     if (!this.deps.confirm) { this.say('Stopping needs a confirm dialog, which is not available here.', 'error'); return; }
+    const stats = countDescendantStats(this.fleet().rows, node.id);
+    const more = stats.total > 0 ? ` and the ${stats.total} ${stats.total === 1 ? 'thing' : 'things'} it started` : '';
     void this.deps.confirm({
-      title: `Stop ${node.label}?`,
-      body: `This stops ${args.label} and everything it started. It cannot be resumed.\nPress ctrl+x again to stop it; Esc keeps it running.`,
+      title: `Stop ${name}?`,
+      body: `This stops "${title}"${more}. It cannot be resumed.\nPress ctrl+x again to stop it; Esc keeps it running.`,
       confirmLabel: 'Stop',
       tone: 'danger',
       confirmChord: { key: 'x', ctrl: true },
     }).then((ok) => {
-      if (ok) { args.onConfirm(); this.say(`Stopping ${node.label}…`, 'warning'); this.invalidate(); }
+      if (ok) {
+        this.deps.actions.kill(node.id, { cascade: true });
+        this.stopTracker.mark(node.id);
+        this.say(`Stopping ${name}…`, 'warning');
+        this.invalidate();
+      }
       this.deps.requestRender();
     });
   }
@@ -468,39 +441,27 @@ export class AgentsModal implements SurfaceModal {
   private interruptSelected(): void {
     const node = this.selectedNode();
     if (!node || isTerminalProcessState(node.state)) return;
-    if (!node.capabilities.interruptible) { this.say(`${node.kind} does not support interrupt.`, 'faint'); return; }
+    if (!node.capabilities.interruptible) { this.say(`${node.label} can't be interrupted.`, 'faint'); return; }
     this.deps.actions.interrupt(node.id);
     this.stopTracker.mark(node.id);
     this.say(`Interrupting ${node.label}…`, 'warning');
   }
 
-  private jumpToBlocked(): void {
-    const blocked = this.fleet().blockedNodeIds;
-    if (blocked.length === 0) { this.say('Nothing is waiting on you right now.', 'faint'); return; }
-    const at = this.selectedId ? blocked.indexOf(this.selectedId) : -1;
-    this.view = 'active';
-    this.query = '';
-    this.tabs = { tabs: this.tabs.tabs, activeTabIndex: 0 };
-    this.hostedFull = false;
-    this.selectedId = blocked[(at + 1) % blocked.length]!;
-    this.status = null;
-  }
-
   private archiveSelected(all: boolean): void {
     if (all) {
-      if (this.view !== 'active') return;
+      if (this.list.archive) return;
       const count = this.deps.readModel.archiveFinished();
-      this.say(count > 0 ? `Archived ${count} finished process${count === 1 ? '' : 'es'}.` : 'Nothing has fully finished to archive.', 'faint');
+      this.say(count > 0 ? `Archived ${count} finished ${count === 1 ? 'one' : 'ones'}.` : 'Nothing has finished to archive.', 'faint');
       return;
     }
     const node = this.selectedNode();
     if (!node) return;
-    if (this.view === 'archived') {
+    if (this.list.archive) {
       const restored = this.deps.readModel.unarchive(node.id);
       this.say(restored > 0 ? `Restored ${node.label}.` : 'Nothing restored for this one.', 'faint');
       return;
     }
-    if (!isTerminalProcessState(node.state)) { this.say('Only finished processes can be archived.', 'faint'); return; }
+    if (!isTerminalProcessState(node.state)) { this.say('Only finished work can be archived.', 'faint'); return; }
     const result = this.deps.readModel.archive(node.id);
     this.say(result.archived ? `Archived ${node.label}.` : result.reason ?? 'Could not archive this one.', 'faint');
   }
@@ -521,10 +482,12 @@ export class AgentsModal implements SurfaceModal {
     if (this.deps.acts?.observedSteerActive()) { this.deps.acts.handleObservedSteerInput('escape'); return true; }
     if (this.deps.acts?.pickModeActive()) { this.deps.acts.handlePickInput('escape'); return true; }
     if (this.deps.spawn?.spawnModeActive()) { this.deps.spawn.handleSpawnInput('escape'); return true; }
-    if (this.filtering) { this.filtering = false; return true; }
+    if (this.list.filtering) { this.list.filtering = false; return true; }
     if (this.hostedFull) { this.hostedFull = false; this.hostedViewport.reset(); return true; }
     if (this.tabs.activeTabIndex > 0) { this.tabs = { tabs: this.tabs.tabs, activeTabIndex: 0 }; return true; }
-    if (this.query) { this.query = ''; return true; }
+    if (this.list.query) { this.list.query = ''; return true; }
+    if (this.list.servicesOpen) { this.list.servicesOpen = false; return true; }
+    if (this.list.archive) { this.list.archive = false; this.list.selectedKey = null; return true; }
     return false;
   }
 
@@ -535,7 +498,7 @@ export class AgentsModal implements SurfaceModal {
 
   private handleKey(token: InputToken, host: SurfaceModalHost): void {
     if (this.steer) { this.handleSteerToken(token); return; }
-    // F2 and ctrl+o open this modal; pressed again here, they close it.
+    // F2 and ctrl+o open this panel; pressed again here, they close it.
     if (token.type === 'key' && ((token.logicalName === 'f2' && !token.ctrl) || (token.ctrl && token.logicalName === 'o'))) {
       host.close(this, 'done');
       return;
@@ -548,7 +511,7 @@ export class AgentsModal implements SurfaceModal {
     }
     if (this.deps.acts?.pickModeActive()) { if (key) this.deps.acts.handlePickInput(key); return; }
     if (this.deps.spawn?.spawnModeActive()) { if (key) this.deps.spawn.handleSpawnInput(key); return; }
-    if (this.filtering) { this.handleFilterToken(token); return; }
+    if (this.list.filtering) { this.deps.acts?.cancelPick(); this.list.handleFilterToken(token); return; }
     if (this.level() === 'full') { this.handleFullToken(token); return; }
     if (token.type === 'key') {
       const name = token.logicalName ?? '';
@@ -557,8 +520,8 @@ export class AgentsModal implements SurfaceModal {
       else if (name === 'down') this.move(1);
       else if (name === 'pageup') this.move(-10);
       else if (name === 'pagedown') this.move(10);
-      else if (name === 'enter') this.openFull(host);
-      else if (isTextBackspace(name) && this.query) { this.deps.acts?.cancelPick(); this.query = this.query.slice(0, -1); }
+      else if (name === 'enter') this.openSelected(host);
+      else if (isTextBackspace(name) && this.list.query) { this.deps.acts?.cancelPick(); this.list.query = this.list.query.slice(0, -1); }
       return;
     }
     if (token.type !== 'text' || token.value.length !== 1) return;
@@ -566,27 +529,27 @@ export class AgentsModal implements SurfaceModal {
     const node = this.selectedNode();
     // A newer list navigation or competing interaction owns the surface now.
     // The active picker was handled above; this only revokes a pending list read.
-    if ('/sjknDbfvaA[]'.includes(token.value)) this.deps.acts?.cancelPick();
+    if ('/sjknDbfvaApr[]'.includes(token.value)) this.deps.acts?.cancelPick();
     switch (token.value) {
-      case '/': this.filtering = true; break;
+      case '/': this.list.filtering = true; break;
       case 'j': this.move(1); break;
       case 'k': this.move(-1); break;
-      case 's': this.beginSteer(); break;
-      case 'x': case 'K': this.stopSelected(); break;
+      case 's': this.stopSelected(); break;
+      case 'b': this.list.toggleServices(); break;
+      case 'r': this.invalidate(); break;
       case 'i': this.interruptSelected(); break;
       case 'p':
         if (node) toggleFleetPause(node, { interrupt: (id) => this.deps.actions.interrupt(id), resume: (id) => this.deps.actions.resume(id), setError: (m) => this.say(m, 'error'), setStatus: (m) => this.say(m, 'warning'), tracker: this.stopTracker });
         break;
       case 'n':
         if (this.deps.spawn) void this.deps.spawn.begin();
-        else this.say('Hosting a third-party agent needs the daemon, which is not connected.', 'faint');
+        else this.say('Starting a new agent needs the GoodVibes service, which is not connected.', 'faint');
         break;
       case 'D':
         if (node && !this.deps.acts?.handleTreeKey('D', node)) this.say('This row does not own a worktree.', 'faint');
         break;
-      case 'b': this.jumpToBlocked(); break;
       case 'f': this.follow = !this.follow; this.applyFollow(); this.say(this.follow ? 'Following the newest running agent.' : 'Stopped following.', 'faint'); break;
-      case 'v': this.view = this.view === 'active' ? 'archived' : 'active'; this.selectedId = null; break;
+      case 'v': this.list.archive = !this.list.archive; this.list.selectedKey = null; break;
       case 'a': this.archiveSelected(false); break;
       case 'A': this.archiveSelected(true); break;
       case ']':
@@ -597,20 +560,6 @@ export class AgentsModal implements SurfaceModal {
         break;
       default: break;
     }
-  }
-
-  private handleFilterToken(token: InputToken): void {
-    if (token.type === 'text') {
-      this.deps.acts?.cancelPick();
-      this.query += [...token.value].filter((ch) => ch >= ' ').join('');
-      this.selectedId = null;
-      return;
-    }
-    if (token.type !== 'key') return;
-    const name = token.logicalName ?? '';
-    if (isTextBackspace(name)) { this.deps.acts?.cancelPick(); this.query = this.query.slice(0, -1); return; }
-    if (name === 'enter') { this.filtering = false; return; }
-    if (name === 'up' || name === 'down') { this.filtering = false; this.move(name === 'up' ? -1 : 1); }
   }
 
   private handleFullToken(token: InputToken): void {
@@ -633,16 +582,13 @@ export class AgentsModal implements SurfaceModal {
       if (token.ctrl && name === 'x') {
         const tab = activeFleetTab(this.tabs);
         if (tab) this.stopSelected(tab.nodeId);
-        else this.say('The hosted session ends with /hosted end; /hosted leave keeps or ends it, as its setting says.', 'faint');
+        else this.say(HOSTED_END_HINT, 'faint');
       }
       return;
     }
     if (token.type !== 'text' || token.value.length !== 1) return;
-    if (token.value === 's') {
-      const tab = activeFleetTab(this.tabs);
-      if (tab) this.selectedId = tab.nodeId;
-      this.beginSteer();
-    } else if ((token.value === ']' || token.value === '[') && !this.hostedFull) {
+    if (token.value === 's') this.beginSteer();
+    else if ((token.value === ']' || token.value === '[') && !this.hostedFull) {
       const next = stepFleetTab(this.tabs, token.value === ']' ? 1 : -1);
       if (next.activeTabIndex > 0) this.tabs = next;
     }
@@ -662,7 +608,7 @@ export class AgentsModal implements SurfaceModal {
 
   // ── View ───────────────────────────────────────────────────────────────────
 
-  private renderedStatus(): AgentsText | null {
+  private renderedStatus(): PanelText | null {
     const receipt = this.receiptStatus;
     if (!receipt || this.status !== receipt.status) return this.status;
     const badge = this.badgeFor(receipt.nodeId);
@@ -674,70 +620,30 @@ export class AgentsModal implements SurfaceModal {
     return this.tabs.tabs.find((tab) => tab.nodeId === nodeId)?.steerBadge ?? null;
   }
 
-  private nodeRow(row: FleetTreeRow, selected: boolean): KitRow {
-    const t = activeTokens();
-    const node = row.node;
-    const stopping = this.stopTracker.isStopping(node.id);
-    const blocked = !stopping && isBlockedOnUserNode(node);
-    const disp = fleetStateDisplay(node.state, stopping, blocked);
-    const running = isRunningProcessState(node.state) || node.state === 'awaiting-approval';
-    const mark = stopping || blocked ? disp.glyph : running ? '◐' : node.state === 'done' ? '✓' : node.state === 'failed' || node.state === 'killed' ? '✕' : '○';
-    const markFg = stopping || blocked ? t.warning : running ? t.brand : node.state === 'done' ? t.success : node.state === 'failed' || node.state === 'killed' ? t.error : t.textFaint;
-    const badge = this.badgeFor(node.id);
-    const attention = fleetNodeAttention(node);
-    const stall = fleetStallMarker(node);
-    const activity = stopping ? 'stopping…'
-      : blocked ? fleetAttentionText(attention ?? { reason: 'approval' })
-        : [node.currentActivity?.toolName ? `${node.currentActivity.toolName}: ${node.currentActivity.text}` : node.headline?.text ?? node.currentActivity?.text ?? node.task ?? '', stall ?? ''].filter(Boolean).join(' · ');
-    const attempt = node.attemptGroup ? ` attempt ${node.attemptGroup.index + 1}/${node.attemptGroup.total}${node.attemptGroup.held ? ' held' : ''}` : '';
-    const kindTag = node.kind === 'agent' ? '' : node.kind === 'acp-agent' ? 'hosted' : node.kind.replace(/-/g, ' ');
-    const desc = [kindTag, `${activity}${attempt}`.trim(), badge ? steerBadgeGlyph(badge.status) : ''].filter(Boolean).join(' · ');
-    const cost = hasFleetCost(node.costUsd, node.costState) ? formatFleetCost(node.costUsd, node.costState) : '';
-    const prefix = row.depth > 0 ? `${'│ '.repeat(row.depth - 1)}└ ` : '';
-    return { label: `${prefix}${node.label}`, desc: desc || undefined, right: [formatElapsed(node.elapsedMs), cost].filter(Boolean).join(' · '), mark, markFg, selected };
-  }
-
-  private listRows(): KitRow[] {
-    const t = activeTokens();
-    const selected = this.selectedEntry();
-    const rows: KitRow[] = [];
-    for (const group of this.groups()) {
-      rows.push({ header: group.name, headerRight: group.name === 'Hosted' ? 'on the daemon' : undefined });
-      for (const entry of group.entries) {
-        const isSelected = selected !== null && this.entryId(entry) === this.entryId(selected);
-        if (entry.kind === 'hosted') {
-          const state = this.deps.hosted!.getState();
-          const record = state.record!;
-          rows.push({ label: record.title.trim() || record.id, desc: `${state.streaming ? 'live' : 'not streaming'} · ${record.status}`, right: `${record.turnCount} turns`, mark: '◈', markFg: t.brandEnd, selected: isSelected });
-        } else {
-          rows.push(this.nodeRow(entry.row, isSelected));
-        }
-      }
+  /** The selected row's detail (wide screens): model, time, files, cost when priced, and the live tail. */
+  private detail(): PanelDetail | null {
+    const selected = this.list.selected();
+    if (!selected) return null;
+    const row = selected.row;
+    if (row.ref.type === 'session' && row.ref.id === HOSTED_ID) {
+      const state = this.deps.hosted?.getState();
+      if (!state?.record) return null;
+      return { title: row.title, meta: 'a conversation running in the GoodVibes service', blocks: [{ kind: 'text', lines: hostedHeaderTexts(state) }], tail: hostedRowTexts(state.rows.slice(-40)) };
     }
-    return rows;
-  }
-
-  private detail(): AgentsDetail | null {
-    const entry = this.selectedEntry();
-    if (!entry) return null;
-    if (entry.kind === 'hosted') {
-      const state = this.deps.hosted!.getState();
-      return { title: state.record!.title.trim() || 'Hosted session', meta: 'a conversation running inside the daemon', blocks: [{ kind: 'text', lines: hostedHeaderTexts(state) }], tail: hostedRowTexts(state.rows.slice(-40)) };
-    }
-    const node = entry.row.node;
+    const node = this.selectedNode();
+    if (!node) return { title: row.title, meta: row.meta.full, blocks: [], tail: [] };
     const stopping = this.stopTracker.isStopping(node.id);
-    const blocked = !stopping && isBlockedOnUserNode(node);
+    const blocked = !stopping && fleetNodeAttention(node) !== null;
     this.deps.acts?.ensureGraphFor(node);
     const observedDraft = this.deps.acts?.observedSteerDraftFor(node.id) ?? null;
     const graph = this.deps.acts?.graphFor(node.id) ?? null;
-    const meta = [node.kind === 'acp-agent' ? 'hosted over ACP' : node.kind, node.model, node.provider].filter(Boolean).join(' · ');
-    let tail: AgentsText[] = [];
+    let tail: PanelText[] = [];
     if (node.kind === 'agent' || node.kind === 'acp-agent') {
       // The tail shows 30 lines and every message it shows gives at least one, so only the last 30 messages are copied.
       if (this.tailCache?.nodeId !== node.id) this.tailCache = { nodeId: node.id, texts: transcriptTail(this.deps.actions.getConversationSnapshot(node.id, { last: 30 }), 30) };
       tail = this.tailCache.texts;
     }
-    return { title: node.label, meta, blocks: [{ kind: 'lines', build: (width) => renderFleetDetailLines(node, width, stopping, blocked, undefined, observedDraft, graph) }], tail };
+    return { title: row.title, meta: row.meta.full, blocks: [{ kind: 'lines', build: (width) => renderFleetDetailLines(node, width, stopping, blocked, undefined, observedDraft, graph) }], tail };
   }
 
   private fullBody(width: number, height: number): readonly Line[] {
@@ -770,22 +676,11 @@ export class AgentsModal implements SurfaceModal {
     return tab.ledgerEntries !== null ? renderFleetLedgerFallback(tab.ledgerEntries, width, height) : renderFleetTranscriptLoading(width);
   }
 
+  /** The headline, and when the service capped its answer, how much of it is shown. */
   private sub(): string {
-    const snapshot = this.fleet();
-    const failed = snapshot.rows.filter((row) => row.node.state === 'failed').length;
-    const blocked = snapshot.blockedNodeIds.length;
-    const parts = [`${snapshot.runningCount} running`];
-    if (failed > 0) parts.push(`${failed} failed`);
-    if (blocked > 0) parts.push(`${blocked} waiting on you`);
-    if (snapshot.daemonPartial) parts.push(`daemon fleet is partial: ${snapshot.daemonPartial.shown} of ${snapshot.daemonPartial.total}`);
-    // The read model sums known leaf readings, not a completeness guarantee:
-    // absent/unpriced costs are omitted, while a recorded zero stays real.
-    // Keep that qualified amount before the secondary session cost so it
-    // remains visible at ordinary terminal widths.
-    parts.push(snapshot.totalCost === null ? 'fleet unpriced' : `known fleet ${formatUsd(snapshot.totalCost)}`);
-    const you = this.deps.sessionCost?.();
-    if (you !== undefined) parts.push(`you ${you === null ? 'unpriced' : formatUsd(you)}`);
-    return parts.join(' · ');
+    const headline = this.list.headline();
+    const partial = this.list.archive ? undefined : this.fleet().daemonPartial;
+    return partial ? `${headline} · showing ${partial.shown} of ${partial.total} from the GoodVibes service` : headline;
   }
 
   private hints(level: 'list' | 'full' | 'picker'): KitHint[] {
@@ -794,59 +689,52 @@ export class AgentsModal implements SurfaceModal {
       return [['⏎', this.deps.acts.observedSteerSubmits() ? 'type and press Enter there' : 'type only'], ['tab', 'submit on/off'], ['esc', 'cancel']];
     }
     if (level === 'picker') return [['↑↓', 'choose'], ['⏎', this.deps.acts?.pickModeActive() ? 'pick (asks first)' : 'next'], ['esc', 'back']];
-    if (this.filtering) return [['⏎', 'done'], ['esc', 'stop filtering']];
     if (level === 'full') {
       if (this.hostedFull) return [['↑↓', 'scroll'], ['f', this.hostedViewport.following ? 'following' : 'follow tail'], ['s', 'say'], ['esc', 'back']];
       const tab = activeFleetTab(this.tabs);
       const node = tab ? this.findNode(tab.nodeId) : null;
-      const allowed = new Set(buildFleetTreeHints(node ?? undefined, this.follow, true).map((hint) => hint.keys));
+      const live = node !== null && !isTerminalProcessState(node.state);
       const hints: KitHint[] = [];
-      if (allowed.has('s')) hints.push(['s', 'steer']);
-      if (allowed.has('K')) hints.push(['ctrl+x', 'stop (asks first)']);
+      if (live && node.capabilities.steerable) hints.push(['s', 'steer']);
+      if (live && node.capabilities.killable) hints.push(['ctrl+x', 'stop (asks first)']);
       hints.push(['[ ]', 'other agents'], ['esc', 'back']);
       return hints;
     }
     const node = this.selectedNode();
     const attention = node ? fleetNodeAttention(node) : null;
-    const enter = attention?.reason === 'pick' ? 'pick a winner' : attention?.reason === 'conflict' ? 'resolve conflict' : 'open full screen';
-    const blocked = this.fleet().blockedNodeIds.length;
-    const allowed = new Set(buildFleetTreeHints(node ?? undefined, this.follow, this.tabs.tabs.length > 0, this.view, blocked).map((hint) => hint.keys));
-    const hints: KitHint[] = [['⏎', enter]];
-    if (allowed.has('s')) hints.push(['s', 'steer']);
-    else if (this.selectedEntry()?.kind === 'hosted' && this.deps.steerHosted) hints.push(['s', 'say']);
-    if (allowed.has('K')) hints.push(['ctrl+x', 'stop']);
-    hints.push(['n', 'new agent']);
-    if (allowed.has('i')) hints.push(['i', 'interrupt']);
-    if (allowed.has('p')) hints.push(['p', node?.state === 'paused' ? 'resume' : 'pause']);
-    if (allowed.has('D') && this.deps.acts) hints.push(['D', 'discard worktree']);
-    if (blocked > 0) hints.push(['b', `waiting on you (${blocked})`]);
-    hints.push(['v', this.view === 'archived' ? 'live' : 'archive'], ['a', this.view === 'archived' ? 'restore' : 'archive one'], ['f', this.follow ? 'following' : 'follow']);
-    return hints;
+    const enterLabel = attention?.reason === 'pick' ? 'pick a winner' : attention?.reason === 'conflict' ? 'resolve conflict' : undefined;
+    return this.list.hints({ canSpawn: true, canPause: true, enterLabel });
   }
 
-  private buildView(): AgentsModalView {
+  private buildView(screenWidth: number): WorkBoardPanelView {
     this.synchronizeHostedView();
     const level = this.level();
     const tab = activeFleetTab(this.tabs);
+    const selectedNode = this.selectedNode();
     const input = this.steer
-      ? { label: this.steer.id === HOSTED_ID ? 'say: ' : `steer ${this.findNode(this.steer.id)?.label ?? ''}: `, draft: this.steer.draft }
-      : this.deps.acts?.observedSteerActive() && this.selectedNode()
+      ? { label: this.steer.id === HOSTED_ID ? 'say: ' : `message to ${this.findNode(this.steer.id)?.label ?? ''}: `, draft: this.steer.draft }
+      : this.deps.acts?.observedSteerActive() && selectedNode
         ? {
-          label: this.deps.acts.observedSteerSubmits() ? 'type and submit in the foreign session: ' : 'type into the foreign session: ',
-          draft: this.deps.acts.observedSteerDraftFor(this.selectedNode()!.id) ?? '',
+          label: this.deps.acts.observedSteerSubmits() ? 'type and submit in its terminal: ' : 'type into its terminal: ',
+          draft: this.deps.acts.observedSteerDraftFor(selectedNode.id) ?? '',
         }
         : null;
     const pick = this.deps.acts?.pickView() ?? null;
     const spawn = this.deps.spawn?.spawnView() ?? null;
-    const shown = this.entries().length;
-    const total = this.snapshotRows().length + (this.hostedAttached() ? 1 : 0);
     const hostedState = this.deps.hosted?.getState();
     const hostedGeneration = this.deps.hosted?.getGeneration() ?? 0;
+    // The detail inset is drawn only on a wide screen; on 80 columns it is not read at all.
+    const wide = screenWidth >= 90;
+    const list = level === 'list' ? this.list.view({
+      stopping: (id) => this.stopTracker.isStopping(id),
+      onClick: (key) => { this.list.select(key); this.follow = false; this.deps.requestRender(); },
+    }) : null;
+    const tabNode = tab ? this.findNode(tab.nodeId) : null;
     return {
       level,
-      crumbs: level === 'full' ? [this.hostedFull ? (hostedState?.record?.title || 'hosted session') : (this.findNode(tab!.nodeId)?.label ?? tab!.label)]
-        : level === 'picker' ? [pick ? 'pick a winner' : spawn?.title ?? 'host an agent']
-          : this.view === 'archived' ? ['archive'] : [],
+      crumbs: level === 'full' ? [this.hostedFull ? (hostedState?.record?.title || 'hosted session') : (tabNode?.label ?? tab!.label)]
+        : level === 'picker' ? [pick ? 'pick a winner' : spawn?.title ?? 'new agent']
+          : this.list.archive ? ['archive'] : [],
       sub: level === 'list' ? this.sub() : '',
       hints: this.hints(level),
       status: this.deps.acts?.observedSteerActive() && this.deps.acts.observedSteerPending()
@@ -855,11 +743,10 @@ export class AgentsModal implements SurfaceModal {
           ? { text: this.deps.acts.observedSteerFailure()!, tone: 'error' }
           : this.renderedStatus(),
       input,
-      filter: { query: this.query, active: this.filtering, count: this.query ? `${shown} of ${total}` : `${total} shown` },
-      rows: level === 'list' ? this.listRows() : [],
-      detail: level === 'list' ? this.detail() : null,
+      list,
+      detail: level === 'list' && wide ? this.detail() : null,
       full: level === 'full' ? {
-        meta: this.hostedFull ? 'hosted on the daemon' : [tab!.kind, this.findNode(tab!.nodeId)?.state ?? 'finished'].join(' · '),
+        meta: this.hostedFull ? 'in the GoodVibes service' : tabNode && !isTerminalProcessState(tabNode.state) ? 'running' : 'finished',
         header: this.hostedFull && hostedState ? hostedHeaderTexts(hostedState) : [],
         body: this.hostedFull && hostedState ? (width, height) => this.hostedViewport.render(hostedState, hostedGeneration, width, height) : (width, height) => this.fullBody(width, height),
         ...(this.hostedFull ? { scroll: () => this.hostedViewport.position } : {}),
@@ -867,19 +754,19 @@ export class AgentsModal implements SurfaceModal {
       picker: level === 'picker'
         ? pick
           ? { intro: `Best of N: ${pick.title}. Choose the winner; Enter shows its diff and asks before merging.${pick.proposal ? ` The judge proposes ${pick.proposal} (advisory).` : ''}`, options: pick.candidates, side: pick.diff ? diffSide(pick.diff) : [{ text: 'This candidate has no diff to preview.', tone: 'faint' }] }
-          : { intro: spawn?.creating ? 'Hosting the agent…' : spawn?.intro ?? '', options: spawn?.options ?? [], side: [] }
+          : { intro: spawn?.creating ? 'Starting the agent…' : spawn?.intro ?? '', options: spawn?.options ?? [], side: [] }
         : null,
       scrollOwner: this,
     };
   }
 
   render(screenWidth: number, screenHeight: number): SurfaceLayer {
-    return renderAgentsModal(this.buildView(), screenWidth, screenHeight);
+    return renderWorkBoardPanel(this.buildView(screenWidth), screenWidth, screenHeight);
   }
 }
 
 /** The files a candidate diff touches, for the picker's side column. */
-function diffSide(diff: string): AgentsText[] {
+function diffSide(diff: string): PanelText[] {
   const files = diff.split('\n').filter((line) => line.startsWith('diff --git ')).map((line) => line.replace(/^diff --git a\/.+? b\//, ''));
   const added = diff.split('\n').filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
   const removed = diff.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---')).length;

@@ -6,7 +6,7 @@
  * this URL every minute" and stop waiting: the daemon supervises the watcher
  * and starts an agent turn when it fires. Registering an action grant is not
  * here: a grant is a command the owner approves, so only the owner registers
- * one (the `/triggers grant` command); a trigger may then name it.
+ * one (`/triggers allow-command`); a trigger may then name it.
  */
 
 import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';

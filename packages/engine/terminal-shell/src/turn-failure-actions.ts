@@ -198,10 +198,10 @@ export interface FailedTurnInputView {
  * before it and the prompt is sent as it was; a turn that already ran tools
  * keeps their results and continues from them. False when nothing failed.
  */
-export function retryFailedTurn(
-  orchestrator: { failedTurnInput(): FailedTurnInputView | null; clearFailedTurnInput(turnId: string): void },
+export function retryFailedTurn<F extends FailedTurnInputView>(
+  orchestrator: { failedTurnInput(): F | null; clearFailedTurnInput(turnId: string): void },
   conversation: TurnFailureConversation & { removeMessagesAfter(count: number, options?: { readonly preserveCompletedTools?: boolean }): void },
-  send: (text: string, content: unknown, options: unknown) => Promise<void>,
+  send: (text: string, content: F['content'] | undefined, options: F['options']) => Promise<void>,
   onError: (error: unknown) => void,
 ): boolean {
   const failed = orchestrator.failedTurnInput();
@@ -220,4 +220,31 @@ export function retryFailedTurn(
     void send(failed.text, failed.content, failed.options).catch(onError);
   }
   return true;
+}
+
+/** What a program hands over to put the row's keys on its command context. */
+export interface WireFailedTurnActionsOptions {
+  readonly commandContext: {
+    failedTurnAction?: ((action: FailedTurnKeyAction) => boolean) | undefined;
+    openModelPicker?: (() => void) | undefined;
+    executeCommand?: ((name: string, args: string[]) => Promise<boolean>) | undefined;
+  };
+  /** Subscribes to MODEL_CHANGED; returns the unsubscribe. */
+  readonly onModelChanged: (listener: () => void) => () => void;
+  /** The program's retry of the failed turn; absent: the one offered with offerFailedTurnRetry. */
+  readonly retry?: (() => boolean) | undefined;
+  readonly render: () => void;
+}
+
+/** Put the failure row's keys on the program's command context (alt+r, alt+o, alt+i, alt+s); returns the unsubscribe. */
+export function wireFailedTurnActions(options: WireFailedTurnActionsOptions): () => void {
+  const { commandContext } = options;
+  commandContext.failedTurnAction = createFailedTurnAction({
+    openModelPicker: () => commandContext.openModelPicker?.(),
+    // The provider sign-ins: each provider, whether it is signed in, and how to fix it.
+    openSignIn: () => { void commandContext.executeCommand?.('auth', []).finally(options.render); },
+    ...(options.retry ? { retry: options.retry } : {}),
+    render: options.render,
+  });
+  return options.onModelChanged(() => noteTurnFailureModelChanged());
 }

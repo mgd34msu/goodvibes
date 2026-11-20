@@ -1154,6 +1154,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       }
     },
     retryDelaysMs: TURN_RETRY_DELAYS_MS,
+    failoverAvailable: () => turnFailover.available(),
     failOver: (error, { shown }) => {
       const moved = turnFailover(error);
       // Readers of the stream drop the failed attempt's text; the fallback model's answer streams afresh.
@@ -1162,12 +1163,15 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       }
       return moved;
     },
-    onRetry: (attempt, delayMs, error) => {
+    onRetry: (attempt, delayMs, error, _failure, plan) => {
       // The first failed request says why, in the transcript, at once; the throbber counts the attempts after it.
       if (attempt === 1 && !streamBlockOpen) {
         const reason = (error instanceof ProviderError ? formatProviderError(error, model.provider) : formatError(error)).split('\n')[0];
-        const minutes = Math.max(1, Math.round(TURN_RETRY_DELAYS_MS.reduce((sum, ms) => sum + ms, 0) / 60_000));
-        context.conversation.addTurnRetry(`${reason}\n  Retrying up to ${TURN_RETRY_DELAYS_MS.length} times over about ${minutes} minute${minutes === 1 ? '' : 's'}. Next: wait, press Esc to stop, or choose another model with /model.`);
+        const seconds = Math.round(plan.delaysMs.reduce((sum, ms) => sum + ms, 0) / 1_000);
+        const minutes = Math.max(1, Math.round(seconds / 60));
+        context.conversation.addTurnRetry(plan.thenFailover
+          ? `${reason}\n  Retrying ${plan.delaysMs.length === 1 ? 'once' : `up to ${plan.delaysMs.length} times`} in about ${seconds} s, then moving to the next model of your fallback order. Next: wait, or press Esc to stop.`
+          : `${reason}\n  Retrying up to ${plan.delaysMs.length} times over about ${minutes} minute${minutes === 1 ? '' : 's'}. Next: wait, press Esc to stop, or choose another model with /model.`);
         context.requestRender();
       }
       if (!context.runtimeBus) return;
@@ -1175,7 +1179,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         turnId: context.turnId,
         provider: model.provider,
         attempt,
-        maxAttempts: TURN_RETRY_DELAYS_MS.length,
+        maxAttempts: plan.delaysMs.length,
         delayMs,
         reason: error instanceof Error ? error.message : String(error),
         ...streamRetryFacts(error),

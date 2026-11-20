@@ -120,8 +120,8 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   openSecurityWorkspace?: () => void;
   openKnowledgeWorkspace?: () => void;
   openSubscriptionWorkspace?: () => void;
-  /** Open the Activity modal (Ctrl+O, /activity). */
-  openActivityModal?: () => void;
+  /** Open Your agents (Ctrl+O, /agents). */
+  openAgents?: () => void;
   /** Open the notification history (/notifications): every system notice in full. */
 
   /**

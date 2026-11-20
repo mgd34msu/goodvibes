@@ -76,6 +76,7 @@ import { GOODVIBES_AGENT_OPERATOR_POLICY } from '@goodvibes-jev/engine/terminal-
 import { flushPendingChannelRows } from '../agent/channel-outbox-flush.ts';
 import { formatChannelProfileRouteSyncReport } from '../agent/channel-profile-routing.ts';
 import { createDaemonOperatorInvoke, resolveDaemonOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn/daemon-operator-client';
+import { retryFailedTurn, wireFailedTurnActions } from '@goodvibes-jev/engine/terminal-shell/turn-failure-actions';
 
 // ── Bootstrap context type ──────────────────────────────────────────────────
 
@@ -485,6 +486,16 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const commandRegistry = shell.commandRegistry;
   const commandContext = shell.commandContext;
   const inputHistory = shell.inputHistory;
+  // A failed or refused turn is a row in the transcript with its next steps on keys:
+  // alt+r sends the prompt again, alt+o picks another model for it, alt+i opens its details, alt+s the sign-ins.
+  bootstrapUnsubs.push(wireFailedTurnActions({
+    commandContext,
+    onModelChanged: (listener) => runtimeBus.on('MODEL_CHANGED', listener),
+    retry: () => retryFailedTurn(orchestrator, conversation,
+      (text, content, inputOptions) => orchestrator.handleUserInput(text, content, inputOptions),
+      (error) => { systemMessageRouter.high(`Not sent again: ${error instanceof Error ? error.message : String(error)}`, 'warning'); requestRender(); }),
+    render: requestRender,
+  }));
   registerAgentTools({
     toolRegistry,
     commandRegistry,

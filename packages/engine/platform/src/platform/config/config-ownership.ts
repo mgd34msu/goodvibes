@@ -114,6 +114,8 @@ export const CONFIG_DOMAIN_OWNERS: Readonly<Record<ConfigDomain, 'daemon' | 'cli
   agents: 'client',
   batch: 'client',
   behavior: 'client',
+  // Each process that drives a browser (the Agent, the daemon) reads its own.
+  browser: 'client',
   cache: 'client',
   checkpoints: 'client',
   contract: 'client',

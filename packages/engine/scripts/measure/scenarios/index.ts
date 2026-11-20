@@ -11,6 +11,7 @@ const mail: Loader = async () => (await import('./mail.ts')).scenarios;
 const hosted: Loader = async () => (await import('./hosted.ts')).scenarios;
 const find: Loader = async () => (await import('./find.ts')).scenarios;
 const acknowledge: Loader = async () => (await import('./acknowledge.ts')).scenarios;
+const approvals: Loader = async () => (await import('./approvals.ts')).scenarios;
 
 export interface ScenarioEntry {
   readonly name: string;
@@ -58,5 +59,7 @@ export const SCENARIOS: readonly ScenarioEntry[] = [
   { name: 'channel-reply-final', load: acknowledge, budgeted: ['fixtureRequests'] },
   { name: 'automation-run-settle', load: acknowledge, budgeted: ['fixtureRequests'] },
   { name: 'approval-raise-answer', load: acknowledge },
+  { name: 'approval-raise-approve', load: approvals },
+  { name: 'approval-list-50', load: approvals },
   { name: 'hosted-agent-request', load: hosted, budgeted: ['toolDefinitionsSent', 'toolDefinitionsWithParameters'], budgetedBytes: ['toolDefinitionBytesSent'] },
 ];

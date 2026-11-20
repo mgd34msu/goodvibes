@@ -36,11 +36,12 @@ export type KeyAction =
   | 'cycle-permission-mode'
   | 'open-notifications'
   | 'failure-other-model'
-  | 'failure-details';
+  | 'failure-details'
+  | 'failure-sign-in';
 
 export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION_DESCRIPTIONS,
   'command-palette':       'Open the command palette (search & run any command)',
-  'open-agents':           'Open the Agents view (same as F2)',
+  'open-agents':           'Open Your agents: what is running, what waits for you, what is scheduled (same as F2)',
   'block-save':            'Save nearest block to file',
   'line-start':            'Move to start of line',
   'clear-prompt':          'Clear the entire prompt (Alt+U; kill-to-start owns Ctrl+U)',
@@ -61,6 +62,7 @@ export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION
   'open-notifications':    'Open the notices (the status bar counts the unread ones)',
   'failure-other-model':   'After a failed turn: choose another model and send the prompt again',
   'failure-details':       'After a failed turn: show what the provider said',
+  'failure-sign-in':       'After a provider refused its key: open the provider sign-ins',
 };
 
 export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindingDefaults<KeyAction>([
@@ -72,14 +74,14 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   'kill-to-start', 'kill-word-forward', 'yank', 'yank-pop',
   'cancel-tool-call', 'toggle-keep-awake', 'toggle-memory-provenance', 'voice-input',
   'focus-work-tree', 'cycle-permission-mode', 'open-notifications', 'failure-other-model',
-  'failure-details',
+  'failure-details', 'failure-sign-in',
 ], {
 // Ctrl+P opens the command palette, the one entry point for every command,
   // view and setting; Ctrl+K (the other common palette chord) opens it too. The
   // readline kill-to-end-of-line that historically owned Ctrl+K is repointed to
   // Alt+K below so the capability is kept, not lost.
   'command-palette':       [{ key: 'p', ctrl: true }, { key: 'k', ctrl: true }],
-// Ctrl+O: the Agents modal (same as F2), where the old Fleet and Ops
+// Ctrl+O: Your agents (same as F2), where the old Fleet and Ops
   // consoles' content lives now. Routed globally in handleGlobalShortcutToken.
   'open-agents':           [{ key: 'o', ctrl: true }],
   'line-start':            [{ key: 'a', ctrl: true }],
@@ -131,6 +133,8 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   // that can never be typed text (like Alt+R retry), unused by any other default.
   'failure-other-model':   [{ key: 'o', alt: true }],
   'failure-details':       [{ key: 'i', alt: true }],
+  // Alt+S: the row of a turn whose provider refused its key, "sign in again".
+  'failure-sign-in':       [{ key: 's', alt: true }],
 });
 
 export class KeybindingsManager extends PlatformKeybindingsManager<KeyAction> {

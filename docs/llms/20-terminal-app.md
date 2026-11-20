@@ -1216,26 +1216,25 @@ The run works in a copy of the suite. Before a task's session starts, its `verif
 
 These commands work through the daemon. The features are described in the automation part ("Scheduled routines", "Supervised triggers", "Notifications", "Mail", "Calendar", "Chat channels", "Voice", "Purchases and payments", "CI watch") and the daemon part ("Credentials and pairing", "The relay", "Hosted sessions", clusters); this list gives each command's forms and an example.
 
-`/schedule add <cron|every|at|when> <value> <prompt...> [options] | list | remove <id> | enable <id> | disable <id> | run <id>` (alias `/sched`) manages scheduled routines kept by the daemon.
+`/schedule` manages scheduled routines kept by the daemon; its actions and lines are the same in both programs (see "`/schedule`, in both programs" in the automation part).
 
 ```text
-/schedule add cron "0 9 * * 1-5" "summarize yesterday's commits" --tz America/Chicago
-/schedule add every 30m "check the deploy"
-/schedule add at 2026-12-01T09:00 "renew the certificate"
-/schedule add when "every weekday at 9am" "triage the inbox"
+/schedule add --cron "0 9 * * 1-5" --tz America/Chicago summarize yesterday's commits
+/schedule add --every 30m check the deploy
+/schedule add --at 2026-12-01T09:00 renew the certificate
+/schedule add --when "every weekday at 9am" triage the inbox
 ```
 
-Options: `--name <name> --model <model> --provider <provider> --template <tmpl> --target main|current|isolated|pinned|background|session:<id> --reasoning <level> --thinking <mode> --wake now|next-heartbeat --fallback <a,b> --tool <name> --external-source <kind> --allow-unsafe-external-content --light-context`, and `--tz <zone> --stagger <ms>` for cron.
-`when` sends the phrase to the decision model, prints `Interpreted "<phrase>" as: <schedule>` and saves it.
-A time already passed is refused: `<time> has already passed.`
-With no daemon: `Routines are kept and run by the GoodVibes daemon, so each runs once with or without a terminal open; it cannot be reached: <reason> Nothing was scheduled or changed.`
-`/schedule run <id>` prints `Running routine <id> (<name>) now`.
+`--when` sends the words to the decision model, prints `Read as: <schedule>` and keeps it.
+A time already passed is refused: `Not kept: <time> has already passed.`
+With no daemon: `Schedules are kept and run by the GoodVibes daemon, so each runs once with or without a terminal open; it cannot be reached: <reason> Nothing was scheduled or changed.`
+`/schedule run <schedule>` prints `Started <schedule>.` and the run's id.
 
-`/triggers [status|list|history <id> [count]|create <json>|cancel <id>|reset <id>|grants|grant <id> <command> [args...]]` manages the daemon's supervised triggers.
+`/triggers` manages the daemon's supervised triggers; its actions are the same in both programs (see "`/triggers`" in the automation part).
 
 ```text
-/triggers create {"id":"build","label":"Build finished","spec":{"kind":"on-exit","command":"npm","args":["run","build"]}}
-/triggers grant build npm run test
+/triggers watch "Build finished" -- npm run build
+/triggers allow-command tests -- npm run test
 ```
 
 `/notify add <url> | remove <n|url> | list [--show] | clear | test` manages webhook notification addresses in ntfy.sh format (`/notify add https://ntfy.sh/my-topic`). `/notify failed` lists failed deliveries and `/notify resend <id|all>` sends them again; one whose Slack or Discord destination changed since it failed is not sent until you add `--to-current`.

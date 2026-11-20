@@ -161,8 +161,8 @@ export interface SecretWriteOptions {
 
 /** What a scope's own write stores hold for one key, as stored, per medium (null: no entry). */
 export interface WriteScopeEntries {
-  readonly secure: string | null;
-  readonly plaintext: string | null;
+  readonly secure: Secret | null;
+  readonly plaintext: Secret | null;
 }
 
 export interface SecretDeleteOptions {
@@ -1153,7 +1153,7 @@ export class SecretsManager {
 
   /** Local alias-aware observation. Private credential bytes never become judgment facts. */
   resolveLocalCredentialSnapshot(key: string):
-    | { readonly state: 'resolved'; readonly value: string; readonly revision: string }
+    | { readonly state: 'resolved'; readonly value: Secret; readonly revision: string }
     | { readonly state: 'absent'; readonly revision: string }
     | { readonly state: 'unsupported'; readonly reason: string } {
     const chain: unknown[] = [this.getPolicy(), this.credentialMutationGeneration];
@@ -1192,8 +1192,8 @@ export class SecretsManager {
       if (typeof value !== 'string') return { state: 'unsupported', reason: 'stored value is not text' };
       chain.push(value);
       const literal = decodeLiteralSecret(value);
-      if (literal !== null) return { state: 'resolved', value: literal, revision: revision() };
-      if (!isSecretRefInput(value)) return { state: 'resolved', value, revision: revision() };
+      if (literal !== null) return { state: 'resolved', value: Secret.of(literal, key), revision: revision() };
+      if (!isSecretRefInput(value)) return { state: 'resolved', value: Secret.of(value, key), revision: revision() };
       const ref = normalizeSecretRef(value);
       if (!ref || ref.source !== 'goodvibes') return { state: 'unsupported', reason: 'held by an external secret provider' };
       current = ref.id;
@@ -1263,14 +1263,17 @@ export class SecretsManager {
    * throws, as {@link getWriteScopeEntry} does.
    */
   async readWriteScopeEntries(key: string, scope: SecretScope): Promise<WriteScopeEntries> {
-    const entries: { secure: string | null; plaintext: string | null } = { secure: null, plaintext: null };
+    const entries: { secure: Secret | null; plaintext: Secret | null } = { secure: null, plaintext: null };
     for (const medium of ['secure', 'plaintext'] as const) {
       const target = this.resolveWriteTarget(scope, medium);
       const result = target.secure ? this.readEncryptedStore(target.path) : this.readPlaintextStore(target.path);
       if (result.status === 'unreadable') {
         throw new SecretStoreUnreadableError(`The secrets store at ${target.path} exists but cannot be read (${result.reason}).`);
       }
-      if (result.status === 'ok' && Object.hasOwn(result.secrets, key)) entries[medium] = result.secrets[key] ?? null;
+      if (result.status === 'ok' && Object.hasOwn(result.secrets, key)) {
+        const stored = result.secrets[key];
+        entries[medium] = stored === undefined ? null : Secret.of(stored, key);
+      }
     }
     return Object.freeze(entries);
   }
@@ -1288,8 +1291,10 @@ export class SecretsManager {
     const stores = (['secure', 'plaintext'] as const).map((medium) => ({ medium, store: this.resolveWriteTarget(scope, medium) }));
     return this.withCredentialMutation(key, () => this.withStoreMutations(stores.map(({ store }) => store.path), () => {
       const now = stores.map(({ medium, store }) => ({ medium, store, values: this.readStoreForWrite(store) }));
+      // The entries are compared and written back as stored, inside the store.
+      const prior = { secure: previous.secure?.reveal('store-write') ?? null, plaintext: previous.plaintext?.reveal('store-write') ?? null };
       const held = (values: Record<string, string>): string | null => (Object.hasOwn(values, key) ? values[key]! : null);
-      const moved = now.filter(({ medium, values }) => held(values) !== previous[medium]);
+      const moved = now.filter(({ medium, values }) => held(values) !== prior[medium]);
       if (moved.length === 0) return 'unchanged' as const;
       // Every medium that differs from before must hold exactly what this caller wrote; anything else is another writer's.
       const ours = (value: string | null): boolean => value !== null && (value === wrote || decodeLiteralSecret(value) === wrote);
@@ -1297,7 +1302,7 @@ export class SecretsManager {
       let changed = false;
       try {
         for (const { medium, store, values } of now) {
-          const before = previous[medium];
+          const before = prior[medium];
           const held = Object.hasOwn(values, key) ? values[key]! : null;
           if (held === before) continue;
           // eslint-disable-next-line @typescript-eslint/no-dynamic-delete

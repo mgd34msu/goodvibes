@@ -13,6 +13,15 @@ export type GlobalShortcutRouteState = GlobalShortcutState & {
   cycleAgentWorkspaceCategory: (direction: 'next' | 'prev') => void;
   dismissAgentWorkspace: () => boolean;
 };
+
+/** The failure row's key actions and what each asks of the row (turn-failure-actions.ts). */
+const FAILURE_KEY_ACTIONS = {
+  'failure-other-model': 'other-model',
+  'failure-details': 'details',
+  'failure-retry': 'retry',
+  'failure-sign-in': 'sign-in',
+} as const;
+
 export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token: InputToken, viewportHeight: number): boolean {
   return routeShortcut(state, token, viewportHeight, {
     modifiedPageScroll: true,
@@ -45,8 +54,8 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
           state.requestRender();
           return true;
 
-        case 'activity-open':
-          state.commandContext?.openActivityModal?.();
+        case 'open-agents':
+          state.commandContext?.openAgents?.();
           state.requestRender();
           return true;
 
@@ -66,8 +75,10 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
 
         case 'failure-other-model':
         case 'failure-details':
-          // Alt+O / Alt+I on the newest failed turn's row; consumed either way, never typed text.
-          state.commandContext?.failedTurnAction?.(action === 'failure-other-model' ? 'other-model' : 'details');
+        case 'failure-retry':
+        case 'failure-sign-in':
+          // Alt+R / Alt+O / Alt+I / Alt+S on the newest failed turn's row; consumed either way, never typed text.
+          state.commandContext?.failedTurnAction?.(FAILURE_KEY_ACTIONS[action]);
           state.requestRender();
           return true;
 

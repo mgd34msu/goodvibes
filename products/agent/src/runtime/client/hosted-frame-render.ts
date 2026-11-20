@@ -41,7 +41,7 @@
  */
 
 import type { ToolCall, ToolResult } from '@goodvibes-jev/engine/platform/platform/types';
-import type { TokenUsage } from '@goodvibes-jev/engine/platform/platform/core';
+import { readTurnFailure, type TokenUsage, type TurnFailureReading, type TurnRefusalReason } from '@goodvibes-jev/engine/platform/platform/core';
 import { readTurnSettlement, stopReasonOfSettlement, type TurnSettlement } from '@goodvibes-jev/engine/transport-core/turn-settlement';
 
 /**
@@ -63,6 +63,8 @@ export interface HostedFrameConversation {
   addToolResults(results: ToolResult[]): void;
   /** A line for the person at the level this mapping knows; no model reads it. */
   addNotice(content: string, meta: { readonly level: 'info' | 'success' | 'warning' | 'error' }): void;
+  /** The failed turn's row (platform core/turn-failure.ts); absent: the failure is a plain error line. */
+  addTurnFailure?(failure: TurnFailureReading): void;
   startStreamingBlock(): void;
   updateStreamingBlock(content: string): void;
   finalizeStreamingBlock(): void;
@@ -130,6 +132,36 @@ function readString(source: Record<string, unknown> | undefined, key: string): s
 function readNumber(source: Record<string, unknown> | undefined, key: string): number | undefined {
   const value = source?.[key];
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+const REFUSALS: readonly TurnRefusalReason[] = ['no-provider', 'no-model', 'daemon-unreachable', 'workspace-not-registered'];
+
+/** The failure reading of a hosted turn's TURN_ERROR, from the facts its payload carries. */
+function hostedTurnFailure(payload: Record<string, unknown> | undefined, turnId: string): TurnFailureReading {
+  const strings = (key: string): string[] | undefined => {
+    const value = payload?.[key];
+    return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : undefined;
+  };
+  const times = payload?.['attemptTimes'];
+  const refusal = readString(payload, 'refusal');
+  const fallbackOrderSet = payload?.['fallbackOrderSet'];
+  return readTurnFailure({
+    turnId,
+    error: readString(payload, 'error'),
+    stopReason: readString(payload, 'stopReason'),
+    status: readNumber(payload, 'status'),
+    code: readString(payload, 'code'),
+    attempts: readNumber(payload, 'attempts'),
+    attemptTimes: Array.isArray(times) ? times.filter((entry): entry is number => typeof entry === 'number') : undefined,
+    providerName: readString(payload, 'providerName'),
+    provider: readString(payload, 'provider'),
+    model: readString(payload, 'model'),
+    changedFiles: strings('changedFiles'),
+    changedUnknown: payload?.['changedUnknown'] === true,
+    fallbackOrderSet: typeof fallbackOrderSet === 'boolean' ? fallbackOrderSet : undefined,
+    fallbackNote: readString(payload, 'fallbackNote'),
+    refusal: REFUSALS.find((reason) => reason === refusal),
+  });
 }
 
 /**
@@ -222,7 +254,7 @@ export function createHostedFrameRenderer(
     });
   };
 
-  const settleTurn = (settlement: TurnSettlement): void => {
+  const settleTurn = (settlement: TurnSettlement, failure?: TurnFailureReading): void => {
     if (settlement.kind === 'answered') {
       // Prefer what was streamed: it is what the person watched arrive. The
       // turn's `response` is the fallback for a turn that produced its text
@@ -250,7 +282,9 @@ export function createHostedFrameRenderer(
         finish({ status: 'error', response: turnText, error: settlement.reason, stopReason });
         return;
       case 'failed':
-        conversation.addNotice(`The hosting daemon reported this turn failed: ${settlement.error}`, { level: 'error' });
+        // The same row a local turn's failure draws, from the facts the daemon sent.
+        if (failure && conversation.addTurnFailure) conversation.addTurnFailure(failure);
+        else conversation.addNotice(`The hosting daemon reported this turn failed: ${settlement.error}`, { level: 'error' });
         requestRender();
         finish({ status: 'error', response: turnText, error: settlement.error, stopReason });
         return;
@@ -355,7 +389,7 @@ export function createHostedFrameRenderer(
         // How the turn ended, from the one settlement reader every surface uses.
         const settlement = readTurnSettlement({ type: frame.type, payload });
         if (!settlement) return;
-        settleTurn(settlement);
+        settleTurn(settlement, settlement.kind === 'failed' ? hostedTurnFailure(payload, settlement.turnId) : undefined);
         return;
       }
       default:

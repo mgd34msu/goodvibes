@@ -198,15 +198,15 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
   });
 
   registry.register({
-    name: 'activity',
+    name: 'agents',
     effect: 'ui-navigation',
-    description: 'Show running work, what needs you, what is coming up, and recent activity',
+    description: 'Open Your agents: what is running, what waits for you, what is scheduled',
     handler(_args, ctx) {
-      if (ctx.openActivityModal) {
-        ctx.openActivityModal();
+      if (ctx.openAgents) {
+        ctx.openAgents();
         return;
       }
-      ctx.print('The Activity view needs the interactive shell.');
+      ctx.print('Your agents needs the interactive shell.');
     },
   });
 

@@ -37,7 +37,8 @@ import { SignedOutGate } from './components/auth/SignedOutGate';
 import { DaemonUnreachableGate } from './components/auth/DaemonUnreachableGate';
 import { SettingsDialog } from './components/settings/dialog/SettingsDialog';
 import type { SettingsSectionId } from './components/settings/dialog/sections';
-import { needsYouCount, runningNow } from './lib/needs-you';
+import { shellCounts } from './lib/needs-you';
+import { useOpenAsks } from './hooks/useOpenAsks';
 import { unpairRelay } from './lib/relay-connection';
 import { useEventStreamState } from './lib/event-stream';
 import { asRecord, bestId, bestTitle, firstString } from './lib/object';
@@ -148,15 +149,11 @@ export default function App() {
     enabled: auth.isSuccess,
     refetchInterval: fleetSubscriptionActive ? 60_000 : 15_000,
   });
-  // The badge counts what the Work page lists under "Needs you", which also holds
-  // pending approvals and ready best-of-N groups. Both queries share the Work page's
-  // cache keys, so opening the page re-uses these reads rather than adding more.
-  const approvalList = useQuery({
-    queryKey: queryKeys.approvals,
-    queryFn: () => platformClient.operator.approvals.list(),
-    enabled: auth.isSuccess,
-    refetchInterval: fleetSubscriptionActive ? 60_000 : 15_000,
-  });
+  // The badge and the account menu's "running" are the work board's counts (lib/needs-you.ts):
+  // the asks waiting for you (approvals and open inbox items), ready best-of-N groups, the
+  // fleet and runtime tasks. Every read shares the Work page's cache keys, so opening the
+  // page re-uses them rather than adding more.
+  const { asks: openAskList } = useOpenAsks(auth.isSuccess);
   const attemptGroupList = useQuery({
     queryKey: queryKeys.fleetAttempts,
     queryFn: () => platformClient.operator.fleet.attempts.list(),
@@ -164,14 +161,6 @@ export default function App() {
     refetchInterval: fleetSubscriptionActive ? 60_000 : 15_000,
     retry: false,
   });
-  const fleetAttentionCount = useMemo(
-    () => needsYouCount({
-      approvals: approvalList.data?.approvals ?? [],
-      nodes: fleetSnapshot.data?.nodes ?? [],
-      attemptGroups: attemptGroupList.isError ? [] : attemptGroupList.data?.groups ?? [],
-    }),
-    [approvalList.data, fleetSnapshot.data, attemptGroupList.data, attemptGroupList.isError],
-  );
   // Runtime tasks: the same key and read the health hook and Work use, so no request is added.
   const taskList = useQuery({
     queryKey: queryKeys.tasks,
@@ -179,14 +168,17 @@ export default function App() {
     enabled: auth.isSuccess,
     retry: 0,
   });
-  const runningWork = useMemo(
-    () => runningNow({
+  const workCounts = useMemo(
+    () => shellCounts({
+      asks: openAskList,
       nodes: fleetSnapshot.data?.nodes ?? [],
       attemptGroups: attemptGroupList.isError ? [] : attemptGroupList.data?.groups ?? [],
       tasks: taskList.data?.tasks ?? [],
     }),
-    [fleetSnapshot.data, attemptGroupList.data, attemptGroupList.isError, taskList.data],
+    [openAskList, fleetSnapshot.data, attemptGroupList.data, attemptGroupList.isError, taskList.data],
   );
+  const fleetAttentionCount = workCounts.waiting;
+  const runningWork = workCounts.running;
   const chatSessions = useQuery({
     queryKey: ['companion-chat', 'sessions'],
     queryFn: () => platformClient.chat.sessions.list({ limit: 100 }),

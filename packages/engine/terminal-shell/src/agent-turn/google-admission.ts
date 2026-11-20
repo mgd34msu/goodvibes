@@ -137,12 +137,12 @@ export function createGoogleSettingsProjector(owners: GoogleAdmissionOwners, pen
       // No stored secret: nothing to prepare. The tool answers with where the
       // owner enters one, instead of a refusal that reads as "no google tool".
       if (observation.state !== 'resolved') return { status: 'projected', args: request.args };
-      const parsed = clientCredentialsFromInput({ clientId: text(request.args.clientId), clientSecret: observation.value });
+      const parsed = clientCredentialsFromInput({ clientId: text(request.args.clientId), clientSecret: observation.value.reveal('dispatch') });
       if (!parsed.ok) throw new ToolInputProjectionError('invalid');
       clientId = parsed.credentials.clientId; clientSecret = parsed.credentials.clientSecret;
       sourceCurrent = () => {
         const latest = secrets.resolveLocalCredentialSnapshot(GOOGLE_SECRET_KEYS.oauthClientSecret);
-        if (latest.state !== 'resolved' || latest.revision !== observation.revision || latest.value !== observation.value) throw new ToolInputProjectionError('stale');
+        if (latest.state !== 'resolved' || latest.revision !== observation.revision || latest.value.reveal('dispatch') !== observation.value.reveal('dispatch')) throw new ToolInputProjectionError('stale');
       };
     }
     const assertSourceCurrent = () => {

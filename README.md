@@ -103,7 +103,7 @@ goodvibes
   src/parser.ts`. It runs beside your conversation, in its own git worktree
   when you want one; `F2` shows everything running.
   ([agents](products/tui/docs/tools-and-commands.md#spawning-an-agent))
-- **Have it check something on a schedule.** `/schedule add every 30m check
+- **Have it check something on a schedule.** `/schedule add --every 30m check
   that https://example.com/health answers` runs that request every 30 minutes.
   The daemon runs it, so no terminal needs to be open; `/schedule list` shows
   your schedules. ([commands](products/tui/docs/commands-reference.md))

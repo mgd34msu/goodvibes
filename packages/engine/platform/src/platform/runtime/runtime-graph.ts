@@ -705,6 +705,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     hookDispatcher,
     featureFlags,
     userRuleStore: userPermissionRuleStore,
+    secretsManager,
   });
   // Ended at the very start of shutdown (stopAutonomousWork), before any owner drains.
   const autonomousLifetime = new AbortController();

@@ -8,13 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ProcessNode, ProcessState } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import { discardableContractWorktree } from './fleet-contract-targets.ts';
-import { fleetNodeAttention, fleetStateGlyph, fleetStateTone, isTerminalProcessState, type FleetStateTone, type FleetTreeRow } from './fleet-read-model.ts';
-
-/** The discard chip follows the same terminal contract-root ownership as the action. */
-function ownsWorktree(node: ProcessNode): boolean {
-  return discardableContractWorktree(node) !== null;
-}
+import { fleetStateGlyph, fleetStateTone, isTerminalProcessState, type FleetStateTone, type FleetTreeRow } from './fleet-read-model.ts';
 
 /** How long 'stopping…' lingers after a stop keypress before the true state is shown regardless (never masks a stuck kill). */
 export const STOP_SETTLE_MS = 1500;
@@ -113,64 +107,6 @@ export function toggleFleetPause(node: ProcessNode, deps: FleetPauseDeps): boole
   return true;
 }
 
-/** A single keyboard-hint chip in the fleet tree footer. */
-export interface FleetHint {
-  readonly keys: string;
-  readonly label: string;
-}
-
-/**
- * Build the fleet tree footer hints for the current selection. Capability gates
- * mirror the handleInput guards: interrupt/kill only on a live capable node;
- * 'p' shows 'pause' for a live pausable node and 'resume' for a paused resumable
- * one (never both, d2).
- */
-export function buildFleetTreeHints(
-  selected: ProcessNode | undefined,
-  follow: boolean,
-  hasTabs: boolean,
-  viewMode: 'active' | 'archived' = 'active',
-  blockedCount = 0,
-): FleetHint[] {
-  const live = selected !== undefined && !isTerminalProcessState(selected.state);
-  const isPaused = selected !== undefined && selected.state === 'paused';
-  // Enter is context-sensitive: on a flagged pick/conflict row it acts, else it
-  // attaches. Name the act so the key is discoverable from the tree.
-  const attention = selected ? fleetNodeAttention(selected) : null;
-  const enterLabel = attention?.reason === 'pick' ? 'pick'
-    : attention?.reason === 'conflict' ? 'resolve conflict'
-      : 'attach';
-  const hints: FleetHint[] = [
-    { keys: 'j/k', label: 'navigate' },
-    { keys: 'Enter', label: enterLabel },
-  ];
-  // Jump-to-blocked is offered whenever something is waiting on the operator,
-  // in either view (the blocked nodes live in the active fleet, and the jump
-  // switches back to it), so it is placed before the view-specific branch.
-  if (blockedCount > 0) hints.push({ keys: 'b', label: `blocked (${blockedCount})` });
-  if (viewMode === 'archived') {
-    // Archive view: restore + return to the live fleet; nothing here is live,
-    // so the live-only control hints (s/i/K/p) never apply.
-    if (selected) hints.push({ keys: 'a', label: 'restore' });
-    hints.push({ keys: 'v', label: 'live view' });
-    if (hasTabs) hints.push({ keys: '[ ]', label: 'tabs' });
-    return hints;
-  }
-  if (live && selected.capabilities.steerable) hints.push({ keys: 's', label: 'steer' }); // discoverable from the tree (attach-and-steer)
-  if (live && selected.capabilities.interruptible) hints.push({ keys: 'i', label: 'interrupt' });
-  if (live && selected.capabilities.killable) hints.push({ keys: 'K', label: 'kill' });
-  if (live && !isPaused && selected.capabilities.pausable) hints.push({ keys: 'p', label: 'pause' });
-  if (isPaused && selected.capabilities.resumable) hints.push({ keys: 'p', label: 'resume' });
-  if (selected && ownsWorktree(selected)) hints.push({ keys: 'D', label: 'discard worktree' });
-  if (selected && !live) hints.push({ keys: 'a', label: 'archive' });
-  hints.push({ keys: 'A', label: 'archive finished' });
-  hints.push({ keys: 'v', label: 'archived' });
-  hints.push({ keys: 'n', label: 'host agent' });
-  hints.push({ keys: 'f', label: follow ? 'follow:on' : 'follow' });
-  if (hasTabs) hints.push({ keys: '[ ]', label: 'tabs' });
-  return hints;
-}
-
 /** K-confirm descendant stats (item 6): total = every non-terminal descendant (what a cascade kill takes down); active = the individually-killable subset. Was "active only" in an earlier version, undercounting a mixed subtree. */
 export function countDescendantStats(rows: readonly FleetTreeRow[], nodeId: string): { total: number; active: number } {
   const byParent = new Map<string, string[]>();
@@ -196,26 +132,4 @@ export function countDescendantStats(rows: readonly FleetTreeRow[], nodeId: stri
     for (const child of byParent.get(id) ?? []) stack.push(child);
   }
   return { total, active };
-}
-
-/**
- * Build the confirm-overlay arm options for a cascade Kill of one node, the
- * label carries the descendant count so the operator sees what a confirm takes
- * down. Extracted from the Agents modal to keep that file under the 800-line cap.
- */
-export function fleetKillConfirmArgs(
-  node: ProcessNode,
-  items: readonly FleetTreeRow[],
-  deps: { readonly kill: (id: string) => void; readonly markStopping: (id: string) => void },
-): { id: string; label: string; verb: string; onConfirm: () => void } {
-  const shortId = node.id.length > 8 ? node.id.slice(-8) : node.id;
-  const stats = countDescendantStats(items, node.id);
-  const suffix = stats.total > 0 ? ` (+${stats.total} descendant${stats.total === 1 ? '' : 's'}, ${stats.active} active)` : '';
-  return {
-    id: node.id,
-    label: `${node.kind} ${shortId}${suffix}`,
-    verb: 'Kill',
-    // Mark 'stopping…' only once the kill is confirmed, not while merely armed.
-    onConfirm: () => { deps.kill(node.id); deps.markStopping(node.id); },
-  };
 }

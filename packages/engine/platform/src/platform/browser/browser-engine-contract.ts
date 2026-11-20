@@ -13,6 +13,7 @@
  * `platform/browser` barrel's surface is unchanged, the same convention
  * orchestrator-runner.ts used when its context-window unit moved out.
  */
+import type { HostResolver } from '../runtime/network/destination.js';
 import { BrowserSessionError } from './browser-sessions.js';
 import type { CardFieldGuard, OwnerApproval, UntrustedContentPort } from './browser-types.js';
 
@@ -172,6 +173,8 @@ export interface BrowserEngineOptions {
    * owner's approval for the page.
    */
   readonly destinationConfig?: { get(key: string): unknown } | undefined;
+  /** How a host name is resolved for the destination check: the system resolver unless a caller supplies its own. */
+  readonly destinationResolver?: HostResolver | undefined;
 }
 
 /** Fields the extraction contract can ask for. Nothing here can invoke anything. */

@@ -429,7 +429,7 @@ GoodVibes schedule preview for Agent routine
   schedule every 7d
   ...
   confirmationRoutes
-    cli /schedule promote-routine "weekly-review" --every "7d" --name "Agent routine: Weekly-Review" --yes
+    cli /routines promote "weekly-review" --every "7d" --name "Agent routine: Weekly-Review" --yes
 ```
 
 Inside the Agent, `/routines start <id>` prints the routine's steps into the main conversation.
@@ -751,11 +751,9 @@ Agent channel delivery sent
 
 ### Automation and host actions
 
-`/automation job <run|pause|resume> <job-id> --yes | run <cancel|retry> <run-id> --yes | schedule <run|enable|disable|delete> <schedule-id> --yes` (alias `/auto`) runs one confirmed automation action on the connected host.
-`/schedule remind --at 2026-12-01T09:00 --message "Renew the passport" --yes` creates a reminder; without `--yes` it prints the preview.
-`/schedule edit <schedule-id> --cron "0 8 * * 1" --yes` changes a schedule; it also takes `--every`, `--at`, `--timezone`, `--stagger-ms`, `--name`, `--prompt` or `--task` with `--success-criteria`, and `--revision`.
-`/schedule promote-routine <routine-id> --cron <expr> --yes` promotes a routine.
-`/schedule receipts`, `/schedule receipt <id>` and `/schedule reconcile` read promotion receipts.
+`/automation job <run|pause|resume> <job-id> --yes | run <cancel|retry> <run-id> --yes` (alias `/auto`) runs one confirmed automation action on the connected host.
+`/schedule` takes the same actions and lines as in the terminal app, and keeps each schedule on the connected host: `/schedule add --at 2026-12-01T09:00 Renew the passport` makes one; `/schedule change <schedule> --cron "0 8 * * 1"` changes one (it also takes `--every`, `--at`, `--tz`, `--stagger`, `--name`, new words for what it does, or `--task` with `--success-criteria`; the change is bound to the schedule as the host has it when it is read); `/schedule pause`, `resume`, `run` and `remove` act on one.
+`/routines promote <routine-id> --cron <expr> --yes` promotes a routine; `/routines receipts`, `/routines receipt <id>` and `/routines reconcile` read promotion receipts.
 
 ### Media and devices
 

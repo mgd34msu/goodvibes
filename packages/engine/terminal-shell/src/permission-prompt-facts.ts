@@ -81,15 +81,25 @@ export function terminalAskFacts(context: TerminalAskContext, request?: Permissi
 
 const cache = new WeakMap<object, { readonly mode: ModeInForceWords; readonly presentation: AskPresentation }>();
 
+/** The context the card was last drawn with: the keys read the same choices the card shows. */
+let lastContext: TerminalAskContext | null = null;
+
+/** Mode words for an ask read before any card was drawn; they change no choice, only the "why" sentence. */
+const UNDRAWN: ModeInForceWords = { chosen: '', sentence: '', asksBefore: '' };
+
 /**
  * The ask's words for its card: computed when the card first draws and again
  * only when the mode words change (the cache is keyed on the request object
- * the pending card holds).
+ * the pending card holds). Without a context, the one the card was last drawn
+ * with: the choices depend on the ask alone, never on the mode words.
  */
-export function askPresentationFor(request: PermissionPromptRequest, context: TerminalAskContext): AskPresentation {
+export function askPresentationFor(request: PermissionPromptRequest, context?: TerminalAskContext | undefined): AskPresentation {
+  if (context) lastContext = context;
+  const using = context ?? lastContext;
+  const mode = using?.modeInForce ?? UNDRAWN;
   const cached = cache.get(request);
-  if (cached && cached.mode === context.modeInForce) return cached.presentation;
-  const presentation = presentApprovalAsk(request, terminalAskFacts(context, request));
-  cache.set(request, { mode: context.modeInForce, presentation });
+  if (cached && (cached.mode === mode || context === undefined)) return cached.presentation;
+  const presentation = presentApprovalAsk(request, using ? terminalAskFacts(using, request) : { modeInForce: UNDRAWN, settingLabel });
+  cache.set(request, { mode, presentation });
   return presentation;
 }

@@ -586,6 +586,7 @@ function composeClientRuntimeServices(
     hookDispatcher,
     featureFlags,
     userRuleStore: userPermissionRuleStore,
+    secretsManager,
   });
   const externalPermissionLifetime = new AbortController();
   disposalScope.registry.add('external protocol permission lifetime', () => externalPermissionLifetime.abort());

@@ -124,15 +124,15 @@ ships with extension loading disabled. The addon is still installed for
 consistency (and would work if a future runtime lifts the limit), but the
 runtime reports the vector index as unavailable and memory search degrades to
 literal matching. This is a permanent platform capability limit, not a
-packaging defect. `/recall vector status` names the reason plainly. Linux
+packaging defect. `/memory index` names the reason plainly. Linux
 (including WSL2) has no such restriction.
 
 ### Copies of memory and restoring one
 
 The memory records store (`memory.sqlite`) is copied once a day, before a
 schema upgrade, and before every restore; the semantic index is not copied, it
-is rebuilt from the records. `/recall snapshots` lists the copies with their
-date, size and record count. `/recall restore <name|latest|date>` replaces
+is rebuilt from the records. `/memory snapshots` lists the copies with their
+date, size and record count. `/memory restore <name|latest|date>` replaces
 every record, link and pending consolidation proposal with those of one copy,
 after one confirmation. The records it replaces are copied first and the
 answer names that copy, so restoring it undoes the restore. The restore runs
@@ -193,16 +193,12 @@ Ten knowledge job kinds can be run directly or saved as schedules through the ru
 
 ## High-signal commands
 
-Six command families front this whole subsystem:
+Two commands front this whole subsystem:
 
 | Command | Does |
 | --- | --- |
-| `/recall add\|search\|vector\|queue\|review\|explain\|injections\|promote\|capture\|snapshots\|restore` | Durable project memory; these are the subcommands most tasks reach for, and `/recall` has more |
+| `/memory` | Durable project memory: remember, search, read, correct, link and review records; see what a task would be given; keep memory as files; save it to a file or load one (a team handoff is `/memory export <file> --scope team`); list and restore its copies; the search index. Bare, it opens the list of actions. |
 | `/knowledge status\|ask\|ingest-url\|import-bookmarks\|import-urls\|list\|search\|get\|queue\|review-issue\|candidates\|reports\|schedules\|lint\|packet\|explain\|reindex\|consolidate` | The structured knowledge store's full command surface |
-| `/memory-sync` | Durable memory export/import and bundle exchange |
-| `/handoff` | Reviewable memory handoff bundles (export, inspect, import) |
-| `/session-memory` | Session-scoped memory capture and review; all subcommands filtered to session scope |
-| `/team-memory` | Team/shared memory review and exchange; queue and export filtered to team scope |
 
 ## Related docs
 

@@ -13,6 +13,14 @@ export type GlobalShortcutRouteState = GlobalShortcutState & {
   commandContext?: CommandContext;
   killRing: KillRing;
 };
+
+/** The failure row's key actions and what each asks of the row (turn-failure-actions.ts). */
+const FAILURE_KEY_ACTIONS = {
+  'failure-other-model': 'other-model',
+  'failure-details': 'details',
+  'failure-sign-in': 'sign-in',
+} as const;
+
 export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token: InputToken, viewportHeight: number): boolean {
   return routeShortcut(state, token, viewportHeight, {
     modifiedPageScroll: false,
@@ -93,8 +101,9 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
 
         case 'failure-other-model':
         case 'failure-details':
-          // Alt+O / Alt+I on the newest failed turn's row; consumed either way, never typed text.
-          state.commandContext?.failedTurnAction?.(action === 'failure-other-model' ? 'other-model' : 'details');
+        case 'failure-sign-in':
+          // Alt+O / Alt+I / Alt+S on the newest failed turn's row; consumed either way, never typed text.
+          state.commandContext?.failedTurnAction?.(FAILURE_KEY_ACTIONS[action]);
           state.requestRender();
           return true;
 

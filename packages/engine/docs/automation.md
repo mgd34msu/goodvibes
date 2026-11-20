@@ -334,9 +334,10 @@ An agent creates, lists, cancels and resets triggers and reads their runs with
 the `trigger` tool (actions `create`, `list`, `history`, `cancel`, `reset`), in
 daemon-hosted sessions, in the TUI and the Agent (which use the daemon's
 supervisor) and in the workers they start. The owner does the same with
-`/triggers list | history <id> | create <json> | cancel <id> | reset <id>`, and
-approves a command a trigger may run with `/triggers grant <id> <command>
-[args...]` (`/triggers grants` lists them). Operators call
+`/triggers list | watch | history | stop | restart` (`/triggers` alone opens
+the list of them), and
+lets triggers run a command with `/triggers allow-command <name> -- <command>
+...` (`/triggers commands` lists them). Operators call
 `watchers.triggers.list`, `.history`, `.create`, `.cancel`, `.reset`,
 `.grant.list` and the owner-only `.grant.register`.
 
@@ -389,6 +390,6 @@ kept, and a dropped one is recorded in the trigger's runs.
 
 Condition, stream and process-exit triggers belong to each surface’s native trigger supervisor. They are separate from workflow event triggers.
 
-In the TUI and Agent, `/triggers status` reads the selected paired daemon’s ownership and trigger summaries. In the WebUI, open **Settings → General → Advanced → Supervised triggers**. The administrative operator method is `watchers.triggers.status` (`read:watchers`); it reads the daemon supervisor, not the workflow event-trigger manager, and never claims execution ownership.
+In the TUI and Agent, `/triggers list` reads the selected paired daemon’s ownership and trigger summaries. In the WebUI, open **Settings → General → Advanced → Supervised triggers**. The administrative operator method is `watchers.triggers.status` (`read:watchers`); it reads the daemon supervisor, not the workflow event-trigger manager, and never claims execution ownership.
 
 Another execution owner remains read-only: close that process and this one takes over on its next supervision tick. A newer saved format requires an updated installation; unreadable storage is named, with its cause, in the daemon log.

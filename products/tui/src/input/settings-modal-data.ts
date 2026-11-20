@@ -274,6 +274,8 @@ export function buildSettingGroups(
     if (rawCat === 'cluster' && groups.has('network')) groups.get('network')!.push(entry);
     // checkpoints.* bound what a workspace checkpoint may store, beside the other local-storage rows.
     if (rawCat === 'checkpoints' && groups.has('storage')) groups.get('storage')!.push(entry);
+    // browser.network.pinned decides what the browser may reach, beside the fetch tool's host rules.
+    if (rawCat === 'browser' && groups.has('fetch')) groups.get('fetch')!.push(entry);
   }
 
   for (const entry of [...hostEntries, ...hostValueEntries]) {

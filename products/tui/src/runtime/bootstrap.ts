@@ -82,6 +82,7 @@ import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { registerStartupProviders } from './startup-provider-registration.ts';
 import { createSerialSteps } from './serial-steps.ts';
 import { retryTerminalRoutineMove, startTerminalRoutines } from './terminal-routines.ts';
+import { wireFailedTurnActions } from '@goodvibes-jev/engine/terminal-shell/turn-failure-actions';
 
 type ExternalServiceFactories = NonNullable<Parameters<typeof startExternalServices>[3]>;
 
@@ -366,6 +367,13 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const commandRegistry = shell.commandRegistry;
   bindControlCommands(services, commandRegistry);
   const commandContext = shell.commandContext;
+  // A failed or refused turn is a row in the transcript with its next steps on keys: alt+o picks
+  // another model for the prompt, alt+i opens its details, alt+s the sign-ins (alt+r is the shell's retry chord).
+  bootstrapUnsubs.push(wireFailedTurnActions({
+    commandContext,
+    onModelChanged: (listener) => runtimeBus.on('MODEL_CHANGED', listener),
+    render: requestRender,
+  }));
   // Recovery loads persisted history before continuing its work. Announce
   // that history without waiting for the resumed work to finish.
   void announceResumeState({

@@ -84,6 +84,8 @@ export interface TerminalCommandShellUiOpeners<Target extends ModelPickerTarget>
   openSelection?: OpenSelection;
   /** Opens settings at `target`; the outcome says where it landed (`not-found`: the text became the search). */
   openSettingsModal?: (target?: string) => SettingsTargetOutcome | 'unreported' | void;
+  /** Opens the three-step first run again (`/setup` → Run first-run again), whether or not a model is ready. */
+  openFirstRun?: () => void;
   openSessionPicker?: () => void;
   openProfilePicker?: () => void;
   openShortcutsOverlay?: () => void;
@@ -91,10 +93,12 @@ export interface TerminalCommandShellUiOpeners<Target extends ModelPickerTarget>
   openSessionView?: (target: { readonly kind: 'agent' | 'process'; readonly id: string }) => boolean;
   openNotifications?: () => void;
   /**
-   * Alt+O / Alt+I on the newest failed turn's row: use another model, show
-   * the details. False when no failed turn offers it (the key does nothing).
+   * Alt+O / Alt+I / Alt+S (and the Agent's Alt+R) on the newest failed turn's
+   * row: use another model, show the details, sign in again, try again
+   * (turn-failure-actions.ts). False when no failed turn offers it (the key
+   * does nothing).
    */
-  failedTurnAction?: (action: 'other-model' | 'details') => boolean;
+  failedTurnAction?: (action: 'retry' | 'other-model' | 'details' | 'sign-in') => boolean;
   focusPrompt?: () => void;
   openMcpWorkspace?: () => void;
 }

@@ -1,29 +1,26 @@
 /**
- * The number on the Work entry in the sidebar.
+ * The shell's counts: the number on the Work entry in the sidebar (what waits
+ * for you) and the account menu's "1 running". Both are the work board's own
+ * `counts` (views/work/work-items.ts readWork, contracts work-board.ts) over the
+ * sources the shell already reads, so they are the Work page's group counts and
+ * never a second derivation: an idle watcher, a heartbeat or a schedule between
+ * runs is not counted as running, and an ask is counted once.
  *
- * It must be the page's own "Needs you" count, not a second derivation: the page
- * also lists pending approvals that no fleet node carries, ready best-of-N
- * groups (their attempt nodes fold into one row), and it drops an
- * approval-blocked node whose approval already has a row. Counting fleet nodes
- * alone reads high or silent. Only these three sources can put a row in the
- * Needs you group, so only they are read here.
+ * The shell does not read the hosted-session list, so a daemon-hosted session
+ * answering right now is counted on the Work page and not here.
  */
-import { buildWorkItems, groupWorkItems, runningNowCount, type WorkSources } from '../views/work/work-items';
+import { readWork, type WorkSources } from '../views/work/work-items';
 
-export type NeedsYouSources = Pick<WorkSources, 'approvals' | 'nodes' | 'attemptGroups'>;
+export type ShellCountSources = Pick<WorkSources, 'asks' | 'nodes' | 'attemptGroups' | 'tasks'>;
 
-export function needsYouCount({ approvals, nodes, attemptGroups }: NeedsYouSources): number {
-  const items = buildWorkItems({ approvals, nodes, attemptGroups, sessions: [], hosted: [], tasks: [], ciWatches: [] });
-  return groupWorkItems(items, 'all').needs.length;
+export interface ShellCounts {
+  /** Rows under "Waiting for you". */
+  readonly waiting: number;
+  /** Rows under "Running now". */
+  readonly running: number;
 }
 
-export type RunningNowSources = Pick<WorkSources, 'nodes' | 'attemptGroups' | 'tasks'>;
-
-/**
- * What the account menu says is running: the Work page's own count over the
- * sources the shell already reads (the fleet, best-of-N groups, runtime tasks),
- * so the two never disagree about an idle watcher or a schedule between runs.
- */
-export function runningNow({ nodes, attemptGroups, tasks }: RunningNowSources): number {
-  return runningNowCount(buildWorkItems({ approvals: [], nodes, attemptGroups, sessions: [], hosted: [], tasks, ciWatches: [] }));
+export function shellCounts(sources: ShellCountSources, now: number = Date.now()): ShellCounts {
+  const { counts } = readWork(sources, now).board;
+  return { waiting: counts.waiting, running: counts.running };
 }
